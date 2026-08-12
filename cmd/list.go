@@ -22,7 +22,7 @@ func newListCmd(deps dependencies) *cobra.Command {
 				return err
 			}
 			for _, source := range sources {
-				fmt.Fprintf(command.OutOrStdout(), "%s\t%s\t%s\n", source.Name, source.Description, source.Path)
+				fmt.Fprintf(command.OutOrStdout(), "%s\t%s\t%s\t%s\n", source.Name, source.Scope, source.Description, source.Path)
 			}
 			return nil
 		},

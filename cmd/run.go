@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 	"github.com/up2jj/wuko/engine"
@@ -11,18 +12,34 @@ import (
 func newRunCmd(deps dependencies) *cobra.Command {
 	var variables, environment []string
 	var dryRun bool
+	var workflowFile string
 	command := &cobra.Command{
-		Use:   "run NAME",
-		Short: "Run a named workflow",
-		Args:  cobra.ExactArgs(1),
+		Use:   "run [NAME]",
+		Short: "Run a named workflow or workflow file",
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(command *cobra.Command, args []string) error {
 			cwd, home, config, err := directories(deps)
 			if err != nil {
 				return err
 			}
-			source, err := workflow.Find(cwd, home, config, args[0])
-			if err != nil {
-				return err
+			if workflowFile != "" && len(args) > 0 {
+				return fmt.Errorf("workflow name and --file cannot be used together")
+			}
+			if workflowFile == "" && len(args) == 0 {
+				return fmt.Errorf("workflow name or --file is required")
+			}
+			var source workflow.Source
+			if workflowFile != "" {
+				path, err := filepath.Abs(workflowFile)
+				if err != nil {
+					return fmt.Errorf("resolving workflow file %s: %w", workflowFile, err)
+				}
+				source = workflow.Source{Path: path}
+			} else {
+				source, err = workflow.Find(cwd, home, config, args[0])
+				if err != nil {
+					return err
+				}
 			}
 			vars, err := parseVars(variables)
 			if err != nil {
@@ -54,6 +71,7 @@ func newRunCmd(deps dependencies) *cobra.Command {
 	command.Flags().StringArrayVar(&variables, "var", nil, "set a workflow variable (key=value; repeatable)")
 	command.Flags().StringArrayVar(&environment, "env", nil, "override an environment variable (KEY=value; repeatable)")
 	command.Flags().BoolVar(&dryRun, "dry-run", false, "validate and print steps without running them")
+	command.Flags().StringVar(&workflowFile, "file", "", "run a workflow from a file path")
 	command.ValidArgsFunction = workflowCompletion(deps)
 	return command
 }

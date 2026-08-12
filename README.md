@@ -21,6 +21,14 @@ go build -o wuko .
 
 ## Workflow discovery
 
+`wuko` opens an interactive workflow picker when connected to a terminal. The picker includes
+every local and global workflow, supports typing to filter, and supports arrow-key navigation.
+Press Enter to print the matching `wuko run` command; press Esc to cancel. A shadowed workflow is
+printed with `wuko run --file PATH` so the selected definition remains unambiguous.
+
+When output is redirected or otherwise non-interactive, bare `wuko` prints all workflows as
+tab-separated name, scope, description, and path fields.
+
 `wuko run NAME` looks for `NAME.yaml` and `NAME.yml` in this order:
 
 1. `.wuko/workflows/` in the current directory and each parent, nearest first.
@@ -32,10 +40,12 @@ error. Referenced Lua files are relative to the workflow file; commands and Lua 
 default to the directory from which Wuko was invoked.
 
 ```sh
+wuko
 wuko list
 wuko validate start-task
 wuko validate
 wuko run start-task
+wuko run --file ./path/to/start-task.yaml
 wuko run start-task --var 'reviewers=["alice","bob"]' --env CLICKUP_TOKEN=secret
 wuko run start-task --dry-run
 ```
@@ -43,6 +53,9 @@ wuko run start-task --dry-run
 `--var` attempts JSON decoding and otherwise stores a string. `--env` always stores a string.
 Both flags are also accepted by `validate`, including when they are needed to resolve a remote
 action reference.
+
+`wuko list` shows the effective workflows and labels each one as `local` or `global`. Bare `wuko`
+also includes shadowed definitions from other scopes.
 
 ## Workflow schema
 

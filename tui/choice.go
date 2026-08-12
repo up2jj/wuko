@@ -10,8 +10,9 @@ import (
 )
 
 type Option struct {
-	Label string
-	Value any
+	Label       string
+	Description string
+	Value       any
 }
 
 type choiceModel struct {
