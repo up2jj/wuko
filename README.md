@@ -64,6 +64,62 @@ typed `args` instead.
 Environment precedence is step environment, CLI `--env`, workflow environment, then the host
 environment. Environment values are not shown by dry-run output.
 
+### Conditional steps
+
+Add `if` to run a step only when an [Expr](https://expr-lang.org/docs/language-definition)
+expression evaluates to a boolean `true`:
+
+```yaml
+vars:
+  deploy: false
+steps:
+  - id: tests
+    type: shell
+    with:
+      command: go
+      args: [test, ./...]
+
+  - id: deploy
+    type: shell
+    if: 'vars.deploy && steps.tests.exit_code == 0'
+    with:
+      command: ./deploy
+```
+
+Conditions use the same data roots as templates, without a leading dot: `vars`, `env`, `steps`,
+`workflow.name`, `workflow.dir`, and `run.dir`. Quote non-trivial expressions so YAML treats them
+as a single string. Literal booleans are also accepted: `if: true` always runs and `if: false`
+always skips. There is no truthiness; every condition must evaluate to a boolean. Missing fields
+and evaluation errors fail the workflow.
+
+A skipped step does not write outputs or variables and is absent from `steps`. Guard a dependent
+step with map membership to make skipping cascade safely:
+
+```yaml
+vars:
+  prepare: false
+steps:
+  - id: prepare
+    type: lua
+    if: vars.prepare
+    with:
+      source: |
+        wuko.set_var("artifact_path", "/tmp/artifact.zip")
+
+  - id: upload
+    type: shell
+    if: '"prepare" in steps'
+    with:
+      command: upload
+      args: ["{{ .vars.artifact_path }}"]
+```
+
+The guard is evaluated before `with` is rendered, so `upload` never tries to resolve
+`artifact_path` when `prepare` was skipped. Use `"name" in vars` when only variable availability
+matters, or `get(vars, "name")` to read an optional value. If a skipped step would have overwritten
+an existing variable, the existing value remains unchanged. Dry-run validates and prints guards
+but does not evaluate them because preceding step outputs are not available.
+
 ### Prompt
 
 ```yaml

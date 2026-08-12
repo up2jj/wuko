@@ -5,6 +5,7 @@ go 1.26
 require (
 	charm.land/bubbles/v2 v2.1.1
 	charm.land/bubbletea/v2 v2.0.7
+	github.com/expr-lang/expr v1.17.8
 	github.com/spf13/cobra v1.9.1
 	github.com/yuin/gopher-lua v1.1.1
 	golang.org/x/term v0.30.0

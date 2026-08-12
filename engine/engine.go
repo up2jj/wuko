@@ -40,6 +40,11 @@ func (e *Engine) Validate(ctx context.Context, definition *workflow.Definition, 
 		return err
 	}
 	for _, workflowStep := range definition.Steps {
+		if workflowStep.If != "" {
+			if _, err := compileCondition(workflowStep.If); err != nil {
+				return fmt.Errorf("step %q if: %w", workflowStep.ID, err)
+			}
+		}
 		if err := validateTemplates(workflowStep.With, workflowStep.Type == "lua"); err != nil {
 			return fmt.Errorf("step %q template: %w", workflowStep.ID, err)
 		}
@@ -69,12 +74,24 @@ func (e *Engine) Run(ctx context.Context, definition *workflow.Definition, optio
 	}
 	if options.DryRun {
 		for i, workflowStep := range definition.Steps {
-			fmt.Fprintf(options.Stdout, "%d. %s (%s)\n", i+1, workflowStep.ID, workflowStep.Type)
+			if workflowStep.If == "" {
+				fmt.Fprintf(options.Stdout, "%d. %s (%s)\n", i+1, workflowStep.ID, workflowStep.Type)
+				continue
+			}
+			fmt.Fprintf(options.Stdout, "%d. %s (%s) if: %s\n", i+1, workflowStep.ID, workflowStep.Type, workflowStep.If)
 		}
 		return state, nil
 	}
 
 	for i, workflowStep := range definition.Steps {
+		run, err := evaluateCondition(workflowStep.If, makeConditionEnvironment(definition, options.RunDir, state))
+		if err != nil {
+			return nil, fmt.Errorf("workflow %q step %q (%s): evaluating if: %w", definition.Name, workflowStep.ID, workflowStep.Type, err)
+		}
+		if !run {
+			fmt.Fprintf(options.Stdout, "[%d/%d] %s (%s) skipped\n", i+1, len(definition.Steps), workflowStep.ID, workflowStep.Type)
+			continue
+		}
 		fmt.Fprintf(options.Stdout, "[%d/%d] %s (%s)\n", i+1, len(definition.Steps), workflowStep.ID, workflowStep.Type)
 		data := templateData(definition, options.RunDir, state)
 		rendered, err := renderValue(workflowStep.With, data, workflowStep.Type == "lua")

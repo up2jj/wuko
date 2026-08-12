@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -47,10 +48,25 @@ func (e *Environment) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
+// Condition is a boolean expression controlling whether a step runs.
+type Condition string
+
+func (c *Condition) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind != yaml.ScalarNode || (node.Tag != "!!str" && node.Tag != "!!bool") {
+		return fmt.Errorf("if must be a boolean expression")
+	}
+	if strings.TrimSpace(node.Value) == "" {
+		return fmt.Errorf("if must not be empty")
+	}
+	*c = Condition(node.Value)
+	return nil
+}
+
 // Step is a raw step declaration. Its With map is decoded strictly by its registered builder.
 type Step struct {
 	ID   string         `yaml:"id"`
 	Type string         `yaml:"type"`
+	If   Condition      `yaml:"if,omitempty"`
 	With map[string]any `yaml:"with"`
 }
 
