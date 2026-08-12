@@ -1,24 +1,15 @@
 package engine
 
 import (
-	"bytes"
 	"fmt"
 	"maps"
-	"os"
-	"strings"
 	"text/template"
+
+	"github.com/up2jj/wuko/workflow"
 )
 
 func renderString(value string, data map[string]any) (string, error) {
-	tmpl, err := template.New("value").Option("missingkey=error").Parse(value)
-	if err != nil {
-		return "", err
-	}
-	var rendered bytes.Buffer
-	if err := tmpl.Execute(&rendered, data); err != nil {
-		return "", err
-	}
-	return rendered.String(), nil
+	return workflow.RenderString(value, data)
 }
 
 func validateTemplates(value any, skipSource bool) error {
@@ -78,17 +69,6 @@ func renderValue(value any, data map[string]any, skipSource bool) (any, error) {
 	}
 }
 
-func hostEnvironment() map[string]string {
-	result := make(map[string]string)
-	for _, value := range os.Environ() {
-		key, item, found := strings.Cut(value, "=")
-		if found {
-			result[key] = item
-		}
-	}
-	return result
-}
-
 func mergeEnvironment(base map[string]string, overlays ...map[string]string) map[string]string {
 	result := maps.Clone(base)
 	for _, overlay := range overlays {
@@ -98,9 +78,5 @@ func mergeEnvironment(base map[string]string, overlays ...map[string]string) map
 }
 
 func environmentAsAny(values map[string]string) map[string]any {
-	result := make(map[string]any, len(values))
-	for key, value := range values {
-		result[key] = value
-	}
-	return result
+	return workflow.EnvironmentValues(values)
 }

@@ -16,6 +16,7 @@ type Request struct {
 	WorkflowDir  string
 	RunDir       string
 	Vars         map[string]any
+	Inputs       map[string]any
 	Env          map[string]string
 	Steps        map[string]any
 	Stdin        io.Reader

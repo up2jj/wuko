@@ -35,6 +35,7 @@ type dependencies struct {
 	homeDir   func() (string, error)
 	configDir func() (string, error)
 	registry  *step.Registry
+	loader    *workflow.Loader
 }
 
 func Execute() error {
@@ -55,13 +56,14 @@ func NewRootCmd() *cobra.Command {
 	return newRootCmd(dependencies{
 		stdin: os.Stdin, stdout: os.Stdout, stderr: os.Stderr,
 		cwd: os.Getwd, homeDir: os.UserHomeDir, configDir: os.UserConfigDir, registry: registry,
+		loader: workflow.NewLoader(nil),
 	})
 }
 
 func newRootCmd(deps dependencies) *cobra.Command {
 	root := &cobra.Command{
 		Use:           "wuko",
-		Short:         "Run trusted local YAML workflows",
+		Short:         "Run trusted YAML workflows",
 		Version:       fmt.Sprintf("%s (commit: %s, built: %s)", version, commit, date),
 		SilenceUsage:  true,
 		SilenceErrors: true,

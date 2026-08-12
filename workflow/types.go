@@ -2,8 +2,10 @@ package workflow
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -62,17 +64,83 @@ func (c *Condition) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
-// Step is a raw step declaration. Its With map is decoded strictly by its registered builder.
+// Step declares either a concrete registered step type or a resolved remote composite action.
 type Step struct {
-	ID   string         `yaml:"id"`
-	Type string         `yaml:"type"`
-	If   Condition      `yaml:"if,omitempty"`
-	With map[string]any `yaml:"with"`
+	ID     string         `yaml:"id"`
+	Type   string         `yaml:"type,omitempty"`
+	Uses   ActionSource   `yaml:"uses,omitempty"`
+	SHA256 string         `yaml:"sha256,omitempty"`
+	If     Condition      `yaml:"if,omitempty"`
+	With   map[string]any `yaml:"with,omitempty"`
+	Action *Action        `yaml:"-"`
+}
+
+// ActionSource identifies action bytes fetched from HTTPS or produced by a local command.
+type ActionSource struct {
+	URL     string
+	Command string
+	Args    []string
+}
+
+func (source *ActionSource) UnmarshalYAML(node *yaml.Node) error {
+	switch node.Kind {
+	case yaml.ScalarNode:
+		if node.Tag != "!!str" || strings.TrimSpace(node.Value) == "" {
+			return fmt.Errorf("uses must be a non-empty HTTPS URL or command object")
+		}
+		source.URL = node.Value
+		return nil
+	case yaml.MappingNode:
+		allowed := map[string]bool{"command": true, "args": true}
+		for i := 0; i < len(node.Content); i += 2 {
+			if !allowed[node.Content[i].Value] {
+				return fmt.Errorf("field %s not found in action command source", node.Content[i].Value)
+			}
+		}
+		var raw struct {
+			Command string   `yaml:"command"`
+			Args    []string `yaml:"args,omitempty"`
+		}
+		if err := node.Decode(&raw); err != nil {
+			return err
+		}
+		if strings.TrimSpace(raw.Command) == "" {
+			return fmt.Errorf("uses command is required")
+		}
+		source.Command, source.Args = raw.Command, raw.Args
+		return nil
+	default:
+		return fmt.Errorf("uses must be a non-empty HTTPS URL or command object")
+	}
+}
+
+// Empty reports whether no action source was declared.
+func (source ActionSource) Empty() bool { return source.URL == "" && source.Command == "" }
+
+// Display returns a safe description that excludes command arguments and URL query strings.
+func (source ActionSource) Display() string {
+	if source.URL != "" {
+		parsed, err := url.Parse(source.URL)
+		if err == nil {
+			parsed.RawQuery, parsed.Fragment = "", ""
+			return parsed.String()
+		}
+		return source.URL
+	}
+	return source.Command
 }
 
 // Load reads and validates the workflow-level schema. Step-specific validation is performed by
 // the step registry.
 func Load(path string) (*Definition, error) {
+	runDir, err := os.Getwd()
+	if err != nil {
+		return nil, fmt.Errorf("finding run directory: %w", err)
+	}
+	return NewLoader(nil).Load(context.Background(), path, LoadOptions{RunDir: runDir})
+}
+
+func loadLocal(path string) (*Definition, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("reading workflow %s: %w", path, err)
@@ -91,7 +159,7 @@ func Load(path string) (*Definition, error) {
 		}
 		return nil, fmt.Errorf("decoding workflow %s: %w", path, err)
 	}
-	if err := validateDefinition(&definition); err != nil {
+	if err := validateDefinition(&definition, true); err != nil {
 		return nil, fmt.Errorf("validating workflow %s: %w", path, err)
 	}
 
@@ -110,7 +178,7 @@ func Load(path string) (*Definition, error) {
 	return &definition, nil
 }
 
-func validateDefinition(definition *Definition) error {
+func validateDefinition(definition *Definition, allowActions bool) error {
 	if definition.Version != 1 {
 		return fmt.Errorf("unsupported version %d (want 1)", definition.Version)
 	}
@@ -130,8 +198,14 @@ func validateDefinition(definition *Definition) error {
 			return fmt.Errorf("duplicate step id %q", workflowStep.ID)
 		}
 		seen[workflowStep.ID] = struct{}{}
-		if workflowStep.Type == "" {
-			return fmt.Errorf("step %q has no type", workflowStep.ID)
+		if (workflowStep.Type == "") == workflowStep.Uses.Empty() {
+			return fmt.Errorf("step %q must set exactly one of type or uses", workflowStep.ID)
+		}
+		if !workflowStep.Uses.Empty() && !allowActions {
+			return fmt.Errorf("step %q: nested remote actions are not supported", workflowStep.ID)
+		}
+		if workflowStep.Uses.Empty() && workflowStep.SHA256 != "" {
+			return fmt.Errorf("step %q: sha256 requires uses", workflowStep.ID)
 		}
 		if workflowStep.With == nil {
 			workflowStep.With = make(map[string]any)

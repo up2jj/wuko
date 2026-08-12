@@ -49,7 +49,7 @@ func Discover(cwd, homeDir, configDir string) ([]Source, error) {
 				continue
 			}
 			path := filepath.Join(dir, filename)
-			definition, err := Load(path)
+			definition, err := loadLocal(path)
 			if err != nil {
 				return nil, err
 			}

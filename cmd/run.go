@@ -24,15 +24,19 @@ func newRunCmd(deps dependencies) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			definition, err := workflow.Load(source.Path)
-			if err != nil {
-				return err
-			}
 			vars, err := parseVars(variables)
 			if err != nil {
 				return err
 			}
 			env, err := parseEnv(environment)
+			if err != nil {
+				return err
+			}
+			loader := deps.loader
+			if loader == nil {
+				loader = workflow.NewLoader(nil)
+			}
+			definition, err := loader.Load(command.Context(), source.Path, workflow.LoadOptions{Vars: vars, Env: env, RunDir: cwd})
 			if err != nil {
 				return err
 			}

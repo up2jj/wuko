@@ -31,3 +31,16 @@ func TestRunHonorsCanceledContext(t *testing.T) {
 		t.Fatalf("error = %v", err)
 	}
 }
+
+func TestRunBoundsCapturedOutput(t *testing.T) {
+	result, err := Run(t.Context(), Options{
+		Command: "sh", Args: []string{"-c", "printf 123456; printf abcdef >&2"},
+		Env: map[string]string{}, Stdout: io.Discard, Stderr: io.Discard, CaptureLimit: 4,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Stdout != "1234" || result.Stderr != "abcd" || !result.StdoutTruncated || !result.StderrTruncated {
+		t.Fatalf("result = %#v", result)
+	}
+}

@@ -9,6 +9,7 @@ import (
 )
 
 type conditionEnvironment struct {
+	Inputs   map[string]any    `expr:"inputs"`
 	Vars     map[string]any    `expr:"vars"`
 	Env      map[string]string `expr:"env"`
 	Steps    map[string]any    `expr:"steps"`
@@ -58,9 +59,10 @@ func evaluateCondition(condition workflow.Condition, environment conditionEnviro
 
 func makeConditionEnvironment(definition *workflow.Definition, runDir string, state *State) conditionEnvironment {
 	return conditionEnvironment{
-		Vars:  state.Vars,
-		Env:   state.Env,
-		Steps: state.Steps,
+		Inputs: state.Inputs,
+		Vars:   state.Vars,
+		Env:    state.Env,
+		Steps:  state.Steps,
 		Workflow: conditionWorkflow{
 			Name: definition.Name,
 			Dir:  definition.Dir,

@@ -9,12 +9,21 @@ import (
 )
 
 func newValidateCmd(deps dependencies) *cobra.Command {
+	var variables, environment []string
 	command := &cobra.Command{
 		Use:   "validate [NAME]",
 		Short: "Validate one or all effective workflows",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(command *cobra.Command, args []string) error {
 			cwd, home, config, err := directories(deps)
+			if err != nil {
+				return err
+			}
+			vars, err := parseVars(variables)
+			if err != nil {
+				return err
+			}
+			env, err := parseEnv(environment)
 			if err != nil {
 				return err
 			}
@@ -32,12 +41,16 @@ func newValidateCmd(deps dependencies) *cobra.Command {
 				}
 			}
 			for _, source := range sources {
-				definition, err := workflow.Load(source.Path)
+				loader := deps.loader
+				if loader == nil {
+					loader = workflow.NewLoader(nil)
+				}
+				definition, err := loader.Load(command.Context(), source.Path, workflow.LoadOptions{Vars: vars, Env: env, RunDir: cwd})
 				if err != nil {
 					return err
 				}
 				if err := engine.New(deps.registry).Validate(command.Context(), definition, engine.Options{
-					RunDir: cwd, Stdin: command.InOrStdin(), Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(),
+					Vars: vars, Env: env, RunDir: cwd, Stdin: command.InOrStdin(), Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(),
 				}); err != nil {
 					return err
 				}
@@ -46,6 +59,8 @@ func newValidateCmd(deps dependencies) *cobra.Command {
 			return nil
 		},
 	}
+	command.Flags().StringArrayVar(&variables, "var", nil, "set a workflow variable (key=value; repeatable)")
+	command.Flags().StringArrayVar(&environment, "env", nil, "override an environment variable (KEY=value; repeatable)")
 	command.ValidArgsFunction = workflowCompletion(deps)
 	return command
 }

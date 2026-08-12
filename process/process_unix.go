@@ -23,12 +23,17 @@ type Options struct {
 	Stdin   io.Reader
 	Stdout  io.Writer
 	Stderr  io.Writer
+	// CaptureLimit bounds each captured output stream. Zero means unlimited. Output written to
+	// Stdout and Stderr is unaffected.
+	CaptureLimit int64
 }
 
 type Result struct {
-	Stdout   string
-	Stderr   string
-	ExitCode int
+	Stdout          string
+	Stderr          string
+	ExitCode        int
+	StdoutTruncated bool
+	StderrTruncated bool
 }
 
 type ExitError struct {
@@ -61,11 +66,12 @@ func Run(ctx context.Context, options Options) (Result, error) {
 		return err
 	}
 
-	var stdout, stderr bytes.Buffer
+	stdout := newCaptureBuffer(options.CaptureLimit)
+	stderr := newCaptureBuffer(options.CaptureLimit)
 	command.Stdout = io.MultiWriter(writerOrDiscard(options.Stdout), &stdout)
 	command.Stderr = io.MultiWriter(writerOrDiscard(options.Stderr), &stderr)
 	err := command.Run()
-	result := Result{Stdout: stdout.String(), Stderr: stderr.String(), ExitCode: 0}
+	result := Result{Stdout: stdout.String(), Stderr: stderr.String(), ExitCode: 0, StdoutTruncated: stdout.truncated, StderrTruncated: stderr.truncated}
 	if err == nil {
 		return result, nil
 	}
@@ -78,6 +84,31 @@ func Run(ctx context.Context, options Options) (Result, error) {
 		return result, &ExitError{Command: options.Command, Code: result.ExitCode, Err: err}
 	}
 	return result, fmt.Errorf("starting %s: %w", options.Command, err)
+}
+
+type captureBuffer struct {
+	bytes.Buffer
+	limit     int64
+	truncated bool
+}
+
+func newCaptureBuffer(limit int64) captureBuffer { return captureBuffer{limit: limit} }
+
+func (buffer *captureBuffer) Write(data []byte) (int, error) {
+	length := len(data)
+	if buffer.limit <= 0 {
+		_, _ = buffer.Buffer.Write(data)
+		return length, nil
+	}
+	remaining := buffer.limit - int64(buffer.Buffer.Len())
+	if remaining > 0 {
+		write := min(int64(len(data)), remaining)
+		_, _ = buffer.Buffer.Write(data[:write])
+	}
+	if int64(length) > remaining {
+		buffer.truncated = true
+	}
+	return length, nil
 }
 
 func environment(values map[string]string) []string {

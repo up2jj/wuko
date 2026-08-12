@@ -1,6 +1,6 @@
 # Wuko
 
-Wuko is a trusted local workflow runner for everyday development tasks. Workflows are YAML files
+Wuko is a trusted workflow runner for everyday development tasks. Local workflows are YAML files
 composed from independently registered Go step packages. The built-in steps prompt for text,
 select one or more choices, run Lua automation, execute commands or inline shell, and launch an
 external agent such as Codex.
@@ -41,6 +41,8 @@ wuko run start-task --dry-run
 ```
 
 `--var` attempts JSON decoding and otherwise stores a string. `--env` always stores a string.
+Both flags are also accepted by `validate`, including when they are needed to resolve a remote
+action reference.
 
 ## Workflow schema
 
@@ -119,6 +121,121 @@ The guard is evaluated before `with` is rendered, so `upload` never tries to res
 matters, or `get(vars, "name")` to read an optional value. If a skipped step would have overwritten
 an existing variable, the existing value remains unchanged. Dry-run validates and prints guards
 but does not evaluate them because preceding step outputs are not available.
+
+### Remote composite actions
+
+A workflow step can invoke a Wuko-native composite action over HTTPS. The action is downloaded and
+validated before any workflow step runs, then its internal steps run sequentially at the `uses`
+position. The caller waits for the entire action before continuing:
+
+```yaml
+vars:
+  action_release: v1
+steps:
+  - id: prepare
+    type: lua
+    with:
+      source: |
+        wuko.output("artifacts", {"app.zip", "checksums.txt"})
+
+  - id: build
+    uses: "https://actions.example.com/{{ .vars.action_release }}/build"
+    sha256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    with:
+      target: linux
+      artifacts:
+        expr: steps.prepare.artifacts
+
+  - id: publish
+    type: shell
+    with:
+      command: publish
+      args: ["{{ .steps.build.artifact }}"]
+```
+
+A scalar `uses` must resolve to an HTTPS URL without embedded credentials. It can use the pre-run
+template roots `.vars`, `.env`, `.workflow.name`, `.workflow.dir`, and `.run.dir`; it cannot depend
+on `.steps`, because actions are resolved before execution. URL filenames and response content
+types are not significant. Query strings are omitted from errors.
+
+An action can instead be fetched by a local command that writes the manifest or archive bytes to
+standard output. This is useful for authenticated tools such as `gh`:
+
+```yaml
+steps:
+  - id: build
+    uses:
+      command: gh
+      args:
+        - api
+        - --method
+        - GET
+        - "repos/acme/wuko-actions/contents/build/action.yml?ref=v1.2.3"
+        - --header
+        - "Accept: application/vnd.github.raw+json"
+    sha256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    with:
+      target: linux
+```
+
+`command` and every argument support the same pre-run templates as HTTPS references. The command
+runs directly, without an implicit shell, in `.run.dir` with the effective workflow environment
+and a 30-second timeout. Use `command: sh` with `args: [-c, "..."]` only when shell syntax such as a
+pipeline is intentionally required. A non-zero exit, oversized output, or invalid stdout fails
+loading; stderr is included in failure diagnostics, while command arguments are omitted. Identical
+rendered command sources are executed once per workflow load.
+
+The optional `sha256` is a 64-character hexadecimal digest of the exact downloaded bytes. Put an
+action release in its URL, such as a SemVer tag or commit. An immutable URL plus `sha256` is fully
+pinned; a floating URL such as `/v1/build` intentionally receives compatible updates. The
+manifest's own `version` describes its Wuko schema, not its published release.
+
+A direct URL may return an action manifest:
+
+```yaml
+version: 1
+name: build
+description: Build an application
+
+inputs:
+  target:
+    type: string
+    required: true
+  artifacts:
+    type: array
+    default: []
+
+outputs:
+  artifact:
+    description: Produced artifact
+    value: steps.package.stdout
+
+steps:
+  - id: package
+    type: shell
+    with:
+      script: ./scripts/build.sh "$1"
+      args: ["{{ .inputs.target }}"]
+      working_directory: "{{ .workflow.dir }}"
+```
+
+Inputs are declared as `string`, `boolean`, `number`, `array`, or `object`. Fixed YAML values and
+templated strings can be passed directly. `{expr: "..."}` evaluates an Expr expression without
+converting arrays, objects, numbers, or booleans to strings. Use `{literal: value}` when a literal
+object would otherwise be mistaken for this wrapper. Missing required inputs, unknown inputs, and
+type mismatches are errors.
+
+Internal steps receive `.inputs`/`inputs`, the caller's effective environment, and the caller's run
+directory. Their step IDs and variables are isolated from the caller. Only manifest outputs are
+exported beneath `.steps.<caller-step-id>`; each output `value` is an Expr expression over the
+internal `inputs`, `vars`, `env`, and `steps` state.
+
+The URL may instead return a ZIP or gzip-compressed tar archive with exactly one root
+`action.yml` or `action.yaml`. Companion files are extracted to an isolated temporary action
+directory, so relative paths in internal steps resolve inside the package. For a direct manifest,
+relative paths retain normal workflow behavior and resolve from the caller workflow directory.
+Archive extraction rejects traversal paths, links, special files, duplicates, and oversized
+packages. Remote actions cannot invoke another remote action in schema version 1.
 
 ### Prompt
 
@@ -244,6 +361,9 @@ Shell and agent output streams live and is also captured as `stdout`, `stderr`, 
 
 ## Trust model
 
-Workflows are trusted local code. Lua can access the network and filesystem and can start
-processes; shell and agent steps also execute local programs. Review workflows before running
-them. Wuko does not download remote workflows or provide a secrets store.
+Workflows and remote actions are trusted code. Lua can access the network and filesystem and can
+start processes; shell and agent steps also execute local programs. Command-based action sources
+also execute locally while the workflow is loading. Review action publishers and pin immutable
+action releases with SHA-256 before running them. Safe archive extraction is not an execution
+sandbox. Wuko does not download whole remote workflows, add authentication headers to HTTPS action
+requests, or provide a secrets store.
