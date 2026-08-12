@@ -1,0 +1,55 @@
+version: 1
+name: start-task
+description: Demonstrate prompts, Lua choices, inline shell, and an agent
+
+env:
+  WUKO_DEMO_TOKEN: "{{ .env.WUKO_DEMO_TOKEN }}"
+
+steps:
+  - id: task_name
+    type: prompt
+    with:
+      variable: task_name
+      message: Task name
+
+  - id: fetch
+    type: lua
+    with:
+      file: ../scripts/fetch_task.lua
+      args:
+        name: "{{ .vars.task_name }}"
+
+  - id: project
+    type: choice
+    with:
+      variable: project_id
+      message: Select a project
+      from: steps.fetch.projects
+      label_field: name
+      value_field: id
+
+  - id: reviewers
+    type: choice
+    with:
+      variable: reviewers
+      message: Select reviewers
+      multiple: true
+      choices:
+        - {label: Alice, value: alice}
+        - {label: Bob, value: bob}
+
+  - id: preview
+    type: shell
+    with:
+      script: |
+        set -eu
+        printf 'Would create branch: %s\n' "$1"
+      args: ["{{ .steps.fetch.task.branch }}"]
+
+  - id: agent_preview
+    type: agent
+    with:
+      command: sh
+      args: [-c, cat]
+      prompt: |
+        Work on {{ .steps.fetch.task.id }} for project {{ .vars.project_id }}.
