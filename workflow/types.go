@@ -64,15 +64,16 @@ func (c *Condition) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
-// Step declares either a concrete registered step type or a resolved remote composite action.
+// Step declares a concrete step, a remote composite action, or a local step-file requirement.
 type Step struct {
-	ID     string         `yaml:"id"`
-	Type   string         `yaml:"type,omitempty"`
-	Uses   ActionSource   `yaml:"uses,omitempty"`
-	SHA256 string         `yaml:"sha256,omitempty"`
-	If     Condition      `yaml:"if,omitempty"`
-	With   map[string]any `yaml:"with,omitempty"`
-	Action *Action        `yaml:"-"`
+	ID      string         `yaml:"id"`
+	Type    string         `yaml:"type,omitempty"`
+	Uses    ActionSource   `yaml:"uses,omitempty"`
+	Require *string        `yaml:"require,omitempty"`
+	SHA256  string         `yaml:"sha256,omitempty"`
+	If      Condition      `yaml:"if,omitempty"`
+	With    map[string]any `yaml:"with,omitempty"`
+	Action  *Action        `yaml:"-"`
 }
 
 // ActionSource identifies action bytes fetched from HTTPS or produced by a local command.
@@ -159,16 +160,22 @@ func loadLocal(path string) (*Definition, error) {
 		}
 		return nil, fmt.Errorf("decoding workflow %s: %w", path, err)
 	}
-	if err := validateDefinition(&definition, true); err != nil {
+	if err := validateDefinitionHeader(&definition); err != nil {
 		return nil, fmt.Errorf("validating workflow %s: %w", path, err)
 	}
-
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return nil, fmt.Errorf("resolving workflow path %s: %w", path, err)
 	}
 	definition.Path = abs
 	definition.Dir = filepath.Dir(abs)
+	definition.Steps, err = expandRequiredSteps(definition.Steps, abs, nil)
+	if err != nil {
+		return nil, fmt.Errorf("loading workflow %s: %w", path, err)
+	}
+	if err := validateDefinition(&definition, true); err != nil {
+		return nil, fmt.Errorf("validating workflow %s: %w", path, err)
+	}
 	if definition.Vars == nil {
 		definition.Vars = make(map[string]any)
 	}
@@ -179,18 +186,15 @@ func loadLocal(path string) (*Definition, error) {
 }
 
 func validateDefinition(definition *Definition, allowActions bool) error {
-	if definition.Version != 1 {
-		return fmt.Errorf("unsupported version %d (want 1)", definition.Version)
-	}
-	if definition.Name == "" {
-		return fmt.Errorf("name is required")
-	}
-	if len(definition.Steps) == 0 {
-		return fmt.Errorf("at least one step is required")
+	if err := validateDefinitionHeader(definition); err != nil {
+		return err
 	}
 
 	seen := make(map[string]struct{}, len(definition.Steps))
 	for i, workflowStep := range definition.Steps {
+		if workflowStep.Require != nil {
+			return fmt.Errorf("step %d: require is only supported in workflow step files", i+1)
+		}
 		if !identifierPattern.MatchString(workflowStep.ID) {
 			return fmt.Errorf("step %d has invalid id %q", i+1, workflowStep.ID)
 		}
@@ -216,6 +220,19 @@ func validateDefinition(definition *Definition, allowActions bool) error {
 		if !environmentPattern.MatchString(name) {
 			return fmt.Errorf("invalid environment name %q", name)
 		}
+	}
+	return nil
+}
+
+func validateDefinitionHeader(definition *Definition) error {
+	if definition.Version != 1 {
+		return fmt.Errorf("unsupported version %d (want 1)", definition.Version)
+	}
+	if definition.Name == "" {
+		return fmt.Errorf("name is required")
+	}
+	if len(definition.Steps) == 0 {
+		return fmt.Errorf("at least one step is required")
 	}
 	return nil
 }

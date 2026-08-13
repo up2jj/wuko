@@ -99,6 +99,46 @@ typed `args` instead.
 Environment precedence is step environment, CLI `--env`, workflow environment, then the host
 environment. Environment values are not shown by dry-run output.
 
+### Splitting steps across files
+
+Use a `require` entry to insert steps from another local YAML file at that position. Paths must be
+relative and are resolved from the file containing the entry, so step files can require other step
+files:
+
+```yaml
+# workflow.yaml
+version: 1
+name: release
+steps:
+  - require: steps/prepare.yaml
+  - id: publish
+    type: shell
+    with:
+      command: ./publish
+```
+
+The required file may be a bare step list:
+
+```yaml
+# steps/prepare.yaml
+- id: test
+  type: shell
+  with:
+    command: go
+    args: [test, ./...]
+
+- id: build
+  type: shell
+  with:
+    command: go
+    args: [build, ./...]
+```
+
+It may instead wrap that list in a `steps` field. A `require` entry cannot contain other step
+fields. All expanded steps are validated as one workflow, so IDs must remain unique across every
+file. Cyclic requirements are rejected. Remote workflow archives can require files bundled in the
+archive; direct remote YAML workflows have no companion files to require.
+
 When [direnv](https://direnv.net/) is installed, `wuko run` and `wuko validate` use the environment
 it exports for the invocation directory as the host environment. Wuko honors direnv's trust model,
 so the applicable `.envrc` must already be approved with `direnv allow`. To load a local `.env`,

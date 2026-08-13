@@ -156,7 +156,7 @@ func NewLoader(client *http.Client) *Loader {
 	return &Loader{client: &copy}
 }
 
-// Load reads a local workflow and resolves all of its remote actions before returning.
+// Load reads a local workflow, expands required step files, and resolves all remote actions.
 func (loader *Loader) Load(ctx context.Context, filename string, options LoadOptions) (*Definition, error) {
 	definition, err := loadLocal(filename)
 	if err != nil {

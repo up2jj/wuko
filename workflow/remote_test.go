@@ -98,6 +98,31 @@ func TestLoadRemoteArchivesWorkflowAndCompanionFiles(t *testing.T) {
 	}
 }
 
+func TestLoadRemoteArchiveExpandsRequiredStepFiles(t *testing.T) {
+	payload := makeZIP(t, map[string]archiveTestFile{
+		"wuko.yaml": {
+			data: []byte("version: 1\nname: remote-split\nsteps:\n  - require: steps/build.yaml\n"),
+			mode: 0o644,
+		},
+		"steps/build.yaml": {
+			data: []byte("- id: build\n  type: shell\n  with: {command: build}\n"),
+			mode: 0o644,
+		},
+	})
+	client := testHTTPClient(func(*http.Request) (*http.Response, error) {
+		return testResponse(http.StatusOK, payload), nil
+	})
+
+	definition, cleanup, err := NewLoader(client).LoadRemote(t.Context(), "https://example.test/workflow.zip", LoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	if len(definition.Steps) != 1 || definition.Steps[0].ID != "build" {
+		t.Fatalf("steps = %#v, want expanded build step", definition.Steps)
+	}
+}
+
 func TestLoadRemoteRejectsInvalidWorkflowArchives(t *testing.T) {
 	tests := map[string][]byte{
 		"missing manifest": makeZIP(t, map[string]archiveTestFile{
