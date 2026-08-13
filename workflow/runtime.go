@@ -12,9 +12,11 @@ import (
 
 // LoadOptions supplies the pre-run values used to resolve remote action references.
 type LoadOptions struct {
-	Vars   map[string]any
-	Env    map[string]string
-	RunDir string
+	Vars map[string]any
+	Env  map[string]string
+	// BaseEnv overrides the current process environment when non-nil.
+	BaseEnv map[string]string
+	RunDir  string
 }
 
 // PrepareValues applies workflow and caller overrides using the same precedence as execution.
@@ -24,6 +26,9 @@ func PrepareValues(definition *Definition, options LoadOptions) (map[string]any,
 		vars[key] = Clone(value)
 	}
 	host := hostEnvironment()
+	if options.BaseEnv != nil {
+		host = maps.Clone(options.BaseEnv)
+	}
 	wfEnv := make(map[string]string, len(definition.Env))
 	root := TemplateData(definition, options.RunDir, nil, vars, host, nil)
 	keys := slices.Sorted(maps.Keys(definition.Env))

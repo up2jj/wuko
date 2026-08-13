@@ -181,8 +181,6 @@ func (r captureRunner) Run(_ context.Context, request step.Request) (step.Result
 }
 
 func TestRunRendersStateAndEnvironment(t *testing.T) {
-	t.Setenv("WUKO_ENGINE_HOST", "host-value")
-	t.Setenv("WUKO_ENGINE_PRIORITY", "host")
 	registry := step.NewRegistry()
 	var seen step.Request
 	if err := registry.Register("capture", func(raw map[string]any) (step.Runner, error) {
@@ -199,7 +197,10 @@ func TestRunRendersStateAndEnvironment(t *testing.T) {
 		Steps: []workflow.Step{{ID: "capture", Type: "capture", With: map[string]any{"value": "{{ .vars.name }}:{{ .env.DERIVED }}"}}},
 	}
 	state, err := New(registry).Run(t.Context(), definition, Options{
-		Vars: map[string]any{"name": "cli"}, Env: map[string]string{"CLI": "yes", "WUKO_ENGINE_PRIORITY": "cli"}, RunDir: t.TempDir(), Stdout: io.Discard, Stderr: io.Discard,
+		Vars:    map[string]any{"name": "cli"},
+		Env:     map[string]string{"CLI": "yes", "WUKO_ENGINE_PRIORITY": "cli"},
+		BaseEnv: map[string]string{"WUKO_ENGINE_HOST": "host-value", "WUKO_ENGINE_PRIORITY": "host"},
+		RunDir:  t.TempDir(), Stdout: io.Discard, Stderr: io.Discard,
 	})
 	if err != nil {
 		t.Fatal(err)

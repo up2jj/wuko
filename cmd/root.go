@@ -36,6 +36,7 @@ type dependencies struct {
 	stdout        io.Writer
 	stderr        io.Writer
 	cwd           func() (string, error)
+	environment   func(context.Context, string) (map[string]string, error)
 	homeDir       func() (string, error)
 	configDir     func() (string, error)
 	registry      *step.Registry
@@ -61,7 +62,8 @@ func NewRootCmd() *cobra.Command {
 	}
 	return newRootCmd(dependencies{
 		stdin: os.Stdin, stdout: os.Stdout, stderr: os.Stderr,
-		cwd: os.Getwd, homeDir: os.UserHomeDir, configDir: os.UserConfigDir, registry: registry,
+		cwd: os.Getwd, environment: direnvEnvironment,
+		homeDir: os.UserHomeDir, configDir: os.UserConfigDir, registry: registry,
 		loader: workflow.NewLoader(nil), isInteractive: interactive,
 	})
 }

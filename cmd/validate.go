@@ -27,6 +27,10 @@ func newValidateCmd(deps dependencies) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			baseEnv, err := invocationEnvironment(command, deps, cwd)
+			if err != nil {
+				return err
+			}
 			var sources []workflow.Source
 			if len(args) == 1 {
 				source, err := workflow.Find(cwd, home, config, args[0])
@@ -45,12 +49,12 @@ func newValidateCmd(deps dependencies) *cobra.Command {
 				if loader == nil {
 					loader = workflow.NewLoader(nil)
 				}
-				definition, err := loader.Load(command.Context(), source.Path, workflow.LoadOptions{Vars: vars, Env: env, RunDir: cwd})
+				definition, err := loader.Load(command.Context(), source.Path, workflow.LoadOptions{Vars: vars, Env: env, BaseEnv: baseEnv, RunDir: cwd})
 				if err != nil {
 					return err
 				}
 				if err := engine.New(deps.registry).Validate(command.Context(), definition, engine.Options{
-					Vars: vars, Env: env, RunDir: cwd, Stdin: command.InOrStdin(), Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(),
+					Vars: vars, Env: env, BaseEnv: baseEnv, RunDir: cwd, Stdin: command.InOrStdin(), Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(),
 				}); err != nil {
 					return err
 				}

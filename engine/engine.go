@@ -17,8 +17,10 @@ type Engine struct {
 }
 
 type Options struct {
-	Vars        map[string]any
-	Env         map[string]string
+	Vars map[string]any
+	Env  map[string]string
+	// BaseEnv overrides the current process environment when non-nil.
+	BaseEnv     map[string]string
 	RunDir      string
 	Stdin       io.Reader
 	Stdout      io.Writer
@@ -26,7 +28,6 @@ type Options struct {
 	Interactive bool
 	DryRun      bool
 	inputs      map[string]any
-	baseEnv     map[string]string
 }
 
 type State struct {
@@ -153,12 +154,9 @@ func (e *Engine) Run(ctx context.Context, definition *workflow.Definition, optio
 }
 
 func initialState(definition *workflow.Definition, options Options) (*State, error) {
-	vars, environment, err := workflow.PrepareValues(definition, workflow.LoadOptions{Vars: options.Vars, Env: options.Env, RunDir: options.RunDir})
+	vars, environment, err := workflow.PrepareValues(definition, workflow.LoadOptions{Vars: options.Vars, Env: options.Env, BaseEnv: options.BaseEnv, RunDir: options.RunDir})
 	if err != nil {
 		return nil, err
-	}
-	if options.baseEnv != nil {
-		environment = mergeEnvironment(options.baseEnv, definition.Env, options.Env)
 	}
 	return &State{Inputs: cloneMap(options.inputs), Vars: vars, Env: environment, Steps: make(map[string]any)}, nil
 }
@@ -195,7 +193,7 @@ func (e *Engine) validateAction(ctx context.Context, definition *workflow.Defini
 	defer cleanup()
 	inputs := actionValidationInputs(workflowStep.Action)
 	inner := &workflow.Definition{Version: 1, Name: workflowStep.Action.Name, Dir: dir, Steps: workflowStep.Action.Steps, Vars: map[string]any{}, Env: workflow.Environment{}}
-	return e.Validate(ctx, inner, Options{inputs: inputs, baseEnv: state.Env, RunDir: options.RunDir, Stdin: options.Stdin, Stdout: options.Stdout, Stderr: options.Stderr, Interactive: options.Interactive})
+	return e.Validate(ctx, inner, Options{inputs: inputs, BaseEnv: state.Env, RunDir: options.RunDir, Stdin: options.Stdin, Stdout: options.Stdout, Stderr: options.Stderr, Interactive: options.Interactive})
 }
 
 func (e *Engine) runAction(ctx context.Context, definition *workflow.Definition, workflowStep workflow.Step, options Options, state *State) (map[string]any, error) {
@@ -209,7 +207,7 @@ func (e *Engine) runAction(ctx context.Context, definition *workflow.Definition,
 	}
 	defer cleanup()
 	inner := &workflow.Definition{Version: 1, Name: workflowStep.Action.Name, Dir: dir, Steps: workflowStep.Action.Steps, Vars: map[string]any{}, Env: workflow.Environment{}}
-	innerState, err := e.Run(ctx, inner, Options{inputs: inputs, baseEnv: state.Env, RunDir: options.RunDir, Stdin: options.Stdin, Stdout: options.Stdout, Stderr: options.Stderr, Interactive: options.Interactive})
+	innerState, err := e.Run(ctx, inner, Options{inputs: inputs, BaseEnv: state.Env, RunDir: options.RunDir, Stdin: options.Stdin, Stdout: options.Stdout, Stderr: options.Stderr, Interactive: options.Interactive})
 	if err != nil {
 		return nil, err
 	}

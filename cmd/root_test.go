@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -48,6 +49,53 @@ steps:
 		t.Fatal(err)
 	}
 	if !strings.Contains(output.String(), "world") {
+		t.Fatalf("output = %q", output.String())
+	}
+}
+
+func TestRunCommandUsesInvocationEnvironment(t *testing.T) {
+	root := t.TempDir()
+	workflowDir := filepath.Join(root, ".wuko", "workflows")
+	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data := `version: 1
+name: environment
+env:
+  DERIVED: "{{ .env.FROM_DIRENV }}"
+  PRIORITY: workflow
+steps:
+  - id: environment
+    type: shell
+    with:
+      script: "printf '%s:%s' \"$DERIVED\" \"$PRIORITY\""
+`
+	if err := os.WriteFile(filepath.Join(workflowDir, "environment.yaml"), []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	registry := step.NewRegistry()
+	if err := shell.Register(registry); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	command := newRootCmd(dependencies{
+		stdin: bytes.NewReader(nil), stdout: &output, stderr: &output,
+		cwd: func() (string, error) { return root, nil },
+		environment: func(_ context.Context, dir string) (map[string]string, error) {
+			if dir != root {
+				t.Fatalf("dir = %q, want %q", dir, root)
+			}
+			return map[string]string{"FROM_DIRENV": "loaded", "PRIORITY": "direnv"}, nil
+		},
+		homeDir:   func() (string, error) { return filepath.Join(root, "home"), nil },
+		configDir: func() (string, error) { return filepath.Join(root, "config"), nil },
+		registry:  registry,
+	})
+	command.SetArgs([]string{"run", "environment", "--env", "PRIORITY=cli"})
+	if err := command.ExecuteContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "loaded:cli") {
 		t.Fatalf("output = %q", output.String())
 	}
 }

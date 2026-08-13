@@ -99,6 +99,17 @@ typed `args` instead.
 Environment precedence is step environment, CLI `--env`, workflow environment, then the host
 environment. Environment values are not shown by dry-run output.
 
+When [direnv](https://direnv.net/) is installed, `wuko run` and `wuko validate` use the environment
+it exports for the invocation directory as the host environment. Wuko honors direnv's trust model,
+so the applicable `.envrc` must already be approved with `direnv allow`. To load a local `.env`,
+put this in that project's `.envrc`:
+
+```sh
+dotenv_if_exists
+```
+
+If direnv is not installed or no `.envrc` applies, Wuko uses its process environment unchanged.
+
 ### Conditional steps
 
 Add `if` to run a step only when an [Expr](https://expr-lang.org/docs/language-definition)

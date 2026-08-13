@@ -2,7 +2,6 @@ package engine
 
 import (
 	"fmt"
-	"maps"
 	"text/template"
 
 	"github.com/up2jj/wuko/workflow"
@@ -67,14 +66,6 @@ func renderValue(value any, data map[string]any, skipSource bool) (any, error) {
 	default:
 		return value, nil
 	}
-}
-
-func mergeEnvironment(base map[string]string, overlays ...map[string]string) map[string]string {
-	result := maps.Clone(base)
-	for _, overlay := range overlays {
-		maps.Copy(result, overlay)
-	}
-	return result
 }
 
 func environmentAsAny(values map[string]string) map[string]any {

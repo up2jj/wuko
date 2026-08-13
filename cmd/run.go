@@ -36,6 +36,10 @@ func newRunCmd(deps dependencies) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			baseEnv, err := invocationEnvironment(command, deps, cwd)
+			if err != nil {
+				return err
+			}
 			var source workflow.Source
 			var definition *workflow.Definition
 			cleanup := func() {}
@@ -52,7 +56,7 @@ func newRunCmd(deps dependencies) *cobra.Command {
 				if loader == nil {
 					loader = workflow.NewLoader(nil)
 				}
-				definition, cleanup, err = loader.LoadRemote(command.Context(), args[0], workflow.LoadOptions{Vars: vars, Env: env, RunDir: cwd})
+				definition, cleanup, err = loader.LoadRemote(command.Context(), args[0], workflow.LoadOptions{Vars: vars, Env: env, BaseEnv: baseEnv, RunDir: cwd})
 				if err != nil {
 					return err
 				}
@@ -68,7 +72,7 @@ func newRunCmd(deps dependencies) *cobra.Command {
 				loader = workflow.NewLoader(nil)
 			}
 			if definition == nil {
-				definition, err = loader.Load(command.Context(), source.Path, workflow.LoadOptions{Vars: vars, Env: env, RunDir: cwd})
+				definition, err = loader.Load(command.Context(), source.Path, workflow.LoadOptions{Vars: vars, Env: env, BaseEnv: baseEnv, RunDir: cwd})
 				if err != nil {
 					return err
 				}
@@ -77,7 +81,7 @@ func newRunCmd(deps dependencies) *cobra.Command {
 				fmt.Fprintf(command.OutOrStdout(), "Workflow %s (%s)\n", definition.Name, definition.Path)
 			}
 			_, err = engine.New(deps.registry).Run(command.Context(), definition, engine.Options{
-				Vars: vars, Env: env, RunDir: cwd, Stdin: command.InOrStdin(),
+				Vars: vars, Env: env, BaseEnv: baseEnv, RunDir: cwd, Stdin: command.InOrStdin(),
 				Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(),
 				Interactive: interactive(command.InOrStdin()), DryRun: dryRun,
 			})
@@ -90,4 +94,15 @@ func newRunCmd(deps dependencies) *cobra.Command {
 	command.Flags().StringVar(&workflowFile, "file", "", "run a workflow from a file path")
 	command.ValidArgsFunction = workflowCompletion(deps)
 	return command
+}
+
+func invocationEnvironment(command *cobra.Command, deps dependencies, cwd string) (map[string]string, error) {
+	if deps.environment == nil {
+		return nil, nil
+	}
+	environment, err := deps.environment(command.Context(), cwd)
+	if err != nil {
+		return nil, err
+	}
+	return environment, nil
 }
