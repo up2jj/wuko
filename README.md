@@ -46,6 +46,8 @@ wuko validate start-task
 wuko validate
 wuko run start-task
 wuko run --file ./path/to/start-task.yaml
+wuko run https://example.com/workflows/release.yaml
+wuko run github:acme/wuko-workflows@v1.2.3:release.yaml
 wuko run start-task --var 'reviewers=["alice","bob"]' --env CLICKUP_TOKEN=secret
 wuko run start-task --dry-run
 ```
@@ -56,6 +58,24 @@ action reference.
 
 `wuko list` shows the effective workflows and labels each one as `local` or `global`. Bare `wuko`
 also includes shadowed definitions from other scopes.
+
+### Remote workflows
+
+`wuko run` accepts a public HTTPS URL or a GitHub shorthand in the form
+`github:owner/repo[@ref][:path]`. A bare GitHub locator uses the repository's default branch and
+`wuko.yaml` at the repository root. For example:
+
+```sh
+wuko run github:acme/wuko-workflows
+wuko run github:acme/wuko-workflows@main:workflows/release.yaml
+```
+
+HTTPS sources may return a YAML workflow directly or a ZIP/tar.gz archive. Archives must contain
+exactly one root-level `wuko.yaml` or `wuko.yml`; companion files are available relative to that
+workflow. Direct YAML URLs and GitHub file locators contain only the selected workflow file, so
+workflows needing companion files should use an HTTPS archive. Remote workflows are downloaded
+without authentication, materialized in a temporary directory, and removed after the run. Remote
+workflow bytes are not pinned by a digest in this version.
 
 ## Workflow schema
 

@@ -79,6 +79,41 @@ steps:
 	}
 }
 
+func TestRunRemoteWorkflowFromHTTPS(t *testing.T) {
+	workflowData := `version: 1
+name: remote-workflow
+steps:
+  - id: echo
+    type: shell
+    with:
+      script: "printf '%s' \"$1\""
+      args: ["{{ .vars.message }}"]
+`
+	client := &http.Client{Transport: commandRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.URL.String() != "https://workflows.example.test/release.yaml" {
+			return nil, fmt.Errorf("unexpected URL %s", request.URL)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Status: "200 OK", Body: io.NopCloser(strings.NewReader(workflowData)), Header: make(http.Header)}, nil
+	})}
+	registry := step.NewRegistry()
+	if err := shell.Register(registry); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	command := newRootCmd(dependencies{
+		stdin: bytes.NewReader(nil), stdout: &output, stderr: &output,
+		cwd: func() (string, error) { return t.TempDir(), nil }, homeDir: func() (string, error) { return "", nil }, configDir: func() (string, error) { return "", nil },
+		registry: registry, loader: workflow.NewLoader(client),
+	})
+	command.SetArgs([]string{"run", "https://workflows.example.test/release.yaml", "--var", "message=hello"})
+	if err := command.ExecuteContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "hello") {
+		t.Fatalf("output = %q", output.String())
+	}
+}
+
 func TestValidateRemoteActionAcceptsVarAndEnvFlags(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, ".wuko", "workflows")

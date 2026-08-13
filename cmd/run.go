@@ -14,8 +14,8 @@ func newRunCmd(deps dependencies) *cobra.Command {
 	var dryRun bool
 	var workflowFile string
 	command := &cobra.Command{
-		Use:   "run [NAME]",
-		Short: "Run a named workflow or workflow file",
+		Use:   "run [NAME|URL|GITHUB]",
+		Short: "Run a named or remotely located workflow",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(command *cobra.Command, args []string) error {
 			cwd, home, config, err := directories(deps)
@@ -23,23 +23,10 @@ func newRunCmd(deps dependencies) *cobra.Command {
 				return err
 			}
 			if workflowFile != "" && len(args) > 0 {
-				return fmt.Errorf("workflow name and --file cannot be used together")
+				return fmt.Errorf("workflow selector and --file cannot be used together")
 			}
 			if workflowFile == "" && len(args) == 0 {
 				return fmt.Errorf("workflow name or --file is required")
-			}
-			var source workflow.Source
-			if workflowFile != "" {
-				path, err := filepath.Abs(workflowFile)
-				if err != nil {
-					return fmt.Errorf("resolving workflow file %s: %w", workflowFile, err)
-				}
-				source = workflow.Source{Path: path}
-			} else {
-				source, err = workflow.Find(cwd, home, config, args[0])
-				if err != nil {
-					return err
-				}
 			}
 			vars, err := parseVars(variables)
 			if err != nil {
@@ -49,13 +36,42 @@ func newRunCmd(deps dependencies) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			var source workflow.Source
+			var definition *workflow.Definition
+			cleanup := func() {}
+			if workflowFile != "" {
+				path, err := filepath.Abs(workflowFile)
+				if err != nil {
+					return fmt.Errorf("resolving workflow file %s: %w", workflowFile, err)
+				}
+				source = workflow.Source{Path: path}
+			} else if workflow.IsRemoteLocator(args[0]) {
+				// Remote workflow content is materialized before loading so relative files and
+				// workflow metadata behave the same way as for a local workflow file.
+				loader := deps.loader
+				if loader == nil {
+					loader = workflow.NewLoader(nil)
+				}
+				definition, cleanup, err = loader.LoadRemote(command.Context(), args[0], workflow.LoadOptions{Vars: vars, Env: env, RunDir: cwd})
+				if err != nil {
+					return err
+				}
+				defer cleanup()
+			} else {
+				source, err = workflow.Find(cwd, home, config, args[0])
+				if err != nil {
+					return err
+				}
+			}
 			loader := deps.loader
 			if loader == nil {
 				loader = workflow.NewLoader(nil)
 			}
-			definition, err := loader.Load(command.Context(), source.Path, workflow.LoadOptions{Vars: vars, Env: env, RunDir: cwd})
-			if err != nil {
-				return err
+			if definition == nil {
+				definition, err = loader.Load(command.Context(), source.Path, workflow.LoadOptions{Vars: vars, Env: env, RunDir: cwd})
+				if err != nil {
+					return err
+				}
 			}
 			if dryRun {
 				fmt.Fprintf(command.OutOrStdout(), "Workflow %s (%s)\n", definition.Name, definition.Path)

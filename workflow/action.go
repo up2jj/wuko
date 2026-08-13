@@ -276,26 +276,35 @@ func validateActionURL(raw string) (*url.URL, error) {
 }
 
 func (loader *Loader) fetch(ctx context.Context, remoteURL *url.URL) ([]byte, error) {
+	return loader.fetchWithHeaders(ctx, remoteURL, nil, "action")
+}
+
+func (loader *Loader) fetchWithHeaders(ctx context.Context, remoteURL *url.URL, headers http.Header, kind string) ([]byte, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, remoteURL.String(), nil)
 	if err != nil {
-		return nil, fmt.Errorf("creating request for %s: %w", safeURL(remoteURL), err)
+		return nil, fmt.Errorf("creating %s request for %s: %w", kind, safeURL(remoteURL), err)
+	}
+	for key, values := range headers {
+		for _, value := range values {
+			request.Header.Add(key, value)
+		}
 	}
 	response, err := loader.client.Do(request)
 	if err != nil {
 		message := strings.ReplaceAll(err.Error(), remoteURL.String(), safeURL(remoteURL))
 		message = queryInErrorPattern.ReplaceAllString(message, "")
-		return nil, fmt.Errorf("fetching action %s: %s", safeURL(remoteURL), message)
+		return nil, fmt.Errorf("fetching %s %s: %s", kind, safeURL(remoteURL), message)
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, fmt.Errorf("fetching action %s: unexpected HTTP status %s", safeURL(remoteURL), response.Status)
+		return nil, fmt.Errorf("fetching %s %s: unexpected HTTP status %s", kind, safeURL(remoteURL), response.Status)
 	}
 	payload, err := io.ReadAll(io.LimitReader(response.Body, maxArchiveSize+1))
 	if err != nil {
-		return nil, fmt.Errorf("reading action %s: %w", safeURL(remoteURL), err)
+		return nil, fmt.Errorf("reading %s %s: %w", kind, safeURL(remoteURL), err)
 	}
 	if len(payload) > maxArchiveSize {
-		return nil, fmt.Errorf("action %s exceeds %d-byte download limit", safeURL(remoteURL), maxArchiveSize)
+		return nil, fmt.Errorf("%s %s exceeds %d-byte download limit", kind, safeURL(remoteURL), maxArchiveSize)
 	}
 	return payload, nil
 }
