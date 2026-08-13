@@ -392,11 +392,56 @@ Agents are regular external processes with their prompt on stdin:
 
 Shell and agent output streams live and is also captured as `stdout`, `stderr`, and `exit_code`.
 
+### Docker
+
+The `docker` step runs one command in a temporary Docker container. The container and any anonymous
+volumes it creates are removed after the step finishes. Docker must be available through the Docker
+Engine API (`DOCKER_HOST` is respected by the Docker client).
+
+```yaml
+- id: tests
+  type: docker
+  with:
+    image: golang:1.26
+    command: go
+    args: [test, ./...]
+    working_directory: /workspace
+    mounts:
+      - source: "{{ .run.dir }}"
+        target: /workspace
+        read_only: true
+    network: none
+    pull: if-missing
+```
+
+`command` and `args` are passed as an argv list. Omitting `command` uses the image's default
+command. `working_directory` is a path inside the container. Mount `source` paths are host paths;
+relative sources are resolved against the workflow run directory, while mount `target` paths must
+be absolute container paths. The step supports `env`, `user`, `platform` (`os/architecture` or
+`os/architecture/variant`), `network`, `tty`, and literal `stdin` values. An explicitly configured
+`stdin` value, including an empty string, is sent to the container and then closed. When `tty: true`
+is used from an interactive terminal, Wuko forwards terminal input until the container exits. Wuko's
+effective environment is passed through and step-level `env` overrides it.
+
+The pull policy defaults to `if-missing`; `never`, `missing`, and `always` are also accepted. Pin
+production images by digest when reproducibility matters. With `tty: true`, Docker combines the
+output streams as a terminal does. Interactive workflows should be run with a terminal attached.
+
+Docker containers created by Wuko receive management, client-host, and owner-process labels. At the
+start of a later Docker step, Wuko recovers only labeled containers created from the same client host
+whose owner process is no longer alive; containers from other client hosts, legacy containers without
+a client-host label, and containers owned by a live Wuko process are left untouched. This covers
+process crashes and forced termination on the next Wuko run without interfering with another machine
+using the same remote daemon. Cleanup failures are reported and are preserved alongside the original
+step error. Images and explicitly configured bind-mounted host directories are retained by design.
+
 ## Trust model
 
 Workflows and remote actions are trusted code. Lua can access the network and filesystem and can
-start processes; shell and agent steps also execute local programs. Command-based action sources
-also execute locally while the workflow is loading. Review action publishers and pin immutable
-action releases with SHA-256 before running them. Safe archive extraction is not an execution
-sandbox. Wuko does not download whole remote workflows, add authentication headers to HTTPS action
-requests, or provide a secrets store.
+start processes; shell and agent steps also execute local programs. Docker steps can access any
+explicitly mounted host paths and can use the configured Docker daemon. Do not mount the Docker
+socket unless the workflow is trusted, because it grants control over the daemon and can amount to
+host-level access. Command-based action sources also execute locally while the workflow is loading.
+Review action publishers and pin immutable action releases with SHA-256 before running them. Safe
+archive extraction is not an execution sandbox. Wuko does not download whole remote workflows, add
+authentication headers to HTTPS action requests, or provide a secrets store.
