@@ -19,9 +19,11 @@ type textModel struct {
 	err       string
 }
 
-func newTextModel(message, defaultValue string, required bool) textModel {
+func newTextModel(message, value string, required bool, echoMode textinput.EchoMode, validate textinput.ValidateFunc) textModel {
 	input := textinput.New()
-	input.SetValue(defaultValue)
+	input.EchoMode = echoMode
+	input.Validate = validate
+	input.SetValue(value)
 	input.Focus()
 	return textModel{input: input, message: message, required: required}
 }
@@ -35,6 +37,10 @@ func (m textModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.cancelled = true
 			return m, tea.Quit
 		case "enter":
+			if m.input.Err != nil {
+				m.err = m.input.Err.Error()
+				return m, nil
+			}
 			if m.required && strings.TrimSpace(m.input.Value()) == "" {
 				m.err = "a value is required"
 				return m, nil
@@ -45,6 +51,12 @@ func (m textModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	var command tea.Cmd
 	m.input, command = m.input.Update(message)
+	if m.err != "" {
+		m.err = ""
+		if m.input.Err != nil {
+			m.err = m.input.Err.Error()
+		}
+	}
 	return m, command
 }
 
@@ -59,9 +71,28 @@ func (m textModel) View() tea.View {
 	return tea.NewView(view + "enter confirm • esc cancel\n")
 }
 
-// Text runs an interactive Bubble Tea text prompt.
-func Text(ctx context.Context, input io.Reader, output io.Writer, message, defaultValue string, required bool) (string, error) {
-	program := tea.NewProgram(newTextModel(message, defaultValue, required),
+// Text runs an interactive Bubble Tea text prompt with an editable initial value.
+func Text(ctx context.Context, input io.Reader, output io.Writer, message, value string, required bool) (string, error) {
+	return runText(ctx, input, output, message, value, required, textinput.EchoNormal, nil)
+}
+
+// TextWithValidation runs a text prompt with an additional validation function.
+func TextWithValidation(ctx context.Context, input io.Reader, output io.Writer, message, value string, required bool, validate func(string) error) (string, error) {
+	return runText(ctx, input, output, message, value, required, textinput.EchoNormal, validate)
+}
+
+// Password runs an interactive Bubble Tea text prompt that masks the entered value.
+func Password(ctx context.Context, input io.Reader, output io.Writer, message string, required bool) (string, error) {
+	return runText(ctx, input, output, message, "", required, textinput.EchoPassword, nil)
+}
+
+// PasswordWithValidation runs a masked text prompt with a validation function.
+func PasswordWithValidation(ctx context.Context, input io.Reader, output io.Writer, message string, required bool, validate func(string) error) (string, error) {
+	return runText(ctx, input, output, message, "", required, textinput.EchoPassword, validate)
+}
+
+func runText(ctx context.Context, input io.Reader, output io.Writer, message, value string, required bool, echoMode textinput.EchoMode, validate textinput.ValidateFunc) (string, error) {
+	program := tea.NewProgram(newTextModel(message, value, required, echoMode, validate),
 		tea.WithContext(ctx), tea.WithInput(input), tea.WithOutput(output), tea.WithoutSignalHandler())
 	final, err := program.Run()
 	if err != nil {

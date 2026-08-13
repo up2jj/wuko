@@ -1,9 +1,9 @@
 # Wuko
 
 Wuko is a trusted workflow runner for everyday development tasks. Local workflows are YAML files
-composed from independently registered Go step packages. The built-in steps prompt for text,
-select one or more choices, run Lua automation, execute commands or inline shell, and launch an
-external agent such as Codex.
+composed from independently registered Go step packages. The built-in steps collect text and
+password input, select one or more choices, run Lua automation, execute commands or inline shell,
+and launch an external agent such as Codex.
 
 ## Install
 
@@ -270,20 +270,116 @@ relative paths retain normal workflow behavior and resolve from the caller workf
 Archive extraction rejects traversal paths, links, special files, duplicates, and oversized
 packages. Remote actions cannot invoke another remote action in schema version 1.
 
-### Prompt
+### Input
+
+Use `input` when the initial text should remain editable. The optional `value` is rendered when
+the step starts, so it can prepopulate text from an earlier step. The required `message` is shown
+directly above the field and should tell the user what to enter:
 
 ```yaml
-- id: task_name
-  type: prompt
+- id: release_name
+  type: input
   with:
-    variable: task_name
-    message: Task name
-    default: Optional default
+    variable: release_name
+    message: Enter the release name
+    value: "{{ .steps.suggest_name.value }}"
     required: true
 ```
 
-Prompts use Bubble Tea v2. A pre-supplied variable skips the UI. Non-interactive runs must supply
-the variable with `--var`.
+### Password
+
+Use `password` for masked text entry. Its required `message` is displayed above the masked field:
+
+```yaml
+- id: credentials
+  type: password
+  with:
+    variable: api_token
+    message: Enter the API token
+    required: true
+```
+
+Input and password steps write their resulting value to `steps.<id>.value` and to the configured
+variable. The value is text unless an input modifier converts it. A pre-supplied variable skips
+the UI, and non-interactive runs must provide it with `--var`.
+
+Both steps support the same optional `validation` block inside `with`:
+
+```yaml
+with:
+  validation:
+    min_length: 3
+    max_length: 40
+    pattern: '^[a-z][a-z0-9-]+$'
+    message: Use 3–40 lowercase letters, digits, or hyphens
+```
+
+Lengths count Unicode characters. `pattern` uses Go regular-expression syntax and is optional;
+anchor it with `^` and `$` when the whole value must match. `message` replaces the default error
+for any failed rule. Invalid rule configurations fail workflow validation before execution.
+
+Input can convert validated text before storing it. Split on a Go regular-expression pattern:
+
+```yaml
+- id: reviewers
+  type: input
+  with:
+    variable: reviewers
+    message: Enter comma-separated reviewers
+    modifiers:
+      trim: true
+      split: ','
+```
+
+Entering `alice, bob` writes `["alice", "bob"]` to both `.steps.reviewers.value` and
+`.vars.reviewers`. `trim` removes leading and trailing Unicode whitespace before validation and
+conversion. When combined with `split`, it also trims every resulting item. Empty fields are
+preserved.
+
+Alternatively, deserialize one JSON value:
+
+```yaml
+- id: metadata
+  type: input
+  with:
+    variable: metadata
+    message: Enter metadata as JSON
+    modifiers:
+      trim: true
+      json: true
+
+- id: describe
+  type: shell
+  with:
+    command: printf
+    args:
+      - 'project=%s first_tag=%s retries=%s\n'
+      - "{{ .vars.metadata.project }}"
+      - "{{ index .steps.metadata.value.tags 0 }}"
+      - "{{ .steps.metadata.value.retries }}"
+
+- id: deploy
+  type: shell
+  if: vars.metadata.deploy
+  with:
+    command: ./deploy
+    args: ["{{ .vars.metadata.project }}"]
+```
+
+For example, entering
+`{"project":"wuko","tags":["go","cli"],"retries":3,"deploy":true}` makes the object available
+as both `.vars.metadata` and `.steps.metadata.value`. Access object fields with dotted paths, such
+as `.vars.metadata.project`; use the Go-template `index` function for array elements, such as
+`{{ index .steps.metadata.value.tags 0 }}`. Conditions use the typed value directly, so
+`if: vars.metadata.deploy` evaluates the JSON boolean rather than a string.
+
+JSON preserves objects, arrays, strings, booleans, null, and numbers. Invalid JSON remains in the
+interactive field with an error. `trim` can be combined with either `split` or `json`; `split` and
+`json` are mutually exclusive. With `--var`, pass JSON as a string because modifiers operate on
+text, for example
+`--var 'metadata="{\"enabled\":true}"'`.
+
+When `required: false`, empty input becomes an empty list for `split` and `null` for `json`.
 
 ### Choice
 

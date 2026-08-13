@@ -16,8 +16,9 @@ import (
 	"github.com/up2jj/wuko/steps/agent"
 	"github.com/up2jj/wuko/steps/choice"
 	dockerstep "github.com/up2jj/wuko/steps/docker"
+	inputstep "github.com/up2jj/wuko/steps/input"
 	luastep "github.com/up2jj/wuko/steps/lua"
-	"github.com/up2jj/wuko/steps/prompt"
+	passwordstep "github.com/up2jj/wuko/steps/password"
 	"github.com/up2jj/wuko/steps/shell"
 	"github.com/up2jj/wuko/tui"
 	"github.com/up2jj/wuko/workflow"
@@ -51,7 +52,8 @@ func Execute() error {
 func NewRootCmd() *cobra.Command {
 	registry := step.NewRegistry()
 	for _, register := range []func(*step.Registry) error{
-		prompt.Register, choice.Register, dockerstep.Register, luastep.Register, shell.Register, agent.Register,
+		inputstep.Register, passwordstep.Register, choice.Register,
+		dockerstep.Register, luastep.Register, shell.Register, agent.Register,
 	} {
 		if err := register(registry); err != nil {
 			panic(err)
