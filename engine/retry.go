@@ -18,10 +18,19 @@ import (
 
 type stepExecutor func(context.Context, step.Request) (step.Result, error)
 
-func (e *Engine) runWithRetry(ctx context.Context, definition *workflow.Definition, workflowStep workflow.Step, options Options, state *State, execute stepExecutor) (step.Result, error) {
+type stepExecution struct {
+	result    step.Result
+	attempts  []AttemptStats
+	retryWait time.Duration
+	err       error
+}
+
+func (e *Engine) runWithRetry(ctx context.Context, definition *workflow.Definition, workflowStep workflow.Step, options Options, state *State, execute stepExecutor) stepExecution {
+	var execution stepExecution
 	operationID, err := executionOperationID(definition, workflowStep, options, state)
 	if err != nil {
-		return step.Result{}, err
+		execution.err = err
+		return execution
 	}
 	maximum := maxAttempts(workflowStep)
 	runCtx := ctx
@@ -33,40 +42,72 @@ func (e *Engine) runWithRetry(ctx context.Context, definition *workflow.Definiti
 
 	for attempt := 1; attempt <= maximum; attempt++ {
 		if err := executionContextError(ctx, runCtx, workflowStep); err != nil {
-			return step.Result{}, err
+			execution.err = err
+			return execution
 		}
 		attemptCtx := runCtx
 		cancelAttempt := func() {}
 		if workflowStep.Timeout != nil {
 			attemptCtx, cancelAttempt = context.WithTimeout(runCtx, workflowStep.Timeout.Value())
 		}
+		attemptStartedAt := time.Now()
+		report(options, ProgressEvent{
+			Kind: AttemptStarted, Status: StatusRunning, Time: attemptStartedAt,
+			WorkflowName: definition.Name, Depth: options.depth, StepID: workflowStep.ID,
+			StepType: executionKind(workflowStep), Attempt: attempt, MaxAttempts: maximum,
+		})
 		request := makeRequest(definition, workflowStep.ID, options, state, attempt, maximum, operationID)
 		result, runErr := execute(attemptCtx, request)
 		attemptContextErr := attemptCtx.Err()
 		cancelAttempt()
 
-		if err := executionContextError(ctx, runCtx, workflowStep); err != nil {
-			return step.Result{}, err
-		}
-		if attemptContextErr == context.DeadlineExceeded && workflowStep.Timeout != nil {
+		if contextErr := executionContextError(ctx, runCtx, workflowStep); contextErr != nil {
+			runErr = contextErr
+		} else if attemptContextErr == context.DeadlineExceeded && workflowStep.Timeout != nil {
 			runErr = fmt.Errorf("timed out after %s: %w", workflowStep.Timeout, context.DeadlineExceeded)
 		}
+		attemptStats := AttemptStats{
+			Number: attempt, Status: statusFromError(runErr), StartedAt: attemptStartedAt,
+			Duration: time.Since(attemptStartedAt), Error: runErr,
+		}
+		execution.attempts = append(execution.attempts, attemptStats)
+		report(options, ProgressEvent{
+			Kind: AttemptFinished, Status: attemptStats.Status, Time: attemptStartedAt.Add(attemptStats.Duration),
+			WorkflowName: definition.Name, Depth: options.depth, StepID: workflowStep.ID,
+			StepType: executionKind(workflowStep), Attempt: attempt, MaxAttempts: maximum,
+			Duration: attemptStats.Duration, Error: runErr,
+		})
 		if runErr == nil {
-			return result, nil
+			execution.result = result
+			return execution
+		}
+		if ctx.Err() != nil || runCtx.Err() != nil {
+			execution.err = runErr
+			return execution
 		}
 		if attempt == maximum {
-			return step.Result{}, fmt.Errorf("attempt %d/%d failed: %w", attempt, maximum, runErr)
+			execution.err = fmt.Errorf("attempt %d/%d failed: %w", attempt, maximum, runErr)
+			return execution
 		}
 
-		fmt.Fprintf(writerOrDiscard(options.Stderr), "%s: attempt %d/%d failed: %v\n", workflowStep.ID, attempt, maximum, runErr)
 		delay := retryDelay(workflowStep.Retry, attempt)
-		fmt.Fprintf(writerOrDiscard(options.Stderr), "%s: retrying in %s\n", workflowStep.ID, delay)
+		report(options, ProgressEvent{
+			Kind: RetryScheduled, Status: StatusRunning, Time: time.Now(),
+			WorkflowName: definition.Name, Depth: options.depth, StepID: workflowStep.ID,
+			StepType: executionKind(workflowStep), Attempt: attempt + 1, MaxAttempts: maximum,
+			RetryDelay: delay, Error: runErr,
+		})
+		waitStartedAt := time.Now()
 		if err := waitForRetry(runCtx, delay); err != nil {
+			execution.retryWait += time.Since(waitStartedAt)
 			if contextErr := executionContextError(ctx, runCtx, workflowStep); contextErr != nil {
-				return step.Result{}, contextErr
+				execution.err = contextErr
+				return execution
 			}
-			return step.Result{}, err
+			execution.err = err
+			return execution
 		}
+		execution.retryWait += time.Since(waitStartedAt)
 	}
 	panic("unreachable")
 }
@@ -156,11 +197,4 @@ func executionPolicySuffix(workflowStep workflow.Step) string {
 		return ""
 	}
 	return " [" + strings.Join(parts, ", ") + "]"
-}
-
-func writerOrDiscard(writer io.Writer) io.Writer {
-	if writer == nil {
-		return io.Discard
-	}
-	return writer
 }

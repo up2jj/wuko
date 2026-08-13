@@ -2,10 +2,12 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
 	"strings"
+	"time"
 
 	"github.com/expr-lang/expr"
 	"github.com/up2jj/wuko/step"
@@ -20,15 +22,18 @@ type Options struct {
 	Vars map[string]any
 	Env  map[string]string
 	// BaseEnv overrides the current process environment when non-nil.
-	BaseEnv         map[string]string
-	RunDir          string
-	Stdin           io.Reader
-	Stdout          io.Writer
-	Stderr          io.Writer
-	Interactive     bool
-	DryRun          bool
+	BaseEnv     map[string]string
+	RunDir      string
+	Stdin       io.Reader
+	Stdout      io.Writer
+	Stderr      io.Writer
+	Interactive bool
+	DryRun      bool
+	// Progress receives structured workflow, step, attempt, retry, and timing events.
+	Progress        func(ProgressEvent)
 	inputs          map[string]any
 	operationPrefix string
+	depth           int
 }
 
 type State struct {
@@ -36,6 +41,7 @@ type State struct {
 	Vars   map[string]any
 	Env    map[string]string
 	Steps  map[string]any
+	Stats  RunStats
 }
 
 func New(registry *step.Registry) *Engine { return &Engine{registry: registry} }
@@ -84,7 +90,7 @@ func (e *Engine) Validate(ctx context.Context, definition *workflow.Definition, 
 	return nil
 }
 
-func (e *Engine) Run(ctx context.Context, definition *workflow.Definition, options Options) (*State, error) {
+func (e *Engine) Run(ctx context.Context, definition *workflow.Definition, options Options) (runState *State, runErr error) {
 	state, err := initialState(definition, options)
 	if err != nil {
 		return nil, err
@@ -113,48 +119,91 @@ func (e *Engine) Run(ctx context.Context, definition *workflow.Definition, optio
 		return state, nil
 	}
 
+	startedAt := time.Now()
+	stats := RunStats{StartedAt: startedAt, Total: len(definition.Steps), Steps: make([]StepStats, 0, len(definition.Steps))}
+	report(options, ProgressEvent{
+		Kind: WorkflowStarted, Status: StatusRunning, Time: startedAt,
+		WorkflowName: definition.Name, Depth: options.depth, Total: len(definition.Steps),
+	})
+	defer func() {
+		finishedAt := time.Now()
+		stats.FinishedAt = finishedAt
+		stats.Duration = finishedAt.Sub(startedAt)
+		state.Stats = stats
+		status := statusFromError(runErr)
+		report(options, ProgressEvent{
+			Kind: WorkflowFinished, Status: status, Time: finishedAt,
+			WorkflowName: definition.Name, Depth: options.depth, Total: len(definition.Steps),
+			Duration: stats.Duration, Error: runErr, Stats: stats,
+		})
+	}()
+
 	for i, workflowStep := range definition.Steps {
-		kind := workflowStep.Type
-		if workflowStep.Action != nil {
-			kind = "uses"
+		kind := executionKind(workflowStep)
+		stepStartedAt := time.Now()
+		finishStep := func(status ExecutionStatus, stepErr error, attempts []AttemptStats, retryWait time.Duration) {
+			stepStats := StepStats{
+				ID: workflowStep.ID, Type: kind, Index: i + 1, Status: status,
+				StartedAt: stepStartedAt, Duration: time.Since(stepStartedAt),
+				RetryWait: retryWait, Attempts: attempts, Error: stepErr,
+			}
+			recordStep(&stats, stepStats)
+			reportStepFinished(options, definition.Name, workflowStep.ID, kind, i+1, len(definition.Steps), stepStats)
 		}
 		run, err := evaluateCondition(workflowStep.If, makeConditionEnvironment(definition, options.RunDir, state))
 		if err != nil {
-			return nil, fmt.Errorf("workflow %q step %q (%s): evaluating if: %w", definition.Name, workflowStep.ID, kind, err)
+			stepErr := fmt.Errorf("workflow %q step %q (%s): evaluating if: %w", definition.Name, workflowStep.ID, kind, err)
+			finishStep(StatusFailed, stepErr, nil, 0)
+			return nil, stepErr
 		}
 		if !run {
-			fmt.Fprintf(options.Stdout, "[%d/%d] %s (%s) skipped\n", i+1, len(definition.Steps), workflowStep.ID, kind)
+			finishStep(StatusSkipped, nil, nil, 0)
 			continue
 		}
-		fmt.Fprintf(options.Stdout, "[%d/%d] %s (%s)\n", i+1, len(definition.Steps), workflowStep.ID, kind)
+		report(options, ProgressEvent{
+			Kind: StepStarted, Status: StatusRunning, Time: stepStartedAt,
+			WorkflowName: definition.Name, Depth: options.depth, StepID: workflowStep.ID,
+			StepType: kind, Index: i + 1, Total: len(definition.Steps), MaxAttempts: maxAttempts(workflowStep),
+			Timeout: stepTimeout(workflowStep),
+		})
 		var execute stepExecutor
 		cleanup := func() {}
 		if workflowStep.Action != nil {
 			execute, cleanup, err = e.prepareActionExecutor(definition, workflowStep, options, state)
 			if err != nil {
-				return nil, fmt.Errorf("workflow %q step %q (%s): %w", definition.Name, workflowStep.ID, kind, err)
+				stepErr := fmt.Errorf("workflow %q step %q (%s): %w", definition.Name, workflowStep.ID, kind, err)
+				finishStep(statusFromError(stepErr), stepErr, nil, 0)
+				return nil, stepErr
 			}
 		} else {
 			data := templateData(definition, options.RunDir, state)
 			rendered, err := renderValue(workflowStep.With, data, workflowStep.Type == "lua")
 			if err != nil {
-				return nil, fmt.Errorf("workflow %q step %q (%s): rendering configuration: %w", definition.Name, workflowStep.ID, workflowStep.Type, err)
+				stepErr := fmt.Errorf("workflow %q step %q (%s): rendering configuration: %w", definition.Name, workflowStep.ID, workflowStep.Type, err)
+				finishStep(StatusFailed, stepErr, nil, 0)
+				return nil, stepErr
 			}
 			raw, ok := rendered.(map[string]any)
 			if !ok {
-				return nil, fmt.Errorf("workflow %q step %q (%s): configuration is not an object", definition.Name, workflowStep.ID, workflowStep.Type)
+				stepErr := fmt.Errorf("workflow %q step %q (%s): configuration is not an object", definition.Name, workflowStep.ID, workflowStep.Type)
+				finishStep(StatusFailed, stepErr, nil, 0)
+				return nil, stepErr
 			}
 			runner, err := e.registry.Build(workflowStep.Type, raw)
 			if err != nil {
-				return nil, fmt.Errorf("workflow %q step %q (%s): %w", definition.Name, workflowStep.ID, workflowStep.Type, err)
+				stepErr := fmt.Errorf("workflow %q step %q (%s): %w", definition.Name, workflowStep.ID, workflowStep.Type, err)
+				finishStep(StatusFailed, stepErr, nil, 0)
+				return nil, stepErr
 			}
 			execute = runner.Run
 		}
-		result, err := e.runWithRetry(ctx, definition, workflowStep, options, state, execute)
+		execution := e.runWithRetry(ctx, definition, workflowStep, options, state, execute)
 		cleanup()
-		if err != nil {
-			return nil, fmt.Errorf("workflow %q step %q (%s): %w", definition.Name, workflowStep.ID, kind, err)
+		finishStep(statusFromError(execution.err), execution.err, execution.attempts, execution.retryWait)
+		if execution.err != nil {
+			return nil, fmt.Errorf("workflow %q step %q (%s): %w", definition.Name, workflowStep.ID, kind, execution.err)
 		}
+		result := execution.result
 		if result.Outputs == nil {
 			result.Outputs = make(map[string]any)
 		}
@@ -164,6 +213,68 @@ func (e *Engine) Run(ctx context.Context, definition *workflow.Definition, optio
 		}
 	}
 	return state, nil
+}
+
+func executionKind(workflowStep workflow.Step) string {
+	if workflowStep.Action != nil {
+		return "uses"
+	}
+	return workflowStep.Type
+}
+
+func stepTimeout(workflowStep workflow.Step) time.Duration {
+	if workflowStep.Timeout == nil {
+		return 0
+	}
+	return workflowStep.Timeout.Value()
+}
+
+func reportStepFinished(options Options, workflowName, stepID, stepType string, index, total int, stats StepStats) {
+	report(options, ProgressEvent{
+		Kind: StepFinished, Status: stats.Status, Time: stats.StartedAt.Add(stats.Duration),
+		WorkflowName: workflowName, Depth: options.depth, StepID: stepID, StepType: stepType,
+		Index: index, Total: total, Attempt: len(stats.Attempts), Duration: stats.Duration, Error: stats.Error,
+	})
+}
+
+func recordStep(stats *RunStats, stepStats StepStats) {
+	stats.Steps = append(stats.Steps, stepStats)
+	switch stepStats.Status {
+	case StatusSucceeded:
+		stats.Succeeded++
+	case StatusSkipped:
+		stats.Skipped++
+	case StatusCanceled:
+		stats.Canceled++
+	default:
+		stats.Failed++
+	}
+	stats.Attempts += len(stepStats.Attempts)
+	stats.Retries += max(0, len(stepStats.Attempts)-1)
+	stats.RetryWait += stepStats.RetryWait
+	timedOutAttempts := 0
+	for _, attempt := range stepStats.Attempts {
+		if attempt.Status == StatusTimedOut {
+			timedOutAttempts++
+		}
+	}
+	stats.TimedOut += timedOutAttempts
+	if stepStats.Status == StatusTimedOut && timedOutAttempts == 0 {
+		stats.TimedOut++
+	}
+}
+
+func statusFromError(err error) ExecutionStatus {
+	if err == nil {
+		return StatusSucceeded
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return StatusTimedOut
+	}
+	if errors.Is(err, context.Canceled) {
+		return StatusCanceled
+	}
+	return StatusFailed
 }
 
 func initialState(definition *workflow.Definition, options Options) (*State, error) {
@@ -221,7 +332,12 @@ func (e *Engine) prepareActionExecutor(definition *workflow.Definition, workflow
 	}
 	inner := &workflow.Definition{Version: 1, Name: workflowStep.Action.Name, Dir: dir, Steps: workflowStep.Action.Steps, Vars: map[string]any{}, Env: workflow.Environment{}}
 	execute := func(ctx context.Context, request step.Request) (step.Result, error) {
-		innerState, err := e.Run(ctx, inner, Options{inputs: inputs, BaseEnv: state.Env, RunDir: options.RunDir, Stdin: options.Stdin, Stdout: options.Stdout, Stderr: options.Stderr, Interactive: options.Interactive, operationPrefix: request.OperationID})
+		innerState, err := e.Run(ctx, inner, Options{
+			inputs: inputs, BaseEnv: state.Env, RunDir: options.RunDir,
+			Stdin: options.Stdin, Stdout: options.Stdout, Stderr: options.Stderr,
+			Interactive: options.Interactive, Progress: options.Progress,
+			operationPrefix: request.OperationID, depth: options.depth + 1,
+		})
 		if err != nil {
 			return step.Result{}, err
 		}

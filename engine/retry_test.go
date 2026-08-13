@@ -88,11 +88,15 @@ func TestRunRetriesAttemptTimeout(t *testing.T) {
 		definition := &workflow.Definition{Version: 1, Name: "timeout", Dir: t.TempDir(), Steps: []workflow.Step{{
 			ID: "run", Type: "timeout", Timeout: &timeout, Retry: immediateRetry(2), With: map[string]any{},
 		}}}
-		if _, err := New(registry).Run(t.Context(), definition, Options{Stdout: io.Discard, Stderr: io.Discard}); err != nil {
+		state, err := New(registry).Run(t.Context(), definition, Options{Stdout: io.Discard, Stderr: io.Discard})
+		if err != nil {
 			t.Fatal(err)
 		}
 		if runner.attempts != 2 {
 			t.Fatalf("attempts = %d", runner.attempts)
+		}
+		if state.Stats.TimedOut != 1 || state.Stats.Retries != 1 {
+			t.Fatalf("stats = %#v", state.Stats)
 		}
 	})
 }

@@ -167,6 +167,14 @@ func interactive(reader io.Reader) bool {
 	return ok && term.IsTerminal(int(file.Fd()))
 }
 
+func colorEnabled(writer io.Writer) bool {
+	if _, disabled := os.LookupEnv("NO_COLOR"); disabled || os.Getenv("TERM") == "dumb" {
+		return false
+	}
+	file, ok := writer.(*os.File)
+	return ok && term.IsTerminal(int(file.Fd()))
+}
+
 func parseVars(values []string) (map[string]any, error) {
 	result := make(map[string]any, len(values))
 	for _, entry := range values {

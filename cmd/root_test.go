@@ -36,9 +36,9 @@ steps:
 	if err := shell.Register(registry); err != nil {
 		t.Fatal(err)
 	}
-	var output bytes.Buffer
+	var output, diagnostics bytes.Buffer
 	command := newRootCmd(dependencies{
-		stdin: bytes.NewReader(nil), stdout: &output, stderr: &output,
+		stdin: bytes.NewReader(nil), stdout: &output, stderr: &diagnostics,
 		cwd:       func() (string, error) { return root, nil },
 		homeDir:   func() (string, error) { return filepath.Join(root, "home"), nil },
 		configDir: func() (string, error) { return filepath.Join(root, "config"), nil },
@@ -48,8 +48,11 @@ steps:
 	if err := command.ExecuteContext(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), "world") {
-		t.Fatalf("output = %q", output.String())
+	if output.String() != "world" {
+		t.Fatalf("stdout = %q", output.String())
+	}
+	if !strings.Contains(diagnostics.String(), "◆ Workflow hello · 1 step") || !strings.Contains(diagnostics.String(), "✓ Workflow hello succeeded") {
+		t.Fatalf("progress = %q", diagnostics.String())
 	}
 }
 

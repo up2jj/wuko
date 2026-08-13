@@ -267,6 +267,31 @@ workflow or step environment values. Retrying a composite `uses` step replays th
 including previously successful inner steps; prefer retry policies on individual inner steps when
 the action can define them.
 
+### Execution progress and statistics
+
+`wuko run` writes execution progress to standard error, leaving standard output available for step
+output. The display uses durable status lines so command output and interactive prompts do not
+corrupt an animated spinner. Color is enabled on a terminal and disabled for redirected output,
+`TERM=dumb`, or when `NO_COLOR` is set.
+
+```text
+◆ Workflow release · 2 steps
+→ [1/2] publish (shell) · up to 3 attempts · timeout 2m0s
+  • attempt 1/3 started
+  ⏱ attempt 1/3 timed out after 2m0s: deadline exceeded
+  ↻ retrying with attempt 2/3 in 500ms
+  • attempt 2/3 started
+✓ [1/2] publish succeeded after 2m1.2s · 2 attempts
+⊘ [2/2] notify skipped
+✓ Workflow release succeeded in 2m1.2s · 1 succeeded · 1 skipped · 2 attempts · 1 retry · 1 timeout · 500ms retry wait
+```
+
+Every workflow, step, and attempt records its start time, duration, and terminal status. Run
+summaries also count successful, failed, skipped, canceled, and unstarted steps; attempts; retries;
+timeouts; and time spent waiting to retry. Composite-action progress is indented and gets a nested
+summary. Go callers can read the completed summary from `engine.State.Stats` and subscribe to the
+same lifecycle through `engine.Options.Progress` without parsing terminal text.
+
 ### Remote composite actions
 
 A workflow step can invoke a Wuko-native composite action over HTTPS. The action is downloaded and

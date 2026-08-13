@@ -6,6 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/up2jj/wuko/engine"
+	"github.com/up2jj/wuko/tui"
 	"github.com/up2jj/wuko/workflow"
 )
 
@@ -80,10 +81,11 @@ func newRunCmd(deps dependencies) *cobra.Command {
 			if dryRun {
 				fmt.Fprintf(command.OutOrStdout(), "Workflow %s (%s)\n", definition.Name, definition.Path)
 			}
+			progress := tui.NewProgress(command.ErrOrStderr(), colorEnabled(command.ErrOrStderr()))
 			_, err = engine.New(deps.registry).Run(command.Context(), definition, engine.Options{
 				Vars: vars, Env: env, BaseEnv: baseEnv, RunDir: cwd, Stdin: command.InOrStdin(),
 				Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(),
-				Interactive: interactive(command.InOrStdin()), DryRun: dryRun,
+				Interactive: interactive(command.InOrStdin()), DryRun: dryRun, Progress: progress.Report,
 			})
 			return err
 		},
