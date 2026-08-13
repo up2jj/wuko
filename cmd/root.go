@@ -86,7 +86,7 @@ func newRootCmd(deps dependencies) *cobra.Command {
 	root.SetIn(deps.stdin)
 	root.SetOut(deps.stdout)
 	root.SetErr(deps.stderr)
-	root.AddCommand(newRunCmd(deps), newListCmd(deps), newValidateCmd(deps), newCompletionCmd())
+	root.AddCommand(newRunCmd(deps), newListCmd(deps), newTreeCmd(deps), newValidateCmd(deps), newCompletionCmd())
 	return root
 }
 

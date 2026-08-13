@@ -50,6 +50,8 @@ wuko run https://example.com/workflows/release.yaml
 wuko run github:acme/wuko-workflows@v1.2.3:release.yaml
 wuko run start-task --var 'reviewers=["alice","bob"]' --env CLICKUP_TOKEN=secret
 wuko run start-task --dry-run
+wuko tree start-task
+wuko tree --file ./path/to/start-task.yaml
 ```
 
 `--var` attempts JSON decoding and otherwise stores a string. `--env` always stores a string.
@@ -58,6 +60,19 @@ action reference.
 
 `wuko list` shows the effective workflows and labels each one as `local` or `global`. Bare `wuko`
 also includes shadowed definitions from other scopes.
+
+`wuko tree NAME` prints the workflow's steps as a tree. Remote composite actions are expanded to
+show their internal steps, and conditional steps include their `if` expression. Like `run`, `tree`
+accepts `--file`, HTTPS and GitHub workflow locators, and repeatable `--var` and `--env` flags for
+resolving templated action references.
+
+```text
+release
+├── test (shell)
+└── build (uses https://actions.example.com/build/v1)
+    ├── compile (shell)
+    └── package (shell) if: inputs.package
+```
 
 ### Remote workflows
 
