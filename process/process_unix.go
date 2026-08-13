@@ -15,6 +15,8 @@ import (
 	"time"
 )
 
+const terminationGracePeriod = 2 * time.Second
+
 type Options struct {
 	Command string
 	Args    []string
@@ -49,29 +51,38 @@ func Run(ctx context.Context, options Options) (Result, error) {
 	if options.Command == "" {
 		return Result{}, fmt.Errorf("command is required")
 	}
-	command := exec.CommandContext(ctx, options.Command, options.Args...)
+	if err := ctx.Err(); err != nil {
+		return Result{}, err
+	}
+	command := exec.Command(options.Command, options.Args...)
 	command.Dir = options.Dir
 	command.Env = environment(options.Env)
 	command.Stdin = options.Stdin
 	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	command.WaitDelay = 2 * time.Second
-	command.Cancel = func() error {
-		if command.Process == nil {
-			return nil
-		}
-		err := syscall.Kill(-command.Process.Pid, syscall.SIGTERM)
-		if errors.Is(err, syscall.ESRCH) {
-			return nil
-		}
-		return err
-	}
+	command.WaitDelay = terminationGracePeriod + time.Second
 
 	stdout := newCaptureBuffer(options.CaptureLimit)
 	stderr := newCaptureBuffer(options.CaptureLimit)
 	command.Stdout = io.MultiWriter(writerOrDiscard(options.Stdout), &stdout)
 	command.Stderr = io.MultiWriter(writerOrDiscard(options.Stderr), &stderr)
-	err := command.Run()
+	if err := command.Start(); err != nil {
+		return Result{}, fmt.Errorf("starting %s: %w", options.Command, err)
+	}
+	wait := make(chan error, 1)
+	go func() { wait <- command.Wait() }()
+
+	var err error
+	canceled := false
+	select {
+	case err = <-wait:
+	case <-ctx.Done():
+		canceled = true
+		err = terminateProcessGroup(command.Process.Pid, wait)
+	}
 	result := Result{Stdout: stdout.String(), Stderr: stderr.String(), ExitCode: 0, StdoutTruncated: stdout.truncated, StderrTruncated: stderr.truncated}
+	if canceled {
+		return result, ctx.Err()
+	}
 	if err == nil {
 		return result, nil
 	}
@@ -84,6 +95,43 @@ func Run(ctx context.Context, options Options) (Result, error) {
 		return result, &ExitError{Command: options.Command, Code: result.ExitCode, Err: err}
 	}
 	return result, fmt.Errorf("starting %s: %w", options.Command, err)
+}
+
+func terminateProcessGroup(processID int, wait <-chan error) error {
+	termErr := signalProcessGroup(processID, syscall.SIGTERM)
+	timer := time.NewTimer(terminationGracePeriod)
+	defer timer.Stop()
+
+	var waitErr error
+	waited := false
+	select {
+	case waitErr = <-wait:
+		waited = true
+		if !processGroupAlive(processID) {
+			return errors.Join(waitErr, termErr)
+		}
+		<-timer.C
+	case <-timer.C:
+	}
+
+	killErr := signalProcessGroup(processID, syscall.SIGKILL)
+	if !waited {
+		waitErr = <-wait
+	}
+	return errors.Join(waitErr, termErr, killErr)
+}
+
+func signalProcessGroup(processID int, signal syscall.Signal) error {
+	err := syscall.Kill(-processID, signal)
+	if errors.Is(err, syscall.ESRCH) {
+		return nil
+	}
+	return err
+}
+
+func processGroupAlive(processID int) bool {
+	err := syscall.Kill(-processID, 0)
+	return err == nil || errors.Is(err, syscall.EPERM)
 }
 
 type captureBuffer struct {

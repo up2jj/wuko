@@ -37,6 +37,7 @@ type Options struct {
 	inputs          map[string]any
 	operationPrefix string
 	depth           int
+	runtime         *runRuntime
 }
 
 type State struct {
@@ -54,7 +55,26 @@ func (e *Engine) Validate(ctx context.Context, definition *workflow.Definition, 
 	if err != nil {
 		return err
 	}
-	for _, workflowStep := range definition.Steps {
+	return e.validateSteps(ctx, definition, definition.Steps, options, state, false)
+}
+
+func (e *Engine) validateSteps(ctx context.Context, definition *workflow.Definition, steps []workflow.Step, options Options, state *State, insideConcurrent bool) error {
+	for _, workflowStep := range steps {
+		if workflowStep.Concurrent != nil {
+			if insideConcurrent {
+				return fmt.Errorf("concurrent group: nested concurrent groups are not supported")
+			}
+			if err := workflowStep.Concurrent.Validate(); err != nil {
+				return fmt.Errorf("concurrent group: %w", err)
+			}
+			childOptions := options
+			childOptions.Interactive = false
+			childOptions.Stdin = nil
+			if err := e.validateSteps(ctx, definition, workflowStep.Concurrent.Steps, childOptions, state, true); err != nil {
+				return fmt.Errorf("concurrent group: %w", err)
+			}
+			continue
+		}
 		if err := workflowStep.ValidateExecutionPolicy(); err != nil {
 			return fmt.Errorf("step %q: %w", workflowStep.ID, err)
 		}
@@ -94,6 +114,7 @@ func (e *Engine) Validate(ctx context.Context, definition *workflow.Definition, 
 }
 
 func (e *Engine) Run(ctx context.Context, definition *workflow.Definition, options Options) (runState *State, runErr error) {
+	options = prepareRunOptions(options)
 	state, err := initialState(definition, options)
 	if err != nil {
 		return nil, err
@@ -102,31 +123,18 @@ func (e *Engine) Run(ctx context.Context, definition *workflow.Definition, optio
 		return nil, err
 	}
 	if options.DryRun {
-		for i, workflowStep := range definition.Steps {
-			kind := workflowStep.Type
-			if workflowStep.Action != nil {
-				kind = "uses " + workflowStep.Uses.Display()
-			}
-			policy := executionPolicySuffix(workflowStep)
-			if workflowStep.If == "" {
-				fmt.Fprintf(options.Stdout, "%d. %s (%s)%s\n", i+1, workflowStep.ID, kind, policy)
-			} else {
-				fmt.Fprintf(options.Stdout, "%d. %s (%s)%s if: %s\n", i+1, workflowStep.ID, kind, policy, workflowStep.If)
-			}
-			if workflowStep.Action != nil {
-				for j, inner := range workflowStep.Action.Steps {
-					fmt.Fprintf(options.Stdout, "   %d.%d %s (%s)%s\n", i+1, j+1, inner.ID, inner.Type, executionPolicySuffix(inner))
-				}
-			}
+		if err := writeDryRun(options.Stdout, definition.Steps, "", nil); err != nil {
+			return nil, err
 		}
 		return state, nil
 	}
 
 	startedAt := time.Now()
-	stats := RunStats{StartedAt: startedAt, Total: len(definition.Steps), Steps: make([]StepStats, 0, len(definition.Steps))}
+	total := leafStepCount(definition.Steps)
+	stats := RunStats{StartedAt: startedAt, Total: total, Steps: make([]StepStats, 0, total)}
 	report(options, ProgressEvent{
 		Kind: WorkflowStarted, Status: StatusRunning, Time: startedAt,
-		WorkflowName: definition.Name, Depth: options.depth, Total: len(definition.Steps),
+		WorkflowName: definition.Name, Depth: options.depth, Total: total,
 	})
 	defer func() {
 		finishedAt := time.Now()
@@ -136,86 +144,145 @@ func (e *Engine) Run(ctx context.Context, definition *workflow.Definition, optio
 		status := statusFromError(runErr)
 		report(options, ProgressEvent{
 			Kind: WorkflowFinished, Status: status, Time: finishedAt,
-			WorkflowName: definition.Name, Depth: options.depth, Total: len(definition.Steps),
+			WorkflowName: definition.Name, Depth: options.depth, Total: total,
 			Duration: stats.Duration, Error: runErr, Stats: stats,
 		})
 	}()
 
-	for i, workflowStep := range definition.Steps {
-		kind := executionKind(workflowStep)
-		stepStartedAt := time.Now()
-		finishStep := func(status ExecutionStatus, stepErr error, attempts []AttemptStats, retryWait time.Duration) {
-			stepStats := StepStats{
-				ID: workflowStep.ID, Type: kind, Index: i + 1, Status: status,
-				StartedAt: stepStartedAt, Duration: time.Since(stepStartedAt),
-				RetryWait: retryWait, Attempts: attempts, Error: stepErr,
+	index := 1
+	for _, workflowStep := range definition.Steps {
+		if workflowStep.Concurrent != nil {
+			outcomes, groupErr := e.runConcurrent(ctx, definition, workflowStep.Concurrent, options, state, index, total)
+			for _, outcome := range outcomes {
+				if outcome.started {
+					recordStep(&stats, outcome.stats)
+				}
 			}
-			recordStep(&stats, stepStats)
-			reportStepFinished(options, definition.Name, workflowStep.ID, kind, i+1, len(definition.Steps), stepStats)
-		}
-		run, err := evaluateCondition(workflowStep.If, makeConditionEnvironment(definition, options.RunDir, state))
-		if err != nil {
-			stepErr := fmt.Errorf("workflow %q step %q (%s): evaluating if: %w", definition.Name, workflowStep.ID, kind, err)
-			finishStep(StatusFailed, stepErr, nil, 0)
-			return nil, stepErr
-		}
-		if !run {
-			finishStep(StatusSkipped, nil, nil, 0)
+			index += len(workflowStep.Concurrent.Steps)
+			if groupErr != nil {
+				return nil, groupErr
+			}
 			continue
 		}
-		report(options, ProgressEvent{
-			Kind: StepStarted, Status: StatusRunning, Time: stepStartedAt,
-			WorkflowName: definition.Name, Depth: options.depth, StepID: workflowStep.ID,
-			StepType: kind, Index: i + 1, Total: len(definition.Steps), MaxAttempts: maxAttempts(workflowStep),
-			Timeout: stepTimeout(workflowStep),
-		})
-		var execute stepExecutor
-		cleanup := func() {}
-		if workflowStep.Action != nil {
-			execute, cleanup, err = e.prepareActionExecutor(definition, workflowStep, options, state)
-			if err != nil {
-				stepErr := fmt.Errorf("workflow %q step %q (%s): %w", definition.Name, workflowStep.ID, kind, err)
-				finishStep(statusFromError(stepErr), stepErr, nil, 0)
-				return nil, stepErr
-			}
-		} else {
-			data := templateData(definition, options.RunDir, state)
-			rendered, err := renderValue(workflowStep.With, data, workflowStep.Type == "lua")
-			if err != nil {
-				stepErr := fmt.Errorf("workflow %q step %q (%s): rendering configuration: %w", definition.Name, workflowStep.ID, workflowStep.Type, err)
-				finishStep(StatusFailed, stepErr, nil, 0)
-				return nil, stepErr
-			}
-			raw, ok := rendered.(map[string]any)
-			if !ok {
-				stepErr := fmt.Errorf("workflow %q step %q (%s): configuration is not an object", definition.Name, workflowStep.ID, workflowStep.Type)
-				finishStep(StatusFailed, stepErr, nil, 0)
-				return nil, stepErr
-			}
-			runner, err := e.registry.Build(workflowStep.Type, raw)
-			if err != nil {
-				stepErr := fmt.Errorf("workflow %q step %q (%s): %w", definition.Name, workflowStep.ID, workflowStep.Type, err)
-				finishStep(StatusFailed, stepErr, nil, 0)
-				return nil, stepErr
-			}
-			execute = runner.Run
+		outcome := e.executeStep(ctx, definition, workflowStep, options, state, index, total)
+		if outcome.started {
+			recordStep(&stats, outcome.stats)
 		}
-		execution := e.runWithRetry(ctx, definition, workflowStep, options, state, execute)
-		cleanup()
-		finishStep(statusFromError(execution.err), execution.err, execution.attempts, execution.retryWait)
-		if execution.err != nil {
-			return nil, fmt.Errorf("workflow %q step %q (%s): %w", definition.Name, workflowStep.ID, kind, execution.err)
+		index++
+		if outcome.err != nil {
+			return nil, outcome.err
 		}
-		result := execution.result
-		if result.Outputs == nil {
-			result.Outputs = make(map[string]any)
+		if outcome.skipped {
+			continue
 		}
-		state.Steps[workflowStep.ID] = cloneAny(result.Outputs)
-		for key, value := range result.Variables {
-			state.Vars[key] = cloneAny(value)
-		}
+		commitStepResult(state, workflowStep.ID, outcome.result)
 	}
 	return state, nil
+}
+
+type stepOutcome struct {
+	result  step.Result
+	stats   StepStats
+	err     error
+	started bool
+	skipped bool
+}
+
+func (e *Engine) executeStep(ctx context.Context, definition *workflow.Definition, workflowStep workflow.Step, options Options, state *State, index, total int) stepOutcome {
+	kind := executionKind(workflowStep)
+	stepStartedAt := time.Now()
+	outcome := stepOutcome{started: true}
+	finishStep := func(status ExecutionStatus, stepErr error, attempts []AttemptStats, retryWait time.Duration) {
+		outcome.stats = StepStats{
+			ID: workflowStep.ID, Type: kind, Index: index, Status: status,
+			StartedAt: stepStartedAt, Duration: time.Since(stepStartedAt),
+			RetryWait: retryWait, Attempts: attempts, Error: stepErr,
+		}
+		reportStepFinished(options, definition.Name, workflowStep.ID, kind, index, total, outcome.stats)
+	}
+	run, err := evaluateCondition(workflowStep.If, makeConditionEnvironment(definition, options.RunDir, state))
+	if err != nil {
+		stepErr := fmt.Errorf("workflow %q step %q (%s): evaluating if: %w", definition.Name, workflowStep.ID, kind, err)
+		finishStep(StatusFailed, stepErr, nil, 0)
+		outcome.err = stepErr
+		return outcome
+	}
+	if !run {
+		finishStep(StatusSkipped, nil, nil, 0)
+		outcome.skipped = true
+		return outcome
+	}
+	report(options, ProgressEvent{
+		Kind: StepStarted, Status: StatusRunning, Time: stepStartedAt,
+		WorkflowName: definition.Name, Depth: options.depth, StepID: workflowStep.ID,
+		StepType: kind, Index: index, Total: total, MaxAttempts: maxAttempts(workflowStep),
+		Timeout: stepTimeout(workflowStep),
+	})
+	var execute stepExecutor
+	cleanup := func() {}
+	if workflowStep.Action != nil {
+		execute, cleanup, err = e.prepareActionExecutor(definition, workflowStep, options, state)
+		if err != nil {
+			stepErr := fmt.Errorf("workflow %q step %q (%s): %w", definition.Name, workflowStep.ID, kind, err)
+			finishStep(statusFromError(stepErr), stepErr, nil, 0)
+			outcome.err = stepErr
+			return outcome
+		}
+	} else {
+		data := templateData(definition, options.RunDir, state)
+		rendered, err := renderValue(workflowStep.With, data, workflowStep.Type == "lua")
+		if err != nil {
+			stepErr := fmt.Errorf("workflow %q step %q (%s): rendering configuration: %w", definition.Name, workflowStep.ID, workflowStep.Type, err)
+			finishStep(StatusFailed, stepErr, nil, 0)
+			outcome.err = stepErr
+			return outcome
+		}
+		raw, ok := rendered.(map[string]any)
+		if !ok {
+			stepErr := fmt.Errorf("workflow %q step %q (%s): configuration is not an object", definition.Name, workflowStep.ID, workflowStep.Type)
+			finishStep(StatusFailed, stepErr, nil, 0)
+			outcome.err = stepErr
+			return outcome
+		}
+		runner, err := e.registry.Build(workflowStep.Type, raw)
+		if err != nil {
+			stepErr := fmt.Errorf("workflow %q step %q (%s): %w", definition.Name, workflowStep.ID, workflowStep.Type, err)
+			finishStep(StatusFailed, stepErr, nil, 0)
+			outcome.err = stepErr
+			return outcome
+		}
+		execute = runner.Run
+	}
+	execution := e.runWithRetry(ctx, definition, workflowStep, options, state, execute)
+	cleanup()
+	finishStep(statusFromError(execution.err), execution.err, execution.attempts, execution.retryWait)
+	if execution.err != nil {
+		outcome.err = fmt.Errorf("workflow %q step %q (%s): %w", definition.Name, workflowStep.ID, kind, execution.err)
+	}
+	outcome.result = execution.result
+	return outcome
+}
+
+func commitStepResult(state *State, stepID string, result step.Result) {
+	if result.Outputs == nil {
+		result.Outputs = make(map[string]any)
+	}
+	state.Steps[stepID] = cloneAny(result.Outputs)
+	for key, value := range result.Variables {
+		state.Vars[key] = cloneAny(value)
+	}
+}
+
+func leafStepCount(steps []workflow.Step) int {
+	total := 0
+	for _, workflowStep := range steps {
+		if workflowStep.Concurrent != nil {
+			total += leafStepCount(workflowStep.Concurrent.Steps)
+			continue
+		}
+		total++
+	}
+	return total
 }
 
 func executionKind(workflowStep workflow.Step) string {
@@ -345,7 +412,7 @@ func (e *Engine) prepareActionExecutor(definition *workflow.Definition, workflow
 			LocalValueDir: options.LocalValueDir, GlobalValueDir: options.GlobalValueDir,
 			Stdin: options.Stdin, Stdout: options.Stdout, Stderr: options.Stderr,
 			Interactive: options.Interactive, Progress: options.Progress,
-			operationPrefix: request.OperationID, depth: options.depth + 1,
+			operationPrefix: request.OperationID, depth: options.depth + 1, runtime: options.runtime,
 		})
 		if err != nil {
 			return step.Result{}, err

@@ -36,6 +36,8 @@ type Result struct {
 	Variables map[string]any
 }
 
+// Runner executes one step. Run must stop spawned work and return promptly when ctx is canceled;
+// it must not continue producing output or external side effects after returning.
 type Runner interface {
 	Run(context.Context, Request) (Result, error)
 }

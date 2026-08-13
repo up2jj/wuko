@@ -77,3 +77,19 @@ func TestProgressRendersFailureTimeoutAndCancellation(t *testing.T) {
 		}
 	}
 }
+
+func TestProgressRendersConcurrentGroup(t *testing.T) {
+	var output bytes.Buffer
+	progress := NewProgress(&output, false)
+	progress.Report(engine.ProgressEvent{
+		Kind: engine.ConcurrentStarted, GroupSize: 3, MaxConcurrency: 2,
+		Timeout: 5 * time.Minute, FailFast: false,
+	})
+	progress.Report(engine.ProgressEvent{
+		Kind: engine.ConcurrentFinished, Status: engine.StatusSucceeded, Duration: 2 * time.Second,
+	})
+	want := "⇉ Concurrent · 3 steps · max 2 concurrent · timeout 5m0s · wait for all\n✓ Concurrent succeeded after 2s\n"
+	if output.String() != want {
+		t.Fatalf("output = %q, want %q", output.String(), want)
+	}
+}

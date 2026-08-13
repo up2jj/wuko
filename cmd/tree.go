@@ -100,6 +100,15 @@ func writeTreeSteps(writer io.Writer, steps []workflow.Step, prefix string) erro
 			branch = "└── "
 			childPrefix = prefix + "    "
 		}
+		if workflowStep.Concurrent != nil {
+			if _, err := fmt.Fprintf(writer, "%s%sconcurrent%s\n", prefix, branch, treeConcurrentPolicy(workflowStep.Concurrent)); err != nil {
+				return err
+			}
+			if err := writeTreeSteps(writer, workflowStep.Concurrent.Steps, childPrefix); err != nil {
+				return err
+			}
+			continue
+		}
 		kind := workflowStep.Type
 		if workflowStep.Action != nil {
 			kind = "uses " + workflowStep.Uses.Display()
@@ -118,6 +127,19 @@ func writeTreeSteps(writer io.Writer, steps []workflow.Step, prefix string) erro
 		}
 	}
 	return nil
+}
+
+func treeConcurrentPolicy(group *workflow.ConcurrentGroup) string {
+	parts := []string{fmt.Sprintf("max %d", group.MaxConcurrency)}
+	if group.Timeout != nil {
+		parts = append(parts, "timeout "+group.Timeout.String())
+	}
+	if group.FailFast {
+		parts = append(parts, "fail fast")
+	} else {
+		parts = append(parts, "wait for all")
+	}
+	return " [" + strings.Join(parts, ", ") + "]"
 }
 
 func treeExecutionPolicy(workflowStep workflow.Step) string {

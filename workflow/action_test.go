@@ -76,6 +76,32 @@ steps:
 	}
 }
 
+func TestLoaderResolvesActionInsideConcurrentGroup(t *testing.T) {
+	client := testHTTPClient(func(*http.Request) (*http.Response, error) {
+		return testResponse(http.StatusOK, []byte(validAction)), nil
+	})
+	workflowPath := writeActionWorkflow(t, `version: 1
+name: caller
+steps:
+  - concurrent:
+      max_concurrency: 2
+      steps:
+        - id: remote
+          uses: https://actions.example.test/build
+          with: {target: linux}
+        - id: local
+          type: shell
+`)
+	definition, err := NewLoader(client).Load(t.Context(), workflowPath, LoadOptions{RunDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	children := definition.Steps[0].Concurrent.Steps
+	if children[0].Action == nil || children[0].Action.Name != "remote-build" {
+		t.Fatalf("resolved action = %#v", children[0].Action)
+	}
+}
+
 func TestLoaderRejectsChecksumAndNestedAction(t *testing.T) {
 	client := testHTTPClient(func(*http.Request) (*http.Response, error) {
 		return testResponse(http.StatusOK, []byte(validAction)), nil

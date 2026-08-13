@@ -221,6 +221,64 @@ matters, or `get(vars, "name")` to read an optional value. If a skipped step wou
 an existing variable, the existing value remains unchanged. Dry-run validates and prints guards
 but does not evaluate them because preceding step outputs are not available.
 
+### Concurrent steps
+
+Wrap independent steps in `concurrent` to run them with a bounded amount of parallelism:
+
+```yaml
+steps:
+  - concurrent:
+      max_concurrency: 3
+      timeout: 10m
+      fail_fast: true
+      steps:
+        - id: lint
+          type: shell
+          with:
+            command: golangci-lint
+            args: [run]
+
+        - id: test
+          type: shell
+          timeout: 3m
+          retry:
+            max_attempts: 3
+          with:
+            command: go
+            args: [test, ./...]
+
+  - id: package
+    type: shell
+    with:
+      command: ./package
+      args: ["{{ .steps.test.stdout }}"]
+```
+
+`max_concurrency` defaults to 4 and must be between 1 and 100. `fail_fast` defaults to `true`:
+after one child exhausts its retries, running siblings are canceled and queued children are not
+started. Set it to `false` to let every child finish and report all failures. The optional group
+`timeout` covers the complete group, including time waiting for a concurrency slot, attempts, and
+retry delays. The workflow's cancellation and the earliest group or child deadline always win.
+
+Every child evaluates its `if`, templates, and action inputs against the same state snapshot taken
+before the group starts. A child cannot consume a sibling's outputs or variables, regardless of
+which one finishes first. Child outputs keep their normal workflow-wide IDs and become available
+after the complete group succeeds, as shown by `.steps.test` above. Put dependent work after the
+group. Step IDs must remain unique across the workflow, including required step files and
+concurrent children. Directly nested concurrent groups are not supported.
+
+Each child owns its normal `timeout`, `retry`, backoff, `max_elapsed_time`, and `operation_id`.
+Retrying one child never restarts a successful sibling, and retry is not supported on the group
+itself. Results are committed atomically after all children succeed and in declaration order. If
+two children try to write the same workflow variable, the group fails instead of choosing a
+timing-dependent winner. External effects such as commands, files, requests, containers, and
+agents cannot be rolled back.
+
+Concurrent children are non-interactive to prevent multiple terminal prompts from competing for
+stdin. Input, password, and choice steps can still be used when their variables are supplied in
+advance. Docker TTY input is not attached inside a concurrent group. Child stdout and stderr are
+safe for concurrent writes, but output from different children can interleave at write boundaries.
+
 ### Retries and execution timeouts
 
 Use `timeout` to limit each attempt and `retry` to repeat a failed step with exponential backoff:
@@ -289,8 +347,9 @@ corrupt an animated spinner. Color is enabled on a terminal and disabled for red
 Every workflow, step, and attempt records its start time, duration, and terminal status. Run
 summaries also count successful, failed, skipped, canceled, and unstarted steps; attempts; retries;
 timeouts; and time spent waiting to retry. Composite-action progress is indented and gets a nested
-summary. Go callers can read the completed summary from `engine.State.Stats` and subscribe to the
-same lifecycle through `engine.Options.Progress` without parsing terminal text.
+summary. Concurrent groups get their own start and finish lines, with child progress indented below
+the group. Go callers can read the completed summary from `engine.State.Stats` and subscribe to the
+same serialized lifecycle through `engine.Options.Progress` without parsing terminal text.
 
 ### Remote composite actions
 

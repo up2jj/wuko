@@ -50,6 +50,23 @@ func (progress *Progress) Report(event engine.ProgressEvent) {
 			parts = append(parts, "timeout "+formatDuration(event.Timeout))
 		}
 		fmt.Fprintf(progress.writer, "%s%s [%d/%d] %s\n", indent, progress.paint("36", "→"), event.Index, event.Total, strings.Join(parts, " · "))
+	case engine.ConcurrentStarted:
+		parts := []string{count(event.GroupSize, "step"), fmt.Sprintf("max %d concurrent", event.MaxConcurrency)}
+		if event.Timeout > 0 {
+			parts = append(parts, "timeout "+formatDuration(event.Timeout))
+		}
+		if event.FailFast {
+			parts = append(parts, "fail fast")
+		} else {
+			parts = append(parts, "wait for all")
+		}
+		fmt.Fprintf(progress.writer, "%s%s Concurrent · %s\n", indent, progress.paint("36", "⇉"), strings.Join(parts, " · "))
+	case engine.ConcurrentFinished:
+		line := fmt.Sprintf("%s%s Concurrent %s after %s", indent, progress.statusMarker(event.Status), statusLabel(event.Status), formatDuration(event.Duration))
+		if event.Error != nil {
+			line += ": " + singleLine(event.Error.Error())
+		}
+		fmt.Fprintln(progress.writer, line)
 	case engine.AttemptStarted:
 		if event.MaxAttempts > 1 {
 			fmt.Fprintf(progress.writer, "%s%s attempt %d/%d started\n", childIndent, progress.paint("2", "•"), event.Attempt, event.MaxAttempts)

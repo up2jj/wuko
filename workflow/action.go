@@ -168,38 +168,51 @@ func (loader *Loader) Load(ctx context.Context, filename string, options LoadOpt
 	}
 	data := TemplateData(definition, options.RunDir, nil, vars, environment, nil)
 	cache := make(map[string]*Action)
-	for i := range definition.Steps {
-		workflowStep := &definition.Steps[i]
+	if err := loader.resolveActions(ctx, definition.Steps, data, environment, options.RunDir, definition.Dir, cache); err != nil {
+		return nil, err
+	}
+	return definition, nil
+}
+
+func (loader *Loader) resolveActions(ctx context.Context, steps []Step, data map[string]any, environment map[string]string, runDir, definitionDir string, cache map[string]*Action) error {
+	for i := range steps {
+		workflowStep := &steps[i]
+		if workflowStep.Concurrent != nil {
+			if err := loader.resolveActions(ctx, workflowStep.Concurrent.Steps, data, environment, runDir, definitionDir, cache); err != nil {
+				return err
+			}
+			continue
+		}
 		if workflowStep.Uses.Empty() {
 			continue
 		}
 		if workflowStep.SHA256 != "" && !sha256Pattern.MatchString(workflowStep.SHA256) {
-			return nil, fmt.Errorf("step %q: sha256 must be a 64-character hexadecimal digest", workflowStep.ID)
+			return fmt.Errorf("step %q: sha256 must be a 64-character hexadecimal digest", workflowStep.ID)
 		}
-		resolved, key, sourceDescription, fetch, err := loader.resolveSource(ctx, workflowStep.Uses, data, environment, options.RunDir)
+		resolved, key, sourceDescription, fetch, err := loader.resolveSource(ctx, workflowStep.Uses, data, environment, runDir)
 		if err != nil {
-			return nil, fmt.Errorf("step %q uses: %w", workflowStep.ID, err)
+			return fmt.Errorf("step %q uses: %w", workflowStep.ID, err)
 		}
 		key += "\x00" + strings.ToLower(workflowStep.SHA256)
 		action := cache[key]
 		if action == nil {
 			payload, err := fetch()
 			if err != nil {
-				return nil, fmt.Errorf("step %q uses: %w", workflowStep.ID, err)
+				return fmt.Errorf("step %q uses: %w", workflowStep.ID, err)
 			}
 			if err := verifyChecksum(payload, workflowStep.SHA256); err != nil {
-				return nil, fmt.Errorf("step %q: %w", workflowStep.ID, err)
+				return fmt.Errorf("step %q: %w", workflowStep.ID, err)
 			}
-			action, err = decodeActionPayload(payload, definition.Dir)
+			action, err = decodeActionPayload(payload, definitionDir)
 			if err != nil {
-				return nil, fmt.Errorf("step %q action %s: %w", workflowStep.ID, sourceDescription, err)
+				return fmt.Errorf("step %q action %s: %w", workflowStep.ID, sourceDescription, err)
 			}
 			cache[key] = action
 		}
 		workflowStep.Uses = resolved
 		workflowStep.Action = action
 	}
-	return definition, nil
+	return nil
 }
 
 func (loader *Loader) resolveSource(ctx context.Context, source ActionSource, data map[string]any, environment map[string]string, runDir string) (ActionSource, string, string, func() ([]byte, error), error) {

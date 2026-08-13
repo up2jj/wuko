@@ -3,6 +3,7 @@ package engine
 import (
 	"fmt"
 	"io"
+	"sync"
 	"time"
 )
 
@@ -10,13 +11,15 @@ import (
 type ProgressKind string
 
 const (
-	WorkflowStarted  ProgressKind = "workflow_started"
-	WorkflowFinished ProgressKind = "workflow_finished"
-	StepStarted      ProgressKind = "step_started"
-	StepFinished     ProgressKind = "step_finished"
-	AttemptStarted   ProgressKind = "attempt_started"
-	AttemptFinished  ProgressKind = "attempt_finished"
-	RetryScheduled   ProgressKind = "retry_scheduled"
+	WorkflowStarted    ProgressKind = "workflow_started"
+	WorkflowFinished   ProgressKind = "workflow_finished"
+	StepStarted        ProgressKind = "step_started"
+	StepFinished       ProgressKind = "step_finished"
+	AttemptStarted     ProgressKind = "attempt_started"
+	AttemptFinished    ProgressKind = "attempt_finished"
+	RetryScheduled     ProgressKind = "retry_scheduled"
+	ConcurrentStarted  ProgressKind = "concurrent_started"
+	ConcurrentFinished ProgressKind = "concurrent_finished"
 )
 
 // ExecutionStatus is the terminal state of a workflow, step, or attempt.
@@ -70,33 +73,66 @@ type RunStats struct {
 	Steps      []StepStats
 }
 
-// ProgressEvent is emitted synchronously as execution changes state. Depth is zero for the
-// selected workflow and increases for steps inside composite actions.
+// ProgressEvent is delivered synchronously and serialized as execution changes state. Depth is
+// zero for the selected workflow and increases inside concurrent groups and composite actions.
 type ProgressEvent struct {
-	Kind         ProgressKind
-	Status       ExecutionStatus
-	Time         time.Time
-	WorkflowName string
-	Depth        int
-	StepID       string
-	StepType     string
-	Index        int
-	Total        int
-	Attempt      int
-	MaxAttempts  int
-	Timeout      time.Duration
-	Duration     time.Duration
-	RetryDelay   time.Duration
-	Error        error
-	Stats        RunStats
+	Kind           ProgressKind
+	Status         ExecutionStatus
+	Time           time.Time
+	WorkflowName   string
+	Depth          int
+	StepID         string
+	StepType       string
+	Index          int
+	Total          int
+	Attempt        int
+	MaxAttempts    int
+	GroupSize      int
+	MaxConcurrency int
+	FailFast       bool
+	Timeout        time.Duration
+	Duration       time.Duration
+	RetryDelay     time.Duration
+	Error          error
+	Stats          RunStats
 }
 
 func report(options Options, event ProgressEvent) {
 	if options.Progress != nil {
+		if options.runtime != nil {
+			options.runtime.mu.Lock()
+			defer options.runtime.mu.Unlock()
+		}
 		options.Progress(event)
 		return
 	}
 	reportLegacy(options, event)
+}
+
+type runRuntime struct {
+	mu sync.Mutex
+}
+
+type synchronizedWriter struct {
+	mu     *sync.Mutex
+	writer io.Writer
+}
+
+func (writer synchronizedWriter) Write(data []byte) (int, error) {
+	writer.mu.Lock()
+	defer writer.mu.Unlock()
+	return writer.writer.Write(data)
+}
+
+func prepareRunOptions(options Options) Options {
+	if options.runtime != nil {
+		return options
+	}
+	runtime := &runRuntime{}
+	options.runtime = runtime
+	options.Stdout = synchronizedWriter{mu: &runtime.mu, writer: writerOrDiscard(options.Stdout)}
+	options.Stderr = synchronizedWriter{mu: &runtime.mu, writer: writerOrDiscard(options.Stderr)}
+	return options
 }
 
 func reportLegacy(options Options, event ProgressEvent) {

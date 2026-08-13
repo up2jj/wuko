@@ -68,16 +68,46 @@ func (c *Condition) UnmarshalYAML(node *yaml.Node) error {
 
 // Step declares a concrete step, a remote composite action, or a local step-file requirement.
 type Step struct {
-	ID      string         `yaml:"id"`
-	Type    string         `yaml:"type,omitempty"`
-	Uses    ActionSource   `yaml:"uses,omitempty"`
-	Require *string        `yaml:"require,omitempty"`
-	SHA256  string         `yaml:"sha256,omitempty"`
-	If      Condition      `yaml:"if,omitempty"`
-	Timeout *Duration      `yaml:"timeout,omitempty"`
-	Retry   *RetryPolicy   `yaml:"retry,omitempty"`
-	With    map[string]any `yaml:"with,omitempty"`
-	Action  *Action        `yaml:"-"`
+	ID         string           `yaml:"id"`
+	Type       string           `yaml:"type,omitempty"`
+	Uses       ActionSource     `yaml:"uses,omitempty"`
+	Require    *string          `yaml:"require,omitempty"`
+	Concurrent *ConcurrentGroup `yaml:"concurrent,omitempty"`
+	SHA256     string           `yaml:"sha256,omitempty"`
+	If         Condition        `yaml:"if,omitempty"`
+	Timeout    *Duration        `yaml:"timeout,omitempty"`
+	Retry      *RetryPolicy     `yaml:"retry,omitempty"`
+	With       map[string]any   `yaml:"with,omitempty"`
+	Action     *Action          `yaml:"-"`
+}
+
+// ConcurrentGroup runs independent child steps against one shared pre-group state snapshot.
+type ConcurrentGroup struct {
+	Steps          []Step    `yaml:"steps"`
+	MaxConcurrency int       `yaml:"max_concurrency,omitempty"`
+	Timeout        *Duration `yaml:"timeout,omitempty"`
+	FailFast       bool      `yaml:"fail_fast"`
+}
+
+func (group *ConcurrentGroup) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("concurrent must be an object")
+	}
+	allowed := map[string]bool{
+		"steps": true, "max_concurrency": true, "timeout": true, "fail_fast": true,
+	}
+	for i := 0; i < len(node.Content); i += 2 {
+		if !allowed[node.Content[i].Value] {
+			return fmt.Errorf("field %s not found in concurrent group", node.Content[i].Value)
+		}
+	}
+	type plainConcurrentGroup ConcurrentGroup
+	decoded := plainConcurrentGroup{MaxConcurrency: 4, FailFast: true}
+	if err := node.Decode(&decoded); err != nil {
+		return err
+	}
+	*group = ConcurrentGroup(decoded)
+	return nil
 }
 
 // Duration is a YAML duration written using Go duration syntax, such as 500ms or 2m.
@@ -253,9 +283,27 @@ func validateDefinition(definition *Definition, allowActions bool) error {
 	}
 
 	seen := make(map[string]struct{}, len(definition.Steps))
-	for i, workflowStep := range definition.Steps {
+	if err := validateSteps(definition.Steps, allowActions, false, seen); err != nil {
+		return err
+	}
+	for name := range definition.Env {
+		if !environmentPattern.MatchString(name) {
+			return fmt.Errorf("invalid environment name %q", name)
+		}
+	}
+	return nil
+}
+
+func validateSteps(steps []Step, allowActions, insideConcurrent bool, seen map[string]struct{}) error {
+	for i, workflowStep := range steps {
 		if workflowStep.Require != nil {
 			return fmt.Errorf("step %d: require is only supported in workflow step files", i+1)
+		}
+		if workflowStep.Concurrent != nil {
+			if err := validateConcurrentEntry(workflowStep, insideConcurrent, allowActions, seen); err != nil {
+				return fmt.Errorf("step %d: %w", i+1, err)
+			}
+			continue
 		}
 		if !identifierPattern.MatchString(workflowStep.ID) {
 			return fmt.Errorf("step %d has invalid id %q", i+1, workflowStep.ID)
@@ -278,13 +326,36 @@ func validateDefinition(definition *Definition, allowActions bool) error {
 		}
 		if workflowStep.With == nil {
 			workflowStep.With = make(map[string]any)
-			definition.Steps[i] = workflowStep
+			steps[i] = workflowStep
 		}
 	}
-	for name := range definition.Env {
-		if !environmentPattern.MatchString(name) {
-			return fmt.Errorf("invalid environment name %q", name)
-		}
+	return nil
+}
+
+func validateConcurrentEntry(workflowStep Step, insideConcurrent, allowActions bool, seen map[string]struct{}) error {
+	if workflowStep.ID != "" || workflowStep.Type != "" || !workflowStep.Uses.Empty() || workflowStep.SHA256 != "" || workflowStep.If != "" || workflowStep.Timeout != nil || workflowStep.Retry != nil || workflowStep.With != nil {
+		return fmt.Errorf("concurrent cannot be combined with other step fields")
+	}
+	if insideConcurrent {
+		return fmt.Errorf("nested concurrent groups are not supported")
+	}
+	group := workflowStep.Concurrent
+	if err := group.Validate(); err != nil {
+		return err
+	}
+	return validateSteps(group.Steps, allowActions, true, seen)
+}
+
+// Validate checks the safety limits of a concurrent group.
+func (group ConcurrentGroup) Validate() error {
+	if len(group.Steps) < 2 {
+		return fmt.Errorf("concurrent group must contain at least two steps")
+	}
+	if group.MaxConcurrency < 1 || group.MaxConcurrency > 100 {
+		return fmt.Errorf("concurrent max_concurrency must be between 1 and 100")
+	}
+	if group.Timeout != nil && group.Timeout.Value() <= 0 {
+		return fmt.Errorf("concurrent timeout must be greater than zero")
 	}
 	return nil
 }

@@ -32,9 +32,21 @@ func expandRequiredSteps(steps []Step, source string, stack []string) ([]Step, e
 		}
 	}
 	stack = append(stack, canonicalSource)
+	return expandRequiredStepsInSource(steps, source, stack)
+}
 
+func expandRequiredStepsInSource(steps []Step, source string, stack []string) ([]Step, error) {
 	expanded := make([]Step, 0, len(steps))
 	for i, workflowStep := range steps {
+		if workflowStep.Concurrent != nil {
+			children, err := expandRequiredStepsInSource(workflowStep.Concurrent.Steps, source, stack)
+			if err != nil {
+				return nil, fmt.Errorf("concurrent group at step %d in %s: %w", i+1, source, err)
+			}
+			workflowStep.Concurrent.Steps = children
+			expanded = append(expanded, workflowStep)
+			continue
+		}
 		if workflowStep.Require == nil {
 			expanded = append(expanded, workflowStep)
 			continue
@@ -65,7 +77,7 @@ func expandRequiredSteps(steps []Step, source string, stack []string) ([]Step, e
 }
 
 func validateRequireEntry(workflowStep Step) error {
-	if workflowStep.ID != "" || workflowStep.Type != "" || !workflowStep.Uses.Empty() || workflowStep.SHA256 != "" || workflowStep.If != "" || workflowStep.Timeout != nil || workflowStep.Retry != nil || workflowStep.With != nil {
+	if workflowStep.ID != "" || workflowStep.Type != "" || !workflowStep.Uses.Empty() || workflowStep.Concurrent != nil || workflowStep.SHA256 != "" || workflowStep.If != "" || workflowStep.Timeout != nil || workflowStep.Retry != nil || workflowStep.With != nil {
 		return fmt.Errorf("require cannot be combined with other step fields")
 	}
 	return nil
