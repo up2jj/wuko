@@ -551,6 +551,81 @@ Dynamic sources must be non-empty lists. Scalar items are both label and value. 
 `label_field` and `value_field`, including dotted paths. Single selection writes a scalar;
 multi-selection writes an ordered list.
 
+### Key-value stores
+
+The `key_value` step persists JSON-compatible values between workflow runs. Every operation names
+both a scope and a store. Local stores live in `.wuko/values/` beside the top-level workflow;
+global stores live in the platform configuration directory under `wuko/values/`. Workflows using
+the same directory, scope, and store name intentionally share values.
+
+Values may be scalars or nested JSON-compatible objects and lists. Set and then read a complex
+project configuration:
+
+```yaml
+- id: save_project
+  type: key_value
+  with:
+    operation: set
+    scope: global
+    store: preferences
+    key: project
+    value:
+      name: wuko
+      enabled: true
+      reviewers:
+        - alice
+        - bob
+      deployment:
+        retries: 3
+        regions:
+          - eu-central
+          - us-east
+        labels:
+          team: platform
+          tier: internal
+
+- id: load_project
+  type: key_value
+  with:
+    operation: get
+    scope: global
+    store: preferences
+    key: project
+
+- id: deploy_project
+  type: shell
+  if: steps.load_project.found && steps.load_project.value.enabled
+  with:
+    command: ./deploy
+    args:
+      - "{{ .steps.load_project.value.name }}"
+      - "{{ .steps.load_project.value.deployment.retries }}"
+      - "{{ index .steps.load_project.value.reviewers 0 }}"
+      - "{{ index .steps.load_project.value.deployment.regions 0 }}"
+      - "{{ .steps.load_project.value.deployment.labels.team }}"
+```
+
+Both `local` and `global` scopes require a safe, single-segment `store` name. Keys are non-empty
+flat strings; dots have no special meaning. The four operations are:
+
+- `get`: requires `key`; outputs `value` and `found`.
+- `set`: requires `key` and an explicit `value`, including `null`; outputs the stored `value`.
+- `delete`: requires `key`; outputs the previous `value` and `deleted`.
+- `list`: accepts no `key` or `value`; outputs key-sorted `entries` containing `key` and `value`.
+
+A missing key is not an error: `get` returns `value: null, found: false`, while a stored JSON null
+returns `value: null, found: true`. Similarly, deleting a missing key returns `deleted: false`.
+Use `.steps.<step-id>` to pass outputs to templates and `steps.<step-id>` in conditions.
+
+Store files are plain, pretty-printed JSON objects. Wuko serializes concurrent access with a lock
+and replaces files atomically so simultaneous processes do not lose updates or expose partial
+JSON. Values are not encrypted; do not use these stores as a secrets vault. Add
+`.wuko/values/` to the applicable `.gitignore` when local values should not be committed.
+Remote top-level workflows cannot use local persistence because their files are temporary, but
+they can use global stores. Composite actions inherit the caller workflow's local and global
+store roots. A successful write is an external effect: it is not rolled back when a later step or
+Lua statement fails, and retrying a write applies it again.
+
 ### Lua
 
 Use either `file` or inline `source`:
@@ -581,12 +656,45 @@ The trusted `wuko` Lua host API provides:
 - `wuko.args`, `wuko.var(name)`, `wuko.set_var(name, value)`, `wuko.output(name, value)`
 - `wuko.env.get(name)`, `wuko.env.all()`
 - `wuko.json.encode(value)`, `wuko.json.decode(text)`
+- `wuko.kv.get`, `set`, `delete`, and `list`
 - `wuko.http.request({method, url, headers, body, timeout})`
 - `wuko.fs.read`, `write`, `mkdir_all`, `list`, `stat`, `rename`, and `remove`
 - `wuko.exec.run({command, args, env, stdin, working_directory})`
 
 Lua outputs support nil, booleans, strings, numbers, arrays, and string-keyed objects. Cyclic and
 mixed-key tables are rejected.
+
+Lua key-value calls use the same store files and return shapes as the YAML step:
+
+```lua
+wuko.kv.set({
+  scope = "global",
+  store = "preferences",
+  key = "project",
+  value = {
+    name = "wuko",
+    enabled = true,
+    reviewers = {"alice", "bob"},
+    deployment = {
+      retries = 3,
+      regions = {"eu-central", "us-east"},
+      labels = {team = "platform", tier = "internal"},
+    },
+  },
+})
+
+local project, found = wuko.kv.get({
+  scope = "global",
+  store = "preferences",
+  key = "project",
+})
+local removed, deleted = wuko.kv.delete({scope = "global", store = "preferences", key = "old"})
+local entries = wuko.kv.list({scope = "global", store = "preferences"})
+```
+
+`get` and `delete` each return the value followed by a boolean. `list` returns a key-sorted array
+of `{key, value}` tables. Because Lua represents JSON null as `nil`, omitting `value` from
+`wuko.kv.set` stores JSON null; a list entry for stored null still contains its `key`.
 
 ### Shell and agent
 

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/step"
+	keyvaluestep "github.com/up2jj/wuko/steps/key_value"
 	"github.com/up2jj/wuko/steps/shell"
 	"github.com/up2jj/wuko/workflow"
 )
@@ -111,6 +112,56 @@ steps:
 	}
 	if !strings.Contains(output.String(), "hello") {
 		t.Fatalf("output = %q", output.String())
+	}
+}
+
+func TestRemoteWorkflowValueStoreScopes(t *testing.T) {
+	tests := []struct {
+		name      string
+		scope     string
+		wantError string
+	}{
+		{"local rejected", "local", "local key-value storage is unavailable"},
+		{"global available", "global", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			workflowData := fmt.Sprintf(`version: 1
+name: remote-values
+steps:
+  - id: save
+    type: key_value
+    with: {operation: set, scope: %s, store: prefs, key: theme, value: dark}
+`, tt.scope)
+			client := &http.Client{Transport: commandRoundTripFunc(func(*http.Request) (*http.Response, error) {
+				return &http.Response{StatusCode: http.StatusOK, Status: "200 OK", Body: io.NopCloser(strings.NewReader(workflowData)), Header: make(http.Header)}, nil
+			})}
+			registry := step.NewRegistry()
+			if err := keyvaluestep.Register(registry); err != nil {
+				t.Fatal(err)
+			}
+			root := t.TempDir()
+			configDir := filepath.Join(root, "config")
+			command := newRootCmd(dependencies{
+				stdin: bytes.NewReader(nil), stdout: io.Discard, stderr: io.Discard,
+				cwd: func() (string, error) { return root, nil }, homeDir: func() (string, error) { return "", nil },
+				configDir: func() (string, error) { return configDir, nil }, registry: registry, loader: workflow.NewLoader(client),
+			})
+			command.SetArgs([]string{"run", "https://workflows.example.test/values.yaml"})
+			err := command.ExecuteContext(t.Context())
+			if tt.wantError != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantError) {
+					t.Fatalf("error = %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Stat(filepath.Join(configDir, "wuko", "values", "prefs.json")); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/step"
+	keyvaluestep "github.com/up2jj/wuko/steps/key_value"
 	"github.com/up2jj/wuko/steps/shell"
 )
 
@@ -53,6 +54,49 @@ steps:
 	}
 	if !strings.Contains(diagnostics.String(), "◆ Workflow hello · 1 step") || !strings.Contains(diagnostics.String(), "✓ Workflow hello succeeded") {
 		t.Fatalf("progress = %q", diagnostics.String())
+	}
+}
+
+func TestRunCommandRoutesLocalAndGlobalValueStores(t *testing.T) {
+	root := t.TempDir()
+	configDir := filepath.Join(root, "config")
+	workflowDir := filepath.Join(root, ".wuko", "workflows")
+	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data := `version: 1
+name: values
+steps:
+  - id: local
+    type: key_value
+    with: {operation: set, scope: local, store: prefs, key: theme, value: dark}
+  - id: global
+    type: key_value
+    with: {operation: set, scope: global, store: prefs, key: language, value: en}
+`
+	if err := os.WriteFile(filepath.Join(workflowDir, "values.yaml"), []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	registry := step.NewRegistry()
+	if err := keyvaluestep.Register(registry); err != nil {
+		t.Fatal(err)
+	}
+	command := newRootCmd(dependencies{
+		stdin: bytes.NewReader(nil), stdout: io.Discard, stderr: io.Discard,
+		cwd: func() (string, error) { return root, nil }, homeDir: func() (string, error) { return "", nil },
+		configDir: func() (string, error) { return configDir, nil }, registry: registry,
+	})
+	command.SetArgs([]string{"run", "values"})
+	if err := command.ExecuteContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{
+		filepath.Join(workflowDir, ".wuko", "values", "prefs.json"),
+		filepath.Join(configDir, "wuko", "values", "prefs.json"),
+	} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("store %s: %v", path, err)
+		}
 	}
 }
 

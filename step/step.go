@@ -12,21 +12,23 @@ import (
 )
 
 type Request struct {
-	StepID       string
-	WorkflowName string
-	WorkflowDir  string
-	RunDir       string
-	Vars         map[string]any
-	Inputs       map[string]any
-	Env          map[string]string
-	Steps        map[string]any
-	Stdin        io.Reader
-	Stdout       io.Writer
-	Stderr       io.Writer
-	Interactive  bool
-	Attempt      int
-	MaxAttempts  int
-	OperationID  string
+	StepID         string
+	WorkflowName   string
+	WorkflowDir    string
+	RunDir         string
+	LocalValueDir  string
+	GlobalValueDir string
+	Vars           map[string]any
+	Inputs         map[string]any
+	Env            map[string]string
+	Steps          map[string]any
+	Stdin          io.Reader
+	Stdout         io.Writer
+	Stderr         io.Writer
+	Interactive    bool
+	Attempt        int
+	MaxAttempts    int
+	OperationID    string
 }
 
 type Result struct {

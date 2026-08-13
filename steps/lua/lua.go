@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	storepkg "github.com/up2jj/wuko/keyvalue"
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
@@ -143,6 +144,11 @@ func (r *runtime) module(state *glua.LState) (*glua.LTable, error) {
 	jsonModule := state.NewTable()
 	state.SetFuncs(jsonModule, map[string]glua.LGFunction{"encode": r.jsonEncode, "decode": r.jsonDecode})
 	module.RawSetString("json", jsonModule)
+	kvModule := state.NewTable()
+	state.SetFuncs(kvModule, map[string]glua.LGFunction{
+		"get": r.kvGet, "set": r.kvSet, "delete": r.kvDelete, "list": r.kvList,
+	})
+	module.RawSetString("kv", kvModule)
 	httpModule := state.NewTable()
 	state.SetFuncs(httpModule, map[string]glua.LGFunction{"request": r.httpRequest})
 	module.RawSetString("http", httpModule)
@@ -253,6 +259,156 @@ func (r *runtime) jsonDecode(state *glua.LState) int {
 	}
 	state.Push(luaValue)
 	return 1
+}
+
+func (r *runtime) kvGet(state *glua.LState) int {
+	store, options, ok := r.kvStore(state, "get", true)
+	if !ok {
+		return 0
+	}
+	value, found, err := store.Get(state.Context(), options.key)
+	if err != nil {
+		state.RaiseError("getting key-value entry: %v", err)
+		return 0
+	}
+	luaValue, err := toLua(state, value)
+	if err != nil {
+		state.RaiseError("converting key-value entry: %v", err)
+		return 0
+	}
+	state.Push(luaValue)
+	state.Push(glua.LBool(found))
+	return 2
+}
+
+func (r *runtime) kvSet(state *glua.LState) int {
+	store, options, ok := r.kvStore(state, "set", true)
+	if !ok {
+		return 0
+	}
+	value, err := fromLua(options.table.RawGetString("value"), make(map[*glua.LTable]bool))
+	if err != nil {
+		state.RaiseError("setting key-value entry: %v", err)
+		return 0
+	}
+	value, err = store.Set(state.Context(), options.key, value)
+	if err != nil {
+		state.RaiseError("setting key-value entry: %v", err)
+		return 0
+	}
+	luaValue, err := toLua(state, value)
+	if err != nil {
+		state.RaiseError("converting key-value entry: %v", err)
+		return 0
+	}
+	state.Push(luaValue)
+	return 1
+}
+
+func (r *runtime) kvDelete(state *glua.LState) int {
+	store, options, ok := r.kvStore(state, "delete", true)
+	if !ok {
+		return 0
+	}
+	value, deleted, err := store.Delete(state.Context(), options.key)
+	if err != nil {
+		state.RaiseError("deleting key-value entry: %v", err)
+		return 0
+	}
+	luaValue, err := toLua(state, value)
+	if err != nil {
+		state.RaiseError("converting key-value entry: %v", err)
+		return 0
+	}
+	state.Push(luaValue)
+	state.Push(glua.LBool(deleted))
+	return 2
+}
+
+func (r *runtime) kvList(state *glua.LState) int {
+	store, _, ok := r.kvStore(state, "list", false)
+	if !ok {
+		return 0
+	}
+	entries, err := store.List(state.Context())
+	if err != nil {
+		state.RaiseError("listing key-value entries: %v", err)
+		return 0
+	}
+	result := state.NewTable()
+	for _, entry := range entries {
+		item := state.NewTable()
+		item.RawSetString("key", glua.LString(entry.Key))
+		value, err := toLua(state, entry.Value)
+		if err != nil {
+			state.RaiseError("converting key-value entry: %v", err)
+			return 0
+		}
+		item.RawSetString("value", value)
+		result.Append(item)
+	}
+	state.Push(result)
+	return 1
+}
+
+type kvOptions struct {
+	table *glua.LTable
+	key   string
+}
+
+func (r *runtime) kvStore(state *glua.LState, operation string, needsKey bool) (*storepkg.Store, kvOptions, bool) {
+	table := state.CheckTable(1)
+	allowed := map[string]bool{"scope": true, "store": true}
+	if needsKey {
+		allowed["key"] = true
+	}
+	if operation == "set" {
+		allowed["value"] = true
+	}
+	var optionErr string
+	table.ForEach(func(key, _ glua.LValue) {
+		if optionErr != "" {
+			return
+		}
+		if key.Type() != glua.LTString || !allowed[key.String()] {
+			optionErr = fmt.Sprintf("unknown option %q", key.String())
+		}
+	})
+	if optionErr != "" {
+		state.RaiseError("key-value %s: %s", operation, optionErr)
+		return nil, kvOptions{}, false
+	}
+	scope, ok := requiredTableString(state, table, "scope", "key-value "+operation)
+	if !ok {
+		return nil, kvOptions{}, false
+	}
+	name, ok := requiredTableString(state, table, "store", "key-value "+operation)
+	if !ok {
+		return nil, kvOptions{}, false
+	}
+	key := ""
+	if needsKey {
+		key, ok = requiredTableString(state, table, "key", "key-value "+operation)
+		if !ok {
+			return nil, kvOptions{}, false
+		}
+	}
+	store, err := storepkg.OpenScoped(r.request.LocalValueDir, r.request.GlobalValueDir, scope, name)
+	if err != nil {
+		state.RaiseError("key-value %s: %v", operation, err)
+		return nil, kvOptions{}, false
+	}
+	return store, kvOptions{table: table, key: key}, true
+}
+
+func requiredTableString(state *glua.LState, table *glua.LTable, key, operation string) (string, bool) {
+	value := table.RawGetString(key)
+	text, ok := value.(glua.LString)
+	if !ok || text == "" {
+		state.RaiseError("%s: %s must be a non-empty string", operation, key)
+		return "", false
+	}
+	return string(text), true
 }
 
 func (r *runtime) httpRequest(state *glua.LState) int {

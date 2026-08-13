@@ -41,6 +41,72 @@ wuko.set_var("done", true)
 	}
 }
 
+func TestLuaKeyValueAPI(t *testing.T) {
+	runner, err := New(map[string]any{
+		"source": `
+local saved = wuko.kv.set({scope = "local", store = "prefs", key = "theme", value = {name = "dark"}})
+wuko.kv.set({scope = "local", store = "prefs", key = "nothing"})
+local theme, found = wuko.kv.get({scope = "local", store = "prefs", key = "theme"})
+local missing, missing_found = wuko.kv.get({scope = "local", store = "prefs", key = "missing"})
+local entries = wuko.kv.list({scope = "local", store = "prefs"})
+local removed, deleted = wuko.kv.delete({scope = "local", store = "prefs", key = "theme"})
+wuko.output("result", {
+  saved = saved.name,
+  theme = theme.name,
+  found = found,
+  missing_is_nil = missing == nil,
+  missing_found = missing_found,
+  first_key = entries[1].key,
+  first_is_nil = entries[1].value == nil,
+  second_key = entries[2].key,
+  removed = removed.name,
+  deleted = deleted,
+})
+`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runner.Run(t.Context(), step.Request{
+		StepID: "kv", WorkflowName: "test", LocalValueDir: t.TempDir(), GlobalValueDir: t.TempDir(),
+		Env: map[string]string{}, Stdout: io.Discard, Stderr: io.Discard,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := result.Outputs["result"].(map[string]any)
+	if output["saved"] != "dark" || output["theme"] != "dark" || output["found"] != true ||
+		output["missing_is_nil"] != true || output["missing_found"] != false || output["first_key"] != "nothing" ||
+		output["first_is_nil"] != true || output["second_key"] != "theme" || output["removed"] != "dark" || output["deleted"] != true {
+		t.Fatalf("output = %#v", output)
+	}
+}
+
+func TestLuaKeyValueRejectsInvalidOptionsAndUnavailableLocalStore(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{"unknown option", `wuko.kv.list({scope="global", store="prefs", extra=true})`, "unknown option"},
+		{"wrong key type", `wuko.kv.get({scope="global", store="prefs", key=true})`, "key must be a non-empty string"},
+		{"bad scope", `wuko.kv.list({scope="shared", store="prefs"})`, "scope must be"},
+		{"local unavailable", `wuko.kv.list({scope="local", store="prefs"})`, "local key-value storage is unavailable"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runner, err := New(map[string]any{"source": tt.source})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = runner.Run(t.Context(), step.Request{GlobalValueDir: t.TempDir(), Env: map[string]string{}, Stdout: io.Discard, Stderr: io.Discard})
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestLuaHostHTTPFilesystemAndProcess(t *testing.T) {
 	var requestSeen bool
 	doHTTP := func(request *http.Request, _ time.Duration) (*http.Response, error) {

@@ -1,0 +1,252 @@
+package keyvalue
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"sync"
+	"syscall"
+	"testing"
+	"time"
+)
+
+func TestStoreOperationsAndPersistence(t *testing.T) {
+	dir := t.TempDir()
+	store, err := Open(dir, "preferences")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value, found, err := store.Get(t.Context(), "missing"); err != nil || found || value != nil {
+		t.Fatalf("missing get = %#v, %v, %v", value, found, err)
+	}
+	want := map[string]any{"enabled": true, "items": []any{"a", float64(2)}}
+	stored, err := store.Set(t.Context(), "theme", want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(stored, map[string]any{"enabled": true, "items": []any{"a", json.Number("2")}}) {
+		t.Fatalf("stored = %#v", stored)
+	}
+	if _, err := store.Set(t.Context(), "nothing", nil); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := store.List(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 || entries[0].Key != "nothing" || entries[1].Key != "theme" {
+		t.Fatalf("entries = %#v", entries)
+	}
+	if value, found, err := store.Get(t.Context(), "nothing"); err != nil || !found || value != nil {
+		t.Fatalf("null get = %#v, %v, %v", value, found, err)
+	}
+	removed, deleted, err := store.Delete(t.Context(), "theme")
+	if err != nil || !deleted || removed == nil {
+		t.Fatalf("delete = %#v, %v, %v", removed, deleted, err)
+	}
+	if value, deleted, err := store.Delete(t.Context(), "theme"); err != nil || deleted || value != nil {
+		t.Fatalf("second delete = %#v, %v, %v", value, deleted, err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "preferences.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "{\n  \"nothing\": null\n}\n" {
+		t.Fatalf("file = %q", data)
+	}
+	for _, name := range []string{"preferences.json", "preferences.lock"} {
+		info, err := os.Stat(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode().Perm() != 0o600 {
+			t.Fatalf("%s mode = %o", name, info.Mode().Perm())
+		}
+	}
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o700 {
+		t.Fatalf("store directory mode = %o", info.Mode().Perm())
+	}
+}
+
+func TestOpenAndValueValidation(t *testing.T) {
+	for _, name := range []string{"", ".", "..", "a/b", `a\\b`, " space"} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Open(t.TempDir(), name); err == nil {
+				t.Fatal("expected error")
+			}
+		})
+	}
+	store, err := Open(t.TempDir(), "valid-name_1.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Set(t.Context(), "", true); err == nil {
+		t.Fatal("expected empty-key error")
+	}
+	if _, err := store.Set(t.Context(), "bad", func() {}); err == nil {
+		t.Fatal("expected incompatible-value error")
+	}
+}
+
+func TestMalformedStoreIsPreserved(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "broken.json")
+	if err := os.WriteFile(path, []byte("[1,2"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := Open(dir, "broken")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Set(t.Context(), "key", "value"); err == nil || !strings.Contains(err.Error(), "decoding store") {
+		t.Fatalf("error = %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "[1,2" {
+		t.Fatalf("file changed to %q", data)
+	}
+}
+
+func TestConcurrentUpdatesDoNotLoseValues(t *testing.T) {
+	store, err := Open(t.TempDir(), "shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	for i := range 20 {
+		wg.Go(func() {
+			if _, err := store.Set(t.Context(), string(rune('a'+i)), i); err != nil {
+				t.Errorf("Set() error = %v", err)
+			}
+		})
+	}
+	wg.Wait()
+	entries, err := store.List(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 20 {
+		t.Fatalf("entries = %d, want 20", len(entries))
+	}
+}
+
+func TestConcurrentProcessUpdatesDoNotLoseValues(t *testing.T) {
+	dir := t.TempDir()
+	barrierPath := filepath.Join(dir, "barrier")
+	barrier, err := os.OpenFile(barrierPath, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer barrier.Close()
+	if err := syscall.Flock(int(barrier.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatal(err)
+	}
+	commands := make([]*exec.Cmd, 12)
+	outputs := make([]bytes.Buffer, len(commands))
+	for i := range commands {
+		command := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestStoreProcessHelper$")
+		command.Env = append(os.Environ(),
+			"WUKO_KV_HELPER_ROOT="+dir,
+			"WUKO_KV_HELPER_KEY="+fmt.Sprintf("key-%02d", i),
+			"WUKO_KV_HELPER_BARRIER="+barrierPath,
+		)
+		command.Stdout = &outputs[i]
+		command.Stderr = &outputs[i]
+		if err := command.Start(); err != nil {
+			t.Fatal(err)
+		}
+		commands[i] = command
+	}
+	if err := syscall.Flock(int(barrier.Fd()), syscall.LOCK_UN); err != nil {
+		t.Fatal(err)
+	}
+	for i, command := range commands {
+		if err := command.Wait(); err != nil {
+			t.Fatalf("helper failed: %v\n%s", err, outputs[i].String())
+		}
+	}
+	store, err := Open(dir, "processes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := store.List(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != len(commands) {
+		t.Fatalf("entries = %d, want %d", len(entries), len(commands))
+	}
+}
+
+func TestStoreProcessHelper(t *testing.T) {
+	root := os.Getenv("WUKO_KV_HELPER_ROOT")
+	if root == "" {
+		return
+	}
+	barrier, err := os.Open(os.Getenv("WUKO_KV_HELPER_BARRIER"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer barrier.Close()
+	if err := syscall.Flock(int(barrier.Fd()), syscall.LOCK_SH); err != nil {
+		t.Fatal(err)
+	}
+	defer syscall.Flock(int(barrier.Fd()), syscall.LOCK_UN)
+	store, err := Open(root, "processes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Set(t.Context(), os.Getenv("WUKO_KV_HELPER_KEY"), true); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLockAcquisitionHonorsContext(t *testing.T) {
+	dir := t.TempDir()
+	store, err := Open(dir, "busy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := os.OpenFile(filepath.Join(dir, "busy.lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatal(err)
+	}
+	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+	ctx, cancel := context.WithTimeout(t.Context(), 25*time.Millisecond)
+	defer cancel()
+	if _, _, err := store.Get(ctx, "key"); err == nil || !strings.Contains(err.Error(), context.DeadlineExceeded.Error()) {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestCanceledContextDoesNotReadStore(t *testing.T) {
+	store, err := Open(t.TempDir(), "canceled")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, _, err := store.Get(ctx, "key"); err == nil || !strings.Contains(err.Error(), context.Canceled.Error()) {
+		t.Fatalf("error = %v", err)
+	}
+}

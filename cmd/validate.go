@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 	"github.com/up2jj/wuko/engine"
@@ -55,6 +56,7 @@ func newValidateCmd(deps dependencies) *cobra.Command {
 				}
 				if err := engine.New(deps.registry).Validate(command.Context(), definition, engine.Options{
 					Vars: vars, Env: env, BaseEnv: baseEnv, RunDir: cwd, Stdin: command.InOrStdin(), Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(),
+					LocalValueDir: filepath.Join(definition.Dir, ".wuko", "values"), GlobalValueDir: filepath.Join(config, "wuko", "values"),
 				}); err != nil {
 					return err
 				}

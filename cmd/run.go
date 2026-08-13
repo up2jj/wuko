@@ -43,6 +43,7 @@ func newRunCmd(deps dependencies) *cobra.Command {
 			}
 			var source workflow.Source
 			var definition *workflow.Definition
+			remoteWorkflow := false
 			cleanup := func() {}
 			if workflowFile != "" {
 				path, err := filepath.Abs(workflowFile)
@@ -51,6 +52,7 @@ func newRunCmd(deps dependencies) *cobra.Command {
 				}
 				source = workflow.Source{Path: path}
 			} else if workflow.IsRemoteLocator(args[0]) {
+				remoteWorkflow = true
 				// Remote workflow content is materialized before loading so relative files and
 				// workflow metadata behave the same way as for a local workflow file.
 				loader := deps.loader
@@ -82,8 +84,13 @@ func newRunCmd(deps dependencies) *cobra.Command {
 				fmt.Fprintf(command.OutOrStdout(), "Workflow %s (%s)\n", definition.Name, definition.Path)
 			}
 			progress := tui.NewProgress(command.ErrOrStderr(), colorEnabled(command.ErrOrStderr()))
+			localValueDir := ""
+			if !remoteWorkflow {
+				localValueDir = filepath.Join(definition.Dir, ".wuko", "values")
+			}
 			_, err = engine.New(deps.registry).Run(command.Context(), definition, engine.Options{
 				Vars: vars, Env: env, BaseEnv: baseEnv, RunDir: cwd, Stdin: command.InOrStdin(),
+				LocalValueDir: localValueDir, GlobalValueDir: filepath.Join(config, "wuko", "values"),
 				Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(),
 				Interactive: interactive(command.InOrStdin()), DryRun: dryRun, Progress: progress.Report,
 			})

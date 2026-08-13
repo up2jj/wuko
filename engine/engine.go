@@ -22,13 +22,16 @@ type Options struct {
 	Vars map[string]any
 	Env  map[string]string
 	// BaseEnv overrides the current process environment when non-nil.
-	BaseEnv     map[string]string
-	RunDir      string
-	Stdin       io.Reader
-	Stdout      io.Writer
-	Stderr      io.Writer
-	Interactive bool
-	DryRun      bool
+	BaseEnv map[string]string
+	RunDir  string
+	// LocalValueDir is empty when local persistence is unavailable, such as for a remote workflow.
+	LocalValueDir  string
+	GlobalValueDir string
+	Stdin          io.Reader
+	Stdout         io.Writer
+	Stderr         io.Writer
+	Interactive    bool
+	DryRun         bool
 	// Progress receives structured workflow, step, attempt, retry, and timing events.
 	Progress        func(ProgressEvent)
 	inputs          map[string]any
@@ -292,7 +295,8 @@ func templateData(definition *workflow.Definition, runDir string, state *State) 
 func makeRequest(definition *workflow.Definition, stepID string, options Options, state *State, attempt, maxAttempts int, operationID string) step.Request {
 	return step.Request{
 		StepID: stepID, WorkflowName: definition.Name, WorkflowDir: definition.Dir,
-		RunDir: options.RunDir, Inputs: cloneMap(state.Inputs), Vars: cloneMap(state.Vars), Env: maps.Clone(state.Env),
+		RunDir: options.RunDir, LocalValueDir: options.LocalValueDir, GlobalValueDir: options.GlobalValueDir,
+		Inputs: cloneMap(state.Inputs), Vars: cloneMap(state.Vars), Env: maps.Clone(state.Env),
 		Steps: cloneMap(state.Steps), Stdin: options.Stdin, Stdout: options.Stdout,
 		Stderr: options.Stderr, Interactive: options.Interactive,
 		Attempt: attempt, MaxAttempts: maxAttempts, OperationID: operationID,
@@ -318,7 +322,11 @@ func (e *Engine) validateAction(ctx context.Context, definition *workflow.Defini
 	defer cleanup()
 	inputs := actionValidationInputs(workflowStep.Action)
 	inner := &workflow.Definition{Version: 1, Name: workflowStep.Action.Name, Dir: dir, Steps: workflowStep.Action.Steps, Vars: map[string]any{}, Env: workflow.Environment{}}
-	return e.Validate(ctx, inner, Options{inputs: inputs, BaseEnv: state.Env, RunDir: options.RunDir, Stdin: options.Stdin, Stdout: options.Stdout, Stderr: options.Stderr, Interactive: options.Interactive})
+	return e.Validate(ctx, inner, Options{
+		inputs: inputs, BaseEnv: state.Env, RunDir: options.RunDir,
+		LocalValueDir: options.LocalValueDir, GlobalValueDir: options.GlobalValueDir,
+		Stdin: options.Stdin, Stdout: options.Stdout, Stderr: options.Stderr, Interactive: options.Interactive,
+	})
 }
 
 func (e *Engine) prepareActionExecutor(definition *workflow.Definition, workflowStep workflow.Step, options Options, state *State) (stepExecutor, func(), error) {
@@ -334,6 +342,7 @@ func (e *Engine) prepareActionExecutor(definition *workflow.Definition, workflow
 	execute := func(ctx context.Context, request step.Request) (step.Result, error) {
 		innerState, err := e.Run(ctx, inner, Options{
 			inputs: inputs, BaseEnv: state.Env, RunDir: options.RunDir,
+			LocalValueDir: options.LocalValueDir, GlobalValueDir: options.GlobalValueDir,
 			Stdin: options.Stdin, Stdout: options.Stdout, Stderr: options.Stderr,
 			Interactive: options.Interactive, Progress: options.Progress,
 			operationPrefix: request.OperationID, depth: options.depth + 1,
