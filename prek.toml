@@ -1,0 +1,56 @@
+# Configuration file for `prek`, a git hook framework written in Rust.
+# See https://prek.j178.dev for more information.
+#:schema https://www.schemastore.org/prek.json
+
+exclude = '^(dist/|completions/)'
+
+[[repos]]
+repo = "https://github.com/pre-commit/pre-commit-hooks"
+rev = "v6.0.0"
+hooks = [
+  { id = "trailing-whitespace" },
+  { id = "end-of-file-fixer" },
+  { id = "check-yaml" },
+  { id = "check-toml" },
+  { id = "check-merge-conflict" },
+  { id = "check-added-large-files" },
+  { id = "check-case-conflict" },
+  { id = "detect-private-key" }
+]
+
+[[repos]]
+repo = "local"
+hooks = [
+  {
+    id = "gofmt",
+    name = "gofmt",
+    entry = "gofmt -l -w",
+    language = "system",
+    types = ["go"]
+  },
+  {
+    id = "go-vet",
+    name = "go vet",
+    entry = "go vet ./...",
+    language = "system",
+    types = ["go"],
+    pass_filenames = false
+  },
+  {
+    id = "go-mod-tidy",
+    name = "go mod tidy (check)",
+    entry = "go mod tidy -diff",
+    language = "system",
+    files = '^go\.(mod|sum)$',
+    pass_filenames = false
+  },
+  {
+    id = "go-test",
+    name = "go test",
+    entry = "go test ./...",
+    language = "system",
+    types = ["go"],
+    pass_filenames = false,
+    stages = ["pre-push"]
+  }
+]

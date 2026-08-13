@@ -1,0 +1,8 @@
+# Built binary
+/wuko
+
+# GoReleaser build output
+/dist/
+
+# Generated shell completions
+/completions/

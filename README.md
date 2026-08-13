@@ -16,8 +16,13 @@ go install github.com/up2jj/wuko@latest
 During development:
 
 ```sh
-go build -o wuko .
+just build
+just test
 ```
+
+Run `just hooks` once to install the prek pre-commit and pre-push hooks. Use
+`prek run --all-files` to run every hook manually, and `just snapshot` to build
+local release archives without publishing them.
 
 ## Workflow discovery
 

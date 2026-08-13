@@ -1,0 +1,70 @@
+version: 2
+
+project_name: wuko
+
+before:
+  hooks:
+    - go mod tidy
+    - mkdir -p completions
+    - sh -c 'go run . completion bash > completions/wuko.bash'
+    - sh -c 'go run . completion zsh  > completions/wuko.zsh'
+    - sh -c 'go run . completion fish > completions/wuko.fish'
+
+builds:
+  - id: wuko
+    main: .
+    binary: wuko
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w
+      - -X github.com/up2jj/wuko/cmd.version=v{{ .Version }}
+      - -X github.com/up2jj/wuko/cmd.commit={{ .Commit }}
+      - -X github.com/up2jj/wuko/cmd.date={{ .Date }}
+
+archives:
+  - id: wuko
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - completions/*
+
+checksum:
+  name_template: "checksums.txt"
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+homebrew_casks:
+  - name: wuko
+    binaries: [wuko]
+    completions:
+      bash: completions/wuko.bash
+      zsh: completions/wuko.zsh
+      fish: completions/wuko.fish
+    homepage: "https://github.com/up2jj/wuko"
+    description: "Trusted workflow runner for everyday development tasks"
+    repository:
+      owner: up2jj
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    commit_author:
+      name: goreleaser-bot
+      email: goreleaser-bot@users.noreply.github.com
+    # Strip the Gatekeeper quarantine flag so the unsigned binary runs on first launch.
+    hooks:
+      post:
+        install: |
+          system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/wuko"]
