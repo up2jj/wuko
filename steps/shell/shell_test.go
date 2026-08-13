@@ -26,3 +26,23 @@ func TestInlineShellArgumentsAndEnvironment(t *testing.T) {
 		t.Fatalf("stdout = %q", got)
 	}
 }
+
+func TestShellExportsAttemptMetadataAfterStepEnvironment(t *testing.T) {
+	runner, err := New(map[string]any{
+		"script": `printf '%s:%s:%s' "$WUKO_STEP_ATTEMPT" "$WUKO_STEP_MAX_ATTEMPTS" "$WUKO_STEP_OPERATION_ID"`,
+		"env":    map[string]any{"WUKO_STEP_ATTEMPT": "spoofed"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runner.Run(t.Context(), step.Request{
+		Attempt: 2, MaxAttempts: 4, OperationID: "release-42",
+		RunDir: t.TempDir(), Env: map[string]string{}, Stdout: io.Discard, Stderr: io.Discard,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := result.Outputs["stdout"]; got != "2:4:release-42" {
+		t.Fatalf("stdout = %q", got)
+	}
+}

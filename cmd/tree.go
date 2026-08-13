@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/up2jj/wuko/workflow"
@@ -107,7 +108,7 @@ func writeTreeSteps(writer io.Writer, steps []workflow.Step, prefix string) erro
 		if workflowStep.If != "" {
 			condition = " if: " + string(workflowStep.If)
 		}
-		if _, err := fmt.Fprintf(writer, "%s%s%s (%s)%s\n", prefix, branch, workflowStep.ID, kind, condition); err != nil {
+		if _, err := fmt.Fprintf(writer, "%s%s%s (%s)%s%s\n", prefix, branch, workflowStep.ID, kind, treeExecutionPolicy(workflowStep), condition); err != nil {
 			return err
 		}
 		if workflowStep.Action != nil {
@@ -117,4 +118,22 @@ func writeTreeSteps(writer io.Writer, steps []workflow.Step, prefix string) erro
 		}
 	}
 	return nil
+}
+
+func treeExecutionPolicy(workflowStep workflow.Step) string {
+	var parts []string
+	if workflowStep.Timeout != nil {
+		parts = append(parts, "timeout "+workflowStep.Timeout.String())
+	}
+	if workflowStep.Retry != nil {
+		retry := fmt.Sprintf("%d attempts", workflowStep.Retry.MaxAttempts)
+		if workflowStep.Retry.MaxElapsedTime.Value() > 0 {
+			retry += " within " + workflowStep.Retry.MaxElapsedTime.String()
+		}
+		parts = append(parts, retry)
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return " [" + strings.Join(parts, ", ") + "]"
 }

@@ -49,6 +49,7 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 	}
 	environment := maps.Clone(request.Env)
 	maps.Copy(environment, r.config.Env)
+	environment = step.ApplyAttemptEnvironment(environment, request)
 	input := r.config.Prompt
 	if input != "" && !strings.HasSuffix(input, "\n") {
 		input += "\n"

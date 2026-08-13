@@ -80,6 +80,7 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 	}
 	request.Env = maps.Clone(request.Env)
 	maps.Copy(request.Env, r.config.Env)
+	request.Env = step.ApplyAttemptEnvironment(request.Env, request)
 	runtime := &runtime{request: request, args: r.config.Args, outputs: make(map[string]any), variables: make(map[string]any), doHTTP: r.doHTTP}
 	state := newState()
 	defer state.Close()
@@ -382,6 +383,7 @@ func (r *runtime) execRun(state *glua.LState) int {
 	if envTable, ok := options.RawGetString("env").(*glua.LTable); ok {
 		envTable.ForEach(func(key, value glua.LValue) { environment[key.String()] = value.String() })
 	}
+	environment = step.ApplyAttemptEnvironment(environment, r.request)
 	dir := tableString(options, "working_directory", r.request.RunDir)
 	if !filepath.IsAbs(dir) {
 		dir = filepath.Join(r.request.RunDir, dir)

@@ -3,6 +3,7 @@ package engine
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"reflect"
 	"strings"
@@ -12,6 +13,57 @@ import (
 	luastep "github.com/up2jj/wuko/steps/lua"
 	"github.com/up2jj/wuko/workflow"
 )
+
+type actionRetryRunner struct {
+	kind       string
+	failures   *int
+	recordKeys *[]string
+}
+
+func (runner actionRetryRunner) Run(_ context.Context, request step.Request) (step.Result, error) {
+	if runner.kind == "record" {
+		*runner.recordKeys = append(*runner.recordKeys, request.OperationID)
+		return step.Result{Outputs: map[string]any{"value": "recorded"}}, nil
+	}
+	*runner.failures++
+	if *runner.failures == 1 {
+		return step.Result{}, errors.New("action failed")
+	}
+	return step.Result{Outputs: map[string]any{"value": "done"}}, nil
+}
+
+func TestCompositeActionRetryKeepsInnerOperationIDsStable(t *testing.T) {
+	registry := step.NewRegistry()
+	var failures int
+	var recordKeys []string
+	if err := registry.Register("action_retry", func(raw map[string]any) (step.Runner, error) {
+		return actionRetryRunner{kind: raw["kind"].(string), failures: &failures, recordKeys: &recordKeys}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	action := &workflow.Action{
+		Version: 1, Name: "retry-action", Dir: t.TempDir(),
+		Outputs: map[string]workflow.ActionOutput{"result": {Value: "steps.finish.value"}},
+		Steps: []workflow.Step{
+			{ID: "record", Type: "action_retry", With: map[string]any{"kind": "record"}},
+			{ID: "finish", Type: "action_retry", With: map[string]any{"kind": "fail"}},
+		},
+	}
+	definition := &workflow.Definition{Version: 1, Name: "caller", Dir: t.TempDir(), Steps: []workflow.Step{{
+		ID: "remote", Uses: workflow.ActionSource{URL: "https://example.test/action"}, Action: action,
+		Retry: immediateRetry(2), With: map[string]any{},
+	}}}
+	state, err := New(registry).Run(t.Context(), definition, Options{RunDir: t.TempDir(), Stdout: io.Discard, Stderr: io.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recordKeys) != 2 || recordKeys[0] == "" || recordKeys[0] != recordKeys[1] {
+		t.Fatalf("inner operation IDs = %#v", recordKeys)
+	}
+	if state.Steps["remote"].(map[string]any)["result"] != "done" {
+		t.Fatalf("state = %#v", state)
+	}
+}
 
 type actionCaptureRunner struct {
 	workflowName string

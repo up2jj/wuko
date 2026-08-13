@@ -16,7 +16,7 @@ func TestInlineLuaStateAndEnvironment(t *testing.T) {
 	runner, err := New(map[string]any{
 		"source": `
 local decoded = wuko.json.decode('{"ok":true}')
-wuko.output("result", {name = wuko.args.name, token = wuko.env.get("TOKEN"), ok = decoded.ok})
+wuko.output("result", {name = wuko.args.name, token = wuko.env.get("TOKEN"), ok = decoded.ok, attempt = wuko.env.get("WUKO_STEP_ATTEMPT"), operation_id = wuko.env.get("WUKO_STEP_OPERATION_ID")})
 wuko.set_var("done", true)
 `,
 		"args": map[string]any{"name": "example"},
@@ -27,12 +27,13 @@ wuko.set_var("done", true)
 	}
 	result, err := runner.Run(t.Context(), step.Request{
 		StepID: "lua", WorkflowName: "test", RunDir: t.TempDir(), Env: map[string]string{"TOKEN": "secret"}, Stdout: io.Discard, Stderr: io.Discard,
+		Attempt: 2, MaxAttempts: 3, OperationID: "lua-operation",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	output := result.Outputs["result"].(map[string]any)
-	if output["name"] != "example" || output["token"] != "step-secret" || output["ok"] != true {
+	if output["name"] != "example" || output["token"] != "step-secret" || output["ok"] != true || output["attempt"] != "2" || output["operation_id"] != "lua-operation" {
 		t.Fatalf("output = %#v", output)
 	}
 	if result.Variables["done"] != true {

@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
@@ -142,11 +143,12 @@ func TestDryRunPrintsButDoesNotEvaluateCondition(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	timeout := workflow.Duration(2 * time.Second)
 	definition := &workflow.Definition{
 		Version: 1, Name: "dry-run", Dir: t.TempDir(),
 		Steps: []workflow.Step{{
 			ID: "run", Type: "capture", If: "vars.missing",
-			With: map[string]any{"value": "{{ .vars.also_missing }}"},
+			Timeout: &timeout, Retry: immediateRetry(2), With: map[string]any{"value": "{{ .vars.also_missing }}"},
 		}},
 	}
 	var output bytes.Buffer
@@ -155,7 +157,7 @@ func TestDryRunPrintsButDoesNotEvaluateCondition(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if got := output.String(); !strings.Contains(got, "if: vars.missing") {
+	if got := output.String(); !strings.Contains(got, "[timeout 2s, 2 attempts] if: vars.missing") {
 		t.Fatalf("output = %q", got)
 	}
 }

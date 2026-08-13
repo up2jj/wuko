@@ -65,7 +65,7 @@ func expandRequiredSteps(steps []Step, source string, stack []string) ([]Step, e
 }
 
 func validateRequireEntry(workflowStep Step) error {
-	if workflowStep.ID != "" || workflowStep.Type != "" || !workflowStep.Uses.Empty() || workflowStep.SHA256 != "" || workflowStep.If != "" || workflowStep.With != nil {
+	if workflowStep.ID != "" || workflowStep.Type != "" || !workflowStep.Uses.Empty() || workflowStep.SHA256 != "" || workflowStep.If != "" || workflowStep.Timeout != nil || workflowStep.Retry != nil || workflowStep.With != nil {
 		return fmt.Errorf("require cannot be combined with other step fields")
 	}
 	return nil

@@ -20,14 +20,15 @@ type Options struct {
 	Vars map[string]any
 	Env  map[string]string
 	// BaseEnv overrides the current process environment when non-nil.
-	BaseEnv     map[string]string
-	RunDir      string
-	Stdin       io.Reader
-	Stdout      io.Writer
-	Stderr      io.Writer
-	Interactive bool
-	DryRun      bool
-	inputs      map[string]any
+	BaseEnv         map[string]string
+	RunDir          string
+	Stdin           io.Reader
+	Stdout          io.Writer
+	Stderr          io.Writer
+	Interactive     bool
+	DryRun          bool
+	inputs          map[string]any
+	operationPrefix string
 }
 
 type State struct {
@@ -45,9 +46,17 @@ func (e *Engine) Validate(ctx context.Context, definition *workflow.Definition, 
 		return err
 	}
 	for _, workflowStep := range definition.Steps {
+		if err := workflowStep.ValidateExecutionPolicy(); err != nil {
+			return fmt.Errorf("step %q: %w", workflowStep.ID, err)
+		}
 		if workflowStep.If != "" {
 			if _, err := compileCondition(workflowStep.If); err != nil {
 				return fmt.Errorf("step %q if: %w", workflowStep.ID, err)
+			}
+		}
+		if workflowStep.Retry != nil && workflowStep.Retry.OperationID != "" {
+			if err := validateTemplates(workflowStep.Retry.OperationID, false); err != nil {
+				return fmt.Errorf("step %q retry operation_id: %w", workflowStep.ID, err)
 			}
 		}
 		if workflowStep.Action != nil {
@@ -67,7 +76,7 @@ func (e *Engine) Validate(ctx context.Context, definition *workflow.Definition, 
 		if !ok {
 			continue
 		}
-		request := makeRequest(definition, workflowStep.ID, options, state)
+		request := makeRequest(definition, workflowStep.ID, options, state, 1, maxAttempts(workflowStep), "validation")
 		if err := validator.Validate(ctx, request); err != nil {
 			return fmt.Errorf("step %q: %w", workflowStep.ID, err)
 		}
@@ -89,14 +98,15 @@ func (e *Engine) Run(ctx context.Context, definition *workflow.Definition, optio
 			if workflowStep.Action != nil {
 				kind = "uses " + workflowStep.Uses.Display()
 			}
+			policy := executionPolicySuffix(workflowStep)
 			if workflowStep.If == "" {
-				fmt.Fprintf(options.Stdout, "%d. %s (%s)\n", i+1, workflowStep.ID, kind)
+				fmt.Fprintf(options.Stdout, "%d. %s (%s)%s\n", i+1, workflowStep.ID, kind, policy)
 			} else {
-				fmt.Fprintf(options.Stdout, "%d. %s (%s) if: %s\n", i+1, workflowStep.ID, kind, workflowStep.If)
+				fmt.Fprintf(options.Stdout, "%d. %s (%s)%s if: %s\n", i+1, workflowStep.ID, kind, policy, workflowStep.If)
 			}
 			if workflowStep.Action != nil {
 				for j, inner := range workflowStep.Action.Steps {
-					fmt.Fprintf(options.Stdout, "   %d.%d %s (%s)\n", i+1, j+1, inner.ID, inner.Type)
+					fmt.Fprintf(options.Stdout, "   %d.%d %s (%s)%s\n", i+1, j+1, inner.ID, inner.Type, executionPolicySuffix(inner))
 				}
 			}
 		}
@@ -117,30 +127,33 @@ func (e *Engine) Run(ctx context.Context, definition *workflow.Definition, optio
 			continue
 		}
 		fmt.Fprintf(options.Stdout, "[%d/%d] %s (%s)\n", i+1, len(definition.Steps), workflowStep.ID, kind)
+		var execute stepExecutor
+		cleanup := func() {}
 		if workflowStep.Action != nil {
-			outputs, err := e.runAction(ctx, definition, workflowStep, options, state)
+			execute, cleanup, err = e.prepareActionExecutor(definition, workflowStep, options, state)
 			if err != nil {
-				return nil, fmt.Errorf("workflow %q step %q (uses): %w", definition.Name, workflowStep.ID, err)
+				return nil, fmt.Errorf("workflow %q step %q (%s): %w", definition.Name, workflowStep.ID, kind, err)
 			}
-			state.Steps[workflowStep.ID] = outputs
-			continue
+		} else {
+			data := templateData(definition, options.RunDir, state)
+			rendered, err := renderValue(workflowStep.With, data, workflowStep.Type == "lua")
+			if err != nil {
+				return nil, fmt.Errorf("workflow %q step %q (%s): rendering configuration: %w", definition.Name, workflowStep.ID, workflowStep.Type, err)
+			}
+			raw, ok := rendered.(map[string]any)
+			if !ok {
+				return nil, fmt.Errorf("workflow %q step %q (%s): configuration is not an object", definition.Name, workflowStep.ID, workflowStep.Type)
+			}
+			runner, err := e.registry.Build(workflowStep.Type, raw)
+			if err != nil {
+				return nil, fmt.Errorf("workflow %q step %q (%s): %w", definition.Name, workflowStep.ID, workflowStep.Type, err)
+			}
+			execute = runner.Run
 		}
-		data := templateData(definition, options.RunDir, state)
-		rendered, err := renderValue(workflowStep.With, data, workflowStep.Type == "lua")
+		result, err := e.runWithRetry(ctx, definition, workflowStep, options, state, execute)
+		cleanup()
 		if err != nil {
-			return nil, fmt.Errorf("workflow %q step %q (%s): rendering configuration: %w", definition.Name, workflowStep.ID, workflowStep.Type, err)
-		}
-		raw, ok := rendered.(map[string]any)
-		if !ok {
-			return nil, fmt.Errorf("workflow %q step %q (%s): configuration is not an object", definition.Name, workflowStep.ID, workflowStep.Type)
-		}
-		runner, err := e.registry.Build(workflowStep.Type, raw)
-		if err != nil {
-			return nil, fmt.Errorf("workflow %q step %q (%s): %w", definition.Name, workflowStep.ID, workflowStep.Type, err)
-		}
-		result, err := runner.Run(ctx, makeRequest(definition, workflowStep.ID, options, state))
-		if err != nil {
-			return nil, fmt.Errorf("workflow %q step %q (%s): %w", definition.Name, workflowStep.ID, workflowStep.Type, err)
+			return nil, fmt.Errorf("workflow %q step %q (%s): %w", definition.Name, workflowStep.ID, kind, err)
 		}
 		if result.Outputs == nil {
 			result.Outputs = make(map[string]any)
@@ -165,12 +178,13 @@ func templateData(definition *workflow.Definition, runDir string, state *State) 
 	return workflow.TemplateData(definition, runDir, state.Inputs, state.Vars, state.Env, state.Steps)
 }
 
-func makeRequest(definition *workflow.Definition, stepID string, options Options, state *State) step.Request {
+func makeRequest(definition *workflow.Definition, stepID string, options Options, state *State, attempt, maxAttempts int, operationID string) step.Request {
 	return step.Request{
 		StepID: stepID, WorkflowName: definition.Name, WorkflowDir: definition.Dir,
 		RunDir: options.RunDir, Inputs: cloneMap(state.Inputs), Vars: cloneMap(state.Vars), Env: maps.Clone(state.Env),
 		Steps: cloneMap(state.Steps), Stdin: options.Stdin, Stdout: options.Stdout,
 		Stderr: options.Stderr, Interactive: options.Interactive,
+		Attempt: attempt, MaxAttempts: maxAttempts, OperationID: operationID,
 	}
 }
 
@@ -196,34 +210,36 @@ func (e *Engine) validateAction(ctx context.Context, definition *workflow.Defini
 	return e.Validate(ctx, inner, Options{inputs: inputs, BaseEnv: state.Env, RunDir: options.RunDir, Stdin: options.Stdin, Stdout: options.Stdout, Stderr: options.Stderr, Interactive: options.Interactive})
 }
 
-func (e *Engine) runAction(ctx context.Context, definition *workflow.Definition, workflowStep workflow.Step, options Options, state *State) (map[string]any, error) {
+func (e *Engine) prepareActionExecutor(definition *workflow.Definition, workflowStep workflow.Step, options Options, state *State) (stepExecutor, func(), error) {
 	inputs, err := resolveActionInputs(workflowStep.Action, workflowStep.With, templateData(definition, options.RunDir, state))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	dir, cleanup, err := workflowStep.Action.Materialize()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	defer cleanup()
 	inner := &workflow.Definition{Version: 1, Name: workflowStep.Action.Name, Dir: dir, Steps: workflowStep.Action.Steps, Vars: map[string]any{}, Env: workflow.Environment{}}
-	innerState, err := e.Run(ctx, inner, Options{inputs: inputs, BaseEnv: state.Env, RunDir: options.RunDir, Stdin: options.Stdin, Stdout: options.Stdout, Stderr: options.Stderr, Interactive: options.Interactive})
-	if err != nil {
-		return nil, err
-	}
-	environment := map[string]any{"inputs": innerState.Inputs, "vars": innerState.Vars, "steps": innerState.Steps, "env": innerState.Env, "workflow": map[string]any{"name": inner.Name, "dir": inner.Dir}, "run": map[string]any{"dir": options.RunDir}}
-	outputs := make(map[string]any, len(workflowStep.Action.Outputs))
-	for name, output := range workflowStep.Action.Outputs {
-		value, err := expr.Eval(output.Value, environment)
+	execute := func(ctx context.Context, request step.Request) (step.Result, error) {
+		innerState, err := e.Run(ctx, inner, Options{inputs: inputs, BaseEnv: state.Env, RunDir: options.RunDir, Stdin: options.Stdin, Stdout: options.Stdout, Stderr: options.Stderr, Interactive: options.Interactive, operationPrefix: request.OperationID})
 		if err != nil {
-			return nil, fmt.Errorf("evaluating output %q: %w", name, err)
+			return step.Result{}, err
 		}
-		if !workflow.ActionDataValue(value) {
-			return nil, fmt.Errorf("output %q is not a YAML/JSON-compatible value", name)
+		environment := map[string]any{"inputs": innerState.Inputs, "vars": innerState.Vars, "steps": innerState.Steps, "env": innerState.Env, "workflow": map[string]any{"name": inner.Name, "dir": inner.Dir}, "run": map[string]any{"dir": options.RunDir}}
+		outputs := make(map[string]any, len(workflowStep.Action.Outputs))
+		for name, output := range workflowStep.Action.Outputs {
+			value, err := expr.Eval(output.Value, environment)
+			if err != nil {
+				return step.Result{}, fmt.Errorf("evaluating output %q: %w", name, err)
+			}
+			if !workflow.ActionDataValue(value) {
+				return step.Result{}, fmt.Errorf("output %q is not a YAML/JSON-compatible value", name)
+			}
+			outputs[name] = cloneAny(value)
 		}
-		outputs[name] = cloneAny(value)
+		return step.Result{Outputs: outputs}, nil
 	}
-	return outputs, nil
+	return execute, cleanup, nil
 }
 
 func validateActionBindings(action *workflow.Action, bindings map[string]any) error {

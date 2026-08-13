@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -23,6 +24,9 @@ type Request struct {
 	Stdout       io.Writer
 	Stderr       io.Writer
 	Interactive  bool
+	Attempt      int
+	MaxAttempts  int
+	OperationID  string
 }
 
 type Result struct {
@@ -36,6 +40,26 @@ type Runner interface {
 
 type Validator interface {
 	Validate(context.Context, Request) error
+}
+
+const (
+	AttemptEnv     = "WUKO_STEP_ATTEMPT"
+	MaxAttemptsEnv = "WUKO_STEP_MAX_ATTEMPTS"
+	OperationIDEnv = "WUKO_STEP_OPERATION_ID"
+)
+
+// ApplyAttemptEnvironment adds reserved execution metadata after step-specific environment
+// overlays have been applied.
+func ApplyAttemptEnvironment(environment map[string]string, request Request) map[string]string {
+	if environment == nil {
+		environment = make(map[string]string, 3)
+	}
+	attempt := max(request.Attempt, 1)
+	maximum := max(request.MaxAttempts, attempt)
+	environment[AttemptEnv] = strconv.Itoa(attempt)
+	environment[MaxAttemptsEnv] = strconv.Itoa(maximum)
+	environment[OperationIDEnv] = request.OperationID
+	return environment
 }
 
 type Builder func(raw map[string]any) (Runner, error)

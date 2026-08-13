@@ -221,6 +221,52 @@ matters, or `get(vars, "name")` to read an optional value. If a skipped step wou
 an existing variable, the existing value remains unchanged. Dry-run validates and prints guards
 but does not evaluate them because preceding step outputs are not available.
 
+### Retries and execution timeouts
+
+Use `timeout` to limit each attempt and `retry` to repeat a failed step with exponential backoff:
+
+```yaml
+steps:
+  - id: publish
+    type: shell
+    timeout: 2m
+    retry:
+      max_attempts: 4
+      initial_delay: 500ms
+      backoff_multiplier: 2
+      max_delay: 10s
+      jitter: 0.2
+      max_elapsed_time: 6m
+      operation_id: "{{ .vars.release_id }}:publish"
+    with:
+      command: ./publish
+```
+
+`max_attempts` includes the first attempt. A retry block defaults to 3 attempts, a 1-second initial
+delay, a multiplier of 2, a 30-second maximum delay, and 20% jitter. `max_elapsed_time` is optional
+and limits the combined time spent executing attempts and waiting between them. `timeout` is useful
+without retries too. A timed-out attempt may be retried, while workflow cancellation stops
+immediately. Step runners must honor context cancellation for timeout enforcement.
+
+An attempt fails when its runner returns an error. Non-zero shell, agent, and Docker exits are
+errors. Lua code must raise a Lua error when application-level results such as an HTTP error status
+or `wuko.exec.run` error should trigger a retry.
+
+Wuko commits step outputs and variables only after a successful attempt, but it cannot roll back
+external effects from commands, HTTP requests, files, containers, or agents. Retry-enabled steps
+therefore have at-least-once execution semantics. `operation_id` is a stable, unique identifier for
+one logical operation; it does not make the operation idempotent. When omitted, Wuko generates an
+ID that is stable across automatic attempts in the current invocation. Provide an explicit ID when
+the same identity must survive a Wuko restart. A command can pass the operation ID to a receiving
+service as an idempotency key, for example in an `Idempotency-Key` HTTP header, when that service
+supports deduplication. Operation IDs are not credentials and should not contain secrets.
+
+Process-based steps and Lua's `wuko.env` receive `WUKO_STEP_ATTEMPT`,
+`WUKO_STEP_MAX_ATTEMPTS`, and `WUKO_STEP_OPERATION_ID`. These names are reserved and override
+workflow or step environment values. Retrying a composite `uses` step replays the entire action,
+including previously successful inner steps; prefer retry policies on individual inner steps when
+the action can define them.
+
 ### Remote composite actions
 
 A workflow step can invoke a Wuko-native composite action over HTTPS. The action is downloaded and

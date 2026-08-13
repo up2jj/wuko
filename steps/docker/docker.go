@@ -274,6 +274,7 @@ func (r *Runner) input(request step.Request) (*runInput, error) {
 func (r *Runner) containerConfig(request step.Request, ownerHost string, attachStdin bool) (*container.Config, *container.HostConfig, error) {
 	environment := maps.Clone(request.Env)
 	maps.Copy(environment, r.config.Env)
+	environment = step.ApplyAttemptEnvironment(environment, request)
 	envKeys := slices.Sorted(maps.Keys(environment))
 	env := make([]string, 0, len(envKeys))
 	for _, key := range envKeys {

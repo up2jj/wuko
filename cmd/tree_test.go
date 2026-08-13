@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
@@ -128,5 +129,20 @@ func TestTreeCommandRejectsMissingOrConflictingWorkflowSelector(t *testing.T) {
 		if err := command.ExecuteContext(t.Context()); err == nil {
 			t.Fatalf("args %v: expected error", args)
 		}
+	}
+}
+
+func TestWorkflowTreeDisplaysExecutionPolicy(t *testing.T) {
+	timeout := workflow.Duration(2 * time.Minute)
+	definition := &workflow.Definition{Name: "release", Steps: []workflow.Step{{
+		ID: "publish", Type: "shell", Timeout: &timeout,
+		Retry: &workflow.RetryPolicy{MaxAttempts: 4, BackoffMultiplier: 1, MaxElapsedTime: workflow.Duration(6 * time.Minute)},
+	}}}
+	var output bytes.Buffer
+	if err := writeWorkflowTree(&output, definition); err != nil {
+		t.Fatal(err)
+	}
+	if want := "release\n└── publish (shell) [timeout 2m0s, 4 attempts within 6m0s]\n"; output.String() != want {
+		t.Fatalf("output = %q, want %q", output.String(), want)
 	}
 }

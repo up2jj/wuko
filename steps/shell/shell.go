@@ -52,6 +52,7 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 	}
 	environment := maps.Clone(request.Env)
 	maps.Copy(environment, r.config.Env)
+	environment = step.ApplyAttemptEnvironment(environment, request)
 	result, err := process.Run(ctx, process.Options{
 		Command: command, Args: args, Dir: dir, Env: environment,
 		Stdin: process.StringInput(r.config.Stdin), Stdout: request.Stdout, Stderr: request.Stderr,
