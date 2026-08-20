@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -83,6 +84,57 @@ steps:
 	command.SetArgs([]string{"run", "--file", path})
 	if err := command.ExecuteContext(t.Context()); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRootCommandRegistersAssertStep(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "assert.yaml")
+	sentinel := filepath.Join(root, "should-not-exist")
+	data := fmt.Sprintf(`version: 1
+name: assertions
+steps:
+  - id: release
+    type: set
+    with:
+      variable: release
+      value: wuko
+  - id: verify
+    type: assert
+    with:
+      expr: steps.release.value == "wuko"
+      message: release value is invalid
+  - id: verify_empty_result
+    type: assert
+    with:
+      expr: len(steps.verify) == 0
+      message: successful assertion published outputs
+  - id: reject
+    type: assert
+    with:
+      expr: false
+      message: Release {{ .vars.release }} rejected
+  - id: after_failure
+    type: file
+    with:
+      operation: write
+      path: %q
+      content: should not be written
+`, sentinel)
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	command := NewRootCmd()
+	command.SetIn(bytes.NewReader(nil))
+	command.SetOut(io.Discard)
+	command.SetErr(io.Discard)
+	command.SetArgs([]string{"run", "--file", path})
+	err := command.ExecuteContext(t.Context())
+	if err == nil || !strings.Contains(err.Error(), "assertion failed: Release wuko rejected") {
+		t.Fatalf("error = %v", err)
+	}
+	if _, statErr := os.Stat(sentinel); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("step after failed assertion ran: %v", statErr)
 	}
 }
 

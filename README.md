@@ -12,7 +12,7 @@ commands or inline shell, and launch an external agent such as Codex.
   conditional steps.
 - Run steps sequentially or concurrently, with retries, timeouts, dry runs, execution trees, live
   progress, and run statistics.
-- Use built-in input, password, choice, confirm, set, `import_vars`, JSONPath, HTTP, file,
+- Use built-in input, password, choice, confirm, set, assert, `import_vars`, JSONPath, HTTP, file,
   key-value, Lua, shell, agent, and Docker steps.
 - Split workflows across local files with `require`, or reuse remote workflows and composite
   actions from HTTPS URLs and GitHub locators.
@@ -45,6 +45,7 @@ commands or inline shell, and launch an external agent such as Codex.
     - [Choice](#choice)
     - [Confirm](#confirm)
     - [Set](#set)
+    - [Assert](#assert)
     - [Import variables](#import-variables)
     - [JSONPath](#jsonpath)
     - [HTTP](#http)
@@ -882,6 +883,29 @@ Expressions use the `inputs`, `vars`, `env`, `steps`, `workflow`, and `run` root
 conditions. The JSON-compatible result is available through both `.steps.<id>.value` and the
 configured variable. Invalid expressions fail validation; missing runtime fields and
 non-JSON-compatible results fail the step without committing its variable.
+
+#### Assert
+
+Use `assert` to stop a workflow with a clear message unless an Expr expression evaluates to
+boolean `true`:
+
+```yaml
+- id: verify_release
+  type: assert
+  with:
+    expr: steps.build.exit_code == 0
+    message: Build must succeed before release
+```
+
+Both `expr` and `message` are required. Expressions use the `inputs`, `vars`, `env`, `steps`,
+`workflow`, and `run` roots used by conditions. Invalid or non-boolean expressions fail workflow
+validation, while missing runtime fields and other evaluation errors fail during execution.
+Messages use normal workflow template rendering, so they can include values available when the
+step starts, such as `Release {{ .vars.release }} is not ready`.
+
+A false expression fails with `assertion failed: <message>` and stops subsequent steps. A true
+expression succeeds without outputs or variables; the successful step is present as an empty
+object at `.steps.<id>`.
 
 #### Import variables
 
