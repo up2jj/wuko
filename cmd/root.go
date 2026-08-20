@@ -7,13 +7,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strings"
 	"syscall"
 
 	"github.com/spf13/cobra"
 	"github.com/up2jj/wuko/step"
-	"github.com/up2jj/wuko/steps/agent"
+	agentstep "github.com/up2jj/wuko/steps/agent"
 	"github.com/up2jj/wuko/steps/choice"
 	dockerstep "github.com/up2jj/wuko/steps/docker"
 	inputstep "github.com/up2jj/wuko/steps/input"
@@ -40,6 +41,7 @@ type dependencies struct {
 	environment   func(context.Context, string) (map[string]string, error)
 	homeDir       func() (string, error)
 	configDir     func() (string, error)
+	agentLookPath func(string) (string, error)
 	registry      *step.Registry
 	loader        *workflow.Loader
 	isInteractive func(io.Reader) bool
@@ -55,7 +57,7 @@ func NewRootCmd() *cobra.Command {
 	registry := step.NewRegistry()
 	for _, register := range []func(*step.Registry) error{
 		inputstep.Register, passwordstep.Register, choice.Register,
-		dockerstep.Register, keyvaluestep.Register, luastep.Register, shell.Register, agent.Register,
+		dockerstep.Register, keyvaluestep.Register, luastep.Register, shell.Register, agentstep.Register,
 	} {
 		if err := register(registry); err != nil {
 			panic(err)
@@ -65,13 +67,17 @@ func NewRootCmd() *cobra.Command {
 		stdin: os.Stdin, stdout: os.Stdout, stderr: os.Stderr,
 		cwd: os.Getwd, environment: direnvEnvironment,
 		homeDir: os.UserHomeDir, configDir: os.UserConfigDir, registry: registry,
-		loader: workflow.NewLoader(nil), isInteractive: interactive,
+		agentLookPath: exec.LookPath,
+		loader:        workflow.NewLoader(nil), isInteractive: interactive,
 	})
 }
 
 func newRootCmd(deps dependencies) *cobra.Command {
 	if deps.isInteractive == nil {
 		deps.isInteractive = interactive
+	}
+	if deps.agentLookPath == nil {
+		deps.agentLookPath = exec.LookPath
 	}
 	root := &cobra.Command{
 		Use:           "wuko",
@@ -87,7 +93,7 @@ func newRootCmd(deps dependencies) *cobra.Command {
 	root.SetIn(deps.stdin)
 	root.SetOut(deps.stdout)
 	root.SetErr(deps.stderr)
-	root.AddCommand(newRunCmd(deps), newListCmd(deps), newTreeCmd(deps), newValidateCmd(deps), newCompletionCmd())
+	root.AddCommand(newRunCmd(deps), newListCmd(deps), newTreeCmd(deps), newValidateCmd(deps), newAgentCmd(deps), newCompletionCmd())
 	return root
 }
 

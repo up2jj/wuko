@@ -22,6 +22,7 @@ and launch an external agent such as Codex.
 
 - [Features](#features)
 - [Install](#install)
+- [Agent skill installation](#agent-skill-installation)
 - [GitHub Actions comparison](#github-actions-comparison)
 - [Workflow discovery](#workflow-discovery)
   - [ClickUp task agent example](#clickup-task-agent-example)
@@ -76,6 +77,17 @@ just test
 Run `just hooks` once to install the prek pre-commit and pre-push hooks. Use
 `prek run --all-files` to run every hook manually, and `just snapshot` to build
 local release archives without publishing them.
+
+## Agent skill installation
+
+Wuko discovers supported coding-agent CLIs available on `PATH` and can install its bundled skills
+for them. Use `wuko agent list` to see the discovered agents and their skill directories. Install
+skills for one agent with `wuko agent install claude`, or install them for every discovered agent
+with `wuko agent install`.
+
+Claude skills are installed under `~/.claude/skills/`; Codex skills are installed under
+`~/.agents/skills/`. Installation is repeatable and replaces the bundled skill files in those
+directories.
 
 ## GitHub Actions comparison
 
