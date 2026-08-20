@@ -35,13 +35,14 @@ and launch an external agent such as Codex.
   - [Execution progress and statistics](#execution-progress-and-statistics)
   - [Debug tracing](#debug-tracing)
   - [Remote composite actions](#remote-composite-actions)
-  - [Input](#input)
-  - [Password](#password)
-  - [Choice](#choice)
-  - [Key-value stores](#key-value-stores)
-  - [Lua](#lua)
-  - [Shell and agent](#shell-and-agent)
-  - [Docker](#docker)
+  - [Available steps](#available-steps)
+    - [Input](#input)
+    - [Password](#password)
+    - [Choice](#choice)
+    - [Key-value stores](#key-value-stores)
+    - [Lua](#lua)
+    - [Shell and agent](#shell-and-agent)
+    - [Docker](#docker)
 - [Trust model](#trust-model)
 
 ## Install
@@ -608,7 +609,9 @@ relative paths retain normal workflow behavior and resolve from the caller workf
 Archive extraction rejects traversal paths, links, special files, duplicates, and oversized
 packages. Remote actions cannot invoke another remote action in schema version 1.
 
-### Input
+### Available steps
+
+#### Input
 
 Use `input` when the initial text should remain editable. The optional `value` is rendered when
 the step starts, so it can prepopulate text from an earlier step. The required `message` is shown
@@ -624,7 +627,7 @@ directly above the field and should tell the user what to enter:
     required: true
 ```
 
-### Password
+#### Password
 
 Use `password` for masked text entry. Its required `message` is displayed above the masked field:
 
@@ -719,7 +722,7 @@ text, for example
 
 When `required: false`, empty input becomes an empty list for `split` and `null` for `json`.
 
-### Choice
+#### Choice
 
 Static single selection:
 
@@ -752,7 +755,7 @@ Dynamic sources must be non-empty lists. Scalar items are both label and value. 
 `label_field` and `value_field`, including dotted paths. Single selection writes a scalar;
 multi-selection writes an ordered list.
 
-### Key-value stores
+#### Key-value stores
 
 The `key_value` step persists JSON-compatible values between workflow runs. Every operation names
 both a scope and a store. Local stores live in `.wuko/values/` beside the top-level workflow;
@@ -827,7 +830,7 @@ they can use global stores. Composite actions inherit the caller workflow's loca
 store roots. A successful write is an external effect: it is not rolled back when a later step or
 Lua statement fails, and retrying a write applies it again.
 
-### Lua
+#### Lua
 
 Use either `file` or inline `source`:
 
@@ -897,7 +900,7 @@ local entries = wuko.kv.list({scope = "global", store = "preferences"})
 of `{key, value}` tables. Because Lua represents JSON null as `nil`, omitting `value` from
 `wuko.kv.set` stores JSON null; a list entry for stored null still contains its `key`.
 
-### Shell and agent
+#### Shell and agent
 
 Shell accepts either argv execution:
 
@@ -934,7 +937,7 @@ Agents are regular external processes with their prompt on stdin:
 
 Shell and agent output streams live and is also captured as `stdout`, `stderr`, and `exit_code`.
 
-### Docker
+#### Docker
 
 The `docker` step runs one command in a temporary Docker container. The container and any anonymous
 volumes it creates are removed after the step finishes. Docker must be available through the Docker
