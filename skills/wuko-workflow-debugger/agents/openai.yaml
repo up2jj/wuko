@@ -1,0 +1,4 @@
+interface:
+  display_name: "Wuko Workflow Debugger"
+  short_description: "Diagnose Wuko workflow failures"
+  default_prompt: "Use $wuko-workflow-debugger to diagnose a Wuko workflow failure."

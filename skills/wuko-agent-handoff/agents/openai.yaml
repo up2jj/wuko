@@ -1,0 +1,4 @@
+interface:
+  display_name: "Wuko Agent Handoff"
+  short_description: "Prepare Claude and Codex handoffs"
+  default_prompt: "Use $wuko-agent-handoff to prepare a provider-neutral Claude or Codex task handoff."

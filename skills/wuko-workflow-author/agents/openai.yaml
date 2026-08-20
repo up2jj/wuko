@@ -1,0 +1,4 @@
+interface:
+  display_name: "Wuko Workflow Author"
+  short_description: "Create and verify Wuko workflows"
+  default_prompt: "Use $wuko-workflow-author to create or update a Wuko workflow."
