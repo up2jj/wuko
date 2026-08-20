@@ -2,6 +2,10 @@ package shell
 
 import (
 	"io"
+	"os"
+	"os/user"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/up2jj/wuko/step"
@@ -44,5 +48,28 @@ func TestShellExportsAttemptMetadataAfterStepEnvironment(t *testing.T) {
 	}
 	if got := result.Outputs["stdout"]; got != "2:4:release-42" {
 		t.Fatalf("stdout = %q", got)
+	}
+}
+
+func TestShellRunsAsConfiguredUser(t *testing.T) {
+	current, err := user.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner, err := New(map[string]any{
+		"script": "id -u",
+		"user":   current.Username,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runner.Run(t.Context(), step.Request{
+		RunDir: t.TempDir(), Env: map[string]string{}, Stdout: io.Discard, Stderr: io.Discard,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(result.Outputs["stdout"].(string)); got != strconv.Itoa(os.Geteuid()) {
+		t.Fatalf("effective user ID = %q, want %d", got, os.Geteuid())
 	}
 }

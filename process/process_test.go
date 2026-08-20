@@ -7,6 +7,8 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
+	"os/user"
 	"strconv"
 	"strings"
 	"sync"
@@ -35,6 +37,79 @@ func TestRunHonorsCanceledContext(t *testing.T) {
 	_, err := Run(ctx, Options{Command: "sh", Args: []string{"-c", "exit 0"}, Env: map[string]string{}})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestRunAsCurrentUser(t *testing.T) {
+	current, err := user.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := Run(t.Context(), Options{
+		Command: "sh", Args: []string{"-c", "id -u"}, Env: map[string]string{}, User: current.Uid,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(result.Stdout); got != strconv.Itoa(os.Geteuid()) {
+		t.Fatalf("effective user ID = %q, want %d", got, os.Geteuid())
+	}
+}
+
+func TestRunRejectsUnknownUser(t *testing.T) {
+	_, err := Run(t.Context(), Options{
+		Command: "sh", Args: []string{"-c", "exit 0"}, Env: map[string]string{},
+		User: "wuko-user-that-does-not-exist-4f58bb1d",
+	})
+	if err == nil || !strings.Contains(err.Error(), `looking up user "wuko-user-that-does-not-exist-4f58bb1d"`) {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestNumericID(t *testing.T) {
+	tests := []struct {
+		value string
+		want  bool
+	}{
+		{value: "0", want: true},
+		{value: "501", want: true},
+		{value: "-2", want: true},
+		{value: ""},
+		{value: "-"},
+		{value: "12a"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.value, func(t *testing.T) {
+			if got := numericID(tt.value); got != tt.want {
+				t.Fatalf("numericID(%q) = %v, want %v", tt.value, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseUserID(t *testing.T) {
+	tests := []struct {
+		value   string
+		want    uint32
+		wantErr bool
+	}{
+		{value: "0", want: 0},
+		{value: "501", want: 501},
+		{value: "-2", want: ^uint32(1)},
+		{value: "4294967295", want: ^uint32(0)},
+		{value: "4294967296", wantErr: true},
+		{value: "invalid", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.value, func(t *testing.T) {
+			got, err := parseUserID("user", tt.value)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("parseUserID() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if got != tt.want {
+				t.Fatalf("parseUserID() = %d, want %d", got, tt.want)
+			}
+		})
 	}
 }
 

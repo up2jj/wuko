@@ -8,8 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"os/user"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -22,9 +25,11 @@ type Options struct {
 	Args    []string
 	Dir     string
 	Env     map[string]string
-	Stdin   io.Reader
-	Stdout  io.Writer
-	Stderr  io.Writer
+	// User is a username or numeric user ID for the child process. Empty inherits the current user.
+	User   string
+	Stdin  io.Reader
+	Stdout io.Writer
+	Stderr io.Writer
 	// CaptureLimit bounds each captured output stream. Zero means unlimited. Output written to
 	// Stdout and Stderr is unaffected.
 	CaptureLimit int64
@@ -54,11 +59,15 @@ func Run(ctx context.Context, options Options) (Result, error) {
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
 	}
+	credential, credentialErr := credentialForUser(options.User)
+	if credentialErr != nil {
+		return Result{}, credentialErr
+	}
 	command := exec.Command(options.Command, options.Args...)
 	command.Dir = options.Dir
 	command.Env = environment(options.Env)
 	command.Stdin = options.Stdin
-	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true, Credential: credential}
 	command.WaitDelay = terminationGracePeriod + time.Second
 
 	stdout := newCaptureBuffer(options.CaptureLimit)
@@ -66,6 +75,9 @@ func Run(ctx context.Context, options Options) (Result, error) {
 	command.Stdout = io.MultiWriter(writerOrDiscard(options.Stdout), &stdout)
 	command.Stderr = io.MultiWriter(writerOrDiscard(options.Stderr), &stderr)
 	if err := command.Start(); err != nil {
+		if options.User != "" {
+			return Result{}, fmt.Errorf("starting %s as user %q: %w", options.Command, options.User, err)
+		}
 		return Result{}, fmt.Errorf("starting %s: %w", options.Command, err)
 	}
 	wait := make(chan error, 1)
@@ -95,6 +107,80 @@ func Run(ctx context.Context, options Options) (Result, error) {
 		return result, &ExitError{Command: options.Command, Code: result.ExitCode, Err: err}
 	}
 	return result, fmt.Errorf("starting %s: %w", options.Command, err)
+}
+
+func credentialForUser(identity string) (*syscall.Credential, error) {
+	if identity == "" {
+		return nil, nil
+	}
+	account, err := lookupUser(identity)
+	if err != nil {
+		return nil, fmt.Errorf("looking up user %q: %w", identity, err)
+	}
+	uid, err := parseUserID("user", account.Uid)
+	if err != nil {
+		return nil, fmt.Errorf("resolving user %q: %w", identity, err)
+	}
+	gid, err := parseUserID("primary group", account.Gid)
+	if err != nil {
+		return nil, fmt.Errorf("resolving user %q: %w", identity, err)
+	}
+	if uid == uint32(os.Geteuid()) && gid == uint32(os.Getegid()) {
+		return nil, nil
+	}
+
+	groupIDs, err := account.GroupIds()
+	if err != nil {
+		return nil, fmt.Errorf("looking up groups for user %q: %w", identity, err)
+	}
+	groups := make([]uint32, len(groupIDs))
+	for i, groupID := range groupIDs {
+		groups[i], err = parseUserID("supplementary group", groupID)
+		if err != nil {
+			return nil, fmt.Errorf("resolving user %q: %w", identity, err)
+		}
+	}
+	return &syscall.Credential{Uid: uid, Gid: gid, Groups: groups}, nil
+}
+
+func lookupUser(identity string) (*user.User, error) {
+	if numericID(identity) {
+		return user.LookupId(identity)
+	}
+	return user.Lookup(identity)
+}
+
+func numericID(value string) bool {
+	if value == "" {
+		return false
+	}
+	if value[0] == '-' {
+		value = value[1:]
+	}
+	if value == "" {
+		return false
+	}
+	for _, character := range value {
+		if character < '0' || character > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func parseUserID(kind, value string) (uint32, error) {
+	if strings.HasPrefix(value, "-") {
+		parsed, err := strconv.ParseInt(value, 10, 32)
+		if err != nil {
+			return 0, fmt.Errorf("invalid %s ID %q: %w", kind, value, err)
+		}
+		return uint32(int32(parsed)), nil
+	}
+	parsed, err := strconv.ParseUint(value, 10, 32)
+	if err != nil {
+		return 0, fmt.Errorf("invalid %s ID %q: %w", kind, value, err)
+	}
+	return uint32(parsed), nil
 }
 
 func terminateProcessGroup(processID int, wait <-chan error) error {

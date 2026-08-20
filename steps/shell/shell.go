@@ -19,6 +19,7 @@ type Config struct {
 	Args             []string             `yaml:"args,omitempty"`
 	WorkingDirectory string               `yaml:"working_directory,omitempty"`
 	Env              workflow.Environment `yaml:"env,omitempty"`
+	User             string               `yaml:"user,omitempty"`
 	Stdin            string               `yaml:"stdin,omitempty"`
 }
 
@@ -54,7 +55,7 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 	maps.Copy(environment, r.config.Env)
 	environment = step.ApplyAttemptEnvironment(environment, request)
 	result, err := process.Run(ctx, process.Options{
-		Command: command, Args: args, Dir: dir, Env: environment,
+		Command: command, Args: args, Dir: dir, Env: environment, User: r.config.User,
 		Stdin: process.StringInput(r.config.Stdin), Stdout: request.Stdout, Stderr: request.Stderr,
 	})
 	outputs := map[string]any{"stdout": result.Stdout, "stderr": result.Stderr, "exit_code": result.ExitCode}

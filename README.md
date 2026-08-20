@@ -937,6 +937,22 @@ Agents are regular external processes with their prompt on stdin:
 
 Shell and agent output streams live and is also captured as `stdout`, `stderr`, and `exit_code`.
 
+Shell steps can run as another local account by setting `user` to a username or numeric user ID:
+
+```yaml
+- id: identity
+  type: shell
+  with:
+    command: id
+    args: [-un]
+    user: deploy
+```
+
+Changing user uses native Unix process credentials and requires Wuko to have permission to assume
+that identity, which normally means running Wuko as root. Wuko does not invoke `sudo` and does not
+rewrite environment variables such as `HOME` or `USER`; the selected account must also be able to
+access the configured working directory and executable. Omitting `user` inherits Wuko's user.
+
 #### Docker
 
 The `docker` step runs one command in a temporary Docker container. The container and any anonymous
