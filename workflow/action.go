@@ -37,15 +37,16 @@ var queryInErrorPattern = regexp.MustCompile(`\?[^\s"']+`)
 
 // Action is a resolved Wuko composite action.
 type Action struct {
-	Version     int                     `yaml:"version"`
-	Name        string                  `yaml:"name"`
-	Description string                  `yaml:"description,omitempty"`
-	Inputs      map[string]ActionInput  `yaml:"inputs,omitempty"`
-	Outputs     map[string]ActionOutput `yaml:"outputs,omitempty"`
-	Steps       []Step                  `yaml:"steps"`
-	Dir         string                  `yaml:"-"`
-	Files       map[string]ActionFile   `yaml:"-"`
-	Location    diagnostic.Location     `yaml:"-"`
+	Version     int                           `yaml:"version"`
+	Name        string                        `yaml:"name"`
+	Description string                        `yaml:"description,omitempty"`
+	Templates   map[string]TemplateDefinition `yaml:"templates,omitempty"`
+	Inputs      map[string]ActionInput        `yaml:"inputs,omitempty"`
+	Outputs     map[string]ActionOutput       `yaml:"outputs,omitempty"`
+	Steps       []Step                        `yaml:"steps"`
+	Dir         string                        `yaml:"-"`
+	Files       map[string]ActionFile         `yaml:"-"`
+	Location    diagnostic.Location           `yaml:"-"`
 }
 
 // ActionInput declares one typed action input.
@@ -179,8 +180,13 @@ func (loader *Loader) Load(ctx context.Context, filename string, options LoadOpt
 	}
 	traceFinish(options.Diagnostics, valuesStarted, diagnostic.PhaseValues, diagnostic.StatusSucceeded, definition.Location, definition.Name, "", "", "", nil, countAttr("variables", len(vars)), countAttr("environment", len(environment)))
 	data := TemplateData(definition, options.RunDir, nil, vars, environment, nil)
+	renderer, err := NewRenderer(definition.Templates)
+	if err != nil {
+		traceFinish(options.Diagnostics, started, diagnostic.PhaseLoad, diagnostic.StatusFailed, definition.Location, definition.Name, "", "", "", nil)
+		return nil, err
+	}
 	cache := make(map[string]*Action)
-	if err := loader.resolveActions(ctx, definition.Name, definition.Steps, data, environment, options.RunDir, definition.Dir, cache, options.Diagnostics); err != nil {
+	if err := loader.resolveActions(ctx, definition.Name, definition.Steps, renderer, data, environment, options.RunDir, definition.Dir, cache, options.Diagnostics); err != nil {
 		traceFinish(options.Diagnostics, started, diagnostic.PhaseLoad, diagnostic.StatusFailed, definition.Location, definition.Name, "", "", "", nil)
 		return nil, err
 	}
@@ -188,11 +194,11 @@ func (loader *Loader) Load(ctx context.Context, filename string, options LoadOpt
 	return definition, nil
 }
 
-func (loader *Loader) resolveActions(ctx context.Context, workflowName string, steps []Step, data map[string]any, environment map[string]string, runDir, definitionDir string, cache map[string]*Action, reporter diagnostic.Reporter) error {
+func (loader *Loader) resolveActions(ctx context.Context, workflowName string, steps []Step, renderer *Renderer, data map[string]any, environment map[string]string, runDir, definitionDir string, cache map[string]*Action, reporter diagnostic.Reporter) error {
 	for i := range steps {
 		workflowStep := &steps[i]
 		if workflowStep.Concurrent != nil {
-			if err := loader.resolveActions(ctx, workflowName, workflowStep.Concurrent.Steps, data, environment, runDir, definitionDir, cache, reporter); err != nil {
+			if err := loader.resolveActions(ctx, workflowName, workflowStep.Concurrent.Steps, renderer, data, environment, runDir, definitionDir, cache, reporter); err != nil {
 				return err
 			}
 			continue
@@ -206,7 +212,7 @@ func (loader *Loader) resolveActions(ctx context.Context, workflowName string, s
 			traceFinish(reporter, started, diagnostic.PhaseActionResolve, diagnostic.StatusFailed, workflowStep.Location, workflowName, workflowStep.ID, "uses", "", err)
 			return fmt.Errorf("step %q: sha256 must be a 64-character hexadecimal digest", workflowStep.ID)
 		}
-		resolved, key, sourceDescription, fetch, err := loader.resolveSource(ctx, workflowStep.Uses, data, environment, runDir)
+		resolved, key, sourceDescription, fetch, err := loader.resolveSource(ctx, workflowStep.Uses, renderer, data, environment, runDir)
 		if err != nil {
 			traceFinish(reporter, started, diagnostic.PhaseActionResolve, diagnostic.StatusFailed, workflowStep.Location, workflowName, workflowStep.ID, "uses", "", err)
 			return fmt.Errorf("step %q uses: %w", workflowStep.ID, err)
@@ -248,9 +254,9 @@ func (loader *Loader) resolveActions(ctx context.Context, workflowName string, s
 	return nil
 }
 
-func (loader *Loader) resolveSource(ctx context.Context, source ActionSource, data map[string]any, environment map[string]string, runDir string) (ActionSource, string, string, func() ([]byte, error), error) {
+func (loader *Loader) resolveSource(ctx context.Context, source ActionSource, renderer *Renderer, data map[string]any, environment map[string]string, runDir string) (ActionSource, string, string, func() ([]byte, error), error) {
 	if source.URL != "" {
-		resolved, err := RenderString(source.URL, data)
+		resolved, err := renderer.Render(source.URL, data)
 		if err != nil {
 			return ActionSource{}, "", "", nil, err
 		}
@@ -263,7 +269,7 @@ func (loader *Loader) resolveSource(ctx context.Context, source ActionSource, da
 		}, nil
 	}
 
-	command, err := RenderString(source.Command, data)
+	command, err := renderer.Render(source.Command, data)
 	if err != nil {
 		return ActionSource{}, "", "", nil, fmt.Errorf("rendering command: %w", err)
 	}
@@ -272,7 +278,7 @@ func (loader *Loader) resolveSource(ctx context.Context, source ActionSource, da
 	}
 	args := make([]string, len(source.Args))
 	for i, argument := range source.Args {
-		args[i], err = RenderString(argument, data)
+		args[i], err = renderer.Render(argument, data)
 		if err != nil {
 			return ActionSource{}, "", "", nil, fmt.Errorf("rendering command argument %d: %w", i+1, err)
 		}
@@ -418,6 +424,16 @@ func decodeAction(data []byte, description, dir string, files map[string]ActionF
 	}
 	action.Dir = dir
 	action.Files = files
+	if action.Files == nil {
+		for name, definition := range action.Templates {
+			if definition.File != "" {
+				return nil, fmt.Errorf("loading %s templates: template %q file %q requires a packaged action", description, name, definition.File)
+			}
+		}
+	}
+	if err := resolveTemplateFiles(action.Templates, action.Dir, action.Files, ""); err != nil {
+		return nil, fmt.Errorf("loading %s templates: %w", description, err)
+	}
 	annotateActionLocations(data, &action, logicalSource)
 	if err := validateAction(&action); err != nil {
 		return nil, fmt.Errorf("validating %s: %w", description, err)
@@ -434,6 +450,9 @@ func validateAction(action *Action) error {
 	}
 	if len(action.Steps) == 0 {
 		return fmt.Errorf("at least one step is required")
+	}
+	if _, err := NewRenderer(action.Templates); err != nil {
+		return err
 	}
 	for name, input := range action.Inputs {
 		if !identifierPattern.MatchString(name) {

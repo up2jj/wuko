@@ -24,15 +24,16 @@ var (
 
 // Definition is a fully loaded workflow document.
 type Definition struct {
-	Version     int                 `yaml:"version"`
-	Name        string              `yaml:"name"`
-	Description string              `yaml:"description,omitempty"`
-	Vars        map[string]any      `yaml:"vars,omitempty"`
-	Env         Environment         `yaml:"env,omitempty"`
-	Steps       []Step              `yaml:"steps"`
-	Path        string              `yaml:"-"`
-	Dir         string              `yaml:"-"`
-	Location    diagnostic.Location `yaml:"-"`
+	Version     int                           `yaml:"version"`
+	Name        string                        `yaml:"name"`
+	Description string                        `yaml:"description,omitempty"`
+	Templates   map[string]TemplateDefinition `yaml:"templates,omitempty"`
+	Vars        map[string]any                `yaml:"vars,omitempty"`
+	Env         Environment                   `yaml:"env,omitempty"`
+	Steps       []Step                        `yaml:"steps"`
+	Path        string                        `yaml:"-"`
+	Dir         string                        `yaml:"-"`
+	Location    diagnostic.Location           `yaml:"-"`
 }
 
 // Environment is a strictly string-valued environment overlay.
@@ -279,6 +280,9 @@ func loadLocalWithDiagnostics(path string, reporter diagnostic.Reporter, sourceR
 	}
 	definition.Path = abs
 	definition.Dir = filepath.Dir(abs)
+	if err := resolveTemplateFiles(definition.Templates, definition.Dir, nil, sourceRoot); err != nil {
+		return nil, fmt.Errorf("loading workflow templates from %s: %w", displaySource, err)
+	}
 	annotateDefinitionLocations(data, &definition, abs)
 	if sourceLabel != "" {
 		definition.Location.Source = remapSource(definition.Location.Source, sourceRoot, sourceLabel)
@@ -322,6 +326,9 @@ func validateDefinition(definition *Definition, allowActions bool) error {
 		if !environmentPattern.MatchString(name) {
 			return fmt.Errorf("invalid environment name %q", name)
 		}
+	}
+	if _, err := NewRenderer(definition.Templates); err != nil {
+		return err
 	}
 	return nil
 }

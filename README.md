@@ -30,6 +30,7 @@ commands or inline shell, and launch an external agent such as Codex.
   - [ClickUp task agent example](#clickup-task-agent-example)
   - [Remote workflows](#remote-workflows)
 - [Workflow schema](#workflow-schema)
+  - [Templates](#templates)
   - [Execution order and step outputs](#execution-order-and-step-outputs)
   - [Splitting steps across files](#splitting-steps-across-files)
   - [Conditional steps](#conditional-steps)
@@ -250,12 +251,28 @@ env:
 steps: []
 ```
 
-Strings use Go templates with `missingkey=error`. Template roots are `.vars`, `.env`, `.steps`,
-`.workflow.name`, `.workflow.dir`, and `.run.dir`. Lua source itself is not templated; use its
-typed `args` instead.
+Strings use strict Go templates. Reusable named templates can be declared inline or loaded from
+files relative to the workflow:
+
+```yaml
+templates:
+  image: '{{ .vars.registry }}/app:{{ .vars.version }}'
+  deployment:
+    file: templates/deployment.yaml.tmpl
+```
+
+See [Templates](docs/templates.md) for named-template invocation, file packaging, data roots,
+composite-action scope, execution order, and typed-input guidance.
 
 Environment precedence is step environment, CLI `--env`, workflow environment, then the host
 environment. Environment values are not shown by dry-run output.
+
+### Templates
+
+Invoke a declared template with `{{ template "name" . }}`. Templates use `missingkey=error` and
+can access `.vars`, `.env`, `.steps`, `.workflow.name`, `.workflow.dir`, `.run.dir`, and action
+`.inputs`. Lua source itself is not templated; use its typed `args` instead. File-backed templates
+must be bundled as companion files when a remote workflow or action is published as an archive.
 
 ### Execution order and step outputs
 

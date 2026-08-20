@@ -111,6 +111,48 @@ func TestLoadRemoteArchivesWorkflowAndCompanionFiles(t *testing.T) {
 	}
 }
 
+func TestLoadRemoteArchiveResolvesTemplateFiles(t *testing.T) {
+	workflowData := []byte(`version: 1
+name: remote-templates
+templates:
+  message:
+    file: templates/message.tmpl
+steps:
+  - id: run
+    type: shell
+    with:
+      command: echo
+      args: ['{{ template "message" . }}']
+`)
+	payload := makeZIP(t, map[string]archiveTestFile{
+		"wuko.yaml":              {data: workflowData, mode: 0o644},
+		"templates/message.tmpl": {data: []byte("Hello {{ .vars.name }}"), mode: 0o644},
+	})
+	client := testHTTPClient(func(*http.Request) (*http.Response, error) { return testResponse(http.StatusOK, payload), nil })
+	definition, cleanup, err := NewLoader(client).LoadRemote(t.Context(), "https://example.test/workflow.zip", LoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	if got := definition.Templates["message"].Body; got != "Hello {{ .vars.name }}" {
+		t.Fatalf("template body = %q", got)
+	}
+}
+
+func TestLoadRemoteRejectsTemplateFileOutsidePackage(t *testing.T) {
+	payload := makeZIP(t, map[string]archiveTestFile{
+		"wuko.yaml": {
+			data: []byte("version: 1\nname: remote\ntemplates:\n  escape:\n    file: ../escape.tmpl\nsteps:\n  - id: run\n    type: shell\n"),
+			mode: 0o644,
+		},
+	})
+	client := testHTTPClient(func(*http.Request) (*http.Response, error) { return testResponse(http.StatusOK, payload), nil })
+	_, _, err := NewLoader(client).LoadRemote(t.Context(), "https://example.test/workflow.zip", LoadOptions{})
+	if err == nil || !strings.Contains(err.Error(), "escapes the workflow package") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestLoadRemoteArchiveExpandsRequiredStepFiles(t *testing.T) {
 	payload := makeZIP(t, map[string]archiveTestFile{
 		"wuko.yaml": {

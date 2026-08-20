@@ -14,7 +14,9 @@ Find the smallest evidence-backed cause of a Wuko workflow failure before changi
 3. Reproduce safely with validation, tree output, or dry-run before running a workflow that can modify files, call services, create containers, or launch an agent.
 4. Classify the failure before proposing a fix:
    - Schema or step decoding: version, unknown fields, required values, types, IDs, paths, or registered step types.
-   - Template or condition evaluation: missing roots, skipped-step references, string versus typed values, or non-boolean expressions.
+   - Template or condition evaluation: malformed or undefined named templates, missing roots,
+     skipped-step references, caller/action scope confusion, string versus typed values, or
+     non-boolean expressions.
    - Environment and directories: `--env`, `--var`, direnv, workflow directory, run directory, and relative files.
    - Runtime step behavior: shell exit status, Lua errors, HTTP responses, filesystem effects, Docker setup, or agent exit codes.
    - JSONPath selection: query syntax after template rendering, missing `vars` or `steps` source paths, `all` list semantics, and `one` cardinality failures.
@@ -26,6 +28,14 @@ Find the smallest evidence-backed cause of a Wuko workflow failure before changi
 ## Useful checks
 
 - Use `wuko validate NAME` to isolate loading and validation errors.
+- For file-backed templates, confirm the declared path is static and relative to the owning
+  workflow or packaged action. Direct remote YAML and standalone action manifests cannot carry
+  companion template files.
+- Distinguish parse-time template errors from runtime data errors. Validation can prove syntax and
+  named references; `.steps` values exist only when an earlier sequential producer has succeeded.
+- If a template failure is difficult to trace, inline one-use aliases and reduce nested template
+  calls before adding helpers. Do not use templating to conceal ordering, condition, or typed-data
+  problems; use workflow `if` and action-input `expr` where those semantics belong.
 - Use `wuko tree NAME` or `wuko tree --file PATH` to inspect expansion, conditions, retries, concurrency, and composite actions.
 - Use `wuko run NAME --dry-run` or `wuko run --file PATH --dry-run` to validate without running step effects.
 - Run a focused Go test first, then `go test ./...` when the failure may cross packages.

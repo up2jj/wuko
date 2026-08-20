@@ -217,3 +217,29 @@ func TestRunRendersStateAndEnvironment(t *testing.T) {
 		t.Fatalf("priority = %q", seen.Env["WUKO_ENGINE_PRIORITY"])
 	}
 }
+
+func TestRunRendersNamedTemplatesWithRuntimeState(t *testing.T) {
+	registry := step.NewRegistry()
+	if err := registry.Register("capture", func(raw map[string]any) (step.Runner, error) {
+		return countingRunner{value: raw["value"]}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	definition := &workflow.Definition{
+		Version: 1, Name: "named", Dir: t.TempDir(), Vars: map[string]any{"prefix": "artifact"},
+		Templates: map[string]workflow.TemplateDefinition{
+			"result": {Inline: `{{ .vars.prefix }}={{ .steps.prepare.value }}`},
+		},
+		Steps: []workflow.Step{
+			{ID: "prepare", Type: "capture", With: map[string]any{"value": "ready"}},
+			{ID: "consume", Type: "capture", With: map[string]any{"value": `{{ template "result" . }}`}},
+		},
+	}
+	state, err := New(registry).Run(t.Context(), definition, Options{RunDir: t.TempDir(), Stdout: io.Discard, Stderr: io.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := state.Steps["consume"].(map[string]any)["value"]; got != "artifact=ready" {
+		t.Fatalf("result = %v", got)
+	}
+}

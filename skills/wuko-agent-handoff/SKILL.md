@@ -26,7 +26,12 @@ Include these elements in order:
 - Verification commands and acceptance criteria.
 - Required final report: summary of changes, tests or checks run, results, and any remaining risks or follow-up.
 
-Use a file path for long task context instead of duplicating or truncating the brief inside YAML. Quote or template values safely, and avoid putting secrets in prompts, arguments, logs, or task files.
+Use a file path for long task context instead of duplicating or truncating the brief inside YAML.
+Keep one-off prompt substitutions inline. Use a named template only for a stable prompt fragment
+reused across providers, and use a file-backed template only for a reviewable reusable prompt
+skeleton—not as a second copy of the task brief. Avoid nested template chains that hide the final
+prompt. Templates return strings, so keep typed agent configuration explicit. Quote rendered
+values safely, and avoid putting secrets in prompts, arguments, logs, templates, or task files.
 
 ## Verification
 

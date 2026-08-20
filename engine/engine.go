@@ -41,6 +41,7 @@ type Options struct {
 	operationPrefix string
 	depth           int
 	runtime         *runRuntime
+	renderer        *workflow.Renderer
 }
 
 type State struct {
@@ -56,6 +57,13 @@ func New(registry *step.Registry) *Engine { return &Engine{registry: registry} }
 func (e *Engine) Validate(ctx context.Context, definition *workflow.Definition, options Options) error {
 	started := time.Now()
 	trace(options, diagnostic.Event{Phase: diagnostic.PhaseValidation, Status: diagnostic.StatusStarted, Time: started, WorkflowName: definition.Name, Location: definition.Location, Message: "validating workflow"})
+	if options.renderer == nil {
+		var err error
+		options.renderer, err = workflow.NewRenderer(definition.Templates)
+		if err != nil {
+			return err
+		}
+	}
 	state, err := initialState(definition, options)
 	if err != nil {
 		trace(options, diagnostic.Event{Phase: diagnostic.PhaseValues, Status: diagnostic.StatusFailed, WorkflowName: definition.Name, Location: definition.Location, Error: err})
@@ -108,7 +116,7 @@ func (e *Engine) validateSteps(ctx context.Context, definition *workflow.Definit
 			}
 		}
 		if workflowStep.Retry != nil && workflowStep.Retry.OperationID != "" {
-			if err := validateTemplates(workflowStep.Retry.OperationID, false); err != nil {
+			if err := validateTemplates(options.renderer, workflowStep.Retry.OperationID, false); err != nil {
 				traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusFailed, started, "validating retry operation ID", err)
 				return fmt.Errorf("step %q retry operation_id: %w", workflowStep.ID, err)
 			}
@@ -121,7 +129,7 @@ func (e *Engine) validateSteps(ctx context.Context, definition *workflow.Definit
 			traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusSucceeded, started, "", nil)
 			continue
 		}
-		if err := validateTemplates(workflowStep.With, workflowStep.Type == "lua"); err != nil {
+		if err := validateTemplates(options.renderer, workflowStep.With, workflowStep.Type == "lua"); err != nil {
 			traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusFailed, started, "validating templates", err)
 			return fmt.Errorf("step %q template: %w", workflowStep.ID, err)
 		}
@@ -147,6 +155,12 @@ func (e *Engine) validateSteps(ctx context.Context, definition *workflow.Definit
 
 func (e *Engine) Run(ctx context.Context, definition *workflow.Definition, options Options) (runState *State, runErr error) {
 	options = prepareRunOptions(options)
+	if options.renderer == nil {
+		options.renderer, runErr = workflow.NewRenderer(definition.Templates)
+		if runErr != nil {
+			return nil, runErr
+		}
+	}
 	state, err := initialState(definition, options)
 	if err != nil {
 		trace(options, diagnostic.Event{Phase: diagnostic.PhaseValues, Status: diagnostic.StatusFailed, WorkflowName: definition.Name, Location: definition.Location, Error: err})
@@ -278,7 +292,7 @@ func (e *Engine) executeStep(ctx context.Context, definition *workflow.Definitio
 		renderStarted := time.Now()
 		traceStep(options, definition, workflowStep, diagnostic.PhaseRender, diagnostic.StatusStarted, time.Time{}, "rendering step configuration", nil)
 		data := templateData(definition, options.RunDir, state)
-		rendered, err := renderValue(workflowStep.With, data, workflowStep.Type == "lua")
+		rendered, err := renderValue(options.renderer, workflowStep.With, data, workflowStep.Type == "lua")
 		if err != nil {
 			traceStep(options, definition, workflowStep, diagnostic.PhaseRender, diagnostic.StatusFailed, renderStarted, "", err)
 			stepErr := fmt.Errorf("workflow %q step %q (%s): rendering configuration: %w", definition.Name, workflowStep.ID, workflowStep.Type, err)
@@ -432,7 +446,7 @@ func (e *Engine) validateAction(ctx context.Context, definition *workflow.Defini
 	if workflowStep.Action == nil {
 		return fmt.Errorf("action was not resolved by the workflow loader")
 	}
-	if err := validateActionBindings(workflowStep.Action, workflowStep.With); err != nil {
+	if err := validateActionBindings(workflowStep.Action, workflowStep.With, options.renderer); err != nil {
 		return err
 	}
 	for name, output := range workflowStep.Action.Outputs {
@@ -446,7 +460,7 @@ func (e *Engine) validateAction(ctx context.Context, definition *workflow.Defini
 	}
 	defer cleanup()
 	inputs := actionValidationInputs(workflowStep.Action)
-	inner := &workflow.Definition{Version: 1, Name: workflowStep.Action.Name, Dir: dir, Steps: workflowStep.Action.Steps, Vars: map[string]any{}, Env: workflow.Environment{}, Location: workflowStep.Action.Location}
+	inner := &workflow.Definition{Version: 1, Name: workflowStep.Action.Name, Templates: workflowStep.Action.Templates, Dir: dir, Steps: workflowStep.Action.Steps, Vars: map[string]any{}, Env: workflow.Environment{}, Location: workflowStep.Action.Location}
 	return e.Validate(ctx, inner, Options{
 		inputs: inputs, BaseEnv: state.Env, RunDir: options.RunDir,
 		LocalValueDir: options.LocalValueDir, GlobalValueDir: options.GlobalValueDir,
@@ -456,7 +470,7 @@ func (e *Engine) validateAction(ctx context.Context, definition *workflow.Defini
 }
 
 func (e *Engine) prepareActionExecutor(definition *workflow.Definition, workflowStep workflow.Step, options Options, state *State) (stepExecutor, func(), error) {
-	inputs, err := resolveActionInputs(workflowStep.Action, workflowStep.With, templateData(definition, options.RunDir, state))
+	inputs, err := resolveActionInputs(workflowStep.Action, workflowStep.With, options.renderer, templateData(definition, options.RunDir, state))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -467,7 +481,7 @@ func (e *Engine) prepareActionExecutor(definition *workflow.Definition, workflow
 	if err != nil {
 		return nil, nil, err
 	}
-	inner := &workflow.Definition{Version: 1, Name: workflowStep.Action.Name, Dir: dir, Steps: workflowStep.Action.Steps, Vars: map[string]any{}, Env: workflow.Environment{}, Location: workflowStep.Action.Location}
+	inner := &workflow.Definition{Version: 1, Name: workflowStep.Action.Name, Templates: workflowStep.Action.Templates, Dir: dir, Steps: workflowStep.Action.Steps, Vars: map[string]any{}, Env: workflow.Environment{}, Location: workflowStep.Action.Location}
 	execute := func(ctx context.Context, request step.Request) (step.Result, error) {
 		innerState, err := e.Run(ctx, inner, Options{
 			inputs: inputs, BaseEnv: state.Env, RunDir: options.RunDir,
@@ -503,7 +517,7 @@ func (e *Engine) prepareActionExecutor(definition *workflow.Definition, workflow
 	return execute, cleanup, nil
 }
 
-func validateActionBindings(action *workflow.Action, bindings map[string]any) error {
+func validateActionBindings(action *workflow.Action, bindings map[string]any, renderer *workflow.Renderer) error {
 	for name, value := range bindings {
 		input, ok := action.Inputs[name]
 		if !ok {
@@ -533,7 +547,7 @@ func validateActionBindings(action *workflow.Action, bindings map[string]any) er
 		if !workflow.ActionDataValue(value) {
 			return fmt.Errorf("input %q is not a YAML/JSON-compatible value", name)
 		}
-		if err := validateTemplates(value, false); err != nil {
+		if err := validateTemplates(renderer, value, false); err != nil {
 			return fmt.Errorf("input %q template: %w", name, err)
 		}
 	}
@@ -568,8 +582,8 @@ func actionValidationInputs(action *workflow.Action) map[string]any {
 	return values
 }
 
-func resolveActionInputs(action *workflow.Action, bindings map[string]any, data map[string]any) (map[string]any, error) {
-	if err := validateActionBindings(action, bindings); err != nil {
+func resolveActionInputs(action *workflow.Action, bindings map[string]any, renderer *workflow.Renderer, data map[string]any) (map[string]any, error) {
+	if err := validateActionBindings(action, bindings, renderer); err != nil {
 		return nil, err
 	}
 	values := actionValidationInputs(action)
@@ -592,7 +606,7 @@ func resolveActionInputs(action *workflow.Action, bindings map[string]any, data 
 				value = literal
 			}
 		} else {
-			value, err = renderValue(value, data, false)
+			value, err = renderValue(renderer, value, data, false)
 			if err != nil {
 				return nil, fmt.Errorf("rendering input %q: %w", name, err)
 			}

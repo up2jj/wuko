@@ -138,6 +138,44 @@ func TestCompositeActionRunsSequentiallyWithTypedInputsAndDeclaredOutputs(t *tes
 	}
 }
 
+func TestCompositeActionKeepsCallerAndActionTemplatesIsolated(t *testing.T) {
+	registry := step.NewRegistry()
+	var order []string
+	if err := registry.Register("action_capture", func(raw map[string]any) (step.Runner, error) {
+		return actionCaptureRunner{value: raw["value"], order: &order}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	action := &workflow.Action{
+		Version: 1, Name: "composite", Dir: t.TempDir(),
+		Templates: map[string]workflow.TemplateDefinition{
+			"value": {Inline: `action={{ .inputs.target }}`},
+		},
+		Inputs:  map[string]workflow.ActionInput{"target": {Type: "string", Required: true}},
+		Outputs: map[string]workflow.ActionOutput{"result": {Value: "steps.render.value"}},
+		Steps: []workflow.Step{{
+			ID: "render", Type: "action_capture", With: map[string]any{"value": `{{ template "value" . }}`},
+		}},
+	}
+	definition := &workflow.Definition{
+		Version: 1, Name: "caller", Dir: t.TempDir(), Vars: map[string]any{"target": "linux"},
+		Templates: map[string]workflow.TemplateDefinition{
+			"value": {Inline: `caller={{ .vars.target }}`},
+		},
+		Steps: []workflow.Step{{
+			ID: "remote", Uses: workflow.ActionSource{URL: "https://example.test/action"}, Action: action,
+			With: map[string]any{"target": `{{ template "value" . }}`},
+		}},
+	}
+	state, err := New(registry).Run(t.Context(), definition, Options{RunDir: t.TempDir(), Stdout: io.Discard, Stderr: io.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := state.Steps["remote"].(map[string]any)["result"]; got != "action=caller=linux" {
+		t.Fatalf("result = %v", got)
+	}
+}
+
 func TestCompositeActionRejectsInputContractViolations(t *testing.T) {
 	registry := step.NewRegistry()
 	action := &workflow.Action{Version: 1, Name: "action", Inputs: map[string]workflow.ActionInput{"name": {Type: "string", Required: true}}, Steps: []workflow.Step{{ID: "run", Type: "capture", With: map[string]any{}}}}

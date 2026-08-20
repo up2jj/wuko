@@ -171,7 +171,7 @@ func waitForRetry(ctx context.Context, delay time.Duration) error {
 
 func executionOperationID(definition *workflow.Definition, workflowStep workflow.Step, options Options, state *State) (string, error) {
 	if workflowStep.Retry != nil && workflowStep.Retry.OperationID != "" {
-		operationID, err := workflow.RenderString(workflowStep.Retry.OperationID, templateData(definition, options.RunDir, state))
+		operationID, err := options.renderer.Render(workflowStep.Retry.OperationID, templateData(definition, options.RunDir, state))
 		if err != nil {
 			return "", fmt.Errorf("rendering retry operation_id: %w", err)
 		}

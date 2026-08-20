@@ -1,13 +1,11 @@
 package workflow
 
 import (
-	"bytes"
 	"fmt"
 	"maps"
 	"os"
 	"slices"
 	"strings"
-	"text/template"
 
 	"github.com/up2jj/wuko/diagnostic"
 )
@@ -27,6 +25,10 @@ type LoadOptions struct {
 
 // PrepareValues applies workflow and caller overrides using the same precedence as execution.
 func PrepareValues(definition *Definition, options LoadOptions) (map[string]any, map[string]string, error) {
+	renderer, err := NewRenderer(definition.Templates)
+	if err != nil {
+		return nil, nil, err
+	}
 	vars := CloneMap(definition.Vars)
 	for key, value := range options.Vars {
 		vars[key] = Clone(value)
@@ -39,7 +41,7 @@ func PrepareValues(definition *Definition, options LoadOptions) (map[string]any,
 	root := TemplateData(definition, options.RunDir, nil, vars, host, nil)
 	keys := slices.Sorted(maps.Keys(definition.Env))
 	for _, key := range keys {
-		value, err := RenderString(definition.Env[key], root)
+		value, err := renderer.Render(definition.Env[key], root)
 		if err != nil {
 			return nil, nil, fmt.Errorf("rendering workflow environment %s: %w", key, err)
 		}
@@ -77,15 +79,11 @@ func TemplateData(definition *Definition, runDir string, inputs, vars map[string
 
 // RenderString renders one strict Go-template string.
 func RenderString(value string, data map[string]any) (string, error) {
-	tmpl, err := template.New("value").Option("missingkey=error").Parse(value)
+	renderer, err := NewRenderer(nil)
 	if err != nil {
 		return "", err
 	}
-	var rendered bytes.Buffer
-	if err := tmpl.Execute(&rendered, data); err != nil {
-		return "", err
-	}
-	return rendered.String(), nil
+	return renderer.Render(value, data)
 }
 
 // EnvironmentValues converts a string environment to template-compatible values.

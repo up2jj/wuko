@@ -2,23 +2,21 @@ package engine
 
 import (
 	"fmt"
-	"text/template"
 
 	"github.com/up2jj/wuko/workflow"
 )
 
-func renderString(value string, data map[string]any) (string, error) {
-	return workflow.RenderString(value, data)
+func renderString(renderer *workflow.Renderer, value string, data map[string]any) (string, error) {
+	return renderer.Render(value, data)
 }
 
-func validateTemplates(value any, skipSource bool) error {
+func validateTemplates(renderer *workflow.Renderer, value any, skipSource bool) error {
 	switch typed := value.(type) {
 	case string:
-		_, err := template.New("value").Option("missingkey=error").Parse(typed)
-		return err
+		return renderer.Validate(typed)
 	case []any:
 		for _, item := range typed {
-			if err := validateTemplates(item, false); err != nil {
+			if err := validateTemplates(renderer, item, false); err != nil {
 				return err
 			}
 		}
@@ -27,7 +25,7 @@ func validateTemplates(value any, skipSource bool) error {
 			if skipSource && key == "source" {
 				continue
 			}
-			if err := validateTemplates(item, false); err != nil {
+			if err := validateTemplates(renderer, item, false); err != nil {
 				return fmt.Errorf("field %s: %w", key, err)
 			}
 		}
@@ -35,14 +33,14 @@ func validateTemplates(value any, skipSource bool) error {
 	return nil
 }
 
-func renderValue(value any, data map[string]any, skipSource bool) (any, error) {
+func renderValue(renderer *workflow.Renderer, value any, data map[string]any, skipSource bool) (any, error) {
 	switch typed := value.(type) {
 	case string:
-		return renderString(typed, data)
+		return renderString(renderer, typed, data)
 	case []any:
 		result := make([]any, len(typed))
 		for i, item := range typed {
-			rendered, err := renderValue(item, data, false)
+			rendered, err := renderValue(renderer, item, data, false)
 			if err != nil {
 				return nil, fmt.Errorf("item %d: %w", i, err)
 			}
@@ -56,7 +54,7 @@ func renderValue(value any, data map[string]any, skipSource bool) (any, error) {
 				result[key] = item
 				continue
 			}
-			rendered, err := renderValue(item, data, false)
+			rendered, err := renderValue(renderer, item, data, false)
 			if err != nil {
 				return nil, fmt.Errorf("field %s: %w", key, err)
 			}

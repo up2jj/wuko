@@ -82,6 +82,27 @@ steps:
 	}
 }
 
+func TestLoaderRendersActionSourceWithNamedTemplate(t *testing.T) {
+	client := testHTTPClient(func(request *http.Request) (*http.Response, error) {
+		if request.URL.Path != "/v2/build" {
+			t.Fatalf("path = %q", request.URL.Path)
+		}
+		return testResponse(http.StatusOK, []byte(validAction)), nil
+	})
+	workflowPath := writeActionWorkflow(t, `version: 1
+name: caller
+templates:
+  action_url: https://actions.example.test/v2/build
+steps:
+  - id: build
+    uses: '{{ template "action_url" . }}'
+    with: {target: linux}
+`)
+	if _, err := NewLoader(client).Load(t.Context(), workflowPath, LoadOptions{}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestLoaderResolvesActionInsideConcurrentGroup(t *testing.T) {
 	client := testHTTPClient(func(*http.Request) (*http.Response, error) {
 		return testResponse(http.StatusOK, []byte(validAction)), nil
@@ -160,6 +181,53 @@ func TestLoaderSupportsZIPAndTarGzipPackages(t *testing.T) {
 				t.Fatalf("temporary action directory remains: %v", err)
 			}
 		})
+	}
+}
+
+func TestLoaderResolvesTemplateFileFromActionPackage(t *testing.T) {
+	manifest := `version: 1
+name: templated-action
+templates:
+  message:
+    file: templates/message.tmpl
+steps:
+  - id: render
+    type: capture
+    with:
+      value: '{{ template "message" . }}'
+`
+	payload := makeZIP(t, map[string]archiveTestFile{
+		"action.yml":             {data: []byte(manifest), mode: 0o644},
+		"templates/message.tmpl": {data: []byte("Hello {{ .inputs.name }}"), mode: 0o644},
+	})
+	client := testHTTPClient(func(*http.Request) (*http.Response, error) { return testResponse(http.StatusOK, payload), nil })
+	path := writeActionWorkflow(t, "version: 1\nname: caller\nsteps:\n  - id: remote\n    uses: https://actions.example.test/package\n")
+	definition, err := NewLoader(client).Load(t.Context(), path, LoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := definition.Steps[0].Action.Templates["message"].Body; got != "Hello {{ .inputs.name }}" {
+		t.Fatalf("template body = %q", got)
+	}
+}
+
+func TestLoaderRejectsTemplateFileInStandaloneAction(t *testing.T) {
+	manifest := `version: 1
+name: standalone
+templates:
+  message:
+    file: templates/message.tmpl
+steps:
+  - id: run
+    type: capture
+`
+	client := testHTTPClient(func(*http.Request) (*http.Response, error) {
+		return testResponse(http.StatusOK, []byte(manifest)), nil
+	})
+	path := writeActionWorkflow(t, "version: 1\nname: caller\nsteps:\n  - id: remote\n    uses: https://actions.example.test/action\n")
+	_, err := NewLoader(client).Load(t.Context(), path, LoadOptions{})
+	if err == nil || !strings.Contains(err.Error(), "requires a packaged action") {
+		t.Fatalf("error = %v", err)
 	}
 }
 
