@@ -10,8 +10,8 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
 ## Workflow
 
 1. Inspect `README.md`, nearby workflows, referenced files, and the repository state before editing. Treat the task brief and existing workflow behavior as requirements.
-2. Model the workflow with `version: 1`, a stable `name`, a useful `description`, explicit `vars` and `env`, and an ordered `steps` list.
-3. Choose the smallest appropriate step type. Keep dependent work sequential; use `concurrent` only for independent children and put consumers after the group.
+2. Model the workflow with `version: 1`, a stable `name`, a useful `description`, explicit `vars` and `env`, and an ordered `steps` list. Wuko does not infer a dependency graph or reorder steps.
+3. Choose the smallest appropriate step type. Declare every producer before its consumers. Use `concurrent` only for independent children and put consumers after the complete group.
 4. Render dynamic values with the documented template roots. Use `if` only for boolean expressions and guard references to skipped steps with membership checks.
 5. Keep local paths relative to the file or workflow context that resolves them. Preserve unique step IDs across required files, concurrent children, and composite actions.
 6. Treat shell, Lua, Docker, remote actions, and agents as trusted executable code. Keep credentials in environment values, never in workflow text, arguments, URLs, logs, or operation IDs.
@@ -33,6 +33,7 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
 
 ## Important behavior
 
+- Step outputs and variables are committed only after success and are available only to later sequential steps. A forward `.steps` reference fails at runtime; a skipped producer is absent from `steps`.
 - Use `require` for local step files and keep required paths relative to the containing workflow file.
 - Supply invocation-time JSON or TOML variables with repeatable `--var-file`; later files replace
   earlier top-level values and explicit `--var` entries take final initial-state precedence.

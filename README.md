@@ -30,6 +30,7 @@ commands or inline shell, and launch an external agent such as Codex.
   - [ClickUp task agent example](#clickup-task-agent-example)
   - [Remote workflows](#remote-workflows)
 - [Workflow schema](#workflow-schema)
+  - [Execution order and step outputs](#execution-order-and-step-outputs)
   - [Splitting steps across files](#splitting-steps-across-files)
   - [Conditional steps](#conditional-steps)
   - [Concurrent steps](#concurrent-steps)
@@ -254,6 +255,40 @@ typed `args` instead.
 
 Environment precedence is step environment, CLI `--env`, workflow environment, then the host
 environment. Environment values are not shown by dry-run output.
+
+### Execution order and step outputs
+
+Top-level steps run in the order they are declared. After a step succeeds, Wuko commits its
+outputs beneath `.steps.<id>` and any variables it writes beneath `.vars`; only later sequential
+steps can read those values. There is no dependency graph or `needs` field in schema version 1.
+
+For example, `package` can consume `build` output because it appears after `build`:
+
+```yaml
+steps:
+  - id: build
+    type: shell
+    with:
+      command: ./build
+
+  - id: package
+    type: shell
+    with:
+      command: ./package
+      args: ["{{ .steps.build.stdout }}"]
+```
+
+References in templated strings use `.steps.<id>.<output>`. Conditions and other Expr expressions
+omit the leading dot and use `steps.<id>.<output>`. Declaring `package` before `build` does not make
+Wuko reorder the steps: the output is still unavailable, and resolving the missing field fails at
+runtime. Template validation checks syntax before execution, but it cannot supply or validate
+outputs that do not exist until earlier steps run.
+
+A failed step stops the workflow and does not commit its outputs or variables. A skipped step also
+commits nothing and is absent from `steps`; guard optional consumers as described under
+[Conditional steps](#conditional-steps). A `concurrent` group is one ordering boundary: its children
+cannot consume sibling results, and their outputs become available only to steps after the whole
+group succeeds.
 
 ### Splitting steps across files
 
