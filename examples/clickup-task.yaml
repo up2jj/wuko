@@ -150,7 +150,7 @@ steps:
     if: vars.agent == "codex"
     with:
       command: codex
-      args: [exec, --sandbox, workspace-write, -]
+      args: [exec, --sandbox, workspace-write, '-']
       prompt: |
         Implement ClickUp task {{ .steps.fetch.task.id }}: {{ .steps.fetch.task.name }}.
 
