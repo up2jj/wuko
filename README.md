@@ -159,6 +159,9 @@ action reference.
 `wuko list` shows the effective workflows and labels each one as `local` or `global`. Bare `wuko`
 also includes shadowed definitions from other scopes.
 
+For the complete discovery rules and command behavior, see
+[Workflow discovery](docs/workflow-discovery.md).
+
 ### ClickUp task agent example
 
 [`examples/clickup-task.yaml`](examples/clickup-task.yaml) is a complete task-start workflow. It
