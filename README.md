@@ -5,9 +5,62 @@ composed from independently registered Go step packages. The built-in steps coll
 password input, select one or more choices, run Lua automation, execute commands or inline shell,
 and launch an external agent such as Codex.
 
+## Features
+
+- Discover local and global workflows from an interactive terminal picker or with `wuko list`.
+- Define strict, versioned YAML workflows with variables, environment values, Go templates, and
+  conditional steps.
+- Run steps sequentially or concurrently, with retries, timeouts, dry runs, execution trees, live
+  progress, and run statistics.
+- Use built-in input, password, choice, key-value, Lua, shell, agent, and Docker steps.
+- Split workflows across local files with `require`, or reuse remote workflows and composite
+  actions from HTTPS URLs and GitHub locators.
+- Integrate with `direnv` and pass values explicitly with `--var` and `--env`.
+- Automate development tasks locally while keeping workflow code visible and reviewable.
+
+## Table of Contents
+
+- [Features](#features)
+- [Install](#install)
+- [GitHub Actions comparison](#github-actions-comparison)
+- [Workflow discovery](#workflow-discovery)
+  - [ClickUp task agent example](#clickup-task-agent-example)
+  - [Remote workflows](#remote-workflows)
+- [Workflow schema](#workflow-schema)
+  - [Splitting steps across files](#splitting-steps-across-files)
+  - [Conditional steps](#conditional-steps)
+  - [Concurrent steps](#concurrent-steps)
+  - [Retries and execution timeouts](#retries-and-execution-timeouts)
+  - [Execution progress and statistics](#execution-progress-and-statistics)
+  - [Remote composite actions](#remote-composite-actions)
+  - [Input](#input)
+  - [Password](#password)
+  - [Choice](#choice)
+  - [Key-value stores](#key-value-stores)
+  - [Lua](#lua)
+  - [Shell and agent](#shell-and-agent)
+  - [Docker](#docker)
+- [Trust model](#trust-model)
+
 ## Install
 
-Wuko requires Go 1.26 or newer.
+### Homebrew
+
+On macOS, install the latest released cask from the Wuko Homebrew tap:
+
+```sh
+brew install --cask up2jj/tap/wuko
+```
+
+Upgrade an existing installation with:
+
+```sh
+brew upgrade --cask wuko
+```
+
+### Go
+
+Wuko requires Go 1.26 or newer. Install the latest version with:
 
 ```sh
 go install github.com/up2jj/wuko@latest
@@ -23,6 +76,27 @@ just test
 Run `just hooks` once to install the prek pre-commit and pre-push hooks. Use
 `prek run --all-files` to run every hook manually, and `just snapshot` to build
 local release archives without publishing them.
+
+## GitHub Actions comparison
+
+Wuko and [GitHub Actions](https://docs.github.com/en/actions) both describe automation as
+workflows made up of steps, but they target different environments:
+
+| | Wuko | GitHub Actions |
+| --- | --- | --- |
+| Primary use | Repeatable development workflows run locally | Hosted CI/CD triggered by GitHub events or manual dispatch |
+| Runtime | The machine where the `wuko` command is run | GitHub-hosted or self-hosted runners |
+| Definition format | Wuko's strict, versioned YAML schema | GitHub Actions workflow syntax under `.github/workflows/` |
+| Built-in operations | Interactive input, Lua, shell, agents, Docker, and local key-value stores | Jobs, runners, marketplace actions, matrices, artifacts, and GitHub integrations |
+| Secrets and context | Explicit CLI/environment values and the host environment | GitHub-provided contexts, secrets, variables, and permissions |
+
+Wuko is **not compatible with GitHub Actions**. A GitHub Actions workflow cannot be run directly
+by Wuko, and Wuko workflow files cannot be used as GitHub Actions workflows. In particular, Wuko
+does not implement GitHub Actions events, job syntax, runner labels, marketplace actions, or
+GitHub Actions expressions. Choose Wuko for local, interactive development automation; choose
+GitHub Actions for repository-hosted CI/CD. They can still be used together—for example, a GitHub
+Actions job can install Wuko and invoke a Wuko workflow as a command—but the workflow definitions
+remain separate.
 
 ## Workflow discovery
 
@@ -65,6 +139,31 @@ action reference.
 
 `wuko list` shows the effective workflows and labels each one as `local` or `global`. Bare `wuko`
 also includes shadowed definitions from other scopes.
+
+### ClickUp task agent example
+
+[`examples/clickup-task.yaml`](examples/clickup-task.yaml) is a complete task-start workflow. It
+asks for a ClickUp task ID, downloads its Markdown description, creates a task branch, and launches
+either Claude Code or Codex with a prepopulated implementation prompt.
+
+Set a ClickUp personal API token in `CLICKUP_TOKEN`. Native task IDs work without any other ClickUp
+configuration. For a custom task ID, also set `CLICKUP_TEAM_ID` to the numeric Workspace ID; the
+workflow then sends ClickUp's `custom_task_ids` and `team_id` query parameters. The selected agent
+CLI must already be installed and authenticated. Run the workflow from the repository root.
+
+```sh
+export CLICKUP_TOKEN=pk_...
+# Required only for custom task IDs:
+export CLICKUP_TEAM_ID=123456
+
+wuko run --file ./examples/clickup-task.yaml
+```
+
+The task brief is written to `.wuko/context/<task-id>.md`, which this repository ignores. The
+branch is named `<task-id>_<lowercase-task-name-slug>`. Before creating it, the workflow rejects a
+dirty working tree, an invalid generated name, or an existing local or remote branch. It does not
+reuse ClickUp MCP authentication because Wuko performs the HTTP request before starting an agent;
+the API token is used only in the request's `Authorization` header.
 
 `wuko tree NAME` prints the workflow's steps as a tree. Remote composite actions are expanded to
 show their internal steps, and conditional steps include their `if` expression. Like `run`, `tree`

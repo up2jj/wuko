@@ -1,0 +1,160 @@
+version: 1
+name: clickup-task
+description: Fetch a ClickUp task, create a branch, and hand it to Claude or Codex
+
+steps:
+  - id: task_id
+    type: input
+    with:
+      variable: task_id
+      message: Enter the ClickUp task ID
+      modifiers:
+        trim: true
+      validation:
+        pattern: '^[A-Za-z0-9][A-Za-z0-9_-]*$'
+        message: Use only letters, numbers, hyphens, and underscores
+
+  - id: fetch
+    type: lua
+    with:
+      source: |
+        local token = wuko.env.get("CLICKUP_TOKEN")
+        if token == nil or token == "" then
+          error("CLICKUP_TOKEN is required")
+        end
+
+        local task_id = wuko.args.task_id
+        local url = wuko.args.api_base_url .. "/task/" .. task_id .. "?include_markdown_description=true"
+        local team_id = wuko.env.get("CLICKUP_TEAM_ID")
+        if team_id ~= nil and team_id ~= "" then
+          if string.match(team_id, "^%d+$") == nil then
+            error("CLICKUP_TEAM_ID must contain only digits")
+          end
+          url = url .. "&custom_task_ids=true&team_id=" .. team_id
+        end
+
+        local response = wuko.http.request({
+          method = "GET",
+          url = url,
+          headers = {Authorization = token},
+          timeout = 30,
+        })
+        if response.status ~= 200 then
+          error("ClickUp request failed with HTTP " .. response.status)
+        end
+
+        local task = wuko.json.decode(response.body)
+        if type(task.name) ~= "string" or task.name == "" then
+          error("ClickUp response is missing the task name")
+        end
+
+        local description = task.markdown_description
+        if type(description) ~= "string" or description == "" then
+          description = task.description
+        end
+        if type(description) ~= "string" or description == "" then
+          description = "_No description provided._"
+        end
+
+        local slug = string.lower(task.name)
+        slug = string.gsub(slug, "[^%w]+", "-")
+        slug = string.gsub(slug, "^-+", "")
+        slug = string.gsub(slug, "-+$", "")
+        slug = string.sub(slug, 1, 80)
+        slug = string.gsub(slug, "-+$", "")
+        if slug == "" then
+          slug = "task"
+        end
+
+        local branch = task_id .. "_" .. slug
+        local markdown_path = ".wuko/context/" .. task_id .. ".md"
+        local task_url = task.url
+        if type(task_url) ~= "string" then
+          task_url = ""
+        end
+
+        local metadata = "- **Task ID:** `" .. task_id .. "`\n"
+        if task_url ~= "" then
+          metadata = metadata .. "- **ClickUp:** [Open task](" .. task_url .. ")\n"
+        end
+        local markdown = "# " .. task.name .. "\n\n" .. metadata .. "\n" .. description .. "\n"
+
+        wuko.fs.mkdir_all(".wuko/context")
+        wuko.fs.write(markdown_path, markdown)
+        wuko.output("task", {id = task_id, name = task.name, url = task_url})
+        wuko.output("branch", branch)
+        wuko.output("markdown_path", markdown_path)
+      args:
+        task_id: "{{ .vars.task_id }}"
+        api_base_url: https://api.clickup.com/api/v2
+
+  - id: branch
+    type: shell
+    with:
+      script: |
+        set -eu
+        branch=$1
+
+        if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+          echo "not inside a Git working tree" >&2
+          exit 1
+        fi
+        if ! git check-ref-format --branch "$branch" >/dev/null 2>&1; then
+          echo "generated branch name is invalid: $branch" >&2
+          exit 1
+        fi
+
+        dirty=$(git status --porcelain --untracked-files=normal)
+        if [ -n "$dirty" ]; then
+          echo "working tree has uncommitted changes" >&2
+          exit 1
+        fi
+        if git show-ref --verify --quiet "refs/heads/$branch"; then
+          echo "local branch already exists: $branch" >&2
+          exit 1
+        fi
+        remote=$(git for-each-ref --format='%(refname)' "refs/remotes/*/$branch")
+        if [ -n "$remote" ]; then
+          echo "remote branch already exists: $branch" >&2
+          exit 1
+        fi
+
+        git switch -c "$branch"
+      args: ["{{ .steps.fetch.branch }}"]
+
+  - id: agent
+    type: choice
+    with:
+      variable: agent
+      message: Select the agent to run
+      choices:
+        - {label: Claude, value: claude}
+        - {label: Codex, value: codex}
+
+  - id: claude
+    type: agent
+    if: vars.agent == "claude"
+    with:
+      command: claude
+      args: [--print, --permission-mode, acceptEdits]
+      prompt: |
+        Implement ClickUp task {{ .steps.fetch.task.id }}: {{ .steps.fetch.task.name }}.
+
+        Read the complete task brief from {{ .steps.fetch.markdown_path }} and treat it as the
+        source of requirements. You are already on branch {{ .steps.fetch.branch }}; do not switch
+        branches. Inspect the repository, implement the task, run the relevant tests, and finish
+        with a concise summary of changes and verification performed.
+
+  - id: codex
+    type: agent
+    if: vars.agent == "codex"
+    with:
+      command: codex
+      args: [exec, --sandbox, workspace-write, -]
+      prompt: |
+        Implement ClickUp task {{ .steps.fetch.task.id }}: {{ .steps.fetch.task.name }}.
+
+        Read the complete task brief from {{ .steps.fetch.markdown_path }} and treat it as the
+        source of requirements. You are already on branch {{ .steps.fetch.branch }}; do not switch
+        branches. Inspect the repository, implement the task, run the relevant tests, and finish
+        with a concise summary of changes and verification performed.
