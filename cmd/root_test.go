@@ -58,6 +58,34 @@ steps:
 	}
 }
 
+func TestRootCommandRegistersJSONPathStep(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "jsonpath.yaml")
+	data := `version: 1
+name: jsonpath
+vars:
+  document: {project: {name: wuko}}
+steps:
+  - id: name
+    type: jsonpath
+    with:
+      from: vars.document
+      query: $.project.name
+      result: one
+`
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	command := NewRootCmd()
+	command.SetIn(bytes.NewReader(nil))
+	command.SetOut(io.Discard)
+	command.SetErr(io.Discard)
+	command.SetArgs([]string{"run", "--file", path})
+	if err := command.ExecuteContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRunCommandImportsVariableFilesBeforeInlineOverrides(t *testing.T) {
 	root := t.TempDir()
 	workflowDir := filepath.Join(root, ".wuko", "workflows")

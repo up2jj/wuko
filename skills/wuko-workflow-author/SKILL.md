@@ -1,6 +1,6 @@
 ---
 name: wuko-workflow-author
-description: Create or update Wuko version-1 YAML workflows, including templates, conditions, required files, composite actions, retries, concurrency, interactive prompts, typed and imported variables, HTTP, files, Lua, shell, Docker, and agent steps. Use when designing workflow files, extending existing workflows, or reviewing workflow structure before execution.
+description: Create or update Wuko version-1 YAML workflows, including templates, conditions, required files, composite actions, retries, concurrency, interactive prompts, typed and imported variables, JSONPath selection, HTTP, files, Lua, shell, Docker, and agent steps. Use when designing workflow files, extending existing workflows, or reviewing workflow structure before execution.
 ---
 
 # Wuko Workflow Author
@@ -24,6 +24,9 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
   needs imperative logic.
 - Use `import_vars` for runtime JSON or TOML variable files. Keep its ordered `files` paths
   relative to the owning workflow or action, and remember imported keys normalize to lowercase.
+- Use `jsonpath` for RFC 9535 selection from a typed `vars` or `steps` value. Use `result: all`
+  for a nodelist and `result: one` only when exactly one match is required; read normalized match
+  locations from `paths`. Use Lua when the selected data also needs transformation or mutation.
 - Use `http` for structured API calls with typed JSON responses, status validation, retries, and
   timeouts. Keep authorization values in environment-backed headers.
 - Use `file` for auditable read, write, copy, move, remove, mkdir, list, stat, and chmod operations.

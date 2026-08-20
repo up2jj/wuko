@@ -12,8 +12,8 @@ commands or inline shell, and launch an external agent such as Codex.
   conditional steps.
 - Run steps sequentially or concurrently, with retries, timeouts, dry runs, execution trees, live
   progress, and run statistics.
-- Use built-in input, password, choice, confirm, set, `import_vars`, HTTP, file, key-value, Lua,
-  shell, agent, and Docker steps.
+- Use built-in input, password, choice, confirm, set, `import_vars`, JSONPath, HTTP, file,
+  key-value, Lua, shell, agent, and Docker steps.
 - Split workflows across local files with `require`, or reuse remote workflows and composite
   actions from HTTPS URLs and GitHub locators.
 - Integrate with `direnv`, import JSON or TOML variable files, and pass values explicitly with
@@ -45,6 +45,7 @@ commands or inline shell, and launch an external agent such as Codex.
     - [Confirm](#confirm)
     - [Set](#set)
     - [Import variables](#import-variables)
+    - [JSONPath](#jsonpath)
     - [HTTP](#http)
     - [File](#file)
     - [Key-value stores](#key-value-stores)
@@ -903,6 +904,33 @@ import.
 
 See [Variable imports](docs/variable-imports.md) for nested-value access from templates and Lua,
 merge examples, concurrency rules, and format-extension guidance.
+
+#### JSONPath
+
+Use `jsonpath` to select values from a typed workflow value with an
+[RFC 9535](https://www.rfc-editor.org/rfc/rfc9535.html) query:
+
+```yaml
+- id: active_projects
+  type: jsonpath
+  with:
+    from: steps.fetch.value
+    query: "$.projects[?@.active == true].id"
+    result: all
+    variable: active_project_ids
+```
+
+`from` is a dotted path rooted at `vars` or `steps`. The query runs against that value after the
+step configuration is rendered. `result` defaults to `all`, which writes the ordered nodelist to
+`.steps.<id>.value` and, when configured, to `variable`; no matches produce an empty list. Set
+`result: one` to require exactly one match and return that value as a scalar. Zero or multiple
+matches then fail the step without committing outputs or variables.
+
+Every successful result also exposes the integer match `count` and `paths`, a list of normalized
+RFC 9535 paths corresponding to the selected values. Duplicate selections are preserved because
+JSONPath results are nodelists, not sets. Evaluation is in-memory; use file-backed processing for
+datasets too large to keep in workflow state. JSONPath selects data but does not transform or
+modify it.
 
 #### HTTP
 
