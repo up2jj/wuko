@@ -12,7 +12,8 @@ and launch an external agent such as Codex.
   conditional steps.
 - Run steps sequentially or concurrently, with retries, timeouts, dry runs, execution trees, live
   progress, and run statistics.
-- Use built-in input, password, choice, key-value, Lua, shell, agent, and Docker steps.
+- Use built-in input, password, choice, confirm, set, HTTP, file, key-value, Lua, shell, agent,
+  and Docker steps.
 - Split workflows across local files with `require`, or reuse remote workflows and composite
   actions from HTTPS URLs and GitHub locators.
 - Integrate with `direnv` and pass values explicitly with `--var` and `--env`.
@@ -39,6 +40,10 @@ and launch an external agent such as Codex.
     - [Input](#input)
     - [Password](#password)
     - [Choice](#choice)
+    - [Confirm](#confirm)
+    - [Set](#set)
+    - [HTTP](#http)
+    - [File](#file)
     - [Key-value stores](#key-value-stores)
     - [Lua](#lua)
     - [Shell and agent](#shell-and-agent)
@@ -101,7 +106,7 @@ workflows made up of steps, but they target different environments:
 | Primary use | Repeatable development workflows run locally | Hosted CI/CD triggered by GitHub events or manual dispatch |
 | Runtime | The machine where the `wuko` command is run | GitHub-hosted or self-hosted runners |
 | Definition format | Wuko's strict, versioned YAML schema | GitHub Actions workflow syntax under `.github/workflows/` |
-| Built-in operations | Interactive input, Lua, shell, agents, Docker, and local key-value stores | Jobs, runners, marketplace actions, matrices, artifacts, and GitHub integrations |
+| Built-in operations | Interactive prompts, typed values, HTTP, files, Lua, shell, agents, Docker, and key-value stores | Jobs, runners, marketplace actions, matrices, artifacts, and GitHub integrations |
 | Secrets and context | Explicit CLI/environment values and the host environment | GitHub-provided contexts, secrets, variables, and permissions |
 
 Wuko is **not compatible with GitHub Actions**. A GitHub Actions workflow cannot be run directly
@@ -754,6 +759,146 @@ Typed multi-selection from an earlier output:
 Dynamic sources must be non-empty lists. Scalar items are both label and value. Object lists use
 `label_field` and `value_field`, including dotted paths. Single selection writes a scalar;
 multi-selection writes an ordered list.
+
+#### Confirm
+
+Use `confirm` for a boolean decision. `default` controls the initially selected interactive
+answer; it does not silently answer a non-interactive prompt:
+
+```yaml
+- id: approval
+  type: confirm
+  with:
+    variable: approved
+    message: Deploy this release?
+    default: false
+
+- id: deploy
+  type: shell
+  if: vars.approved
+  with:
+    command: ./deploy
+```
+
+The result is written to both `.steps.approval.value` and `.vars.approved`. A pre-supplied value
+must be a boolean. Supply it explicitly for non-interactive execution, for example
+`wuko run release --var approved=true`. Confirm steps inside a concurrent group likewise require a
+pre-supplied value.
+
+#### Set
+
+Use `set` to assign a typed literal or evaluate an Expr expression without dropping into Lua.
+Exactly one of `value` or `expr` is required:
+
+```yaml
+- id: defaults
+  type: set
+  with:
+    variable: deployment
+    value:
+      enabled: true
+      retries: 3
+      regions: [eu-central, us-east]
+
+- id: artifact
+  type: set
+  with:
+    variable: artifact_name
+    expr: 'steps.release.value.version + "-" + vars.target + ".tar.gz"'
+```
+
+Expressions use the `inputs`, `vars`, `env`, `steps`, `workflow`, and `run` roots used by
+conditions. The JSON-compatible result is available through both `.steps.<id>.value` and the
+configured variable. Invalid expressions fail validation; missing runtime fields and
+non-JSON-compatible results fail the step without committing its variable.
+
+#### HTTP
+
+Use `http` for structured HTTP API calls. Requests default to `GET`; successful responses default
+to any `2xx` status; and response bodies default to text:
+
+```yaml
+- id: release
+  type: http
+  timeout: 30s
+  retry:
+    max_attempts: 3
+  with:
+    method: GET
+    url: https://api.example.com/releases/latest
+    headers:
+      Authorization: "Bearer {{ .env.API_TOKEN }}"
+    query:
+      channel: stable
+    response: json
+    success_statuses: [200]
+```
+
+Supply at most one of `body` or `json`. `json` is encoded as JSON and adds
+`Content-Type: application/json` unless the header is already present.
+
+Supported response modes are:
+
+- `text` (the default): exposes the raw response body as a string in `.steps.<id>.value`.
+- `json`: requires exactly one JSON value and exposes its typed object, array, string, number,
+  boolean, or null value in `.steps.<id>.value`.
+
+Every response also exposes the raw body string as `body`, the integer status code as `status`, and
+`headers`, whose values are lists so repeated headers are preserved. There are currently no
+dedicated binary, base64, YAML, XML, form-data, file-download, or streaming response modes.
+
+Only HTTP and HTTPS URLs with a host and without embedded user information are accepted. The
+response body is limited to 10 MiB. Redirects may upgrade HTTP to HTTPS, but they may not change
+host or port or downgrade HTTPS to HTTP, which prevents configured headers from crossing a trust
+boundary. Top-level `timeout` and `retry` policies control cancellation and repeated attempts. A
+status outside `success_statuses`, or outside `2xx` when the list is omitted, fails the step.
+
+#### File
+
+The `file` step provides strict filesystem operations relative to the run directory. Create a
+file atomically and then make it executable:
+
+```yaml
+- id: write_script
+  type: file
+  with:
+    operation: write
+    path: scripts/release.sh
+    content: |
+      #!/bin/sh
+      exec ./release "{{ .vars.version }}"
+    overwrite: true
+    mode: "0755"
+
+- id: make_executable
+  type: file
+  with:
+    operation: chmod
+    path: scripts/release.sh
+    mode: "0755"
+```
+
+Supported operations and their extra fields are:
+
+- `read`: outputs text `content` and `size`.
+- `write`: requires `content`; accepts `overwrite` and `mode`; outputs `size`, `mode`, and
+  `created`.
+- `copy` and `move`: require `destination`, accept `overwrite`, and output the resolved source and
+  destination, `size`, and `mode`. Copy accepts regular files and preserves their permissions.
+  Move also works across filesystems by staging a copy before removing the source.
+- `remove`: accepts `recursive`; outputs `removed`. Missing paths are not errors.
+- `mkdir`: accepts `recursive` and `mode`; outputs `created` and `mode`.
+- `list`: accepts `recursive`; outputs path-sorted `entries` with `name`, relative `path`, `type`,
+  `size`, `mode`, and `modified_at`.
+- `stat`: outputs `exists` plus the same metadata when the path exists.
+- `chmod`: requires `mode` and outputs the normalized mode.
+
+Modes must be quoted four-digit octal strings from `"0000"` through `"0777"`; special permission
+bits are not supported. New files default to `"0644"` and new directories to `"0755"`.
+Overwriting a file without `mode` preserves its permissions. Chmod rejects symbolic links. Remove
+rejects filesystem roots and the run directory, and a non-empty directory requires
+`recursive: true`. Absolute paths remain available because Wuko workflows are trusted code, not a
+filesystem sandbox.
 
 #### Key-value stores
 

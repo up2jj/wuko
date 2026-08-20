@@ -1,0 +1,169 @@
+package http
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	nethttp "net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
+	"testing"
+
+	"github.com/up2jj/wuko/step"
+)
+
+func TestJSONRequestAndResponse(t *testing.T) {
+	server := httptest.NewServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
+		if request.Method != nethttp.MethodPost || request.URL.Query().Get("channel") != "stable" {
+			t.Errorf("request = %s %s", request.Method, request.URL.String())
+		}
+		if request.Header.Get("Authorization") != "Bearer token" || request.Header.Get("Content-Type") != "application/json" {
+			t.Errorf("headers = %#v", request.Header)
+		}
+		data, _ := io.ReadAll(request.Body)
+		if string(data) != `{"name":"wuko"}` {
+			t.Errorf("body = %q", data)
+		}
+		writer.Header().Add("X-Result", "one")
+		writer.Header().Add("X-Result", "two")
+		writer.WriteHeader(nethttp.StatusCreated)
+		fmt.Fprint(writer, `{"version":"v1","ready":true}`)
+	}))
+	defer server.Close()
+
+	runner, err := New(map[string]any{
+		"url": server.URL, "method": "post", "headers": map[string]any{"Authorization": "Bearer token"},
+		"query": map[string]any{"channel": "stable"}, "json": map[string]any{"name": "wuko"},
+		"response": "json", "success_statuses": []any{201},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runner.Run(t.Context(), step.Request{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Outputs["status"] != 201 || result.Outputs["value"].(map[string]any)["version"] != "v1" {
+		t.Fatalf("outputs = %#v", result.Outputs)
+	}
+	headers := result.Outputs["headers"].(map[string]any)
+	if got := headers["X-Result"].([]any); len(got) != 2 {
+		t.Fatalf("headers = %#v", headers)
+	}
+}
+
+func TestStatusAndResponseErrors(t *testing.T) {
+	server := httptest.NewServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, _ *nethttp.Request) {
+		writer.WriteHeader(nethttp.StatusTeapot)
+		fmt.Fprint(writer, "no")
+	}))
+	defer server.Close()
+	runner, err := New(map[string]any{"url": server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runner.Run(t.Context(), step.Request{})
+	if err == nil || result.Outputs["status"] != nethttp.StatusTeapot {
+		t.Fatalf("result = %#v, error = %v", result, err)
+	}
+
+	runner, err = New(map[string]any{"url": server.URL, "response": "json", "success_statuses": []any{418}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runner.Run(t.Context(), step.Request{}); err == nil || !strings.Contains(err.Error(), "decoding JSON") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestResponseLimitAndCancellation(t *testing.T) {
+	large := httptest.NewServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, _ *nethttp.Request) {
+		writer.Header().Set("Content-Length", fmt.Sprint(maxResponseSize+1))
+		writer.WriteHeader(nethttp.StatusOK)
+	}))
+	defer large.Close()
+	runner, err := New(map[string]any{"url": large.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runner.Run(t.Context(), step.Request{}); err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("error = %v", err)
+	}
+
+	canceled := httptest.NewServer(nethttp.HandlerFunc(func(_ nethttp.ResponseWriter, request *nethttp.Request) {
+		<-request.Context().Done()
+	}))
+	defer canceled.Close()
+	runner, err = New(map[string]any{"url": canceled.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = runner.Run(ctx, step.Request{})
+	if err == nil || !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestRedirectPolicyRejectsCredentialBoundaryChanges(t *testing.T) {
+	client := newClient()
+	tests := []struct {
+		name    string
+		from    string
+		to      string
+		wantErr bool
+	}{
+		{name: "same origin", from: "https://api.example.com/start", to: "https://api.example.com/next"},
+		{name: "https upgrade", from: "http://api.example.com/start", to: "https://api.example.com/next"},
+		{name: "https downgrade", from: "https://api.example.com/start", to: "http://api.example.com/next", wantErr: true},
+		{name: "different host", from: "https://api.example.com/start", to: "https://redirect.example.net/next", wantErr: true},
+		{name: "different port", from: "https://api.example.com/start", to: "https://api.example.com:8443/next", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			from, err := url.Parse(tt.from)
+			if err != nil {
+				t.Fatal(err)
+			}
+			to, err := url.Parse(tt.to)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = client.CheckRedirect(&nethttp.Request{URL: to}, []*nethttp.Request{{URL: from}})
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("CheckRedirect() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestRejectsInvalidConfiguration(t *testing.T) {
+	tests := []map[string]any{
+		{},
+		{"url": "ftp://example.com"},
+		{"url": "https://user:pass@example.com"},
+		{"url": "https://example.com", "body": "x", "json": nil},
+		{"url": "https://example.com", "response": "yaml"},
+		{"url": "https://example.com", "success_statuses": []any{99}},
+		{"url": "https://example.com", "unknown": true},
+	}
+	for _, raw := range tests {
+		if _, err := New(raw); err == nil {
+			t.Fatalf("New(%#v) succeeded", raw)
+		}
+	}
+}
+
+func TestDecodeJSONPreservesNumbers(t *testing.T) {
+	value, err := decodeJSON([]byte(`{"count":9007199254740993}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := value.(map[string]any)["count"]; got != json.Number("9007199254740993") {
+		t.Fatalf("count = %#v", got)
+	}
+}

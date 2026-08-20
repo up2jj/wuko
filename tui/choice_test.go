@@ -20,6 +20,16 @@ func TestChoiceModelMultipleSelection(t *testing.T) {
 	}
 }
 
+func TestConfirmModelUsesDefaultSelection(t *testing.T) {
+	model := newChoiceModel("Continue?", []Option{{Label: "Yes", Value: true}, {Label: "No", Value: false}}, false, true)
+	model.cursor = 1
+	updated, command := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = updated.(choiceModel)
+	if command == nil || len(model.result) != 1 || model.result[0] != 1 {
+		t.Fatalf("result = %#v, command nil = %v", model.result, command == nil)
+	}
+}
+
 func TestSelectionModelNavigationAndEnter(t *testing.T) {
 	model := newSelectionModel("Workflows", []Option{{Label: "build"}, {Label: "deploy"}})
 	updated, _ := model.Update(tea.KeyPressMsg{Code: tea.KeyDown})

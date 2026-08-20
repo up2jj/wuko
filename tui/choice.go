@@ -110,15 +110,35 @@ func (m choiceModel) View() tea.View {
 
 // Choose runs an interactive Bubble Tea choice prompt and returns selected indexes in option order.
 func Choose(ctx context.Context, input io.Reader, output io.Writer, message string, options []Option, multiple, required bool) ([]int, error) {
-	program := tea.NewProgram(newChoiceModel(message, options, multiple, required),
+	return choose(ctx, input, output, newChoiceModel(message, options, multiple, required))
+}
+
+// Confirm runs an interactive yes/no prompt with the configured initial selection.
+func Confirm(ctx context.Context, input io.Reader, output io.Writer, message string, defaultValue bool) (bool, error) {
+	model := newChoiceModel(message, []Option{{Label: "Yes", Value: true}, {Label: "No", Value: false}}, false, true)
+	if !defaultValue {
+		model.cursor = 1
+	}
+	indexes, err := choose(ctx, input, output, model)
+	if err != nil {
+		return false, err
+	}
+	if len(indexes) != 1 {
+		return false, fmt.Errorf("confirmation ended without a selection")
+	}
+	return indexes[0] == 0, nil
+}
+
+func choose(ctx context.Context, input io.Reader, output io.Writer, model choiceModel) ([]int, error) {
+	program := tea.NewProgram(model,
 		tea.WithContext(ctx), tea.WithInput(input), tea.WithOutput(output), tea.WithoutSignalHandler())
 	final, err := program.Run()
 	if err != nil {
 		return nil, err
 	}
-	model := final.(choiceModel)
-	if model.cancelled {
+	finalModel := final.(choiceModel)
+	if finalModel.cancelled {
 		return nil, context.Canceled
 	}
-	return model.result, nil
+	return finalModel.result, nil
 }

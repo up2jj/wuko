@@ -1,6 +1,6 @@
 ---
 name: wuko-workflow-author
-description: Create or update Wuko version-1 YAML workflows, including templates, conditions, required files, composite actions, retries, concurrency, Lua, shell, Docker, and agent steps. Use when designing workflow files, extending existing workflows, or reviewing workflow structure before execution.
+description: Create or update Wuko version-1 YAML workflows, including templates, conditions, required files, composite actions, retries, concurrency, interactive prompts, typed values, HTTP, files, Lua, shell, Docker, and agent steps. Use when designing workflow files, extending existing workflows, or reviewing workflow structure before execution.
 ---
 
 # Wuko Workflow Author
@@ -15,6 +15,19 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
 4. Render dynamic values with the documented template roots. Use `if` only for boolean expressions and guard references to skipped steps with membership checks.
 5. Keep local paths relative to the file or workflow context that resolves them. Preserve unique step IDs across required files, concurrent children, and composite actions.
 6. Treat shell, Lua, Docker, remote actions, and agents as trusted executable code. Keep credentials in environment values, never in workflow text, arguments, URLs, logs, or operation IDs.
+
+## Step selection
+
+- Use `confirm` for boolean approval, `choice` for enumerated values, `input` for visible text, and
+  `password` for masked text. Supply their variables explicitly in non-interactive runs.
+- Use `set` for JSON-compatible literals and Expr-based values; use Lua only when transformation
+  needs imperative logic.
+- Use `http` for structured API calls with typed JSON responses, status validation, retries, and
+  timeouts. Keep authorization values in environment-backed headers.
+- Use `file` for auditable read, write, copy, move, remove, mkdir, list, stat, and chmod operations.
+  Quote modes such as `"0755"`, opt into overwrites, and use recursive removal narrowly.
+- Use shell for external programs, Lua for multi-operation scripting, Docker for isolated
+  containers, and agent for coding-agent execution.
 
 ## Important behavior
 
