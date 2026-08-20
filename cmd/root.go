@@ -35,6 +35,32 @@ var (
 	date    = "unknown"
 )
 
+const noWorkflowsHelp = `No workflows found.
+
+Create .wuko/workflows/hello.yaml:
+
+  version: 1
+  name: hello
+  steps:
+    - id: greet
+      type: shell
+      with:
+        script: echo "Hello from Wuko"
+
+Run it:
+  wuko run hello
+
+Run a file directly:
+  wuko run --file ./workflow.yaml
+
+Run a trusted remote workflow:
+  wuko run https://example.com/workflow.yaml
+  wuko run github:owner/repo@main:path/to/workflow.yaml
+
+More help:
+  wuko --help
+`
+
 type dependencies struct {
 	stdin         io.Reader
 	stdout        io.Writer
@@ -122,6 +148,10 @@ func runWorkflowPicker(command *cobra.Command, deps dependencies) error {
 		for _, source := range sources {
 			fmt.Fprintf(command.OutOrStdout(), "%s\t%s\t%s\t%s\n", source.Name, source.Scope, source.Description, source.Path)
 		}
+		return nil
+	}
+	if len(sources) == 0 {
+		fmt.Fprint(command.OutOrStdout(), noWorkflowsHelp)
 		return nil
 	}
 

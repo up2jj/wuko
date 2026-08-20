@@ -347,6 +347,50 @@ func TestBareCommandListsAllWorkflowsWithScope(t *testing.T) {
 	}
 }
 
+func TestBareCommandInteractiveWithoutWorkflowsPrintsGuidance(t *testing.T) {
+	root := t.TempDir()
+	var output bytes.Buffer
+	command := newRootCmd(dependencies{
+		stdin: bytes.NewReader(nil), stdout: &output, stderr: &output,
+		cwd:       func() (string, error) { return root, nil },
+		homeDir:   func() (string, error) { return filepath.Join(root, "home"), nil },
+		configDir: func() (string, error) { return filepath.Join(root, "config"), nil },
+		registry:  step.NewRegistry(), isInteractive: func(io.Reader) bool { return true },
+	})
+	command.SetArgs(nil)
+	if err := command.ExecuteContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	want := `No workflows found.
+
+Create .wuko/workflows/hello.yaml:
+
+  version: 1
+  name: hello
+  steps:
+    - id: greet
+      type: shell
+      with:
+        script: echo "Hello from Wuko"
+
+Run it:
+  wuko run hello
+
+Run a file directly:
+  wuko run --file ./workflow.yaml
+
+Run a trusted remote workflow:
+  wuko run https://example.com/workflow.yaml
+  wuko run github:owner/repo@main:path/to/workflow.yaml
+
+More help:
+  wuko --help
+`
+	if got := output.String(); got != want {
+		t.Fatalf("output = %q, want %q", got, want)
+	}
+}
+
 func TestListCommandIncludesScope(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, ".wuko", "workflows")
