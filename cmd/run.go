@@ -13,7 +13,7 @@ import (
 )
 
 func newRunCmd(deps dependencies) *cobra.Command {
-	var variables, environment []string
+	var variables, variableFiles, environment []string
 	var dryRun bool
 	var workflowFile string
 	command := &cobra.Command{
@@ -26,14 +26,14 @@ func newRunCmd(deps dependencies) *cobra.Command {
 				return err
 			}
 			reporter := diagnosticsFor(command, deps, cwd)
-			diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseInvocation, Status: diagnostic.StatusStarted, Message: "run workflow", Attributes: []diagnostic.Attribute{diagnostic.Attr("run_dir", cwd), diagnostic.Attr("variables", fmt.Sprint(len(variables))), diagnostic.Attr("environment", fmt.Sprint(len(environment)))}})
+			diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseInvocation, Status: diagnostic.StatusStarted, Message: "run workflow", Attributes: []diagnostic.Attribute{diagnostic.Attr("run_dir", cwd), diagnostic.Attr("variable_files", fmt.Sprint(len(variableFiles))), diagnostic.Attr("variables", fmt.Sprint(len(variables))), diagnostic.Attr("environment", fmt.Sprint(len(environment)))}})
 			if workflowFile != "" && len(args) > 0 {
 				return fmt.Errorf("workflow selector and --file cannot be used together")
 			}
 			if workflowFile == "" && len(args) == 0 {
 				return fmt.Errorf("workflow name or --file is required")
 			}
-			vars, err := parseVars(variables)
+			vars, err := parseVars(command.Context(), cwd, variableFiles, variables)
 			if err != nil {
 				return err
 			}
@@ -107,6 +107,7 @@ func newRunCmd(deps dependencies) *cobra.Command {
 		},
 	}
 	command.Flags().StringArrayVar(&variables, "var", nil, "set a workflow variable (key=value; repeatable)")
+	command.Flags().StringArrayVar(&variableFiles, "var-file", nil, "import workflow variables from a JSON or TOML file (repeatable)")
 	command.Flags().StringArrayVar(&environment, "env", nil, "override an environment variable (KEY=value; repeatable)")
 	command.Flags().BoolVar(&dryRun, "dry-run", false, "validate and print steps without running them")
 	command.Flags().StringVar(&workflowFile, "file", "", "run a workflow from a file path")

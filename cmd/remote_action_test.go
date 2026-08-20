@@ -165,7 +165,7 @@ steps:
 	}
 }
 
-func TestValidateRemoteActionAcceptsVarAndEnvFlags(t *testing.T) {
+func TestValidateRemoteActionAcceptsVarFileAndEnvFlags(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, ".wuko", "workflows")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -178,6 +178,9 @@ steps:
     uses: https://actions.example.test/{{ .vars.release }}/{{ .env.CHANNEL }}
 `
 	if err := os.WriteFile(filepath.Join(dir, "remote.yaml"), []byte(caller), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "variables.toml"), []byte("release = \"v2\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	manifest := "version: 1\nname: validate\nsteps:\n  - id: run\n    type: shell\n    with: {script: 'true'}\n"
@@ -197,7 +200,7 @@ steps:
 		cwd: func() (string, error) { return root, nil }, homeDir: func() (string, error) { return "", nil }, configDir: func() (string, error) { return "", nil },
 		registry: registry, loader: workflow.NewLoader(client),
 	})
-	command.SetArgs([]string{"validate", "remote", "--var", "release=v2", "--env", "CHANNEL=stable"})
+	command.SetArgs([]string{"validate", "remote", "--var-file", "variables.toml", "--env", "CHANNEL=stable"})
 	if err := command.ExecuteContext(t.Context()); err != nil {
 		t.Fatal(err)
 	}

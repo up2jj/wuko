@@ -35,6 +35,9 @@ steps:
 	if err := os.WriteFile(filepath.Join(workflowDir, "release.yaml"), []byte(definition), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(root, "variables.json"), []byte(`{"release":"v1"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	action := `version: 1
 name: build
 steps:
@@ -63,7 +66,7 @@ steps:
 		configDir: func() (string, error) { return filepath.Join(root, "config"), nil },
 		registry:  step.NewRegistry(), loader: workflow.NewLoader(client),
 	})
-	command.SetArgs([]string{"tree", "release", "--var", "release=v1"})
+	command.SetArgs([]string{"tree", "release", "--var-file", "variables.json"})
 	if err := command.ExecuteContext(t.Context()); err != nil {
 		t.Fatal(err)
 	}

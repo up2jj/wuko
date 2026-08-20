@@ -1,6 +1,6 @@
 ---
 name: wuko-workflow-author
-description: Create or update Wuko version-1 YAML workflows, including templates, conditions, required files, composite actions, retries, concurrency, interactive prompts, typed values, HTTP, files, Lua, shell, Docker, and agent steps. Use when designing workflow files, extending existing workflows, or reviewing workflow structure before execution.
+description: Create or update Wuko version-1 YAML workflows, including templates, conditions, required files, composite actions, retries, concurrency, interactive prompts, typed and imported variables, HTTP, files, Lua, shell, Docker, and agent steps. Use when designing workflow files, extending existing workflows, or reviewing workflow structure before execution.
 ---
 
 # Wuko Workflow Author
@@ -22,6 +22,8 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
   `password` for masked text. Supply their variables explicitly in non-interactive runs.
 - Use `set` for JSON-compatible literals and Expr-based values; use Lua only when transformation
   needs imperative logic.
+- Use `import_vars` for runtime JSON or TOML variable files. Keep its ordered `files` paths
+  relative to the owning workflow or action, and remember imported keys normalize to lowercase.
 - Use `http` for structured API calls with typed JSON responses, status validation, retries, and
   timeouts. Keep authorization values in environment-backed headers.
 - Use `file` for auditable read, write, copy, move, remove, mkdir, list, stat, and chmod operations.
@@ -32,6 +34,8 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
 ## Important behavior
 
 - Use `require` for local step files and keep required paths relative to the containing workflow file.
+- Supply invocation-time JSON or TOML variables with repeatable `--var-file`; later files replace
+  earlier top-level values and explicit `--var` entries take final initial-state precedence.
 - Use `timeout` and `retry` deliberately. Retries have at-least-once effects; do not assume commands, requests, writes, containers, or agents can be rolled back.
 - Give repeated external operations an explicit stable `operation_id` when the receiving service can use it for idempotency.
 - Remember that concurrent children share a pre-group state snapshot, cannot consume sibling outputs, and cannot safely compete for interactive input.
@@ -45,7 +49,8 @@ Run the narrowest checks that prove the change, then broaden them when the workf
 - Validate a discovered workflow with `wuko validate NAME`.
 - Inspect structure with `wuko tree NAME` or `wuko tree --file PATH`.
 - Render and validate a file without executing effects with `wuko run --file PATH --dry-run`.
-- Supply required `--var` and `--env` values explicitly for validation or dry runs; never print secret values.
+- Supply required `--var-file`, `--var`, and `--env` values explicitly for validation or dry runs;
+  never print secret values.
 - Run `go test ./...` when workflow changes accompany Go implementation changes.
 
 Report the files changed, the workflow behavior, and the exact verification commands and results.

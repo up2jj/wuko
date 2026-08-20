@@ -58,6 +58,47 @@ steps:
 	}
 }
 
+func TestRunCommandImportsVariableFilesBeforeInlineOverrides(t *testing.T) {
+	root := t.TempDir()
+	workflowDir := filepath.Join(root, ".wuko", "workflows")
+	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data := `version: 1
+name: imported
+vars: {name: workflow}
+steps:
+  - id: print
+    type: shell
+    with:
+      script: "printf '%s:%s' \"$1\" \"$2\""
+      args: ["{{ .vars.name }}", "{{ .vars.channel }}"]
+`
+	if err := os.WriteFile(filepath.Join(workflowDir, "imported.yaml"), []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "defaults.toml"), []byte("name = \"file\"\nchannel = \"stable\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	registry := step.NewRegistry()
+	if err := shell.Register(registry); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	command := newRootCmd(dependencies{
+		stdin: bytes.NewReader(nil), stdout: &output, stderr: io.Discard,
+		cwd: func() (string, error) { return root, nil }, homeDir: func() (string, error) { return "", nil }, configDir: func() (string, error) { return "", nil },
+		registry: registry,
+	})
+	command.SetArgs([]string{"run", "imported", "--var-file", "defaults.toml", "--var", "name=inline"})
+	if err := command.ExecuteContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if output.String() != "inline:stable" {
+		t.Fatalf("output = %q", output.String())
+	}
+}
+
 func TestRunDebugPinpointsInvalidLuaSyntax(t *testing.T) {
 	root := t.TempDir()
 	workflowDir := filepath.Join(root, ".wuko", "workflows")

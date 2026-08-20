@@ -12,7 +12,7 @@ import (
 )
 
 func newValidateCmd(deps dependencies) *cobra.Command {
-	var variables, environment []string
+	var variables, variableFiles, environment []string
 	command := &cobra.Command{
 		Use:   "validate [NAME]",
 		Short: "Validate one or all effective workflows",
@@ -24,7 +24,7 @@ func newValidateCmd(deps dependencies) *cobra.Command {
 			}
 			reporter := diagnosticsFor(command, deps, cwd)
 			diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseInvocation, Status: diagnostic.StatusStarted, Message: "validate workflows", Attributes: []diagnostic.Attribute{diagnostic.Attr("run_dir", cwd)}})
-			vars, err := parseVars(variables)
+			vars, err := parseVars(command.Context(), cwd, variableFiles, variables)
 			if err != nil {
 				return err
 			}
@@ -76,6 +76,7 @@ func newValidateCmd(deps dependencies) *cobra.Command {
 		},
 	}
 	command.Flags().StringArrayVar(&variables, "var", nil, "set a workflow variable (key=value; repeatable)")
+	command.Flags().StringArrayVar(&variableFiles, "var-file", nil, "import workflow variables from a JSON or TOML file (repeatable)")
 	command.Flags().StringArrayVar(&environment, "env", nil, "override an environment variable (KEY=value; repeatable)")
 	command.ValidArgsFunction = workflowCompletion(deps)
 	return command

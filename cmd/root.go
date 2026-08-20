@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -22,6 +23,7 @@ import (
 	dockerstep "github.com/up2jj/wuko/steps/docker"
 	filestep "github.com/up2jj/wuko/steps/file"
 	httpstep "github.com/up2jj/wuko/steps/http"
+	importvarsstep "github.com/up2jj/wuko/steps/import_vars"
 	inputstep "github.com/up2jj/wuko/steps/input"
 	keyvaluestep "github.com/up2jj/wuko/steps/key_value"
 	luastep "github.com/up2jj/wuko/steps/lua"
@@ -29,6 +31,7 @@ import (
 	setstep "github.com/up2jj/wuko/steps/set"
 	"github.com/up2jj/wuko/steps/shell"
 	"github.com/up2jj/wuko/tui"
+	variablefile "github.com/up2jj/wuko/variables"
 	"github.com/up2jj/wuko/workflow"
 	"golang.org/x/term"
 )
@@ -90,7 +93,7 @@ func NewRootCmd() *cobra.Command {
 	registry := step.NewRegistry()
 	for _, register := range []func(*step.Registry) error{
 		inputstep.Register, passwordstep.Register, choice.Register,
-		confirm.Register, setstep.Register, httpstep.Register, filestep.Register,
+		confirm.Register, setstep.Register, importvarsstep.Register, httpstep.Register, filestep.Register,
 		dockerstep.Register, keyvaluestep.Register, luastep.Register, shell.Register, agentstep.Register,
 	} {
 		if err := register(registry); err != nil {
@@ -237,7 +240,20 @@ func colorEnabled(writer io.Writer) bool {
 	return ok && term.IsTerminal(int(file.Fd()))
 }
 
-func parseVars(values []string) (map[string]any, error) {
+func parseVars(ctx context.Context, baseDir string, files, values []string) (map[string]any, error) {
+	result, err := variablefile.LoadFiles(ctx, baseDir, files)
+	if err != nil {
+		return nil, err
+	}
+	overrides, err := parseVarOverrides(values)
+	if err != nil {
+		return nil, err
+	}
+	maps.Copy(result, overrides)
+	return result, nil
+}
+
+func parseVarOverrides(values []string) (map[string]any, error) {
 	result := make(map[string]any, len(values))
 	for _, entry := range values {
 		key, raw, ok := strings.Cut(entry, "=")

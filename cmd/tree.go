@@ -13,7 +13,7 @@ import (
 )
 
 func newTreeCmd(deps dependencies) *cobra.Command {
-	var variables, environment []string
+	var variables, variableFiles, environment []string
 	var workflowFile string
 	command := &cobra.Command{
 		Use:   "tree [NAME|URL|GITHUB]",
@@ -32,7 +32,7 @@ func newTreeCmd(deps dependencies) *cobra.Command {
 			if workflowFile == "" && len(args) == 0 {
 				return fmt.Errorf("workflow name or --file is required")
 			}
-			vars, err := parseVars(variables)
+			vars, err := parseVars(command.Context(), cwd, variableFiles, variables)
 			if err != nil {
 				return err
 			}
@@ -86,6 +86,7 @@ func newTreeCmd(deps dependencies) *cobra.Command {
 		},
 	}
 	command.Flags().StringArrayVar(&variables, "var", nil, "set a workflow variable (key=value; repeatable)")
+	command.Flags().StringArrayVar(&variableFiles, "var-file", nil, "import workflow variables from a JSON or TOML file (repeatable)")
 	command.Flags().StringArrayVar(&environment, "env", nil, "override an environment variable (KEY=value; repeatable)")
 	command.Flags().StringVar(&workflowFile, "file", "", "display a workflow from a file path")
 	command.ValidArgsFunction = workflowCompletion(deps)

@@ -2,8 +2,8 @@
 
 Wuko is a trusted workflow runner for everyday development tasks. Local workflows are YAML files
 composed from independently registered Go step packages. The built-in steps collect text and
-password input, select one or more choices, run Lua automation, execute commands or inline shell,
-and launch an external agent such as Codex.
+password input, select one or more choices, import typed variables, run Lua automation, execute
+commands or inline shell, and launch an external agent such as Codex.
 
 ## Features
 
@@ -12,11 +12,12 @@ and launch an external agent such as Codex.
   conditional steps.
 - Run steps sequentially or concurrently, with retries, timeouts, dry runs, execution trees, live
   progress, and run statistics.
-- Use built-in input, password, choice, confirm, set, HTTP, file, key-value, Lua, shell, agent,
-  and Docker steps.
+- Use built-in input, password, choice, confirm, set, `import_vars`, HTTP, file, key-value, Lua,
+  shell, agent, and Docker steps.
 - Split workflows across local files with `require`, or reuse remote workflows and composite
   actions from HTTPS URLs and GitHub locators.
-- Integrate with `direnv` and pass values explicitly with `--var` and `--env`.
+- Integrate with `direnv`, import JSON or TOML variable files, and pass values explicitly with
+  `--var` and `--env`.
 - Automate development tasks locally while keeping workflow code visible and reviewable.
 
 ## Table of Contents
@@ -42,6 +43,7 @@ and launch an external agent such as Codex.
     - [Choice](#choice)
     - [Confirm](#confirm)
     - [Set](#set)
+    - [Import variables](#import-variables)
     - [HTTP](#http)
     - [File](#file)
     - [Key-value stores](#key-value-stores)
@@ -146,15 +148,28 @@ wuko run start-task
 wuko run --file ./path/to/start-task.yaml
 wuko run https://example.com/workflows/release.yaml
 wuko run github:acme/wuko-workflows@v1.2.3:release.yaml
+wuko run start-task --var-file defaults.toml --var-file local.json
 wuko run start-task --var 'reviewers=["alice","bob"]' --env CLICKUP_TOKEN=secret
 wuko run start-task --dry-run
 wuko tree start-task
 wuko tree --file ./path/to/start-task.yaml
 ```
 
-`--var` attempts JSON decoding and otherwise stores a string. `--env` always stores a string.
-Both flags are also accepted by `validate`, including when they are needed to resolve a remote
-action reference.
+`--var-file` imports the top-level object from a JSON file or root table from a TOML file. The flag
+is repeatable: files merge from left to right, replacing entire top-level variables rather than
+recursively merging nested objects. Relative paths resolve from the invocation directory.
+Workflow `vars` provide the defaults, variable files override them, and `--var` overrides every
+file value. `--var` attempts JSON decoding and otherwise stores a string; `--env` always stores a
+string. `run`, `validate`, and `tree` accept all three flags, including when values are needed to
+resolve a remote action reference.
+
+Variable files use Viper's configuration decoding. Imported keys, including nested keys, are
+case-insensitive and normalized to lowercase; dotted keys have Viper's nested-key meaning. The
+JSON or TOML document itself is the variable object—do not wrap it in a `vars` field. Other Viper
+formats are not currently accepted, but can be added through the shared variable-file loader.
+
+For complete file-shape, precedence, nesting, Lua, and runtime-step semantics, see
+[Variable imports](docs/variable-imports.md).
 
 `wuko list` shows the effective workflows and labels each one as `local` or `global`. Bare `wuko`
 also includes shadowed definitions from other scopes.
@@ -189,8 +204,8 @@ the API token is used only in the request's `Authorization` header.
 
 `wuko tree NAME` prints the workflow's steps as a tree. Remote composite actions are expanded to
 show their internal steps, and conditional steps include their `if` expression. Like `run`, `tree`
-accepts `--file`, HTTPS and GitHub workflow locators, and repeatable `--var` and `--env` flags for
-resolving templated action references.
+accepts `--file`, HTTPS and GitHub workflow locators, and repeatable `--var-file`, `--var`, and
+`--env` flags for resolving templated action references.
 
 ```text
 release
@@ -814,6 +829,45 @@ Expressions use the `inputs`, `vars`, `env`, `steps`, `workflow`, and `run` root
 conditions. The JSON-compatible result is available through both `.steps.<id>.value` and the
 configured variable. Invalid expressions fail validation; missing runtime fields and
 non-JSON-compatible results fail the step without committing its variable.
+
+#### Import variables
+
+Use `import_vars` to load JSON or TOML variables during workflow execution. Paths are rendered
+when the step starts and resolve from the directory containing the owning workflow or composite
+action:
+
+```yaml
+- id: configuration
+  type: import_vars
+  with:
+    files:
+      - defaults.toml
+      - "environments/{{ .vars.environment }}.json"
+
+- id: describe
+  type: shell
+  with:
+    command: printf
+    args: ["target=%s\\n", "{{ .vars.target }}"]
+```
+
+At least one file is required. Files merge from left to right with top-level replacement, then
+the imported values overwrite variables already present in workflow state—including initial
+`--var` values. A successful step exposes the merged object as `.steps.configuration.variables`,
+its top-level size as `.steps.configuration.count`, and every key beneath `.vars`.
+
+The same strict JSON/TOML and lowercase-key behavior as `--var-file` applies. The import is atomic:
+if any file cannot be read or decoded, the step commits no outputs or variables. Retries reread
+all files. Concurrent children still share their pre-group snapshot, cannot consume an import
+from a sibling, and fail if multiple children write the same variable. Validation and dry-run
+check the step configuration without reading its runtime files.
+
+Relative imports work in local workflows and in remote workflow or action archives that bundle
+the companion files. A direct remote YAML or action manifest contains no companion files to
+import.
+
+See [Variable imports](docs/variable-imports.md) for nested-value access from templates and Lua,
+merge examples, concurrency rules, and format-extension guidance.
 
 #### HTTP
 
