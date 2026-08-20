@@ -5,8 +5,10 @@ import (
 	"io"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/workflow"
 )
 
@@ -22,6 +24,8 @@ func newTreeCmd(deps dependencies) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			reporter := diagnosticsFor(command, deps, cwd)
+			diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseInvocation, Status: diagnostic.StatusStarted, Message: "render workflow tree", Attributes: []diagnostic.Attribute{diagnostic.Attr("run_dir", cwd)}})
 			if workflowFile != "" && len(args) > 0 {
 				return fmt.Errorf("workflow selector and --file cannot be used together")
 			}
@@ -45,7 +49,7 @@ func newTreeCmd(deps dependencies) *cobra.Command {
 			if loader == nil {
 				loader = workflow.NewLoader(nil)
 			}
-			options := workflow.LoadOptions{Vars: vars, Env: env, BaseEnv: baseEnv, RunDir: cwd}
+			options := workflow.LoadOptions{Vars: vars, Env: env, BaseEnv: baseEnv, RunDir: cwd, Diagnostics: reporter}
 			var definition *workflow.Definition
 			if workflowFile != "" {
 				path, err := filepath.Abs(workflowFile)
@@ -64,10 +68,14 @@ func newTreeCmd(deps dependencies) *cobra.Command {
 				}
 				defer cleanup()
 			} else {
+				discoveryStarted := time.Now()
+				diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusStarted, Time: discoveryStarted, Message: args[0]})
 				source, err := workflow.Find(cwd, home, config, args[0])
 				if err != nil {
+					diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusFailed, Duration: time.Since(discoveryStarted), Error: err})
 					return err
 				}
+				diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusSucceeded, Duration: time.Since(discoveryStarted), Location: diagnostic.Location{Source: source.Path}, Message: source.Name})
 				definition, err = loader.Load(command.Context(), source.Path, options)
 				if err != nil {
 					return err

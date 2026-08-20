@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/process"
 	"gopkg.in/yaml.v3"
 )
@@ -44,6 +45,7 @@ type Action struct {
 	Steps       []Step                  `yaml:"steps"`
 	Dir         string                  `yaml:"-"`
 	Files       map[string]ActionFile   `yaml:"-"`
+	Location    diagnostic.Location     `yaml:"-"`
 }
 
 // ActionInput declares one typed action input.
@@ -158,27 +160,39 @@ func NewLoader(client *http.Client) *Loader {
 
 // Load reads a local workflow, expands required step files, and resolves all remote actions.
 func (loader *Loader) Load(ctx context.Context, filename string, options LoadOptions) (*Definition, error) {
-	definition, err := loadLocal(filename)
+	displaySource := filename
+	if options.sourceLabel != "" {
+		displaySource = remapSource(filename, options.sourceRoot, options.sourceLabel)
+	}
+	started := traceStart(options.Diagnostics, diagnostic.PhaseLoad, diagnostic.Location{Source: displaySource}, "", "", "", "loading workflow")
+	definition, err := loadLocalWithDiagnostics(filename, options.Diagnostics, options.sourceRoot, options.sourceLabel)
 	if err != nil {
+		traceFinish(options.Diagnostics, started, diagnostic.PhaseLoad, diagnostic.StatusFailed, diagnostic.Location{Source: displaySource}, "", "", "", "", nil)
 		return nil, err
 	}
+	valuesStarted := traceStart(options.Diagnostics, diagnostic.PhaseValues, definition.Location, definition.Name, "", "", "preparing workflow values")
 	vars, environment, err := PrepareValues(definition, options)
 	if err != nil {
+		traceFinish(options.Diagnostics, valuesStarted, diagnostic.PhaseValues, diagnostic.StatusFailed, definition.Location, definition.Name, "", "", "", err)
+		traceFinish(options.Diagnostics, started, diagnostic.PhaseLoad, diagnostic.StatusFailed, definition.Location, definition.Name, "", "", "", nil)
 		return nil, err
 	}
+	traceFinish(options.Diagnostics, valuesStarted, diagnostic.PhaseValues, diagnostic.StatusSucceeded, definition.Location, definition.Name, "", "", "", nil, countAttr("variables", len(vars)), countAttr("environment", len(environment)))
 	data := TemplateData(definition, options.RunDir, nil, vars, environment, nil)
 	cache := make(map[string]*Action)
-	if err := loader.resolveActions(ctx, definition.Steps, data, environment, options.RunDir, definition.Dir, cache); err != nil {
+	if err := loader.resolveActions(ctx, definition.Name, definition.Steps, data, environment, options.RunDir, definition.Dir, cache, options.Diagnostics); err != nil {
+		traceFinish(options.Diagnostics, started, diagnostic.PhaseLoad, diagnostic.StatusFailed, definition.Location, definition.Name, "", "", "", nil)
 		return nil, err
 	}
+	traceFinish(options.Diagnostics, started, diagnostic.PhaseLoad, diagnostic.StatusSucceeded, definition.Location, definition.Name, "", "", "", nil, countAttr("steps", len(definition.Steps)), countAttr("actions", len(cache)))
 	return definition, nil
 }
 
-func (loader *Loader) resolveActions(ctx context.Context, steps []Step, data map[string]any, environment map[string]string, runDir, definitionDir string, cache map[string]*Action) error {
+func (loader *Loader) resolveActions(ctx context.Context, workflowName string, steps []Step, data map[string]any, environment map[string]string, runDir, definitionDir string, cache map[string]*Action, reporter diagnostic.Reporter) error {
 	for i := range steps {
 		workflowStep := &steps[i]
 		if workflowStep.Concurrent != nil {
-			if err := loader.resolveActions(ctx, workflowStep.Concurrent.Steps, data, environment, runDir, definitionDir, cache); err != nil {
+			if err := loader.resolveActions(ctx, workflowName, workflowStep.Concurrent.Steps, data, environment, runDir, definitionDir, cache, reporter); err != nil {
 				return err
 			}
 			continue
@@ -186,31 +200,50 @@ func (loader *Loader) resolveActions(ctx context.Context, steps []Step, data map
 		if workflowStep.Uses.Empty() {
 			continue
 		}
+		started := traceStart(reporter, diagnostic.PhaseActionResolve, workflowStep.Location, workflowName, workflowStep.ID, "uses", "resolving composite action")
 		if workflowStep.SHA256 != "" && !sha256Pattern.MatchString(workflowStep.SHA256) {
+			err := fmt.Errorf("sha256 must be a 64-character hexadecimal digest")
+			traceFinish(reporter, started, diagnostic.PhaseActionResolve, diagnostic.StatusFailed, workflowStep.Location, workflowName, workflowStep.ID, "uses", "", err)
 			return fmt.Errorf("step %q: sha256 must be a 64-character hexadecimal digest", workflowStep.ID)
 		}
 		resolved, key, sourceDescription, fetch, err := loader.resolveSource(ctx, workflowStep.Uses, data, environment, runDir)
 		if err != nil {
+			traceFinish(reporter, started, diagnostic.PhaseActionResolve, diagnostic.StatusFailed, workflowStep.Location, workflowName, workflowStep.ID, "uses", "", err)
 			return fmt.Errorf("step %q uses: %w", workflowStep.ID, err)
 		}
 		key += "\x00" + strings.ToLower(workflowStep.SHA256)
 		action := cache[key]
 		if action == nil {
+			fetchStarted := traceStart(reporter, diagnostic.PhaseActionFetch, workflowStep.Location, workflowName, workflowStep.ID, "uses", sourceDescription)
 			payload, err := fetch()
 			if err != nil {
+				traceFinish(reporter, fetchStarted, diagnostic.PhaseActionFetch, diagnostic.StatusFailed, workflowStep.Location, workflowName, workflowStep.ID, "uses", "", err)
+				traceFinish(reporter, started, diagnostic.PhaseActionResolve, diagnostic.StatusFailed, workflowStep.Location, workflowName, workflowStep.ID, "uses", "", nil)
 				return fmt.Errorf("step %q uses: %w", workflowStep.ID, err)
 			}
+			traceFinish(reporter, fetchStarted, diagnostic.PhaseActionFetch, diagnostic.StatusSucceeded, workflowStep.Location, workflowName, workflowStep.ID, "uses", "", nil, countAttr("bytes", len(payload)))
+			checksumStarted := traceStart(reporter, diagnostic.PhaseActionChecksum, workflowStep.Location, workflowName, workflowStep.ID, "uses", "verifying action checksum")
 			if err := verifyChecksum(payload, workflowStep.SHA256); err != nil {
+				traceFinish(reporter, checksumStarted, diagnostic.PhaseActionChecksum, diagnostic.StatusFailed, workflowStep.Location, workflowName, workflowStep.ID, "uses", "", err)
+				traceFinish(reporter, started, diagnostic.PhaseActionResolve, diagnostic.StatusFailed, workflowStep.Location, workflowName, workflowStep.ID, "uses", "", nil)
 				return fmt.Errorf("step %q: %w", workflowStep.ID, err)
 			}
-			action, err = decodeActionPayload(payload, definitionDir)
+			traceFinish(reporter, checksumStarted, diagnostic.PhaseActionChecksum, diagnostic.StatusSucceeded, workflowStep.Location, workflowName, workflowStep.ID, "uses", "", nil)
+			decodeStarted := traceStart(reporter, diagnostic.PhaseActionDecode, workflowStep.Location, workflowName, workflowStep.ID, "uses", sourceDescription)
+			action, err = decodeActionPayload(payload, definitionDir, sourceDescription)
 			if err != nil {
+				traceFinish(reporter, decodeStarted, diagnostic.PhaseActionDecode, diagnostic.StatusFailed, workflowStep.Location, workflowName, workflowStep.ID, "uses", "", err)
+				traceFinish(reporter, started, diagnostic.PhaseActionResolve, diagnostic.StatusFailed, workflowStep.Location, workflowName, workflowStep.ID, "uses", "", nil)
 				return fmt.Errorf("step %q action %s: %w", workflowStep.ID, sourceDescription, err)
 			}
+			traceFinish(reporter, decodeStarted, diagnostic.PhaseActionDecode, diagnostic.StatusSucceeded, action.Location, workflowName, workflowStep.ID, "uses", action.Name, nil, countAttr("steps", len(action.Steps)))
 			cache[key] = action
+		} else {
+			diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseActionFetch, Status: diagnostic.StatusSkipped, WorkflowName: workflowName, StepID: workflowStep.ID, StepType: "uses", Location: workflowStep.Location, Message: "using cached action"})
 		}
 		workflowStep.Uses = resolved
 		workflowStep.Action = action
+		traceFinish(reporter, started, diagnostic.PhaseActionResolve, diagnostic.StatusSucceeded, workflowStep.Location, workflowName, workflowStep.ID, "uses", action.Name, nil)
 	}
 	return nil
 }
@@ -340,46 +373,54 @@ func verifyChecksum(payload []byte, expected string) error {
 	return nil
 }
 
-func decodeActionPayload(payload []byte, callerDir string) (*Action, error) {
+func decodeActionPayload(payload []byte, callerDir, source string) (*Action, error) {
 	switch {
 	case isZIP(payload):
 		manifest, files, err := unpackZIP(payload)
 		if err != nil {
 			return nil, err
 		}
-		return decodeAction(manifest, "archived action", "", files)
+		return decodeAction(manifest, "archived action", "", files, archivedActionSource(source, files))
 	case len(payload) >= 2 && payload[0] == 0x1f && payload[1] == 0x8b:
 		manifest, files, err := unpackTarGzip(payload)
 		if err != nil {
 			return nil, err
 		}
-		return decodeAction(manifest, "archived action", "", files)
+		return decodeAction(manifest, "archived action", "", files, archivedActionSource(source, files))
 	default:
 		if len(payload) > maxManifestSize {
 			return nil, fmt.Errorf("manifest exceeds %d-byte limit", maxManifestSize)
 		}
-		return decodeAction(payload, "action manifest", callerDir, nil)
+		return decodeAction(payload, "action manifest", callerDir, nil, source)
 	}
 }
 
-func decodeAction(data []byte, source, dir string, files map[string]ActionFile) (*Action, error) {
+func archivedActionSource(source string, files map[string]ActionFile) string {
+	if _, ok := files["action.yaml"]; ok {
+		return source + "::action.yaml"
+	}
+	return source + "::action.yml"
+}
+
+func decodeAction(data []byte, description, dir string, files map[string]ActionFile, logicalSource string) (*Action, error) {
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	decoder.KnownFields(true)
 	var action Action
 	if err := decoder.Decode(&action); err != nil {
-		return nil, fmt.Errorf("decoding %s: %w", source, err)
+		return nil, fmt.Errorf("decoding %s: %w", description, err)
 	}
 	var extra any
 	if err := decoder.Decode(&extra); err != io.EOF {
 		if err == nil {
-			return nil, fmt.Errorf("decoding %s: multiple YAML documents are not supported", source)
+			return nil, fmt.Errorf("decoding %s: multiple YAML documents are not supported", description)
 		}
-		return nil, fmt.Errorf("decoding %s: %w", source, err)
+		return nil, fmt.Errorf("decoding %s: %w", description, err)
 	}
 	action.Dir = dir
 	action.Files = files
+	annotateActionLocations(data, &action, logicalSource)
 	if err := validateAction(&action); err != nil {
-		return nil, fmt.Errorf("validating %s: %w", source, err)
+		return nil, fmt.Errorf("validating %s: %w", description, err)
 	}
 	return &action, nil
 }

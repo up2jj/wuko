@@ -68,6 +68,12 @@ steps:
 	if definition.Steps[0].Action == nil || definition.Steps[0].Action.Name != "remote-build" {
 		t.Fatalf("action = %#v", definition.Steps[0].Action)
 	}
+	if got := definition.Steps[0].Action.Location; got.Source != "https://actions.example.test/v1/build" || got.Line != 1 {
+		t.Fatalf("action location = %#v", got)
+	}
+	if got := definition.Steps[0].Action.Steps[0].Location; got.Source != "https://actions.example.test/v1/build" || got.Line == 0 {
+		t.Fatalf("action step location = %#v", got)
+	}
 	if definition.Steps[0].Action != definition.Steps[1].Action {
 		t.Fatal("identical action references did not share the load cache")
 	}

@@ -11,8 +11,10 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/step"
 	agentstep "github.com/up2jj/wuko/steps/agent"
 	"github.com/up2jj/wuko/steps/choice"
@@ -45,6 +47,7 @@ type dependencies struct {
 	registry      *step.Registry
 	loader        *workflow.Loader
 	isInteractive func(io.Reader) bool
+	debug         *bool
 }
 
 func Execute() error {
@@ -79,6 +82,8 @@ func newRootCmd(deps dependencies) *cobra.Command {
 	if deps.agentLookPath == nil {
 		deps.agentLookPath = exec.LookPath
 	}
+	debug := false
+	deps.debug = &debug
 	root := &cobra.Command{
 		Use:           "wuko",
 		Short:         "Run trusted YAML workflows",
@@ -93,6 +98,7 @@ func newRootCmd(deps dependencies) *cobra.Command {
 	root.SetIn(deps.stdin)
 	root.SetOut(deps.stdout)
 	root.SetErr(deps.stderr)
+	root.PersistentFlags().BoolVar(&debug, "debug", false, "trace workflow loading, validation, and execution to stderr (may expose non-secret configuration)")
 	root.AddCommand(newRunCmd(deps), newListCmd(deps), newTreeCmd(deps), newValidateCmd(deps), newAgentCmd(deps), newCompletionCmd())
 	return root
 }
@@ -102,10 +108,16 @@ func runWorkflowPicker(command *cobra.Command, deps dependencies) error {
 	if err != nil {
 		return err
 	}
+	reporter := diagnosticsFor(command, deps, cwd)
+	diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseInvocation, Status: diagnostic.StatusStarted, Message: "workflow picker", Attributes: []diagnostic.Attribute{diagnostic.Attr("run_dir", cwd)}})
+	discoveryStarted := time.Now()
+	diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusStarted, Time: discoveryStarted, Message: "discovering workflows"})
 	sources, err := workflow.DiscoverAll(cwd, home, config)
 	if err != nil {
+		diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusFailed, Duration: time.Since(discoveryStarted), Error: err})
 		return err
 	}
+	diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusSucceeded, Duration: time.Since(discoveryStarted), Attributes: []diagnostic.Attribute{diagnostic.Attr("workflows", fmt.Sprint(len(sources)))}})
 	if !deps.isInteractive(command.InOrStdin()) {
 		for _, source := range sources {
 			fmt.Fprintf(command.OutOrStdout(), "%s\t%s\t%s\t%s\n", source.Name, source.Scope, source.Description, source.Path)
@@ -136,12 +148,20 @@ func runWorkflowPicker(command *cobra.Command, deps dependencies) error {
 	if !ok {
 		return fmt.Errorf("workflow selection did not contain a workflow")
 	}
+	diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseSelection, Status: diagnostic.StatusSucceeded, Location: diagnostic.Location{Source: source.Path}, Message: source.Name})
 	if source.Effective {
 		fmt.Fprintf(command.OutOrStdout(), "wuko run %s\n", shellQuote(source.Name))
 		return nil
 	}
 	fmt.Fprintf(command.OutOrStdout(), "wuko run --file %s\n", shellQuote(source.Path))
 	return nil
+}
+
+func diagnosticsFor(command *cobra.Command, deps dependencies, runDir string) diagnostic.Reporter {
+	if deps.debug == nil || !*deps.debug {
+		return nil
+	}
+	return tui.NewDebug(command.ErrOrStderr(), runDir).Report
 }
 
 func shellQuote(value string) string {

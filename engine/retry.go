@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
 )
@@ -29,6 +30,7 @@ func (e *Engine) runWithRetry(ctx context.Context, definition *workflow.Definiti
 	var execution stepExecution
 	operationID, err := executionOperationID(definition, workflowStep, options, state)
 	if err != nil {
+		traceStep(options, definition, workflowStep, diagnostic.PhaseAttempt, diagnostic.StatusFailed, time.Time{}, "preparing operation", err)
 		execution.err = err
 		return execution
 	}
@@ -51,6 +53,7 @@ func (e *Engine) runWithRetry(ctx context.Context, definition *workflow.Definiti
 			attemptCtx, cancelAttempt = context.WithTimeout(runCtx, workflowStep.Timeout.Value())
 		}
 		attemptStartedAt := time.Now()
+		traceStep(options, definition, workflowStep, diagnostic.PhaseAttempt, diagnostic.StatusStarted, time.Time{}, "executing step", nil, attemptAttr(attempt, maximum))
 		report(options, ProgressEvent{
 			Kind: AttemptStarted, Status: StatusRunning, Time: attemptStartedAt,
 			WorkflowName: definition.Name, Depth: options.depth, StepID: workflowStep.ID,
@@ -71,6 +74,11 @@ func (e *Engine) runWithRetry(ctx context.Context, definition *workflow.Definiti
 			Duration: time.Since(attemptStartedAt), Error: runErr,
 		}
 		execution.attempts = append(execution.attempts, attemptStats)
+		diagnosticStatus := diagnostic.StatusSucceeded
+		if runErr != nil {
+			diagnosticStatus = diagnostic.StatusFailed
+		}
+		traceStep(options, definition, workflowStep, diagnostic.PhaseAttempt, diagnosticStatus, attemptStartedAt, "", runErr, attemptAttr(attempt, maximum))
 		report(options, ProgressEvent{
 			Kind: AttemptFinished, Status: attemptStats.Status, Time: attemptStartedAt.Add(attemptStats.Duration),
 			WorkflowName: definition.Name, Depth: options.depth, StepID: workflowStep.ID,
@@ -91,6 +99,8 @@ func (e *Engine) runWithRetry(ctx context.Context, definition *workflow.Definiti
 		}
 
 		delay := retryDelay(workflowStep.Retry, attempt)
+		traceStep(options, definition, workflowStep, diagnostic.PhaseRetry, diagnostic.StatusDetail, time.Time{}, "retry scheduled", nil,
+			attemptAttr(attempt+1, maximum), diagnostic.Attr("delay", delay.String()))
 		report(options, ProgressEvent{
 			Kind: RetryScheduled, Status: StatusRunning, Time: time.Now(),
 			WorkflowName: definition.Name, Depth: options.depth, StepID: workflowStep.ID,

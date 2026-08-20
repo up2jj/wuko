@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/up2jj/wuko/diagnostic"
 	"gopkg.in/yaml.v3"
 )
 
@@ -23,14 +24,15 @@ var (
 
 // Definition is a fully loaded workflow document.
 type Definition struct {
-	Version     int            `yaml:"version"`
-	Name        string         `yaml:"name"`
-	Description string         `yaml:"description,omitempty"`
-	Vars        map[string]any `yaml:"vars,omitempty"`
-	Env         Environment    `yaml:"env,omitempty"`
-	Steps       []Step         `yaml:"steps"`
-	Path        string         `yaml:"-"`
-	Dir         string         `yaml:"-"`
+	Version     int                 `yaml:"version"`
+	Name        string              `yaml:"name"`
+	Description string              `yaml:"description,omitempty"`
+	Vars        map[string]any      `yaml:"vars,omitempty"`
+	Env         Environment         `yaml:"env,omitempty"`
+	Steps       []Step              `yaml:"steps"`
+	Path        string              `yaml:"-"`
+	Dir         string              `yaml:"-"`
+	Location    diagnostic.Location `yaml:"-"`
 }
 
 // Environment is a strictly string-valued environment overlay.
@@ -68,17 +70,18 @@ func (c *Condition) UnmarshalYAML(node *yaml.Node) error {
 
 // Step declares a concrete step, a remote composite action, or a local step-file requirement.
 type Step struct {
-	ID         string           `yaml:"id"`
-	Type       string           `yaml:"type,omitempty"`
-	Uses       ActionSource     `yaml:"uses,omitempty"`
-	Require    *string          `yaml:"require,omitempty"`
-	Concurrent *ConcurrentGroup `yaml:"concurrent,omitempty"`
-	SHA256     string           `yaml:"sha256,omitempty"`
-	If         Condition        `yaml:"if,omitempty"`
-	Timeout    *Duration        `yaml:"timeout,omitempty"`
-	Retry      *RetryPolicy     `yaml:"retry,omitempty"`
-	With       map[string]any   `yaml:"with,omitempty"`
-	Action     *Action          `yaml:"-"`
+	ID         string              `yaml:"id"`
+	Type       string              `yaml:"type,omitempty"`
+	Uses       ActionSource        `yaml:"uses,omitempty"`
+	Require    *string             `yaml:"require,omitempty"`
+	Concurrent *ConcurrentGroup    `yaml:"concurrent,omitempty"`
+	SHA256     string              `yaml:"sha256,omitempty"`
+	If         Condition           `yaml:"if,omitempty"`
+	Timeout    *Duration           `yaml:"timeout,omitempty"`
+	Retry      *RetryPolicy        `yaml:"retry,omitempty"`
+	With       map[string]any      `yaml:"with,omitempty"`
+	Action     *Action             `yaml:"-"`
+	Location   diagnostic.Location `yaml:"-"`
 }
 
 // ConcurrentGroup runs independent child steps against one shared pre-group state snapshot.
@@ -234,8 +237,18 @@ func Load(path string) (*Definition, error) {
 }
 
 func loadLocal(path string) (*Definition, error) {
+	return loadLocalWithDiagnostics(path, nil, "", "")
+}
+
+func loadLocalWithDiagnostics(path string, reporter diagnostic.Reporter, sourceRoot, sourceLabel string) (*Definition, error) {
+	displaySource := path
+	if sourceLabel != "" {
+		displaySource = remapSource(path, sourceRoot, sourceLabel)
+	}
+	loadStarted := traceStart(reporter, diagnostic.PhaseDecode, diagnostic.Location{Source: displaySource}, "", "", "", "decoding workflow")
 	data, err := os.ReadFile(path)
 	if err != nil {
+		traceFinish(reporter, loadStarted, diagnostic.PhaseDecode, diagnostic.StatusFailed, diagnostic.Location{Source: displaySource}, "", "", "", "", err)
 		return nil, fmt.Errorf("reading workflow %s: %w", path, err)
 	}
 
@@ -243,16 +256,21 @@ func loadLocal(path string) (*Definition, error) {
 	decoder.KnownFields(true)
 	var definition Definition
 	if err := decoder.Decode(&definition); err != nil {
+		traceFinish(reporter, loadStarted, diagnostic.PhaseDecode, diagnostic.StatusFailed, diagnostic.Location{Source: displaySource}, "", "", "", "", err)
 		return nil, fmt.Errorf("decoding workflow %s: %w", path, err)
 	}
 	var extra any
 	if err := decoder.Decode(&extra); err != io.EOF {
 		if err == nil {
+			multipleErr := fmt.Errorf("multiple YAML documents are not supported")
+			traceFinish(reporter, loadStarted, diagnostic.PhaseDecode, diagnostic.StatusFailed, diagnostic.Location{Source: displaySource}, "", "", "", "", multipleErr)
 			return nil, fmt.Errorf("decoding workflow %s: multiple YAML documents are not supported", path)
 		}
+		traceFinish(reporter, loadStarted, diagnostic.PhaseDecode, diagnostic.StatusFailed, diagnostic.Location{Source: displaySource}, "", "", "", "", err)
 		return nil, fmt.Errorf("decoding workflow %s: %w", path, err)
 	}
 	if err := validateDefinitionHeader(&definition); err != nil {
+		traceFinish(reporter, loadStarted, diagnostic.PhaseDecode, diagnostic.StatusFailed, diagnostic.Location{Source: displaySource}, definition.Name, "", "", "", err)
 		return nil, fmt.Errorf("validating workflow %s: %w", path, err)
 	}
 	abs, err := filepath.Abs(path)
@@ -261,13 +279,27 @@ func loadLocal(path string) (*Definition, error) {
 	}
 	definition.Path = abs
 	definition.Dir = filepath.Dir(abs)
+	annotateDefinitionLocations(data, &definition, abs)
+	if sourceLabel != "" {
+		definition.Location.Source = remapSource(definition.Location.Source, sourceRoot, sourceLabel)
+	}
+	traceFinish(reporter, loadStarted, diagnostic.PhaseDecode, diagnostic.StatusSucceeded, definition.Location, definition.Name, "", "", "", nil, countAttr("steps", len(definition.Steps)))
+	requireStarted := traceStart(reporter, diagnostic.PhaseRequire, definition.Location, definition.Name, "", "", "expanding required step files")
 	definition.Steps, err = expandRequiredSteps(definition.Steps, abs, nil)
 	if err != nil {
+		traceFinish(reporter, requireStarted, diagnostic.PhaseRequire, diagnostic.StatusFailed, definition.Location, definition.Name, "", "", "", err)
 		return nil, fmt.Errorf("loading workflow %s: %w", path, err)
 	}
+	if sourceLabel != "" {
+		remapStepLocations(definition.Steps, sourceRoot, sourceLabel)
+	}
+	traceFinish(reporter, requireStarted, diagnostic.PhaseRequire, diagnostic.StatusSucceeded, definition.Location, definition.Name, "", "", "", nil, countAttr("steps", len(definition.Steps)))
+	validationStarted := traceStart(reporter, diagnostic.PhaseValidation, definition.Location, definition.Name, "", "", "validating workflow schema")
 	if err := validateDefinition(&definition, true); err != nil {
+		traceFinish(reporter, validationStarted, diagnostic.PhaseValidation, diagnostic.StatusFailed, validationLocation(&definition, err), definition.Name, "", "", "", err)
 		return nil, fmt.Errorf("validating workflow %s: %w", path, err)
 	}
+	traceFinish(reporter, validationStarted, diagnostic.PhaseValidation, diagnostic.StatusSucceeded, definition.Location, definition.Name, "", "", "", nil)
 	if definition.Vars == nil {
 		definition.Vars = make(map[string]any)
 	}

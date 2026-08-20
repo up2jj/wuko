@@ -14,6 +14,8 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+
+	"github.com/up2jj/wuko/diagnostic"
 )
 
 const (
@@ -30,20 +32,33 @@ func IsRemoteLocator(locator string) bool {
 // The returned cleanup function removes the temporary materialization directory and must be
 // called after the workflow has finished executing.
 func (loader *Loader) LoadRemote(ctx context.Context, locator string, options LoadOptions) (*Definition, func(), error) {
+	location := diagnostic.Location{Source: diagnostic.SafeURLString(locator)}
+	started := traceStart(options.Diagnostics, diagnostic.PhaseLoad, location, "", "", "", "loading remote workflow")
+	fetchStarted := traceStart(options.Diagnostics, diagnostic.PhaseWorkflowFetch, location, "", "", "", "fetching remote workflow")
 	payload, description, err := loader.fetchWorkflow(ctx, locator)
 	if err != nil {
+		traceFinish(options.Diagnostics, fetchStarted, diagnostic.PhaseWorkflowFetch, diagnostic.StatusFailed, location, "", "", "", "", err)
+		traceFinish(options.Diagnostics, started, diagnostic.PhaseLoad, diagnostic.StatusFailed, location, "", "", "", "", nil)
 		return nil, func() {}, err
 	}
+	location.Source = description
+	traceFinish(options.Diagnostics, fetchStarted, diagnostic.PhaseWorkflowFetch, diagnostic.StatusSucceeded, location, "", "", "", "", nil, countAttr("bytes", len(payload)))
 
 	path, cleanup, err := materializeRemoteWorkflow(payload, description)
 	if err != nil {
+		traceFinish(options.Diagnostics, started, diagnostic.PhaseLoad, diagnostic.StatusFailed, diagnostic.Location{Source: description}, "", "", "", "", err)
 		return nil, func() {}, fmt.Errorf("materializing workflow %s: %w", description, err)
 	}
+	options.sourceRoot = filepath.Dir(path)
+	options.sourceLabel = description
 	definition, err := loader.Load(ctx, path, options)
 	if err != nil {
 		cleanup()
+		traceFinish(options.Diagnostics, started, diagnostic.PhaseLoad, diagnostic.StatusFailed, diagnostic.Location{Source: description}, "", "", "", "", nil)
 		return nil, func() {}, err
 	}
+	remapDefinitionLocations(definition, filepath.Dir(path), description)
+	traceFinish(options.Diagnostics, started, diagnostic.PhaseLoad, diagnostic.StatusSucceeded, definition.Location, definition.Name, "", "", "", nil, countAttr("bytes", len(payload)))
 	return definition, cleanup, nil
 }
 

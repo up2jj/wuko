@@ -33,6 +33,7 @@ and launch an external agent such as Codex.
   - [Concurrent steps](#concurrent-steps)
   - [Retries and execution timeouts](#retries-and-execution-timeouts)
   - [Execution progress and statistics](#execution-progress-and-statistics)
+  - [Debug tracing](#debug-tracing)
   - [Remote composite actions](#remote-composite-actions)
   - [Input](#input)
   - [Password](#password)
@@ -466,6 +467,31 @@ timeouts; and time spent waiting to retry. Composite-action progress is indented
 summary. Concurrent groups get their own start and finish lines, with child progress indented below
 the group. Go callers can read the completed summary from `engine.State.Stats` and subscribe to the
 same serialized lifecycle through `engine.Options.Progress` without parsing terminal text.
+
+### Debug tracing
+
+Pass the persistent `--debug` flag to `wuko`, `list`, `run`, `validate`, or `tree` to trace workflow
+discovery, loading, required-file expansion, action resolution, validation, and execution to
+standard error. Normal progress and workflow output are unchanged when debug tracing is disabled.
+
+```sh
+wuko run release --debug
+wuko --debug validate release
+wuko tree --file ./workflow.yaml --debug
+```
+
+Debug lines include elapsed time, the workflow or action source, YAML line and column, step ID and
+type, lifecycle phase, duration, and the most specific error. Required fragments retain their own
+locations; remote workflows and actions use query-free logical locators instead of temporary
+materialization paths. Lua syntax errors are reported during validation before any steps run,
+while Lua runtime errors identify the failed attempt and follow the step's retry policy.
+
+Rendered step configuration is emitted as compact JSON. Environment values and fields whose names
+look sensitive—such as passwords, secrets, tokens, credentials, API keys, authorization, and
+private keys—are replaced with `<redacted>`, and URL query strings are removed. Each configuration
+record is limited to 4 KiB. Debug output can still expose sensitive data embedded under an
+innocuous field name, including command arguments, scripts, prompts, or action inputs; review it
+before sharing logs.
 
 ### Remote composite actions
 

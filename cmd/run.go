@@ -3,8 +3,10 @@ package cmd
 import (
 	"fmt"
 	"path/filepath"
+	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/engine"
 	"github.com/up2jj/wuko/tui"
 	"github.com/up2jj/wuko/workflow"
@@ -23,6 +25,8 @@ func newRunCmd(deps dependencies) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			reporter := diagnosticsFor(command, deps, cwd)
+			diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseInvocation, Status: diagnostic.StatusStarted, Message: "run workflow", Attributes: []diagnostic.Attribute{diagnostic.Attr("run_dir", cwd), diagnostic.Attr("variables", fmt.Sprint(len(variables))), diagnostic.Attr("environment", fmt.Sprint(len(environment)))}})
 			if workflowFile != "" && len(args) > 0 {
 				return fmt.Errorf("workflow selector and --file cannot be used together")
 			}
@@ -59,23 +63,27 @@ func newRunCmd(deps dependencies) *cobra.Command {
 				if loader == nil {
 					loader = workflow.NewLoader(nil)
 				}
-				definition, cleanup, err = loader.LoadRemote(command.Context(), args[0], workflow.LoadOptions{Vars: vars, Env: env, BaseEnv: baseEnv, RunDir: cwd})
+				definition, cleanup, err = loader.LoadRemote(command.Context(), args[0], workflow.LoadOptions{Vars: vars, Env: env, BaseEnv: baseEnv, RunDir: cwd, Diagnostics: reporter})
 				if err != nil {
 					return err
 				}
 				defer cleanup()
 			} else {
+				discoveryStarted := time.Now()
+				diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusStarted, Time: discoveryStarted, Message: args[0]})
 				source, err = workflow.Find(cwd, home, config, args[0])
 				if err != nil {
+					diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusFailed, Duration: time.Since(discoveryStarted), Error: err})
 					return err
 				}
+				diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusSucceeded, Duration: time.Since(discoveryStarted), Location: diagnostic.Location{Source: source.Path}, Message: source.Name})
 			}
 			loader := deps.loader
 			if loader == nil {
 				loader = workflow.NewLoader(nil)
 			}
 			if definition == nil {
-				definition, err = loader.Load(command.Context(), source.Path, workflow.LoadOptions{Vars: vars, Env: env, BaseEnv: baseEnv, RunDir: cwd})
+				definition, err = loader.Load(command.Context(), source.Path, workflow.LoadOptions{Vars: vars, Env: env, BaseEnv: baseEnv, RunDir: cwd, Diagnostics: reporter})
 				if err != nil {
 					return err
 				}
@@ -93,6 +101,7 @@ func newRunCmd(deps dependencies) *cobra.Command {
 				LocalValueDir: localValueDir, GlobalValueDir: filepath.Join(config, "wuko", "values"),
 				Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(),
 				Interactive: interactive(command.InOrStdin()), DryRun: dryRun, Progress: progress.Report,
+				Diagnostics: reporter,
 			})
 			return err
 		},

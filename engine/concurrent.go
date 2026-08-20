@@ -8,12 +8,16 @@ import (
 	"slices"
 	"time"
 
+	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/workflow"
 	"golang.org/x/sync/errgroup"
 )
 
 func (e *Engine) runConcurrent(ctx context.Context, definition *workflow.Definition, concurrent *workflow.ConcurrentGroup, options Options, state *State, firstIndex, total int) ([]stepOutcome, error) {
 	startedAt := time.Now()
+	trace(options, diagnostic.Event{Phase: diagnostic.PhaseConcurrent, Status: diagnostic.StatusStarted, Time: startedAt, WorkflowName: definition.Name, Message: "running concurrent group", Attributes: []diagnostic.Attribute{
+		diagnostic.Attr("steps", fmt.Sprint(len(concurrent.Steps))), diagnostic.Attr("max_concurrency", fmt.Sprint(concurrent.MaxConcurrency)), diagnostic.Attr("fail_fast", fmt.Sprint(concurrent.FailFast)),
+	}})
 	report(options, ProgressEvent{
 		Kind: ConcurrentStarted, Status: StatusRunning, Time: startedAt,
 		WorkflowName: definition.Name, Depth: options.depth, Total: total,
@@ -67,7 +71,13 @@ func (e *Engine) runConcurrent(ctx context.Context, definition *workflow.Definit
 
 	groupErr := concurrentExecutionError(ctx, groupCtx, concurrent, outcomes)
 	if groupErr == nil {
+		trace(options, diagnostic.Event{Phase: diagnostic.PhaseCommit, Status: diagnostic.StatusStarted, WorkflowName: definition.Name, Message: "committing concurrent results"})
 		groupErr = commitConcurrentResults(state, concurrent.Steps, outcomes)
+		status := diagnostic.StatusSucceeded
+		if groupErr != nil {
+			status = diagnostic.StatusFailed
+		}
+		trace(options, diagnostic.Event{Phase: diagnostic.PhaseCommit, Status: status, WorkflowName: definition.Name, Message: "concurrent results", Error: groupErr})
 	}
 	finishedAt := time.Now()
 	report(options, ProgressEvent{
@@ -77,6 +87,11 @@ func (e *Engine) runConcurrent(ctx context.Context, definition *workflow.Definit
 		Timeout: concurrentTimeout(concurrent), FailFast: concurrent.FailFast,
 		Duration: finishedAt.Sub(startedAt), Error: groupErr,
 	})
+	diagnosticStatus := diagnostic.StatusSucceeded
+	if groupErr != nil {
+		diagnosticStatus = diagnostic.StatusFailed
+	}
+	trace(options, diagnostic.Event{Phase: diagnostic.PhaseConcurrent, Status: diagnosticStatus, Time: finishedAt, Duration: finishedAt.Sub(startedAt), WorkflowName: definition.Name})
 	if groupErr != nil {
 		return outcomes, fmt.Errorf("workflow %q concurrent group: %w", definition.Name, groupErr)
 	}

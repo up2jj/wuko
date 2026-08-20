@@ -12,6 +12,7 @@ import (
 
 	"github.com/up2jj/wuko/step"
 	keyvaluestep "github.com/up2jj/wuko/steps/key_value"
+	luastep "github.com/up2jj/wuko/steps/lua"
 	"github.com/up2jj/wuko/steps/shell"
 )
 
@@ -54,6 +55,175 @@ steps:
 	}
 	if !strings.Contains(diagnostics.String(), "◆ Workflow hello · 1 step") || !strings.Contains(diagnostics.String(), "✓ Workflow hello succeeded") {
 		t.Fatalf("progress = %q", diagnostics.String())
+	}
+}
+
+func TestRunDebugPinpointsInvalidLuaSyntax(t *testing.T) {
+	root := t.TempDir()
+	workflowDir := filepath.Join(root, ".wuko", "workflows")
+	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data := `version: 1
+name: bad-lua
+steps:
+  - id: prepare
+    type: lua
+    with:
+      source: |
+        local value = )
+        wuko.output("value", value)
+`
+	if err := os.WriteFile(filepath.Join(workflowDir, "bad-lua.yaml"), []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	registry := step.NewRegistry()
+	if err := luastep.Register(registry); err != nil {
+		t.Fatal(err)
+	}
+	var output, diagnostics bytes.Buffer
+	command := newRootCmd(dependencies{
+		stdin: bytes.NewReader(nil), stdout: &output, stderr: &diagnostics,
+		cwd: func() (string, error) { return root, nil }, homeDir: func() (string, error) { return "", nil }, configDir: func() (string, error) { return "", nil },
+		registry: registry,
+	})
+	command.SetArgs([]string{"run", "bad-lua", "--debug"})
+	err := command.ExecuteContext(t.Context())
+	if err == nil || !strings.Contains(err.Error(), "compiling Lua") {
+		t.Fatalf("error = %v", err)
+	}
+	trace := diagnostics.String()
+	for _, want := range []string{"[debug +", ".wuko/workflows/bad-lua.yaml:4:5", "step prepare (lua)", "validation failed", "compiling Lua"} {
+		if !strings.Contains(trace, want) {
+			t.Fatalf("diagnostics = %q, want %q", trace, want)
+		}
+	}
+	if output.Len() != 0 {
+		t.Fatalf("stdout = %q", output.String())
+	}
+}
+
+func TestRunDebugRedactsRenderedEnvironment(t *testing.T) {
+	root := t.TempDir()
+	workflowDir := filepath.Join(root, ".wuko", "workflows")
+	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data := `version: 1
+name: redacted
+steps:
+  - id: deploy
+    type: shell
+    with:
+      script: "true"
+      env:
+        DEPLOY_TOKEN: supersecret
+`
+	if err := os.WriteFile(filepath.Join(workflowDir, "redacted.yaml"), []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	registry := step.NewRegistry()
+	if err := shell.Register(registry); err != nil {
+		t.Fatal(err)
+	}
+	var diagnostics bytes.Buffer
+	command := newRootCmd(dependencies{
+		stdin: bytes.NewReader(nil), stdout: io.Discard, stderr: &diagnostics,
+		cwd: func() (string, error) { return root, nil }, homeDir: func() (string, error) { return "", nil }, configDir: func() (string, error) { return "", nil },
+		registry: registry,
+	})
+	command.SetArgs([]string{"--debug", "run", "redacted"})
+	if err := command.ExecuteContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	trace := diagnostics.String()
+	if strings.Contains(trace, "supersecret") || !strings.Contains(trace, "<redacted>") {
+		t.Fatalf("diagnostics = %q", trace)
+	}
+}
+
+func TestRunDebugReportsLuaRuntimeAttempts(t *testing.T) {
+	root := t.TempDir()
+	workflowDir := filepath.Join(root, ".wuko", "workflows")
+	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data := `version: 1
+name: runtime-lua
+steps:
+  - id: prepare
+    type: lua
+    retry:
+      max_attempts: 2
+      initial_delay: 0s
+      max_delay: 0s
+    with:
+      source: error("lua boom")
+`
+	if err := os.WriteFile(filepath.Join(workflowDir, "runtime-lua.yaml"), []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	registry := step.NewRegistry()
+	if err := luastep.Register(registry); err != nil {
+		t.Fatal(err)
+	}
+	var diagnostics bytes.Buffer
+	command := newRootCmd(dependencies{
+		stdin: bytes.NewReader(nil), stdout: io.Discard, stderr: &diagnostics,
+		cwd: func() (string, error) { return root, nil }, homeDir: func() (string, error) { return "", nil }, configDir: func() (string, error) { return "", nil },
+		registry: registry,
+	})
+	command.SetArgs([]string{"run", "runtime-lua", "--debug"})
+	err := command.ExecuteContext(t.Context())
+	if err == nil || !strings.Contains(err.Error(), "running Lua") {
+		t.Fatalf("error = %v", err)
+	}
+	trace := diagnostics.String()
+	for _, want := range []string{"step prepare (lua)", "attempt failed", "attempt=1/2", "attempt=2/2", "lua boom"} {
+		if !strings.Contains(trace, want) {
+			t.Fatalf("diagnostics = %q, want %q", trace, want)
+		}
+	}
+}
+
+func TestDebugFlagCoversWorkflowCommands(t *testing.T) {
+	root := t.TempDir()
+	workflowDir := filepath.Join(root, ".wuko", "workflows")
+	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workflowDir, "debuggable.yaml"), []byte("version: 1\nname: debuggable\ndescription: debuggable workflow\nsteps:\n  - id: run\n    type: shell\n    with: {script: 'true'}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	registry := step.NewRegistry()
+	if err := shell.Register(registry); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "picker", args: []string{"--debug"}, want: "workflow picker"},
+		{name: "list", args: []string{"list", "--debug"}, want: "discovery succeeded"},
+		{name: "validate", args: []string{"--debug", "validate", "debuggable"}, want: "validation succeeded"},
+		{name: "tree", args: []string{"tree", "debuggable", "--debug"}, want: "load succeeded"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var diagnostics bytes.Buffer
+			command := newRootCmd(dependencies{
+				stdin: bytes.NewReader(nil), stdout: io.Discard, stderr: &diagnostics,
+				cwd: func() (string, error) { return root, nil }, homeDir: func() (string, error) { return "", nil }, configDir: func() (string, error) { return "", nil },
+				registry: registry, isInteractive: func(io.Reader) bool { return false },
+			})
+			command.SetArgs(test.args)
+			if err := command.ExecuteContext(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if got := diagnostics.String(); !strings.Contains(got, "[debug +") || !strings.Contains(got, test.want) {
+				t.Fatalf("diagnostics = %q, want %q", got, test.want)
+			}
+		})
 	}
 }
 

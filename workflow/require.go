@@ -118,6 +118,7 @@ func loadStepFragment(path string) ([]Step, error) {
 		if len(steps) == 0 {
 			return nil, fmt.Errorf("decoding required steps %s: at least one step is required", path)
 		}
+		annotateFragmentLocations(data, steps, path)
 		return steps, nil
 	case yaml.MappingNode:
 		var fragment stepFragment
@@ -127,6 +128,7 @@ func loadStepFragment(path string) ([]Step, error) {
 		if len(fragment.Steps) == 0 {
 			return nil, fmt.Errorf("decoding required steps %s: at least one step is required", path)
 		}
+		annotateFragmentLocations(data, fragment.Steps, path)
 		return fragment.Steps, nil
 	default:
 		return nil, fmt.Errorf("decoding required steps %s: document must be a step list or an object containing steps", path)

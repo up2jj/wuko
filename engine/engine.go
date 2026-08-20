@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/expr-lang/expr"
+	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
 )
@@ -33,7 +34,9 @@ type Options struct {
 	Interactive    bool
 	DryRun         bool
 	// Progress receives structured workflow, step, attempt, retry, and timing events.
-	Progress        func(ProgressEvent)
+	Progress func(ProgressEvent)
+	// Diagnostics receives opt-in loading, validation, and execution phase events.
+	Diagnostics     diagnostic.Reporter
 	inputs          map[string]any
 	operationPrefix string
 	depth           int
@@ -51,64 +54,93 @@ type State struct {
 func New(registry *step.Registry) *Engine { return &Engine{registry: registry} }
 
 func (e *Engine) Validate(ctx context.Context, definition *workflow.Definition, options Options) error {
+	started := time.Now()
+	trace(options, diagnostic.Event{Phase: diagnostic.PhaseValidation, Status: diagnostic.StatusStarted, Time: started, WorkflowName: definition.Name, Location: definition.Location, Message: "validating workflow"})
 	state, err := initialState(definition, options)
 	if err != nil {
+		trace(options, diagnostic.Event{Phase: diagnostic.PhaseValues, Status: diagnostic.StatusFailed, WorkflowName: definition.Name, Location: definition.Location, Error: err})
+		trace(options, diagnostic.Event{Phase: diagnostic.PhaseValidation, Status: diagnostic.StatusFailed, WorkflowName: definition.Name, Location: definition.Location, Duration: time.Since(started)})
 		return err
 	}
-	return e.validateSteps(ctx, definition, definition.Steps, options, state, false)
+	err = e.validateSteps(ctx, definition, definition.Steps, options, state, false)
+	status := diagnostic.StatusSucceeded
+	if err != nil {
+		status = diagnostic.StatusFailed
+	}
+	trace(options, diagnostic.Event{Phase: diagnostic.PhaseValidation, Status: status, WorkflowName: definition.Name, Location: definition.Location, Duration: time.Since(started)})
+	return err
 }
 
 func (e *Engine) validateSteps(ctx context.Context, definition *workflow.Definition, steps []workflow.Step, options Options, state *State, insideConcurrent bool) error {
 	for _, workflowStep := range steps {
 		if workflowStep.Concurrent != nil {
+			started := time.Now()
+			trace(options, diagnostic.Event{Phase: diagnostic.PhaseConcurrent, Status: diagnostic.StatusStarted, Time: started, WorkflowName: definition.Name, Location: workflowStep.Location, Message: "validating concurrent group", Attributes: []diagnostic.Attribute{diagnostic.Attr("steps", fmt.Sprint(len(workflowStep.Concurrent.Steps)))}})
 			if insideConcurrent {
+				trace(options, diagnostic.Event{Phase: diagnostic.PhaseConcurrent, Status: diagnostic.StatusFailed, WorkflowName: definition.Name, Location: workflowStep.Location, Duration: time.Since(started), Error: fmt.Errorf("nested concurrent groups are not supported")})
 				return fmt.Errorf("concurrent group: nested concurrent groups are not supported")
 			}
 			if err := workflowStep.Concurrent.Validate(); err != nil {
+				trace(options, diagnostic.Event{Phase: diagnostic.PhaseConcurrent, Status: diagnostic.StatusFailed, WorkflowName: definition.Name, Location: workflowStep.Location, Duration: time.Since(started), Error: err})
 				return fmt.Errorf("concurrent group: %w", err)
 			}
 			childOptions := options
 			childOptions.Interactive = false
 			childOptions.Stdin = nil
+			childOptions.depth++
 			if err := e.validateSteps(ctx, definition, workflowStep.Concurrent.Steps, childOptions, state, true); err != nil {
+				trace(options, diagnostic.Event{Phase: diagnostic.PhaseConcurrent, Status: diagnostic.StatusFailed, WorkflowName: definition.Name, Location: workflowStep.Location, Duration: time.Since(started)})
 				return fmt.Errorf("concurrent group: %w", err)
 			}
+			trace(options, diagnostic.Event{Phase: diagnostic.PhaseConcurrent, Status: diagnostic.StatusSucceeded, WorkflowName: definition.Name, Location: workflowStep.Location, Duration: time.Since(started)})
 			continue
 		}
+		started := time.Now()
+		traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusStarted, time.Time{}, "validating step", nil)
 		if err := workflowStep.ValidateExecutionPolicy(); err != nil {
+			traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusFailed, started, "", err)
 			return fmt.Errorf("step %q: %w", workflowStep.ID, err)
 		}
 		if workflowStep.If != "" {
 			if _, err := compileCondition(workflowStep.If); err != nil {
+				traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusFailed, started, "compiling condition", err)
 				return fmt.Errorf("step %q if: %w", workflowStep.ID, err)
 			}
 		}
 		if workflowStep.Retry != nil && workflowStep.Retry.OperationID != "" {
 			if err := validateTemplates(workflowStep.Retry.OperationID, false); err != nil {
+				traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusFailed, started, "validating retry operation ID", err)
 				return fmt.Errorf("step %q retry operation_id: %w", workflowStep.ID, err)
 			}
 		}
 		if workflowStep.Action != nil {
 			if err := e.validateAction(ctx, definition, workflowStep, options, state); err != nil {
+				traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusFailed, started, "validating action", err)
 				return fmt.Errorf("step %q: %w", workflowStep.ID, err)
 			}
+			traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusSucceeded, started, "", nil)
 			continue
 		}
 		if err := validateTemplates(workflowStep.With, workflowStep.Type == "lua"); err != nil {
+			traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusFailed, started, "validating templates", err)
 			return fmt.Errorf("step %q template: %w", workflowStep.ID, err)
 		}
 		runner, err := e.registry.Build(workflowStep.Type, workflowStep.With)
 		if err != nil {
+			traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusFailed, started, "building runner", err)
 			return fmt.Errorf("step %q: %w", workflowStep.ID, err)
 		}
 		validator, ok := runner.(step.Validator)
 		if !ok {
+			traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusSucceeded, started, "", nil)
 			continue
 		}
 		request := makeRequest(definition, workflowStep.ID, options, state, 1, maxAttempts(workflowStep), "validation")
 		if err := validator.Validate(ctx, request); err != nil {
+			traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusFailed, started, "validating runner", err)
 			return fmt.Errorf("step %q: %w", workflowStep.ID, err)
 		}
+		traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusSucceeded, started, "", nil)
 	}
 	return nil
 }
@@ -117,6 +149,7 @@ func (e *Engine) Run(ctx context.Context, definition *workflow.Definition, optio
 	options = prepareRunOptions(options)
 	state, err := initialState(definition, options)
 	if err != nil {
+		trace(options, diagnostic.Event{Phase: diagnostic.PhaseValues, Status: diagnostic.StatusFailed, WorkflowName: definition.Name, Location: definition.Location, Error: err})
 		return nil, err
 	}
 	if err := e.Validate(ctx, definition, options); err != nil {
@@ -175,7 +208,11 @@ func (e *Engine) Run(ctx context.Context, definition *workflow.Definition, optio
 		if outcome.skipped {
 			continue
 		}
+		commitStarted := time.Now()
+		traceStep(options, definition, workflowStep, diagnostic.PhaseCommit, diagnostic.StatusStarted, time.Time{}, "committing step result", nil)
 		commitStepResult(state, workflowStep.ID, outcome.result)
+		traceStep(options, definition, workflowStep, diagnostic.PhaseCommit, diagnostic.StatusSucceeded, commitStarted, "", nil,
+			diagnostic.Attr("outputs", fmt.Sprint(len(outcome.result.Outputs))), diagnostic.Attr("variables", fmt.Sprint(len(outcome.result.Variables))))
 	}
 	return state, nil
 }
@@ -200,18 +237,23 @@ func (e *Engine) executeStep(ctx context.Context, definition *workflow.Definitio
 		}
 		reportStepFinished(options, definition.Name, workflowStep.ID, kind, index, total, outcome.stats)
 	}
+	conditionStarted := time.Now()
+	traceStep(options, definition, workflowStep, diagnostic.PhaseCondition, diagnostic.StatusStarted, time.Time{}, string(workflowStep.If), nil)
 	run, err := evaluateCondition(workflowStep.If, makeConditionEnvironment(definition, options.RunDir, state))
 	if err != nil {
+		traceStep(options, definition, workflowStep, diagnostic.PhaseCondition, diagnostic.StatusFailed, conditionStarted, "", err)
 		stepErr := fmt.Errorf("workflow %q step %q (%s): evaluating if: %w", definition.Name, workflowStep.ID, kind, err)
 		finishStep(StatusFailed, stepErr, nil, 0)
 		outcome.err = stepErr
 		return outcome
 	}
 	if !run {
+		traceStep(options, definition, workflowStep, diagnostic.PhaseCondition, diagnostic.StatusSkipped, conditionStarted, "condition evaluated false", nil)
 		finishStep(StatusSkipped, nil, nil, 0)
 		outcome.skipped = true
 		return outcome
 	}
+	traceStep(options, definition, workflowStep, diagnostic.PhaseCondition, diagnostic.StatusSucceeded, conditionStarted, "condition evaluated true", nil)
 	report(options, ProgressEvent{
 		Kind: StepStarted, Status: StatusRunning, Time: stepStartedAt,
 		WorkflowName: definition.Name, Depth: options.depth, StepID: workflowStep.ID,
@@ -221,22 +263,34 @@ func (e *Engine) executeStep(ctx context.Context, definition *workflow.Definitio
 	var execute stepExecutor
 	cleanup := func() {}
 	if workflowStep.Action != nil {
+		prepareStarted := time.Now()
+		traceStep(options, definition, workflowStep, diagnostic.PhaseActionInputs, diagnostic.StatusStarted, time.Time{}, "resolving action inputs", nil)
 		execute, cleanup, err = e.prepareActionExecutor(definition, workflowStep, options, state)
 		if err != nil {
+			traceStep(options, definition, workflowStep, diagnostic.PhaseActionInputs, diagnostic.StatusFailed, prepareStarted, "", err)
 			stepErr := fmt.Errorf("workflow %q step %q (%s): %w", definition.Name, workflowStep.ID, kind, err)
 			finishStep(statusFromError(stepErr), stepErr, nil, 0)
 			outcome.err = stepErr
 			return outcome
 		}
+		traceStep(options, definition, workflowStep, diagnostic.PhaseActionInputs, diagnostic.StatusSucceeded, prepareStarted, "", nil)
 	} else {
+		renderStarted := time.Now()
+		traceStep(options, definition, workflowStep, diagnostic.PhaseRender, diagnostic.StatusStarted, time.Time{}, "rendering step configuration", nil)
 		data := templateData(definition, options.RunDir, state)
 		rendered, err := renderValue(workflowStep.With, data, workflowStep.Type == "lua")
 		if err != nil {
+			traceStep(options, definition, workflowStep, diagnostic.PhaseRender, diagnostic.StatusFailed, renderStarted, "", err)
 			stepErr := fmt.Errorf("workflow %q step %q (%s): rendering configuration: %w", definition.Name, workflowStep.ID, workflowStep.Type, err)
 			finishStep(StatusFailed, stepErr, nil, 0)
 			outcome.err = stepErr
 			return outcome
 		}
+		var configuration []diagnostic.Attribute
+		if options.Diagnostics != nil {
+			configuration = []diagnostic.Attribute{diagnostic.Attr("config", diagnostic.RedactedJSON(rendered))}
+		}
+		traceStep(options, definition, workflowStep, diagnostic.PhaseRender, diagnostic.StatusSucceeded, renderStarted, "", nil, configuration...)
 		raw, ok := rendered.(map[string]any)
 		if !ok {
 			stepErr := fmt.Errorf("workflow %q step %q (%s): configuration is not an object", definition.Name, workflowStep.ID, workflowStep.Type)
@@ -244,13 +298,17 @@ func (e *Engine) executeStep(ctx context.Context, definition *workflow.Definitio
 			outcome.err = stepErr
 			return outcome
 		}
+		runnerStarted := time.Now()
+		traceStep(options, definition, workflowStep, diagnostic.PhaseRunner, diagnostic.StatusStarted, time.Time{}, "building step runner", nil)
 		runner, err := e.registry.Build(workflowStep.Type, raw)
 		if err != nil {
+			traceStep(options, definition, workflowStep, diagnostic.PhaseRunner, diagnostic.StatusFailed, runnerStarted, "", err)
 			stepErr := fmt.Errorf("workflow %q step %q (%s): %w", definition.Name, workflowStep.ID, workflowStep.Type, err)
 			finishStep(StatusFailed, stepErr, nil, 0)
 			outcome.err = stepErr
 			return outcome
 		}
+		traceStep(options, definition, workflowStep, diagnostic.PhaseRunner, diagnostic.StatusSucceeded, runnerStarted, "", nil)
 		execute = runner.Run
 	}
 	execution := e.runWithRetry(ctx, definition, workflowStep, options, state, execute)
@@ -388,11 +446,12 @@ func (e *Engine) validateAction(ctx context.Context, definition *workflow.Defini
 	}
 	defer cleanup()
 	inputs := actionValidationInputs(workflowStep.Action)
-	inner := &workflow.Definition{Version: 1, Name: workflowStep.Action.Name, Dir: dir, Steps: workflowStep.Action.Steps, Vars: map[string]any{}, Env: workflow.Environment{}}
+	inner := &workflow.Definition{Version: 1, Name: workflowStep.Action.Name, Dir: dir, Steps: workflowStep.Action.Steps, Vars: map[string]any{}, Env: workflow.Environment{}, Location: workflowStep.Action.Location}
 	return e.Validate(ctx, inner, Options{
 		inputs: inputs, BaseEnv: state.Env, RunDir: options.RunDir,
 		LocalValueDir: options.LocalValueDir, GlobalValueDir: options.GlobalValueDir,
 		Stdin: options.Stdin, Stdout: options.Stdout, Stderr: options.Stderr, Interactive: options.Interactive,
+		Diagnostics: options.Diagnostics, depth: options.depth + 1, runtime: options.runtime,
 	})
 }
 
@@ -401,17 +460,21 @@ func (e *Engine) prepareActionExecutor(definition *workflow.Definition, workflow
 	if err != nil {
 		return nil, nil, err
 	}
+	if options.Diagnostics != nil {
+		traceStep(options, definition, workflowStep, diagnostic.PhaseActionInputs, diagnostic.StatusDetail, time.Time{}, "resolved action inputs", nil, diagnostic.Attr("config", diagnostic.RedactedJSON(inputs)))
+	}
 	dir, cleanup, err := workflowStep.Action.Materialize()
 	if err != nil {
 		return nil, nil, err
 	}
-	inner := &workflow.Definition{Version: 1, Name: workflowStep.Action.Name, Dir: dir, Steps: workflowStep.Action.Steps, Vars: map[string]any{}, Env: workflow.Environment{}}
+	inner := &workflow.Definition{Version: 1, Name: workflowStep.Action.Name, Dir: dir, Steps: workflowStep.Action.Steps, Vars: map[string]any{}, Env: workflow.Environment{}, Location: workflowStep.Action.Location}
 	execute := func(ctx context.Context, request step.Request) (step.Result, error) {
 		innerState, err := e.Run(ctx, inner, Options{
 			inputs: inputs, BaseEnv: state.Env, RunDir: options.RunDir,
 			LocalValueDir: options.LocalValueDir, GlobalValueDir: options.GlobalValueDir,
 			Stdin: options.Stdin, Stdout: options.Stdout, Stderr: options.Stderr,
 			Interactive: options.Interactive, Progress: options.Progress,
+			Diagnostics:     options.Diagnostics,
 			operationPrefix: request.OperationID, depth: options.depth + 1, runtime: options.runtime,
 		})
 		if err != nil {
@@ -419,16 +482,22 @@ func (e *Engine) prepareActionExecutor(definition *workflow.Definition, workflow
 		}
 		environment := map[string]any{"inputs": innerState.Inputs, "vars": innerState.Vars, "steps": innerState.Steps, "env": innerState.Env, "workflow": map[string]any{"name": inner.Name, "dir": inner.Dir}, "run": map[string]any{"dir": options.RunDir}}
 		outputs := make(map[string]any, len(workflowStep.Action.Outputs))
+		outputsStarted := time.Now()
+		traceStep(options, definition, workflowStep, diagnostic.PhaseActionOutputs, diagnostic.StatusStarted, time.Time{}, "evaluating action outputs", nil)
 		for name, output := range workflowStep.Action.Outputs {
 			value, err := expr.Eval(output.Value, environment)
 			if err != nil {
+				traceStep(options, definition, workflowStep, diagnostic.PhaseActionOutputs, diagnostic.StatusFailed, outputsStarted, "", err)
 				return step.Result{}, fmt.Errorf("evaluating output %q: %w", name, err)
 			}
 			if !workflow.ActionDataValue(value) {
-				return step.Result{}, fmt.Errorf("output %q is not a YAML/JSON-compatible value", name)
+				err := fmt.Errorf("output %q is not a YAML/JSON-compatible value", name)
+				traceStep(options, definition, workflowStep, diagnostic.PhaseActionOutputs, diagnostic.StatusFailed, outputsStarted, "", err)
+				return step.Result{}, err
 			}
 			outputs[name] = cloneAny(value)
 		}
+		traceStep(options, definition, workflowStep, diagnostic.PhaseActionOutputs, diagnostic.StatusSucceeded, outputsStarted, "", nil, diagnostic.Attr("outputs", fmt.Sprint(len(outputs))))
 		return step.Result{Outputs: outputs}, nil
 	}
 	return execute, cleanup, nil

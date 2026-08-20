@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 	"text/template"
+
+	"github.com/up2jj/wuko/diagnostic"
 )
 
 // LoadOptions supplies the pre-run values used to resolve remote action references.
@@ -17,6 +19,10 @@ type LoadOptions struct {
 	// BaseEnv overrides the current process environment when non-nil.
 	BaseEnv map[string]string
 	RunDir  string
+	// Diagnostics receives opt-in workflow loading and preparation events.
+	Diagnostics diagnostic.Reporter
+	sourceRoot  string
+	sourceLabel string
 }
 
 // PrepareValues applies workflow and caller overrides using the same precedence as execution.

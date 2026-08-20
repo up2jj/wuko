@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
 )
@@ -77,5 +79,45 @@ func TestRunReportsTerminalFailure(t *testing.T) {
 	last := events[len(events)-1]
 	if last.Kind != WorkflowFinished || last.Status != StatusFailed || last.Stats.Failed != 1 || last.Stats.Attempts != 1 {
 		t.Fatalf("last event = %#v", last)
+	}
+}
+
+func TestRunReportsDiagnosticFailurePhaseAndLocation(t *testing.T) {
+	registry := step.NewRegistry()
+	if err := registry.Register("fail", func(map[string]any) (step.Runner, error) { return alwaysFailRunner{}, nil }); err != nil {
+		t.Fatal(err)
+	}
+	location := diagnostic.Location{Source: "/project/workflow.yaml", Line: 8, Column: 5}
+	definition := &workflow.Definition{
+		Version: 1, Name: "failure", Dir: t.TempDir(), Location: diagnostic.Location{Source: "/project/workflow.yaml", Line: 1, Column: 1},
+		Steps: []workflow.Step{{ID: "break", Type: "fail", With: map[string]any{"token": "secret", "message": "visible"}, Location: location}},
+	}
+	var events []diagnostic.Event
+	_, err := New(registry).Run(t.Context(), definition, Options{Diagnostics: func(event diagnostic.Event) { events = append(events, event) }})
+	if err == nil {
+		t.Fatal("expected execution error")
+	}
+	wants := map[diagnostic.Phase]diagnostic.Status{
+		diagnostic.PhaseCondition: diagnostic.StatusSucceeded,
+		diagnostic.PhaseRender:    diagnostic.StatusSucceeded,
+		diagnostic.PhaseRunner:    diagnostic.StatusSucceeded,
+		diagnostic.PhaseAttempt:   diagnostic.StatusFailed,
+	}
+	for _, event := range events {
+		if want, ok := wants[event.Phase]; ok && event.Status == want {
+			if event.Location != location {
+				t.Fatalf("event location = %#v, want %#v", event.Location, location)
+			}
+			delete(wants, event.Phase)
+		}
+		if event.Phase == diagnostic.PhaseRender && event.Status == diagnostic.StatusSucceeded {
+			configuration := event.Attributes[0].Value
+			if strings.Contains(configuration, "secret") || !strings.Contains(configuration, "<redacted>") {
+				t.Fatalf("configuration = %s", configuration)
+			}
+		}
+	}
+	if len(wants) != 0 {
+		t.Fatalf("missing diagnostics = %#v; events = %#v", wants, events)
 	}
 }

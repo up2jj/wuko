@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/up2jj/wuko/diagnostic"
 )
 
 func TestGitHubWorkflowURL(t *testing.T) {
@@ -49,18 +51,29 @@ func TestGitHubWorkflowURLRejectsMalformedLocators(t *testing.T) {
 func TestLoadRemoteYAMLAndCleansUp(t *testing.T) {
 	workflowData := []byte("version: 1\nname: remote\nsteps:\n  - id: run\n    type: shell\n    with: {command: true}\n")
 	client := testHTTPClient(func(request *http.Request) (*http.Response, error) {
-		if request.URL.String() != "https://example.test/workflow.yaml" {
+		if request.URL.String() != "https://example.test/workflow.yaml?token=secret" {
 			return nil, fmt.Errorf("unexpected URL %s", request.URL)
 		}
 		return testResponse(http.StatusOK, workflowData), nil
 	})
 
-	definition, cleanup, err := NewLoader(client).LoadRemote(t.Context(), "https://example.test/workflow.yaml", LoadOptions{RunDir: t.TempDir()})
+	var events []diagnostic.Event
+	definition, cleanup, err := NewLoader(client).LoadRemote(t.Context(), "https://example.test/workflow.yaml?token=secret", LoadOptions{
+		RunDir: t.TempDir(), Diagnostics: func(event diagnostic.Event) { events = append(events, event) },
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if definition.Name != "remote" {
 		t.Fatalf("name = %q, want remote", definition.Name)
+	}
+	if definition.Location.Source != "https://example.test/workflow.yaml" {
+		t.Fatalf("logical source = %q", definition.Location.Source)
+	}
+	for _, event := range events {
+		if strings.Contains(event.Location.Source, "wuko-workflow-") || strings.Contains(event.Location.Source, "token=secret") {
+			t.Fatalf("diagnostic source = %q", event.Location.Source)
+		}
 	}
 	if _, err := os.Stat(definition.Path); err != nil {
 		t.Fatalf("materialized workflow is unavailable: %v", err)
