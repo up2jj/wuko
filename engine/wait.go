@@ -10,6 +10,7 @@ import (
 	"github.com/expr-lang/expr"
 	"github.com/expr-lang/expr/vm"
 	"github.com/up2jj/wuko/diagnostic"
+	wukoexpr "github.com/up2jj/wuko/expression"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
 )
@@ -89,7 +90,7 @@ func decodeWaitConfig(raw map[string]any) (waitConfig, error) {
 }
 
 func compileWaitCondition(condition string) (*vm.Program, error) {
-	program, err := expr.Compile(condition, expr.Env(waitEnvironment{}), expr.AsBool())
+	program, err := wukoexpr.Compile(condition, expr.Env(waitEnvironment{}), expr.AsBool())
 	if err != nil {
 		return nil, fmt.Errorf("compiling until: %w", err)
 	}

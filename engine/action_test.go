@@ -101,7 +101,7 @@ func TestCompositeActionRunsSequentiallyWithTypedInputsAndDeclaredOutputs(t *tes
 			"items":   {Type: "array", Required: true},
 			"enabled": {Type: "boolean", Default: true, HasDefault: true},
 		},
-		Outputs: map[string]workflow.ActionOutput{"result": {Value: "steps.second.value"}},
+		Outputs: map[string]workflow.ActionOutput{"result": {Value: `required(steps.second.value, "missing action result")`}},
 		Steps: []workflow.Step{
 			{ID: "first", Type: "action_capture", With: map[string]any{"value": "first"}},
 			{ID: "second", Type: "action_capture", If: "inputs.enabled && len(inputs.items) == 2", With: map[string]any{"value": "done"}},
@@ -111,8 +111,8 @@ func TestCompositeActionRunsSequentiallyWithTypedInputsAndDeclaredOutputs(t *tes
 	definition := &workflow.Definition{
 		Version: 1, Name: "caller", Dir: t.TempDir(), Vars: map[string]any{}, Env: workflow.Environment{},
 		Steps: []workflow.Step{
-			{ID: "prepare", Type: "action_capture", With: map[string]any{"value": []any{"a", "b"}}},
-			{ID: "remote", Uses: workflow.ActionSource{URL: "https://example.test/action@v1"}, Action: action, With: map[string]any{"items": map[string]any{"expr": "steps.prepare.value"}}},
+			{ID: "prepare", Type: "action_capture", With: map[string]any{"value": []any{"b", "a"}}},
+			{ID: "remote", Uses: workflow.ActionSource{URL: "https://example.test/action@v1"}, Action: action, With: map[string]any{"items": map[string]any{"expr": "list(steps.prepare.value[1], steps.prepare.value[0])"}}},
 			{ID: "consume", Type: "action_capture", With: map[string]any{"value": "{{ .steps.remote.result }}"}},
 		},
 	}

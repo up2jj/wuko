@@ -14,6 +14,7 @@ import (
 	"text/template"
 	"text/template/parse"
 
+	"github.com/up2jj/wuko/expression"
 	"gopkg.in/yaml.v3"
 )
 
@@ -63,7 +64,7 @@ type Renderer struct {
 
 // NewRenderer constructs a renderer from resolved template definitions.
 func NewRenderer(definitions map[string]TemplateDefinition) (*Renderer, error) {
-	base := template.New("templates").Option("missingkey=error")
+	base := newTemplate("templates")
 	names := slices.Sorted(maps.Keys(definitions))
 	for _, name := range names {
 		if !identifierPattern.MatchString(name) {
@@ -77,7 +78,7 @@ func NewRenderer(definitions map[string]TemplateDefinition) (*Renderer, error) {
 		if strings.TrimSpace(body) == "" {
 			return nil, fmt.Errorf("template %q body must not be empty", name)
 		}
-		parsed, err := template.New(name).Option("missingkey=error").Parse(body)
+		parsed, err := newTemplate(name).Parse(body)
 		if err != nil {
 			return nil, fmt.Errorf("template %q: %w", name, err)
 		}
@@ -119,7 +120,7 @@ func (renderer *Renderer) compile(value string) (*template.Template, error) {
 	if cached, ok := renderer.cache.Load(value); ok {
 		return cached.(*template.Template), nil
 	}
-	parsed, err := template.New(executionTemplateName).Option("missingkey=error").Parse(value)
+	parsed, err := newTemplate(executionTemplateName).Parse(value)
 	if err != nil {
 		return nil, err
 	}
@@ -130,7 +131,7 @@ func (renderer *Renderer) compile(value string) (*template.Template, error) {
 	}
 	// Parse under a second root name so an explicit definition of the execution root
 	// cannot be mistaken for the value's own parse tree.
-	definitionCheck, err := template.New(definitionCheckTemplateName).Parse(value)
+	definitionCheck, err := newTemplate(definitionCheckTemplateName).Parse(value)
 	if err != nil {
 		return nil, err
 	}
@@ -152,6 +153,10 @@ func (renderer *Renderer) compile(value string) (*template.Template, error) {
 	}
 	actual, _ := renderer.cache.LoadOrStore(value, compiled)
 	return actual.(*template.Template), nil
+}
+
+func newTemplate(name string) *template.Template {
+	return template.New(name).Funcs(expression.TemplateFuncs()).Option("missingkey=error")
 }
 
 func validateTemplateReferences(tmpl *template.Template) error {

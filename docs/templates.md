@@ -30,6 +30,10 @@ with:
     - "{{ index .vars.regions 0 }}"
 ```
 
+Wuko also provides deterministic string, defaulting, collection, indentation, JSON, and YAML
+helpers. See [Template, Expr, and Lua functions](template-functions.md) for the complete reference
+and equivalent syntax in each language.
+
 Lua `source` is deliberately not rendered. Pass dynamic values through the Lua step's typed
 `args` instead.
 
@@ -202,8 +206,8 @@ therefore cannot depend on `.steps`, `.foreach`, or `.matrix`.
 
 ## Safety
 
-Templates do not provide shell, JSON, YAML, or HTML escaping automatically. Quote or encode
-values for the destination format, and avoid treating untrusted values as executable shell
-source. Wuko does not add filesystem, command-execution, or environment-lookup template
-functions; templates receive only the documented data roots and Go's built-in template
-functions.
+Templates do not provide shell or HTML escaping automatically. Use the documented JSON or YAML
+serialization helpers where appropriate, quote values for their destination format, and avoid
+treating untrusted values as executable shell source. Wuko does not add filesystem,
+command-execution, network, clock, random, or environment-lookup functions; templates receive
+only the documented data roots and [side-effect-free helpers](template-functions.md).

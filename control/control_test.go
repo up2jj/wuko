@@ -55,6 +55,22 @@ func TestMatrixExpansionOrder(t *testing.T) {
 	}
 }
 
+func TestExpressionHelpers(t *testing.T) {
+	expression := `sortAlpha(vars.items)`
+	if err := ValidateExpression(expression); err != nil {
+		t.Fatal(err)
+	}
+	got, err := EvaluateExpression(expression, map[string]any{
+		"vars": map[string]any{"items": []any{"z", "a"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, []string{"a", "z"}) {
+		t.Fatalf("value = %#v", got)
+	}
+}
+
 func TestExpansionLimitsAndCancellation(t *testing.T) {
 	items := make([]any, DefaultMaxIterations+1)
 	if _, err := Foreach(items); err == nil || !strings.Contains(err.Error(), "exceeds max_iterations 10000") {

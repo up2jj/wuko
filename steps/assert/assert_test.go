@@ -11,7 +11,7 @@ import (
 
 func TestAssertionUsesAllExpressionRoots(t *testing.T) {
 	runner, err := New(map[string]any{
-		"expr":    `inputs.enabled && vars.enabled && env.MODE == "test" && steps.prepare.ready && workflow.name == "release" && workflow.dir == "/workflow" && run.dir == "/run"`,
+		"expr":    `hasKey(inputs, "enabled") && inputs.enabled && vars.enabled && env.MODE == "test" && steps.prepare.ready && workflow.name == "release" && workflow.dir == "/workflow" && run.dir == "/run"`,
 		"message": "release is not ready",
 	})
 	if err != nil {

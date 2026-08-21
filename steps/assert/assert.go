@@ -8,6 +8,7 @@ import (
 
 	"github.com/expr-lang/expr"
 	"github.com/expr-lang/expr/vm"
+	wukoexpr "github.com/up2jj/wuko/expression"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -55,7 +56,7 @@ func New(raw map[string]any) (step.Runner, error) {
 	if strings.TrimSpace(config.Message) == "" {
 		return nil, fmt.Errorf("message is required")
 	}
-	program, err := expr.Compile(config.Expr, expr.Env(expressionEnvironment{}), expr.AsBool())
+	program, err := wukoexpr.Compile(config.Expr, expr.Env(expressionEnvironment{}), expr.AsBool())
 	if err != nil {
 		return nil, fmt.Errorf("compiling expr: %w", err)
 	}

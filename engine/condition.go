@@ -5,6 +5,7 @@ import (
 
 	"github.com/expr-lang/expr"
 	"github.com/expr-lang/expr/vm"
+	wukoexpr "github.com/up2jj/wuko/expression"
 	"github.com/up2jj/wuko/workflow"
 )
 
@@ -30,7 +31,7 @@ type conditionRun struct {
 }
 
 func compileCondition(condition workflow.Condition) (*vm.Program, error) {
-	program, err := expr.Compile(
+	program, err := wukoexpr.Compile(
 		string(condition),
 		expr.Env(conditionEnvironment{}),
 		expr.AsBool(),

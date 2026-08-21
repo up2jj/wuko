@@ -271,7 +271,8 @@ templates:
 ```
 
 See [Templates](docs/templates.md) for named-template invocation, file packaging, data roots,
-composite-action scope, execution order, and typed-input guidance.
+composite-action scope, execution order, and typed-input guidance. See
+[Template, Expr, and Lua functions](docs/template-functions.md) for the shared helper reference.
 
 Environment precedence is step environment, CLI `--env`, workflow environment, then the host
 environment. Environment values are not shown by dry-run output.
@@ -282,6 +283,8 @@ Invoke a declared template with `{{ template "name" . }}`. Templates use `missin
 can access `.vars`, `.env`, `.steps`, `.workflow.name`, `.workflow.dir`, `.run.dir`, and action
 `.inputs`. Lua source itself is not templated; use its typed `args` instead. File-backed templates
 must be bundled as companion files when a remote workflow or action is published as an archive.
+String, collection, defaulting, indentation, JSON, and YAML helpers are listed in
+[Template, Expr, and Lua functions](docs/template-functions.md).
 
 ### Execution order and step outputs
 
@@ -1362,6 +1365,7 @@ The trusted `wuko` Lua host API provides:
 - `wuko.args`, `wuko.var(name)`, `wuko.set_var(name, value)`, `wuko.output(name, value)`
 - `wuko.env.get(name)`, `wuko.env.all()`
 - `wuko.json.encode(value)`, `wuko.json.decode(text)`
+- `wuko.helpers` string, defaulting, collection, indentation, JSON, and YAML helpers
 - `wuko.kv.get`, `set`, `delete`, and `list`
 - `wuko.http.request({method, url, headers, body, timeout})`
 - `wuko.fs.read`, `write`, `mkdir_all`, `list`, `stat`, `rename`, and `remove`

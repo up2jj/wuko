@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/expr-lang/expr"
+	wukoexpr "github.com/up2jj/wuko/expression"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -168,7 +169,7 @@ func validateMaxIterations(maxIterations int) error {
 
 // ValidateExpression compiles a collection expression without requiring runtime roots.
 func ValidateExpression(expression string) error {
-	if _, err := expr.Compile(expression, expr.AllowUndefinedVariables()); err != nil {
+	if _, err := wukoexpr.Compile(expression, expr.AllowUndefinedVariables()); err != nil {
 		return err
 	}
 	return nil
@@ -176,7 +177,7 @@ func ValidateExpression(expression string) error {
 
 // EvaluateExpression evaluates a typed expression against workflow runtime roots.
 func EvaluateExpression(expression string, environment map[string]any) (any, error) {
-	program, err := expr.Compile(expression, expr.Env(environment))
+	program, err := wukoexpr.Compile(expression, expr.Env(environment))
 	if err != nil {
 		return nil, err
 	}

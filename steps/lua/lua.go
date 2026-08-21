@@ -155,6 +155,9 @@ func (r *runtime) module(state *glua.LState) (*glua.LTable, error) {
 	jsonModule := state.NewTable()
 	state.SetFuncs(jsonModule, map[string]glua.LGFunction{"encode": r.jsonEncode, "decode": r.jsonDecode})
 	module.RawSetString("json", jsonModule)
+	helpers := state.NewTable()
+	state.SetFuncs(helpers, helperFunctions())
+	module.RawSetString("helpers", helpers)
 	kvModule := state.NewTable()
 	state.SetFuncs(kvModule, map[string]glua.LGFunction{
 		"get": r.kvGet, "set": r.kvSet, "delete": r.kvDelete, "list": r.kvList,

@@ -122,7 +122,7 @@ func TestPollCommitsOnlyMatchingObservationAndReportsProgress(t *testing.T) {
 		}
 		definition := waitDefinition(map[string]any{
 			"interval": "1s", "step": map[string]any{"type": "probe"},
-			"until": `error == nil && result.value == 3 && poll == 3 && workflow.name == "wait"`,
+			"until": `error == nil && hasKey(result, "value") && result.value == 3 && poll == 3 && workflow.name == "wait"`,
 		}, waitTimeout(10*time.Second))
 		var events []ProgressEvent
 		state, err := New(registry).Run(t.Context(), definition, Options{

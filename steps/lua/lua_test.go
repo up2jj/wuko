@@ -60,6 +60,99 @@ func TestLuaControlBindings(t *testing.T) {
 	}
 }
 
+func TestLuaHelpers(t *testing.T) {
+	runner, err := New(map[string]any{
+		"source": `
+local h = wuko.helpers
+local original = {"b", "a"}
+local object = h.dict("b", 2, "a", 1)
+wuko.output("helpers", {
+  lower = h.lower("WUKO"),
+  upper = h.upper("wuko"),
+  trim = h.trim("  value  "),
+  trim_prefix = h.trim_prefix("release-v1", "release-"),
+  trim_suffix = h.trim_suffix("release.yaml", ".yaml"),
+  contains = h.contains("workflow", "flow"),
+  has_prefix = h.has_prefix("release-v1", "release-"),
+  has_suffix = h.has_suffix("release.yaml", ".yaml"),
+  replace = h.replace("hello_world", "_", "-"),
+  split_join = h.join(h.split("a,b", ","), ":"),
+  default = h.default("", "fallback"),
+  coalesce = h.coalesce("", 0, false, "value"),
+  required = h.required("value", "value is required"),
+  indent = h.indent("one\ntwo", 2),
+  nindent = h.nindent("one\ntwo", 2),
+  list = h.list("a", "b"),
+  get = h.get(object, "a"),
+  missing = h.get(object, "missing") == nil,
+  has_key = h.has_key(object, "b"),
+  keys = h.join(h.keys(object), ","),
+  sorted = h.join(h.sort_alpha(original), ","),
+  original = h.join(original, ","),
+  json = h.to_json(object),
+  json_compact = h.to_json_compact(object),
+  yaml = h.to_yaml(object),
+})
+`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runner.Run(t.Context(), step.Request{StepID: "helpers", WorkflowName: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := result.Outputs["helpers"].(map[string]any)
+	wants := map[string]any{
+		"lower": "wuko", "upper": "WUKO", "trim": "value",
+		"trim_prefix": "v1", "trim_suffix": "release", "contains": true,
+		"has_prefix": true, "has_suffix": true, "replace": "hello-world",
+		"split_join": "a:b", "default": "fallback", "coalesce": "value",
+		"required": "value", "indent": "  one\n  two", "nindent": "\n  one\n  two",
+		"get": float64(1), "missing": true, "has_key": true, "keys": "a,b",
+		"sorted": "a,b", "original": "b,a",
+		"json":         "{\n  \"a\": 1,\n  \"b\": 2\n}",
+		"json_compact": `{"a":1,"b":2}`,
+		"yaml":         "a: 1\nb: 2\n",
+	}
+	for key, want := range wants {
+		if got := output[key]; got != want {
+			t.Errorf("%s = %#v, want %#v", key, got, want)
+		}
+	}
+	list := output["list"].([]any)
+	if len(list) != 2 || list[0] != "a" || list[1] != "b" {
+		t.Fatalf("list = %#v", list)
+	}
+}
+
+func TestLuaHelpersRejectInvalidArguments(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{name: "required", source: `wuko.helpers.required("", "application is required")`, want: "application is required"},
+		{name: "negative indent", source: `wuko.helpers.indent("value", -1)`, want: "indent width"},
+		{name: "odd dict", source: `wuko.helpers.dict("key")`, want: "even number"},
+		{name: "non-string dict key", source: `wuko.helpers.dict(true, "value")`, want: "want string"},
+		{name: "non-string sort item", source: `wuko.helpers.sort_alpha({"value", 1})`, want: "want string"},
+		{name: "get from list", source: `wuko.helpers.get({"value"}, "key")`, want: "map with string keys"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runner, err := New(map[string]any{"source": tt.source})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = runner.Run(t.Context(), step.Request{StepID: "helpers", WorkflowName: "test"})
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestLuaFinallyBinding(t *testing.T) {
 	runner, err := New(map[string]any{
 		"source": `wuko.output("outcome", {status = wuko.finally.status, step = wuko.finally.errors[1].step_id})`,

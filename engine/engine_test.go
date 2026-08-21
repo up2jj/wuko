@@ -76,7 +76,7 @@ func TestRunConditionUsesRuntimeState(t *testing.T) {
 			{ID: "prepare", Type: "capture", With: map[string]any{"value": true}},
 			{
 				ID: "consume", Type: "capture",
-				If:   `steps.prepare.value && vars.result && env.MODE == "test" && workflow.name == "conditional" && run.dir != ""`,
+				If:   `hasKey(steps, "prepare") && steps.prepare.value && vars.result && env.MODE == "test" && workflow.name == "conditional" && run.dir != ""`,
 				With: map[string]any{"value": "consumed"},
 			},
 		},

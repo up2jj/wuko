@@ -9,6 +9,7 @@ import (
 
 	"github.com/expr-lang/expr"
 	"github.com/expr-lang/expr/vm"
+	wukoexpr "github.com/up2jj/wuko/expression"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -69,7 +70,7 @@ func New(raw map[string]any) (step.Runner, error) {
 	if config.Expr == "" {
 		return nil, fmt.Errorf("expr must not be empty")
 	}
-	program, err := expr.Compile(config.Expr, expr.Env(expressionEnvironment{}))
+	program, err := wukoexpr.Compile(config.Expr, expr.Env(expressionEnvironment{}))
 	if err != nil {
 		return nil, fmt.Errorf("compiling expr: %w", err)
 	}

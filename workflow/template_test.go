@@ -29,6 +29,56 @@ func TestRendererExecutesInlineAndNestedTemplates(t *testing.T) {
 	}
 }
 
+func TestRendererExposesHelpersToNamedAndInlineTemplates(t *testing.T) {
+	renderer, err := NewRenderer(map[string]TemplateDefinition{
+		"labels": {Inline: `{{ .vars.labels | keys | join "," }}`},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := renderer.Render(`{{ template "labels" . }}:{{ .vars.name | trim | lower }}`, map[string]any{
+		"vars": map[string]any{
+			"labels": map[string]any{"z": true, "a": true},
+			"name":   " WUKO ",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "a,z:wuko" {
+		t.Fatalf("rendered = %q", got)
+	}
+}
+
+func TestRendererHelpersPreserveStrictMissingKeys(t *testing.T) {
+	renderer, err := NewRenderer(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = renderer.Render(`{{ .vars.missing | default "fallback" }}`, map[string]any{"vars": map[string]any{}})
+	if err == nil || !strings.Contains(err.Error(), "map has no entry for key") {
+		t.Fatalf("error = %v", err)
+	}
+	got, err := renderer.Render(`{{ get "missing" .vars | default "fallback" }}`, map[string]any{"vars": map[string]any{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "fallback" {
+		t.Fatalf("rendered = %q", got)
+	}
+}
+
+func TestRendererRejectsUnknownFunctionDuringValidation(t *testing.T) {
+	renderer, err := NewRenderer(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = renderer.Validate(`{{ unknownHelper .vars.name }}`)
+	if err == nil || !strings.Contains(err.Error(), `function "unknownHelper" not defined`) {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestRendererRejectsInvalidDefinitionsAndReferences(t *testing.T) {
 	tests := []struct {
 		name        string

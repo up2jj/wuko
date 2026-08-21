@@ -11,6 +11,7 @@ import (
 
 	"github.com/expr-lang/expr"
 	"github.com/up2jj/wuko/diagnostic"
+	wukoexpr "github.com/up2jj/wuko/expression"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
 )
@@ -611,7 +612,7 @@ func (e *Engine) validateAction(ctx context.Context, definition *workflow.Defini
 		return err
 	}
 	for name, output := range workflowStep.Action.Outputs {
-		if _, err := expr.Compile(output.Value, expr.AllowUndefinedVariables()); err != nil {
+		if _, err := wukoexpr.Compile(output.Value, expr.AllowUndefinedVariables()); err != nil {
 			return fmt.Errorf("output %q: %w", name, err)
 		}
 	}
@@ -660,7 +661,7 @@ func (e *Engine) prepareActionExecutor(definition *workflow.Definition, workflow
 		outputsStarted := time.Now()
 		traceStep(options, definition, workflowStep, diagnostic.PhaseActionOutputs, diagnostic.StatusStarted, time.Time{}, "evaluating action outputs", nil)
 		for name, output := range workflowStep.Action.Outputs {
-			value, err := expr.Eval(output.Value, environment)
+			value, err := wukoexpr.Eval(output.Value, environment)
 			if err != nil {
 				traceStep(options, definition, workflowStep, diagnostic.PhaseActionOutputs, diagnostic.StatusFailed, outputsStarted, "", err)
 				return step.Result{}, fmt.Errorf("evaluating output %q: %w", name, err)
@@ -690,7 +691,7 @@ func validateActionBindings(action *workflow.Action, bindings map[string]any, re
 				if !ok || strings.TrimSpace(text) == "" {
 					return fmt.Errorf("input %q expr must be a non-empty string", name)
 				}
-				if _, err := expr.Compile(text, expr.AllowUndefinedVariables()); err != nil {
+				if _, err := wukoexpr.Compile(text, expr.AllowUndefinedVariables()); err != nil {
 					return fmt.Errorf("input %q expr: %w", name, err)
 				}
 				continue
@@ -759,7 +760,7 @@ func resolveActionInputs(action *workflow.Action, bindings map[string]any, rende
 		var err error
 		if mapping, ok := value.(map[string]any); ok && len(mapping) == 1 {
 			if expression, ok := mapping["expr"].(string); ok {
-				value, err = expr.Eval(expression, data)
+				value, err = wukoexpr.Eval(expression, data)
 				if err != nil {
 					return nil, fmt.Errorf("evaluating input %q: %w", name, err)
 				}

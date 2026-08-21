@@ -60,6 +60,23 @@ func TestExpressionUsesControlBindings(t *testing.T) {
 	}
 }
 
+func TestExpressionUsesSharedHelpers(t *testing.T) {
+	runner, err := New(map[string]any{
+		"variable": "manifest",
+		"expr":     `toYAML(dict("name", default(vars.name, "wuko")))`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{"name": ""}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := result.Outputs["value"]; got != "name: wuko\n" {
+		t.Fatalf("value = %#v", got)
+	}
+}
+
 func TestExpressionFailureDoesNotReturnResult(t *testing.T) {
 	runner, err := New(map[string]any{"variable": "value", "expr": `vars.missing.name`})
 	if err != nil {
