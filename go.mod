@@ -13,6 +13,7 @@ require (
 	github.com/moby/moby/client v0.5.1
 	github.com/muesli/cancelreader v0.2.2
 	github.com/opencontainers/image-spec v1.1.1
+	github.com/robfig/cron/v3 v3.0.1
 	github.com/spf13/cobra v1.9.1
 	github.com/spf13/viper v1.21.0
 	github.com/theory/jsonpath v0.12.0

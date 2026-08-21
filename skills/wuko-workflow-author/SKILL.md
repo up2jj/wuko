@@ -1,6 +1,6 @@
 ---
 name: wuko-workflow-author
-description: Create or update Wuko version-1 YAML workflows, including templates, conditions, finally cleanup, foreach and matrix controls, required files, composite actions, waits, polling, retries, concurrency, interactive prompts, typed and imported variables, JSONPath selection, semantic versions, HTTP, files, managed temporary resources, glob discovery, persistent change detectors, content-addressed directory caches, Lua, shell, Docker, and agent steps. Use when designing workflow files, extending existing workflows, or reviewing workflow structure before execution.
+description: Create or update Wuko version-1 YAML workflows, including cron schedules, templates, conditions, finally cleanup, foreach and matrix controls, required files, composite actions, waits, polling, retries, concurrency, interactive prompts, typed and imported variables, JSONPath selection, semantic versions, HTTP, files, managed temporary resources, glob discovery, persistent change detectors, content-addressed directory caches, Lua, shell, Docker, and agent steps. Use when designing workflow files, extending existing workflows, or reviewing workflow structure before execution.
 ---
 
 # Wuko Workflow Author
@@ -76,6 +76,10 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
 - Supply invocation-time JSON or TOML variables with repeatable `--var-file`; later files replace
   earlier top-level values and explicit `--var` entries take final initial-state precedence.
 - Use `timeout` and `retry` deliberately. Retries have at-least-once effects; do not assume commands, requests, writes, containers, or agents can be rolled back.
+- Use top-level `cron` only when `wuko run` should remain alive and execute repeatedly. Write five
+  conventional cron fields or six fields with seconds first; add an IANA `timezone` only when the
+  machine-local default is inappropriate. Scheduled attempts are serial, skip missed occurrences,
+  reload the workflow at each occurrence, and continue after failures until canceled.
 - Distinguish polling from retries: polling repeats successful observations until `until` matches,
   commits only the final result, and can still repeat external effects with at-least-once semantics.
 - Give repeated external operations an explicit stable `operation_id` when the receiving service can use it for idempotency.

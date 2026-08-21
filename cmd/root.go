@@ -16,6 +16,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/up2jj/wuko/diagnostic"
+	workflowschedule "github.com/up2jj/wuko/schedule"
 	"github.com/up2jj/wuko/step"
 	agentstep "github.com/up2jj/wuko/steps/agent"
 	assertstep "github.com/up2jj/wuko/steps/assert"
@@ -93,6 +94,8 @@ type dependencies struct {
 	registry      *step.Registry
 	loader        *workflow.Loader
 	isInteractive func(io.Reader) bool
+	now           func() time.Time
+	waitUntil     func(context.Context, time.Time) error
 	debug         *bool
 }
 
@@ -147,6 +150,7 @@ func NewRootCmd() *cobra.Command {
 		homeDir: os.UserHomeDir, configDir: os.UserConfigDir, registry: registry,
 		agentLookPath: exec.LookPath,
 		loader:        workflow.NewLoader(nil), isInteractive: interactive,
+		now: time.Now, waitUntil: workflowschedule.Wait,
 	})
 }
 
@@ -156,6 +160,12 @@ func newRootCmd(deps dependencies) *cobra.Command {
 	}
 	if deps.agentLookPath == nil {
 		deps.agentLookPath = exec.LookPath
+	}
+	if deps.now == nil {
+		deps.now = time.Now
+	}
+	if deps.waitUntil == nil {
+		deps.waitUntil = workflowschedule.Wait
 	}
 	debug := false
 	deps.debug = &debug

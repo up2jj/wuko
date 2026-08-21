@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/up2jj/wuko/diagnostic"
+	workflowschedule "github.com/up2jj/wuko/schedule"
 	"gopkg.in/yaml.v3"
 )
 
@@ -27,6 +28,8 @@ type Definition struct {
 	Version     int                           `yaml:"version"`
 	Name        string                        `yaml:"name"`
 	Description string                        `yaml:"description,omitempty"`
+	Cron        string                        `yaml:"cron,omitempty"`
+	Timezone    string                        `yaml:"timezone,omitempty"`
 	Templates   map[string]TemplateDefinition `yaml:"templates,omitempty"`
 	Vars        map[string]any                `yaml:"vars,omitempty"`
 	Env         Environment                   `yaml:"env,omitempty"`
@@ -590,6 +593,15 @@ func validateDefinitionHeader(definition *Definition) error {
 	}
 	if len(definition.Steps) == 0 {
 		return fmt.Errorf("at least one step is required")
+	}
+	if definition.Cron == "" {
+		if definition.Timezone != "" {
+			return fmt.Errorf("timezone requires cron")
+		}
+		return nil
+	}
+	if _, err := workflowschedule.Parse(definition.Cron, definition.Timezone); err != nil {
+		return err
 	}
 	return nil
 }

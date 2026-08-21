@@ -131,6 +131,106 @@ steps:
 	}
 }
 
+func TestScheduledRunReloadsAndStopsCleanly(t *testing.T) {
+	root := t.TempDir()
+	workflowDir := filepath.Join(root, ".wuko", "workflows")
+	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(workflowDir, "scheduled.yaml")
+	workflowData := func(message string) string {
+		return fmt.Sprintf(`version: 1
+name: scheduled
+cron: "1-59/2 * * * * *"
+timezone: UTC
+steps:
+  - id: echo
+    type: shell
+    with:
+      script: "printf %s"
+`, message)
+	}
+	if err := os.WriteFile(path, []byte(workflowData("old")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	registry := step.NewRegistry()
+	if err := shell.Register(registry); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	now := time.Date(2026, time.August, 21, 10, 0, 0, 500_000_000, time.UTC)
+	waits := 0
+	var output, diagnostics bytes.Buffer
+	command := newRootCmd(dependencies{
+		stdin: bytes.NewReader(nil), stdout: &output, stderr: &diagnostics,
+		cwd:       func() (string, error) { return root, nil },
+		homeDir:   func() (string, error) { return filepath.Join(root, "home"), nil },
+		configDir: func() (string, error) { return filepath.Join(root, "config"), nil },
+		registry:  registry,
+		now:       func() time.Time { return now },
+		waitUntil: func(_ context.Context, instant time.Time) error {
+			waits++
+			if waits == 1 {
+				if err := os.WriteFile(path, []byte(workflowData("new")), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				now = instant
+				return nil
+			}
+			cancel()
+			return context.Canceled
+		},
+	})
+	command.SetArgs([]string{"run", "scheduled"})
+	if err := command.ExecuteContext(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if output.String() != "new" {
+		t.Fatalf("stdout = %q, want reloaded workflow output", output.String())
+	}
+	if waits != 2 || !strings.Contains(diagnostics.String(), "Waiting for workflow scheduled") {
+		t.Fatalf("waits = %d, diagnostics = %q", waits, diagnostics.String())
+	}
+}
+
+func TestScheduledDryRunDoesNotWait(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "scheduled.yaml")
+	data := `version: 1
+name: scheduled
+cron: "* * * * * *"
+steps:
+  - id: echo
+    type: shell
+    with: {script: "printf effect"}
+`
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	registry := step.NewRegistry()
+	if err := shell.Register(registry); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	command := newRootCmd(dependencies{
+		stdin: bytes.NewReader(nil), stdout: &output, stderr: io.Discard,
+		cwd: func() (string, error) { return root, nil }, homeDir: func() (string, error) { return "", nil },
+		configDir: func() (string, error) { return "", nil }, registry: registry,
+		waitUntil: func(context.Context, time.Time) error {
+			t.Fatal("dry-run unexpectedly waited for cron")
+			return nil
+		},
+	})
+	command.SetArgs([]string{"run", "--file", path, "--dry-run"})
+	if err := command.ExecuteContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(output.String(), "effect") {
+		t.Fatalf("dry-run executed shell: %q", output.String())
+	}
+}
+
 func TestRootCommandRegistersJSONPathStep(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "jsonpath.yaml")

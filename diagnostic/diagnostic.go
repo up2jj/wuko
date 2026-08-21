@@ -19,6 +19,7 @@ const (
 	PhaseActionChecksum Phase = "action checksum"
 	PhaseActionDecode   Phase = "action decode"
 	PhaseWorkflowFetch  Phase = "workflow fetch"
+	PhaseSchedule       Phase = "schedule"
 	PhaseValidation     Phase = "validation"
 	PhaseCondition      Phase = "condition"
 	PhaseRender         Phase = "render"

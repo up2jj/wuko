@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"time"
@@ -45,65 +46,81 @@ func newRunCmd(deps dependencies) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			var source workflow.Source
-			var definition *workflow.Definition
-			remoteWorkflow := false
-			cleanup := func() {}
+			var target workflowRunTarget
 			if workflowFile != "" {
 				path, err := filepath.Abs(workflowFile)
 				if err != nil {
 					return fmt.Errorf("resolving workflow file %s: %w", workflowFile, err)
 				}
-				source = workflow.Source{Path: path}
+				target.path = path
 			} else if workflow.IsRemoteLocator(args[0]) {
-				remoteWorkflow = true
-				// Remote workflow content is materialized before loading so relative files and
-				// workflow metadata behave the same way as for a local workflow file.
-				loader := deps.loader
-				if loader == nil {
-					loader = workflow.NewLoader(nil)
-				}
-				definition, cleanup, err = loader.LoadRemote(command.Context(), args[0], workflow.LoadOptions{Vars: vars, Env: env, BaseEnv: baseEnv, RunDir: cwd, Diagnostics: reporter})
-				if err != nil {
-					return err
-				}
-				defer cleanup()
+				target = workflowRunTarget{locator: args[0], remote: true}
 			} else {
 				discoveryStarted := time.Now()
 				diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusStarted, Time: discoveryStarted, Message: args[0]})
-				source, err = workflow.Find(cwd, home, config, args[0])
+				source, err := workflow.Find(cwd, home, config, args[0])
 				if err != nil {
 					diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusFailed, Duration: time.Since(discoveryStarted), Error: err})
 					return err
 				}
 				diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusSucceeded, Duration: time.Since(discoveryStarted), Location: diagnostic.Location{Source: source.Path}, Message: source.Name})
+				target.path = source.Path
 			}
 			loader := deps.loader
 			if loader == nil {
 				loader = workflow.NewLoader(nil)
 			}
-			if definition == nil {
-				definition, err = loader.Load(command.Context(), source.Path, workflow.LoadOptions{Vars: vars, Env: env, BaseEnv: baseEnv, RunDir: cwd, Diagnostics: reporter})
-				if err != nil {
-					return err
-				}
+			loadOptions := workflow.LoadOptions{Vars: vars, Env: env, BaseEnv: baseEnv, RunDir: cwd, Diagnostics: reporter}
+			definition, cleanup, err := target.load(command.Context(), loader, loadOptions)
+			if err != nil {
+				return err
 			}
 			if dryRun {
 				fmt.Fprintf(command.OutOrStdout(), "Workflow %s (%s)\n", definition.Name, definition.Path)
 			}
 			progress := tui.NewProgress(command.ErrOrStderr(), colorEnabled(command.ErrOrStderr()))
-			localValueDir := ""
-			if !remoteWorkflow {
-				localValueDir = filepath.Join(definition.Dir, ".wuko", "values")
+			optionsFor := func(definition *workflow.Definition) engine.Options {
+				localValueDir := ""
+				if !target.remote {
+					localValueDir = filepath.Join(definition.Dir, ".wuko", "values")
+				}
+				return engine.Options{
+					Vars: vars, Env: env, BaseEnv: baseEnv, RunDir: cwd, Stdin: command.InOrStdin(),
+					LocalValueDir: localValueDir, GlobalValueDir: filepath.Join(config, "wuko", "values"),
+					Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(),
+					Interactive: interactive(command.InOrStdin()), DryRun: dryRun, Progress: progress.Report,
+					Diagnostics: reporter,
+				}
 			}
-			_, err = engine.New(deps.registry).Run(command.Context(), definition, engine.Options{
-				Vars: vars, Env: env, BaseEnv: baseEnv, RunDir: cwd, Stdin: command.InOrStdin(),
-				LocalValueDir: localValueDir, GlobalValueDir: filepath.Join(config, "wuko", "values"),
-				Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(),
-				Interactive: interactive(command.InOrStdin()), DryRun: dryRun, Progress: progress.Report,
-				Diagnostics: reporter,
-			})
-			return err
+			execute := func(ctx context.Context, definition *workflow.Definition) error {
+				_, err := engine.New(deps.registry).Run(ctx, definition, optionsFor(definition))
+				return err
+			}
+			if dryRun || definition.Cron == "" {
+				defer cleanup()
+				return execute(command.Context(), definition)
+			}
+
+			if err := engine.New(deps.registry).Validate(command.Context(), definition, optionsFor(definition)); err != nil {
+				cleanup()
+				return err
+			}
+			runner := scheduledRunner{
+				load: func(ctx context.Context) (*workflow.Definition, func(), error) {
+					definition, release, err := target.load(ctx, loader, loadOptions)
+					if err != nil {
+						return nil, func() {}, err
+					}
+					if err := engine.New(deps.registry).Validate(ctx, definition, optionsFor(definition)); err != nil {
+						release()
+						return nil, func() {}, err
+					}
+					return definition, release, nil
+				},
+				execute: execute, now: deps.now, wait: deps.waitUntil,
+				stderr: command.ErrOrStderr(), diagnostics: reporter,
+			}
+			return runner.run(command.Context(), definition, cleanup)
 		},
 	}
 	command.Flags().StringArrayVar(&variables, "var", nil, "set a workflow variable (key=value; repeatable)")
@@ -113,6 +130,20 @@ func newRunCmd(deps dependencies) *cobra.Command {
 	command.Flags().StringVar(&workflowFile, "file", "", "run a workflow from a file path")
 	command.ValidArgsFunction = workflowCompletion(deps)
 	return command
+}
+
+type workflowRunTarget struct {
+	path    string
+	locator string
+	remote  bool
+}
+
+func (target workflowRunTarget) load(ctx context.Context, loader *workflow.Loader, options workflow.LoadOptions) (*workflow.Definition, func(), error) {
+	if target.remote {
+		return loader.LoadRemote(ctx, target.locator, options)
+	}
+	definition, err := loader.Load(ctx, target.path, options)
+	return definition, func() {}, err
 }
 
 func invocationEnvironment(command *cobra.Command, deps dependencies, cwd string) (map[string]string, error) {

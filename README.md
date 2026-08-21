@@ -10,6 +10,7 @@ commands or inline shell, and launch an external agent such as Codex.
 - Discover local and global workflows from an interactive terminal picker or with `wuko list`.
 - Define strict, versioned YAML workflows with variables, environment values, Go templates, and
   conditional steps.
+- Keep a workflow running on a five- or six-field cron schedule with an optional IANA timezone.
 - Run steps sequentially or concurrently, wait for fixed durations or polled conditions, and use
   foreach and matrix fan-out, retries, timeouts, dry runs, execution trees, live progress, and run
   statistics.
@@ -32,6 +33,7 @@ commands or inline shell, and launch an external agent such as Codex.
   - [ClickUp task agent example](#clickup-task-agent-example)
   - [Remote workflows](#remote-workflows)
 - [Workflow schema](#workflow-schema)
+  - [Cron schedules](#cron-schedules)
   - [Templates](#templates)
   - [Execution order and step outputs](#execution-order-and-step-outputs)
   - [Splitting steps across files](#splitting-steps-across-files)
@@ -256,6 +258,8 @@ Every workflow is strict and versioned:
 version: 1
 name: example
 description: Example workflow
+cron: "0 9 * * *"
+timezone: Europe/Warsaw
 vars:
   greeting: Hello
 env:
@@ -280,6 +284,37 @@ composite-action scope, execution order, and typed-input guidance. See
 
 Environment precedence is step environment, CLI `--env`, workflow environment, then the host
 environment. Environment values are not shown by dry-run output.
+
+### Cron schedules
+
+Add `cron` to make `wuko run` a persistent scheduled process. Wuko accepts the conventional five
+fields (minute, hour, day of month, month, day of week) or six fields with seconds first. Cron
+descriptors such as `@daily` and embedded `CRON_TZ` prefixes are not supported. Set `timezone` to
+an IANA name such as `Europe/Warsaw`; it defaults to the machine's local timezone and cannot be
+declared without `cron`.
+
+```yaml
+version: 1
+name: cleanup
+cron: "0 0 9 * * *"
+timezone: Europe/Warsaw
+steps:
+  - id: cleanup
+    type: shell
+    with:
+      command: ./cleanup
+```
+
+If the current minute or second matches when `wuko run cleanup` starts, the first attempt begins
+immediately. Otherwise Wuko prints the next occurrence to standard error and waits. After each
+attempt it waits for the next future occurrence, so attempts never overlap and occurrences missed
+while a workflow is running are not replayed.
+
+The workflow is reloaded, resolved, and validated at each occurrence. Execution or reload failures
+are reported and the process keeps waiting; if a reload has no valid schedule, Wuko retries on the
+last valid one. CLI variables, variable-file contents, explicit environment overrides, and the
+direnv environment are captured at startup. Stop the scheduled run with Ctrl+C. `validate`, `tree`,
+and `wuko run --dry-run` validate schedules without waiting or starting the persistent loop.
 
 ### Templates
 
