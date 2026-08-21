@@ -90,6 +90,48 @@ func (e *Engine) Validate(ctx context.Context, definition *workflow.Definition, 
 
 func (e *Engine) validateSteps(ctx context.Context, definition *workflow.Definition, steps []workflow.Step, options Options, state *State, insideConcurrent bool) error {
 	for _, workflowStep := range steps {
+		if workflowStep.IsConditionalBlock() {
+			started := time.Now()
+			trace(options, diagnostic.Event{
+				Phase: diagnostic.PhaseValidation, Status: diagnostic.StatusStarted, Time: started,
+				WorkflowName: definition.Name, Location: workflowStep.Location, Message: "validating conditional block",
+			})
+			fail := func(err error) error {
+				trace(options, diagnostic.Event{
+					Phase: diagnostic.PhaseValidation, Status: diagnostic.StatusFailed, Time: time.Now(), Duration: time.Since(started),
+					WorkflowName: definition.Name, Location: workflowStep.Location, Error: err,
+				})
+				return err
+			}
+			if insideConcurrent {
+				return fail(fmt.Errorf("conditional blocks are not supported inside concurrent groups"))
+			}
+			if workflowStep.If == "" {
+				return fail(fmt.Errorf("conditional block must set if"))
+			}
+			if len(workflowStep.Steps) == 0 {
+				return fail(fmt.Errorf("conditional block must contain at least one step"))
+			}
+			if workflowStep.ID != "" || workflowStep.Type != "" || !workflowStep.Uses.Empty() || workflowStep.Require != nil || workflowStep.Concurrent != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil || workflowStep.SHA256 != "" || workflowStep.Timeout != nil || workflowStep.Retry != nil || workflowStep.With != nil {
+				return fail(fmt.Errorf("conditional block cannot be combined with other step fields"))
+			}
+			if _, err := compileCondition(workflowStep.If); err != nil {
+				return fail(fmt.Errorf("conditional block if: %w", err))
+			}
+			for _, child := range workflowStep.Steps {
+				if child.IsConditionalBlock() {
+					return fail(fmt.Errorf("nested conditional blocks are not supported"))
+				}
+			}
+			if err := e.validateSteps(ctx, definition, workflowStep.Steps, options, state, false); err != nil {
+				return fail(fmt.Errorf("conditional block: %w", err))
+			}
+			trace(options, diagnostic.Event{
+				Phase: diagnostic.PhaseValidation, Status: diagnostic.StatusSucceeded, Time: time.Now(), Duration: time.Since(started),
+				WorkflowName: definition.Name, Location: workflowStep.Location,
+			})
+			continue
+		}
 		if workflowStep.Foreach != nil || workflowStep.Matrix != nil {
 			if err := e.validateControl(ctx, definition, workflowStep, options, state); err != nil {
 				return fmt.Errorf("step %q: %w", workflowStep.ID, err)
@@ -314,6 +356,24 @@ func finallyErrorRecord(status ExecutionStatus, stepID, stepType string, err err
 func (e *Engine) executeSequence(ctx context.Context, definition *workflow.Definition, steps []workflow.Step, options Options, state *State, stats *RunStats, firstIndex, total int) error {
 	index := firstIndex
 	for _, workflowStep := range steps {
+		if workflowStep.IsConditionalBlock() {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			run, err := evaluateConditionalBlock(definition, workflowStep, options, state)
+			if err != nil {
+				return err
+			}
+			if run {
+				if err := e.executeSequence(ctx, definition, workflowStep.Steps, options, state, stats, index, total); err != nil {
+					return err
+				}
+			} else {
+				recordSkippedSteps(definition, workflowStep.Steps, options, stats, index, total)
+			}
+			index += leafStepCount(workflowStep.Steps)
+			continue
+		}
 		if workflowStep.Concurrent != nil {
 			outcomes, groupErr := e.runConcurrent(ctx, definition, workflowStep.Concurrent, options, state, index, total)
 			for _, outcome := range outcomes {
@@ -353,6 +413,68 @@ func (e *Engine) executeSequence(ctx context.Context, definition *workflow.Defin
 			diagnostic.Attr("outputs", fmt.Sprint(len(outcome.result.Outputs))), diagnostic.Attr("variables", fmt.Sprint(len(outcome.result.Variables))))
 	}
 	return nil
+}
+
+func evaluateConditionalBlock(definition *workflow.Definition, workflowStep workflow.Step, options Options, state *State) (bool, error) {
+	started := time.Now()
+	trace(options, diagnostic.Event{
+		Phase: diagnostic.PhaseCondition, Status: diagnostic.StatusStarted, Time: started,
+		WorkflowName: definition.Name, Location: workflowStep.Location,
+		Message: string(workflowStep.If),
+	})
+	run, err := evaluateCondition(workflowStep.If, makeConditionEnvironment(definition, options.RunDir, state))
+	if err != nil {
+		trace(options, diagnostic.Event{
+			Phase: diagnostic.PhaseCondition, Status: diagnostic.StatusFailed, Time: time.Now(), Duration: time.Since(started),
+			WorkflowName: definition.Name, Location: workflowStep.Location, Error: err,
+		})
+		return false, fmt.Errorf("workflow %q conditional block: evaluating if: %w", definition.Name, err)
+	}
+	status := diagnostic.StatusSucceeded
+	message := "condition evaluated true"
+	if !run {
+		status = diagnostic.StatusSkipped
+		message = "condition evaluated false"
+	}
+	trace(options, diagnostic.Event{
+		Phase: diagnostic.PhaseCondition, Status: status, Time: time.Now(), Duration: time.Since(started),
+		WorkflowName: definition.Name, Location: workflowStep.Location, Message: message,
+	})
+	return run, nil
+}
+
+func recordSkippedSteps(definition *workflow.Definition, steps []workflow.Step, options Options, stats *RunStats, firstIndex, total int) {
+	index := firstIndex
+	for _, workflowStep := range steps {
+		if workflowStep.IsConditionalBlock() {
+			recordSkippedSteps(definition, workflowStep.Steps, options, stats, index, total)
+			index += leafStepCount(workflowStep.Steps)
+			continue
+		}
+		if workflowStep.Concurrent != nil {
+			recordSkippedSteps(definition, workflowStep.Concurrent.Steps, options, stats, index, total)
+			index += leafStepCount(workflowStep.Concurrent.Steps)
+			continue
+		}
+		started := time.Now()
+		stepStats := StepStats{
+			ID: workflowStep.ID, Type: skippedStepKind(workflowStep), Index: index,
+			Status: StatusSkipped, StartedAt: started,
+		}
+		reportStepFinished(options, definition.Name, workflowStep.ID, stepStats.Type, index, total, stepStats)
+		recordStep(stats, stepStats)
+		index++
+	}
+}
+
+func skippedStepKind(workflowStep workflow.Step) string {
+	if workflowStep.Foreach != nil {
+		return "foreach"
+	}
+	if workflowStep.Matrix != nil {
+		return "matrix"
+	}
+	return executionKind(workflowStep)
 }
 
 type stepOutcome struct {
@@ -514,6 +636,10 @@ func commitStepResult(state *State, stepID string, result step.Result) {
 func leafStepCount(steps []workflow.Step) int {
 	total := 0
 	for _, workflowStep := range steps {
+		if workflowStep.IsConditionalBlock() {
+			total += leafStepCount(workflowStep.Steps)
+			continue
+		}
 		if workflowStep.Concurrent != nil {
 			total += leafStepCount(workflowStep.Concurrent.Steps)
 			continue

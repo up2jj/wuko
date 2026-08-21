@@ -127,6 +127,15 @@ func writeTreeStepsWithFollowing(writer io.Writer, steps []workflow.Step, prefix
 			branch = "└── "
 			childPrefix = prefix + "    "
 		}
+		if workflowStep.IsConditionalBlock() {
+			if _, err := fmt.Fprintf(writer, "%s%sif: %s\n", prefix, branch, workflowStep.If); err != nil {
+				return err
+			}
+			if err := writeTreeSteps(writer, workflowStep.Steps, childPrefix); err != nil {
+				return err
+			}
+			continue
+		}
 		if workflowStep.Concurrent != nil {
 			if _, err := fmt.Fprintf(writer, "%s%sconcurrent%s\n", prefix, branch, treeConcurrentPolicy(workflowStep.Concurrent)); err != nil {
 				return err

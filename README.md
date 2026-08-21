@@ -431,6 +431,31 @@ matters, or `get(vars, "name")` to read an optional value. If a skipped step wou
 an existing variable, the existing value remains unchanged. Dry-run validates and prints guards
 but does not evaluate them because preceding step outputs are not available.
 
+Use an anonymous conditional block when several sequential steps share one guard:
+
+```yaml
+steps:
+  - if: vars.deploy
+    steps:
+      - id: build
+        type: shell
+        with: {command: ./build}
+      - id: deploy
+        type: shell
+        with: {command: ./deploy}
+```
+
+The block condition is evaluated once against the state at block entry. When it is true, children
+run sequentially and later children can consume earlier child outputs and variables. When it is
+false, every ordinary child and concurrent leaf is reported as skipped; foreach and matrix parents
+are skipped without expanding iterations. The block has no ID, output namespace, timeout, or retry
+policy, and child IDs remain in the surrounding namespace.
+
+Conditional blocks may appear in workflows, composite actions, `finally`, and foreach or matrix
+bodies. They may contain existing controls under their normal nesting rules, including a
+`concurrent` group. Directly nested conditional blocks and conditional blocks used as direct
+concurrent children are rejected.
+
 ### Concurrent steps
 
 Wrap independent steps in `concurrent` to run them with a bounded amount of parallelism:

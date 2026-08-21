@@ -1,6 +1,7 @@
 # Workflow controls
 
-Wuko has three ways to run more than one operation: `concurrent`, `foreach`, and `matrix`.
+Wuko has three controls for scheduling or repeating operations: `concurrent`, `foreach`, and
+`matrix`.
 
 - Use `concurrent` for a fixed set of independent steps.
 - Use `foreach` when one runtime list determines how many times a block runs.
@@ -9,6 +10,23 @@ Wuko has three ways to run more than one operation: `concurrent`, `foreach`, and
 Both `foreach` and `matrix` are logical parent steps. Each iteration receives an isolated copy of
 the state that existed before the parent began, runs its child steps in order, and contributes one
 record to the parent's ordered result.
+
+An anonymous `if` wrapper can guard a sequential block containing any of these controls:
+
+```yaml
+- if: vars.enabled
+  steps:
+    - {id: prepare, type: shell}
+    - concurrent:
+        steps:
+          - {id: lint, type: shell}
+          - {id: test, type: shell}
+```
+
+The condition is evaluated once. The wrapper adds no ID, state, output, or step-count entry of its
+own. A false condition reports its ordinary children and concurrent leaves as skipped and skips
+fan-out parents without expansion. Conditional wrappers may appear inside foreach and matrix
+bodies, but not directly inside a concurrent group; wrappers cannot be directly nested.
 
 ## Foreach
 
@@ -193,7 +211,9 @@ steps. The following are not supported:
 - foreach inside foreach or matrix;
 - matrix inside matrix or foreach;
 - foreach or matrix inside a concurrent group;
-- nested concurrent groups.
+- nested concurrent groups;
+- conditional blocks directly inside concurrent groups;
+- directly nested conditional blocks.
 
 Put dependent work after the inner concurrent group or after the complete control parent.
 

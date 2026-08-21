@@ -282,6 +282,10 @@ func durationValue(duration *workflow.Duration) time.Duration {
 func selectedStepOutputs(state *State, steps []workflow.Step) map[string]any {
 	result := make(map[string]any)
 	for _, workflowStep := range steps {
+		if workflowStep.IsConditionalBlock() {
+			maps.Copy(result, selectedStepOutputs(state, workflowStep.Steps))
+			continue
+		}
 		if workflowStep.Concurrent != nil {
 			maps.Copy(result, selectedStepOutputs(state, workflowStep.Concurrent.Steps))
 			continue

@@ -11,7 +11,7 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
 
 1. Inspect `README.md`, nearby workflows, referenced files, and the repository state before editing. Treat the task brief and existing workflow behavior as requirements.
 2. Model the workflow with `version: 1`, a stable `name`, a useful `description`, explicit `vars` and `env`, and an ordered `steps` list. Wuko does not infer a dependency graph or reorder steps.
-3. Choose the smallest appropriate step type. Declare every producer before its consumers. Use `concurrent` for a fixed set of independent children, `foreach` for a runtime list, and `matrix` for a Cartesian product. Put consumers after the complete group or control.
+3. Choose the smallest appropriate step type. Declare every producer before its consumers. Use an anonymous `if` plus `steps` wrapper when several sequential children share one condition, `concurrent` for a fixed set of independent children, `foreach` for a runtime list, and `matrix` for a Cartesian product. Put consumers after the complete group or control.
 4. Render dynamic values with the documented template roots. Keep one-off substitutions inline; introduce a named template only for genuine reuse or a substantial multiline artifact. Use `if` only for boolean expressions and guard references to skipped steps with membership checks.
 5. Keep local paths relative to the file or workflow context that resolves them. Preserve unique step IDs across required files, concurrent children, main steps, finally cleanup, and composite actions.
 6. Treat shell, Lua, Docker, remote actions, and agents as trusted executable code. Keep credentials in environment values, never in workflow text, arguments, URLs, logs, or operation IDs.
@@ -80,6 +80,7 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
   commits only the final result, and can still repeat external effects with at-least-once semantics.
 - Give repeated external operations an explicit stable `operation_id` when the receiving service can use it for idempotency.
 - Remember that concurrent children share a pre-group state snapshot, cannot consume sibling outputs, and cannot safely compete for interactive input.
+- A multi-step conditional uses `- if: EXPR` with a sibling `steps` list. Its condition is evaluated once, its children retain their surrounding IDs and sequential state flow, and the wrapper has no ID, outputs, timeout, or retry policy. It may contain `concurrent`, `foreach`, or `matrix` subject to their normal nesting rules, but cannot be directly nested or placed directly inside `concurrent`.
 - A successful `changed` detector advances its local snapshot immediately, even if later guarded
   work fails. It is unavailable to direct remote workflows and does not react to file timestamps
   or permissions.

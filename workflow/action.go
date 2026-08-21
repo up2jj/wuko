@@ -202,6 +202,12 @@ func (loader *Loader) Load(ctx context.Context, filename string, options LoadOpt
 func (loader *Loader) resolveActions(ctx context.Context, workflowName string, steps []Step, renderer *Renderer, data map[string]any, environment map[string]string, runDir, definitionDir string, cache map[string]*Action, reporter diagnostic.Reporter) error {
 	for i := range steps {
 		workflowStep := &steps[i]
+		if workflowStep.IsConditionalBlock() {
+			if err := loader.resolveActions(ctx, workflowName, workflowStep.Steps, renderer, data, environment, runDir, definitionDir, cache, reporter); err != nil {
+				return err
+			}
+			continue
+		}
 		if workflowStep.Concurrent != nil {
 			if err := loader.resolveActions(ctx, workflowName, workflowStep.Concurrent.Steps, renderer, data, environment, runDir, definitionDir, cache, reporter); err != nil {
 				return err

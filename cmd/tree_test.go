@@ -191,6 +191,29 @@ func TestWorkflowTreeDisplaysConcurrentGroup(t *testing.T) {
 	}
 }
 
+func TestWorkflowTreeDisplaysConditionalBlock(t *testing.T) {
+	definition := &workflow.Definition{Name: "conditional", Steps: []workflow.Step{
+		{If: "vars.deploy", Steps: []workflow.Step{
+			{ID: "build", Type: "shell"},
+			{ID: "deploy", Type: "shell", If: "steps.build.exit_code == 0"},
+		}},
+		{ID: "notify", Type: "shell"},
+	}}
+	var output bytes.Buffer
+	if err := writeWorkflowTree(&output, definition); err != nil {
+		t.Fatal(err)
+	}
+	want := `conditional
+├── if: vars.deploy
+│   ├── build (shell)
+│   └── deploy (shell) if: steps.build.exit_code == 0
+└── notify (shell)
+`
+	if output.String() != want {
+		t.Fatalf("output = %q, want %q", output.String(), want)
+	}
+}
+
 func TestWorkflowTreeDisplaysFanoutControls(t *testing.T) {
 	definition := &workflow.Definition{Name: "fanout", Steps: []workflow.Step{
 		{ID: "deploy", If: "vars.deploy", Foreach: &workflow.ForeachGroup{

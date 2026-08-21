@@ -13,6 +13,15 @@ func writeDryRun(writer io.Writer, steps []workflow.Step, indent string, parent 
 	for i, workflowStep := range steps {
 		path := append(append([]int(nil), parent...), i+1)
 		index := dryRunIndex(path)
+		if workflowStep.IsConditionalBlock() {
+			if _, err := fmt.Fprintf(writer, "%s%s if: %s\n", indent, index, workflowStep.If); err != nil {
+				return err
+			}
+			if err := writeDryRun(writer, workflowStep.Steps, indent+"   ", path); err != nil {
+				return err
+			}
+			continue
+		}
 		if workflowStep.Concurrent != nil {
 			if _, err := fmt.Fprintf(writer, "%s%s concurrent%s\n", indent, index, concurrentPolicySuffix(workflowStep.Concurrent)); err != nil {
 				return err

@@ -70,12 +70,14 @@ func (c *Condition) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
-// Step declares a concrete step, a remote composite action, or a local step-file requirement.
+// Step declares a concrete step, a transparent conditional block, a remote composite action, or
+// a local step-file requirement.
 type Step struct {
 	ID         string              `yaml:"id"`
 	Type       string              `yaml:"type,omitempty"`
 	Uses       ActionSource        `yaml:"uses,omitempty"`
 	Require    *string             `yaml:"require,omitempty"`
+	Steps      []Step              `yaml:"steps,omitempty"`
 	Concurrent *ConcurrentGroup    `yaml:"concurrent,omitempty"`
 	Foreach    *ForeachGroup       `yaml:"foreach,omitempty"`
 	Matrix     *MatrixGroup        `yaml:"matrix,omitempty"`
@@ -93,13 +95,16 @@ func (workflowStep *Step) UnmarshalYAML(node *yaml.Node) error {
 		return fmt.Errorf("step must be an object")
 	}
 	allowed := map[string]bool{
-		"id": true, "type": true, "uses": true, "require": true, "concurrent": true,
+		"id": true, "type": true, "uses": true, "require": true, "steps": true, "concurrent": true,
 		"foreach": true, "matrix": true, "sha256": true, "if": true, "timeout": true,
 		"retry": true, "with": true,
 	}
 	for i := 0; i < len(node.Content); i += 2 {
 		if !allowed[node.Content[i].Value] {
 			return fmt.Errorf("field %s not found in step", node.Content[i].Value)
+		}
+		if node.Content[i].Value == "steps" && node.Content[i+1].Kind != yaml.SequenceNode {
+			return fmt.Errorf("steps must be a list")
 		}
 	}
 	type plain Step
@@ -110,6 +115,9 @@ func (workflowStep *Step) UnmarshalYAML(node *yaml.Node) error {
 	*workflowStep = Step(decoded)
 	return nil
 }
+
+// IsConditionalBlock reports whether the step is an anonymous multi-step conditional.
+func (workflowStep Step) IsConditionalBlock() bool { return workflowStep.Steps != nil }
 
 // ConcurrentGroup runs independent child steps against one shared pre-group state snapshot.
 type ConcurrentGroup struct {
@@ -395,6 +403,12 @@ func validateStepScope(steps []Step, allowActions bool, scope stepScope, inherit
 
 func collectScopeIDs(steps []Step, seen map[string]struct{}) error {
 	for i, workflowStep := range steps {
+		if workflowStep.IsConditionalBlock() {
+			if err := collectScopeIDs(workflowStep.Steps, seen); err != nil {
+				return fmt.Errorf("step %d: %w", i+1, err)
+			}
+			continue
+		}
 		if workflowStep.Concurrent != nil {
 			if err := collectScopeIDs(workflowStep.Concurrent.Steps, seen); err != nil {
 				return fmt.Errorf("step %d: %w", i+1, err)
@@ -417,6 +431,12 @@ func collectScopeIDs(steps []Step, seen map[string]struct{}) error {
 
 func validateSteps(steps []Step, allowActions bool, scope stepScope, seen map[string]struct{}) error {
 	for i, workflowStep := range steps {
+		if workflowStep.IsConditionalBlock() {
+			if err := validateConditionalBlock(workflowStep, scope, allowActions, seen); err != nil {
+				return fmt.Errorf("step %d: %w", i+1, err)
+			}
+			continue
+		}
 		if workflowStep.Require != nil {
 			return fmt.Errorf("step %d: require is only supported in workflow step files", i+1)
 		}
@@ -452,8 +472,29 @@ func validateSteps(steps []Step, allowActions bool, scope stepScope, seen map[st
 	return nil
 }
 
+func validateConditionalBlock(workflowStep Step, scope stepScope, allowActions bool, seen map[string]struct{}) error {
+	if workflowStep.If == "" {
+		return fmt.Errorf("conditional block must set if")
+	}
+	if len(workflowStep.Steps) == 0 {
+		return fmt.Errorf("conditional block must contain at least one step")
+	}
+	if workflowStep.ID != "" || workflowStep.Type != "" || !workflowStep.Uses.Empty() || workflowStep.Require != nil || workflowStep.Concurrent != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil || workflowStep.SHA256 != "" || workflowStep.Timeout != nil || workflowStep.Retry != nil || workflowStep.With != nil {
+		return fmt.Errorf("conditional block cannot be combined with other step fields")
+	}
+	if scope == scopeConcurrent {
+		return fmt.Errorf("conditional blocks are not supported inside concurrent groups")
+	}
+	for _, child := range workflowStep.Steps {
+		if child.IsConditionalBlock() {
+			return fmt.Errorf("nested conditional blocks are not supported")
+		}
+	}
+	return validateSteps(workflowStep.Steps, allowActions, scope, seen)
+}
+
 func validateConcurrentEntry(workflowStep Step, scope stepScope, allowActions bool, seen map[string]struct{}) error {
-	if workflowStep.ID != "" || workflowStep.Type != "" || !workflowStep.Uses.Empty() || workflowStep.Foreach != nil || workflowStep.Matrix != nil || workflowStep.SHA256 != "" || workflowStep.If != "" || workflowStep.Timeout != nil || workflowStep.Retry != nil || workflowStep.With != nil {
+	if workflowStep.ID != "" || workflowStep.Type != "" || !workflowStep.Uses.Empty() || workflowStep.IsConditionalBlock() || workflowStep.Foreach != nil || workflowStep.Matrix != nil || workflowStep.SHA256 != "" || workflowStep.If != "" || workflowStep.Timeout != nil || workflowStep.Retry != nil || workflowStep.With != nil {
 		return fmt.Errorf("concurrent cannot be combined with other step fields")
 	}
 	if scope == scopeConcurrent {
