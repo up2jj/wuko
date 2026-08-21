@@ -45,24 +45,24 @@ commands or inline shell, and launch an external agent such as Codex.
   - [Debug tracing](#debug-tracing)
   - [Remote composite actions](#remote-composite-actions)
   - [Available steps](#available-steps)
-    - [Input](#input)
-    - [Password](#password)
+    - [Assert](#assert)
+    - [Cache](#cache)
     - [Choice](#choice)
     - [Confirm](#confirm)
-    - [Set](#set)
-    - [Assert](#assert)
-    - [Import variables](#import-variables)
-    - [JSONPath](#jsonpath)
-    - [Semantic versions](#semantic-versions)
-    - [HTTP](#http)
+    - [Docker](#docker)
     - [File](#file)
-    - [Temp](#temp)
     - [Glob](#glob)
-    - [Cache](#cache)
+    - [HTTP](#http)
+    - [Import variables](#import-variables)
+    - [Input](#input)
+    - [JSONPath](#jsonpath)
     - [Key-value stores](#key-value-stores)
     - [Lua](#lua)
+    - [Password](#password)
+    - [Semantic versions](#semantic-versions)
+    - [Set](#set)
     - [Shell and agent](#shell-and-agent)
-    - [Docker](#docker)
+    - [Temp](#temp)
 - [Trust model](#trust-model)
 
 ## Install
@@ -799,202 +799,6 @@ packages. Remote actions cannot invoke another remote action in schema version 1
 
 ### Available steps
 
-#### Input
-
-Use `input` when the initial text should remain editable. The optional `value` is rendered when
-the step starts, so it can prepopulate text from an earlier step. The required `message` is shown
-directly above the field and should tell the user what to enter:
-
-```yaml
-- id: release_name
-  type: input
-  with:
-    variable: release_name
-    message: Enter the release name
-    value: "{{ .steps.suggest_name.value }}"
-    required: true
-```
-
-#### Password
-
-Use `password` for masked text entry. Its required `message` is displayed above the masked field:
-
-```yaml
-- id: credentials
-  type: password
-  with:
-    variable: api_token
-    message: Enter the API token
-    required: true
-```
-
-Input and password steps write their resulting value to `steps.<id>.value` and to the configured
-variable. The value is text unless an input modifier converts it. A pre-supplied variable skips
-the UI, and non-interactive runs must provide it with `--var`.
-
-Both steps support the same optional `validation` block inside `with`:
-
-```yaml
-with:
-  validation:
-    min_length: 3
-    max_length: 40
-    pattern: '^[a-z][a-z0-9-]+$'
-    message: Use 3–40 lowercase letters, digits, or hyphens
-```
-
-Lengths count Unicode characters. `pattern` uses Go regular-expression syntax and is optional;
-anchor it with `^` and `$` when the whole value must match. `message` replaces the default error
-for any failed rule. Invalid rule configurations fail workflow validation before execution.
-
-Input can convert validated text before storing it. Split on a Go regular-expression pattern:
-
-```yaml
-- id: reviewers
-  type: input
-  with:
-    variable: reviewers
-    message: Enter comma-separated reviewers
-    modifiers:
-      trim: true
-      split: ','
-```
-
-Entering `alice, bob` writes `["alice", "bob"]` to both `.steps.reviewers.value` and
-`.vars.reviewers`. `trim` removes leading and trailing Unicode whitespace before validation and
-conversion. When combined with `split`, it also trims every resulting item. Empty fields are
-preserved.
-
-Alternatively, deserialize one JSON value:
-
-```yaml
-- id: metadata
-  type: input
-  with:
-    variable: metadata
-    message: Enter metadata as JSON
-    modifiers:
-      trim: true
-      json: true
-
-- id: describe
-  type: shell
-  with:
-    command: printf
-    args:
-      - 'project=%s first_tag=%s retries=%s\n'
-      - "{{ .vars.metadata.project }}"
-      - "{{ index .steps.metadata.value.tags 0 }}"
-      - "{{ .steps.metadata.value.retries }}"
-
-- id: deploy
-  type: shell
-  if: vars.metadata.deploy
-  with:
-    command: ./deploy
-    args: ["{{ .vars.metadata.project }}"]
-```
-
-For example, entering
-`{"project":"wuko","tags":["go","cli"],"retries":3,"deploy":true}` makes the object available
-as both `.vars.metadata` and `.steps.metadata.value`. Access object fields with dotted paths, such
-as `.vars.metadata.project`; use the Go-template `index` function for array elements, such as
-`{{ index .steps.metadata.value.tags 0 }}`. Conditions use the typed value directly, so
-`if: vars.metadata.deploy` evaluates the JSON boolean rather than a string.
-
-JSON preserves objects, arrays, strings, booleans, null, and numbers. Invalid JSON remains in the
-interactive field with an error. `trim` can be combined with either `split` or `json`; `split` and
-`json` are mutually exclusive. With `--var`, pass JSON as a string because modifiers operate on
-text, for example
-`--var 'metadata="{\"enabled\":true}"'`.
-
-When `required: false`, empty input becomes an empty list for `split` and `null` for `json`.
-
-#### Choice
-
-Static single selection:
-
-```yaml
-- id: environment
-  type: choice
-  with:
-    variable: environment
-    message: Select environment
-    choices:
-      - {label: Development, value: dev}
-      - {label: Production, value: prod}
-```
-
-Typed multi-selection from an earlier output:
-
-```yaml
-- id: projects
-  type: choice
-  with:
-    variable: project_ids
-    message: Select projects
-    multiple: true
-    from: steps.fetch.projects
-    label_field: name
-    value_field: id
-```
-
-Dynamic sources must be non-empty lists. Scalar items are both label and value. Object lists use
-`label_field` and `value_field`, including dotted paths. Single selection writes a scalar;
-multi-selection writes an ordered list.
-
-#### Confirm
-
-Use `confirm` for a boolean decision. `default` controls the initially selected interactive
-answer; it does not silently answer a non-interactive prompt:
-
-```yaml
-- id: approval
-  type: confirm
-  with:
-    variable: approved
-    message: Deploy this release?
-    default: false
-
-- id: deploy
-  type: shell
-  if: vars.approved
-  with:
-    command: ./deploy
-```
-
-The result is written to both `.steps.approval.value` and `.vars.approved`. A pre-supplied value
-must be a boolean. Supply it explicitly for non-interactive execution, for example
-`wuko run release --var approved=true`. Confirm steps inside a concurrent group likewise require a
-pre-supplied value.
-
-#### Set
-
-Use `set` to assign a typed literal or evaluate an Expr expression without dropping into Lua.
-Exactly one of `value` or `expr` is required:
-
-```yaml
-- id: defaults
-  type: set
-  with:
-    variable: deployment
-    value:
-      enabled: true
-      retries: 3
-      regions: [eu-central, us-east]
-
-- id: artifact
-  type: set
-  with:
-    variable: artifact_name
-    expr: 'steps.release.value.version + "-" + vars.target + ".tar.gz"'
-```
-
-Expressions use the `inputs`, `vars`, `env`, `steps`, `workflow`, and `run` roots used by
-conditions. The JSON-compatible result is available through both `.steps.<id>.value` and the
-configured variable. Invalid expressions fail validation; missing runtime fields and
-non-JSON-compatible results fail the step without committing its variable.
-
 #### Assert
 
 Use `assert` to stop a workflow with a clear message unless an Expr expression evaluates to
@@ -1017,296 +821,6 @@ step starts, such as `Release {{ .vars.release }} is not ready`.
 A false expression fails with `assertion failed: <message>` and stops subsequent steps. A true
 expression succeeds without outputs or variables; the successful step is present as an empty
 object at `.steps.<id>`.
-
-#### Import variables
-
-Use `import_vars` to load JSON or TOML variables during workflow execution. Paths are rendered
-when the step starts and resolve from the directory containing the owning workflow or composite
-action:
-
-```yaml
-- id: configuration
-  type: import_vars
-  with:
-    files:
-      - defaults.toml
-      - "environments/{{ .vars.environment }}.json"
-
-- id: describe
-  type: shell
-  with:
-    command: printf
-    args: ["target=%s\\n", "{{ .vars.target }}"]
-```
-
-At least one file is required. Files merge from left to right with top-level replacement, then
-the imported values overwrite variables already present in workflow state—including initial
-`--var` values. A successful step exposes the merged object as `.steps.configuration.variables`,
-its top-level size as `.steps.configuration.count`, and every key beneath `.vars`.
-
-The same strict JSON/TOML and lowercase-key behavior as `--var-file` applies. The import is atomic:
-if any file cannot be read or decoded, the step commits no outputs or variables. Retries reread
-all files. Concurrent children still share their pre-group snapshot, cannot consume an import
-from a sibling, and fail if multiple children write the same variable. Validation and dry-run
-check the step configuration without reading its runtime files.
-
-Relative imports work in local workflows and in remote workflow or action archives that bundle
-the companion files. A direct remote YAML or action manifest contains no companion files to
-import.
-
-See [Variable imports](docs/variable-imports.md) for nested-value access from templates and Lua,
-merge examples, concurrency rules, and format-extension guidance.
-
-#### JSONPath
-
-Use `jsonpath` to select values from a typed workflow value with an
-[RFC 9535](https://www.rfc-editor.org/rfc/rfc9535.html) query:
-
-```yaml
-- id: active_projects
-  type: jsonpath
-  with:
-    from: steps.fetch.value
-    query: "$.projects[?@.active == true].id"
-    result: all
-    variable: active_project_ids
-```
-
-`from` is a dotted path rooted at `vars` or `steps`. The query runs against that value after the
-step configuration is rendered. `result` defaults to `all`, which writes the ordered nodelist to
-`.steps.<id>.value` and, when configured, to `variable`; no matches produce an empty list. Set
-`result: one` to require exactly one match and return that value as a scalar. Zero or multiple
-matches then fail the step without committing outputs or variables.
-
-Every successful result also exposes the integer match `count` and `paths`, a list of normalized
-RFC 9535 paths corresponding to the selected values. Duplicate selections are preserved because
-JSONPath results are nodelists, not sets. Evaluation is in-memory; use file-backed processing for
-datasets too large to keep in workflow state. JSONPath selects data but does not transform or
-modify it.
-
-#### Semantic versions
-
-Use `semver` to parse, compare, constrain, or increment semantic versions without invoking an
-external command. Versions must contain major, minor, and patch numbers; a common lowercase `v`
-tag prefix is accepted and removed from normalized outputs.
-
-Parse a version into its canonical value and components:
-
-```yaml
-- id: release
-  type: semver
-  with:
-    operation: parse
-    version: "v1.4.2-rc.1+build.7"
-    variable: release_version
-```
-
-The primary result is available at `.steps.release.value` and, when configured, at
-`.vars.release_version`. Parse also returns `version`, `major`, `minor`, `patch`, `prerelease`,
-and `metadata`.
-
-Compare precedence with `other`; `value` and `comparison` are `-1`, `0`, or `1`, and the step also
-returns boolean `less`, `equal`, and `greater` outputs. Build metadata does not affect precedence:
-
-```yaml
-- id: ordering
-  type: semver
-  with:
-    operation: compare
-    version: "{{ .vars.current_version }}"
-    other: "{{ .vars.candidate_version }}"
-```
-
-Check a version against a constraint with `constrain`. The boolean result is returned as both
-`value` and `matched`; comma or whitespace joins comparisons with AND, while `||` joins them with
-OR. Hyphen ranges, wildcards, tilde, and caret constraints are supported. Prerelease versions
-only match a constraint set that includes a prerelease comparator.
-
-```yaml
-- id: supported
-  type: semver
-  with:
-    operation: constrain
-    version: "{{ .vars.version }}"
-    constraint: ">= 1.4.0, < 2.0.0"
-    variable: is_supported
-```
-
-Increment `major`, `minor`, or `patch` with `part`. The string result is returned as `value` and
-`version`, with the normalized input in `previous`. Incrementing clears build metadata and
-prerelease data; incrementing the patch of a prerelease promotes it to its associated stable
-version.
-
-```yaml
-- id: next_release
-  type: semver
-  with:
-    operation: increment
-    version: "{{ .vars.version }}"
-    part: minor
-    variable: next_version
-```
-
-#### HTTP
-
-Use `http` for structured HTTP API calls. Requests default to `GET`; successful responses default
-to any `2xx` status; and response bodies default to text:
-
-```yaml
-- id: release
-  type: http
-  timeout: 30s
-  retry:
-    max_attempts: 3
-  with:
-    method: GET
-    url: https://api.example.com/releases/latest
-    headers:
-      Authorization: "Bearer {{ .env.API_TOKEN }}"
-    query:
-      channel: stable
-    response: json
-    success_statuses: [200]
-```
-
-Supply at most one of `body` or `json`. `json` is encoded as JSON and adds
-`Content-Type: application/json` unless the header is already present.
-
-Supported response modes are:
-
-- `text` (the default): exposes the raw response body as a string in `.steps.<id>.value`.
-- `json`: requires exactly one JSON value and exposes its typed object, array, string, number,
-  boolean, or null value in `.steps.<id>.value`.
-
-Every response also exposes the raw body string as `body`, the integer status code as `status`, and
-`headers`, whose values are lists so repeated headers are preserved. There are currently no
-dedicated binary, base64, YAML, XML, form-data, file-download, or streaming response modes.
-
-Only HTTP and HTTPS URLs with a host and without embedded user information are accepted. The
-response body is limited to 10 MiB. Redirects may upgrade HTTP to HTTPS, but they may not change
-host or port or downgrade HTTPS to HTTP, which prevents configured headers from crossing a trust
-boundary. Top-level `timeout` and `retry` policies control cancellation and repeated attempts. A
-status outside `success_statuses`, or outside `2xx` when the list is omitted, fails the step.
-Inside a polling `wait`, that status failure remains an observation available to `until`; failures
-that occur before a complete response is decoded still stop the wait.
-
-#### File
-
-The `file` step provides strict filesystem operations relative to the run directory. Create a
-file atomically and then make it executable:
-
-```yaml
-- id: write_script
-  type: file
-  with:
-    operation: write
-    path: scripts/release.sh
-    content: |
-      #!/bin/sh
-      exec ./release "{{ .vars.version }}"
-    overwrite: true
-    mode: "0755"
-
-- id: make_executable
-  type: file
-  with:
-    operation: chmod
-    path: scripts/release.sh
-    mode: "0755"
-```
-
-Supported operations and their extra fields are:
-
-- `read`: outputs text `content` and `size`.
-- `write`: requires `content`; accepts `overwrite` and `mode`; outputs `size`, `mode`, and
-  `created`.
-- `copy` and `move`: require `destination`, accept `overwrite`, and output the resolved source and
-  destination, `size`, and `mode`. Copy accepts regular files and preserves their permissions.
-  Move also works across filesystems by staging a copy before removing the source.
-- `remove`: accepts `recursive`; outputs `removed`. Missing paths are not errors.
-- `mkdir`: accepts `recursive` and `mode`; outputs `created` and `mode`.
-- `list`: accepts `recursive`; outputs path-sorted `entries` with `name`, relative `path`, `type`,
-  `size`, `mode`, and `modified_at`.
-- `stat`: outputs `exists` plus the same metadata when the path exists.
-- `chmod`: requires `mode` and outputs the normalized mode.
-
-Modes must be quoted four-digit octal strings from `"0000"` through `"0777"`; special permission
-bits are not supported. New files default to `"0644"` and new directories to `"0755"`.
-Overwriting a file without `mode` preserves its permissions. Chmod rejects symbolic links. Remove
-rejects filesystem roots and the run directory, and a non-empty directory requires
-`recursive: true`. Absolute paths remain available because Wuko workflows are trusted code, not a
-filesystem sandbox.
-
-#### Temp
-
-The `temp` step creates an empty managed file or directory in the operating system's temporary
-directory. Use its absolute `path` output in later steps instead of choosing and cleaning a
-scratch location manually:
-
-```yaml
-- id: workspace
-  type: temp
-  with:
-    kind: directory
-    pattern: wuko-build-*
-
-- id: build
-  type: shell
-  with:
-    command: ./build
-    args: ["--output", "{{ .steps.workspace.path }}"]
-
-finally:
-  - id: inspect
-    type: shell
-    with:
-      command: ./inspect-build
-      args: ["{{ .steps.workspace.path }}"]
-```
-
-`kind` is required and must be `file` or `directory`. `pattern` is optional and defaults to
-`wuko-*`; it is a filename pattern, not a path, and cannot contain `/` or `\`. The final `*` is
-replaced with random characters; when no `*` is present, random characters are appended. The step
-outputs `path` and `kind`. Files are closed before the step succeeds and use the operating
-system's secure temporary-file permissions; directories use its secure temporary-directory
-permissions.
-
-Managed resources remain available through the complete root workflow, nested composite actions,
-retries, polling, concurrent branches, foreach and matrix iterations, and explicit `finally`
-steps. Wuko removes them in reverse completion order after `finally` ends. Every removal is
-attempted; removal errors are joined with main and `finally` errors and fail an otherwise
-successful run. Missing resources are accepted. Directory cleanup is recursive, while file
-cleanup refuses to recursively delete a directory that has replaced the original file.
-
-Validation and dry runs do not create temporary resources. After an executed run returns, its
-state may still contain the former absolute path even though the managed resource no longer
-exists. Custom parent directories, initial content, and custom modes are not supported; use a
-later `file` step when those operations are needed.
-
-#### Glob
-
-The `glob` step discovers regular files with portable, shell-independent patterns. Patterns use
-forward slashes on every platform and support `*`, `?`, character classes, and recursive `**`:
-
-```yaml
-- id: sources
-  type: glob
-  with:
-    root: .
-    patterns:
-      - "**/*.go"
-      - "scripts/[a-z]*.sh"
-      - ".github/**/*.yaml"
-```
-
-`root` defaults to the run directory and may be relative to it or absolute. Patterns must be
-relative to `root`; multiple patterns form a union and duplicate matches are removed. Wildcards
-skip hidden files and directories unless the leading dot is explicit in the pattern. Directories,
-symbolic links, and files beneath symbolic-link directories are not returned.
-
-The step outputs the resolved absolute `root`, `count`, and path-sorted `files`. Each file contains
-`name`, a forward-slash relative `path`, `type: file`, `size`, `mode`, and UTC `modified_at`.
-Matching no files succeeds with `count: 0` and an empty `files` list.
 
 #### Cache
 
@@ -1388,6 +902,304 @@ Archives preserve regular files, empty directories, permissions, modification ti
 symbolic links whose targets remain inside the same cached directory. Special files, target-root
 symlinks, escaping links, malformed archives, and traversal paths are rejected. Cancellation
 stops hashing, archive creation, or extraction and removes temporary data.
+
+#### Choice
+
+Static single selection:
+
+```yaml
+- id: environment
+  type: choice
+  with:
+    variable: environment
+    message: Select environment
+    choices:
+      - {label: Development, value: dev}
+      - {label: Production, value: prod}
+```
+
+Typed multi-selection from an earlier output:
+
+```yaml
+- id: projects
+  type: choice
+  with:
+    variable: project_ids
+    message: Select projects
+    multiple: true
+    from: steps.fetch.projects
+    label_field: name
+    value_field: id
+```
+
+Dynamic sources must be non-empty lists. Scalar items are both label and value. Object lists use
+`label_field` and `value_field`, including dotted paths. Single selection writes a scalar;
+multi-selection writes an ordered list.
+
+#### Confirm
+
+Use `confirm` for a boolean decision. `default` controls the initially selected interactive
+answer; it does not silently answer a non-interactive prompt:
+
+```yaml
+- id: approval
+  type: confirm
+  with:
+    variable: approved
+    message: Deploy this release?
+    default: false
+
+- id: deploy
+  type: shell
+  if: vars.approved
+  with:
+    command: ./deploy
+```
+
+The result is written to both `.steps.approval.value` and `.vars.approved`. A pre-supplied value
+must be a boolean. Supply it explicitly for non-interactive execution, for example
+`wuko run release --var approved=true`. Confirm steps inside a concurrent group likewise require a
+pre-supplied value.
+
+#### Docker
+
+The `docker` step runs one command in a temporary Docker container. The container and any anonymous
+volumes it creates are removed after the step finishes. Docker must be available through the Docker
+Engine API (`DOCKER_HOST` is respected by the Docker client).
+
+```yaml
+- id: tests
+  type: docker
+  with:
+    image: golang:1.26
+    command: go
+    args: [test, ./...]
+    working_directory: /workspace
+    mounts:
+      - source: "{{ .run.dir }}"
+        target: /workspace
+        read_only: true
+    network: none
+    pull: if-missing
+```
+
+`command` and `args` are passed as an argv list. Omitting `command` uses the image's default
+command. `working_directory` is a path inside the container. Mount `source` paths are host paths;
+relative sources are resolved against the workflow run directory, while mount `target` paths must
+be absolute container paths. The step supports `env`, `user`, `platform` (`os/architecture` or
+`os/architecture/variant`), `network`, `tty`, and literal `stdin` values. An explicitly configured
+`stdin` value, including an empty string, is sent to the container and then closed. When `tty: true`
+is used from an interactive terminal, Wuko forwards terminal input until the container exits. Wuko's
+effective environment is passed through and step-level `env` overrides it.
+
+The pull policy defaults to `if-missing`; `never`, `missing`, and `always` are also accepted. Pin
+production images by digest when reproducibility matters. With `tty: true`, Docker combines the
+output streams as a terminal does. Interactive workflows should be run with a terminal attached.
+
+Docker containers created by Wuko receive management, client-host, and owner-process labels. At the
+start of a later Docker step, Wuko recovers only labeled containers created from the same client host
+whose owner process is no longer alive; containers from other client hosts, legacy containers without
+a client-host label, and containers owned by a live Wuko process are left untouched. This covers
+process crashes and forced termination on the next Wuko run without interfering with another machine
+using the same remote daemon. Cleanup failures are reported and are preserved alongside the original
+step error. Images and explicitly configured bind-mounted host directories are retained by design.
+
+#### File
+
+The `file` step provides strict filesystem operations relative to the run directory. Create a
+file atomically and then make it executable:
+
+```yaml
+- id: write_script
+  type: file
+  with:
+    operation: write
+    path: scripts/release.sh
+    content: |
+      #!/bin/sh
+      exec ./release "{{ .vars.version }}"
+    overwrite: true
+    mode: "0755"
+
+- id: make_executable
+  type: file
+  with:
+    operation: chmod
+    path: scripts/release.sh
+    mode: "0755"
+```
+
+Supported operations and their extra fields are:
+
+- `read`: outputs text `content` and `size`.
+- `write`: requires `content`; accepts `overwrite` and `mode`; outputs `size`, `mode`, and
+  `created`.
+- `copy` and `move`: require `destination`, accept `overwrite`, and output the resolved source and
+  destination, `size`, and `mode`. Copy accepts regular files and preserves their permissions.
+  Move also works across filesystems by staging a copy before removing the source.
+- `remove`: accepts `recursive`; outputs `removed`. Missing paths are not errors.
+- `mkdir`: accepts `recursive` and `mode`; outputs `created` and `mode`.
+- `list`: accepts `recursive`; outputs path-sorted `entries` with `name`, relative `path`, `type`,
+  `size`, `mode`, and `modified_at`.
+- `stat`: outputs `exists` plus the same metadata when the path exists.
+- `chmod`: requires `mode` and outputs the normalized mode.
+
+Modes must be quoted four-digit octal strings from `"0000"` through `"0777"`; special permission
+bits are not supported. New files default to `"0644"` and new directories to `"0755"`.
+Overwriting a file without `mode` preserves its permissions. Chmod rejects symbolic links. Remove
+rejects filesystem roots and the run directory, and a non-empty directory requires
+`recursive: true`. Absolute paths remain available because Wuko workflows are trusted code, not a
+filesystem sandbox.
+
+#### Glob
+
+The `glob` step discovers regular files with portable, shell-independent patterns. Patterns use
+forward slashes on every platform and support `*`, `?`, character classes, and recursive `**`:
+
+```yaml
+- id: sources
+  type: glob
+  with:
+    root: .
+    patterns:
+      - "**/*.go"
+      - "scripts/[a-z]*.sh"
+      - ".github/**/*.yaml"
+```
+
+`root` defaults to the run directory and may be relative to it or absolute. Patterns must be
+relative to `root`; multiple patterns form a union and duplicate matches are removed. Wildcards
+skip hidden files and directories unless the leading dot is explicit in the pattern. Directories,
+symbolic links, and files beneath symbolic-link directories are not returned.
+
+The step outputs the resolved absolute `root`, `count`, and path-sorted `files`. Each file contains
+`name`, a forward-slash relative `path`, `type: file`, `size`, `mode`, and UTC `modified_at`.
+Matching no files succeeds with `count: 0` and an empty `files` list.
+
+#### HTTP
+
+Use `http` for structured HTTP API calls. Requests default to `GET`; successful responses default
+to any `2xx` status; and response bodies default to text:
+
+```yaml
+- id: release
+  type: http
+  timeout: 30s
+  retry:
+    max_attempts: 3
+  with:
+    method: GET
+    url: https://api.example.com/releases/latest
+    headers:
+      Authorization: "Bearer {{ .env.API_TOKEN }}"
+    query:
+      channel: stable
+    response: json
+    success_statuses: [200]
+```
+
+Supply at most one of `body` or `json`. `json` is encoded as JSON and adds
+`Content-Type: application/json` unless the header is already present.
+
+Supported response modes are:
+
+- `text` (the default): exposes the raw response body as a string in `.steps.<id>.value`.
+- `json`: requires exactly one JSON value and exposes its typed object, array, string, number,
+  boolean, or null value in `.steps.<id>.value`.
+
+Every response also exposes the raw body string as `body`, the integer status code as `status`, and
+`headers`, whose values are lists so repeated headers are preserved. There are currently no
+dedicated binary, base64, YAML, XML, form-data, file-download, or streaming response modes.
+
+Only HTTP and HTTPS URLs with a host and without embedded user information are accepted. The
+response body is limited to 10 MiB. Redirects may upgrade HTTP to HTTPS, but they may not change
+host or port or downgrade HTTPS to HTTP, which prevents configured headers from crossing a trust
+boundary. Top-level `timeout` and `retry` policies control cancellation and repeated attempts. A
+status outside `success_statuses`, or outside `2xx` when the list is omitted, fails the step.
+Inside a polling `wait`, that status failure remains an observation available to `until`; failures
+that occur before a complete response is decoded still stop the wait.
+
+#### Import variables
+
+Use `import_vars` to load JSON or TOML variables during workflow execution. Paths are rendered
+when the step starts and resolve from the directory containing the owning workflow or composite
+action:
+
+```yaml
+- id: configuration
+  type: import_vars
+  with:
+    files:
+      - defaults.toml
+      - "environments/{{ .vars.environment }}.json"
+
+- id: describe
+  type: shell
+  with:
+    command: printf
+    args: ["target=%s\\n", "{{ .vars.target }}"]
+```
+
+At least one file is required. Files merge from left to right with top-level replacement, then
+the imported values overwrite variables already present in workflow state—including initial
+`--var` values. A successful step exposes the merged object as `.steps.configuration.variables`,
+its top-level size as `.steps.configuration.count`, and every key beneath `.vars`.
+
+The same strict JSON/TOML and lowercase-key behavior as `--var-file` applies. The import is atomic:
+if any file cannot be read or decoded, the step commits no outputs or variables. Retries reread
+all files. Concurrent children still share their pre-group snapshot, cannot consume an import
+from a sibling, and fail if multiple children write the same variable. Validation and dry-run
+check the step configuration without reading its runtime files.
+
+Relative imports work in local workflows and in remote workflow or action archives that bundle
+the companion files. A direct remote YAML or action manifest contains no companion files to
+import.
+
+See [Variable imports](docs/variable-imports.md) for nested-value access from templates and Lua,
+merge examples, concurrency rules, and format-extension guidance.
+
+#### Input
+
+Use `input` when the initial text should remain editable. The optional `value` is rendered when
+the step starts, so it can prepopulate text from an earlier step. The required `message` is shown
+directly above the field and should tell the user what to enter:
+
+```yaml
+- id: release_name
+  type: input
+  with:
+    variable: release_name
+    message: Enter the release name
+    value: "{{ .steps.suggest_name.value }}"
+    required: true
+```
+
+#### JSONPath
+
+Use `jsonpath` to select values from a typed workflow value with an
+[RFC 9535](https://www.rfc-editor.org/rfc/rfc9535.html) query:
+
+```yaml
+- id: active_projects
+  type: jsonpath
+  with:
+    from: steps.fetch.value
+    query: "$.projects[?@.active == true].id"
+    result: all
+    variable: active_project_ids
+```
+
+`from` is a dotted path rooted at `vars` or `steps`. The query runs against that value after the
+step configuration is rendered. `result` defaults to `all`, which writes the ordered nodelist to
+`.steps.<id>.value` and, when configured, to `variable`; no matches produce an empty list. Set
+`result: one` to require exactly one match and return that value as a scalar. Zero or multiple
+matches then fail the step without committing outputs or variables.
+
+Every successful result also exposes the integer match `count` and `paths`, a list of normalized
+RFC 9535 paths corresponding to the selected values. Duplicate selections are preserved because
+JSONPath results are nodelists, not sets. Evaluation is in-memory; use file-backed processing for
+datasets too large to keep in workflow state. JSONPath selects data but does not transform or
+modify it.
 
 #### Key-value stores
 
@@ -1535,6 +1347,191 @@ local entries = wuko.kv.list({scope = "global", store = "preferences"})
 of `{key, value}` tables. Because Lua represents JSON null as `nil`, omitting `value` from
 `wuko.kv.set` stores JSON null; a list entry for stored null still contains its `key`.
 
+#### Password
+
+Use `password` for masked text entry. Its required `message` is displayed above the masked field:
+
+```yaml
+- id: credentials
+  type: password
+  with:
+    variable: api_token
+    message: Enter the API token
+    required: true
+```
+
+Input and password steps write their resulting value to `steps.<id>.value` and to the configured
+variable. The value is text unless an input modifier converts it. A pre-supplied variable skips
+the UI, and non-interactive runs must provide it with `--var`.
+
+Both steps support the same optional `validation` block inside `with`:
+
+```yaml
+with:
+  validation:
+    min_length: 3
+    max_length: 40
+    pattern: '^[a-z][a-z0-9-]+$'
+    message: Use 3–40 lowercase letters, digits, or hyphens
+```
+
+Lengths count Unicode characters. `pattern` uses Go regular-expression syntax and is optional;
+anchor it with `^` and `$` when the whole value must match. `message` replaces the default error
+for any failed rule. Invalid rule configurations fail workflow validation before execution.
+
+Input can convert validated text before storing it. Split on a Go regular-expression pattern:
+
+```yaml
+- id: reviewers
+  type: input
+  with:
+    variable: reviewers
+    message: Enter comma-separated reviewers
+    modifiers:
+      trim: true
+      split: ','
+```
+
+Entering `alice, bob` writes `["alice", "bob"]` to both `.steps.reviewers.value` and
+`.vars.reviewers`. `trim` removes leading and trailing Unicode whitespace before validation and
+conversion. When combined with `split`, it also trims every resulting item. Empty fields are
+preserved.
+
+Alternatively, deserialize one JSON value:
+
+```yaml
+- id: metadata
+  type: input
+  with:
+    variable: metadata
+    message: Enter metadata as JSON
+    modifiers:
+      trim: true
+      json: true
+
+- id: describe
+  type: shell
+  with:
+    command: printf
+    args:
+      - 'project=%s first_tag=%s retries=%s\n'
+      - "{{ .vars.metadata.project }}"
+      - "{{ index .steps.metadata.value.tags 0 }}"
+      - "{{ .steps.metadata.value.retries }}"
+
+- id: deploy
+  type: shell
+  if: vars.metadata.deploy
+  with:
+    command: ./deploy
+    args: ["{{ .vars.metadata.project }}"]
+```
+
+For example, entering
+`{"project":"wuko","tags":["go","cli"],"retries":3,"deploy":true}` makes the object available
+as both `.vars.metadata` and `.steps.metadata.value`. Access object fields with dotted paths, such
+as `.vars.metadata.project`; use the Go-template `index` function for array elements, such as
+`{{ index .steps.metadata.value.tags 0 }}`. Conditions use the typed value directly, so
+`if: vars.metadata.deploy` evaluates the JSON boolean rather than a string.
+
+JSON preserves objects, arrays, strings, booleans, null, and numbers. Invalid JSON remains in the
+interactive field with an error. `trim` can be combined with either `split` or `json`; `split` and
+`json` are mutually exclusive. With `--var`, pass JSON as a string because modifiers operate on
+text, for example
+`--var 'metadata="{\"enabled\":true}"'`.
+
+When `required: false`, empty input becomes an empty list for `split` and `null` for `json`.
+
+#### Semantic versions
+
+Use `semver` to parse, compare, constrain, or increment semantic versions without invoking an
+external command. Versions must contain major, minor, and patch numbers; a common lowercase `v`
+tag prefix is accepted and removed from normalized outputs.
+
+Parse a version into its canonical value and components:
+
+```yaml
+- id: release
+  type: semver
+  with:
+    operation: parse
+    version: "v1.4.2-rc.1+build.7"
+    variable: release_version
+```
+
+The primary result is available at `.steps.release.value` and, when configured, at
+`.vars.release_version`. Parse also returns `version`, `major`, `minor`, `patch`, `prerelease`,
+and `metadata`.
+
+Compare precedence with `other`; `value` and `comparison` are `-1`, `0`, or `1`, and the step also
+returns boolean `less`, `equal`, and `greater` outputs. Build metadata does not affect precedence:
+
+```yaml
+- id: ordering
+  type: semver
+  with:
+    operation: compare
+    version: "{{ .vars.current_version }}"
+    other: "{{ .vars.candidate_version }}"
+```
+
+Check a version against a constraint with `constrain`. The boolean result is returned as both
+`value` and `matched`; comma or whitespace joins comparisons with AND, while `||` joins them with
+OR. Hyphen ranges, wildcards, tilde, and caret constraints are supported. Prerelease versions
+only match a constraint set that includes a prerelease comparator.
+
+```yaml
+- id: supported
+  type: semver
+  with:
+    operation: constrain
+    version: "{{ .vars.version }}"
+    constraint: ">= 1.4.0, < 2.0.0"
+    variable: is_supported
+```
+
+Increment `major`, `minor`, or `patch` with `part`. The string result is returned as `value` and
+`version`, with the normalized input in `previous`. Incrementing clears build metadata and
+prerelease data; incrementing the patch of a prerelease promotes it to its associated stable
+version.
+
+```yaml
+- id: next_release
+  type: semver
+  with:
+    operation: increment
+    version: "{{ .vars.version }}"
+    part: minor
+    variable: next_version
+```
+
+#### Set
+
+Use `set` to assign a typed literal or evaluate an Expr expression without dropping into Lua.
+Exactly one of `value` or `expr` is required:
+
+```yaml
+- id: defaults
+  type: set
+  with:
+    variable: deployment
+    value:
+      enabled: true
+      retries: 3
+      regions: [eu-central, us-east]
+
+- id: artifact
+  type: set
+  with:
+    variable: artifact_name
+    expr: 'steps.release.value.version + "-" + vars.target + ".tar.gz"'
+```
+
+Expressions use the `inputs`, `vars`, `env`, `steps`, `workflow`, and `run` roots used by
+conditions. The JSON-compatible result is available through both `.steps.<id>.value` and the
+configured variable. Invalid expressions fail validation; missing runtime fields and
+non-JSON-compatible results fail the step without committing its variable.
+
 #### Shell and agent
 
 Shell accepts either argv execution:
@@ -1588,48 +1585,51 @@ that identity, which normally means running Wuko as root. Wuko does not invoke `
 rewrite environment variables such as `HOME` or `USER`; the selected account must also be able to
 access the configured working directory and executable. Omitting `user` inherits Wuko's user.
 
-#### Docker
+#### Temp
 
-The `docker` step runs one command in a temporary Docker container. The container and any anonymous
-volumes it creates are removed after the step finishes. Docker must be available through the Docker
-Engine API (`DOCKER_HOST` is respected by the Docker client).
+The `temp` step creates an empty managed file or directory in the operating system's temporary
+directory. Use its absolute `path` output in later steps instead of choosing and cleaning a
+scratch location manually:
 
 ```yaml
-- id: tests
-  type: docker
+- id: workspace
+  type: temp
   with:
-    image: golang:1.26
-    command: go
-    args: [test, ./...]
-    working_directory: /workspace
-    mounts:
-      - source: "{{ .run.dir }}"
-        target: /workspace
-        read_only: true
-    network: none
-    pull: if-missing
+    kind: directory
+    pattern: wuko-build-*
+
+- id: build
+  type: shell
+  with:
+    command: ./build
+    args: ["--output", "{{ .steps.workspace.path }}"]
+
+finally:
+  - id: inspect
+    type: shell
+    with:
+      command: ./inspect-build
+      args: ["{{ .steps.workspace.path }}"]
 ```
 
-`command` and `args` are passed as an argv list. Omitting `command` uses the image's default
-command. `working_directory` is a path inside the container. Mount `source` paths are host paths;
-relative sources are resolved against the workflow run directory, while mount `target` paths must
-be absolute container paths. The step supports `env`, `user`, `platform` (`os/architecture` or
-`os/architecture/variant`), `network`, `tty`, and literal `stdin` values. An explicitly configured
-`stdin` value, including an empty string, is sent to the container and then closed. When `tty: true`
-is used from an interactive terminal, Wuko forwards terminal input until the container exits. Wuko's
-effective environment is passed through and step-level `env` overrides it.
+`kind` is required and must be `file` or `directory`. `pattern` is optional and defaults to
+`wuko-*`; it is a filename pattern, not a path, and cannot contain `/` or `\`. The final `*` is
+replaced with random characters; when no `*` is present, random characters are appended. The step
+outputs `path` and `kind`. Files are closed before the step succeeds and use the operating
+system's secure temporary-file permissions; directories use its secure temporary-directory
+permissions.
 
-The pull policy defaults to `if-missing`; `never`, `missing`, and `always` are also accepted. Pin
-production images by digest when reproducibility matters. With `tty: true`, Docker combines the
-output streams as a terminal does. Interactive workflows should be run with a terminal attached.
+Managed resources remain available through the complete root workflow, nested composite actions,
+retries, polling, concurrent branches, foreach and matrix iterations, and explicit `finally`
+steps. Wuko removes them in reverse completion order after `finally` ends. Every removal is
+attempted; removal errors are joined with main and `finally` errors and fail an otherwise
+successful run. Missing resources are accepted. Directory cleanup is recursive, while file
+cleanup refuses to recursively delete a directory that has replaced the original file.
 
-Docker containers created by Wuko receive management, client-host, and owner-process labels. At the
-start of a later Docker step, Wuko recovers only labeled containers created from the same client host
-whose owner process is no longer alive; containers from other client hosts, legacy containers without
-a client-host label, and containers owned by a live Wuko process are left untouched. This covers
-process crashes and forced termination on the next Wuko run without interfering with another machine
-using the same remote daemon. Cleanup failures are reported and are preserved alongside the original
-step error. Images and explicitly configured bind-mounted host directories are retained by design.
+Validation and dry runs do not create temporary resources. After an executed run returns, its
+state may still contain the former absolute path even though the managed resource no longer
+exists. Custom parent directories, initial content, and custom modes are not supported; use a
+later `file` step when those operations are needed.
 
 ## Trust model
 
