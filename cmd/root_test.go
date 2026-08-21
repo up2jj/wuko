@@ -294,6 +294,41 @@ steps:
 	}
 }
 
+func TestRootCommandRegistersChangedStep(t *testing.T) {
+	root := t.TempDir()
+	workflowPath := filepath.Join(root, "changed.yaml")
+	data := `version: 1
+name: changed
+steps:
+  - id: detect
+    type: changed
+    with:
+      values: {target: linux}
+  - id: verify
+    type: assert
+    if: steps.detect.changed
+    with:
+      expr: steps.detect.changed
+      message: first changed result was false
+`
+	if err := os.WriteFile(workflowPath, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		command := NewRootCmd()
+		command.SetIn(bytes.NewReader(nil))
+		command.SetOut(io.Discard)
+		command.SetErr(io.Discard)
+		command.SetArgs([]string{"run", "--file", workflowPath})
+		if err := command.ExecuteContext(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, ".wuko", "values", "changed.json")); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRootCommandRunsBuiltInWaitStep(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "wait.yaml")

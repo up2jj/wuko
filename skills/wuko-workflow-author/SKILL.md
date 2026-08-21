@@ -1,6 +1,6 @@
 ---
 name: wuko-workflow-author
-description: Create or update Wuko version-1 YAML workflows, including templates, conditions, finally cleanup, foreach and matrix controls, required files, composite actions, waits, polling, retries, concurrency, interactive prompts, typed and imported variables, JSONPath selection, semantic versions, HTTP, files, managed temporary resources, glob discovery, content-addressed directory caches, Lua, shell, Docker, and agent steps. Use when designing workflow files, extending existing workflows, or reviewing workflow structure before execution.
+description: Create or update Wuko version-1 YAML workflows, including templates, conditions, finally cleanup, foreach and matrix controls, required files, composite actions, waits, polling, retries, concurrency, interactive prompts, typed and imported variables, JSONPath selection, semantic versions, HTTP, files, managed temporary resources, glob discovery, persistent change detectors, content-addressed directory caches, Lua, shell, Docker, and agent steps. Use when designing workflow files, extending existing workflows, or reviewing workflow structure before execution.
 ---
 
 # Wuko Workflow Author
@@ -41,6 +41,9 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
   steps; use `file` afterward when content or custom permissions are required.
 - Use `glob` to discover regular files with portable `*`, `?`, character-class, and recursive `**`
   patterns. Keep patterns relative to its `root` and consume the sorted metadata from `files`.
+- Use `changed` before guarded work that should run only when selected file contents or named
+  values differ from the detector's previous local snapshot. Branch on its `changed` output, and
+  give repeated foreach, matrix, or action detectors a templated key containing their binding.
 - Use `cache` with an early `restore` and a later `save` for dependency or build directories.
   Derive the key from stable lockfiles or manifests, keep restore and save declarations identical,
   and branch on the restore step's `hit` output when work can be skipped.
@@ -77,6 +80,9 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
   commits only the final result, and can still repeat external effects with at-least-once semantics.
 - Give repeated external operations an explicit stable `operation_id` when the receiving service can use it for idempotency.
 - Remember that concurrent children share a pre-group state snapshot, cannot consume sibling outputs, and cannot safely compete for interactive input.
+- A successful `changed` detector advances its local snapshot immediately, even if later guarded
+  work fails. It is unavailable to direct remote workflows and does not react to file timestamps
+  or permissions.
 - Foreach and matrix iterations also start from one pre-control snapshot, but steps within an
   iteration remain sequential. Read bindings from `.foreach` or `.matrix`; consume ordered results
   beneath the parent step ID. Iteration variables do not escape, fan-out controls cannot nest, and

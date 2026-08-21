@@ -12,8 +12,10 @@ import (
 )
 
 type Request struct {
-	StepID         string
-	WorkflowName   string
+	StepID       string
+	WorkflowName string
+	// WorkflowSource is the stable logical source of the workflow or action definition.
+	WorkflowSource string
 	WorkflowDir    string
 	RunDir         string
 	LocalValueDir  string

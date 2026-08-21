@@ -14,7 +14,8 @@ commands or inline shell, and launch an external agent such as Codex.
   foreach and matrix fan-out, retries, timeouts, dry runs, execution trees, live progress, and run
   statistics.
 - Use built-in wait, input, password, choice, confirm, set, assert, `import_vars`, JSONPath,
-  semantic-version, HTTP, file, temp, glob, cache, key-value, Lua, shell, agent, and Docker steps.
+  semantic-version, HTTP, file, temp, glob, cache, changed, key-value, Lua, shell, agent, and Docker
+  steps.
 - Split workflows across local files with `require`, or reuse remote workflows and composite
   actions from HTTPS URLs and GitHub locators.
 - Integrate with `direnv`, import JSON or TOML variable files, and pass values explicitly with
@@ -47,6 +48,7 @@ commands or inline shell, and launch an external agent such as Codex.
   - [Available steps](#available-steps)
     - [Assert](#assert)
     - [Cache](#cache)
+    - [Changed](#changed)
     - [Choice](#choice)
     - [Confirm](#confirm)
     - [Docker](#docker)
@@ -902,6 +904,57 @@ Archives preserve regular files, empty directories, permissions, modification ti
 symbolic links whose targets remain inside the same cached directory. Special files, target-root
 symlinks, escaping links, malformed archives, and traversal paths are rejected. Cancellation
 stops hashing, archive creation, or extraction and removes temporary data.
+
+#### Changed
+
+Use `changed` to compare selected files and structured values with the detector's previous
+successful execution. Guard later work with its boolean `changed` output:
+
+```yaml
+- id: source_changed
+  type: changed
+  with:
+    key: build-inputs
+    root: .
+    files:
+      - go.mod
+      - go.sum
+      - "src/**/*.go"
+      - assets
+    values:
+      target: "{{ .vars.target }}"
+      release: "{{ .vars.release }}"
+
+- id: build
+  type: shell
+  if: steps.source_changed.changed
+  with:
+    command: ./build
+```
+
+At least one non-empty `files` or `values` input is required. `root` defaults to the run
+directory and may be relative or absolute. File entries are relative to `root` and accept the
+same `*`, `?`, character-class, and `**` syntax as `glob`. A literal directory includes its
+regular files recursively. Missing paths and patterns with no matches are valid, allowing later
+creation or deletion to register as a change. Matching does not follow symbolic links, and
+wildcards skip hidden paths unless the leading dot is explicit.
+
+The fingerprint contains normalized, sorted patterns, matched relative paths and file contents,
+and canonical JSON for `values`. File timestamps, permissions, file-entry ordering, duplicate
+patterns, and map key order do not affect it. List order remains significant. Values retain YAML
+scalar, list, and object types; strings use normal workflow template rendering.
+
+The first execution returns `changed: true`; an identical later execution returns `false`.
+Snapshots are atomically stored in the workflow-local `.wuko/values/changed.json` store. Its own
+store artifacts are excluded from file matches. Direct remote workflows cannot use this
+local-only step, but composite actions called by a local workflow inherit the caller's local
+storage.
+
+`key` is optional and defaults to the step ID within the logical workflow or action source. Use a
+templated key when the same detector repeats in a foreach, matrix, or reusable action, for example
+`key: "build-{{ .matrix.os }}-{{ .matrix.go_version }}"`. A detector advances its snapshot as
+soon as it succeeds; failure of a later guarded step does not roll the snapshot back. Validation
+and dry-run check configuration without reading inputs or creating snapshot files.
 
 #### Choice
 

@@ -96,6 +96,12 @@ func TestOpenAndValueValidation(t *testing.T) {
 	if _, err := store.Set(t.Context(), "bad", func() {}); err == nil {
 		t.Fatal("expected incompatible-value error")
 	}
+	if _, err := store.SetIfDifferent(t.Context(), "", true); err == nil {
+		t.Fatal("expected SetIfDifferent empty-key error")
+	}
+	if _, err := store.SetIfDifferent(t.Context(), "bad", func() {}); err == nil {
+		t.Fatal("expected SetIfDifferent incompatible-value error")
+	}
 }
 
 func TestMalformedStoreIsPreserved(t *testing.T) {
@@ -140,6 +146,52 @@ func TestConcurrentUpdatesDoNotLoseValues(t *testing.T) {
 	}
 	if len(entries) != 20 {
 		t.Fatalf("entries = %d, want 20", len(entries))
+	}
+}
+
+func TestSetIfDifferentIsAtomicAndDoesNotRewriteUnchangedValue(t *testing.T) {
+	dir := t.TempDir()
+	store, err := Open(dir, "changed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var changedCount int
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	for range 20 {
+		wg.Go(func() {
+			changed, err := store.SetIfDifferent(t.Context(), "fingerprint", "same")
+			if err != nil {
+				t.Errorf("SetIfDifferent() error = %v", err)
+				return
+			}
+			if changed {
+				mu.Lock()
+				changedCount++
+				mu.Unlock()
+			}
+		})
+	}
+	wg.Wait()
+	if changedCount != 1 {
+		t.Fatalf("changed count = %d, want 1", changedCount)
+	}
+	path := filepath.Join(dir, "changed.json")
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(time.Millisecond)
+	changed, err := store.SetIfDifferent(t.Context(), "fingerprint", "same")
+	if err != nil || changed {
+		t.Fatalf("unchanged update = %v, %v", changed, err)
+	}
+	after, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !after.ModTime().Equal(before.ModTime()) {
+		t.Fatalf("store modification time changed: before=%s after=%s", before.ModTime(), after.ModTime())
 	}
 }
 

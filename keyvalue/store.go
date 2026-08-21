@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"slices"
 	"syscall"
@@ -113,6 +114,32 @@ func (s *Store) Set(ctx context.Context, key string, value any) (any, error) {
 		return nil, err
 	}
 	return clone(normalized), nil
+}
+
+// SetIfDifferent atomically stores value when it differs from the current value. It returns true
+// when the key was absent or its value changed. An unchanged value does not rewrite the store.
+func (s *Store) SetIfDifferent(ctx context.Context, key string, value any) (bool, error) {
+	if err := validateKey(key); err != nil {
+		return false, err
+	}
+	normalized, err := Normalize(value)
+	if err != nil {
+		return false, fmt.Errorf("value is not JSON-compatible: %w", err)
+	}
+	changed := false
+	err = s.withLock(ctx, func() error {
+		values, err := s.read()
+		if err != nil {
+			return err
+		}
+		if previous, found := values[key]; found && reflect.DeepEqual(previous, normalized) {
+			return nil
+		}
+		values[key] = normalized
+		changed = true
+		return s.write(values)
+	})
+	return changed, err
 }
 
 // Delete removes key and returns its previous value and whether it existed.

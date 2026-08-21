@@ -623,7 +623,7 @@ func templateData(definition *workflow.Definition, runDir string, state *State) 
 
 func makeRequest(definition *workflow.Definition, stepID string, options Options, state *State, attempt, maxAttempts int, operationID string) step.Request {
 	return step.Request{
-		StepID: stepID, WorkflowName: definition.Name, WorkflowDir: definition.Dir,
+		StepID: stepID, WorkflowName: definition.Name, WorkflowSource: definition.Location.Source, WorkflowDir: definition.Dir,
 		RunDir: options.RunDir, LocalValueDir: options.LocalValueDir, GlobalValueDir: options.GlobalValueDir,
 		Inputs: cloneMap(state.Inputs), Vars: cloneMap(state.Vars), Env: maps.Clone(state.Env),
 		Steps: cloneMap(state.Steps), Bindings: cloneMap(state.Bindings), Stdin: options.Stdin, Stdout: options.Stdout,
