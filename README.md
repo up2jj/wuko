@@ -14,7 +14,7 @@ commands or inline shell, and launch an external agent such as Codex.
   foreach and matrix fan-out, retries, timeouts, dry runs, execution trees, live progress, and run
   statistics.
 - Use built-in wait, input, password, choice, confirm, set, assert, `import_vars`, JSONPath,
-  semantic-version, HTTP, file, glob, key-value, Lua, shell, agent, and Docker steps.
+  semantic-version, HTTP, file, glob, cache, key-value, Lua, shell, agent, and Docker steps.
 - Split workflows across local files with `require`, or reuse remote workflows and composite
   actions from HTTPS URLs and GitHub locators.
 - Integrate with `direnv`, import JSON or TOML variable files, and pass values explicitly with
@@ -1259,6 +1259,87 @@ symbolic links, and files beneath symbolic-link directories are not returned.
 The step outputs the resolved absolute `root`, `count`, and path-sorted `files`. Each file contains
 `name`, a forward-slash relative `path`, `type: file`, `size`, `mode`, and UTC `modified_at`.
 Matching no files succeeds with `count: 0` and an empty `files` list.
+
+#### Cache
+
+The `cache` step restores and saves dependency or build directories without invoking a
+platform-specific archive command. Restore early in the workflow, perform the work only after a
+miss, and save the resulting directories afterward:
+
+```yaml
+- id: prepare_vendor
+  type: file
+  with:
+    operation: mkdir
+    path: vendor
+    recursive: true
+
+- id: prepare_build
+  type: file
+  with:
+    operation: mkdir
+    path: build
+    recursive: true
+
+- id: restore_dependencies
+  type: cache
+  with:
+    operation: restore
+    cache_dir: .wuko/cache
+    key_files:
+      - go.mod
+      - go.sum
+    paths:
+      - vendor
+      - build
+
+- id: build_dependencies
+  type: shell
+  if: "!steps.restore_dependencies.hit"
+  with:
+    script: go mod vendor && go build -o build/app ./cmd/app
+
+- id: save_dependencies
+  type: cache
+  if: "!steps.restore_dependencies.hit"
+  with:
+    operation: save
+    cache_dir: .wuko/cache
+    key_files:
+      - go.mod
+      - go.sum
+    paths:
+      - vendor
+      - build
+```
+
+Every cache declaration requires `operation`, `cache_dir`, `key_files`, and `paths`:
+
+- `operation` is `restore` or `save`. Use separate steps and keep their other fields identical.
+- `cache_dir` is the user-selected backing directory. Relative values resolve from the run
+  directory; absolute values remain absolute.
+- `key_files` is a non-empty list of regular files. Every file must exist when the step runs.
+- `paths` is a non-empty list of directories stored together. Every directory must already exist,
+  including before restore; create initially absent directories with `file` or another preceding
+  step.
+
+Wuko derives a versioned SHA-256 key from the normalized, sorted key-file paths and contents and
+the normalized, sorted target paths. File timestamps and permissions do not affect the key, and
+reordering either list does not change it. The backing entry is `<cache_dir>/<key>.tar.gz`.
+Duplicate or overlapping target directories are rejected, as is any overlap between `cache_dir`
+and a target directory.
+
+A restore miss is successful and returns `hit: false`; a hit returns `hit: true` and `key`.
+Restore validates and stages the entire entry before replacing existing target directories. It
+rolls back earlier replacements if a later target cannot be installed, so stale files are not
+merged into a restored tree. Save returns `key`, `stored`, and compressed `size`. Entries are
+immutable: if another step or process has already saved the same key, save succeeds with
+`stored: false` and retains the existing entry.
+
+Archives preserve regular files, empty directories, permissions, modification times, and relative
+symbolic links whose targets remain inside the same cached directory. Special files, target-root
+symlinks, escaping links, malformed archives, and traversal paths are rejected. Cancellation
+stops hashing, archive creation, or extraction and removes temporary data.
 
 #### Key-value stores
 

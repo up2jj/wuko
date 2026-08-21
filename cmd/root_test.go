@@ -218,6 +218,52 @@ steps:
 	}
 }
 
+func TestRootCommandRegistersCacheStep(t *testing.T) {
+	root := t.TempDir()
+	keyFile := filepath.Join(root, "go.sum")
+	target := filepath.Join(root, "vendor")
+	cacheDir := filepath.Join(root, "cache")
+	if err := os.WriteFile(keyFile, []byte("checksum\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "module.txt"), []byte("cached"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	workflowPath := filepath.Join(root, "cache.yaml")
+	data := fmt.Sprintf(`version: 1
+name: cache
+steps:
+  - id: save
+    type: cache
+    with:
+      operation: save
+      cache_dir: %q
+      key_files: [%q]
+      paths: [%q]
+`, cacheDir, keyFile, target)
+	if err := os.WriteFile(workflowPath, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	command := NewRootCmd()
+	command.SetIn(bytes.NewReader(nil))
+	command.SetOut(io.Discard)
+	command.SetErr(io.Discard)
+	command.SetArgs([]string{"run", "--file", workflowPath})
+	if err := command.ExecuteContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := filepath.Glob(filepath.Join(cacheDir, "*.tar.gz"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("cache entries = %v, want one", entries)
+	}
+}
+
 func TestRootCommandRunsBuiltInWaitStep(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "wait.yaml")
