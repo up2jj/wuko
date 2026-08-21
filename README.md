@@ -1,1787 +1,262 @@
 # Wuko
 
-Wuko is a trusted workflow runner for everyday development tasks. Local workflows are YAML files
-composed from independently registered Go step packages. The built-in steps collect text and
-password input, select one or more choices, import typed variables, run Lua automation, execute
-commands or inline shell, and launch an external agent such as Codex.
+Wuko is a trusted, local workflow runner for development tasks. Workflows are strict, versioned
+YAML files made from independently registered Go step packages. They can prompt for input, work
+with typed data and files, call APIs, run scripts or containers, and start coding agents.
 
 ## Features
 
-- Discover local and global workflows from an interactive terminal picker or with `wuko list`.
-- Define strict, versioned YAML workflows with variables, environment values, Go templates, and
-  conditional steps.
-- Keep a workflow running on a five- or six-field cron schedule with an optional IANA timezone.
-- Run steps sequentially or concurrently, wait for fixed durations or polled conditions, and use
-  foreach and matrix fan-out, retries, timeouts, dry runs, execution trees, live progress, and run
-  statistics.
-- Use built-in wait, input, password, choice, confirm, set, assert, `import_vars`, JSONPath,
-  semantic-version, HTTP, file, temp, glob, cache, changed, key-value, Lua, shell, agent, and Docker
-  steps.
-- Split workflows across local files with `require`, or reuse remote workflows and composite
-  actions from HTTPS URLs and GitHub locators.
-- Integrate with `direnv`, import JSON or TOML variable files, and pass values explicitly with
-  `--var` and `--env`.
-- Automate development tasks locally while keeping workflow code visible and reviewable.
+- **Local-first workflows** — keep readable automation beside the code it changes.
+- **Interactive runs** — collect text, passwords, choices, and confirmations in the terminal.
+- **Typed workflow state** — use variables, step outputs, JSON/TOML imports, JSONPath, semantic
+  versions, templates, and expressions without converting everything to strings.
+- **Useful execution controls** — conditions, retries, timeouts, polling, concurrency, foreach and
+  matrix expansion, scheduled runs, dry runs, execution trees, and guaranteed cleanup.
+- **Portable operations** — use built-in HTTP, filesystem, glob, cache, change detection,
+  key-value, temporary resource, and Docker steps instead of platform-specific shell commands.
+- **Extensible automation** — run Lua, direct commands, inline shell, or an external agent such as
+  Codex.
+- **Reusable definitions** — split steps across files and consume public remote workflows or
+  pinned composite actions.
+- **Visible execution** — get live progress, retry and polling details, run statistics, and
+  redacted debug tracing.
 
-## Table of Contents
-
-- [Features](#features)
-- [Install](#install)
-- [Agent skill installation](#agent-skill-installation)
-- [GitHub Actions comparison](#github-actions-comparison)
-- [Workflow discovery](#workflow-discovery)
-  - [ClickUp task agent example](#clickup-task-agent-example)
-  - [Remote workflows](#remote-workflows)
-- [Workflow schema](#workflow-schema)
-  - [Cron schedules](#cron-schedules)
-  - [Templates](#templates)
-  - [Execution order and step outputs](#execution-order-and-step-outputs)
-  - [Splitting steps across files](#splitting-steps-across-files)
-  - [Conditional steps](#conditional-steps)
-  - [Concurrent steps](#concurrent-steps)
-  - [Foreach and matrix controls](#foreach-and-matrix-controls)
-  - [Waits and polling](#waits-and-polling)
-  - [Retries and execution timeouts](#retries-and-execution-timeouts)
-  - [Graceful shutdown](#graceful-shutdown)
-  - [Finally cleanup](#finally-cleanup)
-  - [Execution progress and statistics](#execution-progress-and-statistics)
-  - [Debug tracing](#debug-tracing)
-  - [Remote composite actions](#remote-composite-actions)
-  - [Available steps](#available-steps)
-    - [Assert](#assert)
-    - [Cache](#cache)
-    - [Changed](#changed)
-    - [Choice](#choice)
-    - [Confirm](#confirm)
-    - [Docker](#docker)
-    - [File](#file)
-    - [Glob](#glob)
-    - [HTTP](#http)
-    - [Import variables](#import-variables)
-    - [Input](#input)
-    - [JSONPath](#jsonpath)
-    - [Key-value stores](#key-value-stores)
-    - [Lua](#lua)
-    - [Password](#password)
-    - [Semantic versions](#semantic-versions)
-    - [Set](#set)
-    - [Shell and agent](#shell-and-agent)
-    - [Temp](#temp)
-- [Trust model](#trust-model)
+Wuko is not a GitHub Actions runtime. It is designed for local and interactive development
+automation; GitHub Actions is designed for repository-hosted CI/CD. A CI job may invoke Wuko, but
+the two workflow formats are separate.
 
 ## Install
 
-### Homebrew
-
-On macOS, install the latest released cask from the Wuko Homebrew tap:
+On macOS:
 
 ```sh
 brew install --cask up2jj/tap/wuko
 ```
 
-Upgrade an existing installation with:
-
-```sh
-brew upgrade --cask wuko
-```
-
-### Go
-
-Wuko requires Go 1.26 or newer. Install the latest version with:
+With Go 1.26 or newer:
 
 ```sh
 go install github.com/up2jj/wuko@latest
 ```
 
-During development:
+For repository development:
 
 ```sh
 just build
 just test
 ```
 
-Run `just hooks` once to install the prek pre-commit and pre-push hooks. Use
-`prek run --all-files` to run every hook manually, and `just snapshot` to build
-local release archives without publishing them.
+Run `just hooks` once to install the prek hooks. Use `prek run --all-files` to run every hook and
+`just snapshot` to build local release archives.
 
-## Agent skill installation
+## Quick start
 
-Wuko discovers supported coding-agent CLIs available on `PATH` and can install its bundled skills
-for them. Use `wuko agent list` to see the discovered agents and their skill directories. Install
-skills for one agent with `wuko agent install claude`, or install them for every discovered agent
-with `wuko agent install`.
+Create `.wuko/workflows/check.yaml`:
 
-Claude skills are installed under `~/.claude/skills/`; Codex skills are installed under
-`~/.agents/skills/`. Installation is repeatable and replaces the bundled skill files in those
-directories.
+```yaml
+version: 1
+name: check
+description: Run the project checks
 
-## GitHub Actions comparison
+vars:
+  package: ./...
 
-Wuko and [GitHub Actions](https://docs.github.com/en/actions) both describe automation as
-workflows made up of steps, but they target different environments:
+steps:
+  - id: tests
+    type: shell
+    with:
+      command: go
+      args: [test, "{{ .vars.package }}"]
 
-| | Wuko | GitHub Actions |
-| --- | --- | --- |
-| Primary use | Repeatable development workflows run locally | Hosted CI/CD triggered by GitHub events or manual dispatch |
-| Runtime | The machine where the `wuko` command is run | GitHub-hosted or self-hosted runners |
-| Definition format | Wuko's strict, versioned YAML schema | GitHub Actions workflow syntax under `.github/workflows/` |
-| Built-in operations | Interactive prompts, typed values, HTTP, files, Lua, shell, agents, Docker, and key-value stores | Jobs, runners, marketplace actions, matrices, artifacts, and GitHub integrations |
-| Secrets and context | Explicit CLI/environment values and the host environment | GitHub-provided contexts, secrets, variables, and permissions |
+  - id: summary
+    type: shell
+    with:
+      command: printf
+      args: ["tests exited with %s\n", "{{ .steps.tests.exit_code }}"]
+```
 
-Wuko is **not compatible with GitHub Actions**. A GitHub Actions workflow cannot be run directly
-by Wuko, and Wuko workflow files cannot be used as GitHub Actions workflows. In particular, Wuko
-does not implement GitHub Actions events, job syntax, runner labels, marketplace actions, or
-GitHub Actions expressions. Choose Wuko for local, interactive development automation; choose
-GitHub Actions for repository-hosted CI/CD. They can still be used together—for example, a GitHub
-Actions job can install Wuko and invoke a Wuko workflow as a command—but the workflow definitions
-remain separate.
-
-## Workflow discovery
-
-`wuko` opens an interactive workflow picker when connected to a terminal. The picker includes
-every local and global workflow, supports typing to filter, and supports arrow-key navigation.
-Press Enter to print the matching `wuko run` command; press Esc to cancel. A shadowed workflow is
-printed with `wuko run --file PATH` so the selected definition remains unambiguous.
-
-When output is redirected or otherwise non-interactive, bare `wuko` prints all workflows as
-tab-separated name, scope, description, and path fields.
-
-`wuko run NAME` looks for `NAME.yaml` and `NAME.yml` in this order:
-
-1. `.wuko/workflows/` in the current directory and each parent, nearest first.
-2. `~/.wuko/workflows/`.
-3. The platform user config directory under `wuko/workflows/`.
-
-The first definition wins. Declaring both extensions for the same name in one directory is an
-error. Referenced Lua files are relative to the workflow file; commands and Lua host operations
-default to the directory from which Wuko was invoked.
+Then discover, inspect, validate, or run it:
 
 ```sh
 wuko
 wuko list
-wuko validate start-task
-wuko validate
-wuko run start-task
-wuko run --file ./path/to/start-task.yaml
-wuko run https://example.com/workflows/release.yaml
-wuko run github:acme/wuko-workflows@v1.2.3:release.yaml
-wuko run start-task --var-file defaults.toml --var-file local.json
-wuko run start-task --var 'reviewers=["alice","bob"]' --env CLICKUP_TOKEN=secret
-wuko run start-task --dry-run
-wuko tree start-task
-wuko tree --file ./path/to/start-task.yaml
+wuko tree check
+wuko validate check
+wuko run check
+wuko run check --var package=./cmd/...
+wuko run check --dry-run
 ```
 
-`--var-file` imports the top-level object from a JSON file or root table from a TOML file. The flag
-is repeatable: files merge from left to right, replacing entire top-level variables rather than
-recursively merging nested objects. Relative paths resolve from the invocation directory.
-Workflow `vars` provide the defaults, variable files override them, and `--var` overrides every
-file value. `--var` attempts JSON decoding and otherwise stores a string; `--env` always stores a
-string. `run`, `validate`, and `tree` accept all three flags, including when values are needed to
-resolve a remote action reference.
-
-Variable files use Viper's configuration decoding. Imported keys, including nested keys, are
-case-insensitive and normalized to lowercase; dotted keys have Viper's nested-key meaning. The
-JSON or TOML document itself is the variable object—do not wrap it in a `vars` field. Other Viper
-formats are not currently accepted, but can be added through the shared variable-file loader.
-
-For complete file-shape, precedence, nesting, Lua, and runtime-step semantics, see
-[Variable imports](docs/variable-imports.md).
-
-`wuko list` shows the effective workflows and labels each one as `local` or `global`. Bare `wuko`
-also includes shadowed definitions from other scopes.
-
-For the complete discovery rules and command behavior, see
-[Workflow discovery](docs/workflow-discovery.md).
-
-### ClickUp task agent example
-
-[`examples/clickup-task.yaml`](examples/clickup-task.yaml) is a complete task-start workflow. It
-asks for a ClickUp task ID, downloads its Markdown description, creates a task branch, and launches
-either Claude Code or Codex with a prepopulated implementation prompt.
-
-Set a ClickUp personal API token in `CLICKUP_TOKEN`. Native task IDs work without any other ClickUp
-configuration. For a custom task ID, also set `CLICKUP_TEAM_ID` to the numeric Workspace ID; the
-workflow then sends ClickUp's `custom_task_ids` and `team_id` query parameters. The selected agent
-CLI must already be installed and authenticated. Run the workflow from the repository root.
+Bare `wuko` opens a searchable picker in a terminal. `wuko run NAME` searches the nearest
+`.wuko/workflows/` directory first, then the user workflow directories. Use `--file` for an
+explicit path:
 
 ```sh
-export CLICKUP_TOKEN=pk_...
-# Required only for custom task IDs:
-export CLICKUP_TEAM_ID=123456
-
-wuko run --file ./examples/clickup-task.yaml
+wuko run --file ./workflows/release.yaml
 ```
 
-The task brief is written to `.wuko/context/<task-id>.md`, which this repository ignores. The
-branch is named `<task-id>_<lowercase-task-name-slug>`. Before creating it, the workflow rejects a
-dirty working tree, an invalid generated name, or an existing local or remote branch. It does not
-reuse ClickUp MCP authentication because Wuko performs the HTTP request before starting an agent;
-the API token is used only in the request's `Authorization` header.
+See [Workflow discovery](docs/workflow-discovery.md) for search order, shadowing, and
+non-interactive behavior.
 
-`wuko tree NAME` prints the workflow's steps as a tree. Remote composite actions are expanded to
-show their internal steps, and conditional steps include their `if` expression. Like `run`, `tree`
-accepts `--file`, HTTPS and GitHub workflow locators, and repeatable `--var-file`, `--var`, and
-`--env` flags for resolving templated action references.
+## Workflow building blocks
 
-```text
-release
-├── test (shell)
-└── build (uses https://actions.example.com/build/v1)
-    ├── compile (shell)
-    └── package (shell) if: inputs.package
-```
-
-### Remote workflows
-
-`wuko run` accepts a public HTTPS URL or a GitHub shorthand in the form
-`github:owner/repo[@ref][:path]`. A bare GitHub locator uses the repository's default branch and
-`wuko.yaml` at the repository root. For example:
-
-```sh
-wuko run github:acme/wuko-workflows
-wuko run github:acme/wuko-workflows@main:workflows/release.yaml
-```
-
-HTTPS sources may return a YAML workflow directly or a ZIP/tar.gz archive. Archives must contain
-exactly one root-level `wuko.yaml` or `wuko.yml`; companion files are available relative to that
-workflow. Direct YAML URLs and GitHub file locators contain only the selected workflow file, so
-workflows needing companion files should use an HTTPS archive. Remote workflows are downloaded
-without authentication, materialized in a temporary directory, and removed after the run. Remote
-workflow bytes are not pinned by a digest in this version.
-
-## Workflow schema
-
-Every workflow is strict and versioned:
+Every workflow has a schema version, name, and ordered steps. It may also define a description,
+variables, environment values, templates, a cron schedule, and cleanup steps:
 
 ```yaml
 version: 1
-name: example
-description: Example workflow
-cron: "0 9 * * *"
+name: release
+description: Build and publish a release
+cron: "0 9 * * 1-5"
 timezone: Europe/Warsaw
+
 vars:
-  greeting: Hello
+  target: linux
+
 env:
   API_TOKEN: "{{ .env.API_TOKEN }}"
-steps: []
-finally: []
-```
 
-Strings use strict Go templates. Reusable named templates can be declared inline or loaded from
-files relative to the workflow:
-
-```yaml
-templates:
-  image: '{{ .vars.registry }}/app:{{ .vars.version }}'
-  deployment:
-    file: templates/deployment.yaml.tmpl
-```
-
-See [Templates](docs/templates.md) for named-template invocation, file packaging, data roots,
-composite-action scope, execution order, and typed-input guidance. See
-[Template, Expr, and Lua functions](docs/template-functions.md) for the shared helper reference.
-
-Environment precedence is step environment, CLI `--env`, workflow environment, then the host
-environment. Environment values are not shown by dry-run output.
-
-### Cron schedules
-
-Add `cron` to make `wuko run` a persistent scheduled process. Wuko accepts the conventional five
-fields (minute, hour, day of month, month, day of week) or six fields with seconds first. Cron
-descriptors such as `@daily` and embedded `CRON_TZ` prefixes are not supported. Set `timezone` to
-an IANA name such as `Europe/Warsaw`; it defaults to the machine's local timezone and cannot be
-declared without `cron`.
-
-```yaml
-version: 1
-name: cleanup
-cron: "0 0 9 * * *"
-timezone: Europe/Warsaw
 steps:
+  - id: build
+    type: shell
+    timeout: 5m
+    retry:
+      max_attempts: 3
+    with:
+      command: ./build
+      args: ["{{ .vars.target }}"]
+
+  - id: publish
+    type: shell
+    if: steps.build.exit_code == 0
+    with:
+      command: ./publish
+      args: ["{{ .steps.build.stdout }}"]
+
+finally:
   - id: cleanup
     type: shell
     with:
       command: ./cleanup
 ```
 
-If the current minute or second matches when `wuko run cleanup` starts, the first attempt begins
-immediately. Otherwise Wuko prints the next occurrence to standard error and waits. After each
-attempt it waits for the next future occurrence, so attempts never overlap and occurrences missed
-while a workflow is running are not replayed.
+Steps run in declaration order. A successful step publishes outputs under `.steps.<id>` for Go
+templates and `steps.<id>` for expressions. Variables live under `.vars`/`vars`. A failed step
+stops ordinary execution; `finally` still runs.
 
-The workflow is reloaded, resolved, and validated at each occurrence. Execution or reload failures
-are reported and the process keeps waiting; if a reload has no valid schedule, Wuko retries on the
-last valid one. CLI variables, variable-file contents, explicit environment overrides, and the
-direnv environment are captured at startup. Stop the scheduled run with Ctrl+C. `validate`, `tree`,
-and `wuko run --dry-run` validate schedules without waiting or starting the persistent loop.
+For workflow syntax and execution behavior, see:
 
-### Templates
+- [Execution and composition](docs/execution.md) — conditions, concurrency, scheduling, waits,
+  retries, required files, remote reuse, progress, and debugging.
+- [Workflow controls](docs/workflow-control.md) — foreach and matrix expansion.
+- [Finally cleanup](docs/finally.md) and [graceful shutdown](docs/graceful-shutdown.md).
+- [Templates](docs/templates.md) and [template, Expr, and Lua functions](docs/template-functions.md).
+- [Variable imports](docs/variable-imports.md).
 
-Invoke a declared template with `{{ template "name" . }}`. Templates use `missingkey=error` and
-can access `.vars`, `.env`, `.steps`, `.workflow.name`, `.workflow.dir`, `.run.dir`, and action
-`.inputs`. Lua source itself is not templated; use its typed `args` instead. File-backed templates
-must be bundled as companion files when a remote workflow or action is published as an archive.
-String, collection, defaulting, indentation, JSON, and YAML helpers are listed in
-[Template, Expr, and Lua functions](docs/template-functions.md).
+## Available steps
 
-### Execution order and step outputs
+Each linked guide contains multiple examples for every step.
 
-Top-level steps run in the order they are declared. After a step succeeds, Wuko commits its
-outputs beneath `.steps.<id>` and any variables it writes beneath `.vars`; only later sequential
-steps can read those values. There is no dependency graph or `needs` field in schema version 1.
+| Step | Use it to | Examples |
+| --- | --- | --- |
+| `input` | Collect editable text or typed JSON/lists | [Interactive steps](docs/steps-interactive.md#input) |
+| `password` | Collect masked text | [Interactive steps](docs/steps-interactive.md#password) |
+| `choice` | Select one or many static/dynamic values | [Interactive steps](docs/steps-interactive.md#choice) |
+| `confirm` | Collect a boolean decision | [Interactive steps](docs/steps-interactive.md#confirm) |
+| `set` | Assign a literal or expression result | [Data steps](docs/steps-data.md#set) |
+| `assert` | Stop unless an expression is true | [Data steps](docs/steps-data.md#assert) |
+| `import_vars` | Load JSON or TOML into workflow state | [Data steps](docs/steps-data.md#import_vars) |
+| `jsonpath` | Select values with RFC 9535 JSONPath | [Data steps](docs/steps-data.md#jsonpath) |
+| `semver` | Parse, compare, constrain, or increment versions | [Data steps](docs/steps-data.md#semver) |
+| `key_value` | Persist JSON-compatible values between runs | [Data steps](docs/steps-data.md#key_value) |
+| `changed` | Detect changed files or structured inputs | [Data steps](docs/steps-data.md#changed) |
+| `file` | Perform shell-independent filesystem operations | [System steps](docs/steps-system.md#file) |
+| `glob` | Discover regular files with portable patterns | [System steps](docs/steps-system.md#glob) |
+| `temp` | Create automatically cleaned files/directories | [System steps](docs/steps-system.md#temp) |
+| `cache` | Restore and save directory caches | [System steps](docs/steps-system.md#cache) |
+| `http` | Make structured HTTP API calls | [System steps](docs/steps-system.md#http) |
+| `docker` | Run a command in a temporary container | [System steps](docs/steps-system.md#docker) |
+| `shell` | Run argv commands or inline shell | [Automation steps](docs/steps-automation.md#shell) |
+| `agent` | Start an external coding agent with a prompt | [Automation steps](docs/steps-automation.md#agent) |
+| `lua` | Run typed in-process automation | [Automation steps](docs/steps-automation.md#lua) |
+| `wait` | Delay or poll another step | [Automation steps](docs/steps-automation.md#wait) |
 
-For example, `package` can consume `build` output because it appears after `build`:
+## Common workflow patterns
 
-```yaml
-steps:
-  - id: build
-    type: shell
-    with:
-      command: ./build
-
-  - id: package
-    type: shell
-    with:
-      command: ./package
-      args: ["{{ .steps.build.stdout }}"]
-```
-
-References in templated strings use `.steps.<id>.<output>`. Conditions and other Expr expressions
-omit the leading dot and use `steps.<id>.<output>`. Declaring `package` before `build` does not make
-Wuko reorder the steps: the output is still unavailable, and resolving the missing field fails at
-runtime. Template validation checks syntax before execution, but it cannot supply or validate
-outputs that do not exist until earlier steps run.
-
-A failed step stops the workflow and does not commit its outputs or variables. A skipped step also
-commits nothing and is absent from `steps`; guard optional consumers as described under
-[Conditional steps](#conditional-steps). A `concurrent` group is one ordering boundary: its children
-cannot consume sibling results, and their outputs become available only to steps after the whole
-group succeeds.
-
-### Splitting steps across files
-
-Use a `require` entry to insert steps from another local YAML file at that position. Paths must be
-relative and are resolved from the file containing the entry, so step files can require other step
-files:
-
-```yaml
-# workflow.yaml
-version: 1
-name: release
-steps:
-  - require: steps/prepare.yaml
-  - id: publish
-    type: shell
-    with:
-      command: ./publish
-```
-
-The required file may be a bare step list:
-
-```yaml
-# steps/prepare.yaml
-- id: test
-  type: shell
-  with:
-    command: go
-    args: [test, ./...]
-
-- id: build
-  type: shell
-  with:
-    command: go
-    args: [build, ./...]
-```
-
-It may instead wrap that list in a `steps` field. A `require` entry cannot contain other step
-fields. All expanded steps are validated as one workflow, so IDs must remain unique across every
-file. Cyclic requirements are rejected. Remote workflow archives can require files bundled in the
-archive; direct remote YAML workflows have no companion files to require.
-
-When [direnv](https://direnv.net/) is installed, `wuko run` and `wuko validate` use the environment
-it exports for the invocation directory as the host environment. Wuko honors direnv's trust model,
-so the applicable `.envrc` must already be approved with `direnv allow`. To load a local `.env`,
-put this in that project's `.envrc`:
-
-```sh
-dotenv_if_exists
-```
-
-If direnv is not installed or no `.envrc` applies, Wuko uses its process environment unchanged.
-
-### Conditional steps
-
-Add `if` to run a step only when an [Expr](https://expr-lang.org/docs/language-definition)
-expression evaluates to a boolean `true`:
-
-```yaml
-vars:
-  deploy: false
-steps:
-  - id: tests
-    type: shell
-    with:
-      command: go
-      args: [test, ./...]
-
-  - id: deploy
-    type: shell
-    if: 'vars.deploy && steps.tests.exit_code == 0'
-    with:
-      command: ./deploy
-```
-
-Conditions use the same data roots as templates, without a leading dot: `vars`, `env`, `steps`,
-`workflow.name`, `workflow.dir`, and `run.dir`. Quote non-trivial expressions so YAML treats them
-as a single string. Literal booleans are also accepted: `if: true` always runs and `if: false`
-always skips. There is no truthiness; every condition must evaluate to a boolean. Missing fields
-and evaluation errors fail the workflow.
-
-A skipped step does not write outputs or variables and is absent from `steps`. Guard a dependent
-step with map membership to make skipping cascade safely:
-
-```yaml
-vars:
-  prepare: false
-steps:
-  - id: prepare
-    type: lua
-    if: vars.prepare
-    with:
-      source: |
-        wuko.set_var("artifact_path", "/tmp/artifact.zip")
-
-  - id: upload
-    type: shell
-    if: '"prepare" in steps'
-    with:
-      command: upload
-      args: ["{{ .vars.artifact_path }}"]
-```
-
-The guard is evaluated before `with` is rendered, so `upload` never tries to resolve
-`artifact_path` when `prepare` was skipped. Use `"name" in vars` when only variable availability
-matters, or `get(vars, "name")` to read an optional value. If a skipped step would have overwritten
-an existing variable, the existing value remains unchanged. Dry-run validates and prints guards
-but does not evaluate them because preceding step outputs are not available.
-
-Use an anonymous conditional block when several sequential steps share one guard:
+Split a long workflow at the point where the steps should be inserted:
 
 ```yaml
 steps:
-  - if: vars.deploy
-    steps:
-      - id: build
-        type: shell
-        with: {command: ./build}
-      - id: deploy
-        type: shell
-        with: {command: ./deploy}
+  - require: steps/checks.yaml
+  - require: steps/release.yaml
 ```
 
-The block condition is evaluated once against the state at block entry. When it is true, children
-run sequentially and later children can consume earlier child outputs and variables. When it is
-false, every ordinary child and concurrent leaf is reported as skipped; foreach and matrix parents
-are skipped without expanding iterations. The block has no ID, output namespace, timeout, or retry
-policy, and child IDs remain in the surrounding namespace.
-
-Conditional blocks may appear in workflows, composite actions, `finally`, and foreach or matrix
-bodies. They may contain existing controls under their normal nesting rules, including a
-`concurrent` group. Directly nested conditional blocks and conditional blocks used as direct
-concurrent children are rejected.
-
-### Concurrent steps
-
-Wrap independent steps in `concurrent` to run them with a bounded amount of parallelism:
+Run independent work concurrently:
 
 ```yaml
 steps:
   - concurrent:
-      max_concurrency: 3
-      timeout: 10m
-      fail_fast: true
+      max_concurrency: 2
       steps:
         - id: lint
           type: shell
-          with:
-            command: golangci-lint
-            args: [run]
-
+          with: {command: golangci-lint, args: [run]}
         - id: test
           type: shell
-          timeout: 3m
-          retry:
-            max_attempts: 3
-          with:
-            command: go
-            args: [test, ./...]
-
-  - id: package
-    type: shell
-    with:
-      command: ./package
-      args: ["{{ .steps.test.stdout }}"]
+          with: {command: go, args: [test, ./...]}
 ```
 
-`max_concurrency` defaults to 4 and must be between 1 and 100. `fail_fast` defaults to `true`:
-after one child exhausts its retries, running siblings are canceled and queued children are not
-started. Set it to `false` to let every child finish and report all failures. The optional group
-`timeout` covers the complete group, including time waiting for a concurrency slot, attempts, and
-retry delays. The workflow's cancellation and the earliest group or child deadline always win.
-Deadlines cancel active children and then wait for their cleanup, so elapsed wall-clock time may
-exceed the configured timeout.
-
-Every child evaluates its `if`, templates, and action inputs against the same state snapshot taken
-before the group starts. A child cannot consume a sibling's outputs or variables, regardless of
-which one finishes first. Child outputs keep their normal workflow-wide IDs and become available
-after the complete group succeeds, as shown by `.steps.test` above. Put dependent work after the
-group. Step IDs must remain unique across the workflow, including required step files and
-concurrent children. Directly nested concurrent groups are not supported.
-
-Each child owns its normal `timeout`, `retry`, backoff, `max_elapsed_time`, and `operation_id`.
-Retrying one child never restarts a successful sibling, and retry is not supported on the group
-itself. Results are committed atomically after all children succeed and in declaration order. If
-two children try to write the same workflow variable, the group fails instead of choosing a
-timing-dependent winner. External effects such as commands, files, requests, containers, and
-agents cannot be rolled back.
-
-Concurrent children are non-interactive to prevent multiple terminal prompts from competing for
-stdin. Input, password, and choice steps can still be used when their variables are supplied in
-advance. Docker TTY input is not attached inside a concurrent group. Child stdout and stderr are
-safe for concurrent writes, but output from different children can interleave at write boundaries.
-
-### Foreach and matrix controls
-
-Use `foreach` to repeat a child block for every value in a runtime list, or `matrix` to run the
-Cartesian product of named axes. Both controls are sequential by default, support bounded
-parallelism, isolate each iteration's variables, and publish ordered results beneath one parent
-step ID.
-
-See [Workflow controls](docs/workflow-control.md) for complete schemas, result shapes, scheduling,
-state rules, examples, and limitations.
-
-### Waits and polling
-
-Use `wait` with `duration` for a cancellation-aware fixed delay:
-
-```yaml
-- id: settle
-  type: wait
-  with:
-    duration: 30s
-```
-
-To poll, embed one registered step and evaluate its outputs with an Expr `until` condition. A
-polling wait requires a top-level `timeout`, runs its first poll immediately, and defaults to a
-5-second interval:
-
-```yaml
-- id: await_release
-  type: wait
-  timeout: 5m
-  with:
-    interval: 5s
-    step:
-      type: http
-      with:
-        url: https://api.example.com/releases/42
-        response: json
-    until: 'error == nil && result.value.status == "ready"'
-```
-
-`until` must return a boolean and has the normal `inputs`, `vars`, `env`, `steps`, `workflow`, and
-`run` roots plus `result` for the latest nested outputs, `error` for a nullable error-message
-string, and the one-based `poll` number. Only `type` and `with` are accepted on the embedded step;
-it has no separate ID, condition, timeout, retry policy, action, concurrent group, or nested wait.
-Its configuration is rendered once from the wait step's state snapshot, then reused for every
-poll.
-
-Nested errors are observations that the predicate can accept or reject. HTTP responses outside
-the configured success statuses remain complete observations with `status`, `headers`, `body`,
-and `value`; transport, response-size, and decoding failures stop the wait immediately. Workflow
-cancellation and predicate evaluation errors also stop immediately. A false predicate waits for
-the interval and polls again until the top-level timeout expires.
-
-When the predicate matches, the final nested outputs are exposed directly at `.steps.<wait-id>`
-and its variables are committed. Earlier observations never modify workflow state. Polling can
-repeat external effects even when the nested step succeeds, so prefer read-only probes or
-idempotent operations. If the outer wait also has `retry`, a failed or timed-out wait attempt
-restarts the entire polling loop.
-
-### Retries and execution timeouts
-
-Use `timeout` to limit each attempt and `retry` to repeat a failed step with exponential backoff:
-
-```yaml
-steps:
-  - id: publish
-    type: shell
-    timeout: 2m
-    retry:
-      max_attempts: 4
-      initial_delay: 500ms
-      backoff_multiplier: 2
-      max_delay: 10s
-      jitter: 0.2
-      max_elapsed_time: 6m
-      operation_id: "{{ .vars.release_id }}:publish"
-    with:
-      command: ./publish
-```
-
-`max_attempts` includes the first attempt. A retry block defaults to 3 attempts, a 1-second initial
-delay, a multiplier of 2, a 30-second maximum delay, and 20% jitter. `max_elapsed_time` is optional
-and limits the combined time spent executing attempts and waiting between them. `timeout` is useful
-without retries too. A timed-out attempt may be retried, while workflow cancellation stops
-immediately. Step runners must honor context cancellation for timeout enforcement.
-
-An attempt fails when its runner returns an error. Non-zero shell, agent, and Docker exits are
-errors. Lua code must raise a Lua error when application-level results such as an HTTP error status
-or `wuko.exec.run` error should trigger a retry.
-
-Wuko commits step outputs and variables only after a successful attempt, but it cannot roll back
-external effects from commands, HTTP requests, files, containers, or agents. Retry-enabled steps
-therefore have at-least-once execution semantics. `operation_id` is a stable, unique identifier for
-one logical operation; it does not make the operation idempotent. When omitted, Wuko generates an
-ID that is stable across automatic attempts in the current invocation. Provide an explicit ID when
-the same identity must survive a Wuko restart. A command can pass the operation ID to a receiving
-service as an idempotency key, for example in an `Idempotency-Key` HTTP header, when that service
-supports deduplication. Operation IDs are not credentials and should not contain secrets.
-
-Process-based steps and Lua's `wuko.env` receive `WUKO_STEP_ATTEMPT`,
-`WUKO_STEP_MAX_ATTEMPTS`, and `WUKO_STEP_OPERATION_ID`. These names are reserved and override
-workflow or step environment values. Retrying a composite `uses` step replays the entire action,
-including previously successful inner steps; prefer retry policies on individual inner steps when
-the action can define them.
-
-### Graceful shutdown
-
-On the first `SIGINT` or `SIGTERM`, Wuko cancels the workflow, stops admitting queued concurrent
-children and foreach or matrix iterations, and waits for active work to return. A second signal
-forces termination immediately. Wuko also forces termination if graceful shutdown has not
-completed within 10 seconds; forced termination exits with status 130.
-
-Step runners must honor context cancellation. Shell and agent commands receive `SIGTERM` as a
-process group and are escalated to `SIGKILL` after two seconds. Other in-process runners cannot be
-forcibly stopped independently, which is why the process-wide shutdown budget exists.
-
-Step, group, and control timeouts are cancellation deadlines rather than strict wall-clock caps:
-cleanup and subprocess termination happen after the deadline and may extend observed duration.
-Completed external effects are never rolled back. When a concurrent group, foreach, or matrix is
-canceled or fails, its aggregate outputs are not committed; progress output reports how many
-children or iterations started, succeeded, and were not run so partial effects can be identified.
-
-See [Graceful shutdown](docs/graceful-shutdown.md) for signal escalation, workflow-control
-behavior, timeout boundaries, subprocess termination, and guidance for custom runners.
-
-### Finally cleanup
-
-Workflows and composite actions can declare one `finally` step list. Cleanup runs after main
-runtime success, failure, timeout, or cancellation, continues after individual cleanup failures,
-and can use committed state plus structured `finally.status` and `finally.errors` outcome data.
-
-```yaml
-finally:
-  - id: release_lock
-    type: shell
-    timeout: 30s
-    with: {command: ./release-lock}
-```
-
-See [Finally cleanup](docs/finally.md) for lifecycle order, conditional cleanup, state and error
-visibility, composite-action retries, cancellation behavior, inspection commands, and limitations.
-
-### Execution progress and statistics
-
-`wuko run` writes execution progress to standard error, leaving standard output available for step
-output. The display uses durable status lines so command output and interactive prompts do not
-corrupt an animated spinner. Color is enabled on a terminal and disabled for redirected output,
-`TERM=dumb`, or when `NO_COLOR` is set.
-
-```text
-◆ Workflow release · 2 steps
-→ [1/2] publish (shell) · up to 3 attempts · timeout 2m0s
-  • attempt 1/3 started
-  ⏱ attempt 1/3 timed out after 2m0s: deadline exceeded
-  ↻ retrying with attempt 2/3 in 500ms
-  • attempt 2/3 started
-✓ [1/2] publish succeeded after 2m1.2s · 2 attempts
-⊘ [2/2] notify skipped
-✓ Workflow release succeeded in 2m1.2s · 1 succeeded · 1 skipped · 2 attempts · 1 retry · 1 timeout · 500ms retry wait
-```
-
-Every workflow, step, attempt, and poll records its start time, duration, and status. Run
-summaries also count successful, failed, skipped, canceled, and unstarted steps; attempts; retries;
-polls; timeouts; and time spent waiting to retry or poll. Polls and retries remain separate counts.
-Composite-action progress is indented and gets a nested summary. Concurrent groups get their own
-start and finish lines, with child progress indented below the group. Go callers can read the
-completed summary from `engine.State.Stats` and subscribe to the same serialized lifecycle through
-`engine.Options.Progress` without parsing terminal text.
-
-### Debug tracing
-
-Pass the persistent `--debug` flag to `wuko`, `list`, `run`, `validate`, or `tree` to trace workflow
-discovery, loading, required-file expansion, action resolution, validation, and execution to
-standard error. Normal progress and workflow output are unchanged when debug tracing is disabled.
+Load initial variables and override them from the command line:
 
 ```sh
-wuko run release --debug
-wuko --debug validate release
-wuko tree --file ./workflow.yaml --debug
+wuko run release --var-file defaults.toml --var-file local.json
+wuko run release --var target=darwin --env API_TOKEN=secret
 ```
 
-Debug lines include elapsed time, the workflow or action source, YAML line and column, step ID and
-type, lifecycle phase, duration, and the most specific error. Required fragments retain their own
-locations; remote workflows and actions use query-free logical locators instead of temporary
-materialization paths. Lua syntax errors are reported during validation before any steps run,
-while Lua runtime errors identify the failed attempt and follow the step's retry policy.
+Run a public remote workflow:
 
-Rendered step configuration is emitted as compact JSON. Environment values and fields whose names
-look sensitive—such as passwords, secrets, tokens, credentials, API keys, authorization, and
-private keys—are replaced with `<redacted>`, and URL query strings are removed. Each configuration
-record is limited to 4 KiB. Debug output can still expose sensitive data embedded under an
-innocuous field name, including command arguments, scripts, prompts, or action inputs; review it
-before sharing logs.
-
-### Remote composite actions
-
-A workflow step can invoke a Wuko-native composite action over HTTPS. The action is downloaded and
-validated before any workflow step runs, then its internal steps run sequentially at the `uses`
-position. The caller waits for the entire action before continuing:
-
-```yaml
-vars:
-  action_release: v1
-steps:
-  - id: prepare
-    type: lua
-    with:
-      source: |
-        wuko.output("artifacts", {"app.zip", "checksums.txt"})
-
-  - id: build
-    uses: "https://actions.example.com/{{ .vars.action_release }}/build"
-    sha256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-    with:
-      target: linux
-      artifacts:
-        expr: steps.prepare.artifacts
-
-  - id: publish
-    type: shell
-    with:
-      command: publish
-      args: ["{{ .steps.build.artifact }}"]
+```sh
+wuko run https://example.com/workflows/release.yaml
+wuko run github:acme/wuko-workflows@v1.2.3:release.yaml
 ```
 
-A scalar `uses` must resolve to an HTTPS URL without embedded credentials. It can use the pre-run
-template roots `.vars`, `.env`, `.workflow.name`, `.workflow.dir`, and `.run.dir`; it cannot depend
-on `.steps`, because actions are resolved before execution. URL filenames and response content
-types are not significant. Query strings are omitted from errors.
+See the [ClickUp task agent example](docs/clickup-task-example.md) for a complete workflow that
+fetches a task, creates a branch, and launches Claude Code or Codex.
 
-An action can instead be fetched by a local command that writes the manifest or archive bytes to
-standard output. This is useful for authenticated tools such as `gh`:
+## Agent skills
 
-```yaml
-steps:
-  - id: build
-    uses:
-      command: gh
-      args:
-        - api
-        - --method
-        - GET
-        - "repos/acme/wuko-actions/contents/build/action.yml?ref=v1.2.3"
-        - --header
-        - "Accept: application/vnd.github.raw+json"
-    sha256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-    with:
-      target: linux
+Wuko can install its bundled skills for supported coding-agent CLIs found on `PATH`:
+
+```sh
+wuko agent list
+wuko agent install claude
+wuko agent install
 ```
 
-`command` and every argument support the same pre-run templates as HTTPS references. The command
-runs directly, without an implicit shell, in `.run.dir` with the effective workflow environment
-and a 30-second timeout. Use `command: sh` with `args: [-c, "..."]` only when shell syntax such as a
-pipeline is intentionally required. A non-zero exit, oversized output, or invalid stdout fails
-loading; stderr is included in failure diagnostics, while command arguments are omitted. Identical
-rendered command sources are executed once per workflow load.
-
-The optional `sha256` is a 64-character hexadecimal digest of the exact downloaded bytes. Put an
-action release in its URL, such as a SemVer tag or commit. An immutable URL plus `sha256` is fully
-pinned; a floating URL such as `/v1/build` intentionally receives compatible updates. The
-manifest's own `version` describes its Wuko schema, not its published release.
-
-A direct URL may return an action manifest:
-
-```yaml
-version: 1
-name: build
-description: Build an application
-
-inputs:
-  target:
-    type: string
-    required: true
-  artifacts:
-    type: array
-    default: []
-
-outputs:
-  artifact:
-    description: Produced artifact
-    value: steps.package.stdout
-
-steps:
-  - id: package
-    type: shell
-    with:
-      script: ./scripts/build.sh "$1"
-      args: ["{{ .inputs.target }}"]
-      working_directory: "{{ .workflow.dir }}"
-```
-
-Inputs are declared as `string`, `boolean`, `number`, `array`, or `object`. Fixed YAML values and
-templated strings can be passed directly. `{expr: "..."}` evaluates an Expr expression without
-converting arrays, objects, numbers, or booleans to strings. Use `{literal: value}` when a literal
-object would otherwise be mistaken for this wrapper. Missing required inputs, unknown inputs, and
-type mismatches are errors.
-
-Internal steps receive `.inputs`/`inputs`, the caller's effective environment, and the caller's run
-directory. Their step IDs and variables are isolated from the caller. Only manifest outputs are
-exported beneath `.steps.<caller-step-id>`; each output `value` is an Expr expression over the
-internal `inputs`, `vars`, `env`, and `steps` state.
-
-The URL may instead return a ZIP or gzip-compressed tar archive with exactly one root
-`action.yml` or `action.yaml`. Companion files are extracted to an isolated temporary action
-directory, so relative paths in internal steps resolve inside the package. For a direct manifest,
-relative paths retain normal workflow behavior and resolve from the caller workflow directory.
-Archive extraction rejects traversal paths, links, special files, duplicates, and oversized
-packages. Remote actions cannot invoke another remote action in schema version 1.
-
-### Available steps
-
-#### Assert
-
-Use `assert` to stop a workflow with a clear message unless an Expr expression evaluates to
-boolean `true`:
-
-```yaml
-- id: verify_release
-  type: assert
-  with:
-    expr: steps.build.exit_code == 0
-    message: Build must succeed before release
-```
-
-Both `expr` and `message` are required. Expressions use the `inputs`, `vars`, `env`, `steps`,
-`workflow`, and `run` roots used by conditions. Invalid or non-boolean expressions fail workflow
-validation, while missing runtime fields and other evaluation errors fail during execution.
-Messages use normal workflow template rendering, so they can include values available when the
-step starts, such as `Release {{ .vars.release }} is not ready`.
-
-A false expression fails with `assertion failed: <message>` and stops subsequent steps. A true
-expression succeeds without outputs or variables; the successful step is present as an empty
-object at `.steps.<id>`.
-
-#### Cache
-
-The `cache` step restores and saves dependency or build directories without invoking a
-platform-specific archive command. Restore early in the workflow, perform the work only after a
-miss, and save the resulting directories afterward:
-
-```yaml
-- id: prepare_vendor
-  type: file
-  with:
-    operation: mkdir
-    path: vendor
-    recursive: true
-
-- id: prepare_build
-  type: file
-  with:
-    operation: mkdir
-    path: build
-    recursive: true
-
-- id: restore_dependencies
-  type: cache
-  with:
-    operation: restore
-    cache_dir: .wuko/cache
-    key_files:
-      - go.mod
-      - go.sum
-    paths:
-      - vendor
-      - build
-
-- id: build_dependencies
-  type: shell
-  if: "!steps.restore_dependencies.hit"
-  with:
-    script: go mod vendor && go build -o build/app ./cmd/app
-
-- id: save_dependencies
-  type: cache
-  if: "!steps.restore_dependencies.hit"
-  with:
-    operation: save
-    cache_dir: .wuko/cache
-    key_files:
-      - go.mod
-      - go.sum
-    paths:
-      - vendor
-      - build
-```
-
-Every cache declaration requires `operation`, `cache_dir`, `key_files`, and `paths`:
-
-- `operation` is `restore` or `save`. Use separate steps and keep their other fields identical.
-- `cache_dir` is the user-selected backing directory. Relative values resolve from the run
-  directory; absolute values remain absolute.
-- `key_files` is a non-empty list of regular files. Every file must exist when the step runs.
-- `paths` is a non-empty list of directories stored together. Every directory must already exist,
-  including before restore; create initially absent directories with `file` or another preceding
-  step.
-
-Wuko derives a versioned SHA-256 key from the normalized, sorted key-file paths and contents and
-the normalized, sorted target paths. File timestamps and permissions do not affect the key, and
-reordering either list does not change it. The backing entry is `<cache_dir>/<key>.tar.gz`.
-Duplicate or overlapping target directories are rejected, as is any overlap between `cache_dir`
-and a target directory.
-
-A restore miss is successful and returns `hit: false`; a hit returns `hit: true` and `key`.
-Restore validates and stages the entire entry before replacing existing target directories. It
-rolls back earlier replacements if a later target cannot be installed, so stale files are not
-merged into a restored tree. Save returns `key`, `stored`, and compressed `size`. Entries are
-immutable: if another step or process has already saved the same key, save succeeds with
-`stored: false` and retains the existing entry.
-
-Archives preserve regular files, empty directories, permissions, modification times, and relative
-symbolic links whose targets remain inside the same cached directory. Special files, target-root
-symlinks, escaping links, malformed archives, and traversal paths are rejected. Cancellation
-stops hashing, archive creation, or extraction and removes temporary data.
-
-#### Changed
-
-Use `changed` to compare selected files and structured values with the detector's previous
-successful execution. Guard later work with its boolean `changed` output:
-
-```yaml
-- id: source_changed
-  type: changed
-  with:
-    key: build-inputs
-    root: .
-    files:
-      - go.mod
-      - go.sum
-      - "src/**/*.go"
-      - assets
-    values:
-      target: "{{ .vars.target }}"
-      release: "{{ .vars.release }}"
-
-- id: build
-  type: shell
-  if: steps.source_changed.changed
-  with:
-    command: ./build
-```
-
-At least one non-empty `files` or `values` input is required. `root` defaults to the run
-directory and may be relative or absolute. File entries are relative to `root` and accept the
-same `*`, `?`, character-class, and `**` syntax as `glob`. A literal directory includes its
-regular files recursively. Missing paths and patterns with no matches are valid, allowing later
-creation or deletion to register as a change. Matching does not follow symbolic links, and
-wildcards skip hidden paths unless the leading dot is explicit.
-
-The fingerprint contains normalized, sorted patterns, matched relative paths and file contents,
-and canonical JSON for `values`. File timestamps, permissions, file-entry ordering, duplicate
-patterns, and map key order do not affect it. List order remains significant. Values retain YAML
-scalar, list, and object types; strings use normal workflow template rendering.
-
-The first execution returns `changed: true`; an identical later execution returns `false`.
-Snapshots are atomically stored in the workflow-local `.wuko/values/changed.json` store. Its own
-store artifacts are excluded from file matches. Direct remote workflows cannot use this
-local-only step, but composite actions called by a local workflow inherit the caller's local
-storage.
-
-`key` is optional and defaults to the step ID within the logical workflow or action source. Use a
-templated key when the same detector repeats in a foreach, matrix, or reusable action, for example
-`key: "build-{{ .matrix.os }}-{{ .matrix.go_version }}"`. A detector advances its snapshot as
-soon as it succeeds; failure of a later guarded step does not roll the snapshot back. Validation
-and dry-run check configuration without reading inputs or creating snapshot files.
-
-#### Choice
-
-Static single selection:
-
-```yaml
-- id: environment
-  type: choice
-  with:
-    variable: environment
-    message: Select environment
-    choices:
-      - {label: Development, value: dev}
-      - {label: Production, value: prod}
-```
-
-Typed multi-selection from an earlier output:
-
-```yaml
-- id: projects
-  type: choice
-  with:
-    variable: project_ids
-    message: Select projects
-    multiple: true
-    from: steps.fetch.projects
-    label_field: name
-    value_field: id
-```
-
-Dynamic sources must be non-empty lists. Scalar items are both label and value. Object lists use
-`label_field` and `value_field`, including dotted paths. Single selection writes a scalar;
-multi-selection writes an ordered list.
-
-#### Confirm
-
-Use `confirm` for a boolean decision. `default` controls the initially selected interactive
-answer; it does not silently answer a non-interactive prompt:
-
-```yaml
-- id: approval
-  type: confirm
-  with:
-    variable: approved
-    message: Deploy this release?
-    default: false
-
-- id: deploy
-  type: shell
-  if: vars.approved
-  with:
-    command: ./deploy
-```
-
-The result is written to both `.steps.approval.value` and `.vars.approved`. A pre-supplied value
-must be a boolean. Supply it explicitly for non-interactive execution, for example
-`wuko run release --var approved=true`. Confirm steps inside a concurrent group likewise require a
-pre-supplied value.
-
-#### Docker
-
-The `docker` step runs one command in a temporary Docker container. The container and any anonymous
-volumes it creates are removed after the step finishes. Docker must be available through the Docker
-Engine API (`DOCKER_HOST` is respected by the Docker client).
-
-```yaml
-- id: tests
-  type: docker
-  with:
-    image: golang:1.26
-    command: go
-    args: [test, ./...]
-    working_directory: /workspace
-    mounts:
-      - source: "{{ .run.dir }}"
-        target: /workspace
-        read_only: true
-    network: none
-    pull: if-missing
-```
-
-`command` and `args` are passed as an argv list. Omitting `command` uses the image's default
-command. `working_directory` is a path inside the container. Mount `source` paths are host paths;
-relative sources are resolved against the workflow run directory, while mount `target` paths must
-be absolute container paths. The step supports `env`, `user`, `platform` (`os/architecture` or
-`os/architecture/variant`), `network`, `tty`, and literal `stdin` values. An explicitly configured
-`stdin` value, including an empty string, is sent to the container and then closed. When `tty: true`
-is used from an interactive terminal, Wuko forwards terminal input until the container exits. Wuko's
-effective environment is passed through and step-level `env` overrides it.
-
-The pull policy defaults to `if-missing`; `never`, `missing`, and `always` are also accepted. Pin
-production images by digest when reproducibility matters. With `tty: true`, Docker combines the
-output streams as a terminal does. Interactive workflows should be run with a terminal attached.
-
-Docker containers created by Wuko receive management, client-host, and owner-process labels. At the
-start of a later Docker step, Wuko recovers only labeled containers created from the same client host
-whose owner process is no longer alive; containers from other client hosts, legacy containers without
-a client-host label, and containers owned by a live Wuko process are left untouched. This covers
-process crashes and forced termination on the next Wuko run without interfering with another machine
-using the same remote daemon. Cleanup failures are reported and are preserved alongside the original
-step error. Images and explicitly configured bind-mounted host directories are retained by design.
-
-#### File
-
-The `file` step provides strict, shell-independent filesystem operations relative to the run
-directory. For example, create a file atomically:
-
-```yaml
-- id: write_script
-  type: file
-  with:
-    operation: write
-    path: scripts/release.sh
-    content: |
-      #!/bin/sh
-      exec ./release "{{ .vars.version }}"
-    overwrite: true
-    mode: "0755"
-
-```
-
-Available operations are `read`, `write`, `copy`, `move`, `remove`, `mkdir`, `list`, `stat`,
-`chmod`, `find`, `link`, `truncate`, `tail`, `disk_usage`, `atomic_swap`, `permissions`, and `touch`.
-See [Filesystem operations](docs/filesystem-operations.md) for every field, output, safety rule,
-failure guarantee, and usage example.
-
-#### Glob
-
-The `glob` step discovers regular files with portable, shell-independent patterns. Patterns use
-forward slashes on every platform and support `*`, `?`, character classes, and recursive `**`:
-
-```yaml
-- id: sources
-  type: glob
-  with:
-    root: .
-    patterns:
-      - "**/*.go"
-      - "scripts/[a-z]*.sh"
-      - ".github/**/*.yaml"
-```
-
-`root` defaults to the run directory and may be relative to it or absolute. Patterns must be
-relative to `root`; multiple patterns form a union and duplicate matches are removed. Wildcards
-skip hidden files and directories unless the leading dot is explicit in the pattern. Directories,
-symbolic links, and files beneath symbolic-link directories are not returned.
-
-The step outputs the resolved absolute `root`, `count`, and path-sorted `files`. Each file contains
-`name`, a forward-slash relative `path`, `type: file`, `size`, `mode`, and UTC `modified_at`.
-Matching no files succeeds with `count: 0` and an empty `files` list.
-
-#### HTTP
-
-Use `http` for structured HTTP API calls. Requests default to `GET`; successful responses default
-to any `2xx` status; and response bodies default to text:
-
-```yaml
-- id: release
-  type: http
-  timeout: 30s
-  retry:
-    max_attempts: 3
-  with:
-    method: GET
-    url: https://api.example.com/releases/latest
-    query:
-      channel: stable
-    auth:
-      bearer_token: "{{ .env.API_TOKEN }}"
-    cookies:
-      jar: .wuko/example.cookies
-    response: json
-    success_statuses: [200]
-```
-
-Supply at most one of `body` or `json`. `json` is encoded as JSON and adds
-`Content-Type: application/json` unless the header is already present.
-
-Supported response modes are:
-
-- `text` (the default): exposes the raw response body as a string in `.steps.<id>.value`.
-- `json`: requires exactly one JSON value and exposes its typed object, array, string, number,
-  boolean, or null value in `.steps.<id>.value`.
-
-Every response also exposes the raw body string as `body`, the integer status code as `status`, and
-`headers`, whose values are lists so repeated headers are preserved. There are currently no
-dedicated binary, base64, YAML, XML, form-data, file-download, or streaming response modes.
-
-Authentication can be configured with exactly one dedicated mode:
-
-```yaml
-auth:
-  bearer_token: "{{ .env.API_TOKEN }}"
-
-# Or:
-auth:
-  basic:
-    username: "{{ .env.API_USER }}"
-    password: "{{ .env.API_PASSWORD }}"
-```
-
-Bearer authentication sets the `Authorization` header using the `Bearer` scheme; Basic
-authentication applies standard HTTP Basic encoding. Dedicated authentication and a raw
-`Authorization` header are mutually exclusive.
-
-Use `cookies.values` for request cookies and `cookies.jar` for persistence:
-
-```yaml
-cookies:
-  values:
-    tenant: stable
-  jar: .wuko/api.cookies
-```
-
-The jar uses the curl-compatible Netscape cookie-file format, loads before each attempt, and is
-atomically saved afterward, including when a complete response has a failing status or body
-decoding fails. Relative jar paths resolve from the run directory. Missing jars are created with
-owner-only permissions; malformed jars fail the step. A lock beside the jar serializes concurrent
-users so cookie updates are not lost. Cookie values override same-named stored cookies for the
-initial request. Dedicated cookies and a raw `Cookie` header are mutually exclusive.
-
-An explicit proxy overrides environment proxy selection; otherwise `HTTP_PROXY`, `HTTPS_PROXY`,
-and `NO_PROXY` retain their normal Go behavior. HTTP and HTTPS proxy URLs are accepted and may
-contain credentials:
-
-```yaml
-proxy:
-  url: http://proxy-user:proxy-password@proxy.example.com:8080
-```
-
-For mutual TLS, provide an unencrypted PEM certificate chain and matching private key. Relative
-paths resolve from the directory containing the owning workflow or composite action. System CA
-trust is unchanged:
-
-```yaml
-client_certificate:
-  cert_file: certificates/client.pem
-  key_file: certificates/client-key.pem
-```
-
-Only HTTP and HTTPS URLs with a host and without embedded user information are accepted. The
-response body is limited to 10 MiB. Redirects may upgrade HTTP to HTTPS, but they may not change
-host or port or downgrade HTTPS to HTTP, which prevents configured headers from crossing a trust
-boundary. Top-level `timeout` and `retry` policies control cancellation and repeated attempts. A
-status outside `success_statuses`, or outside `2xx` when the list is omitted, fails the step.
-Inside a polling `wait`, that status failure remains an observation available to `until`; failures
-that occur before a complete response is decoded still stop the wait.
-
-#### Import variables
-
-Use `import_vars` to load JSON or TOML variables during workflow execution. Paths are rendered
-when the step starts and resolve from the directory containing the owning workflow or composite
-action:
-
-```yaml
-- id: configuration
-  type: import_vars
-  with:
-    files:
-      - defaults.toml
-      - "environments/{{ .vars.environment }}.json"
-
-- id: describe
-  type: shell
-  with:
-    command: printf
-    args: ["target=%s\\n", "{{ .vars.target }}"]
-```
-
-At least one file is required. Files merge from left to right with top-level replacement, then
-the imported values overwrite variables already present in workflow state—including initial
-`--var` values. A successful step exposes the merged object as `.steps.configuration.variables`,
-its top-level size as `.steps.configuration.count`, and every key beneath `.vars`.
-
-The same strict JSON/TOML and lowercase-key behavior as `--var-file` applies. The import is atomic:
-if any file cannot be read or decoded, the step commits no outputs or variables. Retries reread
-all files. Concurrent children still share their pre-group snapshot, cannot consume an import
-from a sibling, and fail if multiple children write the same variable. Validation and dry-run
-check the step configuration without reading its runtime files.
-
-Relative imports work in local workflows and in remote workflow or action archives that bundle
-the companion files. A direct remote YAML or action manifest contains no companion files to
-import.
-
-See [Variable imports](docs/variable-imports.md) for nested-value access from templates and Lua,
-merge examples, concurrency rules, and format-extension guidance.
-
-#### Input
-
-Use `input` when the initial text should remain editable. The optional `value` is rendered when
-the step starts, so it can prepopulate text from an earlier step. The required `message` is shown
-directly above the field and should tell the user what to enter:
-
-```yaml
-- id: release_name
-  type: input
-  with:
-    variable: release_name
-    message: Enter the release name
-    value: "{{ .steps.suggest_name.value }}"
-    required: true
-```
-
-#### JSONPath
-
-Use `jsonpath` to select values from a typed workflow value with an
-[RFC 9535](https://www.rfc-editor.org/rfc/rfc9535.html) query:
-
-```yaml
-- id: active_projects
-  type: jsonpath
-  with:
-    from: steps.fetch.value
-    query: "$.projects[?@.active == true].id"
-    result: all
-    variable: active_project_ids
-```
-
-`from` is a dotted path rooted at `vars` or `steps`. The query runs against that value after the
-step configuration is rendered. `result` defaults to `all`, which writes the ordered nodelist to
-`.steps.<id>.value` and, when configured, to `variable`; no matches produce an empty list. Set
-`result: one` to require exactly one match and return that value as a scalar. Zero or multiple
-matches then fail the step without committing outputs or variables.
-
-Every successful result also exposes the integer match `count` and `paths`, a list of normalized
-RFC 9535 paths corresponding to the selected values. Duplicate selections are preserved because
-JSONPath results are nodelists, not sets. Evaluation is in-memory; use file-backed processing for
-datasets too large to keep in workflow state. JSONPath selects data but does not transform or
-modify it.
-
-#### Key-value stores
-
-The `key_value` step persists JSON-compatible values between workflow runs. Every operation names
-both a scope and a store. Local stores live in `.wuko/values/` beside the top-level workflow;
-global stores live in the platform configuration directory under `wuko/values/`. Workflows using
-the same directory, scope, and store name intentionally share values.
-
-Values may be scalars or nested JSON-compatible objects and lists. Set and then read a complex
-project configuration:
-
-```yaml
-- id: save_project
-  type: key_value
-  with:
-    operation: set
-    scope: global
-    store: preferences
-    key: project
-    value:
-      name: wuko
-      enabled: true
-      reviewers:
-        - alice
-        - bob
-      deployment:
-        retries: 3
-        regions:
-          - eu-central
-          - us-east
-        labels:
-          team: platform
-          tier: internal
-
-- id: load_project
-  type: key_value
-  with:
-    operation: get
-    scope: global
-    store: preferences
-    key: project
-
-- id: deploy_project
-  type: shell
-  if: steps.load_project.found && steps.load_project.value.enabled
-  with:
-    command: ./deploy
-    args:
-      - "{{ .steps.load_project.value.name }}"
-      - "{{ .steps.load_project.value.deployment.retries }}"
-      - "{{ index .steps.load_project.value.reviewers 0 }}"
-      - "{{ index .steps.load_project.value.deployment.regions 0 }}"
-      - "{{ .steps.load_project.value.deployment.labels.team }}"
-```
-
-Both `local` and `global` scopes require a safe, single-segment `store` name. Keys are non-empty
-flat strings; dots have no special meaning. The four operations are:
-
-- `get`: requires `key`; outputs `value` and `found`.
-- `set`: requires `key` and an explicit `value`, including `null`; outputs the stored `value`.
-- `delete`: requires `key`; outputs the previous `value` and `deleted`.
-- `list`: accepts no `key` or `value`; outputs key-sorted `entries` containing `key` and `value`.
-
-A missing key is not an error: `get` returns `value: null, found: false`, while a stored JSON null
-returns `value: null, found: true`. Similarly, deleting a missing key returns `deleted: false`.
-Use `.steps.<step-id>` to pass outputs to templates and `steps.<step-id>` in conditions.
-
-Store files are plain, pretty-printed JSON objects. Wuko serializes concurrent access with a lock
-and replaces files atomically so simultaneous processes do not lose updates or expose partial
-JSON. Values are not encrypted; do not use these stores as a secrets vault. Add
-`.wuko/values/` to the applicable `.gitignore` when local values should not be committed.
-Remote top-level workflows cannot use local persistence because their files are temporary, but
-they can use global stores. Composite actions inherit the caller workflow's local and global
-store roots. A successful write is an external effect: it is not rolled back when a later step or
-Lua statement fails, and retrying a write applies it again.
-
-#### Lua
-
-Use either `file` or inline `source`:
-
-```yaml
-- id: metadata
-  type: lua
-  with:
-    file: ../scripts/metadata.lua
-    args:
-      task: "{{ .vars.task_name }}"
-```
-
-```yaml
-- id: metadata
-  type: lua
-  with:
-    source: |
-      local token = wuko.env.get("API_TOKEN")
-      wuko.output("task", {id = "TASK-1", title = wuko.args.title})
-      wuko.set_var("task_id", "TASK-1")
-    args:
-      title: "{{ .vars.task_name }}"
-```
-
-The trusted `wuko` Lua host API provides:
-
-- `wuko.args`, `wuko.var(name)`, `wuko.set_var(name, value)`, `wuko.output(name, value)`
-- `wuko.env.get(name)`, `wuko.env.all()`
-- `wuko.json.encode(value)`, `wuko.json.decode(text)`
-- `wuko.helpers` string, defaulting, collection, indentation, JSON, and YAML helpers
-- `wuko.kv.get`, `set`, `delete`, and `list`
-- `wuko.http.request({method, url, headers, body, timeout})`
-- `wuko.fs.read`, `write`, `mkdir_all`, `list`, `stat`, `rename`, and `remove`
-- `wuko.exec.run({command, args, env, stdin, working_directory})`
-
-Lua outputs support nil, booleans, strings, numbers, arrays, and string-keyed objects. Cyclic and
-mixed-key tables are rejected.
-
-Lua key-value calls use the same store files and return shapes as the YAML step:
-
-```lua
-wuko.kv.set({
-  scope = "global",
-  store = "preferences",
-  key = "project",
-  value = {
-    name = "wuko",
-    enabled = true,
-    reviewers = {"alice", "bob"},
-    deployment = {
-      retries = 3,
-      regions = {"eu-central", "us-east"},
-      labels = {team = "platform", tier = "internal"},
-    },
-  },
-})
-
-local project, found = wuko.kv.get({
-  scope = "global",
-  store = "preferences",
-  key = "project",
-})
-local removed, deleted = wuko.kv.delete({scope = "global", store = "preferences", key = "old"})
-local entries = wuko.kv.list({scope = "global", store = "preferences"})
-```
-
-`get` and `delete` each return the value followed by a boolean. `list` returns a key-sorted array
-of `{key, value}` tables. Because Lua represents JSON null as `nil`, omitting `value` from
-`wuko.kv.set` stores JSON null; a list entry for stored null still contains its `key`.
-
-#### Password
-
-Use `password` for masked text entry. Its required `message` is displayed above the masked field:
-
-```yaml
-- id: credentials
-  type: password
-  with:
-    variable: api_token
-    message: Enter the API token
-    required: true
-```
-
-Input and password steps write their resulting value to `steps.<id>.value` and to the configured
-variable. The value is text unless an input modifier converts it. A pre-supplied variable skips
-the UI, and non-interactive runs must provide it with `--var`.
-
-Both steps support the same optional `validation` block inside `with`:
-
-```yaml
-with:
-  validation:
-    min_length: 3
-    max_length: 40
-    pattern: '^[a-z][a-z0-9-]+$'
-    message: Use 3–40 lowercase letters, digits, or hyphens
-```
-
-Lengths count Unicode characters. `pattern` uses Go regular-expression syntax and is optional;
-anchor it with `^` and `$` when the whole value must match. `message` replaces the default error
-for any failed rule. Invalid rule configurations fail workflow validation before execution.
-
-Input can convert validated text before storing it. Split on a Go regular-expression pattern:
-
-```yaml
-- id: reviewers
-  type: input
-  with:
-    variable: reviewers
-    message: Enter comma-separated reviewers
-    modifiers:
-      trim: true
-      split: ','
-```
-
-Entering `alice, bob` writes `["alice", "bob"]` to both `.steps.reviewers.value` and
-`.vars.reviewers`. `trim` removes leading and trailing Unicode whitespace before validation and
-conversion. When combined with `split`, it also trims every resulting item. Empty fields are
-preserved.
-
-Alternatively, deserialize one JSON value:
-
-```yaml
-- id: metadata
-  type: input
-  with:
-    variable: metadata
-    message: Enter metadata as JSON
-    modifiers:
-      trim: true
-      json: true
-
-- id: describe
-  type: shell
-  with:
-    command: printf
-    args:
-      - 'project=%s first_tag=%s retries=%s\n'
-      - "{{ .vars.metadata.project }}"
-      - "{{ index .steps.metadata.value.tags 0 }}"
-      - "{{ .steps.metadata.value.retries }}"
-
-- id: deploy
-  type: shell
-  if: vars.metadata.deploy
-  with:
-    command: ./deploy
-    args: ["{{ .vars.metadata.project }}"]
-```
-
-For example, entering
-`{"project":"wuko","tags":["go","cli"],"retries":3,"deploy":true}` makes the object available
-as both `.vars.metadata` and `.steps.metadata.value`. Access object fields with dotted paths, such
-as `.vars.metadata.project`; use the Go-template `index` function for array elements, such as
-`{{ index .steps.metadata.value.tags 0 }}`. Conditions use the typed value directly, so
-`if: vars.metadata.deploy` evaluates the JSON boolean rather than a string.
-
-JSON preserves objects, arrays, strings, booleans, null, and numbers. Invalid JSON remains in the
-interactive field with an error. `trim` can be combined with either `split` or `json`; `split` and
-`json` are mutually exclusive. With `--var`, pass JSON as a string because modifiers operate on
-text, for example
-`--var 'metadata="{\"enabled\":true}"'`.
-
-When `required: false`, empty input becomes an empty list for `split` and `null` for `json`.
-
-#### Semantic versions
-
-Use `semver` to parse, compare, constrain, or increment semantic versions without invoking an
-external command. Versions must contain major, minor, and patch numbers; a common lowercase `v`
-tag prefix is accepted and removed from normalized outputs.
-
-Parse a version into its canonical value and components:
-
-```yaml
-- id: release
-  type: semver
-  with:
-    operation: parse
-    version: "v1.4.2-rc.1+build.7"
-    variable: release_version
-```
-
-The primary result is available at `.steps.release.value` and, when configured, at
-`.vars.release_version`. Parse also returns `version`, `major`, `minor`, `patch`, `prerelease`,
-and `metadata`.
-
-Compare precedence with `other`; `value` and `comparison` are `-1`, `0`, or `1`, and the step also
-returns boolean `less`, `equal`, and `greater` outputs. Build metadata does not affect precedence:
-
-```yaml
-- id: ordering
-  type: semver
-  with:
-    operation: compare
-    version: "{{ .vars.current_version }}"
-    other: "{{ .vars.candidate_version }}"
-```
-
-Check a version against a constraint with `constrain`. The boolean result is returned as both
-`value` and `matched`; comma or whitespace joins comparisons with AND, while `||` joins them with
-OR. Hyphen ranges, wildcards, tilde, and caret constraints are supported. Prerelease versions
-only match a constraint set that includes a prerelease comparator.
-
-```yaml
-- id: supported
-  type: semver
-  with:
-    operation: constrain
-    version: "{{ .vars.version }}"
-    constraint: ">= 1.4.0, < 2.0.0"
-    variable: is_supported
-```
-
-Increment `major`, `minor`, or `patch` with `part`. The string result is returned as `value` and
-`version`, with the normalized input in `previous`. Incrementing clears build metadata and
-prerelease data; incrementing the patch of a prerelease promotes it to its associated stable
-version.
-
-```yaml
-- id: next_release
-  type: semver
-  with:
-    operation: increment
-    version: "{{ .vars.version }}"
-    part: minor
-    variable: next_version
-```
-
-#### Set
-
-Use `set` to assign a typed literal or evaluate an Expr expression without dropping into Lua.
-Exactly one of `value` or `expr` is required:
-
-```yaml
-- id: defaults
-  type: set
-  with:
-    variable: deployment
-    value:
-      enabled: true
-      retries: 3
-      regions: [eu-central, us-east]
-
-- id: artifact
-  type: set
-  with:
-    variable: artifact_name
-    expr: 'steps.release.value.version + "-" + vars.target + ".tar.gz"'
-```
-
-Expressions use the `inputs`, `vars`, `env`, `steps`, `workflow`, and `run` roots used by
-conditions. The JSON-compatible result is available through both `.steps.<id>.value` and the
-configured variable. Invalid expressions fail validation; missing runtime fields and
-non-JSON-compatible results fail the step without committing its variable.
-
-#### Shell and agent
-
-Shell accepts either argv execution:
-
-```yaml
-- id: status
-  type: shell
-  with:
-    command: git
-    args: [status, --short]
-```
-
-or inline shell. Arguments follow `wuko` and are available as `$1`, `$2`, and so on:
-
-```yaml
-- id: branch
-  type: shell
-  with:
-    script: |
-      set -eu
-      git switch -c "$1"
-    args: ["{{ .steps.fetch.task.branch }}"]
-```
-
-Agents are regular external processes with their prompt on stdin:
-
-```yaml
-- id: codex
-  type: agent
-  with:
-    command: codex
-    args: [exec, -]
-    prompt: "Work on {{ .steps.fetch.task.id }}"
-```
-
-Shell and agent output streams live and is also captured as `stdout`, `stderr`, and `exit_code`.
-
-Shell steps can run as another local account by setting `user` to a username or numeric user ID:
-
-```yaml
-- id: identity
-  type: shell
-  with:
-    command: id
-    args: [-un]
-    user: deploy
-```
-
-Changing user uses native Unix process credentials and requires Wuko to have permission to assume
-that identity, which normally means running Wuko as root. Wuko does not invoke `sudo` and does not
-rewrite environment variables such as `HOME` or `USER`; the selected account must also be able to
-access the configured working directory and executable. Omitting `user` inherits Wuko's user.
-
-#### Temp
-
-The `temp` step creates an empty managed file or directory in the operating system's temporary
-directory. Use its absolute `path` output in later steps instead of choosing and cleaning a
-scratch location manually:
-
-```yaml
-- id: workspace
-  type: temp
-  with:
-    kind: directory
-    pattern: wuko-build-*
-
-- id: build
-  type: shell
-  with:
-    command: ./build
-    args: ["--output", "{{ .steps.workspace.path }}"]
-
-finally:
-  - id: inspect
-    type: shell
-    with:
-      command: ./inspect-build
-      args: ["{{ .steps.workspace.path }}"]
-```
-
-`kind` is required and must be `file` or `directory`. `pattern` is optional and defaults to
-`wuko-*`; it is a filename pattern, not a path, and cannot contain `/` or `\`. The final `*` is
-replaced with random characters; when no `*` is present, random characters are appended. The step
-outputs `path` and `kind`. Files are closed before the step succeeds and use the operating
-system's secure temporary-file permissions; directories use its secure temporary-directory
-permissions.
-
-Managed resources remain available through the complete root workflow, nested composite actions,
-retries, polling, concurrent branches, foreach and matrix iterations, and explicit `finally`
-steps. Wuko removes them in reverse completion order after `finally` ends. Every removal is
-attempted; removal errors are joined with main and `finally` errors and fail an otherwise
-successful run. Missing resources are accepted. Directory cleanup is recursive, while file
-cleanup refuses to recursively delete a directory that has replaced the original file.
-
-Validation and dry runs do not create temporary resources. After an executed run returns, its
-state may still contain the former absolute path even though the managed resource no longer
-exists. Custom parent directories, initial content, and custom modes are not supported; use a
-later `file` step when those operations are needed.
+Claude skills are installed under `~/.claude/skills/`; Codex skills are installed under
+`~/.agents/skills/`. Reinstalling replaces the bundled skill files.
+
+## Documentation
+
+- [Execution and composition](docs/execution.md)
+- [ClickUp task agent example](docs/clickup-task-example.md)
+- [Interactive steps](docs/steps-interactive.md)
+- [Data steps](docs/steps-data.md)
+- [System steps](docs/steps-system.md)
+- [Automation steps](docs/steps-automation.md)
+- [Filesystem operation reference](docs/filesystem-operations.md)
+- [Workflow controls](docs/workflow-control.md)
+- [Workflow discovery](docs/workflow-discovery.md)
+- [Templates](docs/templates.md)
+- [Template, Expr, and Lua functions](docs/template-functions.md)
+- [Variable imports](docs/variable-imports.md)
+- [Finally cleanup](docs/finally.md)
+- [Graceful shutdown](docs/graceful-shutdown.md)
 
 ## Trust model
 
-Workflows and remote actions are trusted code. Lua can access the network and filesystem and can
-start processes; shell and agent steps also execute local programs. Docker steps can access any
-explicitly mounted host paths and can use the configured Docker daemon. Do not mount the Docker
-socket unless the workflow is trusted, because it grants control over the daemon and can amount to
-host-level access. Command-based action sources also execute locally while the workflow is loading.
-Review action publishers and pin immutable action releases with SHA-256 before running them. Safe
-archive extraction is not an execution sandbox. Wuko does not download whole remote workflows, add
-authentication headers to HTTPS action requests, or provide a secrets store.
+Workflows and remote actions are trusted code. Lua, shell, agent, Docker, and command-based action
+sources can access local resources with the permissions granted to Wuko. Review publishers, pin
+immutable remote action releases with SHA-256, and do not mount the Docker socket for untrusted
+workflows. Safe archive extraction is not an execution sandbox, and Wuko does not provide a
+secrets store.
