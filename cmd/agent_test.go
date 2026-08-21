@@ -57,13 +57,15 @@ func TestAgentInstallCopiesEmbeddedSkills(t *testing.T) {
 	if err := command.ExecuteContext(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	for _, skill := range []string{"wuko-workflow-author", "wuko-workflow-debugger", "wuko-agent-handoff"} {
-		path := filepath.Join(home, ".claude", "skills", skill, "SKILL.md")
-		if _, err := os.Stat(path); err != nil {
-			t.Fatalf("skill %s was not installed: %v", skill, err)
+	for _, skill := range []string{"wuko-workflow-author", "wuko-workflow-debugger", "wuko-workflow-runner", "wuko-agent-handoff"} {
+		for _, file := range []string{"SKILL.md", filepath.Join("agents", "openai.yaml")} {
+			path := filepath.Join(home, ".claude", "skills", skill, file)
+			if _, err := os.Stat(path); err != nil {
+				t.Fatalf("skill file %s was not installed: %v", path, err)
+			}
 		}
 	}
-	if !strings.Contains(output.String(), "installed 3 skills for claude") {
+	if !strings.Contains(output.String(), "installed 4 skills for claude") {
 		t.Fatalf("output = %q", output.String())
 	}
 }
