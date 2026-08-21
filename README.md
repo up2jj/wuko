@@ -13,7 +13,7 @@ commands or inline shell, and launch an external agent such as Codex.
 - Run steps sequentially or concurrently, wait for fixed durations or polled conditions, and use
   retries, timeouts, dry runs, execution trees, live progress, and run statistics.
 - Use built-in wait, input, password, choice, confirm, set, assert, `import_vars`, JSONPath,
-  semantic-version, HTTP, file, key-value, Lua, shell, agent, and Docker steps.
+  semantic-version, HTTP, file, glob, key-value, Lua, shell, agent, and Docker steps.
 - Split workflows across local files with `require`, or reuse remote workflows and composite
   actions from HTTPS URLs and GitHub locators.
 - Integrate with `direnv`, import JSON or TOML variable files, and pass values explicitly with
@@ -52,6 +52,7 @@ commands or inline shell, and launch an external agent such as Codex.
     - [Semantic versions](#semantic-versions)
     - [HTTP](#http)
     - [File](#file)
+    - [Glob](#glob)
     - [Key-value stores](#key-value-stores)
     - [Lua](#lua)
     - [Shell and agent](#shell-and-agent)
@@ -1176,6 +1177,31 @@ Overwriting a file without `mode` preserves its permissions. Chmod rejects symbo
 rejects filesystem roots and the run directory, and a non-empty directory requires
 `recursive: true`. Absolute paths remain available because Wuko workflows are trusted code, not a
 filesystem sandbox.
+
+#### Glob
+
+The `glob` step discovers regular files with portable, shell-independent patterns. Patterns use
+forward slashes on every platform and support `*`, `?`, character classes, and recursive `**`:
+
+```yaml
+- id: sources
+  type: glob
+  with:
+    root: .
+    patterns:
+      - "**/*.go"
+      - "scripts/[a-z]*.sh"
+      - ".github/**/*.yaml"
+```
+
+`root` defaults to the run directory and may be relative to it or absolute. Patterns must be
+relative to `root`; multiple patterns form a union and duplicate matches are removed. Wildcards
+skip hidden files and directories unless the leading dot is explicit in the pattern. Directories,
+symbolic links, and files beneath symbolic-link directories are not returned.
+
+The step outputs the resolved absolute `root`, `count`, and path-sorted `files`. Each file contains
+`name`, a forward-slash relative `path`, `type: file`, `size`, `mode`, and UTC `modified_at`.
+Matching no files succeeds with `count: 0` and an empty `files` list.
 
 #### Key-value stores
 

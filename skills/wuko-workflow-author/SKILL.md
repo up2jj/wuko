@@ -1,6 +1,6 @@
 ---
 name: wuko-workflow-author
-description: Create or update Wuko version-1 YAML workflows, including templates, conditions, required files, composite actions, waits, polling, retries, concurrency, interactive prompts, typed and imported variables, JSONPath selection, semantic versions, HTTP, files, Lua, shell, Docker, and agent steps. Use when designing workflow files, extending existing workflows, or reviewing workflow structure before execution.
+description: Create or update Wuko version-1 YAML workflows, including templates, conditions, required files, composite actions, waits, polling, retries, concurrency, interactive prompts, typed and imported variables, JSONPath selection, semantic versions, HTTP, files, glob discovery, Lua, shell, Docker, and agent steps. Use when designing workflow files, extending existing workflows, or reviewing workflow structure before execution.
 ---
 
 # Wuko Workflow Author
@@ -36,6 +36,8 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
   predicate for polling. Give every poll a top-level timeout and prefer read-only probes.
 - Use `file` for auditable read, write, copy, move, remove, mkdir, list, stat, and chmod operations.
   Quote modes such as `"0755"`, opt into overwrites, and use recursive removal narrowly.
+- Use `glob` to discover regular files with portable `*`, `?`, character-class, and recursive `**`
+  patterns. Keep patterns relative to its `root` and consume the sorted metadata from `files`.
 - Use shell for external programs, Lua for multi-operation scripting, Docker for isolated
   containers, and agent for coding-agent execution.
 

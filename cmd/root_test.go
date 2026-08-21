@@ -113,6 +113,39 @@ steps:
 	}
 }
 
+func TestRootCommandRegistersGlobStep(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "glob.yaml")
+	data := fmt.Sprintf(`version: 1
+name: glob
+steps:
+  - id: sources
+    type: glob
+    with:
+      root: %q
+      patterns: ["**/*.go"]
+  - id: verify
+    type: assert
+    with:
+      expr: steps.sources.count == 1 && steps.sources.files[0].path == "main.go"
+      message: glob result was unexpected
+`, root)
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	command := NewRootCmd()
+	command.SetIn(bytes.NewReader(nil))
+	command.SetOut(io.Discard)
+	command.SetErr(io.Discard)
+	command.SetArgs([]string{"run", "--file", path})
+	if err := command.ExecuteContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRootCommandRunsBuiltInWaitStep(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "wait.yaml")
