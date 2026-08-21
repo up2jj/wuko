@@ -30,7 +30,10 @@ type Config struct {
 	Query             map[string]string        `yaml:"query,omitempty"`
 	Body              string                   `yaml:"body,omitempty"`
 	JSON              any                      `yaml:"json,omitempty"`
+	Form              map[string]string        `yaml:"form,omitempty"`
+	Files             []FileConfig             `yaml:"files,omitempty"`
 	Response          string                   `yaml:"response,omitempty"`
+	Download          *DownloadConfig          `yaml:"download,omitempty"`
 	SuccessStatuses   []int                    `yaml:"success_statuses,omitempty"`
 	Auth              *AuthConfig              `yaml:"auth,omitempty"`
 	Cookies           *CookiesConfig           `yaml:"cookies,omitempty"`
@@ -62,10 +65,22 @@ type ClientCertificateConfig struct {
 	KeyFile  string `yaml:"key_file"`
 }
 
+type FileConfig struct {
+	Field string `yaml:"field"`
+	Path  string `yaml:"path"`
+}
+
+type DownloadConfig struct {
+	Path      string `yaml:"path"`
+	Overwrite bool   `yaml:"overwrite,omitempty"`
+}
+
 type Runner struct {
-	config  Config
-	hasBody bool
-	hasJSON bool
+	config   Config
+	hasBody  bool
+	hasJSON  bool
+	hasForm  bool
+	hasFiles bool
 }
 
 type statusError struct {
@@ -104,8 +119,18 @@ func New(raw map[string]any) (step.Runner, error) {
 	}
 	_, hasBody := raw["body"]
 	_, hasJSON := raw["json"]
-	if hasBody && hasJSON {
-		return nil, fmt.Errorf("body and json are mutually exclusive")
+	_, hasForm := raw["form"]
+	_, hasFiles := raw["files"]
+	_, hasResponse := raw["response"]
+	_, hasDownload := raw["download"]
+	if (hasBody && hasJSON) || ((hasBody || hasJSON) && (hasForm || hasFiles)) {
+		return nil, fmt.Errorf("body, json, and form/files request bodies are mutually exclusive")
+	}
+	if hasDownload && config.Download == nil {
+		return nil, fmt.Errorf("download must configure a path")
+	}
+	if hasDownload && hasResponse {
+		return nil, fmt.Errorf("download and response are mutually exclusive")
 	}
 	if config.URL == "" {
 		return nil, fmt.Errorf("url is required")
@@ -116,7 +141,10 @@ func New(raw map[string]any) (step.Runner, error) {
 	if config.Response == "" {
 		config.Response = "text"
 	}
-	runner := &Runner{config: config, hasBody: hasBody, hasJSON: hasJSON}
+	runner := &Runner{
+		config: config, hasBody: hasBody, hasJSON: hasJSON,
+		hasForm: hasForm, hasFiles: hasFiles,
+	}
 	if err := runner.validate(false); err != nil {
 		return nil, err
 	}
@@ -160,6 +188,19 @@ func (r *Runner) Run(ctx context.Context, execution step.Request) (result step.R
 		query.Set(key, value)
 	}
 	parsed.RawQuery = query.Encode()
+	var download *downloadTarget
+	if r.config.Download != nil {
+		download, err = prepareDownload(ctx, execution.RunDir, *r.config.Download)
+		if err != nil {
+			return step.Result{}, err
+		}
+		defer func() {
+			if err := download.Cleanup(); err != nil && resultErr == nil {
+				result = step.Result{}
+				resultErr = fmt.Errorf("cleaning up download: %w", err)
+			}
+		}()
+	}
 
 	transport, err := r.newTransport(execution.WorkflowDir)
 	if err != nil {
@@ -186,6 +227,8 @@ func (r *Runner) Run(ctx context.Context, execution step.Request) (result step.R
 	client := newClient(transport, jar)
 
 	var body io.Reader
+	var multipartBody *multipartRequestBody
+	var multipartReader io.ReadCloser
 	if r.hasJSON {
 		data, err := json.Marshal(r.config.JSON)
 		if err != nil {
@@ -194,10 +237,33 @@ func (r *Runner) Run(ctx context.Context, execution step.Request) (result step.R
 		body = bytes.NewReader(data)
 	} else if r.hasBody {
 		body = strings.NewReader(r.config.Body)
+	} else if r.hasFiles {
+		multipartBody, err = prepareMultipartBody(ctx, execution.WorkflowDir, r.config.Form, r.config.Files)
+		if err != nil {
+			return step.Result{}, err
+		}
+		multipartReader, err = multipartBody.Open()
+		if err != nil {
+			return step.Result{}, err
+		}
+		body = multipartReader
+	} else if r.hasForm {
+		values := make(url.Values, len(r.config.Form))
+		for key, value := range r.config.Form {
+			values.Set(key, value)
+		}
+		body = strings.NewReader(values.Encode())
 	}
 	request, err := http.NewRequestWithContext(ctx, strings.ToUpper(r.config.Method), parsed.String(), body)
 	if err != nil {
+		if multipartReader != nil {
+			multipartReader.Close()
+		}
 		return step.Result{}, fmt.Errorf("creating request: %w", err)
+	}
+	if multipartBody != nil {
+		request.ContentLength = multipartBody.ContentLength()
+		request.GetBody = multipartBody.Open
 	}
 	for key, value := range r.config.Headers {
 		request.Header.Set(key, value)
@@ -212,12 +278,30 @@ func (r *Runner) Run(ctx context.Context, execution step.Request) (result step.R
 	if r.hasJSON && request.Header.Get("Content-Type") == "" {
 		request.Header.Set("Content-Type", "application/json")
 	}
-	applyConditionalHeaders(request.Header, execution.PreviousAttempt)
+	if r.hasForm && !r.hasFiles && request.Header.Get("Content-Type") == "" {
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	}
+	if multipartBody != nil {
+		request.Header.Set("Content-Type", multipartBody.ContentType())
+	}
+	if download == nil {
+		applyConditionalHeaders(request.Header, execution.PreviousAttempt)
+	}
 	response, err := client.Do(request)
 	if err != nil {
 		return step.Result{}, fmt.Errorf("performing request: %w", requestError{method: request.Method, err: err})
 	}
 	defer response.Body.Close()
+	if download != nil && r.success(response.StatusCode) {
+		size, err := download.Write(ctx, response.Body)
+		if err != nil {
+			return step.Result{}, fmt.Errorf("downloading response: %w", err)
+		}
+		return step.Result{Outputs: map[string]any{
+			"status": response.StatusCode, "headers": responseHeaders(response.Header),
+			"path": download.Path(), "size": size,
+		}}, nil
+	}
 	if response.ContentLength > maxResponseSize {
 		return step.Result{}, fmt.Errorf("response body exceeds %d bytes", maxResponseSize)
 	}
@@ -314,10 +398,16 @@ func (r *Runner) validate(resolved bool) error {
 			return fmt.Errorf("response must be text or json")
 		}
 	}
+	if r.config.Download != nil && (resolved || !templated(r.config.Download.Path)) && strings.TrimSpace(r.config.Download.Path) == "" {
+		return fmt.Errorf("download path must not be empty")
+	}
 	for _, status := range r.config.SuccessStatuses {
 		if status < 100 || status > 599 {
 			return fmt.Errorf("success status %d must be between 100 and 599", status)
 		}
+	}
+	if err := r.validateRequestBody(resolved); err != nil {
+		return err
 	}
 	if err := r.validateAuthentication(resolved); err != nil {
 		return err
@@ -336,6 +426,34 @@ func (r *Runner) validate(resolved bool) error {
 		return fmt.Errorf("parsing url: %w", err)
 	}
 	return validateURL(parsed)
+}
+
+func (r *Runner) validateRequestBody(resolved bool) error {
+	if r.hasFiles && len(r.config.Files) == 0 {
+		return fmt.Errorf("files must contain at least one file")
+	}
+	if r.hasFiles && headerExists(r.config.Headers, "Content-Type") {
+		return fmt.Errorf("files and Content-Type header are mutually exclusive")
+	}
+	if r.hasFiles {
+		for field := range r.config.Form {
+			if strings.ContainsAny(field, "\r\n") {
+				return fmt.Errorf("form field %q must not contain newlines", field)
+			}
+		}
+	}
+	for i, file := range r.config.Files {
+		if (resolved || !templated(file.Field)) && strings.TrimSpace(file.Field) == "" {
+			return fmt.Errorf("files[%d] field must not be empty", i)
+		}
+		if (resolved || !templated(file.Path)) && strings.TrimSpace(file.Path) == "" {
+			return fmt.Errorf("files[%d] path must not be empty", i)
+		}
+		if (resolved || !templated(file.Field)) && strings.ContainsAny(file.Field, "\r\n") {
+			return fmt.Errorf("files[%d] field must not contain newlines", i)
+		}
+	}
+	return nil
 }
 
 func (r *Runner) validateAuthentication(resolved bool) error {

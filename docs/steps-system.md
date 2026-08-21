@@ -191,10 +191,79 @@ Post JSON with Basic authentication and persistent cookies:
     success_statuses: [201]
 ```
 
-Supply at most one of `body` or `json`. Every response exposes `status`, `headers`, and raw `body`;
-`value` is text or decoded JSON. Bodies are limited to 10 MiB. Dedicated bearer/Basic auth is
-mutually exclusive with a raw `Authorization` header. The step also supports explicit proxies,
-cookie values/jars, and mutual-TLS certificate files.
+Submit a URL-encoded form:
+
+```yaml
+- id: create_session
+  type: http
+  with:
+    method: POST
+    url: https://api.example.com/session
+    form:
+      username: "{{ .vars.username }}"
+      remember: "true"
+```
+
+Upload files with multipart form data:
+
+```yaml
+- id: publish_artifact
+  type: http
+  timeout: 10m
+  with:
+    method: POST
+    url: https://api.example.com/releases
+    form:
+      channel: stable
+    files:
+      - {field: artifact, path: dist/release.tar.gz}
+      - {field: attachment, path: docs/release-notes.txt}
+```
+
+Stream a large response directly to a file:
+
+```yaml
+- id: download_artifact
+  type: http
+  timeout: 30m
+  with:
+    url: https://api.example.com/releases/latest/artifact
+    download:
+      path: downloads/release.tar.gz
+      overwrite: true
+```
+
+Supply one request body mode: `body`, `json`, or `form`/`files`. A `form` without files uses
+`application/x-www-form-urlencoded`; adding `files` switches the request to `multipart/form-data`
+and includes the form fields. Each file requires a multipart `field` and a `path`; multiple entries
+may use the same field. Relative paths resolve from the workflow or action that owns the step, and
+absolute paths are accepted.
+
+Uploads must be regular files. The filename comes from the path's base name, and the media type is
+inferred from its extension with `application/octet-stream` as the fallback. Wuko streams files
+from disk with a computed `Content-Length`, so uploads are not buffered in memory and have no
+Wuko-specific size limit. Do not set `Content-Type` for multipart requests because Wuko supplies
+the required boundary. Files are reopened for retries and body-preserving redirects; do not modify
+them while the request is running.
+
+Use `download` instead of `response` to stream a successful response to disk. Relative download
+paths resolve from the run directory; absolute paths are also accepted. Downloads have no
+Wuko-specific size limit and expose `status`, `headers`, resolved `path`, and `size` without
+buffering `body` or `value`. The destination's parent directory must already exist. Existing
+destinations are rejected unless `overwrite: true` is set, and an overwritten regular file keeps
+its permissions.
+
+Downloads are written to a temporary file beside the destination and installed atomically only
+after the entire successful response has been read and synced. Cancellation, connection/read
+errors, and unsuccessful HTTP statuses remove the temporary file without changing the destination.
+Unsuccessful responses retain the normal bounded `body` and `value` outputs so retry and error
+handling continue to work normally. A status listed in `success_statuses` is considered successful
+and is therefore downloaded even when it is outside `2xx`.
+
+Buffered responses expose `status`, `headers`, and raw `body`; `value` is text or decoded JSON.
+Buffered response bodies are limited to 10 MiB. Dedicated bearer/Basic auth is mutually exclusive
+with a raw `Authorization` header. The step also supports explicit proxies, cookie values/jars,
+and mutual-TLS certificate files.
 
 HTTP retries use the ordinary step-level `retry` timing and attempt limits. Unless overridden with
 `retry.methods`, only idempotent methods (`GET`, `HEAD`, `OPTIONS`, `PUT`, `DELETE`, and `TRACE`)
@@ -203,11 +272,11 @@ codes and inclusive quoted ranges can be supplied with `retry.statuses`. Include
 explicitly when the endpoint makes those requests safe to repeat.
 
 A retryable response's `Retry-After` delta-seconds or HTTP date can extend the next backoff, up to
-the policy's `max_delay` and `max_elapsed_time`. When a completed response contains `ETag` or
+the policy's `max_delay` and `max_elapsed_time`. For buffered responses containing `ETag` or
 `Last-Modified`, the next attempt sends `If-None-Match` or `If-Modified-Since` unless that header
 was configured explicitly. A `304 Not Modified` then succeeds with the previous response's body
 and value while exposing the `304` status and refreshed headers. Validators are retained only
-between attempts of that one step execution.
+between attempts of that one step execution and are not applied to downloads.
 
 ## `docker`
 
