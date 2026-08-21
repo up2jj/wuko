@@ -28,7 +28,7 @@ func (e *Engine) validateControl(ctx context.Context, definition *workflow.Defin
 			return fmt.Errorf("if: %w", err)
 		}
 	}
-	kind, children, expressions, maxConcurrency, _, _, err := controlDeclaration(workflowStep)
+	kind, children, expressions, maxConcurrency, _, _, _, err := controlDeclaration(workflowStep)
 	if err != nil {
 		return err
 	}
@@ -52,7 +52,10 @@ func (e *Engine) validateControl(ctx context.Context, definition *workflow.Defin
 }
 
 func (e *Engine) executeControl(ctx context.Context, definition *workflow.Definition, workflowStep workflow.Step, options Options, state *State, index, total int) stepOutcome {
-	kind, children, _, maxConcurrency, timeout, failFast, declarationErr := controlDeclaration(workflowStep)
+	if err := ctx.Err(); err != nil {
+		return stepOutcome{err: err}
+	}
+	kind, children, _, maxConcurrency, maxIterations, timeout, failFast, declarationErr := controlDeclaration(workflowStep)
 	startedAt := time.Now()
 	outcome := stepOutcome{started: true}
 	finish := func(status ExecutionStatus, err error, iterations []IterationStats, nested RunStats) {
@@ -93,7 +96,7 @@ func (e *Engine) executeControl(ctx context.Context, definition *workflow.Defini
 
 	expansionStarted := time.Now()
 	traceStep(options, definition, workflowStep, diagnostic.PhaseControl, diagnostic.StatusStarted, time.Time{}, "expanding "+kind, nil)
-	iterations, err := expandControl(workflowStep, templateData(definition, options.RunDir, state))
+	iterations, err := expandControl(ctx, workflowStep, templateData(definition, options.RunDir, state), maxIterations)
 	if err != nil {
 		traceStep(options, definition, workflowStep, diagnostic.PhaseControl, diagnostic.StatusFailed, expansionStarted, "expanding "+kind, err)
 		stepErr := fmt.Errorf("workflow %q step %q (%s): expanding: %w", definition.Name, workflowStep.ID, kind, err)
@@ -141,9 +144,15 @@ func (e *Engine) executeControl(ctx context.Context, definition *workflow.Defini
 
 	nested := RunStats{}
 	iterationStats := make([]IterationStats, 0, len(outcomes))
+	startedIterations := 0
+	succeededIterations := 0
 	for _, item := range outcomes {
 		if !item.Started {
 			continue
+		}
+		startedIterations++
+		if item.Err == nil {
+			succeededIterations++
 		}
 		stats := item.Value.stats
 		rollupNestedMetrics(&nested, stats)
@@ -157,6 +166,7 @@ func (e *Engine) executeControl(ctx context.Context, definition *workflow.Defini
 		Kind: ControlFinished, Status: statusFromError(runErr), Time: finishedAt, WorkflowName: definition.Name,
 		Depth: options.depth, StepID: workflowStep.ID, ControlKind: kind, Iterations: len(iterations),
 		MaxConcurrency: maxConcurrency, FailFast: failFast, Timeout: timeout,
+		Started: startedIterations, Succeeded: succeededIterations,
 		Duration: finishedAt.Sub(startedAt), Error: runErr,
 	})
 	if runErr != nil {
@@ -182,14 +192,14 @@ func (e *Engine) executeControl(ctx context.Context, definition *workflow.Defini
 	return outcome
 }
 
-func controlDeclaration(workflowStep workflow.Step) (kind string, children []workflow.Step, expressions []controlExpression, maxConcurrency int, timeout time.Duration, failFast bool, err error) {
+func controlDeclaration(workflowStep workflow.Step) (kind string, children []workflow.Step, expressions []controlExpression, maxConcurrency, maxIterations int, timeout time.Duration, failFast bool, err error) {
 	switch {
 	case workflowStep.Foreach != nil:
 		group := workflowStep.Foreach
 		if validationErr := group.Validate(); validationErr != nil {
 			err = validationErr
 		}
-		return "foreach", group.Steps, []controlExpression{{label: "items", value: group.Items}}, group.MaxConcurrency, durationValue(group.Timeout), group.FailFast, err
+		return "foreach", group.Steps, []controlExpression{{label: "items", value: group.Items}}, group.MaxConcurrency, effectiveMaxIterations(group.MaxIterations), durationValue(group.Timeout), group.FailFast, err
 	case workflowStep.Matrix != nil:
 		group := workflowStep.Matrix
 		if validationErr := group.Validate(); validationErr != nil {
@@ -200,22 +210,28 @@ func controlDeclaration(workflowStep workflow.Step) (kind string, children []wor
 				expressions = append(expressions, controlExpression{label: "axis " + axis.Name, value: axis.Expression})
 			}
 		}
-		return "matrix", group.Steps, expressions, group.MaxConcurrency, durationValue(group.Timeout), group.FailFast, err
+		return "matrix", group.Steps, expressions, group.MaxConcurrency, effectiveMaxIterations(group.MaxIterations), durationValue(group.Timeout), group.FailFast, err
 	default:
-		return "", nil, nil, 0, 0, false, fmt.Errorf("control declaration is missing")
+		return "", nil, nil, 0, 0, 0, false, fmt.Errorf("control declaration is missing")
 	}
 }
 
-func expandControl(workflowStep workflow.Step, environment map[string]any) ([]controlpkg.Iteration, error) {
+func expandControl(ctx context.Context, workflowStep workflow.Step, environment map[string]any, maxIterations int) ([]controlpkg.Iteration, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if workflowStep.Foreach != nil {
 		items, err := controlpkg.EvaluateList(workflowStep.Foreach.Items, environment)
 		if err != nil {
 			return nil, fmt.Errorf("items: %w", err)
 		}
-		return controlpkg.Foreach(items)
+		return controlpkg.ForeachContext(ctx, items, maxIterations)
 	}
 	axes := make([]controlpkg.Axis, 0, len(workflowStep.Matrix.Axes))
 	for _, declaration := range workflowStep.Matrix.Axes {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		values := declaration.Values
 		if declaration.Expression != "" {
 			var err error
@@ -223,10 +239,20 @@ func expandControl(workflowStep workflow.Step, environment map[string]any) ([]co
 			if err != nil {
 				return nil, fmt.Errorf("axis %q: %w", declaration.Name, err)
 			}
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 		}
 		axes = append(axes, controlpkg.Axis{Name: declaration.Name, Values: values})
 	}
-	return controlpkg.Matrix(axes)
+	return controlpkg.MatrixContext(ctx, axes, maxIterations)
+}
+
+func effectiveMaxIterations(value int) int {
+	if value == 0 {
+		return controlpkg.DefaultMaxIterations
+	}
+	return value
 }
 
 func validationBindings(workflowStep workflow.Step) map[string]any {

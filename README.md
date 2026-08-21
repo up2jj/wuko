@@ -39,6 +39,7 @@ commands or inline shell, and launch an external agent such as Codex.
   - [Foreach and matrix controls](#foreach-and-matrix-controls)
   - [Waits and polling](#waits-and-polling)
   - [Retries and execution timeouts](#retries-and-execution-timeouts)
+  - [Graceful shutdown](#graceful-shutdown)
   - [Execution progress and statistics](#execution-progress-and-statistics)
   - [Debug tracing](#debug-tracing)
   - [Remote composite actions](#remote-composite-actions)
@@ -459,6 +460,8 @@ after one child exhausts its retries, running siblings are canceled and queued c
 started. Set it to `false` to let every child finish and report all failures. The optional group
 `timeout` covers the complete group, including time waiting for a concurrency slot, attempts, and
 retry delays. The workflow's cancellation and the earliest group or child deadline always win.
+Deadlines cancel active children and then wait for their cleanup, so elapsed wall-clock time may
+exceed the configured timeout.
 
 Every child evaluates its `if`, templates, and action inputs against the same state snapshot taken
 before the group starts. A child cannot consume a sibling's outputs or variables, regardless of
@@ -582,6 +585,26 @@ Process-based steps and Lua's `wuko.env` receive `WUKO_STEP_ATTEMPT`,
 workflow or step environment values. Retrying a composite `uses` step replays the entire action,
 including previously successful inner steps; prefer retry policies on individual inner steps when
 the action can define them.
+
+### Graceful shutdown
+
+On the first `SIGINT` or `SIGTERM`, Wuko cancels the workflow, stops admitting queued concurrent
+children and foreach or matrix iterations, and waits for active work to return. A second signal
+forces termination immediately. Wuko also forces termination if graceful shutdown has not
+completed within 10 seconds; forced termination exits with status 130.
+
+Step runners must honor context cancellation. Shell and agent commands receive `SIGTERM` as a
+process group and are escalated to `SIGKILL` after two seconds. Other in-process runners cannot be
+forcibly stopped independently, which is why the process-wide shutdown budget exists.
+
+Step, group, and control timeouts are cancellation deadlines rather than strict wall-clock caps:
+cleanup and subprocess termination happen after the deadline and may extend observed duration.
+Completed external effects are never rolled back. When a concurrent group, foreach, or matrix is
+canceled or fails, its aggregate outputs are not committed; progress output reports how many
+children or iterations started, succeeded, and were not run so partial effects can be identified.
+
+See [Graceful shutdown](docs/graceful-shutdown.md) for signal escalation, workflow-control
+behavior, timeout boundaries, subprocess termination, and guidance for custom runners.
 
 ### Execution progress and statistics
 

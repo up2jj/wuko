@@ -2,6 +2,7 @@ package tui
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -89,6 +90,19 @@ func TestProgressRendersConcurrentGroup(t *testing.T) {
 		Kind: engine.ConcurrentFinished, Status: engine.StatusSucceeded, Duration: 2 * time.Second,
 	})
 	want := "⇉ Concurrent · 3 steps · max 2 concurrent · timeout 5m0s · wait for all\n✓ Concurrent succeeded after 2s\n"
+	if output.String() != want {
+		t.Fatalf("output = %q, want %q", output.String(), want)
+	}
+}
+
+func TestProgressRendersCanceledWorkSummary(t *testing.T) {
+	var output bytes.Buffer
+	progress := NewProgress(&output, false)
+	progress.Report(engine.ProgressEvent{
+		Kind: engine.ConcurrentFinished, Status: engine.StatusCanceled, Duration: 2 * time.Second,
+		GroupSize: 5, Started: 2, Succeeded: 1, Error: context.Canceled,
+	})
+	want := "■ Concurrent canceled after 2s · 2/5 steps started · 1 succeeded · 3 not run: context canceled\n"
 	if output.String() != want {
 		t.Fatalf("output = %q, want %q", output.String(), want)
 	}

@@ -178,7 +178,7 @@ func TestDryRunPrintsUnexpandedControls(t *testing.T) {
 	if _, err := New(registry).Run(t.Context(), definition, Options{DryRun: true, Stdout: &output, Stderr: io.Discard}); err != nil {
 		t.Fatal(err)
 	}
-	if want := "1. loop (foreach vars.missing) [max 1, fail fast]\n   1.1 run (capture)\n"; output.String() != want {
+	if want := "1. loop (foreach vars.missing) [max 1, max 10000 iterations, fail fast]\n   1.1 run (capture)\n"; output.String() != want {
 		t.Fatalf("output = %q, want %q", output.String(), want)
 	}
 }

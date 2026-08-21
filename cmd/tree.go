@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	controlpkg "github.com/up2jj/wuko/control"
 	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/workflow"
 )
@@ -120,7 +121,7 @@ func writeTreeSteps(writer io.Writer, steps []workflow.Step, prefix string) erro
 		}
 		if workflowStep.Foreach != nil {
 			condition := treeCondition(workflowStep)
-			if _, err := fmt.Fprintf(writer, "%s%s%s (foreach %s)%s%s\n", prefix, branch, workflowStep.ID, workflowStep.Foreach.Items, treeFanoutPolicy(workflowStep.Foreach.MaxConcurrency, workflowStep.Foreach.Timeout, workflowStep.Foreach.FailFast), condition); err != nil {
+			if _, err := fmt.Fprintf(writer, "%s%s%s (foreach %s)%s%s\n", prefix, branch, workflowStep.ID, workflowStep.Foreach.Items, treeFanoutPolicy(workflowStep.Foreach.MaxConcurrency, workflowStep.Foreach.MaxIterations, workflowStep.Foreach.Timeout, workflowStep.Foreach.FailFast), condition); err != nil {
 				return err
 			}
 			if err := writeTreeSteps(writer, workflowStep.Foreach.Steps, childPrefix); err != nil {
@@ -130,7 +131,7 @@ func writeTreeSteps(writer io.Writer, steps []workflow.Step, prefix string) erro
 		}
 		if workflowStep.Matrix != nil {
 			condition := treeCondition(workflowStep)
-			if _, err := fmt.Fprintf(writer, "%s%s%s (matrix %s)%s%s\n", prefix, branch, workflowStep.ID, treeMatrixAxes(workflowStep.Matrix.Axes), treeFanoutPolicy(workflowStep.Matrix.MaxConcurrency, workflowStep.Matrix.Timeout, workflowStep.Matrix.FailFast), condition); err != nil {
+			if _, err := fmt.Fprintf(writer, "%s%s%s (matrix %s)%s%s\n", prefix, branch, workflowStep.ID, treeMatrixAxes(workflowStep.Matrix.Axes), treeFanoutPolicy(workflowStep.Matrix.MaxConcurrency, workflowStep.Matrix.MaxIterations, workflowStep.Matrix.Timeout, workflowStep.Matrix.FailFast), condition); err != nil {
 				return err
 			}
 			if err := writeTreeSteps(writer, workflowStep.Matrix.Steps, childPrefix); err != nil {
@@ -173,8 +174,11 @@ func treeMatrixAxes(axes workflow.MatrixAxes) string {
 	return strings.Join(names, " × ")
 }
 
-func treeFanoutPolicy(maxConcurrency int, timeout *workflow.Duration, failFast bool) string {
-	parts := []string{fmt.Sprintf("max %d", maxConcurrency)}
+func treeFanoutPolicy(maxConcurrency, maxIterations int, timeout *workflow.Duration, failFast bool) string {
+	if maxIterations == 0 {
+		maxIterations = controlpkg.DefaultMaxIterations
+	}
+	parts := []string{fmt.Sprintf("max %d", maxConcurrency), fmt.Sprintf("max %d iterations", maxIterations)}
 	if timeout != nil {
 		parts = append(parts, "timeout "+timeout.String())
 	}

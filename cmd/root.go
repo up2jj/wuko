@@ -46,6 +46,12 @@ var (
 	date    = "unknown"
 )
 
+const shutdownGracePeriod = 10 * time.Second
+
+// ErrForcedShutdown means graceful cancellation exceeded its budget or a second signal requested
+// immediate termination.
+var ErrForcedShutdown = errors.New("forced shutdown")
+
 const noWorkflowsHelp = `No workflows found.
 
 Create .wuko/workflows/hello.yaml:
@@ -88,9 +94,37 @@ type dependencies struct {
 }
 
 func Execute() error {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	return NewRootCmd().ExecuteContext(ctx)
+	signals := make(chan os.Signal, 2)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(signals)
+	return executeWithSignals(signals, shutdownGracePeriod, func(ctx context.Context) error {
+		return NewRootCmd().ExecuteContext(ctx)
+	})
+}
+
+func executeWithSignals(signals <-chan os.Signal, gracePeriod time.Duration, execute func(context.Context) error) error {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- execute(ctx) }()
+
+	select {
+	case err := <-done:
+		return err
+	case <-signals:
+		cancel()
+	}
+
+	timer := time.NewTimer(gracePeriod)
+	defer timer.Stop()
+	select {
+	case err := <-done:
+		return err
+	case received := <-signals:
+		return fmt.Errorf("%w after receiving %s during graceful shutdown", ErrForcedShutdown, received)
+	case <-timer.C:
+		return fmt.Errorf("%w after graceful shutdown exceeded %s", ErrForcedShutdown, gracePeriod)
+	}
 }
 
 func NewRootCmd() *cobra.Command {

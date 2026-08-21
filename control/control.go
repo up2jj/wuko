@@ -14,6 +14,13 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+const (
+	// DefaultMaxIterations bounds fan-out expansion when a workflow does not choose a lower limit.
+	DefaultMaxIterations = 10_000
+	// MaxIterations is the largest fan-out expansion a workflow may explicitly request.
+	MaxIterations = 1_000_000
+)
+
 // Policy controls scheduling of independent iterations.
 type Policy struct {
 	MaxConcurrency int
@@ -46,14 +53,32 @@ type Axis struct {
 
 // Foreach expands an ordered collection into foreach bindings.
 func Foreach(items any) ([]Iteration, error) {
+	return ForeachContext(context.Background(), items, DefaultMaxIterations)
+}
+
+// ForeachContext expands an ordered collection up to maxIterations while honoring cancellation.
+func ForeachContext(ctx context.Context, items any, maxIterations int) ([]Iteration, error) {
+	if err := validateMaxIterations(maxIterations); err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	values, ok := asSlice(items)
 	if !ok {
 		return nil, fmt.Errorf("items returned %T, want list or array", items)
 	}
+	if len(values) > maxIterations {
+		return nil, fmt.Errorf("foreach iteration count %d exceeds max_iterations %d", len(values), maxIterations)
+	}
 	iterations := make([]Iteration, len(values))
 	for i, item := range values {
+		cloned, err := cloneContext(ctx, item)
+		if err != nil {
+			return nil, err
+		}
 		iterations[i] = Iteration{Index: i, Bindings: map[string]any{
-			"foreach": map[string]any{"index": i, "item": clone(item)},
+			"foreach": map[string]any{"index": i, "item": cloned},
 		}}
 	}
 	return iterations, nil
@@ -61,10 +86,20 @@ func Foreach(items any) ([]Iteration, error) {
 
 // Matrix expands ordered axes into a Cartesian product. The rightmost axis changes fastest.
 func Matrix(axes []Axis) ([]Iteration, error) {
+	return MatrixContext(context.Background(), axes, DefaultMaxIterations)
+}
+
+// MatrixContext expands an ordered Cartesian product up to maxIterations while honoring cancellation.
+func MatrixContext(ctx context.Context, axes []Axis, maxIterations int) ([]Iteration, error) {
+	if err := validateMaxIterations(maxIterations); err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if len(axes) == 0 {
 		return nil, fmt.Errorf("matrix requires at least one axis")
 	}
-	count := 1
 	seen := make(map[string]struct{}, len(axes))
 	empty := false
 	for _, axis := range axes {
@@ -78,33 +113,57 @@ func Matrix(axes []Axis) ([]Iteration, error) {
 			return nil, fmt.Errorf("duplicate matrix axis %q", axis.Name)
 		}
 		seen[axis.Name] = struct{}{}
-		if !empty && len(axis.Values) > int(^uint(0)>>1)/count {
-			return nil, fmt.Errorf("matrix combination count exceeds platform integer capacity")
-		}
-		if !empty {
-			count *= len(axis.Values)
-		}
 	}
 	if empty {
 		return []Iteration{}, nil
 	}
+	count := 1
+	for _, axis := range axes {
+		if len(axis.Values) > maxIterations/count {
+			return nil, fmt.Errorf("matrix combination count exceeds max_iterations %d", maxIterations)
+		}
+		count *= len(axis.Values)
+	}
 	iterations := make([]Iteration, 0, count)
-	var expand func(int, map[string]any)
-	expand = func(axisIndex int, binding map[string]any) {
+	var expand func(int, map[string]any) error
+	expand = func(axisIndex int, binding map[string]any) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if axisIndex == len(axes) {
 			index := len(iterations)
-			iterations = append(iterations, Iteration{Index: index, Bindings: map[string]any{"matrix": cloneMap(binding)}})
-			return
+			cloned, err := cloneMapContext(ctx, binding)
+			if err != nil {
+				return err
+			}
+			iterations = append(iterations, Iteration{Index: index, Bindings: map[string]any{"matrix": cloned}})
+			return nil
 		}
 		axis := axes[axisIndex]
 		for _, value := range axis.Values {
-			binding[axis.Name] = clone(value)
-			expand(axisIndex+1, binding)
+			cloned, err := cloneContext(ctx, value)
+			if err != nil {
+				return err
+			}
+			binding[axis.Name] = cloned
+			if err := expand(axisIndex+1, binding); err != nil {
+				return err
+			}
 		}
 		delete(binding, axis.Name)
+		return nil
 	}
-	expand(0, make(map[string]any, len(axes)))
+	if err := expand(0, make(map[string]any, len(axes))); err != nil {
+		return nil, err
+	}
 	return iterations, nil
+}
+
+func validateMaxIterations(maxIterations int) error {
+	if maxIterations < 1 || maxIterations > MaxIterations {
+		return fmt.Errorf("max_iterations must be between 1 and %d", MaxIterations)
+	}
+	return nil
 }
 
 // ValidateExpression compiles a collection expression without requiring runtime roots.
@@ -198,6 +257,9 @@ func Run[T any](ctx context.Context, iterations []Iteration, policy Policy, obse
 		observer(event)
 	}
 	runOne := func(iterationCtx context.Context, iteration Iteration) error {
+		if err := iterationCtx.Err(); err != nil {
+			return err
+		}
 		started := time.Now()
 		outcomes[iteration.Index] = Outcome[T]{Iteration: iteration, Started: true, StartedAt: started}
 		notify(Event{Kind: IterationStarted, Index: iteration.Index, Started: started})
@@ -297,24 +359,45 @@ func asSlice(value any) ([]any, bool) {
 }
 
 func cloneMap(source map[string]any) map[string]any {
-	result := make(map[string]any, len(source))
-	for key, value := range source {
-		result[key] = clone(value)
-	}
+	result, _ := cloneMapContext(context.Background(), source)
 	return result
 }
 
 func clone(value any) any {
+	result, _ := cloneContext(context.Background(), value)
+	return result
+}
+
+func cloneMapContext(ctx context.Context, source map[string]any) (map[string]any, error) {
+	result := make(map[string]any, len(source))
+	for key, value := range source {
+		cloned, err := cloneContext(ctx, value)
+		if err != nil {
+			return nil, err
+		}
+		result[key] = cloned
+	}
+	return result, nil
+}
+
+func cloneContext(ctx context.Context, value any) (any, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	switch typed := value.(type) {
 	case map[string]any:
-		return cloneMap(typed)
+		return cloneMapContext(ctx, typed)
 	case []any:
 		result := make([]any, len(typed))
 		for i, item := range typed {
-			result[i] = clone(item)
+			cloned, err := cloneContext(ctx, item)
+			if err != nil {
+				return nil, err
+			}
+			result[i] = cloned
 		}
-		return result
+		return result, nil
 	default:
-		return value
+		return value, nil
 	}
 }

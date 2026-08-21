@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	controlpkg "github.com/up2jj/wuko/control"
 	"gopkg.in/yaml.v3"
 )
 
@@ -12,6 +13,7 @@ type ForeachGroup struct {
 	Items          string    `yaml:"items"`
 	Steps          []Step    `yaml:"steps"`
 	MaxConcurrency int       `yaml:"max_concurrency,omitempty"`
+	MaxIterations  int       `yaml:"max_iterations,omitempty"`
 	Timeout        *Duration `yaml:"timeout,omitempty"`
 	FailFast       bool      `yaml:"fail_fast"`
 }
@@ -21,14 +23,17 @@ func (group *ForeachGroup) UnmarshalYAML(node *yaml.Node) error {
 		return fmt.Errorf("foreach must be an object")
 	}
 	if err := rejectUnknownFields(node, "foreach", map[string]bool{
-		"items": true, "steps": true, "max_concurrency": true, "timeout": true, "fail_fast": true,
+		"items": true, "steps": true, "max_concurrency": true, "max_iterations": true, "timeout": true, "fail_fast": true,
 	}); err != nil {
 		return err
 	}
 	type plain ForeachGroup
-	decoded := plain{MaxConcurrency: 1, FailFast: true}
+	decoded := plain{MaxConcurrency: 1, MaxIterations: controlpkg.DefaultMaxIterations, FailFast: true}
 	if err := node.Decode(&decoded); err != nil {
 		return err
+	}
+	if decoded.MaxIterations == 0 && hasMappingField(node, "max_iterations") {
+		return fmt.Errorf("foreach max_iterations must be between 1 and %d", controlpkg.MaxIterations)
 	}
 	*group = ForeachGroup(decoded)
 	return nil
@@ -84,6 +89,7 @@ type MatrixGroup struct {
 	Axes           MatrixAxes `yaml:"axes"`
 	Steps          []Step     `yaml:"steps"`
 	MaxConcurrency int        `yaml:"max_concurrency,omitempty"`
+	MaxIterations  int        `yaml:"max_iterations,omitempty"`
 	Timeout        *Duration  `yaml:"timeout,omitempty"`
 	FailFast       bool       `yaml:"fail_fast"`
 }
@@ -93,14 +99,17 @@ func (group *MatrixGroup) UnmarshalYAML(node *yaml.Node) error {
 		return fmt.Errorf("matrix must be an object")
 	}
 	if err := rejectUnknownFields(node, "matrix", map[string]bool{
-		"axes": true, "steps": true, "max_concurrency": true, "timeout": true, "fail_fast": true,
+		"axes": true, "steps": true, "max_concurrency": true, "max_iterations": true, "timeout": true, "fail_fast": true,
 	}); err != nil {
 		return err
 	}
 	type plain MatrixGroup
-	decoded := plain{MaxConcurrency: 1, FailFast: true}
+	decoded := plain{MaxConcurrency: 1, MaxIterations: controlpkg.DefaultMaxIterations, FailFast: true}
 	if err := node.Decode(&decoded); err != nil {
 		return err
+	}
+	if decoded.MaxIterations == 0 && hasMappingField(node, "max_iterations") {
+		return fmt.Errorf("matrix max_iterations must be between 1 and %d", controlpkg.MaxIterations)
 	}
 	*group = MatrixGroup(decoded)
 	return nil
@@ -115,12 +124,27 @@ func rejectUnknownFields(node *yaml.Node, kind string, allowed map[string]bool) 
 	return nil
 }
 
-func validateFanoutPolicy(kind string, childCount, maxConcurrency int, timeout *Duration) error {
+func hasMappingField(node *yaml.Node, name string) bool {
+	for i := 0; i < len(node.Content); i += 2 {
+		if node.Content[i].Value == name {
+			return true
+		}
+	}
+	return false
+}
+
+func validateFanoutPolicy(kind string, childCount, maxConcurrency, maxIterations int, timeout *Duration) error {
 	if childCount == 0 {
 		return fmt.Errorf("%s group must contain at least one step", kind)
 	}
 	if maxConcurrency < 1 || maxConcurrency > 100 {
 		return fmt.Errorf("%s max_concurrency must be between 1 and 100", kind)
+	}
+	if maxIterations == 0 {
+		maxIterations = controlpkg.DefaultMaxIterations
+	}
+	if maxIterations < 1 || maxIterations > controlpkg.MaxIterations {
+		return fmt.Errorf("%s max_iterations must be between 1 and %d", kind, controlpkg.MaxIterations)
 	}
 	if timeout != nil && timeout.Value() <= 0 {
 		return fmt.Errorf("%s timeout must be greater than zero", kind)
@@ -133,7 +157,7 @@ func (group ForeachGroup) Validate() error {
 	if strings.TrimSpace(group.Items) == "" {
 		return fmt.Errorf("foreach items must be a non-empty expression")
 	}
-	return validateFanoutPolicy("foreach", len(group.Steps), group.MaxConcurrency, group.Timeout)
+	return validateFanoutPolicy("foreach", len(group.Steps), group.MaxConcurrency, group.MaxIterations, group.Timeout)
 }
 
 // Validate checks the matrix declaration and execution limits.
@@ -141,5 +165,5 @@ func (group MatrixGroup) Validate() error {
 	if len(group.Axes) == 0 {
 		return fmt.Errorf("matrix requires at least one axis")
 	}
-	return validateFanoutPolicy("matrix", len(group.Steps), group.MaxConcurrency, group.Timeout)
+	return validateFanoutPolicy("matrix", len(group.Steps), group.MaxConcurrency, group.MaxIterations, group.Timeout)
 }

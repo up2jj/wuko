@@ -15,6 +15,7 @@ steps:
   - id: deploy
     foreach:
       items: vars.targets
+      max_iterations: 20
       steps:
         - {id: run, type: shell}
   - id: checks
@@ -33,11 +34,11 @@ steps:
 		t.Fatal(err)
 	}
 	foreach := definition.Steps[0].Foreach
-	if foreach == nil || foreach.MaxConcurrency != 1 || !foreach.FailFast || foreach.Items != "vars.targets" {
+	if foreach == nil || foreach.MaxConcurrency != 1 || foreach.MaxIterations != 20 || !foreach.FailFast || foreach.Items != "vars.targets" {
 		t.Fatalf("foreach = %#v", foreach)
 	}
 	matrix := definition.Steps[1].Matrix
-	if matrix == nil || matrix.MaxConcurrency != 2 || matrix.FailFast || matrix.Timeout.Value() != 5*time.Minute {
+	if matrix == nil || matrix.MaxConcurrency != 2 || matrix.MaxIterations != 10_000 || matrix.FailFast || matrix.Timeout.Value() != 5*time.Minute {
 		t.Fatalf("matrix = %#v", matrix)
 	}
 	if len(matrix.Axes) != 2 || matrix.Axes[0].Name != "os" || matrix.Axes[1].Expression != "vars.versions" {
@@ -53,6 +54,8 @@ func TestControlValidationAndScopedIDs(t *testing.T) {
 	}{
 		{name: "missing items", body: "  - id: loop\n    foreach:\n      steps: [{id: run, type: shell}]\n", want: "items"},
 		{name: "no axes", body: "  - id: loop\n    matrix:\n      axes: {}\n      steps: [{id: run, type: shell}]\n", want: "at least one axis"},
+		{name: "zero max iterations", body: "  - id: loop\n    foreach:\n      items: vars.items\n      max_iterations: 0\n      steps: [{id: run, type: shell}]\n", want: "max_iterations"},
+		{name: "excessive max iterations", body: "  - id: loop\n    matrix:\n      axes: {os: [linux]}\n      max_iterations: 1000001\n      steps: [{id: run, type: shell}]\n", want: "max_iterations"},
 		{name: "filter unsupported", body: "  - id: loop\n    matrix:\n      axes: {os: [linux]}\n      exclude: []\n      steps: [{id: run, type: shell}]\n", want: "field exclude"},
 		{name: "nested fanout", body: "  - id: outer\n    foreach:\n      items: vars.items\n      steps:\n        - id: inner\n          matrix:\n            axes: {os: [linux]}\n            steps: [{id: run, type: shell}]\n", want: "nested matrix"},
 		{name: "inside concurrent", body: "  - concurrent:\n      steps:\n        - id: loop\n          foreach:\n            items: vars.items\n            steps: [{id: run, type: shell}]\n        - {id: other, type: shell}\n", want: "nested foreach"},

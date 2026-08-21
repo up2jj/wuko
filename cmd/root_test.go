@@ -9,13 +9,85 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	"github.com/up2jj/wuko/step"
 	keyvaluestep "github.com/up2jj/wuko/steps/key_value"
 	luastep "github.com/up2jj/wuko/steps/lua"
 	"github.com/up2jj/wuko/steps/shell"
 )
+
+func TestExecuteWithSignalsCancelsGracefully(t *testing.T) {
+	signals := make(chan os.Signal, 1)
+	started := make(chan struct{})
+	go func() {
+		<-started
+		signals <- syscall.SIGINT
+	}()
+
+	err := executeWithSignals(signals, time.Minute, func(ctx context.Context) error {
+		close(started)
+		<-ctx.Done()
+		return ctx.Err()
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("executeWithSignals() error = %v, want context.Canceled", err)
+	}
+}
+
+func TestExecuteWithSignalsForcesSecondSignal(t *testing.T) {
+	signals := make(chan os.Signal, 2)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	finished := make(chan struct{})
+	go func() {
+		<-started
+		signals <- syscall.SIGINT
+		signals <- syscall.SIGINT
+	}()
+
+	err := executeWithSignals(signals, time.Minute, func(ctx context.Context) error {
+		defer close(finished)
+		close(started)
+		<-ctx.Done()
+		<-release
+		return ctx.Err()
+	})
+	if !errors.Is(err, ErrForcedShutdown) {
+		t.Fatalf("executeWithSignals() error = %v, want ErrForcedShutdown", err)
+	}
+	close(release)
+	<-finished
+}
+
+func TestExecuteWithSignalsForcesExpiredGracePeriod(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		signals := make(chan os.Signal, 1)
+		started := make(chan struct{})
+		release := make(chan struct{})
+		finished := make(chan struct{})
+		go func() {
+			<-started
+			signals <- syscall.SIGTERM
+		}()
+
+		err := executeWithSignals(signals, time.Second, func(ctx context.Context) error {
+			defer close(finished)
+			close(started)
+			<-ctx.Done()
+			<-release
+			return ctx.Err()
+		})
+		if !errors.Is(err, ErrForcedShutdown) || !strings.Contains(err.Error(), "exceeded 1s") {
+			t.Fatalf("executeWithSignals() error = %v, want expired ErrForcedShutdown", err)
+		}
+		close(release)
+		<-finished
+	})
+}
 
 func TestRunCommandInMemory(t *testing.T) {
 	root := t.TempDir()

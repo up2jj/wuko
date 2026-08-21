@@ -41,9 +41,20 @@ func (e *Engine) runConcurrent(ctx context.Context, definition *workflow.Definit
 
 	if concurrent.FailFast {
 		group, runCtx := errgroup.WithContext(groupCtx)
-		group.SetLimit(min(concurrent.MaxConcurrency, len(concurrent.Steps)))
+		slots := make(chan struct{}, min(concurrent.MaxConcurrency, len(concurrent.Steps)))
+	failFastLoop:
 		for i, workflowStep := range concurrent.Steps {
+			select {
+			case slots <- struct{}{}:
+				if runCtx.Err() != nil {
+					<-slots
+					break failFastLoop
+				}
+			case <-runCtx.Done():
+				break failFastLoop
+			}
 			group.Go(func() error {
+				defer func() { <-slots }()
 				if runCtx.Err() != nil {
 					return nil
 				}
@@ -55,9 +66,20 @@ func (e *Engine) runConcurrent(ctx context.Context, definition *workflow.Definit
 		_ = group.Wait()
 	} else {
 		var group errgroup.Group
-		group.SetLimit(min(concurrent.MaxConcurrency, len(concurrent.Steps)))
+		slots := make(chan struct{}, min(concurrent.MaxConcurrency, len(concurrent.Steps)))
+	collectLoop:
 		for i, workflowStep := range concurrent.Steps {
+			select {
+			case slots <- struct{}{}:
+				if groupCtx.Err() != nil {
+					<-slots
+					break collectLoop
+				}
+			case <-groupCtx.Done():
+				break collectLoop
+			}
 			group.Go(func() error {
+				defer func() { <-slots }()
 				if groupCtx.Err() != nil {
 					return nil
 				}
@@ -79,11 +101,13 @@ func (e *Engine) runConcurrent(ctx context.Context, definition *workflow.Definit
 		}
 		trace(options, diagnostic.Event{Phase: diagnostic.PhaseCommit, Status: status, WorkflowName: definition.Name, Message: "concurrent results", Error: groupErr})
 	}
+	started, succeeded := concurrentOutcomeCounts(outcomes)
 	finishedAt := time.Now()
 	report(options, ProgressEvent{
 		Kind: ConcurrentFinished, Status: statusFromError(groupErr), Time: finishedAt,
 		WorkflowName: definition.Name, Depth: options.depth, Total: total,
 		GroupSize: len(concurrent.Steps), MaxConcurrency: concurrent.MaxConcurrency,
+		Started: started, Succeeded: succeeded,
 		Timeout: concurrentTimeout(concurrent), FailFast: concurrent.FailFast,
 		Duration: finishedAt.Sub(startedAt), Error: groupErr,
 	})
@@ -96,6 +120,19 @@ func (e *Engine) runConcurrent(ctx context.Context, definition *workflow.Definit
 		return outcomes, fmt.Errorf("workflow %q concurrent group: %w", definition.Name, groupErr)
 	}
 	return outcomes, nil
+}
+
+func concurrentOutcomeCounts(outcomes []stepOutcome) (started, succeeded int) {
+	for _, outcome := range outcomes {
+		if !outcome.started {
+			continue
+		}
+		started++
+		if outcome.err == nil && !outcome.skipped {
+			succeeded++
+		}
+	}
+	return started, succeeded
 }
 
 func concurrentExecutionError(parent, groupCtx context.Context, concurrent *workflow.ConcurrentGroup, outcomes []stepOutcome) error {

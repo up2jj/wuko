@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 
@@ -115,12 +116,50 @@ func TestRunControlFailureDoesNotCommitAggregate(t *testing.T) {
 			Steps: []workflow.Step{{ID: "run", Type: "fail", With: map[string]any{}}},
 		}}},
 	}
-	state, err := New(registry).Run(t.Context(), definition, Options{Stdout: io.Discard, Stderr: io.Discard})
+	var finished ProgressEvent
+	state, err := New(registry).Run(t.Context(), definition, Options{
+		Stdout: io.Discard, Stderr: io.Discard,
+		Progress: func(event ProgressEvent) {
+			if event.Kind == ControlFinished {
+				finished = event
+			}
+		},
+	})
 	if err == nil {
 		t.Fatal("expected failure")
 	}
 	if state != nil {
 		t.Fatalf("failed run returned state %#v", state)
+	}
+	if finished.Started != 3 || finished.Succeeded != 2 {
+		t.Fatalf("control progress = %#v, want 3 started and 2 succeeded", finished)
+	}
+}
+
+func TestRunControlRejectsExpansionAboveWorkflowLimit(t *testing.T) {
+	registry := step.NewRegistry()
+	runs := 0
+	if err := registry.Register("count", func(map[string]any) (step.Runner, error) {
+		return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+			runs++
+			return step.Result{}, nil
+		}), nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	definition := &workflow.Definition{
+		Version: 1, Name: "bounded", Dir: t.TempDir(), Vars: map[string]any{"items": []any{"one", "two", "three"}},
+		Steps: []workflow.Step{{ID: "loop", Foreach: &workflow.ForeachGroup{
+			Items: "vars.items", MaxConcurrency: 1, MaxIterations: 2, FailFast: true,
+			Steps: []workflow.Step{{ID: "run", Type: "count", With: map[string]any{}}},
+		}}},
+	}
+	_, err := New(registry).Run(t.Context(), definition, Options{Stdout: io.Discard, Stderr: io.Discard})
+	if err == nil || !strings.Contains(err.Error(), "exceeds max_iterations 2") {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if runs != 0 {
+		t.Fatalf("runner executed %d times before expansion rejection", runs)
 	}
 }
 

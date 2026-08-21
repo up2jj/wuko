@@ -110,6 +110,8 @@ type ProgressEvent struct {
 	Attempt        int
 	MaxAttempts    int
 	GroupSize      int
+	Started        int
+	Succeeded      int
 	ControlKind    string
 	Iteration      int
 	Iterations     int

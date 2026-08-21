@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -51,6 +52,30 @@ func TestMatrixExpansionOrder(t *testing.T) {
 	}
 	if _, err := Matrix([]Axis{{Name: "os", Values: []any{"linux"}}, {Name: "os", Values: []any{"darwin"}}}); err == nil {
 		t.Fatal("expected duplicate axis error")
+	}
+}
+
+func TestExpansionLimitsAndCancellation(t *testing.T) {
+	items := make([]any, DefaultMaxIterations+1)
+	if _, err := Foreach(items); err == nil || !strings.Contains(err.Error(), "exceeds max_iterations 10000") {
+		t.Fatalf("Foreach() error = %v", err)
+	}
+
+	axes := []Axis{
+		{Name: "left", Values: make([]any, 101)},
+		{Name: "right", Values: make([]any, 100)},
+	}
+	if _, err := Matrix(axes); err == nil || !strings.Contains(err.Error(), "exceeds max_iterations 10000") {
+		t.Fatalf("Matrix() error = %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := ForeachContext(ctx, []any{"item"}, 1); !errors.Is(err, context.Canceled) {
+		t.Fatalf("ForeachContext() error = %v, want context.Canceled", err)
+	}
+	if _, err := MatrixContext(ctx, []Axis{{Name: "axis", Values: []any{"value"}}}, 1); !errors.Is(err, context.Canceled) {
+		t.Fatalf("MatrixContext() error = %v, want context.Canceled", err)
 	}
 }
 

@@ -91,6 +91,7 @@ steps:
         os: [linux, darwin]
         go_version: vars.go_versions
       max_concurrency: 2
+      max_iterations: 100
       steps:
         - id: test
           type: shell
@@ -136,6 +137,7 @@ Both controls accept the same policies:
   foreach:
     items: vars.items
     max_concurrency: 4
+    max_iterations: 1000
     timeout: 15m
     fail_fast: false
     steps:
@@ -146,16 +148,30 @@ Both controls accept the same policies:
 
 - `max_concurrency` defaults to `1` and must be from 1 through 100. One preserves item order for
   external effects; larger values allow iterations to overlap.
+- `max_iterations` defaults to `10,000`, may be lowered for a workflow-specific safety bound, and
+  cannot exceed the absolute limit of `1,000,000`. Expansion fails before iteration state is
+  allocated when the foreach list or Cartesian product exceeds the configured limit.
 - `fail_fast` defaults to `true`. After an iteration fails, Wuko cancels running siblings and does
   not start queued work where possible. With `false`, Wuko runs every iteration and reports all
   failures in expansion order.
-- `timeout` is optional and covers queueing, child steps, retries, polling delays, and nested
-  concurrent groups for the complete parent.
+- `timeout` is optional and begins after collection expressions and expansion complete. It covers
+  queueing, child steps, retries, polling delays, and nested concurrent groups during the execution
+  phase. It cancels active work at the deadline and then waits for cleanup, so total wall-clock
+  duration can be longer.
 - Each child retains its own condition, timeout, retry, polling, and action behavior.
 
 The parent result is committed only after every iteration succeeds. A failure exposes no partial
 `steps.<parent-id>` aggregate. Commands, files, HTTP requests, containers, agents, and other
 external effects completed before a failure are not rolled back.
+
+Cancellation and fail-fast scheduling stop admitting queued iterations and wait for all active
+iterations to return. Terminal progress reports how many iterations started, succeeded, and were
+not run. Expansion itself checks cancellation while cloning foreach values and constructing matrix
+bindings. Expr does not accept a context during expression evaluation, so cancellation is checked
+immediately before and after each collection expression rather than during its evaluation.
+
+See [Graceful shutdown](graceful-shutdown.md) for signal escalation, nested-control propagation,
+timeout boundaries, atomic result commits, and partial external effects.
 
 Parallel controls are non-interactive so iterations cannot compete for terminal input. Sequential
 controls retain normal interactive behavior. Pre-supplied input, password, and choice variables
@@ -206,8 +222,8 @@ each body once. It does not evaluate runtime collections or predict their expans
 - Matrix is Cartesian-only. GitHub Actions-style `include` and `exclude` rules are not supported.
 - Fan-out controls cannot be nested.
 - Action sources are static with respect to iteration bindings.
-- There is no fixed expansion cap. A large list or Cartesian product can consume substantial time
-  and memory; bound it before execution and use `timeout` and `max_concurrency` deliberately.
+- Expansion is capped by `max_iterations`; choose a lower workflow-specific value when the default
+  of 10,000 is larger than expected.
 - Parallel iterations cannot prompt interactively, and their stdout or stderr may interleave at
   write boundaries.
 - Failed controls do not expose partial aggregate results.

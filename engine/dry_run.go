@@ -23,7 +23,7 @@ func writeDryRun(writer io.Writer, steps []workflow.Step, indent string, parent 
 			continue
 		}
 		if workflowStep.Foreach != nil {
-			if _, err := fmt.Fprintf(writer, "%s%s %s (foreach %s)%s%s\n", indent, index, workflowStep.ID, workflowStep.Foreach.Items, fanoutPolicySuffix(workflowStep.Foreach.MaxConcurrency, workflowStep.Foreach.Timeout, workflowStep.Foreach.FailFast), dryRunCondition(workflowStep)); err != nil {
+			if _, err := fmt.Fprintf(writer, "%s%s %s (foreach %s)%s%s\n", indent, index, workflowStep.ID, workflowStep.Foreach.Items, fanoutPolicySuffix(workflowStep.Foreach.MaxConcurrency, workflowStep.Foreach.MaxIterations, workflowStep.Foreach.Timeout, workflowStep.Foreach.FailFast), dryRunCondition(workflowStep)); err != nil {
 				return err
 			}
 			if err := writeDryRun(writer, workflowStep.Foreach.Steps, indent+"   ", path); err != nil {
@@ -32,7 +32,7 @@ func writeDryRun(writer io.Writer, steps []workflow.Step, indent string, parent 
 			continue
 		}
 		if workflowStep.Matrix != nil {
-			if _, err := fmt.Fprintf(writer, "%s%s %s (matrix %s)%s%s\n", indent, index, workflowStep.ID, matrixAxisNames(workflowStep.Matrix.Axes), fanoutPolicySuffix(workflowStep.Matrix.MaxConcurrency, workflowStep.Matrix.Timeout, workflowStep.Matrix.FailFast), dryRunCondition(workflowStep)); err != nil {
+			if _, err := fmt.Fprintf(writer, "%s%s %s (matrix %s)%s%s\n", indent, index, workflowStep.ID, matrixAxisNames(workflowStep.Matrix.Axes), fanoutPolicySuffix(workflowStep.Matrix.MaxConcurrency, workflowStep.Matrix.MaxIterations, workflowStep.Matrix.Timeout, workflowStep.Matrix.FailFast), dryRunCondition(workflowStep)); err != nil {
 				return err
 			}
 			if err := writeDryRun(writer, workflowStep.Matrix.Steps, indent+"   ", path); err != nil {
@@ -75,8 +75,8 @@ func matrixAxisNames(axes workflow.MatrixAxes) string {
 	return strings.Join(names, " × ")
 }
 
-func fanoutPolicySuffix(maxConcurrency int, timeout *workflow.Duration, failFast bool) string {
-	parts := []string{fmt.Sprintf("max %d", maxConcurrency)}
+func fanoutPolicySuffix(maxConcurrency, maxIterations int, timeout *workflow.Duration, failFast bool) string {
+	parts := []string{fmt.Sprintf("max %d", maxConcurrency), fmt.Sprintf("max %d iterations", effectiveMaxIterations(maxIterations))}
 	if timeout != nil {
 		parts = append(parts, "timeout "+timeout.String())
 	}

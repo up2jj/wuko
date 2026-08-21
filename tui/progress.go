@@ -63,6 +63,9 @@ func (progress *Progress) Report(event engine.ProgressEvent) {
 		fmt.Fprintf(progress.writer, "%s%s Concurrent · %s\n", indent, progress.paint("36", "⇉"), strings.Join(parts, " · "))
 	case engine.ConcurrentFinished:
 		line := fmt.Sprintf("%s%s Concurrent %s after %s", indent, progress.statusMarker(event.Status), statusLabel(event.Status), formatDuration(event.Duration))
+		if event.Status != engine.StatusSucceeded {
+			line += " · " + workSummary(event.Started, event.Succeeded, event.GroupSize, "step")
+		}
 		if event.Error != nil {
 			line += ": " + singleLine(event.Error.Error())
 		}
@@ -80,6 +83,9 @@ func (progress *Progress) Report(event engine.ProgressEvent) {
 		fmt.Fprintf(progress.writer, "%s%s %s %s · %s\n", indent, progress.paint("36", "↻"), controlLabel(event.ControlKind), event.StepID, strings.Join(parts, " · "))
 	case engine.ControlFinished:
 		line := fmt.Sprintf("%s%s %s %s %s after %s", indent, progress.statusMarker(event.Status), controlLabel(event.ControlKind), event.StepID, statusLabel(event.Status), formatDuration(event.Duration))
+		if event.Status != engine.StatusSucceeded {
+			line += " · " + workSummary(event.Started, event.Succeeded, event.Iterations, "iteration")
+		}
 		if event.Error != nil {
 			line += ": " + singleLine(event.Error.Error())
 		}
@@ -235,6 +241,14 @@ func count(value int, singular string) string {
 		}
 	}
 	return fmt.Sprintf("%d %s", value, word)
+}
+
+func workSummary(started, succeeded, total int, unit string) string {
+	parts := []string{fmt.Sprintf("%d/%d %ss started", started, total, unit), fmt.Sprintf("%d succeeded", succeeded)}
+	if notRun := total - started; notRun > 0 {
+		parts = append(parts, fmt.Sprintf("%d not run", notRun))
+	}
+	return strings.Join(parts, " · ")
 }
 
 func formatDuration(duration time.Duration) string {

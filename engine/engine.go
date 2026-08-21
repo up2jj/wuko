@@ -272,6 +272,9 @@ type stepOutcome struct {
 }
 
 func (e *Engine) executeStep(ctx context.Context, definition *workflow.Definition, workflowStep workflow.Step, options Options, state *State, index, total int) stepOutcome {
+	if err := ctx.Err(); err != nil {
+		return stepOutcome{err: err}
+	}
 	kind := executionKind(workflowStep)
 	stepStartedAt := time.Now()
 	outcome := stepOutcome{started: true}

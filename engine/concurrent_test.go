@@ -216,6 +216,48 @@ func TestRunConcurrentGroupTimeoutCancelsChildren(t *testing.T) {
 	})
 }
 
+func TestRunConcurrentGroupCancellationDoesNotAdmitQueuedChildren(t *testing.T) {
+	registry := step.NewRegistry()
+	started := make(chan struct{}, 1)
+	var runs atomic.Int32
+	if err := registry.Register("block", func(map[string]any) (step.Runner, error) {
+		return runnerFunc(func(ctx context.Context, _ step.Request) (step.Result, error) {
+			runs.Add(1)
+			started <- struct{}{}
+			<-ctx.Done()
+			return step.Result{}, ctx.Err()
+		}), nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	steps := []workflow.Step{
+		{ID: "first", Type: "block", With: map[string]any{}},
+		{ID: "queued", Type: "block", With: map[string]any{}},
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	var finished ProgressEvent
+	definition := concurrentDefinition(t, &workflow.ConcurrentGroup{
+		Steps: steps, MaxConcurrency: 1, FailFast: false,
+	})
+	go func() {
+		_, err := New(registry).Run(ctx, definition, Options{Stdout: io.Discard, Stderr: io.Discard, Progress: func(event ProgressEvent) {
+			if event.Kind == ConcurrentFinished {
+				finished = event
+			}
+		}})
+		done <- err
+	}()
+	<-started
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run() error = %v, want context.Canceled", err)
+	}
+	if runs.Load() != 1 || finished.Started != 1 || finished.Succeeded != 0 {
+		t.Fatalf("runs = %d, progress = %#v", runs.Load(), finished)
+	}
+}
+
 func TestRunConcurrentGroupUsesSnapshotAndRejectsVariableConflicts(t *testing.T) {
 	registry := step.NewRegistry()
 	if err := registry.Register("write", func(raw map[string]any) (step.Runner, error) {

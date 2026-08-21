@@ -187,9 +187,9 @@ func TestWorkflowTreeDisplaysFanoutControls(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := `fanout
-├── deploy (foreach vars.targets) [max 1, fail fast] if: vars.deploy
+├── deploy (foreach vars.targets) [max 1, max 10000 iterations, fail fast] if: vars.deploy
 │   └── run (shell)
-└── checks (matrix os × go) [max 2, wait for all]
+└── checks (matrix os × go) [max 2, max 10000 iterations, wait for all]
     └── test (shell)
 `
 	if output.String() != want {
