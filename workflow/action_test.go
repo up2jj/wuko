@@ -339,6 +339,65 @@ steps:
 	}
 }
 
+func TestLoaderRunsCommandActionSourceFromScopedWorkingDirectory(t *testing.T) {
+	root := t.TempDir()
+	project := filepath.Join(root, "project")
+	if err := os.Mkdir(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	workflowPath := filepath.Join(root, "workflow.yaml")
+	data := `version: 1
+name: scoped-command-source
+vars: {project: project}
+steps:
+  - working_directory: "{{ .vars.project }}"
+    steps:
+      - id: action
+        uses:
+          command: sh
+          args:
+            - -c
+            - |
+              test "$PWD" = "$1"
+              printf '%s' "$ACTION_MANIFEST"
+            - wuko
+            - "{{ .run.dir }}"
+        with: {target: linux}
+`
+	if err := os.WriteFile(workflowPath, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	definition, err := NewLoader(nil).Load(t.Context(), workflowPath, LoadOptions{
+		Env: map[string]string{"ACTION_MANIFEST": validAction}, RunDir: root,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	actionStep := definition.Steps[0].Steps[0]
+	if actionStep.Action == nil || actionStep.Uses.Args[3] != project {
+		t.Fatalf("resolved scoped action = %#v", actionStep)
+	}
+}
+
+func TestLoaderRejectsCommandActionSourceWithRuntimeWorkingDirectory(t *testing.T) {
+	workflowPath := writeActionWorkflow(t, `version: 1
+name: dynamic-command-source
+steps:
+  - id: select
+    type: shell
+  - working_directory: "{{ .steps.select.dir }}"
+    steps:
+      - id: action
+        uses:
+          command: sh
+          args: [-c, "printf '%s' \"$ACTION_MANIFEST\""]
+`)
+	_, err := NewLoader(nil).Load(t.Context(), workflowPath, LoadOptions{RunDir: t.TempDir()})
+	if err == nil || !strings.Contains(err.Error(), "resolved while loading") {
+		t.Fatalf("runtime working_directory error = %v", err)
+	}
+}
+
 func TestLoaderAcceptsArchiveFromCommandSource(t *testing.T) {
 	payload := makeZIP(t, map[string]archiveTestFile{"action.yml": {data: []byte(validAction), mode: 0o644}})
 	archivePath := filepath.Join(t.TempDir(), "action.zip")

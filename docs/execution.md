@@ -66,6 +66,173 @@ errors fail the workflow. Use an anonymous block when several sequential steps s
 
 The block condition is evaluated once. Its children remain in the surrounding output namespace.
 
+## Scoped working directories
+
+Use `working_directory` when several steps should run from the same existing directory:
+
+```yaml
+- working_directory: ./backend
+  steps:
+    - id: generate
+      type: shell
+      with: {command: go, args: [generate, ./...]}
+    - id: test
+      type: shell
+      with: {command: go, args: [test, ./...]}
+```
+
+`working_directory` is a transparent execution-scope wrapper. It changes `.run.dir` for its
+descendants without becoming a step itself. Relative nested paths resolve from the enclosing scoped
+directory, and the previous scope is restored automatically when the block ends, including after
+failure or cancellation. The target must already be a directory; the block neither creates nor
+removes it.
+
+Wuko does not change the process-wide working directory. It passes the scoped directory to child
+steps through their execution request, so independently scoped concurrent branches are safe. Child
+IDs, outputs, and variables remain in the surrounding namespace, and only executable leaf steps
+appear in run statistics and progress.
+
+Paths may be absolute or relative and may use templates. The block path is rendered when the block
+is entered, using the enclosing `.run.dir` and all state committed by earlier sequential steps:
+
+```yaml
+- working_directory: "{{ .vars.project_dir }}"
+  steps:
+    - working_directory: packages/api
+      steps:
+        - id: build_api
+          type: shell
+          with: {command: go, args: [build, ./...]}
+```
+
+The inner path above resolves beneath `{{ .vars.project_dir }}`. A step-level
+`with.working_directory`, when supported by that step type, still applies only to that one step and
+resolves relative to the active scoped `.run.dir`.
+
+Command-backed composite-action sources are resolved while the workflow is loaded. When such an
+action is inside a `working_directory` block, the block path must therefore be resolvable from the
+initial workflow values; it cannot depend on earlier step outputs or active foreach or matrix
+bindings. HTTPS action sources remain loadable inside runtime-resolved directory blocks, and their
+internal steps receive the scoped directory when the action executes.
+
+### Composition with controls
+
+| Composition | Behavior |
+| --- | --- |
+| With `if` | The fields cannot share one wrapper; place one block inside the other. |
+| Around `concurrent` | Every concurrent branch inherits the scoped directory. |
+| Directly inside `concurrent` | The block is one atomic branch; its children run sequentially using one concurrency slot and commit together. |
+| Around `foreach` or `matrix` | The directory is resolved once, then inherited by every iteration. |
+| Inside `foreach` or `matrix` | The directory is resolved per iteration and may use `.foreach` or `.matrix`. |
+| Nested `working_directory` | Relative paths resolve from the enclosing scoped directory. |
+| Composite actions | Internal action steps inherit the caller's active scoped directory. |
+| `finally` | The scope behaves normally and is restored when the block finishes. |
+
+Condition several scoped steps by putting the directory block inside an anonymous `if` block:
+
+```yaml
+- if: vars.build
+  steps:
+    - working_directory: ./backend
+      steps:
+        - id: build
+          type: shell
+          with: {command: go, args: [build, ./...]}
+```
+
+Use independent directory blocks as concurrent branches when each branch has its own sequential
+work:
+
+```yaml
+- concurrent:
+    max_concurrency: 2
+    steps:
+      - working_directory: ./backend
+        steps:
+          - id: generate
+            type: shell
+            with: {command: go, args: [generate, ./...]}
+          - id: backend_tests
+            type: shell
+            with: {command: go, args: [test, ./...]}
+      - working_directory: ./frontend
+        steps:
+          - id: lint
+            type: shell
+            with: {command: npm, args: [run, lint]}
+```
+
+The backend wrapper is one concurrent branch: `backend_tests` may consume `generate` outputs, and
+the branch consumes one concurrency slot. Its state is committed atomically with the other branch
+only if the group succeeds.
+
+A directory block outside a fan-out control is resolved once:
+
+```yaml
+- working_directory: ./services
+  steps:
+    - id: test_services
+      foreach:
+        items: vars.services
+        steps:
+          - id: test_service
+            type: shell
+            with: {command: ./test-service, args: ["{{ .foreach.item }}"]}
+```
+
+Place it inside the iteration body when each iteration needs a different directory:
+
+```yaml
+- id: test_services
+  foreach:
+    items: vars.services
+    steps:
+      - working_directory: "services/{{ .foreach.item }}"
+        steps:
+          - id: test_service
+            type: shell
+            with: {command: ./test}
+```
+
+Matrix bindings work the same way:
+
+```yaml
+- id: test_packages
+  matrix:
+    axes:
+      package: [api, worker]
+      go: ["1.25", "1.26"]
+    steps:
+      - working_directory: "packages/{{ .matrix.package }}"
+        steps:
+          - id: test_package
+            type: shell
+            with:
+              command: go
+              args: [test, ./...]
+              env: {GOTOOLCHAIN: "go{{ .matrix.go }}"}
+```
+
+Composite actions inherit the active scope, and cleanup may establish its own scope:
+
+```yaml
+steps:
+  - working_directory: ./backend
+    steps:
+      - id: package
+        uses: https://example.com/actions/package-v1.yaml
+
+finally:
+  - working_directory: ./backend
+    steps:
+      - id: cleanup
+        type: shell
+        with: {command: ./cleanup}
+```
+
+Working-directory wrappers preserve the normal nesting rules. They cannot be used to bypass the
+restrictions on directly nested conditional, concurrent, foreach, or matrix controls.
+
 ## Concurrency
 
 Group independent work with a bounded concurrency level:

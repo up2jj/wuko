@@ -37,12 +37,13 @@ type Options struct {
 	// Progress receives structured workflow, step, attempt, retry, poll, and timing events.
 	Progress func(ProgressEvent)
 	// Diagnostics receives opt-in loading, validation, and execution phase events.
-	Diagnostics     diagnostic.Reporter
-	inputs          map[string]any
-	operationPrefix string
-	depth           int
-	runtime         *runRuntime
-	renderer        *workflow.Renderer
+	Diagnostics            diagnostic.Reporter
+	inputs                 map[string]any
+	operationPrefix        string
+	depth                  int
+	runtime                *runRuntime
+	renderer               *workflow.Renderer
+	deferContextValidation bool
 }
 
 type State struct {
@@ -51,8 +52,9 @@ type State struct {
 	Env    map[string]string
 	Steps  map[string]any
 	// Bindings contains lifecycle and iteration-local roots such as finally, foreach, and matrix.
-	Bindings map[string]any
-	Stats    RunStats
+	Bindings    map[string]any
+	Stats       RunStats
+	writtenVars map[string]struct{}
 }
 
 func New(registry *step.Registry) *Engine { return &Engine{registry: registry} }
@@ -90,6 +92,12 @@ func (e *Engine) Validate(ctx context.Context, definition *workflow.Definition, 
 
 func (e *Engine) validateSteps(ctx context.Context, definition *workflow.Definition, steps []workflow.Step, options Options, state *State, insideConcurrent bool) error {
 	for _, workflowStep := range steps {
+		if workflowStep.IsWorkingDirectoryBlock() {
+			if err := e.validateWorkingDirectoryBlock(ctx, definition, workflowStep, options, state, insideConcurrent); err != nil {
+				return err
+			}
+			continue
+		}
 		if workflowStep.IsConditionalBlock() {
 			started := time.Now()
 			trace(options, diagnostic.Event{
@@ -179,6 +187,10 @@ func (e *Engine) validateSteps(ctx context.Context, definition *workflow.Definit
 			}
 		}
 		if workflowStep.Action != nil {
+			if options.deferContextValidation {
+				traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusSucceeded, started, "deferring context-dependent action validation", nil)
+				continue
+			}
 			if err := e.validateAction(ctx, definition, workflowStep, options, state); err != nil {
 				traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusFailed, started, "validating action", err)
 				return fmt.Errorf("step %q: %w", workflowStep.ID, err)
@@ -187,7 +199,7 @@ func (e *Engine) validateSteps(ctx context.Context, definition *workflow.Definit
 			continue
 		}
 		if workflowStep.Type == "wait" {
-			if err := e.validateWaitStep(ctx, definition, workflowStep, options, state); err != nil {
+			if err := e.validateWaitStep(ctx, definition, workflowStep, options, state, !options.deferContextValidation); err != nil {
 				traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusFailed, started, "validating wait", err)
 				return fmt.Errorf("step %q: %w", workflowStep.ID, err)
 			}
@@ -204,7 +216,7 @@ func (e *Engine) validateSteps(ctx context.Context, definition *workflow.Definit
 			return fmt.Errorf("step %q: %w", workflowStep.ID, err)
 		}
 		validator, ok := runner.(step.Validator)
-		if !ok {
+		if !ok || options.deferContextValidation {
 			traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusSucceeded, started, "", nil)
 			continue
 		}
@@ -356,6 +368,13 @@ func finallyErrorRecord(status ExecutionStatus, stepID, stepType string, err err
 func (e *Engine) executeSequence(ctx context.Context, definition *workflow.Definition, steps []workflow.Step, options Options, state *State, stats *RunStats, firstIndex, total int) error {
 	index := firstIndex
 	for _, workflowStep := range steps {
+		if workflowStep.IsWorkingDirectoryBlock() {
+			if err := e.executeWorkingDirectoryBlock(ctx, definition, workflowStep, options, state, stats, index, total); err != nil {
+				return err
+			}
+			index += leafStepCount(workflowStep.Steps)
+			continue
+		}
 		if workflowStep.IsConditionalBlock() {
 			if err := ctx.Err(); err != nil {
 				return err
@@ -377,11 +396,9 @@ func (e *Engine) executeSequence(ctx context.Context, definition *workflow.Defin
 		if workflowStep.Concurrent != nil {
 			outcomes, groupErr := e.runConcurrent(ctx, definition, workflowStep.Concurrent, options, state, index, total)
 			for _, outcome := range outcomes {
-				if outcome.started {
-					recordStep(stats, outcome.stats)
-				}
+				mergeRunStats(stats, outcome.stats)
 			}
-			index += len(workflowStep.Concurrent.Steps)
+			index += leafStepCount(workflowStep.Concurrent.Steps)
 			if groupErr != nil {
 				return groupErr
 			}
@@ -446,6 +463,11 @@ func evaluateConditionalBlock(definition *workflow.Definition, workflowStep work
 func recordSkippedSteps(definition *workflow.Definition, steps []workflow.Step, options Options, stats *RunStats, firstIndex, total int) {
 	index := firstIndex
 	for _, workflowStep := range steps {
+		if workflowStep.IsWorkingDirectoryBlock() {
+			recordSkippedSteps(definition, workflowStep.Steps, options, stats, index, total)
+			index += leafStepCount(workflowStep.Steps)
+			continue
+		}
 		if workflowStep.IsConditionalBlock() {
 			recordSkippedSteps(definition, workflowStep.Steps, options, stats, index, total)
 			index += leafStepCount(workflowStep.Steps)
@@ -630,12 +652,19 @@ func commitStepResult(state *State, stepID string, result step.Result) {
 	state.Steps[stepID] = cloneAny(result.Outputs)
 	for key, value := range result.Variables {
 		state.Vars[key] = cloneAny(value)
+		if state.writtenVars != nil {
+			state.writtenVars[key] = struct{}{}
+		}
 	}
 }
 
 func leafStepCount(steps []workflow.Step) int {
 	total := 0
 	for _, workflowStep := range steps {
+		if workflowStep.IsWorkingDirectoryBlock() {
+			total += leafStepCount(workflowStep.Steps)
+			continue
+		}
 		if workflowStep.IsConditionalBlock() {
 			total += leafStepCount(workflowStep.Steps)
 			continue
@@ -660,6 +689,20 @@ func rollupNestedMetrics(stats *RunStats, nested RunStats) {
 	stats.Polls += nested.Polls
 	stats.PollWait += nested.PollWait
 	stats.TimedOut += nested.TimedOut
+}
+
+func mergeRunStats(target *RunStats, source RunStats) {
+	target.Steps = append(target.Steps, source.Steps...)
+	target.Succeeded += source.Succeeded
+	target.Failed += source.Failed
+	target.Skipped += source.Skipped
+	target.Canceled += source.Canceled
+	target.TimedOut += source.TimedOut
+	target.Attempts += source.Attempts
+	target.Retries += source.Retries
+	target.RetryWait += source.RetryWait
+	target.Polls += source.Polls
+	target.PollWait += source.PollWait
 }
 
 func bindingRoot(bindings map[string]any, name string) map[string]any {

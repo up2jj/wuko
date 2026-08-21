@@ -30,6 +30,7 @@ const (
 	maxArchiveSize  = 20 << 20
 	maxExtracted    = 50 << 20
 	maxEntries      = 1000
+	dynamicRunDir   = "__wuko_runtime_working_directory__"
 )
 
 var sha256Pattern = regexp.MustCompile(`^[0-9a-fA-F]{64}$`)
@@ -187,11 +188,11 @@ func (loader *Loader) Load(ctx context.Context, filename string, options LoadOpt
 		return nil, err
 	}
 	cache := make(map[string]*Action)
-	if err := loader.resolveActions(ctx, definition.Name, definition.Steps, renderer, data, environment, options.RunDir, definition.Dir, cache, options.Diagnostics); err != nil {
+	if err := loader.resolveActions(ctx, definition.Name, definition.Steps, renderer, data, environment, options.RunDir, true, definition.Dir, cache, options.Diagnostics); err != nil {
 		traceFinish(options.Diagnostics, started, diagnostic.PhaseLoad, diagnostic.StatusFailed, definition.Location, definition.Name, "", "", "", nil)
 		return nil, err
 	}
-	if err := loader.resolveActions(ctx, definition.Name, definition.Finally, renderer, data, environment, options.RunDir, definition.Dir, cache, options.Diagnostics); err != nil {
+	if err := loader.resolveActions(ctx, definition.Name, definition.Finally, renderer, data, environment, options.RunDir, true, definition.Dir, cache, options.Diagnostics); err != nil {
 		traceFinish(options.Diagnostics, started, diagnostic.PhaseLoad, diagnostic.StatusFailed, definition.Location, definition.Name, "", "", "", nil)
 		return nil, err
 	}
@@ -199,29 +200,36 @@ func (loader *Loader) Load(ctx context.Context, filename string, options LoadOpt
 	return definition, nil
 }
 
-func (loader *Loader) resolveActions(ctx context.Context, workflowName string, steps []Step, renderer *Renderer, data map[string]any, environment map[string]string, runDir, definitionDir string, cache map[string]*Action, reporter diagnostic.Reporter) error {
+func (loader *Loader) resolveActions(ctx context.Context, workflowName string, steps []Step, renderer *Renderer, data map[string]any, environment map[string]string, runDir string, runDirKnown bool, definitionDir string, cache map[string]*Action, reporter diagnostic.Reporter) error {
 	for i := range steps {
 		workflowStep := &steps[i]
+		if workflowStep.IsWorkingDirectoryBlock() {
+			childData, childRunDir, childRunDirKnown := actionWorkingDirectoryScope(renderer, data, runDir, runDirKnown, workflowStep.WorkingDirectory)
+			if err := loader.resolveActions(ctx, workflowName, workflowStep.Steps, renderer, childData, environment, childRunDir, childRunDirKnown, definitionDir, cache, reporter); err != nil {
+				return err
+			}
+			continue
+		}
 		if workflowStep.IsConditionalBlock() {
-			if err := loader.resolveActions(ctx, workflowName, workflowStep.Steps, renderer, data, environment, runDir, definitionDir, cache, reporter); err != nil {
+			if err := loader.resolveActions(ctx, workflowName, workflowStep.Steps, renderer, data, environment, runDir, runDirKnown, definitionDir, cache, reporter); err != nil {
 				return err
 			}
 			continue
 		}
 		if workflowStep.Concurrent != nil {
-			if err := loader.resolveActions(ctx, workflowName, workflowStep.Concurrent.Steps, renderer, data, environment, runDir, definitionDir, cache, reporter); err != nil {
+			if err := loader.resolveActions(ctx, workflowName, workflowStep.Concurrent.Steps, renderer, data, environment, runDir, runDirKnown, definitionDir, cache, reporter); err != nil {
 				return err
 			}
 			continue
 		}
 		if workflowStep.Foreach != nil {
-			if err := loader.resolveActions(ctx, workflowName, workflowStep.Foreach.Steps, renderer, data, environment, runDir, definitionDir, cache, reporter); err != nil {
+			if err := loader.resolveActions(ctx, workflowName, workflowStep.Foreach.Steps, renderer, data, environment, runDir, runDirKnown, definitionDir, cache, reporter); err != nil {
 				return err
 			}
 			continue
 		}
 		if workflowStep.Matrix != nil {
-			if err := loader.resolveActions(ctx, workflowName, workflowStep.Matrix.Steps, renderer, data, environment, runDir, definitionDir, cache, reporter); err != nil {
+			if err := loader.resolveActions(ctx, workflowName, workflowStep.Matrix.Steps, renderer, data, environment, runDir, runDirKnown, definitionDir, cache, reporter); err != nil {
 				return err
 			}
 			continue
@@ -235,7 +243,7 @@ func (loader *Loader) resolveActions(ctx context.Context, workflowName string, s
 			traceFinish(reporter, started, diagnostic.PhaseActionResolve, diagnostic.StatusFailed, workflowStep.Location, workflowName, workflowStep.ID, "uses", "", err)
 			return fmt.Errorf("step %q: sha256 must be a 64-character hexadecimal digest", workflowStep.ID)
 		}
-		resolved, key, sourceDescription, fetch, err := loader.resolveSource(ctx, workflowStep.Uses, renderer, data, environment, runDir)
+		resolved, key, sourceDescription, fetch, err := loader.resolveSource(ctx, workflowStep.Uses, renderer, data, environment, runDir, runDirKnown)
 		if err != nil {
 			traceFinish(reporter, started, diagnostic.PhaseActionResolve, diagnostic.StatusFailed, workflowStep.Location, workflowName, workflowStep.ID, "uses", "", err)
 			return fmt.Errorf("step %q uses: %w", workflowStep.ID, err)
@@ -277,11 +285,35 @@ func (loader *Loader) resolveActions(ctx context.Context, workflowName string, s
 	return nil
 }
 
-func (loader *Loader) resolveSource(ctx context.Context, source ActionSource, renderer *Renderer, data map[string]any, environment map[string]string, runDir string) (ActionSource, string, string, func() ([]byte, error), error) {
+func actionWorkingDirectoryScope(renderer *Renderer, data map[string]any, runDir string, runDirKnown bool, value string) (map[string]any, string, bool) {
+	if runDirKnown {
+		rendered, err := renderer.Render(value, data)
+		if err == nil && strings.TrimSpace(rendered) != "" && !strings.Contains(rendered, "<no value>") {
+			dir := rendered
+			if !filepath.IsAbs(dir) {
+				dir = filepath.Join(runDir, dir)
+			}
+			dir = filepath.Clean(dir)
+			return templateDataWithRunDir(data, dir), dir, true
+		}
+	}
+	return templateDataWithRunDir(data, dynamicRunDir), "", false
+}
+
+func templateDataWithRunDir(data map[string]any, runDir string) map[string]any {
+	result := CloneMap(data)
+	result["run"] = map[string]any{"dir": runDir}
+	return result
+}
+
+func (loader *Loader) resolveSource(ctx context.Context, source ActionSource, renderer *Renderer, data map[string]any, environment map[string]string, runDir string, runDirKnown bool) (ActionSource, string, string, func() ([]byte, error), error) {
 	if source.URL != "" {
 		resolved, err := renderer.Render(source.URL, data)
 		if err != nil {
 			return ActionSource{}, "", "", nil, err
+		}
+		if !runDirKnown && strings.Contains(resolved, dynamicRunDir) {
+			return ActionSource{}, "", "", nil, fmt.Errorf("action URL depends on a working_directory that is resolved at runtime")
 		}
 		remoteURL, err := validateActionURL(resolved)
 		if err != nil {
@@ -290,6 +322,9 @@ func (loader *Loader) resolveSource(ctx context.Context, source ActionSource, re
 		return ActionSource{URL: resolved}, "url\x00" + remoteURL.String(), safeURL(remoteURL), func() ([]byte, error) {
 			return loader.fetch(ctx, remoteURL)
 		}, nil
+	}
+	if !runDirKnown {
+		return ActionSource{}, "", "", nil, fmt.Errorf("command action source requires a working_directory that can be resolved while loading the workflow")
 	}
 
 	command, err := renderer.Render(source.Command, data)
@@ -333,7 +368,7 @@ func (loader *Loader) resolveSource(ctx context.Context, source ActionSource, re
 		}
 		return []byte(result.Stdout), nil
 	}
-	return resolved, "command\x00" + string(keyData), fmt.Sprintf("command %q", command), fetch, nil
+	return resolved, "command\x00" + runDir + "\x00" + string(keyData), fmt.Sprintf("command %q", command), fetch, nil
 }
 
 func validateActionURL(raw string) (*url.URL, error) {

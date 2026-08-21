@@ -97,7 +97,7 @@ func compileWaitCondition(condition string) (*vm.Program, error) {
 	return program, nil
 }
 
-func (e *Engine) validateWaitStep(ctx context.Context, definition *workflow.Definition, workflowStep workflow.Step, options Options, state *State) error {
+func (e *Engine) validateWaitStep(ctx context.Context, definition *workflow.Definition, workflowStep workflow.Step, options Options, state *State, validateRunner bool) error {
 	config, err := decodeWaitConfig(workflowStep.With)
 	if err != nil {
 		return fmt.Errorf("decoding wait step: %w", err)
@@ -119,7 +119,7 @@ func (e *Engine) validateWaitStep(ctx context.Context, definition *workflow.Defi
 		return fmt.Errorf("nested step: %w", err)
 	}
 	validator, ok := runner.(step.Validator)
-	if !ok {
+	if !ok || !validateRunner {
 		return nil
 	}
 	request := makeRequest(definition, workflowStep.ID, options, state, 1, maxAttempts(workflowStep), "validation")

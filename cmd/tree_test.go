@@ -214,6 +214,30 @@ func TestWorkflowTreeDisplaysConditionalBlock(t *testing.T) {
 	}
 }
 
+func TestWorkflowTreeDisplaysWorkingDirectoryBlock(t *testing.T) {
+	definition := &workflow.Definition{Name: "scoped", Steps: []workflow.Step{
+		{WorkingDirectory: "./backend", Steps: []workflow.Step{
+			{ID: "build", Type: "shell"},
+			{WorkingDirectory: "nested", Steps: []workflow.Step{{ID: "test", Type: "shell"}}},
+		}},
+		{ID: "notify", Type: "shell"},
+	}}
+	var output bytes.Buffer
+	if err := writeWorkflowTree(&output, definition); err != nil {
+		t.Fatal(err)
+	}
+	want := `scoped
+├── working_directory: ./backend
+│   ├── build (shell)
+│   └── working_directory: nested
+│       └── test (shell)
+└── notify (shell)
+`
+	if output.String() != want {
+		t.Fatalf("output = %q, want %q", output.String(), want)
+	}
+}
+
 func TestWorkflowTreeDisplaysFanoutControls(t *testing.T) {
 	definition := &workflow.Definition{Name: "fanout", Steps: []workflow.Step{
 		{ID: "deploy", If: "vars.deploy", Foreach: &workflow.ForeachGroup{

@@ -15,7 +15,7 @@ Every rendered string can access these roots:
 | `.steps` | Outputs committed by earlier sequential steps. |
 | `.workflow.name` | The owning workflow or action name. |
 | `.workflow.dir` | The directory containing the owning workflow or materialized action. |
-| `.run.dir` | The directory where Wuko was invoked. |
+| `.run.dir` | The active run directory: initially where Wuko was invoked, or the directory established by an enclosing `working_directory` block. |
 | `.inputs` | Composite-action inputs; empty in a top-level workflow. |
 | `.foreach` | Active foreach item and zero-based index; available only inside a foreach body. |
 | `.matrix` | Active named axis values; available only inside a matrix body. |

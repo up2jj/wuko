@@ -11,7 +11,8 @@ with typed data and files, call APIs, run scripts or containers, and start codin
 - **Typed workflow state** — use variables, step outputs, JSON/TOML imports, JSONPath, semantic
   versions, templates, and expressions without converting everything to strings.
 - **Useful execution controls** — conditions, retries, timeouts, polling, concurrency, foreach and
-  matrix expansion, scheduled runs, dry runs, execution trees, and guaranteed cleanup.
+  matrix expansion, scoped working-directory blocks, scheduled runs, dry runs, execution trees,
+  and guaranteed cleanup.
 - **Portable operations** — use built-in HTTP, filesystem, glob, cache, change detection,
   key-value, temporary resource, and Docker steps instead of platform-specific shell commands.
 - **Extensible automation** — run Lua, direct commands, inline shell, or an external agent such as

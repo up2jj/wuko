@@ -58,6 +58,9 @@ func annotateSteps(steps []Step, sequence *yaml.Node, source string) {
 		if node.Kind != yaml.MappingNode {
 			continue
 		}
+		if steps[i].IsWorkingDirectoryBlock() {
+			annotateSteps(steps[i].Steps, mappingValue(node, "steps"), source)
+		}
 		if steps[i].IsConditionalBlock() {
 			annotateSteps(steps[i].Steps, mappingValue(node, "steps"), source)
 		}
@@ -104,6 +107,9 @@ func remapDefinitionLocations(definition *Definition, materializedRoot, logicalS
 func remapStepLocations(steps []Step, materializedRoot, logicalSource string) {
 	for i := range steps {
 		steps[i].Location.Source = remapSource(steps[i].Location.Source, materializedRoot, logicalSource)
+		if steps[i].IsWorkingDirectoryBlock() {
+			remapStepLocations(steps[i].Steps, materializedRoot, logicalSource)
+		}
 		if steps[i].IsConditionalBlock() {
 			remapStepLocations(steps[i].Steps, materializedRoot, logicalSource)
 		}
@@ -166,6 +172,10 @@ func validationLocation(definition *Definition, err error) diagnostic.Location {
 func flattenSteps(steps []Step) []Step {
 	var flattened []Step
 	for _, workflowStep := range steps {
+		if workflowStep.IsWorkingDirectoryBlock() {
+			flattened = append(flattened, flattenSteps(workflowStep.Steps)...)
+			continue
+		}
 		if workflowStep.IsConditionalBlock() {
 			flattened = append(flattened, flattenSteps(workflowStep.Steps)...)
 			continue
