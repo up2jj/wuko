@@ -20,27 +20,51 @@ import (
 )
 
 const (
-	operationRead   = "read"
-	operationWrite  = "write"
-	operationCopy   = "copy"
-	operationMove   = "move"
-	operationRemove = "remove"
-	operationMkdir  = "mkdir"
-	operationList   = "list"
-	operationStat   = "stat"
-	operationChmod  = "chmod"
+	operationRead        = "read"
+	operationWrite       = "write"
+	operationCopy        = "copy"
+	operationMove        = "move"
+	operationRemove      = "remove"
+	operationMkdir       = "mkdir"
+	operationList        = "list"
+	operationStat        = "stat"
+	operationChmod       = "chmod"
+	operationFind        = "find"
+	operationLink        = "link"
+	operationTruncate    = "truncate"
+	operationTail        = "tail"
+	operationDiskUsage   = "disk_usage"
+	operationAtomicSwap  = "atomic_swap"
+	operationPermissions = "permissions"
+	operationTouch       = "touch"
 )
 
 var modePattern = regexp.MustCompile(`^0[0-7]{3}$`)
 
 type Config struct {
-	Operation   string `yaml:"operation"`
-	Path        string `yaml:"path"`
-	Destination string `yaml:"destination,omitempty"`
-	Content     string `yaml:"content,omitempty"`
-	Recursive   bool   `yaml:"recursive,omitempty"`
-	Overwrite   bool   `yaml:"overwrite,omitempty"`
-	Mode        string `yaml:"mode,omitempty"`
+	Operation   string   `yaml:"operation"`
+	Path        string   `yaml:"path"`
+	Destination string   `yaml:"destination,omitempty"`
+	Content     string   `yaml:"content,omitempty"`
+	Recursive   bool     `yaml:"recursive,omitempty"`
+	Overwrite   bool     `yaml:"overwrite,omitempty"`
+	Mode        string   `yaml:"mode,omitempty"`
+	Patterns    []string `yaml:"patterns,omitempty"`
+	Types       []string `yaml:"types,omitempty"`
+	MinSize     string   `yaml:"min_size,omitempty"`
+	MaxSize     string   `yaml:"max_size,omitempty"`
+	MinAge      string   `yaml:"min_age,omitempty"`
+	MaxAge      string   `yaml:"max_age,omitempty"`
+	LinkType    string   `yaml:"link_type,omitempty"`
+	Replace     string   `yaml:"replace,omitempty"`
+	Size        string   `yaml:"size,omitempty"`
+	Lines       int      `yaml:"lines,omitempty"`
+	Bytes       string   `yaml:"bytes,omitempty"`
+	MaxBytes    string   `yaml:"max_bytes,omitempty"`
+	Largest     int      `yaml:"largest,omitempty"`
+	Create      bool     `yaml:"create,omitempty"`
+	AccessedAt  string   `yaml:"accessed_at,omitempty"`
+	ModifiedAt  string   `yaml:"modified_at,omitempty"`
 }
 
 type Runner struct {
@@ -103,6 +127,22 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 		return r.stat(ctx, path)
 	case operationChmod:
 		return r.chmod(ctx, path)
+	case operationFind:
+		return r.find(ctx, path)
+	case operationLink:
+		return r.link(ctx, request.RunDir, path)
+	case operationTruncate:
+		return r.truncate(ctx, path)
+	case operationTail:
+		return r.tail(ctx, path)
+	case operationDiskUsage:
+		return r.diskUsage(ctx, path)
+	case operationAtomicSwap:
+		return r.atomicSwap(ctx, request.RunDir, path)
+	case operationPermissions:
+		return r.permissions(ctx, path)
+	case operationTouch:
+		return r.touch(ctx, path)
 	default:
 		panic("validated file operation")
 	}
@@ -151,11 +191,45 @@ func (r *Runner) validate(resolved bool) error {
 		if err := require("mode"); err != nil {
 			return err
 		}
+	case operationFind:
+		for _, field := range []string{"patterns", "types", "min_size", "max_size", "min_age", "max_age", "mode"} {
+			allowed[field] = true
+		}
+		if err := require("patterns"); err != nil {
+			return err
+		}
+	case operationLink:
+		allowed["destination"], allowed["link_type"], allowed["replace"] = true, true, true
+		for _, field := range []string{"destination", "link_type"} {
+			if err := require(field); err != nil {
+				return err
+			}
+		}
+	case operationTruncate:
+		allowed["size"] = true
+	case operationTail:
+		allowed["lines"], allowed["bytes"], allowed["max_bytes"] = true, true, true
+	case operationDiskUsage:
+		allowed["largest"] = true
+	case operationAtomicSwap:
+		allowed["destination"], allowed["replace"] = true, true
+		if err := require("destination"); err != nil {
+			return err
+		}
+	case operationPermissions:
+		allowed["mode"], allowed["recursive"] = true, true
+		if err := require("mode"); err != nil {
+			return err
+		}
+	case operationTouch:
+		for _, field := range []string{"create", "mode", "accessed_at", "modified_at"} {
+			allowed[field] = true
+		}
 	default:
 		if !resolved && templated(r.config.Operation) {
 			return nil
 		}
-		return fmt.Errorf("operation must be read, write, copy, move, remove, mkdir, list, stat, or chmod")
+		return fmt.Errorf("operation must be read, write, copy, move, remove, mkdir, list, stat, chmod, find, link, truncate, tail, disk_usage, atomic_swap, permissions, or touch")
 	}
 	for field := range r.present {
 		if !allowed[field] {
@@ -166,6 +240,9 @@ func (r *Runner) validate(resolved bool) error {
 		if _, err := parseMode(r.config.Mode); err != nil {
 			return err
 		}
+	}
+	if err := r.validateAdvanced(resolved); err != nil {
+		return err
 	}
 	return nil
 }

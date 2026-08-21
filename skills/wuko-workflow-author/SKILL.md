@@ -34,7 +34,10 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
   timeouts. Keep authorization values in environment-backed headers.
 - Use `wait` with `duration` for a fixed delay, or embed a `type`/`with` step and an Expr `until`
   predicate for polling. Give every poll a top-level timeout and prefer read-only probes.
-- Use `file` for auditable read, write, copy, move, remove, mkdir, list, stat, and chmod operations.
+- Use `file` for auditable reads, atomic writes and directory swaps, copying, moving, removal,
+  directory creation, listing and filtered discovery, metadata and disk-usage inspection, links,
+  truncation, bounded tails, permissions, and timestamps. Consult
+  `docs/filesystem-operations.md` for the strict fields, outputs, symlink rules, and failure guarantees.
   Quote modes such as `"0755"`, opt into overwrites, and use recursive removal narrowly.
 - Use `temp` for an empty file or directory that should live through the complete root run and be
   removed automatically after explicit `finally`. Consume its absolute `path` output in later

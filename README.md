@@ -1119,8 +1119,8 @@ step error. Images and explicitly configured bind-mounted host directories are r
 
 #### File
 
-The `file` step provides strict filesystem operations relative to the run directory. Create a
-file atomically and then make it executable:
+The `file` step provides strict, shell-independent filesystem operations relative to the run
+directory. For example, create a file atomically:
 
 ```yaml
 - id: write_script
@@ -1134,35 +1134,12 @@ file atomically and then make it executable:
     overwrite: true
     mode: "0755"
 
-- id: make_executable
-  type: file
-  with:
-    operation: chmod
-    path: scripts/release.sh
-    mode: "0755"
 ```
 
-Supported operations and their extra fields are:
-
-- `read`: outputs text `content` and `size`.
-- `write`: requires `content`; accepts `overwrite` and `mode`; outputs `size`, `mode`, and
-  `created`.
-- `copy` and `move`: require `destination`, accept `overwrite`, and output the resolved source and
-  destination, `size`, and `mode`. Copy accepts regular files and preserves their permissions.
-  Move also works across filesystems by staging a copy before removing the source.
-- `remove`: accepts `recursive`; outputs `removed`. Missing paths are not errors.
-- `mkdir`: accepts `recursive` and `mode`; outputs `created` and `mode`.
-- `list`: accepts `recursive`; outputs path-sorted `entries` with `name`, relative `path`, `type`,
-  `size`, `mode`, and `modified_at`.
-- `stat`: outputs `exists` plus the same metadata when the path exists.
-- `chmod`: requires `mode` and outputs the normalized mode.
-
-Modes must be quoted four-digit octal strings from `"0000"` through `"0777"`; special permission
-bits are not supported. New files default to `"0644"` and new directories to `"0755"`.
-Overwriting a file without `mode` preserves its permissions. Chmod rejects symbolic links. Remove
-rejects filesystem roots and the run directory, and a non-empty directory requires
-`recursive: true`. Absolute paths remain available because Wuko workflows are trusted code, not a
-filesystem sandbox.
+Available operations are `read`, `write`, `copy`, `move`, `remove`, `mkdir`, `list`, `stat`,
+`chmod`, `find`, `link`, `truncate`, `tail`, `disk_usage`, `atomic_swap`, `permissions`, and `touch`.
+See [Filesystem operations](docs/filesystem-operations.md) for every field, output, safety rule,
+failure guarantee, and usage example.
 
 #### Glob
 
