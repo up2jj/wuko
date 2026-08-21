@@ -33,7 +33,7 @@ type Options struct {
 	Stderr         io.Writer
 	Interactive    bool
 	DryRun         bool
-	// Progress receives structured workflow, step, attempt, retry, and timing events.
+	// Progress receives structured workflow, step, attempt, retry, poll, and timing events.
 	Progress func(ProgressEvent)
 	// Diagnostics receives opt-in loading, validation, and execution phase events.
 	Diagnostics     diagnostic.Reporter
@@ -124,6 +124,14 @@ func (e *Engine) validateSteps(ctx context.Context, definition *workflow.Definit
 		if workflowStep.Action != nil {
 			if err := e.validateAction(ctx, definition, workflowStep, options, state); err != nil {
 				traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusFailed, started, "validating action", err)
+				return fmt.Errorf("step %q: %w", workflowStep.ID, err)
+			}
+			traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusSucceeded, started, "", nil)
+			continue
+		}
+		if workflowStep.Type == "wait" {
+			if err := e.validateWaitStep(ctx, definition, workflowStep, options, state); err != nil {
+				traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusFailed, started, "validating wait", err)
 				return fmt.Errorf("step %q: %w", workflowStep.ID, err)
 			}
 			traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusSucceeded, started, "", nil)
@@ -243,11 +251,13 @@ func (e *Engine) executeStep(ctx context.Context, definition *workflow.Definitio
 	kind := executionKind(workflowStep)
 	stepStartedAt := time.Now()
 	outcome := stepOutcome{started: true}
+	metrics := waitMetrics{}
 	finishStep := func(status ExecutionStatus, stepErr error, attempts []AttemptStats, retryWait time.Duration) {
 		outcome.stats = StepStats{
 			ID: workflowStep.ID, Type: kind, Index: index, Status: status,
 			StartedAt: stepStartedAt, Duration: time.Since(stepStartedAt),
-			RetryWait: retryWait, Attempts: attempts, Error: stepErr,
+			RetryWait: retryWait, Polls: metrics.polls, PollWait: metrics.pollWait,
+			Attempts: attempts, Error: stepErr,
 		}
 		reportStepFinished(options, definition.Name, workflowStep.ID, kind, index, total, outcome.stats)
 	}
@@ -288,6 +298,18 @@ func (e *Engine) executeStep(ctx context.Context, definition *workflow.Definitio
 			return outcome
 		}
 		traceStep(options, definition, workflowStep, diagnostic.PhaseActionInputs, diagnostic.StatusSucceeded, prepareStarted, "", nil)
+	} else if workflowStep.Type == "wait" {
+		prepareStarted := time.Now()
+		traceStep(options, definition, workflowStep, diagnostic.PhaseRunner, diagnostic.StatusStarted, time.Time{}, "preparing wait", nil)
+		execute, err = e.prepareWaitExecutor(definition, workflowStep, options, state, &metrics)
+		if err != nil {
+			traceStep(options, definition, workflowStep, diagnostic.PhaseRunner, diagnostic.StatusFailed, prepareStarted, "preparing wait", err)
+			stepErr := fmt.Errorf("workflow %q step %q (%s): %w", definition.Name, workflowStep.ID, kind, err)
+			finishStep(StatusFailed, stepErr, nil, 0)
+			outcome.err = stepErr
+			return outcome
+		}
+		traceStep(options, definition, workflowStep, diagnostic.PhaseRunner, diagnostic.StatusSucceeded, prepareStarted, "prepared wait", nil)
 	} else {
 		renderStarted := time.Now()
 		traceStep(options, definition, workflowStep, diagnostic.PhaseRender, diagnostic.StatusStarted, time.Time{}, "rendering step configuration", nil)
@@ -375,7 +397,8 @@ func reportStepFinished(options Options, workflowName, stepID, stepType string, 
 	report(options, ProgressEvent{
 		Kind: StepFinished, Status: stats.Status, Time: stats.StartedAt.Add(stats.Duration),
 		WorkflowName: workflowName, Depth: options.depth, StepID: stepID, StepType: stepType,
-		Index: index, Total: total, Attempt: len(stats.Attempts), Duration: stats.Duration, Error: stats.Error,
+		Index: index, Total: total, Attempt: len(stats.Attempts), Duration: stats.Duration,
+		Polls: stats.Polls, PollWait: stats.PollWait, Error: stats.Error,
 	})
 }
 
@@ -394,6 +417,8 @@ func recordStep(stats *RunStats, stepStats StepStats) {
 	stats.Attempts += len(stepStats.Attempts)
 	stats.Retries += max(0, len(stepStats.Attempts)-1)
 	stats.RetryWait += stepStats.RetryWait
+	stats.Polls += stepStats.Polls
+	stats.PollWait += stepStats.PollWait
 	timedOutAttempts := 0
 	for _, attempt := range stepStats.Attempts {
 		if attempt.Status == StatusTimedOut {

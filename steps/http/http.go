@@ -35,6 +35,14 @@ type Runner struct {
 	client  *http.Client
 }
 
+type statusError struct{ status int }
+
+func (err statusError) Error() string {
+	return fmt.Sprintf("HTTP request returned status %d", err.status)
+}
+
+func (statusError) ObservationAvailable() bool { return true }
+
 func Register(registry *step.Registry) error { return registry.Register("http", New) }
 
 func New(raw map[string]any) (step.Runner, error) {
@@ -151,7 +159,7 @@ func (r *Runner) Run(ctx context.Context, _ step.Request) (step.Result, error) {
 	}
 	result := step.Result{Outputs: outputs}
 	if !r.success(response.StatusCode) {
-		return result, fmt.Errorf("HTTP request returned status %d", response.StatusCode)
+		return result, statusError{status: response.StatusCode}
 	}
 	return result, nil
 }

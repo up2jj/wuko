@@ -87,6 +87,30 @@ steps:
 	}
 }
 
+func TestRootCommandRunsBuiltInWaitStep(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "wait.yaml")
+	data := `version: 1
+name: wait
+steps:
+  - id: pause
+    type: wait
+    with:
+      duration: 1ns
+`
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	command := NewRootCmd()
+	command.SetIn(bytes.NewReader(nil))
+	command.SetOut(io.Discard)
+	command.SetErr(io.Discard)
+	command.SetArgs([]string{"run", "--file", path})
+	if err := command.ExecuteContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRootCommandRegistersAssertStep(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "assert.yaml")

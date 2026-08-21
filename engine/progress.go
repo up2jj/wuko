@@ -18,6 +18,9 @@ const (
 	AttemptStarted     ProgressKind = "attempt_started"
 	AttemptFinished    ProgressKind = "attempt_finished"
 	RetryScheduled     ProgressKind = "retry_scheduled"
+	PollStarted        ProgressKind = "poll_started"
+	PollFinished       ProgressKind = "poll_finished"
+	PollScheduled      ProgressKind = "poll_scheduled"
 	ConcurrentStarted  ProgressKind = "concurrent_started"
 	ConcurrentFinished ProgressKind = "concurrent_finished"
 )
@@ -43,7 +46,7 @@ type AttemptStats struct {
 	Error     error
 }
 
-// StepStats records the terminal outcome and retry activity of one workflow step.
+// StepStats records the terminal outcome, retries, and polling activity of one workflow step.
 type StepStats struct {
 	ID        string
 	Type      string
@@ -52,6 +55,8 @@ type StepStats struct {
 	StartedAt time.Time
 	Duration  time.Duration
 	RetryWait time.Duration
+	Polls     int
+	PollWait  time.Duration
 	Attempts  []AttemptStats
 	Error     error
 }
@@ -70,6 +75,8 @@ type RunStats struct {
 	Attempts   int
 	Retries    int
 	RetryWait  time.Duration
+	Polls      int
+	PollWait   time.Duration
 	Steps      []StepStats
 }
 
@@ -93,6 +100,11 @@ type ProgressEvent struct {
 	Timeout        time.Duration
 	Duration       time.Duration
 	RetryDelay     time.Duration
+	Poll           int
+	PollDelay      time.Duration
+	Matched        bool
+	Polls          int
+	PollWait       time.Duration
 	Error          error
 	Stats          RunStats
 }
@@ -149,6 +161,8 @@ func reportLegacy(options Options, event ProgressEvent) {
 		}
 	case RetryScheduled:
 		fmt.Fprintf(writerOrDiscard(options.Stderr), "%s: retrying in %s\n", event.StepID, event.RetryDelay)
+	case PollScheduled:
+		fmt.Fprintf(writerOrDiscard(options.Stderr), "%s: poll %d did not match; polling again in %s\n", event.StepID, event.Poll-1, event.PollDelay)
 	}
 }
 

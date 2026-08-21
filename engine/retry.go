@@ -193,6 +193,11 @@ func executionOperationID(definition *workflow.Definition, workflowStep workflow
 
 func executionPolicySuffix(workflowStep workflow.Step) string {
 	var parts []string
+	if workflowStep.Type == "wait" {
+		if description := waitPolicyDescription(workflowStep); description != "" {
+			parts = append(parts, description)
+		}
+	}
 	if workflowStep.Timeout != nil {
 		parts = append(parts, "timeout "+workflowStep.Timeout.String())
 	}

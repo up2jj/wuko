@@ -69,6 +69,10 @@ func TestStatusAndResponseErrors(t *testing.T) {
 	if err == nil || result.Outputs["status"] != nethttp.StatusTeapot {
 		t.Fatalf("result = %#v, error = %v", result, err)
 	}
+	var observation step.ObservationError
+	if !errors.As(err, &observation) || !observation.ObservationAvailable() {
+		t.Fatalf("status error does not expose a completed observation: %T %v", err, err)
+	}
 
 	runner, err = New(map[string]any{"url": server.URL, "response": "json", "success_statuses": []any{418}})
 	if err != nil {
@@ -76,6 +80,8 @@ func TestStatusAndResponseErrors(t *testing.T) {
 	}
 	if _, err := runner.Run(t.Context(), step.Request{}); err == nil || !strings.Contains(err.Error(), "decoding JSON") {
 		t.Fatalf("error = %v", err)
+	} else if errors.As(err, &observation) {
+		t.Fatalf("decoding error unexpectedly exposes an observation: %T %v", err, err)
 	}
 }
 
@@ -91,6 +97,11 @@ func TestResponseLimitAndCancellation(t *testing.T) {
 	}
 	if _, err := runner.Run(t.Context(), step.Request{}); err == nil || !strings.Contains(err.Error(), "exceeds") {
 		t.Fatalf("error = %v", err)
+	} else {
+		var observation step.ObservationError
+		if errors.As(err, &observation) {
+			t.Fatalf("response-size error unexpectedly exposes an observation: %T %v", err, err)
+		}
 	}
 
 	canceled := httptest.NewServer(nethttp.HandlerFunc(func(_ nethttp.ResponseWriter, request *nethttp.Request) {

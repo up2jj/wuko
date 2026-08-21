@@ -1,6 +1,6 @@
 ---
 name: wuko-workflow-author
-description: Create or update Wuko version-1 YAML workflows, including templates, conditions, required files, composite actions, retries, concurrency, interactive prompts, typed and imported variables, JSONPath selection, HTTP, files, Lua, shell, Docker, and agent steps. Use when designing workflow files, extending existing workflows, or reviewing workflow structure before execution.
+description: Create or update Wuko version-1 YAML workflows, including templates, conditions, required files, composite actions, waits, polling, retries, concurrency, interactive prompts, typed and imported variables, JSONPath selection, HTTP, files, Lua, shell, Docker, and agent steps. Use when designing workflow files, extending existing workflows, or reviewing workflow structure before execution.
 ---
 
 # Wuko Workflow Author
@@ -29,6 +29,8 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
   locations from `paths`. Use Lua when the selected data also needs transformation or mutation.
 - Use `http` for structured API calls with typed JSON responses, status validation, retries, and
   timeouts. Keep authorization values in environment-backed headers.
+- Use `wait` with `duration` for a fixed delay, or embed a `type`/`with` step and an Expr `until`
+  predicate for polling. Give every poll a top-level timeout and prefer read-only probes.
 - Use `file` for auditable read, write, copy, move, remove, mkdir, list, stat, and chmod operations.
   Quote modes such as `"0755"`, opt into overwrites, and use recursive removal narrowly.
 - Use shell for external programs, Lua for multi-operation scripting, Docker for isolated
@@ -53,6 +55,8 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
 - Supply invocation-time JSON or TOML variables with repeatable `--var-file`; later files replace
   earlier top-level values and explicit `--var` entries take final initial-state precedence.
 - Use `timeout` and `retry` deliberately. Retries have at-least-once effects; do not assume commands, requests, writes, containers, or agents can be rolled back.
+- Distinguish polling from retries: polling repeats successful observations until `until` matches,
+  commits only the final result, and can still repeat external effects with at-least-once semantics.
 - Give repeated external operations an explicit stable `operation_id` when the receiving service can use it for idempotency.
 - Remember that concurrent children share a pre-group state snapshot, cannot consume sibling outputs, and cannot safely compete for interactive input.
 - Pin remote composite actions with an immutable release and `sha256` when reproducibility or supply-chain trust matters.

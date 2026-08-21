@@ -93,3 +93,25 @@ func TestProgressRendersConcurrentGroup(t *testing.T) {
 		t.Fatalf("output = %q, want %q", output.String(), want)
 	}
 }
+
+func TestProgressRendersPollLifecycleAndSummary(t *testing.T) {
+	var output bytes.Buffer
+	progress := NewProgress(&output, false)
+	progress.Report(engine.ProgressEvent{Kind: engine.PollStarted, Poll: 1})
+	progress.Report(engine.ProgressEvent{Kind: engine.PollScheduled, Poll: 2, PollDelay: 5 * time.Second, Error: errors.New("not ready")})
+	progress.Report(engine.ProgressEvent{Kind: engine.PollStarted, Poll: 2})
+	progress.Report(engine.ProgressEvent{Kind: engine.PollFinished, Poll: 2, Matched: true, Duration: 20 * time.Millisecond})
+	progress.Report(engine.ProgressEvent{
+		Kind: engine.WorkflowFinished, Status: engine.StatusSucceeded, WorkflowName: "poll", Duration: 5020 * time.Millisecond,
+		Stats: engine.RunStats{Succeeded: 1, Attempts: 1, Polls: 2, PollWait: 5 * time.Second},
+	})
+	want := `  • poll 1 started
+  ↻ poll 1 did not match · poll 2 in 5s: not ready
+  • poll 2 started
+  ✓ poll 2 matched after 20ms
+✓ Workflow poll succeeded in 5.02s · 1 succeeded · 1 attempt · 2 polls · 5s poll wait
+`
+	if output.String() != want {
+		t.Fatalf("output = %q, want %q", output.String(), want)
+	}
+}

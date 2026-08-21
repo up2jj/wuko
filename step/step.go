@@ -46,6 +46,13 @@ type Validator interface {
 	Validate(context.Context, Request) error
 }
 
+// ObservationError reports that a failed runner still produced a complete, usable observation.
+// Control steps such as wait may evaluate the accompanying Result instead of failing immediately.
+type ObservationError interface {
+	error
+	ObservationAvailable() bool
+}
+
 const (
 	AttemptEnv     = "WUKO_STEP_ATTEMPT"
 	MaxAttemptsEnv = "WUKO_STEP_MAX_ATTEMPTS"

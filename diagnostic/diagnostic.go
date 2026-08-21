@@ -27,6 +27,7 @@ const (
 	PhaseActionOutputs  Phase = "action outputs"
 	PhaseAttempt        Phase = "attempt"
 	PhaseRetry          Phase = "retry"
+	PhasePoll           Phase = "poll"
 	PhaseConcurrent     Phase = "concurrent"
 	PhaseCommit         Phase = "commit"
 )

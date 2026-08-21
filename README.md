@@ -10,10 +10,10 @@ commands or inline shell, and launch an external agent such as Codex.
 - Discover local and global workflows from an interactive terminal picker or with `wuko list`.
 - Define strict, versioned YAML workflows with variables, environment values, Go templates, and
   conditional steps.
-- Run steps sequentially or concurrently, with retries, timeouts, dry runs, execution trees, live
-  progress, and run statistics.
-- Use built-in input, password, choice, confirm, set, assert, `import_vars`, JSONPath, HTTP, file,
-  key-value, Lua, shell, agent, and Docker steps.
+- Run steps sequentially or concurrently, wait for fixed durations or polled conditions, and use
+  retries, timeouts, dry runs, execution trees, live progress, and run statistics.
+- Use built-in wait, input, password, choice, confirm, set, assert, `import_vars`, JSONPath, HTTP,
+  file, key-value, Lua, shell, agent, and Docker steps.
 - Split workflows across local files with `require`, or reuse remote workflows and composite
   actions from HTTPS URLs and GitHub locators.
 - Integrate with `direnv`, import JSON or TOML variable files, and pass values explicitly with
@@ -35,6 +35,7 @@ commands or inline shell, and launch an external agent such as Codex.
   - [Splitting steps across files](#splitting-steps-across-files)
   - [Conditional steps](#conditional-steps)
   - [Concurrent steps](#concurrent-steps)
+  - [Waits and polling](#waits-and-polling)
   - [Retries and execution timeouts](#retries-and-execution-timeouts)
   - [Execution progress and statistics](#execution-progress-and-statistics)
   - [Debug tracing](#debug-tracing)
@@ -474,6 +475,54 @@ stdin. Input, password, and choice steps can still be used when their variables 
 advance. Docker TTY input is not attached inside a concurrent group. Child stdout and stderr are
 safe for concurrent writes, but output from different children can interleave at write boundaries.
 
+### Waits and polling
+
+Use `wait` with `duration` for a cancellation-aware fixed delay:
+
+```yaml
+- id: settle
+  type: wait
+  with:
+    duration: 30s
+```
+
+To poll, embed one registered step and evaluate its outputs with an Expr `until` condition. A
+polling wait requires a top-level `timeout`, runs its first poll immediately, and defaults to a
+5-second interval:
+
+```yaml
+- id: await_release
+  type: wait
+  timeout: 5m
+  with:
+    interval: 5s
+    step:
+      type: http
+      with:
+        url: https://api.example.com/releases/42
+        response: json
+    until: 'error == nil && result.value.status == "ready"'
+```
+
+`until` must return a boolean and has the normal `inputs`, `vars`, `env`, `steps`, `workflow`, and
+`run` roots plus `result` for the latest nested outputs, `error` for a nullable error-message
+string, and the one-based `poll` number. Only `type` and `with` are accepted on the embedded step;
+it has no separate ID, condition, timeout, retry policy, action, concurrent group, or nested wait.
+Its configuration is rendered once from the wait step's state snapshot, then reused for every
+poll.
+
+Nested errors are observations that the predicate can accept or reject. HTTP responses outside
+the configured success statuses remain complete observations with `status`, `headers`, `body`,
+and `value`; transport, response-size, and decoding failures stop the wait immediately. Workflow
+cancellation and predicate evaluation errors also stop immediately. A false predicate waits for
+the interval and polls again until the top-level timeout expires.
+
+When the predicate matches, the final nested outputs are exposed directly at `.steps.<wait-id>`
+and its variables are committed. Earlier observations never modify workflow state. Polling can
+repeat external effects even when the nested step succeeds, so prefer read-only probes or
+idempotent operations. If the outer wait also has `retry`, a failed or timed-out wait attempt
+restarts the entire polling loop.
+
 ### Retries and execution timeouts
 
 Use `timeout` to limit each attempt and `retry` to repeat a failed step with exponential backoff:
@@ -539,12 +588,13 @@ corrupt an animated spinner. Color is enabled on a terminal and disabled for red
 ✓ Workflow release succeeded in 2m1.2s · 1 succeeded · 1 skipped · 2 attempts · 1 retry · 1 timeout · 500ms retry wait
 ```
 
-Every workflow, step, and attempt records its start time, duration, and terminal status. Run
+Every workflow, step, attempt, and poll records its start time, duration, and status. Run
 summaries also count successful, failed, skipped, canceled, and unstarted steps; attempts; retries;
-timeouts; and time spent waiting to retry. Composite-action progress is indented and gets a nested
-summary. Concurrent groups get their own start and finish lines, with child progress indented below
-the group. Go callers can read the completed summary from `engine.State.Stats` and subscribe to the
-same serialized lifecycle through `engine.Options.Progress` without parsing terminal text.
+polls; timeouts; and time spent waiting to retry or poll. Polls and retries remain separate counts.
+Composite-action progress is indented and gets a nested summary. Concurrent groups get their own
+start and finish lines, with child progress indented below the group. Go callers can read the
+completed summary from `engine.State.Stats` and subscribe to the same serialized lifecycle through
+`engine.Options.Progress` without parsing terminal text.
 
 ### Debug tracing
 
@@ -1013,6 +1063,8 @@ response body is limited to 10 MiB. Redirects may upgrade HTTP to HTTPS, but the
 host or port or downgrade HTTPS to HTTP, which prevents configured headers from crossing a trust
 boundary. Top-level `timeout` and `retry` policies control cancellation and repeated attempts. A
 status outside `success_statuses`, or outside `2xx` when the list is omitted, fails the step.
+Inside a polling `wait`, that status failure remains an observation available to `until`; failures
+that occur before a complete response is decoded still stop the wait.
 
 #### File
 

@@ -141,12 +141,12 @@ func TestRunStopsAtMaxElapsedTime(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		registry := step.NewRegistry()
 		runner := &contextRunner{}
-		if err := registry.Register("wait", func(map[string]any) (step.Runner, error) { return runner, nil }); err != nil {
+		if err := registry.Register("blocking", func(map[string]any) (step.Runner, error) { return runner, nil }); err != nil {
 			t.Fatal(err)
 		}
 		policy := immediateRetry(3)
 		policy.MaxElapsedTime = workflow.Duration(2 * time.Second)
-		definition := &workflow.Definition{Version: 1, Name: "budget", Dir: t.TempDir(), Steps: []workflow.Step{{ID: "wait", Type: "wait", Retry: policy, With: map[string]any{}}}}
+		definition := &workflow.Definition{Version: 1, Name: "budget", Dir: t.TempDir(), Steps: []workflow.Step{{ID: "wait", Type: "blocking", Retry: policy, With: map[string]any{}}}}
 		_, err := New(registry).Run(t.Context(), definition, Options{Stdout: io.Discard, Stderr: io.Discard})
 		if err == nil || !strings.Contains(err.Error(), "max_elapsed_time 2s exceeded") {
 			t.Fatalf("error = %v", err)

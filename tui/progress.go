@@ -83,6 +83,18 @@ func (progress *Progress) Report(event engine.ProgressEvent) {
 		fmt.Fprintln(progress.writer, line)
 	case engine.RetryScheduled:
 		fmt.Fprintf(progress.writer, "%s%s retrying with attempt %d/%d in %s\n", childIndent, progress.paint("33", "↻"), event.Attempt, event.MaxAttempts, formatDuration(event.RetryDelay))
+	case engine.PollStarted:
+		fmt.Fprintf(progress.writer, "%s%s poll %d started\n", childIndent, progress.paint("2", "•"), event.Poll)
+	case engine.PollFinished:
+		if event.Matched {
+			fmt.Fprintf(progress.writer, "%s%s poll %d matched after %s\n", childIndent, progress.paint("32", "✓"), event.Poll, formatDuration(event.Duration))
+		}
+	case engine.PollScheduled:
+		line := fmt.Sprintf("%s%s poll %d did not match · poll %d in %s", childIndent, progress.paint("33", "↻"), event.Poll-1, event.Poll, formatDuration(event.PollDelay))
+		if event.Error != nil {
+			line += ": " + singleLine(event.Error.Error())
+		}
+		fmt.Fprintln(progress.writer, line)
 	case engine.StepFinished:
 		marker := progress.statusMarker(event.Status)
 		if event.Status == engine.StatusSkipped {
@@ -160,6 +172,12 @@ func runSummary(stats engine.RunStats) []string {
 	}
 	if stats.RetryWait > 0 {
 		parts = append(parts, formatDuration(stats.RetryWait)+" retry wait")
+	}
+	if stats.Polls > 0 {
+		parts = append(parts, count(stats.Polls, "poll"))
+	}
+	if stats.PollWait > 0 {
+		parts = append(parts, formatDuration(stats.PollWait)+" poll wait")
 	}
 	return parts
 }
