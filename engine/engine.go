@@ -177,6 +177,7 @@ func (e *Engine) validateSteps(ctx context.Context, definition *workflow.Definit
 }
 
 func (e *Engine) Run(ctx context.Context, definition *workflow.Definition, options Options) (runState *State, runErr error) {
+	rootRun := options.runtime == nil
 	options = prepareRunOptions(options)
 	if options.renderer == nil {
 		options.renderer, runErr = workflow.NewRenderer(definition.Templates)
@@ -228,6 +229,9 @@ func (e *Engine) Run(ctx context.Context, definition *workflow.Definition, optio
 
 	mainErr = e.executeSequence(ctx, definition, definition.Steps, options, state, &stats, 1, total)
 	cleanupErrors := e.executeFinally(context.WithoutCancel(ctx), definition, options, state, &stats, mainErr, total)
+	if rootRun {
+		cleanupErrors = append(cleanupErrors, options.runtime.runCleanups()...)
+	}
 	runErr = errors.Join(append([]error{mainErr}, cleanupErrors...)...)
 	if runErr != nil {
 		return nil, runErr
@@ -461,7 +465,7 @@ func (e *Engine) executeStep(ctx context.Context, definition *workflow.Definitio
 			return outcome
 		}
 		traceStep(options, definition, workflowStep, diagnostic.PhaseRunner, diagnostic.StatusSucceeded, runnerStarted, "", nil)
-		execute = runner.Run
+		execute = managedExecutor(options, workflowStep.ID, runner)
 	}
 	execution := e.runWithRetry(ctx, definition, workflowStep, options, state, execute)
 	cleanup()
@@ -471,6 +475,30 @@ func (e *Engine) executeStep(ctx context.Context, definition *workflow.Definitio
 	}
 	outcome.result = execution.result
 	return outcome
+}
+
+func managedExecutor(options Options, stepID string, runner step.Runner) stepExecutor {
+	return func(ctx context.Context, request step.Request) (step.Result, error) {
+		result, err := runner.Run(ctx, request)
+		if err != nil {
+			return result, err
+		}
+		cleaner, ok := runner.(step.Cleaner)
+		if !ok {
+			return result, nil
+		}
+		cleanupResult := step.Result{
+			Outputs:   cloneMap(result.Outputs),
+			Variables: cloneMap(result.Variables),
+		}
+		options.runtime.registerCleanup(func() error {
+			if err := cleaner.Cleanup(cleanupResult); err != nil {
+				return fmt.Errorf("cleaning managed resources for step %q: %w", stepID, err)
+			}
+			return nil
+		})
+		return result, nil
+	}
 }
 
 func commitStepResult(state *State, stepID string, result step.Result) {

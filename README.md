@@ -14,7 +14,7 @@ commands or inline shell, and launch an external agent such as Codex.
   foreach and matrix fan-out, retries, timeouts, dry runs, execution trees, live progress, and run
   statistics.
 - Use built-in wait, input, password, choice, confirm, set, assert, `import_vars`, JSONPath,
-  semantic-version, HTTP, file, glob, cache, key-value, Lua, shell, agent, and Docker steps.
+  semantic-version, HTTP, file, temp, glob, cache, key-value, Lua, shell, agent, and Docker steps.
 - Split workflows across local files with `require`, or reuse remote workflows and composite
   actions from HTTPS URLs and GitHub locators.
 - Integrate with `direnv`, import JSON or TOML variable files, and pass values explicitly with
@@ -56,6 +56,7 @@ commands or inline shell, and launch an external agent such as Codex.
     - [Semantic versions](#semantic-versions)
     - [HTTP](#http)
     - [File](#file)
+    - [Temp](#temp)
     - [Glob](#glob)
     - [Key-value stores](#key-value-stores)
     - [Lua](#lua)
@@ -1234,6 +1235,52 @@ Overwriting a file without `mode` preserves its permissions. Chmod rejects symbo
 rejects filesystem roots and the run directory, and a non-empty directory requires
 `recursive: true`. Absolute paths remain available because Wuko workflows are trusted code, not a
 filesystem sandbox.
+
+#### Temp
+
+The `temp` step creates an empty managed file or directory in the operating system's temporary
+directory. Use its absolute `path` output in later steps instead of choosing and cleaning a
+scratch location manually:
+
+```yaml
+- id: workspace
+  type: temp
+  with:
+    kind: directory
+    pattern: wuko-build-*
+
+- id: build
+  type: shell
+  with:
+    command: ./build
+    args: ["--output", "{{ .steps.workspace.path }}"]
+
+finally:
+  - id: inspect
+    type: shell
+    with:
+      command: ./inspect-build
+      args: ["{{ .steps.workspace.path }}"]
+```
+
+`kind` is required and must be `file` or `directory`. `pattern` is optional and defaults to
+`wuko-*`; it is a filename pattern, not a path, and cannot contain `/` or `\`. The final `*` is
+replaced with random characters; when no `*` is present, random characters are appended. The step
+outputs `path` and `kind`. Files are closed before the step succeeds and use the operating
+system's secure temporary-file permissions; directories use its secure temporary-directory
+permissions.
+
+Managed resources remain available through the complete root workflow, nested composite actions,
+retries, polling, concurrent branches, foreach and matrix iterations, and explicit `finally`
+steps. Wuko removes them in reverse completion order after `finally` ends. Every removal is
+attempted; removal errors are joined with main and `finally` errors and fail an otherwise
+successful run. Missing resources are accepted. Directory cleanup is recursive, while file
+cleanup refuses to recursively delete a directory that has replaced the original file.
+
+Validation and dry runs do not create temporary resources. After an executed run returns, its
+state may still contain the former absolute path even though the managed resource no longer
+exists. Custom parent directories, initial content, and custom modes are not supported; use a
+later `file` step when those operations are needed.
 
 #### Glob
 

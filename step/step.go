@@ -44,6 +44,14 @@ type Runner interface {
 	Run(context.Context, Request) (Result, error)
 }
 
+// Cleaner is an optional runner lifecycle implemented by steps that create managed resources.
+// Cleanup is called once for each successful Run, in reverse completion order, after the root
+// workflow and its finally steps finish. Implementations must derive the resource to remove from
+// result rather than mutable runner state because one runner may produce multiple results.
+type Cleaner interface {
+	Cleanup(Result) error
+}
+
 type Validator interface {
 	Validate(context.Context, Request) error
 }

@@ -1,6 +1,6 @@
 ---
 name: wuko-workflow-author
-description: Create or update Wuko version-1 YAML workflows, including templates, conditions, finally cleanup, foreach and matrix controls, required files, composite actions, waits, polling, retries, concurrency, interactive prompts, typed and imported variables, JSONPath selection, semantic versions, HTTP, files, glob discovery, content-addressed directory caches, Lua, shell, Docker, and agent steps. Use when designing workflow files, extending existing workflows, or reviewing workflow structure before execution.
+description: Create or update Wuko version-1 YAML workflows, including templates, conditions, finally cleanup, foreach and matrix controls, required files, composite actions, waits, polling, retries, concurrency, interactive prompts, typed and imported variables, JSONPath selection, semantic versions, HTTP, files, managed temporary resources, glob discovery, content-addressed directory caches, Lua, shell, Docker, and agent steps. Use when designing workflow files, extending existing workflows, or reviewing workflow structure before execution.
 ---
 
 # Wuko Workflow Author
@@ -36,6 +36,9 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
   predicate for polling. Give every poll a top-level timeout and prefer read-only probes.
 - Use `file` for auditable read, write, copy, move, remove, mkdir, list, stat, and chmod operations.
   Quote modes such as `"0755"`, opt into overwrites, and use recursive removal narrowly.
+- Use `temp` for an empty file or directory that should live through the complete root run and be
+  removed automatically after explicit `finally`. Consume its absolute `path` output in later
+  steps; use `file` afterward when content or custom permissions are required.
 - Use `glob` to discover regular files with portable `*`, `?`, character-class, and recursive `**`
   patterns. Keep patterns relative to its `root` and consume the sorted metadata from `files`.
 - Use `cache` with an early `restore` and a later `save` for dependency or build directories.
@@ -64,6 +67,9 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
   their own timeouts, make them idempotent, and select failures with stable `finally.status` and
   `finally.errors` metadata rather than error-message text. Cleanup cannot recover from an error;
   consult `docs/finally.md` when it is available for lifecycle and limitations.
+- Managed `temp` resources outlive nested workflows and actions and remain available to explicit
+  `finally`; the engine removes them afterward. Cleanup failures fail the run after every managed
+  removal has been attempted.
 - Supply invocation-time JSON or TOML variables with repeatable `--var-file`; later files replace
   earlier top-level values and explicit `--var` entries take final initial-state precedence.
 - Use `timeout` and `retry` deliberately. Retries have at-least-once effects; do not assume commands, requests, writes, containers, or agents can be rolled back.

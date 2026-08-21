@@ -142,7 +142,29 @@ func report(options Options, event ProgressEvent) {
 }
 
 type runRuntime struct {
-	mu sync.Mutex
+	mu       sync.Mutex
+	cleanups []func() error
+}
+
+func (runtime *runRuntime) registerCleanup(cleanup func() error) {
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	runtime.cleanups = append(runtime.cleanups, cleanup)
+}
+
+func (runtime *runRuntime) runCleanups() []error {
+	runtime.mu.Lock()
+	cleanups := runtime.cleanups
+	runtime.cleanups = nil
+	runtime.mu.Unlock()
+
+	var cleanupErrors []error
+	for index := len(cleanups) - 1; index >= 0; index-- {
+		if err := cleanups[index](); err != nil {
+			cleanupErrors = append(cleanupErrors, err)
+		}
+	}
+	return cleanupErrors
 }
 
 type synchronizedWriter struct {

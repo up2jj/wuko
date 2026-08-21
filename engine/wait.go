@@ -170,6 +170,7 @@ func fixedWaitExecutor(duration time.Duration) stepExecutor {
 }
 
 func (e *Engine) pollExecutor(definition *workflow.Definition, workflowStep workflow.Step, options Options, config waitConfig, runner step.Runner, program *vm.Program, metrics *waitMetrics) stepExecutor {
+	execute := managedExecutor(options, workflowStep.ID, runner)
 	return func(ctx context.Context, request step.Request) (step.Result, error) {
 		for poll := 1; ; poll++ {
 			if err := ctx.Err(); err != nil {
@@ -184,7 +185,7 @@ func (e *Engine) pollExecutor(definition *workflow.Definition, workflowStep work
 			})
 			traceStep(options, definition, workflowStep, diagnostic.PhasePoll, diagnostic.StatusStarted, time.Time{}, "executing nested "+config.Step.Type+" step", nil, diagnostic.Attr("poll", fmt.Sprint(poll)))
 
-			result, runErr := runner.Run(ctx, request)
+			result, runErr := execute(ctx, request)
 			duration := time.Since(started)
 			if err := ctx.Err(); err != nil {
 				reportPollFinished(options, definition, workflowStep, poll, duration, statusFromError(err), false, err)

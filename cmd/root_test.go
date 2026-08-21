@@ -218,6 +218,36 @@ steps:
 	}
 }
 
+func TestRootCommandRegistersTempStep(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "temp.yaml")
+	data := `version: 1
+name: temp
+steps:
+  - id: workspace
+    type: temp
+    with:
+      kind: directory
+      pattern: wuko-cli-*
+  - id: verify
+    type: assert
+    with:
+      expr: steps.workspace.kind == "directory"
+      message: temp result was unexpected
+`
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	command := NewRootCmd()
+	command.SetIn(bytes.NewReader(nil))
+	command.SetOut(io.Discard)
+	command.SetErr(io.Discard)
+	command.SetArgs([]string{"run", "--file", path})
+	if err := command.ExecuteContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRootCommandRegistersCacheStep(t *testing.T) {
 	root := t.TempDir()
 	keyFile := filepath.Join(root, "go.sum")
