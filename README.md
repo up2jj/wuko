@@ -12,8 +12,8 @@ commands or inline shell, and launch an external agent such as Codex.
   conditional steps.
 - Run steps sequentially or concurrently, wait for fixed durations or polled conditions, and use
   retries, timeouts, dry runs, execution trees, live progress, and run statistics.
-- Use built-in wait, input, password, choice, confirm, set, assert, `import_vars`, JSONPath, HTTP,
-  file, key-value, Lua, shell, agent, and Docker steps.
+- Use built-in wait, input, password, choice, confirm, set, assert, `import_vars`, JSONPath,
+  semantic-version, HTTP, file, key-value, Lua, shell, agent, and Docker steps.
 - Split workflows across local files with `require`, or reuse remote workflows and composite
   actions from HTTPS URLs and GitHub locators.
 - Integrate with `direnv`, import JSON or TOML variable files, and pass values explicitly with
@@ -49,6 +49,7 @@ commands or inline shell, and launch an external agent such as Codex.
     - [Assert](#assert)
     - [Import variables](#import-variables)
     - [JSONPath](#jsonpath)
+    - [Semantic versions](#semantic-versions)
     - [HTTP](#http)
     - [File](#file)
     - [Key-value stores](#key-value-stores)
@@ -1022,6 +1023,69 @@ RFC 9535 paths corresponding to the selected values. Duplicate selections are pr
 JSONPath results are nodelists, not sets. Evaluation is in-memory; use file-backed processing for
 datasets too large to keep in workflow state. JSONPath selects data but does not transform or
 modify it.
+
+#### Semantic versions
+
+Use `semver` to parse, compare, constrain, or increment semantic versions without invoking an
+external command. Versions must contain major, minor, and patch numbers; a common lowercase `v`
+tag prefix is accepted and removed from normalized outputs.
+
+Parse a version into its canonical value and components:
+
+```yaml
+- id: release
+  type: semver
+  with:
+    operation: parse
+    version: "v1.4.2-rc.1+build.7"
+    variable: release_version
+```
+
+The primary result is available at `.steps.release.value` and, when configured, at
+`.vars.release_version`. Parse also returns `version`, `major`, `minor`, `patch`, `prerelease`,
+and `metadata`.
+
+Compare precedence with `other`; `value` and `comparison` are `-1`, `0`, or `1`, and the step also
+returns boolean `less`, `equal`, and `greater` outputs. Build metadata does not affect precedence:
+
+```yaml
+- id: ordering
+  type: semver
+  with:
+    operation: compare
+    version: "{{ .vars.current_version }}"
+    other: "{{ .vars.candidate_version }}"
+```
+
+Check a version against a constraint with `constrain`. The boolean result is returned as both
+`value` and `matched`; comma or whitespace joins comparisons with AND, while `||` joins them with
+OR. Hyphen ranges, wildcards, tilde, and caret constraints are supported. Prerelease versions
+only match a constraint set that includes a prerelease comparator.
+
+```yaml
+- id: supported
+  type: semver
+  with:
+    operation: constrain
+    version: "{{ .vars.version }}"
+    constraint: ">= 1.4.0, < 2.0.0"
+    variable: is_supported
+```
+
+Increment `major`, `minor`, or `patch` with `part`. The string result is returned as `value` and
+`version`, with the normalized input in `previous`. Incrementing clears build metadata and
+prerelease data; incrementing the patch of a prerelease promotes it to its associated stable
+version.
+
+```yaml
+- id: next_release
+  type: semver
+  with:
+    operation: increment
+    version: "{{ .vars.version }}"
+    part: minor
+    variable: next_version
+```
 
 #### HTTP
 

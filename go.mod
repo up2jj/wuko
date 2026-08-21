@@ -5,6 +5,7 @@ go 1.26
 require (
 	charm.land/bubbles/v2 v2.1.1
 	charm.land/bubbletea/v2 v2.0.7
+	github.com/Masterminds/semver/v3 v3.5.0
 	github.com/containerd/errdefs v1.0.0
 	github.com/expr-lang/expr v1.17.8
 	github.com/moby/moby/api v1.55.0

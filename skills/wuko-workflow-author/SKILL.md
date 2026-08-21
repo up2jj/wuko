@@ -1,6 +1,6 @@
 ---
 name: wuko-workflow-author
-description: Create or update Wuko version-1 YAML workflows, including templates, conditions, required files, composite actions, waits, polling, retries, concurrency, interactive prompts, typed and imported variables, JSONPath selection, HTTP, files, Lua, shell, Docker, and agent steps. Use when designing workflow files, extending existing workflows, or reviewing workflow structure before execution.
+description: Create or update Wuko version-1 YAML workflows, including templates, conditions, required files, composite actions, waits, polling, retries, concurrency, interactive prompts, typed and imported variables, JSONPath selection, semantic versions, HTTP, files, Lua, shell, Docker, and agent steps. Use when designing workflow files, extending existing workflows, or reviewing workflow structure before execution.
 ---
 
 # Wuko Workflow Author
@@ -27,6 +27,9 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
 - Use `jsonpath` for RFC 9535 selection from a typed `vars` or `steps` value. Use `result: all`
   for a nodelist and `result: one` only when exactly one match is required; read normalized match
   locations from `paths`. Use Lua when the selected data also needs transformation or mutation.
+- Use `semver` for strict semantic-version parsing, precedence comparison, constraint checks, and
+  major/minor/patch increments. Read the operation's primary typed result from `value`; remember
+  that build metadata does not affect comparison and ordinary constraints exclude prereleases.
 - Use `http` for structured API calls with typed JSON responses, status validation, retries, and
   timeouts. Keep authorization values in environment-backed headers.
 - Use `wait` with `duration` for a fixed delay, or embed a `type`/`with` step and an Expr `until`

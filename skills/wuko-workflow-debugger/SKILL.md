@@ -1,6 +1,6 @@
 ---
 name: wuko-workflow-debugger
-description: Diagnose Wuko workflow validation and runtime failures involving schema, templates, conditions, environment, JSONPath selection, step behavior, concurrency, retries, remote actions, or trust boundaries. Use when a Wuko workflow fails, skips unexpectedly, produces the wrong output, or needs a minimal reproducible diagnosis.
+description: Diagnose Wuko workflow validation and runtime failures involving schema, templates, conditions, environment, JSONPath selection, semantic versions, step behavior, concurrency, retries, remote actions, or trust boundaries. Use when a Wuko workflow fails, skips unexpectedly, produces the wrong output, or needs a minimal reproducible diagnosis.
 ---
 
 # Wuko Workflow Debugger
@@ -20,6 +20,8 @@ Find the smallest evidence-backed cause of a Wuko workflow failure before changi
    - Environment and directories: `--env`, `--var`, direnv, workflow directory, run directory, and relative files.
    - Runtime step behavior: shell exit status, Lua errors, HTTP responses, filesystem effects, Docker setup, or agent exit codes.
    - JSONPath selection: query syntax after template rendering, missing `vars` or `steps` source paths, `all` list semantics, and `one` cardinality failures.
+   - Semantic versions: strict version syntax, normalized `v` prefixes, precedence versus build
+     metadata, prerelease constraint matching, and increment-part behavior.
    - Concurrency and retry: pre-group snapshots, non-interactive children, deadlines, cancellation, duplicate writes, and at-least-once effects.
    - Remote actions and trust: source resolution, archive contents, digest pinning, credentials, and executable permissions.
 5. Confirm the diagnosis with the smallest targeted command or test. Separate observed facts from hypotheses and state what evidence would disprove the diagnosis.

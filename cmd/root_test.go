@@ -87,6 +87,32 @@ steps:
 	}
 }
 
+func TestRootCommandRegistersSemVerStep(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "semver.yaml")
+	data := `version: 1
+name: semver
+steps:
+  - id: next
+    type: semver
+    with:
+      operation: increment
+      version: 1.2.3
+      part: patch
+`
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	command := NewRootCmd()
+	command.SetIn(bytes.NewReader(nil))
+	command.SetOut(io.Discard)
+	command.SetErr(io.Discard)
+	command.SetArgs([]string{"run", "--file", path})
+	if err := command.ExecuteContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRootCommandRunsBuiltInWaitStep(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "wait.yaml")
