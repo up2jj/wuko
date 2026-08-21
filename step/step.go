@@ -33,6 +33,9 @@ type Request struct {
 	Attempt     int
 	MaxAttempts int
 	OperationID string
+	// PreviousAttempt is the most recent failed attempt that produced a complete result.
+	// It is nil on the first attempt and remains immutable for the duration of Run.
+	PreviousAttempt *Result
 }
 
 type Result struct {

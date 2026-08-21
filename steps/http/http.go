@@ -14,7 +14,9 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/up2jj/wuko/step"
 )
@@ -66,13 +68,32 @@ type Runner struct {
 	hasJSON bool
 }
 
-type statusError struct{ status int }
+type statusError struct {
+	method     string
+	status     int
+	retryAfter time.Duration
+}
 
 func (err statusError) Error() string {
 	return fmt.Sprintf("HTTP request returned status %d", err.status)
 }
 
 func (statusError) ObservationAvailable() bool { return true }
+
+func (err statusError) HTTPRequestMethod() string     { return err.method }
+func (err statusError) HTTPStatusCode() int           { return err.status }
+func (err statusError) HTTPRetryAfter() time.Duration { return err.retryAfter }
+
+type requestError struct {
+	method string
+	err    error
+}
+
+func (err requestError) Error() string             { return err.err.Error() }
+func (err requestError) Unwrap() error             { return err.err }
+func (err requestError) HTTPRequestMethod() string { return err.method }
+func (requestError) HTTPStatusCode() int           { return 0 }
+func (requestError) HTTPRetryAfter() time.Duration { return 0 }
 
 func Register(registry *step.Registry) error { return registry.Register("http", New) }
 
@@ -191,9 +212,10 @@ func (r *Runner) Run(ctx context.Context, execution step.Request) (result step.R
 	if r.hasJSON && request.Header.Get("Content-Type") == "" {
 		request.Header.Set("Content-Type", "application/json")
 	}
+	applyConditionalHeaders(request.Header, execution.PreviousAttempt)
 	response, err := client.Do(request)
 	if err != nil {
-		return step.Result{}, fmt.Errorf("performing request: %w", err)
+		return step.Result{}, fmt.Errorf("performing request: %w", requestError{method: request.Method, err: err})
 	}
 	defer response.Body.Close()
 	if response.ContentLength > maxResponseSize {
@@ -205,6 +227,11 @@ func (r *Runner) Run(ctx context.Context, execution step.Request) (result step.R
 	}
 	if len(data) > maxResponseSize {
 		return step.Result{}, fmt.Errorf("response body exceeds %d bytes", maxResponseSize)
+	}
+	if response.StatusCode == http.StatusNotModified {
+		if outputs, ok := revalidatedOutputs(execution.PreviousAttempt, response.Header); ok {
+			return step.Result{Outputs: outputs}, nil
+		}
 	}
 	value := any(string(data))
 	if r.config.Response == "json" {
@@ -221,7 +248,10 @@ func (r *Runner) Run(ctx context.Context, execution step.Request) (result step.R
 	}
 	result = step.Result{Outputs: outputs}
 	if !r.success(response.StatusCode) {
-		return result, statusError{status: response.StatusCode}
+		return result, statusError{
+			method: request.Method, status: response.StatusCode,
+			retryAfter: parseRetryAfter(response.Header.Get("Retry-After"), time.Now()),
+		}
 	}
 	return result, nil
 }
@@ -448,6 +478,98 @@ func responseHeaders(header http.Header) map[string]any {
 		result[key] = items
 	}
 	return result
+}
+
+func applyConditionalHeaders(header http.Header, previous *step.Result) {
+	if previous == nil || previous.Outputs == nil {
+		return
+	}
+	previousHeaders, ok := previous.Outputs["headers"].(map[string]any)
+	if !ok {
+		return
+	}
+	if !requestHeaderExists(header, "If-None-Match") {
+		if etag := outputHeader(previousHeaders, "ETag"); etag != "" {
+			header.Set("If-None-Match", etag)
+		}
+	}
+	if !requestHeaderExists(header, "If-Modified-Since") {
+		if modified := outputHeader(previousHeaders, "Last-Modified"); modified != "" {
+			header.Set("If-Modified-Since", modified)
+		}
+	}
+}
+
+func requestHeaderExists(header http.Header, name string) bool {
+	for key := range header {
+		if strings.EqualFold(key, name) {
+			return true
+		}
+	}
+	return false
+}
+
+func revalidatedOutputs(previous *step.Result, current http.Header) (map[string]any, bool) {
+	if previous == nil || previous.Outputs == nil {
+		return nil, false
+	}
+	body, hasBody := previous.Outputs["body"]
+	value, hasValue := previous.Outputs["value"]
+	previousHeaders, hasHeaders := previous.Outputs["headers"].(map[string]any)
+	if !hasBody || !hasValue || !hasHeaders {
+		return nil, false
+	}
+	headers := make(map[string]any, len(previousHeaders)+len(current))
+	for key, values := range previousHeaders {
+		headers[key] = values
+	}
+	for key, values := range responseHeaders(current) {
+		for existing := range headers {
+			if strings.EqualFold(existing, key) && existing != key {
+				delete(headers, existing)
+			}
+		}
+		headers[key] = values
+	}
+	return map[string]any{
+		"status":  http.StatusNotModified,
+		"headers": headers,
+		"body":    body,
+		"value":   value,
+	}, true
+}
+
+func outputHeader(headers map[string]any, name string) string {
+	for key, raw := range headers {
+		if !strings.EqualFold(key, name) {
+			continue
+		}
+		values, ok := raw.([]any)
+		if !ok || len(values) == 0 {
+			return ""
+		}
+		value, _ := values[0].(string)
+		return value
+	}
+	return ""
+}
+
+func parseRetryAfter(value string, now time.Time) time.Duration {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+	if seconds, err := strconv.ParseInt(value, 10, 64); err == nil {
+		if seconds <= 0 || seconds > int64((1<<63-1)/time.Second) {
+			return 0
+		}
+		return time.Duration(seconds) * time.Second
+	}
+	date, err := http.ParseTime(value)
+	if err != nil || !date.After(now) {
+		return 0
+	}
+	return date.Sub(now)
 }
 
 func decodeJSON(data []byte) (any, error) {

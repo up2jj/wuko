@@ -57,6 +57,38 @@ func TestRetryPolicyDefaults(t *testing.T) {
 	}
 }
 
+func TestHTTPRetryPolicyMethodsAndStatusRanges(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "workflow.yaml")
+	writeTestFile(t, path, `version: 1
+name: http-retry
+steps:
+  - id: fetch
+    type: http
+    retry:
+      methods: [get, POST]
+      statuses: [408, 429, "500-599"]
+    with: {url: https://example.test}
+`)
+	definition, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy := definition.Steps[0].Retry
+	if strings.Join(policy.Methods, ",") != "GET,POST" {
+		t.Fatalf("methods = %v", policy.Methods)
+	}
+	want := []StatusRange{{From: 408, To: 408}, {From: 429, To: 429}, {From: 500, To: 599}}
+	if len(policy.Statuses) != len(want) {
+		t.Fatalf("statuses = %#v", policy.Statuses)
+	}
+	for i := range want {
+		if policy.Statuses[i] != want[i] {
+			t.Fatalf("statuses = %#v", policy.Statuses)
+		}
+	}
+}
+
 func TestLoadRejectsInvalidExecutionPolicy(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -71,6 +103,8 @@ func TestLoadRejectsInvalidExecutionPolicy(t *testing.T) {
 		{name: "max delay", fields: "    retry: {initial_delay: 2s, max_delay: 1s}\n", want: "max_delay"},
 		{name: "jitter", fields: "    retry: {jitter: 1.1}\n", want: "jitter"},
 		{name: "elapsed", fields: "    retry: {max_elapsed_time: -1s}\n", want: "max_elapsed_time"},
+		{name: "HTTP fields on shell", fields: "    retry: {methods: [GET]}\n", want: "only supported for http"},
+		{name: "empty methods", fields: "    retry: {methods: []}\n", want: "only supported for http"},
 		{name: "unknown", fields: "    retry: {unknown: true}\n", want: "field unknown"},
 	}
 	for _, test := range tests {
@@ -78,6 +112,33 @@ func TestLoadRejectsInvalidExecutionPolicy(t *testing.T) {
 			dir := t.TempDir()
 			path := filepath.Join(dir, "workflow.yaml")
 			writeTestFile(t, path, "version: 1\nname: invalid\nsteps:\n  - id: run\n    type: shell\n"+test.fields+"    with: {command: run}\n")
+			_, err := Load(path)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestLoadRejectsInvalidHTTPRetryPolicy(t *testing.T) {
+	tests := []struct {
+		name   string
+		policy string
+		want   string
+	}{
+		{name: "invalid method", policy: "methods: ['BAD METHOD']", want: "valid HTTP method"},
+		{name: "duplicate method", policy: "methods: [GET, get]", want: "duplicated"},
+		{name: "empty methods", policy: "methods: []", want: "at least one"},
+		{name: "empty statuses", policy: "statuses: []", want: "at least one"},
+		{name: "descending range", policy: "statuses: ['599-500']", want: "ascending"},
+		{name: "out of range", policy: "statuses: [99]", want: "between 100 and 599"},
+		{name: "overlap", policy: "statuses: ['500-550', '525-599']", want: "overlap"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "workflow.yaml")
+			writeTestFile(t, path, "version: 1\nname: invalid\nsteps:\n  - id: fetch\n    type: http\n    retry: {"+test.policy+"}\n    with: {url: https://example.test}\n")
 			_, err := Load(path)
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("error = %v, want %q", err, test.want)

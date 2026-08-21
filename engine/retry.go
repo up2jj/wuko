@@ -5,10 +5,12 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"math"
 	randv2 "math/rand/v2"
+	"slices"
 	"strings"
 	"time"
 
@@ -26,8 +28,41 @@ type stepExecution struct {
 	err       error
 }
 
+type httpRetryError interface {
+	error
+	HTTPRequestMethod() string
+	HTTPStatusCode() int
+	HTTPRetryAfter() time.Duration
+}
+
+type attemptTimeoutError struct {
+	duration time.Duration
+	cause    error
+}
+
+func (err attemptTimeoutError) Error() string {
+	return fmt.Sprintf("timed out after %s: %v", err.duration, context.DeadlineExceeded)
+}
+
+func (err attemptTimeoutError) Unwrap() []error {
+	if err.cause == nil {
+		return []error{context.DeadlineExceeded}
+	}
+	return []error{context.DeadlineExceeded, err.cause}
+}
+
+var defaultHTTPRetryMethods = []string{"GET", "HEAD", "OPTIONS", "PUT", "DELETE", "TRACE"}
+
+var defaultHTTPRetryStatuses = []workflow.StatusRange{
+	{From: 408, To: 408},
+	{From: 425, To: 425},
+	{From: 429, To: 429},
+	{From: 500, To: 599},
+}
+
 func (e *Engine) runWithRetry(ctx context.Context, definition *workflow.Definition, workflowStep workflow.Step, options Options, state *State, execute stepExecutor) stepExecution {
 	var execution stepExecution
+	var previousAttempt *step.Result
 	operationID, err := executionOperationID(definition, workflowStep, options, state)
 	if err != nil {
 		traceStep(options, definition, workflowStep, diagnostic.PhaseAttempt, diagnostic.StatusFailed, time.Time{}, "preparing operation", err)
@@ -60,6 +95,7 @@ func (e *Engine) runWithRetry(ctx context.Context, definition *workflow.Definiti
 			StepType: executionKind(workflowStep), Attempt: attempt, MaxAttempts: maximum,
 		})
 		request := makeRequest(definition, workflowStep.ID, options, state, attempt, maximum, operationID)
+		request.PreviousAttempt = previousAttempt
 		result, runErr := execute(attemptCtx, request)
 		attemptContextErr := attemptCtx.Err()
 		cancelAttempt()
@@ -67,7 +103,7 @@ func (e *Engine) runWithRetry(ctx context.Context, definition *workflow.Definiti
 		if contextErr := executionContextError(ctx, runCtx, workflowStep); contextErr != nil {
 			runErr = contextErr
 		} else if attemptContextErr == context.DeadlineExceeded && workflowStep.Timeout != nil {
-			runErr = fmt.Errorf("timed out after %s: %w", workflowStep.Timeout, context.DeadlineExceeded)
+			runErr = attemptTimeoutError{duration: workflowStep.Timeout.Value(), cause: runErr}
 		}
 		attemptStats := AttemptStats{
 			Number: attempt, Status: statusFromError(runErr), StartedAt: attemptStartedAt,
@@ -97,8 +133,16 @@ func (e *Engine) runWithRetry(ctx context.Context, definition *workflow.Definiti
 			execution.err = fmt.Errorf("attempt %d/%d failed: %w", attempt, maximum, runErr)
 			return execution
 		}
+		if !shouldRetry(workflowStep, runErr) {
+			execution.err = runErr
+			return execution
+		}
+		if result.Outputs != nil {
+			completed := result
+			previousAttempt = &completed
+		}
 
-		delay := retryDelay(workflowStep.Retry, attempt)
+		delay := retryDelayForError(workflowStep.Retry, attempt, runErr)
 		traceStep(options, definition, workflowStep, diagnostic.PhaseRetry, diagnostic.StatusDetail, time.Time{}, "retry scheduled", nil,
 			attemptAttr(attempt+1, maximum), diagnostic.Attr("delay", delay.String()))
 		report(options, ProgressEvent{
@@ -120,6 +164,48 @@ func (e *Engine) runWithRetry(ctx context.Context, definition *workflow.Definiti
 		execution.retryWait += time.Since(waitStartedAt)
 	}
 	panic("unreachable")
+}
+
+func shouldRetry(workflowStep workflow.Step, err error) bool {
+	if workflowStep.Type != "http" {
+		return true
+	}
+	var retryErr httpRetryError
+	if !errors.As(err, &retryErr) {
+		return false
+	}
+	methods := workflowStep.Retry.Methods
+	if len(methods) == 0 {
+		methods = defaultHTTPRetryMethods
+	}
+	methodAllowed := slices.ContainsFunc(methods, func(method string) bool {
+		return strings.EqualFold(method, retryErr.HTTPRequestMethod())
+	})
+	if !methodAllowed {
+		return false
+	}
+	if retryErr.HTTPStatusCode() == 0 {
+		return true
+	}
+	statuses := workflowStep.Retry.Statuses
+	if len(statuses) == 0 {
+		statuses = defaultHTTPRetryStatuses
+	}
+	return slices.ContainsFunc(statuses, func(status workflow.StatusRange) bool {
+		return retryErr.HTTPStatusCode() >= status.From && retryErr.HTTPStatusCode() <= status.To
+	})
+}
+
+func retryDelayForError(policy *workflow.RetryPolicy, failedAttempt int, err error) time.Duration {
+	delay := retryDelay(policy, failedAttempt)
+	var retryErr httpRetryError
+	if errors.As(err, &retryErr) {
+		delay = max(delay, retryErr.HTTPRetryAfter())
+	}
+	if policy != nil {
+		delay = min(delay, policy.MaxDelay.Value())
+	}
+	return max(0, delay)
 }
 
 func maxAttempts(workflowStep workflow.Step) int {

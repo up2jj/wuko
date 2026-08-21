@@ -90,6 +90,53 @@ func TestHTTPRetriesAndCommitsSuccessfulResponse(t *testing.T) {
 	}
 }
 
+func TestHTTPRetryRevalidatesPreviousResponse(t *testing.T) {
+	var attempts atomic.Int32
+	modified := "Thu, 20 Aug 2026 10:00:00 GMT"
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch attempts.Add(1) {
+		case 1:
+			writer.Header().Set("ETag", `"release-42"`)
+			writer.Header().Set("Last-Modified", modified)
+			writer.Header().Set("Retry-After", "0")
+			writer.Header().Set("X-Version", "cached")
+			writer.WriteHeader(http.StatusServiceUnavailable)
+			fmt.Fprint(writer, "cached body")
+		case 2:
+			if request.Header.Get("If-None-Match") != `"release-42"` || request.Header.Get("If-Modified-Since") != modified {
+				t.Errorf("conditional headers = %#v", request.Header)
+			}
+			writer.Header().Set("ETag", `"release-43"`)
+			writer.Header().Set("X-Version", "fresh")
+			writer.WriteHeader(http.StatusNotModified)
+		default:
+			t.Errorf("unexpected attempt %d", attempts.Load())
+		}
+	}))
+	defer server.Close()
+
+	policy := &workflow.RetryPolicy{MaxAttempts: 2, BackoffMultiplier: 1}
+	definition := &workflow.Definition{Version: 1, Name: "revalidate", Dir: t.TempDir(), Steps: []workflow.Step{{
+		ID: "request", Type: "http", With: map[string]any{"url": server.URL}, Retry: policy,
+	}}}
+	registry := step.NewRegistry()
+	if err := httpstep.Register(registry); err != nil {
+		t.Fatal(err)
+	}
+	state, err := engine.New(registry).Run(t.Context(), definition, engine.Options{Stdout: io.Discard, Stderr: io.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outputs := state.Steps["request"].(map[string]any)
+	if attempts.Load() != 2 || outputs["status"] != http.StatusNotModified || outputs["body"] != "cached body" || outputs["value"] != "cached body" {
+		t.Fatalf("attempts = %d, outputs = %#v", attempts.Load(), outputs)
+	}
+	headers := outputs["headers"].(map[string]any)
+	if headers["Etag"].([]any)[0] != `"release-43"` || headers["Last-Modified"].([]any)[0] != modified || headers["X-Version"].([]any)[0] != "fresh" {
+		t.Fatalf("headers = %#v", headers)
+	}
+}
+
 func portableRegistry(t *testing.T) *step.Registry {
 	t.Helper()
 	registry := step.NewRegistry()

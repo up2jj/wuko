@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 var (
 	identifierPattern  = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 	environmentPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	httpMethodPattern  = regexp.MustCompile("^[!#$%&'*+\\-.^_`|~0-9A-Z]+$")
 )
 
 // Definition is a fully loaded workflow document.
@@ -174,13 +176,53 @@ func (duration Duration) String() string { return duration.Value().String() }
 
 // RetryPolicy controls repeated execution of one logical workflow step.
 type RetryPolicy struct {
-	MaxAttempts       int      `yaml:"max_attempts"`
-	InitialDelay      Duration `yaml:"initial_delay,omitempty"`
-	BackoffMultiplier float64  `yaml:"backoff_multiplier,omitempty"`
-	MaxDelay          Duration `yaml:"max_delay,omitempty"`
-	Jitter            float64  `yaml:"jitter,omitempty"`
-	MaxElapsedTime    Duration `yaml:"max_elapsed_time,omitempty"`
-	OperationID       string   `yaml:"operation_id,omitempty"`
+	MaxAttempts       int           `yaml:"max_attempts"`
+	InitialDelay      Duration      `yaml:"initial_delay,omitempty"`
+	BackoffMultiplier float64       `yaml:"backoff_multiplier,omitempty"`
+	MaxDelay          Duration      `yaml:"max_delay,omitempty"`
+	Jitter            float64       `yaml:"jitter,omitempty"`
+	MaxElapsedTime    Duration      `yaml:"max_elapsed_time,omitempty"`
+	OperationID       string        `yaml:"operation_id,omitempty"`
+	Methods           []string      `yaml:"methods,omitempty"`
+	Statuses          []StatusRange `yaml:"statuses,omitempty"`
+	hasMethods        bool
+	hasStatuses       bool
+}
+
+// StatusRange is one inclusive HTTP status-code range used by an HTTP retry policy.
+type StatusRange struct {
+	From int
+	To   int
+}
+
+func (status *StatusRange) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind != yaml.ScalarNode {
+		return fmt.Errorf("retry status must be an integer or range")
+	}
+	value := strings.TrimSpace(node.Value)
+	parts := strings.Split(value, "-")
+	if len(parts) > 2 || value == "" {
+		return fmt.Errorf("retry status %q must be an integer or inclusive range", value)
+	}
+	from, err := strconv.Atoi(strings.TrimSpace(parts[0]))
+	if err != nil {
+		return fmt.Errorf("retry status %q must be an integer or inclusive range", value)
+	}
+	to := from
+	if len(parts) == 2 {
+		to, err = strconv.Atoi(strings.TrimSpace(parts[1]))
+		if err != nil {
+			return fmt.Errorf("retry status %q must be an integer or inclusive range", value)
+		}
+	}
+	if from < 100 || from > 599 || to < 100 || to > 599 {
+		return fmt.Errorf("retry status %q must be between 100 and 599", value)
+	}
+	if from > to {
+		return fmt.Errorf("retry status range %q must be ascending", value)
+	}
+	*status = StatusRange{From: from, To: to}
+	return nil
 }
 
 func (policy *RetryPolicy) UnmarshalYAML(node *yaml.Node) error {
@@ -190,7 +232,7 @@ func (policy *RetryPolicy) UnmarshalYAML(node *yaml.Node) error {
 	allowed := map[string]bool{
 		"max_attempts": true, "initial_delay": true, "backoff_multiplier": true,
 		"max_delay": true, "jitter": true, "max_elapsed_time": true,
-		"operation_id": true,
+		"operation_id": true, "methods": true, "statuses": true,
 	}
 	for i := 0; i < len(node.Content); i += 2 {
 		if !allowed[node.Content[i].Value] {
@@ -206,6 +248,14 @@ func (policy *RetryPolicy) UnmarshalYAML(node *yaml.Node) error {
 		return err
 	}
 	*policy = RetryPolicy(decoded)
+	for i := 0; i < len(node.Content); i += 2 {
+		switch node.Content[i].Value {
+		case "methods":
+			policy.hasMethods = true
+		case "statuses":
+			policy.hasStatuses = true
+		}
+	}
 	return nil
 }
 
@@ -580,6 +630,37 @@ func (workflowStep Step) ValidateExecutionPolicy() error {
 	}
 	if policy.OperationID != "" && strings.TrimSpace(policy.OperationID) == "" {
 		return fmt.Errorf("retry operation_id cannot be blank")
+	}
+	if workflowStep.Type != "http" && (policy.hasMethods || policy.hasStatuses || len(policy.Methods) > 0 || len(policy.Statuses) > 0) {
+		return fmt.Errorf("retry methods and statuses are only supported for http steps")
+	}
+	if policy.hasMethods && len(policy.Methods) == 0 {
+		return fmt.Errorf("retry methods must contain at least one HTTP method")
+	}
+	if policy.hasStatuses && len(policy.Statuses) == 0 {
+		return fmt.Errorf("retry statuses must contain at least one HTTP status or range")
+	}
+	seenMethods := make(map[string]bool, len(policy.Methods))
+	for i, method := range policy.Methods {
+		method = strings.ToUpper(strings.TrimSpace(method))
+		if method == "" || !httpMethodPattern.MatchString(method) {
+			return fmt.Errorf("retry method %q is not a valid HTTP method", policy.Methods[i])
+		}
+		if seenMethods[method] {
+			return fmt.Errorf("retry method %q is duplicated", method)
+		}
+		seenMethods[method] = true
+		policy.Methods[i] = method
+	}
+	for i, status := range policy.Statuses {
+		if status.From < 100 || status.From > 599 || status.To < 100 || status.To > 599 || status.From > status.To {
+			return fmt.Errorf("retry status range %d-%d must be ascending and between 100 and 599", status.From, status.To)
+		}
+		for _, previous := range policy.Statuses[:i] {
+			if status.From <= previous.To && previous.From <= status.To {
+				return fmt.Errorf("retry status ranges %d-%d and %d-%d overlap", previous.From, previous.To, status.From, status.To)
+			}
+		}
 	}
 	return nil
 }

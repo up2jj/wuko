@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/up2jj/wuko/step"
 )
@@ -176,5 +177,71 @@ func TestDecodeJSONPreservesNumbers(t *testing.T) {
 	}
 	if got := value.(map[string]any)["count"]; got != json.Number("9007199254740993") {
 		t.Fatalf("count = %#v", got)
+	}
+}
+
+func TestRetryAfterParsing(t *testing.T) {
+	now := time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name  string
+		value string
+		want  time.Duration
+	}{
+		{name: "delta seconds", value: "12", want: 12 * time.Second},
+		{name: "HTTP date", value: now.Add(20 * time.Second).Format(nethttp.TimeFormat), want: 20 * time.Second},
+		{name: "past HTTP date", value: now.Add(-time.Second).Format(nethttp.TimeFormat)},
+		{name: "negative delta", value: "-2"},
+		{name: "invalid", value: "later"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := parseRetryAfter(test.value, now); got != test.want {
+				t.Fatalf("parseRetryAfter(%q) = %s, want %s", test.value, got, test.want)
+			}
+		})
+	}
+}
+
+func TestConditionalHeadersAndRevalidatedResult(t *testing.T) {
+	modified := "Thu, 20 Aug 2026 10:00:00 GMT"
+	previous := &step.Result{Outputs: map[string]any{
+		"status": 503,
+		"headers": map[string]any{
+			"Etag":          []any{`"release-42"`},
+			"Last-Modified": []any{modified},
+			"X-Cached":      []any{"old"},
+		},
+		"body":  `{"ready":false}`,
+		"value": map[string]any{"ready": false},
+	}}
+	headers := make(nethttp.Header)
+	applyConditionalHeaders(headers, previous)
+	if headers.Get("If-None-Match") != `"release-42"` || headers.Get("If-Modified-Since") != modified {
+		t.Fatalf("conditional headers = %#v", headers)
+	}
+
+	explicit := nethttp.Header{"If-None-Match": []string{""}, "If-Modified-Since": []string{"explicit"}}
+	applyConditionalHeaders(explicit, previous)
+	if values := explicit.Values("If-None-Match"); len(values) != 1 || values[0] != "" {
+		t.Fatalf("explicit ETag condition was replaced: %#v", explicit)
+	}
+	if explicit.Get("If-Modified-Since") != "explicit" {
+		t.Fatalf("explicit modified condition was replaced: %#v", explicit)
+	}
+
+	current := make(nethttp.Header)
+	current.Set("ETag", `"release-43"`)
+	current.Set("X-Cached", "fresh")
+	outputs, ok := revalidatedOutputs(previous, current)
+	ready, valueOK := outputs["value"].(map[string]any)["ready"].(bool)
+	if !ok || !valueOK || ready || outputs["status"] != nethttp.StatusNotModified || outputs["body"] != previous.Outputs["body"] {
+		t.Fatalf("revalidated outputs = %#v, ok = %v", outputs, ok)
+	}
+	merged := outputs["headers"].(map[string]any)
+	if outputHeader(merged, "ETag") != `"release-43"` || outputHeader(merged, "Last-Modified") != modified || outputHeader(merged, "X-Cached") != "fresh" {
+		t.Fatalf("merged headers = %#v", merged)
+	}
+	if _, ok := revalidatedOutputs(nil, current); ok {
+		t.Fatal("304 without a previous representation was reusable")
 	}
 }

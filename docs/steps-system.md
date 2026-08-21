@@ -160,7 +160,9 @@ Fetch JSON with retries and bearer authentication:
 - id: release
   type: http
   timeout: 30s
-  retry: {max_attempts: 3}
+  retry:
+    max_attempts: 3
+    statuses: [408, 429, "500-599"]
   with:
     url: https://api.example.com/releases/latest
     query: {channel: stable}
@@ -193,6 +195,19 @@ Supply at most one of `body` or `json`. Every response exposes `status`, `header
 `value` is text or decoded JSON. Bodies are limited to 10 MiB. Dedicated bearer/Basic auth is
 mutually exclusive with a raw `Authorization` header. The step also supports explicit proxies,
 cookie values/jars, and mutual-TLS certificate files.
+
+HTTP retries use the ordinary step-level `retry` timing and attempt limits. Unless overridden with
+`retry.methods`, only idempotent methods (`GET`, `HEAD`, `OPTIONS`, `PUT`, `DELETE`, and `TRACE`)
+are retried. The default retryable statuses are `408`, `425`, `429`, and `500-599`; individual
+codes and inclusive quoted ranges can be supplied with `retry.statuses`. Include `POST` or `PATCH`
+explicitly when the endpoint makes those requests safe to repeat.
+
+A retryable response's `Retry-After` delta-seconds or HTTP date can extend the next backoff, up to
+the policy's `max_delay` and `max_elapsed_time`. When a completed response contains `ETag` or
+`Last-Modified`, the next attempt sends `If-None-Match` or `If-Modified-Since` unless that header
+was configured explicitly. A `304 Not Modified` then succeeds with the previous response's body
+and value while exposing the `304` status and refreshed headers. Validators are retained only
+between attempts of that one step execution.
 
 ## `docker`
 

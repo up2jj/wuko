@@ -54,6 +54,12 @@ func TestRunRetriesAndCommitsOnlySuccessfulAttempt(t *testing.T) {
 		if request.Attempt != i+1 || request.MaxAttempts != 3 || request.OperationID != "release-42" {
 			t.Fatalf("request %d = %#v", i+1, request)
 		}
+		if i == 0 && request.PreviousAttempt != nil {
+			t.Fatalf("first request previous attempt = %#v", request.PreviousAttempt)
+		}
+		if i > 0 && (request.PreviousAttempt == nil || request.PreviousAttempt.Outputs["failed"] != i) {
+			t.Fatalf("request %d previous attempt = %#v", i+1, request.PreviousAttempt)
+		}
 	}
 	if _, exists := state.Vars["leaked"]; exists {
 		t.Fatal("failed-attempt variable was committed")
@@ -171,5 +177,53 @@ func TestRunDoesNotRetryParentCancellation(t *testing.T) {
 	_, err := New(registry).Run(ctx, definition, Options{Stdout: io.Discard, Stderr: io.Discard})
 	if !errors.Is(err, context.Canceled) || len(requests) != 0 {
 		t.Fatalf("error = %v, attempts = %d", err, len(requests))
+	}
+}
+
+type retryHTTPError struct {
+	method     string
+	status     int
+	retryAfter time.Duration
+}
+
+func (err retryHTTPError) Error() string                 { return "HTTP failure" }
+func (err retryHTTPError) HTTPRequestMethod() string     { return err.method }
+func (err retryHTTPError) HTTPStatusCode() int           { return err.status }
+func (err retryHTTPError) HTTPRetryAfter() time.Duration { return err.retryAfter }
+
+func TestHTTPRetryEligibility(t *testing.T) {
+	tests := []struct {
+		name   string
+		policy *workflow.RetryPolicy
+		err    error
+		want   bool
+	}{
+		{name: "default GET transport", policy: immediateRetry(2), err: retryHTTPError{method: "GET"}, want: true},
+		{name: "default GET transient status", policy: immediateRetry(2), err: retryHTTPError{method: "GET", status: 503}, want: true},
+		{name: "default GET permanent status", policy: immediateRetry(2), err: retryHTTPError{method: "GET", status: 404}},
+		{name: "default POST", policy: immediateRetry(2), err: retryHTTPError{method: "POST", status: 503}},
+		{name: "POST override", policy: &workflow.RetryPolicy{MaxAttempts: 2, Methods: []string{"POST"}, Statuses: []workflow.StatusRange{{From: 500, To: 504}}}, err: retryHTTPError{method: "POST", status: 502}, want: true},
+		{name: "wrapped GET timeout", policy: immediateRetry(2), err: attemptTimeoutError{duration: time.Second, cause: retryHTTPError{method: "GET"}}, want: true},
+		{name: "terminal HTTP error", policy: immediateRetry(2), err: errors.New("decoding response")},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			workflowStep := workflow.Step{Type: "http", Retry: test.policy}
+			if got := shouldRetry(workflowStep, test.err); got != test.want {
+				t.Fatalf("shouldRetry() = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
+func TestRetryAfterExtendsBackoffWithinMaxDelay(t *testing.T) {
+	policy := &workflow.RetryPolicy{
+		InitialDelay: workflow.Duration(time.Second), BackoffMultiplier: 1, MaxDelay: workflow.Duration(5 * time.Second),
+	}
+	if got := retryDelayForError(policy, 1, retryHTTPError{retryAfter: 3 * time.Second}); got != 3*time.Second {
+		t.Fatalf("delay = %s, want 3s", got)
+	}
+	if got := retryDelayForError(policy, 1, retryHTTPError{retryAfter: 10 * time.Second}); got != 5*time.Second {
+		t.Fatalf("capped delay = %s, want 5s", got)
 	}
 }
