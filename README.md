@@ -58,6 +58,7 @@ commands or inline shell, and launch an external agent such as Codex.
     - [File](#file)
     - [Temp](#temp)
     - [Glob](#glob)
+    - [Cache](#cache)
     - [Key-value stores](#key-value-stores)
     - [Lua](#lua)
     - [Shell and agent](#shell-and-agent)
