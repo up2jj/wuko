@@ -122,6 +122,70 @@ Expr also supports native list and object literals, which are usually clearer th
 
 Use `"key" in object` as an idiomatic alternative to `hasKey(object, "key")`.
 
+## Expr-only typed collection operations
+
+Expr provides higher-order operations for transforming typed lists. These functions are available
+wherever Wuko accepts Expr, including `set.expr`, `assert.expr`, conditions, foreach items, and
+matrix axes. They are not Go-template or Lua helpers.
+
+| Function | Example | Result |
+| --- | --- | --- |
+| `groupBy` | `groupBy(items, .tier)` | Object whose keys contain ordered lists of matching items |
+| `indexBy` | `indexBy(items, "id")` | Object mapping each string field value to its original item |
+| `sort` | `sort(items)` or `sort(items, "desc")` | Sorted copy of a scalar list |
+| `sortBy` | `sortBy(items, .priority)` | Copy sorted by a computed value; accepts optional `"desc"` |
+| `uniq` | `uniq(items)` | Copy containing the first occurrence of each value |
+| `flatten` | `flatten(items)` | Recursively flattened, one-dimensional list |
+| `chunk` | `chunk(items, 3)` | Ordered lists of at most three items |
+
+Predicates use Expr's current item shorthand. For example, this groups services without changing
+their order inside each group:
+
+```expr
+groupBy(vars.services, .tier)
+```
+
+`indexBy` accepts an exact top-level field name. Every item must be a string-keyed object, the
+field must exist and contain a string, and keys must be unique. Invalid items and duplicate keys
+stop evaluation rather than silently discarding or replacing data:
+
+```expr
+indexBy(vars.services, "id")
+```
+
+`sort`, `sortBy`, `uniq`, `flatten`, and `chunk` return new lists and do not modify their inputs.
+`flatten` recursively removes all nested list levels. `chunk` requires a positive size and retains
+a shorter final chunk. Collection operations compose naturally in pipelines:
+
+```expr
+vars.priorities | uniq() | sort("desc") | chunk(2)
+```
+
+Use `set` to retain a transformed value for later steps:
+
+```yaml
+- id: service_index
+  type: set
+  with:
+    variable: services_by_id
+    expr: 'indexBy(vars.services, "id")'
+```
+
+A collection expression can also feed foreach directly. Here each iteration receives a list of up
+to ten targets in `.foreach.item`:
+
+```yaml
+- id: deploy_batches
+  foreach:
+    items: chunk(vars.targets, 10)
+    steps:
+      - id: deploy
+        type: shell
+        with:
+          command: ./deploy-batch
+          args: ['{{ .foreach.item | toJSONCompact }}']
+```
+
 ## Indentation and serialization
 
 | Function | Go template | Expr | Lua | Result |

@@ -187,6 +187,76 @@ func sortAlpha(collection any) ([]string, error) {
 	return result, nil
 }
 
+func indexBy(collection any, field string) (map[string]any, error) {
+	value, err := listValue(collection)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]any, value.Len())
+	for i := range value.Len() {
+		item := value.Index(i).Interface()
+		object, err := stringMapValue(item)
+		if err != nil {
+			return nil, fmt.Errorf("item %d: %w", i, err)
+		}
+		entry := object.MapIndex(reflect.ValueOf(field).Convert(object.Type().Key()))
+		if !entry.IsValid() {
+			return nil, fmt.Errorf("item %d has no field %q", i, field)
+		}
+		keyValue := entry
+		if keyValue.Kind() == reflect.Interface {
+			if keyValue.IsNil() {
+				return nil, fmt.Errorf("item %d field %q is <nil>, want string", i, field)
+			}
+			keyValue = keyValue.Elem()
+		}
+		if keyValue.Kind() != reflect.String {
+			return nil, fmt.Errorf("item %d field %q is %s, want string", i, field, keyValue.Type())
+		}
+		key := keyValue.String()
+		if _, exists := result[key]; exists {
+			return nil, fmt.Errorf("duplicate index key %q at item %d", key, i)
+		}
+		result[key] = item
+	}
+	return result, nil
+}
+
+func chunk(collection any, size int) ([][]any, error) {
+	if size < 1 {
+		return nil, fmt.Errorf("chunk size must be at least 1")
+	}
+	value, err := listValue(collection)
+	if err != nil {
+		return nil, err
+	}
+	chunkCount := 0
+	if value.Len() > 0 {
+		chunkCount = 1 + (value.Len()-1)/size
+	}
+	result := make([][]any, 0, chunkCount)
+	for start := 0; start < value.Len(); start += size {
+		end := start + min(size, value.Len()-start)
+		part := make([]any, end-start)
+		for i := start; i < end; i++ {
+			part[i-start] = value.Index(i).Interface()
+		}
+		result = append(result, part)
+	}
+	return result, nil
+}
+
+func listValue(collection any) (reflect.Value, error) {
+	if collection == nil {
+		return reflect.Value{}, fmt.Errorf("expected list or array, got <nil>")
+	}
+	value := reflect.ValueOf(collection)
+	if value.Kind() != reflect.Array && value.Kind() != reflect.Slice {
+		return reflect.Value{}, fmt.Errorf("expected list or array, got %T", collection)
+	}
+	return value, nil
+}
+
 func join(separator string, collection any) (string, error) {
 	values, err := stringSlice(collection)
 	if err != nil {

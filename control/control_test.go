@@ -71,6 +71,26 @@ func TestExpressionHelpers(t *testing.T) {
 	}
 }
 
+func TestForeachConsumesChunkedExpressionList(t *testing.T) {
+	values, err := EvaluateList(`chunk(vars.items, 2)`, map[string]any{
+		"vars": map[string]any{"items": []any{"api", "worker", "web"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	iterations, err := Foreach(values)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Iteration{
+		{Index: 0, Bindings: map[string]any{"foreach": map[string]any{"index": 0, "item": []any{"api", "worker"}}}},
+		{Index: 1, Bindings: map[string]any{"foreach": map[string]any{"index": 1, "item": []any{"web"}}}},
+	}
+	if !reflect.DeepEqual(iterations, want) {
+		t.Fatalf("iterations = %#v, want %#v", iterations, want)
+	}
+}
+
 func TestExpansionLimitsAndCancellation(t *testing.T) {
 	items := make([]any, DefaultMaxIterations+1)
 	if _, err := Foreach(items); err == nil || !strings.Contains(err.Error(), "exceeds max_iterations 10000") {

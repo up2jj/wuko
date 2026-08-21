@@ -67,6 +67,130 @@ func TestCollectionHelpersAreStrictAndDeterministic(t *testing.T) {
 	}
 }
 
+func TestExprTypedCollectionHelpers(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   any
+	}{
+		{
+			name:   "group by",
+			source: `groupBy([{"id": "api", "tier": "backend"}, {"id": "web", "tier": "frontend"}, {"id": "worker", "tier": "backend"}], .tier)`,
+			want: map[any][]any{
+				"backend": {
+					map[string]any{"id": "api", "tier": "backend"},
+					map[string]any{"id": "worker", "tier": "backend"},
+				},
+				"frontend": {map[string]any{"id": "web", "tier": "frontend"}},
+			},
+		},
+		{name: "sort", source: `sort([3, 1, 2])`, want: []any{1, 2, 3}},
+		{
+			name:   "sort by",
+			source: `sortBy([{"name": "api", "priority": 2}, {"name": "web", "priority": 1}], .priority)`,
+			want: []any{
+				map[string]any{"name": "web", "priority": 1},
+				map[string]any{"name": "api", "priority": 2},
+			},
+		},
+		{name: "unique", source: `uniq(["api", "worker", "api"])`, want: []any{"api", "worker"}},
+		{name: "flatten", source: `flatten([["api"], [["worker", "web"]]])`, want: []any{"api", "worker", "web"}},
+		{
+			name:   "index by",
+			source: `indexBy([{"id": "api", "port": 8080}, {"id": "web", "port": 3000}], "id")`,
+			want: map[string]any{
+				"api": map[string]any{"id": "api", "port": 8080},
+				"web": map[string]any{"id": "web", "port": 3000},
+			},
+		},
+		{name: "chunk", source: `chunk(["api", "worker", "web"], 2)`, want: [][]any{{"api", "worker"}, {"web"}}},
+		{name: "composed pipeline", source: `[3, 1, 2, 3] | uniq() | sort() | chunk(2)`, want: [][]any{{1, 2}, {3}}},
+		{name: "empty index", source: `indexBy([], "id")`, want: map[string]any{}},
+		{name: "empty chunks", source: `chunk([], 2)`, want: [][]any{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := Eval(tt.source, map[string]any{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("value = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExprTypedCollectionHelpersAcceptTypedListsWithoutMutation(t *testing.T) {
+	items := []int{1, 2, 3}
+	got, err := Eval(`chunk(items, 2)`, map[string]any{"items": items})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := [][]any{{1, 2}, {3}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("value = %#v, want %#v", got, want)
+	}
+	if !reflect.DeepEqual(items, []int{1, 2, 3}) {
+		t.Fatalf("input mutated: %#v", items)
+	}
+	array := [3]string{"api", "worker", "web"}
+	got, err = Eval(`chunk(items, 10)`, map[string]any{"items": array})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := [][]any{{"api", "worker", "web"}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("value = %#v, want %#v", got, want)
+	}
+
+	indexed, err := Eval(`indexBy(items, "id")`, map[string]any{
+		"items": []map[string]string{{"id": "api"}, {"id": "worker"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{
+		"api":    map[string]string{"id": "api"},
+		"worker": map[string]string{"id": "worker"},
+	}
+	if !reflect.DeepEqual(indexed, want) {
+		t.Fatalf("value = %#v, want %#v", indexed, want)
+	}
+}
+
+func TestExprTypedCollectionHelperErrors(t *testing.T) {
+	tests := []struct {
+		source string
+		want   string
+	}{
+		{source: `indexBy(nil, "id")`, want: "expected list or array"},
+		{source: `indexBy([1], "id")`, want: "item 0"},
+		{source: `indexBy([{"name": "api"}], "id")`, want: `has no field "id"`},
+		{source: `indexBy([{"id": nil}], "id")`, want: "want string"},
+		{source: `indexBy([{"id": 1}], "id")`, want: "want string"},
+		{source: `indexBy([{"id": "api"}, {"id": "api"}], "id")`, want: `duplicate index key "api" at item 1`},
+		{source: `chunk("api", 2)`, want: "expected list or array"},
+		{source: `chunk([], 0)`, want: "chunk size must be at least 1"},
+		{source: `chunk([], -1)`, want: "chunk size must be at least 1"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.source, func(t *testing.T) {
+			_, err := Eval(tt.source, map[string]any{})
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want substring %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestExprOnlyCollectionHelpersAreNotTemplateFunctions(t *testing.T) {
+	functions := TemplateFuncs()
+	for _, name := range []string{"indexBy", "chunk"} {
+		if _, exists := functions[name]; exists {
+			t.Fatalf("%s unexpectedly exposed to Go templates", name)
+		}
+	}
+}
+
 func TestSerializationHelpers(t *testing.T) {
 	value := map[string]any{"b": 2, "a": 1}
 	pretty, err := toJSON(value)

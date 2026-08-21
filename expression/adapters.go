@@ -89,6 +89,12 @@ func exprOptions() []expr.Option {
 		expr.Function("sortAlpha", func(values ...any) (any, error) {
 			return sortAlpha(values[0])
 		}, new(func(any) []string)),
+		expr.Function("indexBy", func(values ...any) (any, error) {
+			return indexBy(values[0], values[1].(string))
+		}, new(func(any, string) map[string]any)),
+		expr.Function("chunk", func(values ...any) (any, error) {
+			return chunk(values[0], values[1].(int))
+		}, new(func(any, int) [][]any)),
 		expr.Function("toJSON", func(values ...any) (any, error) {
 			return toJSON(values[0])
 		}, new(func(any) string)),

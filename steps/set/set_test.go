@@ -2,6 +2,7 @@ package set
 
 import (
 	"math"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -74,6 +75,49 @@ func TestExpressionUsesSharedHelpers(t *testing.T) {
 	}
 	if got := result.Outputs["value"]; got != "name: wuko\n" {
 		t.Fatalf("value = %#v", got)
+	}
+}
+
+func TestExpressionStoresTypedCollectionResults(t *testing.T) {
+	tests := []struct {
+		name string
+		expr string
+		vars map[string]any
+		want any
+	}{
+		{
+			name: "index by",
+			expr: `indexBy(vars.services, "id")`,
+			vars: map[string]any{"services": []any{
+				map[string]any{"id": "api", "port": 8080},
+				map[string]any{"id": "web", "port": 3000},
+			}},
+			want: map[string]any{
+				"api": map[string]any{"id": "api", "port": 8080},
+				"web": map[string]any{"id": "web", "port": 3000},
+			},
+		},
+		{
+			name: "chunk",
+			expr: `chunk(vars.targets, 2)`,
+			vars: map[string]any{"targets": []any{"api", "worker", "web"}},
+			want: [][]any{{"api", "worker"}, {"web"}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runner, err := New(map[string]any{"variable": "result", "expr": tt.expr})
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := runner.Run(t.Context(), step.Request{Vars: tt.vars})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := result.Variables["result"]; !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("value = %#v, want %#v", got, tt.want)
+			}
+		})
 	}
 }
 
