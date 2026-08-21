@@ -13,6 +13,8 @@ type conditionEnvironment struct {
 	Vars     map[string]any    `expr:"vars"`
 	Env      map[string]string `expr:"env"`
 	Steps    map[string]any    `expr:"steps"`
+	Foreach  map[string]any    `expr:"foreach"`
+	Matrix   map[string]any    `expr:"matrix"`
 	Workflow conditionWorkflow `expr:"workflow"`
 	Run      conditionRun      `expr:"run"`
 }
@@ -59,10 +61,12 @@ func evaluateCondition(condition workflow.Condition, environment conditionEnviro
 
 func makeConditionEnvironment(definition *workflow.Definition, runDir string, state *State) conditionEnvironment {
 	return conditionEnvironment{
-		Inputs: state.Inputs,
-		Vars:   state.Vars,
-		Env:    state.Env,
-		Steps:  state.Steps,
+		Inputs:  state.Inputs,
+		Vars:    state.Vars,
+		Env:     state.Env,
+		Steps:   state.Steps,
+		Foreach: bindingRoot(state.Bindings, "foreach"),
+		Matrix:  bindingRoot(state.Bindings, "matrix"),
 		Workflow: conditionWorkflow{
 			Name: definition.Name,
 			Dir:  definition.Dir,

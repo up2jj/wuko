@@ -55,6 +55,11 @@ func PrepareValues(definition *Definition, options LoadOptions) (map[string]any,
 
 // TemplateData constructs the common Go-template roots for a workflow or action.
 func TemplateData(definition *Definition, runDir string, inputs, vars map[string]any, environment map[string]string, steps map[string]any) map[string]any {
+	return TemplateDataWithBindings(definition, runDir, inputs, vars, environment, steps, nil)
+}
+
+// TemplateDataWithBindings constructs template roots including active workflow-control bindings.
+func TemplateDataWithBindings(definition *Definition, runDir string, inputs, vars map[string]any, environment map[string]string, steps, bindings map[string]any) map[string]any {
 	if inputs == nil {
 		inputs = map[string]any{}
 	}
@@ -64,7 +69,7 @@ func TemplateData(definition *Definition, runDir string, inputs, vars map[string
 	if steps == nil {
 		steps = map[string]any{}
 	}
-	return map[string]any{
+	result := map[string]any{
 		"inputs": inputs,
 		"vars":   vars,
 		"env":    EnvironmentValues(environment),
@@ -75,6 +80,10 @@ func TemplateData(definition *Definition, runDir string, inputs, vars map[string
 		},
 		"run": map[string]any{"dir": runDir},
 	}
+	for key, value := range bindings {
+		result[key] = Clone(value)
+	}
+	return result
 }
 
 // RenderString renders one strict Go-template string.

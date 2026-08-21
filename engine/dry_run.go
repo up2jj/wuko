@@ -22,6 +22,24 @@ func writeDryRun(writer io.Writer, steps []workflow.Step, indent string, parent 
 			}
 			continue
 		}
+		if workflowStep.Foreach != nil {
+			if _, err := fmt.Fprintf(writer, "%s%s %s (foreach %s)%s%s\n", indent, index, workflowStep.ID, workflowStep.Foreach.Items, fanoutPolicySuffix(workflowStep.Foreach.MaxConcurrency, workflowStep.Foreach.Timeout, workflowStep.Foreach.FailFast), dryRunCondition(workflowStep)); err != nil {
+				return err
+			}
+			if err := writeDryRun(writer, workflowStep.Foreach.Steps, indent+"   ", path); err != nil {
+				return err
+			}
+			continue
+		}
+		if workflowStep.Matrix != nil {
+			if _, err := fmt.Fprintf(writer, "%s%s %s (matrix %s)%s%s\n", indent, index, workflowStep.ID, matrixAxisNames(workflowStep.Matrix.Axes), fanoutPolicySuffix(workflowStep.Matrix.MaxConcurrency, workflowStep.Matrix.Timeout, workflowStep.Matrix.FailFast), dryRunCondition(workflowStep)); err != nil {
+				return err
+			}
+			if err := writeDryRun(writer, workflowStep.Matrix.Steps, indent+"   ", path); err != nil {
+				return err
+			}
+			continue
+		}
 		kind := workflowStep.Type
 		if workflowStep.Action != nil {
 			kind = "uses " + workflowStep.Uses.Display()
@@ -40,6 +58,34 @@ func writeDryRun(writer io.Writer, steps []workflow.Step, indent string, parent 
 		}
 	}
 	return nil
+}
+
+func dryRunCondition(workflowStep workflow.Step) string {
+	if workflowStep.If == "" {
+		return ""
+	}
+	return " if: " + string(workflowStep.If)
+}
+
+func matrixAxisNames(axes workflow.MatrixAxes) string {
+	names := make([]string, len(axes))
+	for i, axis := range axes {
+		names[i] = axis.Name
+	}
+	return strings.Join(names, " × ")
+}
+
+func fanoutPolicySuffix(maxConcurrency int, timeout *workflow.Duration, failFast bool) string {
+	parts := []string{fmt.Sprintf("max %d", maxConcurrency)}
+	if timeout != nil {
+		parts = append(parts, "timeout "+timeout.String())
+	}
+	if failFast {
+		parts = append(parts, "fail fast")
+	} else {
+		parts = append(parts, "wait for all")
+	}
+	return " [" + strings.Join(parts, ", ") + "]"
 }
 
 func dryRunIndex(path []int) string {

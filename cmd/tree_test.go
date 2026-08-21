@@ -169,3 +169,30 @@ func TestWorkflowTreeDisplaysConcurrentGroup(t *testing.T) {
 		t.Fatalf("output = %q, want %q", output.String(), want)
 	}
 }
+
+func TestWorkflowTreeDisplaysFanoutControls(t *testing.T) {
+	definition := &workflow.Definition{Name: "fanout", Steps: []workflow.Step{
+		{ID: "deploy", If: "vars.deploy", Foreach: &workflow.ForeachGroup{
+			Items: "vars.targets", MaxConcurrency: 1, FailFast: true,
+			Steps: []workflow.Step{{ID: "run", Type: "shell"}},
+		}},
+		{ID: "checks", Matrix: &workflow.MatrixGroup{
+			Axes:           workflow.MatrixAxes{{Name: "os", Values: []any{"linux"}}, {Name: "go", Values: []any{"1.26"}}},
+			MaxConcurrency: 2, FailFast: false,
+			Steps: []workflow.Step{{ID: "test", Type: "shell"}},
+		}},
+	}}
+	var output bytes.Buffer
+	if err := writeWorkflowTree(&output, definition); err != nil {
+		t.Fatal(err)
+	}
+	want := `fanout
+├── deploy (foreach vars.targets) [max 1, fail fast] if: vars.deploy
+│   └── run (shell)
+└── checks (matrix os × go) [max 2, wait for all]
+    └── test (shell)
+`
+	if output.String() != want {
+		t.Fatalf("output = %q, want %q", output.String(), want)
+	}
+}

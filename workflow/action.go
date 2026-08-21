@@ -203,6 +203,18 @@ func (loader *Loader) resolveActions(ctx context.Context, workflowName string, s
 			}
 			continue
 		}
+		if workflowStep.Foreach != nil {
+			if err := loader.resolveActions(ctx, workflowName, workflowStep.Foreach.Steps, renderer, data, environment, runDir, definitionDir, cache, reporter); err != nil {
+				return err
+			}
+			continue
+		}
+		if workflowStep.Matrix != nil {
+			if err := loader.resolveActions(ctx, workflowName, workflowStep.Matrix.Steps, renderer, data, environment, runDir, definitionDir, cache, reporter); err != nil {
+				return err
+			}
+			continue
+		}
 		if workflowStep.Uses.Empty() {
 			continue
 		}

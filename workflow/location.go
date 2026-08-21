@@ -53,11 +53,21 @@ func annotateSteps(steps []Step, sequence *yaml.Node, source string) {
 	for i := range min(len(steps), len(sequence.Content)) {
 		node := sequence.Content[i]
 		steps[i].Location = nodeLocation(node, source)
-		if steps[i].Concurrent == nil || node.Kind != yaml.MappingNode {
+		if node.Kind != yaml.MappingNode {
 			continue
 		}
-		concurrent := mappingValue(node, "concurrent")
-		annotateSteps(steps[i].Concurrent.Steps, mappingValue(concurrent, "steps"), source)
+		if steps[i].Concurrent != nil {
+			group := mappingValue(node, "concurrent")
+			annotateSteps(steps[i].Concurrent.Steps, mappingValue(group, "steps"), source)
+		}
+		if steps[i].Foreach != nil {
+			group := mappingValue(node, "foreach")
+			annotateSteps(steps[i].Foreach.Steps, mappingValue(group, "steps"), source)
+		}
+		if steps[i].Matrix != nil {
+			group := mappingValue(node, "matrix")
+			annotateSteps(steps[i].Matrix.Steps, mappingValue(group, "steps"), source)
+		}
 	}
 }
 
@@ -90,6 +100,12 @@ func remapStepLocations(steps []Step, materializedRoot, logicalSource string) {
 		steps[i].Location.Source = remapSource(steps[i].Location.Source, materializedRoot, logicalSource)
 		if steps[i].Concurrent != nil {
 			remapStepLocations(steps[i].Concurrent.Steps, materializedRoot, logicalSource)
+		}
+		if steps[i].Foreach != nil {
+			remapStepLocations(steps[i].Foreach.Steps, materializedRoot, logicalSource)
+		}
+		if steps[i].Matrix != nil {
+			remapStepLocations(steps[i].Matrix.Steps, materializedRoot, logicalSource)
 		}
 	}
 }
@@ -136,6 +152,16 @@ func flattenSteps(steps []Step) []Step {
 	for _, workflowStep := range steps {
 		if workflowStep.Concurrent != nil {
 			flattened = append(flattened, flattenSteps(workflowStep.Concurrent.Steps)...)
+			continue
+		}
+		if workflowStep.Foreach != nil {
+			flattened = append(flattened, workflowStep)
+			flattened = append(flattened, flattenSteps(workflowStep.Foreach.Steps)...)
+			continue
+		}
+		if workflowStep.Matrix != nil {
+			flattened = append(flattened, workflowStep)
+			flattened = append(flattened, flattenSteps(workflowStep.Matrix.Steps)...)
 			continue
 		}
 		flattened = append(flattened, workflowStep)

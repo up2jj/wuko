@@ -23,6 +23,8 @@ type expressionEnvironment struct {
 	Vars     map[string]any    `expr:"vars"`
 	Env      map[string]string `expr:"env"`
 	Steps    map[string]any    `expr:"steps"`
+	Foreach  map[string]any    `expr:"foreach"`
+	Matrix   map[string]any    `expr:"matrix"`
 	Workflow workflowValue     `expr:"workflow"`
 	Run      runValue          `expr:"run"`
 }
@@ -81,10 +83,12 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 	if !r.hasValue {
 		var err error
 		value, err = expr.Run(r.program, expressionEnvironment{
-			Inputs: request.Inputs,
-			Vars:   request.Vars,
-			Env:    request.Env,
-			Steps:  request.Steps,
+			Inputs:  request.Inputs,
+			Vars:    request.Vars,
+			Env:     request.Env,
+			Steps:   request.Steps,
+			Foreach: bindingRoot(request.Bindings, "foreach"),
+			Matrix:  bindingRoot(request.Bindings, "matrix"),
 			Workflow: workflowValue{
 				Name: request.WorkflowName,
 				Dir:  request.WorkflowDir,
@@ -102,6 +106,14 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 		Outputs:   map[string]any{"value": value},
 		Variables: map[string]any{r.config.Variable: value},
 	}, nil
+}
+
+func bindingRoot(bindings map[string]any, name string) map[string]any {
+	value, _ := bindings[name].(map[string]any)
+	if value == nil {
+		return map[string]any{}
+	}
+	return value
 }
 
 func validateJSON(value any) error {

@@ -11,7 +11,8 @@ commands or inline shell, and launch an external agent such as Codex.
 - Define strict, versioned YAML workflows with variables, environment values, Go templates, and
   conditional steps.
 - Run steps sequentially or concurrently, wait for fixed durations or polled conditions, and use
-  retries, timeouts, dry runs, execution trees, live progress, and run statistics.
+  foreach and matrix fan-out, retries, timeouts, dry runs, execution trees, live progress, and run
+  statistics.
 - Use built-in wait, input, password, choice, confirm, set, assert, `import_vars`, JSONPath,
   semantic-version, HTTP, file, glob, key-value, Lua, shell, agent, and Docker steps.
 - Split workflows across local files with `require`, or reuse remote workflows and composite
@@ -35,6 +36,7 @@ commands or inline shell, and launch an external agent such as Codex.
   - [Splitting steps across files](#splitting-steps-across-files)
   - [Conditional steps](#conditional-steps)
   - [Concurrent steps](#concurrent-steps)
+  - [Foreach and matrix controls](#foreach-and-matrix-controls)
   - [Waits and polling](#waits-and-polling)
   - [Retries and execution timeouts](#retries-and-execution-timeouts)
   - [Execution progress and statistics](#execution-progress-and-statistics)
@@ -476,6 +478,16 @@ Concurrent children are non-interactive to prevent multiple terminal prompts fro
 stdin. Input, password, and choice steps can still be used when their variables are supplied in
 advance. Docker TTY input is not attached inside a concurrent group. Child stdout and stderr are
 safe for concurrent writes, but output from different children can interleave at write boundaries.
+
+### Foreach and matrix controls
+
+Use `foreach` to repeat a child block for every value in a runtime list, or `matrix` to run the
+Cartesian product of named axes. Both controls are sequential by default, support bounded
+parallelism, isolate each iteration's variables, and publish ordered results beneath one parent
+step ID.
+
+See [Workflow controls](docs/workflow-control.md) for complete schemas, result shapes, scheduling,
+state rules, examples, and limitations.
 
 ### Waits and polling
 

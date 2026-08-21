@@ -67,6 +67,34 @@ func (progress *Progress) Report(event engine.ProgressEvent) {
 			line += ": " + singleLine(event.Error.Error())
 		}
 		fmt.Fprintln(progress.writer, line)
+	case engine.ControlStarted:
+		parts := []string{count(event.Iterations, "iteration"), fmt.Sprintf("max %d concurrent", event.MaxConcurrency)}
+		if event.Timeout > 0 {
+			parts = append(parts, "timeout "+formatDuration(event.Timeout))
+		}
+		if event.FailFast {
+			parts = append(parts, "fail fast")
+		} else {
+			parts = append(parts, "wait for all")
+		}
+		fmt.Fprintf(progress.writer, "%s%s %s %s · %s\n", indent, progress.paint("36", "↻"), controlLabel(event.ControlKind), event.StepID, strings.Join(parts, " · "))
+	case engine.ControlFinished:
+		line := fmt.Sprintf("%s%s %s %s %s after %s", indent, progress.statusMarker(event.Status), controlLabel(event.ControlKind), event.StepID, statusLabel(event.Status), formatDuration(event.Duration))
+		if event.Error != nil {
+			line += ": " + singleLine(event.Error.Error())
+		}
+		fmt.Fprintln(progress.writer, line)
+	case engine.IterationStarted:
+		fmt.Fprintf(progress.writer, "%s%s iteration %d/%d started\n", indent, progress.paint("2", "•"), event.Iteration+1, event.Iterations)
+	case engine.IterationFinished:
+		if event.Status == engine.StatusSucceeded {
+			return
+		}
+		line := fmt.Sprintf("%s%s iteration %d/%d %s after %s", indent, progress.statusMarker(event.Status), event.Iteration+1, event.Iterations, statusLabel(event.Status), formatDuration(event.Duration))
+		if event.Error != nil {
+			line += ": " + singleLine(event.Error.Error())
+		}
+		fmt.Fprintln(progress.writer, line)
 	case engine.AttemptStarted:
 		if event.MaxAttempts > 1 {
 			fmt.Fprintf(progress.writer, "%s%s attempt %d/%d started\n", childIndent, progress.paint("2", "•"), event.Attempt, event.MaxAttempts)
@@ -227,4 +255,11 @@ func formatDuration(duration time.Duration) string {
 
 func singleLine(value string) string {
 	return strings.Join(strings.Fields(value), " ")
+}
+
+func controlLabel(kind string) string {
+	if kind == "" {
+		return "Control"
+	}
+	return strings.ToUpper(kind[:1]) + kind[1:]
 }

@@ -76,6 +76,8 @@ type Step struct {
 	Uses       ActionSource        `yaml:"uses,omitempty"`
 	Require    *string             `yaml:"require,omitempty"`
 	Concurrent *ConcurrentGroup    `yaml:"concurrent,omitempty"`
+	Foreach    *ForeachGroup       `yaml:"foreach,omitempty"`
+	Matrix     *MatrixGroup        `yaml:"matrix,omitempty"`
 	SHA256     string              `yaml:"sha256,omitempty"`
 	If         Condition           `yaml:"if,omitempty"`
 	Timeout    *Duration           `yaml:"timeout,omitempty"`
@@ -83,6 +85,29 @@ type Step struct {
 	With       map[string]any      `yaml:"with,omitempty"`
 	Action     *Action             `yaml:"-"`
 	Location   diagnostic.Location `yaml:"-"`
+}
+
+func (workflowStep *Step) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("step must be an object")
+	}
+	allowed := map[string]bool{
+		"id": true, "type": true, "uses": true, "require": true, "concurrent": true,
+		"foreach": true, "matrix": true, "sha256": true, "if": true, "timeout": true,
+		"retry": true, "with": true,
+	}
+	for i := 0; i < len(node.Content); i += 2 {
+		if !allowed[node.Content[i].Value] {
+			return fmt.Errorf("field %s not found in step", node.Content[i].Value)
+		}
+	}
+	type plain Step
+	var decoded plain
+	if err := node.Decode(&decoded); err != nil {
+		return err
+	}
+	*workflowStep = Step(decoded)
+	return nil
 }
 
 // ConcurrentGroup runs independent child steps against one shared pre-group state snapshot.
@@ -318,8 +343,7 @@ func validateDefinition(definition *Definition, allowActions bool) error {
 		return err
 	}
 
-	seen := make(map[string]struct{}, len(definition.Steps))
-	if err := validateSteps(definition.Steps, allowActions, false, seen); err != nil {
+	if err := validateStepScope(definition.Steps, allowActions, scopeTop, nil); err != nil {
 		return err
 	}
 	for name := range definition.Env {
@@ -333,24 +357,64 @@ func validateDefinition(definition *Definition, allowActions bool) error {
 	return nil
 }
 
-func validateSteps(steps []Step, allowActions, insideConcurrent bool, seen map[string]struct{}) error {
+type stepScope uint8
+
+const (
+	scopeTop stepScope = iota
+	scopeControl
+	scopeConcurrent
+)
+
+func validateStepScope(steps []Step, allowActions bool, scope stepScope, inherited map[string]struct{}) error {
+	seen := make(map[string]struct{}, len(inherited)+len(steps))
+	for id := range inherited {
+		seen[id] = struct{}{}
+	}
+	if err := collectScopeIDs(steps, seen); err != nil {
+		return err
+	}
+	return validateSteps(steps, allowActions, scope, seen)
+}
+
+func collectScopeIDs(steps []Step, seen map[string]struct{}) error {
 	for i, workflowStep := range steps {
-		if workflowStep.Require != nil {
-			return fmt.Errorf("step %d: require is only supported in workflow step files", i+1)
-		}
 		if workflowStep.Concurrent != nil {
-			if err := validateConcurrentEntry(workflowStep, insideConcurrent, allowActions, seen); err != nil {
+			if err := collectScopeIDs(workflowStep.Concurrent.Steps, seen); err != nil {
 				return fmt.Errorf("step %d: %w", i+1, err)
 			}
+			continue
+		}
+		if workflowStep.Require != nil {
 			continue
 		}
 		if !identifierPattern.MatchString(workflowStep.ID) {
 			return fmt.Errorf("step %d has invalid id %q", i+1, workflowStep.ID)
 		}
-		if _, ok := seen[workflowStep.ID]; ok {
+		if _, exists := seen[workflowStep.ID]; exists {
 			return fmt.Errorf("duplicate step id %q", workflowStep.ID)
 		}
 		seen[workflowStep.ID] = struct{}{}
+	}
+	return nil
+}
+
+func validateSteps(steps []Step, allowActions bool, scope stepScope, seen map[string]struct{}) error {
+	for i, workflowStep := range steps {
+		if workflowStep.Require != nil {
+			return fmt.Errorf("step %d: require is only supported in workflow step files", i+1)
+		}
+		if workflowStep.Concurrent != nil {
+			if err := validateConcurrentEntry(workflowStep, scope, allowActions, seen); err != nil {
+				return fmt.Errorf("step %d: %w", i+1, err)
+			}
+			continue
+		}
+		if workflowStep.Foreach != nil || workflowStep.Matrix != nil {
+			if err := validateControlEntry(workflowStep, scope, allowActions, seen); err != nil {
+				return fmt.Errorf("step %q: %w", workflowStep.ID, err)
+			}
+			continue
+		}
 		if (workflowStep.Type == "") == workflowStep.Uses.Empty() {
 			return fmt.Errorf("step %q must set exactly one of type or uses", workflowStep.ID)
 		}
@@ -371,18 +435,45 @@ func validateSteps(steps []Step, allowActions, insideConcurrent bool, seen map[s
 	return nil
 }
 
-func validateConcurrentEntry(workflowStep Step, insideConcurrent, allowActions bool, seen map[string]struct{}) error {
-	if workflowStep.ID != "" || workflowStep.Type != "" || !workflowStep.Uses.Empty() || workflowStep.SHA256 != "" || workflowStep.If != "" || workflowStep.Timeout != nil || workflowStep.Retry != nil || workflowStep.With != nil {
+func validateConcurrentEntry(workflowStep Step, scope stepScope, allowActions bool, seen map[string]struct{}) error {
+	if workflowStep.ID != "" || workflowStep.Type != "" || !workflowStep.Uses.Empty() || workflowStep.Foreach != nil || workflowStep.Matrix != nil || workflowStep.SHA256 != "" || workflowStep.If != "" || workflowStep.Timeout != nil || workflowStep.Retry != nil || workflowStep.With != nil {
 		return fmt.Errorf("concurrent cannot be combined with other step fields")
 	}
-	if insideConcurrent {
+	if scope == scopeConcurrent {
 		return fmt.Errorf("nested concurrent groups are not supported")
 	}
 	group := workflowStep.Concurrent
 	if err := group.Validate(); err != nil {
 		return err
 	}
-	return validateSteps(group.Steps, allowActions, true, seen)
+	return validateSteps(group.Steps, allowActions, scopeConcurrent, seen)
+}
+
+func validateControlEntry(workflowStep Step, scope stepScope, allowActions bool, enclosing map[string]struct{}) error {
+	if workflowStep.Foreach != nil && workflowStep.Matrix != nil {
+		return fmt.Errorf("must set exactly one of foreach or matrix")
+	}
+	kind := "foreach"
+	var children []Step
+	var validationErr error
+	if workflowStep.Matrix != nil {
+		kind = "matrix"
+		children = workflowStep.Matrix.Steps
+		validationErr = workflowStep.Matrix.Validate()
+	} else {
+		children = workflowStep.Foreach.Steps
+		validationErr = workflowStep.Foreach.Validate()
+	}
+	if workflowStep.Type != "" || !workflowStep.Uses.Empty() || workflowStep.Require != nil || workflowStep.Concurrent != nil || workflowStep.SHA256 != "" || workflowStep.Timeout != nil || workflowStep.Retry != nil || workflowStep.With != nil {
+		return fmt.Errorf("%s cannot be combined with ordinary step fields", kind)
+	}
+	if scope != scopeTop {
+		return fmt.Errorf("nested %s controls are not supported", kind)
+	}
+	if validationErr != nil {
+		return validationErr
+	}
+	return validateStepScope(children, allowActions, scopeControl, enclosing)
 }
 
 // Validate checks the safety limits of a concurrent group.

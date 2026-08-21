@@ -41,6 +41,25 @@ wuko.set_var("done", true)
 	}
 }
 
+func TestLuaControlBindings(t *testing.T) {
+	runner, err := New(map[string]any{
+		"source": `wuko.output("binding", {item = wuko.foreach.item, os = wuko.matrix.os})`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runner.Run(t.Context(), step.Request{Bindings: map[string]any{
+		"foreach": map[string]any{"item": "api"}, "matrix": map[string]any{"os": "linux"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{"item": "api", "os": "linux"}
+	if got := result.Outputs["binding"].(map[string]any); got["item"] != want["item"] || got["os"] != want["os"] {
+		t.Fatalf("binding = %#v", got)
+	}
+}
+
 func TestLuaKeyValueAPI(t *testing.T) {
 	runner, err := New(map[string]any{
 		"source": `

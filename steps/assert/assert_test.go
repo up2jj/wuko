@@ -34,6 +34,19 @@ func TestAssertionUsesAllExpressionRoots(t *testing.T) {
 	}
 }
 
+func TestAssertionUsesControlBindings(t *testing.T) {
+	runner, err := New(map[string]any{"expr": `foreach.item == "api" && matrix.os == "linux"`, "message": "wrong binding"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runner.Run(t.Context(), step.Request{Bindings: map[string]any{
+		"foreach": map[string]any{"item": "api"}, "matrix": map[string]any{"os": "linux"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestFalseAssertionReturnsConfiguredMessage(t *testing.T) {
 	runner, err := New(map[string]any{"expr": "false", "message": "build must succeed"})
 	if err != nil {

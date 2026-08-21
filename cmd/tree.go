@@ -118,6 +118,26 @@ func writeTreeSteps(writer io.Writer, steps []workflow.Step, prefix string) erro
 			}
 			continue
 		}
+		if workflowStep.Foreach != nil {
+			condition := treeCondition(workflowStep)
+			if _, err := fmt.Fprintf(writer, "%s%s%s (foreach %s)%s%s\n", prefix, branch, workflowStep.ID, workflowStep.Foreach.Items, treeFanoutPolicy(workflowStep.Foreach.MaxConcurrency, workflowStep.Foreach.Timeout, workflowStep.Foreach.FailFast), condition); err != nil {
+				return err
+			}
+			if err := writeTreeSteps(writer, workflowStep.Foreach.Steps, childPrefix); err != nil {
+				return err
+			}
+			continue
+		}
+		if workflowStep.Matrix != nil {
+			condition := treeCondition(workflowStep)
+			if _, err := fmt.Fprintf(writer, "%s%s%s (matrix %s)%s%s\n", prefix, branch, workflowStep.ID, treeMatrixAxes(workflowStep.Matrix.Axes), treeFanoutPolicy(workflowStep.Matrix.MaxConcurrency, workflowStep.Matrix.Timeout, workflowStep.Matrix.FailFast), condition); err != nil {
+				return err
+			}
+			if err := writeTreeSteps(writer, workflowStep.Matrix.Steps, childPrefix); err != nil {
+				return err
+			}
+			continue
+		}
 		kind := workflowStep.Type
 		if workflowStep.Action != nil {
 			kind = "uses " + workflowStep.Uses.Display()
@@ -136,6 +156,34 @@ func writeTreeSteps(writer io.Writer, steps []workflow.Step, prefix string) erro
 		}
 	}
 	return nil
+}
+
+func treeCondition(workflowStep workflow.Step) string {
+	if workflowStep.If == "" {
+		return ""
+	}
+	return " if: " + string(workflowStep.If)
+}
+
+func treeMatrixAxes(axes workflow.MatrixAxes) string {
+	names := make([]string, len(axes))
+	for i, axis := range axes {
+		names[i] = axis.Name
+	}
+	return strings.Join(names, " × ")
+}
+
+func treeFanoutPolicy(maxConcurrency int, timeout *workflow.Duration, failFast bool) string {
+	parts := []string{fmt.Sprintf("max %d", maxConcurrency)}
+	if timeout != nil {
+		parts = append(parts, "timeout "+timeout.String())
+	}
+	if failFast {
+		parts = append(parts, "fail fast")
+	} else {
+		parts = append(parts, "wait for all")
+	}
+	return " [" + strings.Join(parts, ", ") + "]"
 }
 
 func treeConcurrentPolicy(group *workflow.ConcurrentGroup) string {

@@ -22,13 +22,15 @@ type Request struct {
 	Inputs         map[string]any
 	Env            map[string]string
 	Steps          map[string]any
-	Stdin          io.Reader
-	Stdout         io.Writer
-	Stderr         io.Writer
-	Interactive    bool
-	Attempt        int
-	MaxAttempts    int
-	OperationID    string
+	// Bindings contains active workflow-control roots such as foreach and matrix.
+	Bindings    map[string]any
+	Stdin       io.Reader
+	Stdout      io.Writer
+	Stderr      io.Writer
+	Interactive bool
+	Attempt     int
+	MaxAttempts int
+	OperationID string
 }
 
 type Result struct {

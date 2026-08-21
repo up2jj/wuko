@@ -29,6 +29,7 @@ const (
 	PhaseRetry          Phase = "retry"
 	PhasePoll           Phase = "poll"
 	PhaseConcurrent     Phase = "concurrent"
+	PhaseControl        Phase = "control"
 	PhaseCommit         Phase = "commit"
 )
 

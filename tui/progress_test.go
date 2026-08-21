@@ -94,6 +94,24 @@ func TestProgressRendersConcurrentGroup(t *testing.T) {
 	}
 }
 
+func TestProgressRendersControlLifecycle(t *testing.T) {
+	var output bytes.Buffer
+	progress := NewProgress(&output, false)
+	progress.Report(engine.ProgressEvent{
+		Kind: engine.ControlStarted, ControlKind: "matrix", StepID: "checks",
+		Iterations: 4, MaxConcurrency: 2, FailFast: true,
+	})
+	progress.Report(engine.ProgressEvent{Kind: engine.IterationStarted, Iteration: 0, Iterations: 4, Depth: 1})
+	progress.Report(engine.ProgressEvent{
+		Kind: engine.ControlFinished, ControlKind: "matrix", StepID: "checks",
+		Status: engine.StatusSucceeded, Duration: 2 * time.Second,
+	})
+	want := "↻ Matrix checks · 4 iterations · max 2 concurrent · fail fast\n  • iteration 1/4 started\n✓ Matrix checks succeeded after 2s\n"
+	if output.String() != want {
+		t.Fatalf("output = %q, want %q", output.String(), want)
+	}
+}
+
 func TestProgressRendersPollLifecycleAndSummary(t *testing.T) {
 	var output bytes.Buffer
 	progress := NewProgress(&output, false)

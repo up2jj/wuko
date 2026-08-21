@@ -49,7 +49,9 @@ type State struct {
 	Vars   map[string]any
 	Env    map[string]string
 	Steps  map[string]any
-	Stats  RunStats
+	// Bindings contains iteration-local workflow-control roots.
+	Bindings map[string]any
+	Stats    RunStats
 }
 
 func New(registry *step.Registry) *Engine { return &Engine{registry: registry} }
@@ -81,6 +83,12 @@ func (e *Engine) Validate(ctx context.Context, definition *workflow.Definition, 
 
 func (e *Engine) validateSteps(ctx context.Context, definition *workflow.Definition, steps []workflow.Step, options Options, state *State, insideConcurrent bool) error {
 	for _, workflowStep := range steps {
+		if workflowStep.Foreach != nil || workflowStep.Matrix != nil {
+			if err := e.validateControl(ctx, definition, workflowStep, options, state); err != nil {
+				return fmt.Errorf("step %q: %w", workflowStep.ID, err)
+			}
+			continue
+		}
 		if workflowStep.Concurrent != nil {
 			started := time.Now()
 			trace(options, diagnostic.Event{Phase: diagnostic.PhaseConcurrent, Status: diagnostic.StatusStarted, Time: started, WorkflowName: definition.Name, Location: workflowStep.Location, Message: "validating concurrent group", Attributes: []diagnostic.Attribute{diagnostic.Attr("steps", fmt.Sprint(len(workflowStep.Concurrent.Steps)))}})
@@ -204,28 +212,43 @@ func (e *Engine) Run(ctx context.Context, definition *workflow.Definition, optio
 		})
 	}()
 
-	index := 1
-	for _, workflowStep := range definition.Steps {
+	if err := e.executeSequence(ctx, definition, definition.Steps, options, state, &stats, 1, total); err != nil {
+		return nil, err
+	}
+	return state, nil
+}
+
+func (e *Engine) executeSequence(ctx context.Context, definition *workflow.Definition, steps []workflow.Step, options Options, state *State, stats *RunStats, firstIndex, total int) error {
+	index := firstIndex
+	for _, workflowStep := range steps {
 		if workflowStep.Concurrent != nil {
 			outcomes, groupErr := e.runConcurrent(ctx, definition, workflowStep.Concurrent, options, state, index, total)
 			for _, outcome := range outcomes {
 				if outcome.started {
-					recordStep(&stats, outcome.stats)
+					recordStep(stats, outcome.stats)
 				}
 			}
 			index += len(workflowStep.Concurrent.Steps)
 			if groupErr != nil {
-				return nil, groupErr
+				return groupErr
 			}
 			continue
 		}
-		outcome := e.executeStep(ctx, definition, workflowStep, options, state, index, total)
+		var outcome stepOutcome
+		if workflowStep.Foreach != nil || workflowStep.Matrix != nil {
+			outcome = e.executeControl(ctx, definition, workflowStep, options, state, index, total)
+		} else {
+			outcome = e.executeStep(ctx, definition, workflowStep, options, state, index, total)
+		}
 		if outcome.started {
-			recordStep(&stats, outcome.stats)
+			recordStep(stats, outcome.stats)
+			if outcome.nested != nil {
+				rollupNestedMetrics(stats, *outcome.nested)
+			}
 		}
 		index++
 		if outcome.err != nil {
-			return nil, outcome.err
+			return outcome.err
 		}
 		if outcome.skipped {
 			continue
@@ -236,7 +259,7 @@ func (e *Engine) Run(ctx context.Context, definition *workflow.Definition, optio
 		traceStep(options, definition, workflowStep, diagnostic.PhaseCommit, diagnostic.StatusSucceeded, commitStarted, "", nil,
 			diagnostic.Attr("outputs", fmt.Sprint(len(outcome.result.Outputs))), diagnostic.Attr("variables", fmt.Sprint(len(outcome.result.Variables))))
 	}
-	return state, nil
+	return nil
 }
 
 type stepOutcome struct {
@@ -245,6 +268,7 @@ type stepOutcome struct {
 	err     error
 	started bool
 	skipped bool
+	nested  *RunStats
 }
 
 func (e *Engine) executeStep(ctx context.Context, definition *workflow.Definition, workflowStep workflow.Step, options Options, state *State, index, total int) stepOutcome {
@@ -374,9 +398,30 @@ func leafStepCount(steps []workflow.Step) int {
 			total += leafStepCount(workflowStep.Concurrent.Steps)
 			continue
 		}
+		if workflowStep.Foreach != nil || workflowStep.Matrix != nil {
+			total++
+			continue
+		}
 		total++
 	}
 	return total
+}
+
+func rollupNestedMetrics(stats *RunStats, nested RunStats) {
+	stats.Attempts += nested.Attempts
+	stats.Retries += nested.Retries
+	stats.RetryWait += nested.RetryWait
+	stats.Polls += nested.Polls
+	stats.PollWait += nested.PollWait
+	stats.TimedOut += nested.TimedOut
+}
+
+func bindingRoot(bindings map[string]any, name string) map[string]any {
+	value, _ := bindings[name].(map[string]any)
+	if value == nil {
+		return map[string]any{}
+	}
+	return value
 }
 
 func executionKind(workflowStep workflow.Step) string {
@@ -453,7 +498,7 @@ func initialState(definition *workflow.Definition, options Options) (*State, err
 }
 
 func templateData(definition *workflow.Definition, runDir string, state *State) map[string]any {
-	return workflow.TemplateData(definition, runDir, state.Inputs, state.Vars, state.Env, state.Steps)
+	return workflow.TemplateDataWithBindings(definition, runDir, state.Inputs, state.Vars, state.Env, state.Steps, state.Bindings)
 }
 
 func makeRequest(definition *workflow.Definition, stepID string, options Options, state *State, attempt, maxAttempts int, operationID string) step.Request {
@@ -461,7 +506,7 @@ func makeRequest(definition *workflow.Definition, stepID string, options Options
 		StepID: stepID, WorkflowName: definition.Name, WorkflowDir: definition.Dir,
 		RunDir: options.RunDir, LocalValueDir: options.LocalValueDir, GlobalValueDir: options.GlobalValueDir,
 		Inputs: cloneMap(state.Inputs), Vars: cloneMap(state.Vars), Env: maps.Clone(state.Env),
-		Steps: cloneMap(state.Steps), Stdin: options.Stdin, Stdout: options.Stdout,
+		Steps: cloneMap(state.Steps), Bindings: cloneMap(state.Bindings), Stdin: options.Stdin, Stdout: options.Stdout,
 		Stderr: options.Stderr, Interactive: options.Interactive,
 		Attempt: attempt, MaxAttempts: maxAttempts, OperationID: operationID,
 	}

@@ -23,6 +23,10 @@ const (
 	PollScheduled      ProgressKind = "poll_scheduled"
 	ConcurrentStarted  ProgressKind = "concurrent_started"
 	ConcurrentFinished ProgressKind = "concurrent_finished"
+	ControlStarted     ProgressKind = "control_started"
+	ControlFinished    ProgressKind = "control_finished"
+	IterationStarted   ProgressKind = "iteration_started"
+	IterationFinished  ProgressKind = "iteration_finished"
 )
 
 // ExecutionStatus is the terminal state of a workflow, step, or attempt.
@@ -48,17 +52,28 @@ type AttemptStats struct {
 
 // StepStats records the terminal outcome, retries, and polling activity of one workflow step.
 type StepStats struct {
-	ID        string
-	Type      string
+	ID         string
+	Type       string
+	Index      int
+	Status     ExecutionStatus
+	StartedAt  time.Time
+	Duration   time.Duration
+	RetryWait  time.Duration
+	Polls      int
+	PollWait   time.Duration
+	Attempts   []AttemptStats
+	Error      error
+	Iterations []IterationStats
+}
+
+// IterationStats records one foreach or matrix iteration without retaining its binding values.
+type IterationStats struct {
 	Index     int
 	Status    ExecutionStatus
 	StartedAt time.Time
 	Duration  time.Duration
-	RetryWait time.Duration
-	Polls     int
-	PollWait  time.Duration
-	Attempts  []AttemptStats
 	Error     error
+	Steps     []StepStats
 }
 
 // RunStats summarizes one workflow execution. Composite actions have their own nested summary.
@@ -95,6 +110,9 @@ type ProgressEvent struct {
 	Attempt        int
 	MaxAttempts    int
 	GroupSize      int
+	ControlKind    string
+	Iteration      int
+	Iterations     int
 	MaxConcurrency int
 	FailFast       bool
 	Timeout        time.Duration

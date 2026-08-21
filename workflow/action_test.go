@@ -129,6 +129,53 @@ steps:
 	}
 }
 
+func TestLoaderResolvesStaticActionsInsideFanoutControls(t *testing.T) {
+	client := testHTTPClient(func(*http.Request) (*http.Response, error) {
+		return testResponse(http.StatusOK, []byte(validAction)), nil
+	})
+	workflowPath := writeActionWorkflow(t, `version: 1
+name: caller
+vars: {targets: [linux]}
+steps:
+  - id: foreach_action
+    foreach:
+      items: vars.targets
+      steps:
+        - id: remote
+          uses: https://actions.example.test/build
+          with: {target: {expr: foreach.item}}
+  - id: matrix_action
+    matrix:
+      axes: {target: [linux]}
+      steps:
+        - id: remote
+          uses: https://actions.example.test/build
+          with: {target: {expr: matrix.target}}
+`)
+	definition, err := NewLoader(client).Load(t.Context(), workflowPath, LoadOptions{RunDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if definition.Steps[0].Foreach.Steps[0].Action == nil || definition.Steps[1].Matrix.Steps[0].Action == nil {
+		t.Fatalf("actions were not resolved: %#v", definition.Steps)
+	}
+
+	workflowPath = writeActionWorkflow(t, `version: 1
+name: invalid
+vars: {targets: [linux]}
+steps:
+  - id: dynamic
+    foreach:
+      items: vars.targets
+      steps:
+        - id: remote
+          uses: https://actions.example.test/{{ .foreach.item }}
+`)
+	if _, err := NewLoader(client).Load(t.Context(), workflowPath, LoadOptions{RunDir: t.TempDir()}); err == nil || !strings.Contains(err.Error(), "foreach") {
+		t.Fatalf("dynamic action source error = %v", err)
+	}
+}
+
 func TestLoaderRejectsChecksumAndNestedAction(t *testing.T) {
 	client := testHTTPClient(func(*http.Request) (*http.Response, error) {
 		return testResponse(http.StatusOK, []byte(validAction)), nil

@@ -157,7 +157,7 @@ func commitConcurrentResults(state *State, steps []workflow.Step, outcomes []ste
 func cloneState(state *State) *State {
 	return &State{
 		Inputs: cloneMap(state.Inputs), Vars: cloneMap(state.Vars), Env: maps.Clone(state.Env),
-		Steps: cloneMap(state.Steps),
+		Steps: cloneMap(state.Steps), Bindings: cloneMap(state.Bindings),
 	}
 }
 
