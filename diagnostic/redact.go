@@ -80,7 +80,8 @@ func redact(value any, redactValues bool) any {
 }
 
 func sensitiveKey(key string) bool {
-	return strings.EqualFold(strings.TrimSpace(key), "auth") || sensitiveKeyPattern.MatchString(key)
+	trimmed := strings.TrimSpace(key)
+	return strings.EqualFold(trimmed, "auth") || strings.EqualFold(trimmed, "cookies") || sensitiveKeyPattern.MatchString(key)
 }
 
 func isContainer(value any) bool {

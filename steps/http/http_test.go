@@ -121,7 +121,7 @@ func TestResponseLimitAndCancellation(t *testing.T) {
 }
 
 func TestRedirectPolicyRejectsCredentialBoundaryChanges(t *testing.T) {
-	client := newClient()
+	client := newClient(nil, nil)
 	tests := []struct {
 		name    string
 		from    string

@@ -1090,10 +1090,12 @@ to any `2xx` status; and response bodies default to text:
   with:
     method: GET
     url: https://api.example.com/releases/latest
-    headers:
-      Authorization: "Bearer {{ .env.API_TOKEN }}"
     query:
       channel: stable
+    auth:
+      bearer_token: "{{ .env.API_TOKEN }}"
+    cookies:
+      jar: .wuko/example.cookies
     response: json
     success_statuses: [200]
 ```
@@ -1110,6 +1112,58 @@ Supported response modes are:
 Every response also exposes the raw body string as `body`, the integer status code as `status`, and
 `headers`, whose values are lists so repeated headers are preserved. There are currently no
 dedicated binary, base64, YAML, XML, form-data, file-download, or streaming response modes.
+
+Authentication can be configured with exactly one dedicated mode:
+
+```yaml
+auth:
+  bearer_token: "{{ .env.API_TOKEN }}"
+
+# Or:
+auth:
+  basic:
+    username: "{{ .env.API_USER }}"
+    password: "{{ .env.API_PASSWORD }}"
+```
+
+Bearer authentication sets the `Authorization` header using the `Bearer` scheme; Basic
+authentication applies standard HTTP Basic encoding. Dedicated authentication and a raw
+`Authorization` header are mutually exclusive.
+
+Use `cookies.values` for request cookies and `cookies.jar` for persistence:
+
+```yaml
+cookies:
+  values:
+    tenant: stable
+  jar: .wuko/api.cookies
+```
+
+The jar uses the curl-compatible Netscape cookie-file format, loads before each attempt, and is
+atomically saved afterward, including when a complete response has a failing status or body
+decoding fails. Relative jar paths resolve from the run directory. Missing jars are created with
+owner-only permissions; malformed jars fail the step. A lock beside the jar serializes concurrent
+users so cookie updates are not lost. Cookie values override same-named stored cookies for the
+initial request. Dedicated cookies and a raw `Cookie` header are mutually exclusive.
+
+An explicit proxy overrides environment proxy selection; otherwise `HTTP_PROXY`, `HTTPS_PROXY`,
+and `NO_PROXY` retain their normal Go behavior. HTTP and HTTPS proxy URLs are accepted and may
+contain credentials:
+
+```yaml
+proxy:
+  url: http://proxy-user:proxy-password@proxy.example.com:8080
+```
+
+For mutual TLS, provide an unencrypted PEM certificate chain and matching private key. Relative
+paths resolve from the directory containing the owning workflow or composite action. System CA
+trust is unchanged:
+
+```yaml
+client_certificate:
+  cert_file: certificates/client.pem
+  key_file: certificates/client-key.pem
+```
 
 Only HTTP and HTTPS URLs with a host and without embedded user information are accepted. The
 response body is limited to 10 MiB. Redirects may upgrade HTTP to HTTPS, but they may not change

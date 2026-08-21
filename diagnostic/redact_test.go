@@ -9,11 +9,14 @@ func TestRedactedJSONRemovesSensitiveAndEnvironmentValues(t *testing.T) {
 	type environment map[string]string
 	value := map[string]any{
 		"command": "deploy", "args": []any{"--target", "prod"}, "api_key": "secret-api-key",
-		"env":    environment{"TOKEN": "secret-token", "VISIBLE": "also-secret"},
-		"nested": map[string]any{"authorization": "Bearer secret", "url": "https://example.test/build?token=secret#part", "script": "curl 'https://example.test/run?token=embedded'"},
+		"env":     environment{"TOKEN": "secret-token", "VISIBLE": "also-secret"},
+		"nested":  map[string]any{"authorization": "Bearer secret", "url": "https://example.test/build?token=secret#part", "script": "curl 'https://example.test/run?token=embedded'"},
+		"auth":    map[string]any{"basic": map[string]any{"username": "alice", "password": "auth-secret"}},
+		"cookies": map[string]any{"values": map[string]any{"session": "cookie-secret"}, "jar": "secret-jar.txt"},
+		"proxy":   map[string]any{"url": "http://proxy-user:proxy-secret@proxy.example/path?token=hidden"},
 	}
 	got := RedactedJSON(value)
-	for _, secret := range []string{"secret-api-key", "secret-token", "also-secret", "Bearer secret", "?token=secret", "?token=embedded"} {
+	for _, secret := range []string{"secret-api-key", "secret-token", "also-secret", "Bearer secret", "?token=secret", "?token=embedded", "auth-secret", "cookie-secret", "secret-jar.txt", "proxy-user", "proxy-secret", "?token=hidden"} {
 		if strings.Contains(got, secret) {
 			t.Fatalf("RedactedJSON() exposed %q in %s", secret, got)
 		}
