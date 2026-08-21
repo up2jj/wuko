@@ -264,3 +264,21 @@ func TestWorkflowTreeDisplaysFanoutControls(t *testing.T) {
 		t.Fatalf("output = %q, want %q", output.String(), want)
 	}
 }
+
+func TestWorkflowTreeDisplaysReturnControl(t *testing.T) {
+	definition := &workflow.Definition{Name: "cached", Steps: []workflow.Step{
+		{Return: &workflow.ReturnControl{Outputs: map[string]string{"cached": "true", "artifact": "steps.build.path"}}, If: "vars.cached"},
+		{ID: "build", Type: "shell"},
+	}}
+	var output bytes.Buffer
+	if err := writeWorkflowTree(&output, definition); err != nil {
+		t.Fatal(err)
+	}
+	want := `cached
+├── return (outputs: artifact, cached) if: vars.cached
+└── build (shell)
+`
+	if output.String() != want {
+		t.Fatalf("output = %q, want %q", output.String(), want)
+	}
+}

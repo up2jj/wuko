@@ -217,6 +217,12 @@ steps. The following are not supported:
 
 Put dependent work after the inner concurrent group or after the complete control parent.
 
+An early [`return`](return.md) may follow a completed concurrent, foreach, or matrix control and
+consume its committed outputs. It cannot appear inside a concurrent branch or fan-out body because
+parallel branches or iterations could race to publish conflicting workflow results. A composite
+action used by a branch or iteration may return internally; that finishes only the individual
+action invocation.
+
 ## Composite actions and required files
 
 Required step fragments can appear inside foreach and matrix bodies. Relative paths continue to

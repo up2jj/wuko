@@ -32,6 +32,9 @@ func (e *Engine) validateControl(ctx context.Context, definition *workflow.Defin
 	if err != nil {
 		return err
 	}
+	if containsReturn(children) {
+		return fmt.Errorf("return is not supported inside %s controls", kind)
+	}
 	for _, expression := range expressions {
 		if err := controlpkg.ValidateExpression(expression.value); err != nil {
 			return fmt.Errorf("%s %s: %w", kind, expression.label, err)

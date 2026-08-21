@@ -540,7 +540,40 @@ func validateAction(action *Action) error {
 		}
 	}
 	definition := &Definition{Version: 1, Name: action.Name, Steps: action.Steps, Finally: action.Finally}
-	return validateDefinition(definition, false)
+	if err := validateDefinition(definition, false); err != nil {
+		return err
+	}
+	return action.ValidateReturnContracts()
+}
+
+// ValidateReturnContracts checks that every early return satisfies the declared action outputs.
+func (action *Action) ValidateReturnContracts() error {
+	return validateActionReturnContracts(action.Steps, action.Outputs)
+}
+
+func validateActionReturnContracts(steps []Step, outputs map[string]ActionOutput) error {
+	for _, workflowStep := range steps {
+		if workflowStep.IsWorkingDirectoryBlock() || workflowStep.IsConditionalBlock() {
+			if err := validateActionReturnContracts(workflowStep.Steps, outputs); err != nil {
+				return err
+			}
+			continue
+		}
+		if workflowStep.Return == nil {
+			continue
+		}
+		for name := range outputs {
+			if _, exists := workflowStep.Return.Outputs[name]; !exists {
+				return fmt.Errorf("return outputs do not match action outputs: missing %q", name)
+			}
+		}
+		for name := range workflowStep.Return.Outputs {
+			if _, exists := outputs[name]; !exists {
+				return fmt.Errorf("return outputs do not match action outputs: unexpected %q", name)
+			}
+		}
+	}
+	return nil
 }
 
 // ActionValueMatches reports whether a value satisfies a manifest input type.

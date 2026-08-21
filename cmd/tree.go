@@ -3,7 +3,9 @@ package cmd
 import (
 	"fmt"
 	"io"
+	"maps"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -150,6 +152,16 @@ func writeTreeStepsWithFollowing(writer io.Writer, steps []workflow.Step, prefix
 				return err
 			}
 			if err := writeTreeSteps(writer, workflowStep.Concurrent.Steps, childPrefix); err != nil {
+				return err
+			}
+			continue
+		}
+		if workflowStep.Return != nil {
+			names := strings.Join(slices.Sorted(maps.Keys(workflowStep.Return.Outputs)), ", ")
+			if names == "" {
+				names = "{}"
+			}
+			if _, err := fmt.Fprintf(writer, "%s%sreturn (outputs: %s)%s\n", prefix, branch, names, treeCondition(workflowStep)); err != nil {
 				return err
 			}
 			continue

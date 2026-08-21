@@ -51,10 +51,14 @@ type State struct {
 	Vars   map[string]any
 	Env    map[string]string
 	Steps  map[string]any
+	// Outputs contains values explicitly produced by a return control.
+	Outputs map[string]any
 	// Bindings contains lifecycle and iteration-local roots such as finally, foreach, and matrix.
 	Bindings    map[string]any
 	Stats       RunStats
 	writtenVars map[string]struct{}
+	returning   bool
+	didReturn   bool
 }
 
 func New(registry *step.Registry) *Engine { return &Engine{registry: registry} }
@@ -77,10 +81,14 @@ func (e *Engine) Validate(ctx context.Context, definition *workflow.Definition, 
 	}
 	err = e.validateSteps(ctx, definition, definition.Steps, options, state, false)
 	if err == nil && len(definition.Finally) > 0 {
-		state.Bindings = map[string]any{"finally": map[string]any{
-			"status": string(StatusSucceeded), "errors": []any{},
-		}}
-		err = e.validateSteps(ctx, definition, definition.Finally, options, state, false)
+		if containsReturn(definition.Finally) {
+			err = fmt.Errorf("finally: return is not supported inside finally")
+		} else {
+			state.Bindings = map[string]any{"finally": map[string]any{
+				"status": string(StatusSucceeded), "errors": []any{},
+			}}
+			err = e.validateSteps(ctx, definition, definition.Finally, options, state, false)
+		}
 	}
 	status := diagnostic.StatusSucceeded
 	if err != nil {
@@ -120,7 +128,7 @@ func (e *Engine) validateSteps(ctx context.Context, definition *workflow.Definit
 			if len(workflowStep.Steps) == 0 {
 				return fail(fmt.Errorf("conditional block must contain at least one step"))
 			}
-			if workflowStep.ID != "" || workflowStep.Type != "" || !workflowStep.Uses.Empty() || workflowStep.Require != nil || workflowStep.Concurrent != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil || workflowStep.SHA256 != "" || workflowStep.Timeout != nil || workflowStep.Retry != nil || workflowStep.With != nil {
+			if workflowStep.ID != "" || workflowStep.Type != "" || !workflowStep.Uses.Empty() || workflowStep.Require != nil || workflowStep.Concurrent != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil || workflowStep.Return != nil || workflowStep.SHA256 != "" || workflowStep.Timeout != nil || workflowStep.Retry != nil || workflowStep.With != nil {
 				return fail(fmt.Errorf("conditional block cannot be combined with other step fields"))
 			}
 			if _, err := compileCondition(workflowStep.If); err != nil {
@@ -143,6 +151,15 @@ func (e *Engine) validateSteps(ctx context.Context, definition *workflow.Definit
 		if workflowStep.Foreach != nil || workflowStep.Matrix != nil {
 			if err := e.validateControl(ctx, definition, workflowStep, options, state); err != nil {
 				return fmt.Errorf("step %q: %w", workflowStep.ID, err)
+			}
+			continue
+		}
+		if workflowStep.Return != nil {
+			if insideConcurrent {
+				return fmt.Errorf("return is not supported inside concurrent groups")
+			}
+			if err := e.validateReturn(workflowStep); err != nil {
+				return fmt.Errorf("return: %w", err)
 			}
 			continue
 		}
@@ -282,6 +299,7 @@ func (e *Engine) Run(ctx context.Context, definition *workflow.Definition, optio
 	}()
 
 	mainErr = e.executeSequence(ctx, definition, definition.Steps, options, state, &stats, 1, total)
+	state.returning = false
 	cleanupErrors := e.executeFinally(context.WithoutCancel(ctx), definition, options, state, &stats, mainErr, total)
 	if rootRun {
 		cleanupErrors = append(cleanupErrors, options.runtime.runCleanups()...)
@@ -367,12 +385,16 @@ func finallyErrorRecord(status ExecutionStatus, stepID, stepType string, err err
 
 func (e *Engine) executeSequence(ctx context.Context, definition *workflow.Definition, steps []workflow.Step, options Options, state *State, stats *RunStats, firstIndex, total int) error {
 	index := firstIndex
-	for _, workflowStep := range steps {
+	for position, workflowStep := range steps {
 		if workflowStep.IsWorkingDirectoryBlock() {
 			if err := e.executeWorkingDirectoryBlock(ctx, definition, workflowStep, options, state, stats, index, total); err != nil {
 				return err
 			}
 			index += leafStepCount(workflowStep.Steps)
+			if state.returning {
+				recordSkippedSteps(definition, steps[position+1:], options, stats, index, total)
+				return nil
+			}
 			continue
 		}
 		if workflowStep.IsConditionalBlock() {
@@ -391,6 +413,21 @@ func (e *Engine) executeSequence(ctx context.Context, definition *workflow.Defin
 				recordSkippedSteps(definition, workflowStep.Steps, options, stats, index, total)
 			}
 			index += leafStepCount(workflowStep.Steps)
+			if state.returning {
+				recordSkippedSteps(definition, steps[position+1:], options, stats, index, total)
+				return nil
+			}
+			continue
+		}
+		if workflowStep.Return != nil {
+			triggered, err := e.executeReturn(ctx, definition, workflowStep, options, state)
+			if err != nil {
+				return err
+			}
+			if triggered {
+				recordSkippedSteps(definition, steps[position+1:], options, stats, index, total)
+				return nil
+			}
 			continue
 		}
 		if workflowStep.Concurrent != nil {
@@ -476,6 +513,9 @@ func recordSkippedSteps(definition *workflow.Definition, steps []workflow.Step, 
 		if workflowStep.Concurrent != nil {
 			recordSkippedSteps(definition, workflowStep.Concurrent.Steps, options, stats, index, total)
 			index += leafStepCount(workflowStep.Concurrent.Steps)
+			continue
+		}
+		if workflowStep.Return != nil {
 			continue
 		}
 		started := time.Now()
@@ -673,6 +713,9 @@ func leafStepCount(steps []workflow.Step) int {
 			total += leafStepCount(workflowStep.Concurrent.Steps)
 			continue
 		}
+		if workflowStep.Return != nil {
+			continue
+		}
 		if workflowStep.Foreach != nil || workflowStep.Matrix != nil {
 			total++
 			continue
@@ -783,7 +826,7 @@ func initialState(definition *workflow.Definition, options Options) (*State, err
 	if err != nil {
 		return nil, err
 	}
-	return &State{Inputs: cloneMap(options.inputs), Vars: vars, Env: environment, Steps: make(map[string]any)}, nil
+	return &State{Inputs: cloneMap(options.inputs), Vars: vars, Env: environment, Steps: make(map[string]any), Outputs: make(map[string]any)}, nil
 }
 
 func templateData(definition *workflow.Definition, runDir string, state *State) map[string]any {
@@ -806,6 +849,9 @@ func (e *Engine) validateAction(ctx context.Context, definition *workflow.Defini
 		return fmt.Errorf("action was not resolved by the workflow loader")
 	}
 	if err := validateActionBindings(workflowStep.Action, workflowStep.With, options.renderer); err != nil {
+		return err
+	}
+	if err := workflowStep.Action.ValidateReturnContracts(); err != nil {
 		return err
 	}
 	for name, output := range workflowStep.Action.Outputs {
@@ -852,6 +898,9 @@ func (e *Engine) prepareActionExecutor(definition *workflow.Definition, workflow
 		})
 		if err != nil {
 			return step.Result{}, err
+		}
+		if innerState.didReturn {
+			return step.Result{Outputs: cloneMap(innerState.Outputs)}, nil
 		}
 		environment := map[string]any{"inputs": innerState.Inputs, "vars": innerState.Vars, "steps": innerState.Steps, "env": innerState.Env, "workflow": map[string]any{"name": inner.Name, "dir": inner.Dir}, "run": map[string]any{"dir": options.RunDir}}
 		outputs := make(map[string]any, len(workflowStep.Action.Outputs))

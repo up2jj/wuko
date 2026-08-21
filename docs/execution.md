@@ -28,6 +28,11 @@ Templates use `.steps` and `.vars`; Expr conditions use `steps` and `vars`. Sche
 dependency graph or `needs` field. Failed and skipped steps commit no state. Concurrent children
 share the snapshot from group entry and cannot consume sibling results.
 
+Use the anonymous `return` control to finish the current workflow or composite action successfully
+with typed Expr outputs. It may appear in sequential conditional or working-directory scopes, still
+runs `finally`, and cannot appear inside concurrent or fan-out bodies. See
+[Early successful return](return.md) for the complete contract and examples.
+
 ## Conditions
 
 Use an Expr expression returning a boolean:

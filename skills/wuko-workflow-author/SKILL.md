@@ -1,6 +1,6 @@
 ---
 name: wuko-workflow-author
-description: Create or update Wuko version-1 YAML workflows, including cron schedules, templates, conditions, finally cleanup, foreach and matrix controls, required files, composite actions, waits, polling, retries, concurrency, interactive prompts, typed and imported variables, JSONPath selection, semantic versions, HTTP, files, managed temporary resources, glob discovery, persistent change detectors, content-addressed directory caches, Lua, shell, Docker, and agent steps. Use when designing workflow files, extending existing workflows, or reviewing workflow structure before execution.
+description: Create or update Wuko version-1 YAML workflows, including cron schedules, templates, conditions, early returns, finally cleanup, foreach and matrix controls, required files, composite actions, waits, polling, retries, concurrency, interactive prompts, typed and imported variables, JSONPath selection, semantic versions, HTTP, files, managed temporary resources, glob discovery, persistent change detectors, content-addressed directory caches, Lua, shell, Docker, and agent steps. Use when designing workflow files, extending existing workflows, or reviewing workflow structure before execution.
 ---
 
 # Wuko Workflow Author
@@ -50,12 +50,19 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
 - Use `cache` with an early `restore` and a later `save` for dependency or build directories.
   Derive the key from stable lockfiles or manifests, keep restore and save declarations identical,
   and branch on the restore step's `hit` output when work can be skipped.
+- Use anonymous `return` with Expr-valued `outputs` to finish a workflow or composite action
+  successfully after a cache hit or other terminal condition. Keep it in the main sequential flow
+  or a conditional/working-directory block; do not place it inside concurrent, foreach, matrix, or
+  finally. Composite-action return keys must exactly match the declared action outputs.
 - Use shell for external programs, Lua for multi-operation scripting, Docker for isolated
   containers, and agent for coding-agent execution.
 
 ## Important behavior
 
 - Step outputs and variables are committed only after success and are available only to later sequential steps. A forward `.steps` reference fails at runtime; a skipped producer is absent from `steps`.
+- A triggered `return` preserves prior commits, marks later declared work skipped, publishes its
+  typed expressions through workflow outputs or the invoking action step, and still runs `finally`
+  with successful main status. Use `outputs: {}` for a successful no-op result.
 - Treat templates as string presentation, not workflow logic. Keep step ordering, `if` conditions,
   retries, types, and typed data explicit in YAML. Do not split a readable one-line substitution
   into a named template or build chains of templates that merely rename values.

@@ -3,6 +3,8 @@ package engine
 import (
 	"fmt"
 	"io"
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -36,6 +38,16 @@ func writeDryRun(writer io.Writer, steps []workflow.Step, indent string, parent 
 				return err
 			}
 			if err := writeDryRun(writer, workflowStep.Concurrent.Steps, indent+"   ", path); err != nil {
+				return err
+			}
+			continue
+		}
+		if workflowStep.Return != nil {
+			names := strings.Join(slices.Sorted(maps.Keys(workflowStep.Return.Outputs)), ", ")
+			if names == "" {
+				names = "{}"
+			}
+			if _, err := fmt.Fprintf(writer, "%s%s return (outputs: %s)%s\n", indent, index, names, dryRunCondition(workflowStep)); err != nil {
 				return err
 			}
 			continue

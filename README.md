@@ -10,9 +10,9 @@ with typed data and files, call APIs, run scripts or containers, and start codin
 - **Interactive runs** — collect text, passwords, choices, and confirmations in the terminal.
 - **Typed workflow state** — use variables, step outputs, JSON/TOML imports, JSONPath, semantic
   versions, templates, and expressions without converting everything to strings.
-- **Useful execution controls** — conditions, retries, timeouts, polling, concurrency, foreach and
-  matrix expansion, scoped working-directory blocks, scheduled runs, dry runs, execution trees,
-  and guaranteed cleanup.
+- **Useful execution controls** — conditions, early successful returns, retries, timeouts, polling,
+  concurrency, foreach and matrix expansion, scoped working-directory blocks, scheduled runs, dry
+  runs, execution trees, and guaranteed cleanup.
 - **Portable operations** — use built-in HTTP, filesystem, glob, cache, change detection,
   key-value, temporary resource, and Docker steps instead of platform-specific shell commands.
 - **Extensible automation** — run Lua, direct commands, inline shell, or an external agent such as
@@ -150,6 +150,7 @@ For workflow syntax and execution behavior, see:
 - [Execution and composition](docs/execution.md) — conditions, concurrency, scheduling, waits,
   retries, required files, remote reuse, progress, and debugging.
 - [Workflow controls](docs/workflow-control.md) — foreach and matrix expansion.
+- [Early successful return](docs/return.md) — finish workflows and actions with explicit outputs.
 - [Finally cleanup](docs/finally.md) and [graceful shutdown](docs/graceful-shutdown.md).
 - [Templates](docs/templates.md) and [template, Expr, and Lua functions](docs/template-functions.md).
 - [Variable imports](docs/variable-imports.md).
@@ -247,6 +248,7 @@ Claude skills are installed under `~/.claude/skills/`; Codex skills are installe
 - [Automation steps](docs/steps-automation.md)
 - [Filesystem operation reference](docs/filesystem-operations.md)
 - [Workflow controls](docs/workflow-control.md)
+- [Early successful return](docs/return.md)
 - [Workflow discovery](docs/workflow-discovery.md)
 - [Templates](docs/templates.md)
 - [Template, Expr, and Lua functions](docs/template-functions.md)
