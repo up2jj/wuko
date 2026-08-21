@@ -60,6 +60,28 @@ func TestLuaControlBindings(t *testing.T) {
 	}
 }
 
+func TestLuaFinallyBinding(t *testing.T) {
+	runner, err := New(map[string]any{
+		"source": `wuko.output("outcome", {status = wuko.finally.status, step = wuko.finally.errors[1].step_id})`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runner.Run(t.Context(), step.Request{Bindings: map[string]any{
+		"finally": map[string]any{
+			"status": "failed",
+			"errors": []any{map[string]any{"step_id": "deploy"}},
+		},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outcome := result.Outputs["outcome"].(map[string]any)
+	if outcome["status"] != "failed" || outcome["step"] != "deploy" {
+		t.Fatalf("outcome = %#v", outcome)
+	}
+}
+
 func TestLuaKeyValueAPI(t *testing.T) {
 	runner, err := New(map[string]any{
 		"source": `

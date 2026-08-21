@@ -1,6 +1,6 @@
 ---
 name: wuko-workflow-author
-description: Create or update Wuko version-1 YAML workflows, including templates, conditions, foreach and matrix controls, required files, composite actions, waits, polling, retries, concurrency, interactive prompts, typed and imported variables, JSONPath selection, semantic versions, HTTP, files, glob discovery, Lua, shell, Docker, and agent steps. Use when designing workflow files, extending existing workflows, or reviewing workflow structure before execution.
+description: Create or update Wuko version-1 YAML workflows, including templates, conditions, finally cleanup, foreach and matrix controls, required files, composite actions, waits, polling, retries, concurrency, interactive prompts, typed and imported variables, JSONPath selection, semantic versions, HTTP, files, glob discovery, Lua, shell, Docker, and agent steps. Use when designing workflow files, extending existing workflows, or reviewing workflow structure before execution.
 ---
 
 # Wuko Workflow Author
@@ -13,7 +13,7 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
 2. Model the workflow with `version: 1`, a stable `name`, a useful `description`, explicit `vars` and `env`, and an ordered `steps` list. Wuko does not infer a dependency graph or reorder steps.
 3. Choose the smallest appropriate step type. Declare every producer before its consumers. Use `concurrent` for a fixed set of independent children, `foreach` for a runtime list, and `matrix` for a Cartesian product. Put consumers after the complete group or control.
 4. Render dynamic values with the documented template roots. Keep one-off substitutions inline; introduce a named template only for genuine reuse or a substantial multiline artifact. Use `if` only for boolean expressions and guard references to skipped steps with membership checks.
-5. Keep local paths relative to the file or workflow context that resolves them. Preserve unique step IDs across required files, concurrent children, and composite actions.
+5. Keep local paths relative to the file or workflow context that resolves them. Preserve unique step IDs across required files, concurrent children, main steps, finally cleanup, and composite actions.
 6. Treat shell, Lua, Docker, remote actions, and agents as trusted executable code. Keep credentials in environment values, never in workflow text, arguments, URLs, logs, or operation IDs.
 
 ## Step selection
@@ -57,6 +57,10 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
   `range`/`with` blocks, or duplicated control flow. Move imperative transformation to Lua and
   keep executable shell behavior visible in the owning step.
 - Use `require` for local step files and keep required paths relative to the containing workflow file.
+- Use one workflow- or action-level `finally` list for multi-step cleanup. Give cleanup operations
+  their own timeouts, make them idempotent, and select failures with stable `finally.status` and
+  `finally.errors` metadata rather than error-message text. Cleanup cannot recover from an error;
+  consult `docs/finally.md` when it is available for lifecycle and limitations.
 - Supply invocation-time JSON or TOML variables with repeatable `--var-file`; later files replace
   earlier top-level values and explicit `--var` entries take final initial-state precedence.
 - Use `timeout` and `retry` deliberately. Retries have at-least-once effects; do not assume commands, requests, writes, containers, or agents can be rolled back.

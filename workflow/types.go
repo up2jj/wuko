@@ -31,6 +31,7 @@ type Definition struct {
 	Vars        map[string]any                `yaml:"vars,omitempty"`
 	Env         Environment                   `yaml:"env,omitempty"`
 	Steps       []Step                        `yaml:"steps"`
+	Finally     []Step                        `yaml:"finally,omitempty"`
 	Path        string                        `yaml:"-"`
 	Dir         string                        `yaml:"-"`
 	Location    diagnostic.Location           `yaml:"-"`
@@ -319,8 +320,14 @@ func loadLocalWithDiagnostics(path string, reporter diagnostic.Reporter, sourceR
 		traceFinish(reporter, requireStarted, diagnostic.PhaseRequire, diagnostic.StatusFailed, definition.Location, definition.Name, "", "", "", err)
 		return nil, fmt.Errorf("loading workflow %s: %w", path, err)
 	}
+	definition.Finally, err = expandRequiredSteps(definition.Finally, abs, nil)
+	if err != nil {
+		traceFinish(reporter, requireStarted, diagnostic.PhaseRequire, diagnostic.StatusFailed, definition.Location, definition.Name, "", "", "", err)
+		return nil, fmt.Errorf("loading workflow %s finally: %w", path, err)
+	}
 	if sourceLabel != "" {
 		remapStepLocations(definition.Steps, sourceRoot, sourceLabel)
+		remapStepLocations(definition.Finally, sourceRoot, sourceLabel)
 	}
 	traceFinish(reporter, requireStarted, diagnostic.PhaseRequire, diagnostic.StatusSucceeded, definition.Location, definition.Name, "", "", "", nil, countAttr("steps", len(definition.Steps)))
 	validationStarted := traceStart(reporter, diagnostic.PhaseValidation, definition.Location, definition.Name, "", "", "validating workflow schema")
@@ -343,8 +350,18 @@ func validateDefinition(definition *Definition, allowActions bool) error {
 		return err
 	}
 
-	if err := validateStepScope(definition.Steps, allowActions, scopeTop, nil); err != nil {
+	seen := make(map[string]struct{}, len(definition.Steps)+len(definition.Finally))
+	if err := collectScopeIDs(definition.Steps, seen); err != nil {
 		return err
+	}
+	if err := collectScopeIDs(definition.Finally, seen); err != nil {
+		return fmt.Errorf("finally: %w", err)
+	}
+	if err := validateSteps(definition.Steps, allowActions, scopeTop, seen); err != nil {
+		return err
+	}
+	if err := validateSteps(definition.Finally, allowActions, scopeTop, seen); err != nil {
+		return fmt.Errorf("finally: %w", err)
 	}
 	for name := range definition.Env {
 		if !environmentPattern.MatchString(name) {

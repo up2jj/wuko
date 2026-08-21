@@ -134,7 +134,7 @@ func (r *runtime) module(state *glua.LState) (*glua.LTable, error) {
 		return nil, fmt.Errorf("converting Lua arguments: %w", err)
 	}
 	module.RawSetString("args", args)
-	for _, name := range []string{"foreach", "matrix"} {
+	for _, name := range []string{"foreach", "matrix", "finally"} {
 		binding, exists := r.request.Bindings[name]
 		if !exists {
 			continue

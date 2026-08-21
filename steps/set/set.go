@@ -25,6 +25,7 @@ type expressionEnvironment struct {
 	Steps    map[string]any    `expr:"steps"`
 	Foreach  map[string]any    `expr:"foreach"`
 	Matrix   map[string]any    `expr:"matrix"`
+	Finally  map[string]any    `expr:"finally"`
 	Workflow workflowValue     `expr:"workflow"`
 	Run      runValue          `expr:"run"`
 }
@@ -89,6 +90,7 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 			Steps:   request.Steps,
 			Foreach: bindingRoot(request.Bindings, "foreach"),
 			Matrix:  bindingRoot(request.Bindings, "matrix"),
+			Finally: bindingRoot(request.Bindings, "finally"),
 			Workflow: workflowValue{
 				Name: request.WorkflowName,
 				Dir:  request.WorkflowDir,

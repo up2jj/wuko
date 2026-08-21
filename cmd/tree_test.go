@@ -150,6 +150,27 @@ func TestWorkflowTreeDisplaysExecutionPolicy(t *testing.T) {
 	}
 }
 
+func TestWriteWorkflowTreeShowsFinallySections(t *testing.T) {
+	action := &workflow.Action{
+		Version: 1, Name: "action",
+		Steps:   []workflow.Step{{ID: "inside", Type: "shell"}},
+		Finally: []workflow.Step{{ID: "inside_cleanup", Type: "shell"}},
+	}
+	definition := &workflow.Definition{
+		Version: 1, Name: "tree",
+		Steps:   []workflow.Step{{ID: "call", Uses: workflow.ActionSource{URL: "https://example.test/action"}, Action: action}},
+		Finally: []workflow.Step{{ID: "cleanup", Type: "shell"}},
+	}
+	var output bytes.Buffer
+	if err := writeWorkflowTree(&output, definition); err != nil {
+		t.Fatal(err)
+	}
+	want := "tree\n├── call (uses https://example.test/action)\n│   ├── inside (shell)\n│   └── finally\n│       └── inside_cleanup (shell)\n└── finally\n    └── cleanup (shell)\n"
+	if output.String() != want {
+		t.Fatalf("tree output = %q, want %q", output.String(), want)
+	}
+}
+
 func TestWorkflowTreeDisplaysConcurrentGroup(t *testing.T) {
 	timeout := workflow.Duration(5 * time.Minute)
 	definition := &workflow.Definition{Name: "checks", Steps: []workflow.Step{{Concurrent: &workflow.ConcurrentGroup{

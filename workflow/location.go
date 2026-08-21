@@ -16,6 +16,7 @@ func annotateDefinitionLocations(data []byte, definition *Definition, source str
 	}
 	definition.Location = nodeLocation(root, source)
 	annotateSteps(definition.Steps, mappingValue(root, "steps"), source)
+	annotateSteps(definition.Finally, mappingValue(root, "finally"), source)
 }
 
 func annotateActionLocations(data []byte, action *Action, source string) {
@@ -25,6 +26,7 @@ func annotateActionLocations(data []byte, action *Action, source string) {
 	}
 	action.Location = nodeLocation(root, source)
 	annotateSteps(action.Steps, mappingValue(root, "steps"), source)
+	annotateSteps(action.Finally, mappingValue(root, "finally"), source)
 }
 
 func annotateFragmentLocations(data []byte, steps []Step, source string) {
@@ -93,6 +95,7 @@ func nodeLocation(node *yaml.Node, source string) diagnostic.Location {
 func remapDefinitionLocations(definition *Definition, materializedRoot, logicalSource string) {
 	definition.Location.Source = remapSource(definition.Location.Source, materializedRoot, logicalSource)
 	remapStepLocations(definition.Steps, materializedRoot, logicalSource)
+	remapStepLocations(definition.Finally, materializedRoot, logicalSource)
 }
 
 func remapStepLocations(steps []Step, materializedRoot, logicalSource string) {
@@ -129,18 +132,25 @@ func validationLocation(definition *Definition, err error) diagnostic.Location {
 		return definition.Location
 	}
 	message := err.Error()
-	for _, workflowStep := range flattenSteps(definition.Steps) {
+	indexedSteps := definition.Steps
+	indexedMessage := message
+	if strings.HasPrefix(message, "finally: ") {
+		indexedSteps = definition.Finally
+		indexedMessage = strings.TrimPrefix(message, "finally: ")
+	}
+	allSteps := append(flattenSteps(definition.Steps), flattenSteps(definition.Finally)...)
+	for _, workflowStep := range allSteps {
 		quotedID := strconv.Quote(workflowStep.ID)
 		if workflowStep.ID != "" && (strings.Contains(message, "step "+quotedID) || strings.Contains(message, "step id "+quotedID)) {
 			return workflowStep.Location
 		}
 	}
-	if strings.HasPrefix(message, "step ") {
-		number, _, found := strings.Cut(strings.TrimPrefix(message, "step "), ":")
+	if strings.HasPrefix(indexedMessage, "step ") {
+		number, _, found := strings.Cut(strings.TrimPrefix(indexedMessage, "step "), ":")
 		if found {
 			index, parseErr := strconv.Atoi(number)
-			if parseErr == nil && index > 0 && index <= len(definition.Steps) {
-				return definition.Steps[index-1].Location
+			if parseErr == nil && index > 0 && index <= len(indexedSteps) {
+				return indexedSteps[index-1].Location
 			}
 		}
 	}

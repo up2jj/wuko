@@ -55,9 +55,27 @@ func writeDryRun(writer io.Writer, steps []workflow.Step, indent string, parent 
 			if err := writeDryRun(writer, workflowStep.Action.Steps, indent+"   ", path); err != nil {
 				return err
 			}
+			if len(workflowStep.Action.Finally) > 0 {
+				if _, err := fmt.Fprintf(writer, "%s   finally:\n", indent); err != nil {
+					return err
+				}
+				if err := writeDryRun(writer, workflowStep.Action.Finally, indent+"      ", path); err != nil {
+					return err
+				}
+			}
 		}
 	}
 	return nil
+}
+
+func writeDryRunFinally(writer io.Writer, steps []workflow.Step) error {
+	if len(steps) == 0 {
+		return nil
+	}
+	if _, err := fmt.Fprintln(writer, "finally:"); err != nil {
+		return err
+	}
+	return writeDryRun(writer, steps, "   ", nil)
 }
 
 func dryRunCondition(workflowStep workflow.Step) string {

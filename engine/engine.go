@@ -49,7 +49,7 @@ type State struct {
 	Vars   map[string]any
 	Env    map[string]string
 	Steps  map[string]any
-	// Bindings contains iteration-local workflow-control roots.
+	// Bindings contains lifecycle and iteration-local roots such as finally, foreach, and matrix.
 	Bindings map[string]any
 	Stats    RunStats
 }
@@ -73,6 +73,12 @@ func (e *Engine) Validate(ctx context.Context, definition *workflow.Definition, 
 		return err
 	}
 	err = e.validateSteps(ctx, definition, definition.Steps, options, state, false)
+	if err == nil && len(definition.Finally) > 0 {
+		state.Bindings = map[string]any{"finally": map[string]any{
+			"status": string(StatusSucceeded), "errors": []any{},
+		}}
+		err = e.validateSteps(ctx, definition, definition.Finally, options, state, false)
+	}
 	status := diagnostic.StatusSucceeded
 	if err != nil {
 		status = diagnostic.StatusFailed
@@ -189,22 +195,29 @@ func (e *Engine) Run(ctx context.Context, definition *workflow.Definition, optio
 		if err := writeDryRun(options.Stdout, definition.Steps, "", nil); err != nil {
 			return nil, err
 		}
+		if err := writeDryRunFinally(options.Stdout, definition.Finally); err != nil {
+			return nil, err
+		}
 		return state, nil
 	}
 
 	startedAt := time.Now()
-	total := leafStepCount(definition.Steps)
+	total := leafStepCount(definition.Steps) + leafStepCount(definition.Finally)
 	stats := RunStats{StartedAt: startedAt, Total: total, Steps: make([]StepStats, 0, total)}
 	report(options, ProgressEvent{
 		Kind: WorkflowStarted, Status: StatusRunning, Time: startedAt,
 		WorkflowName: definition.Name, Depth: options.depth, Total: total,
 	})
+	var mainErr error
 	defer func() {
 		finishedAt := time.Now()
 		stats.FinishedAt = finishedAt
 		stats.Duration = finishedAt.Sub(startedAt)
 		state.Stats = stats
 		status := statusFromError(runErr)
+		if mainErr != nil {
+			status = statusFromError(mainErr)
+		}
 		report(options, ProgressEvent{
 			Kind: WorkflowFinished, Status: status, Time: finishedAt,
 			WorkflowName: definition.Name, Depth: options.depth, Total: total,
@@ -212,10 +225,85 @@ func (e *Engine) Run(ctx context.Context, definition *workflow.Definition, optio
 		})
 	}()
 
-	if err := e.executeSequence(ctx, definition, definition.Steps, options, state, &stats, 1, total); err != nil {
-		return nil, err
+	mainErr = e.executeSequence(ctx, definition, definition.Steps, options, state, &stats, 1, total)
+	cleanupErrors := e.executeFinally(context.WithoutCancel(ctx), definition, options, state, &stats, mainErr, total)
+	runErr = errors.Join(append([]error{mainErr}, cleanupErrors...)...)
+	if runErr != nil {
+		return nil, runErr
 	}
 	return state, nil
+}
+
+func (e *Engine) executeFinally(ctx context.Context, definition *workflow.Definition, options Options, state *State, stats *RunStats, mainErr error, total int) []error {
+	if len(definition.Finally) == 0 {
+		return nil
+	}
+	bindingsWereNil := state.Bindings == nil
+	if state.Bindings == nil {
+		state.Bindings = make(map[string]any)
+	}
+	previousBinding, hadPreviousBinding := state.Bindings["finally"]
+	errorsValue := finallyErrorRecords(stats.Steps)
+	if mainErr != nil && len(errorsValue) == 0 {
+		errorsValue = append(errorsValue, finallyErrorRecord(statusFromError(mainErr), "", "", mainErr))
+	}
+	state.Bindings["finally"] = map[string]any{
+		"status": string(statusFromError(mainErr)), "errors": errorsValue,
+	}
+	defer func() {
+		if hadPreviousBinding {
+			state.Bindings["finally"] = previousBinding
+		} else {
+			delete(state.Bindings, "finally")
+		}
+		if bindingsWereNil && len(state.Bindings) == 0 {
+			state.Bindings = nil
+		}
+	}()
+
+	index := leafStepCount(definition.Steps) + 1
+	cleanupErrors := make([]error, 0)
+	for _, cleanupStep := range definition.Finally {
+		before := len(stats.Steps)
+		err := e.executeSequence(ctx, definition, []workflow.Step{cleanupStep}, options, state, stats, index, total)
+		if err != nil {
+			cleanupErrors = append(cleanupErrors, err)
+			newRecords := finallyErrorRecords(stats.Steps[before:])
+			if len(newRecords) == 0 {
+				newRecords = append(newRecords, finallyErrorRecord(statusFromError(err), cleanupStep.ID, executionKind(cleanupStep), err))
+			}
+			errorsValue = append(errorsValue, newRecords...)
+			state.Bindings["finally"].(map[string]any)["errors"] = errorsValue
+		}
+		index += leafStepCount([]workflow.Step{cleanupStep})
+	}
+	return cleanupErrors
+}
+
+func finallyErrorRecords(steps []StepStats) []any {
+	var records []any
+	for _, stats := range steps {
+		if len(stats.Iterations) > 0 {
+			before := len(records)
+			for _, iteration := range stats.Iterations {
+				records = append(records, finallyErrorRecords(iteration.Steps)...)
+			}
+			if len(records) > before {
+				continue
+			}
+		}
+		if stats.Error == nil || stats.Status == StatusSucceeded || stats.Status == StatusSkipped {
+			continue
+		}
+		records = append(records, finallyErrorRecord(stats.Status, stats.ID, stats.Type, stats.Error))
+	}
+	return records
+}
+
+func finallyErrorRecord(status ExecutionStatus, stepID, stepType string, err error) map[string]any {
+	return map[string]any{
+		"status": string(status), "message": err.Error(), "step_id": stepID, "step_type": stepType,
+	}
 }
 
 func (e *Engine) executeSequence(ctx context.Context, definition *workflow.Definition, steps []workflow.Step, options Options, state *State, stats *RunStats, firstIndex, total int) error {
@@ -533,7 +621,7 @@ func (e *Engine) validateAction(ctx context.Context, definition *workflow.Defini
 	}
 	defer cleanup()
 	inputs := actionValidationInputs(workflowStep.Action)
-	inner := &workflow.Definition{Version: 1, Name: workflowStep.Action.Name, Templates: workflowStep.Action.Templates, Dir: dir, Steps: workflowStep.Action.Steps, Vars: map[string]any{}, Env: workflow.Environment{}, Location: workflowStep.Action.Location}
+	inner := &workflow.Definition{Version: 1, Name: workflowStep.Action.Name, Templates: workflowStep.Action.Templates, Dir: dir, Steps: workflowStep.Action.Steps, Finally: workflowStep.Action.Finally, Vars: map[string]any{}, Env: workflow.Environment{}, Location: workflowStep.Action.Location}
 	return e.Validate(ctx, inner, Options{
 		inputs: inputs, BaseEnv: state.Env, RunDir: options.RunDir,
 		LocalValueDir: options.LocalValueDir, GlobalValueDir: options.GlobalValueDir,
@@ -554,7 +642,7 @@ func (e *Engine) prepareActionExecutor(definition *workflow.Definition, workflow
 	if err != nil {
 		return nil, nil, err
 	}
-	inner := &workflow.Definition{Version: 1, Name: workflowStep.Action.Name, Templates: workflowStep.Action.Templates, Dir: dir, Steps: workflowStep.Action.Steps, Vars: map[string]any{}, Env: workflow.Environment{}, Location: workflowStep.Action.Location}
+	inner := &workflow.Definition{Version: 1, Name: workflowStep.Action.Name, Templates: workflowStep.Action.Templates, Dir: dir, Steps: workflowStep.Action.Steps, Finally: workflowStep.Action.Finally, Vars: map[string]any{}, Env: workflow.Environment{}, Location: workflowStep.Action.Location}
 	execute := func(ctx context.Context, request step.Request) (step.Result, error) {
 		innerState, err := e.Run(ctx, inner, Options{
 			inputs: inputs, BaseEnv: state.Env, RunDir: options.RunDir,

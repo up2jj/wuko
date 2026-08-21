@@ -1,6 +1,6 @@
 ---
 name: wuko-workflow-debugger
-description: Diagnose Wuko workflow validation and runtime failures involving schema, templates, conditions, environment, JSONPath selection, semantic versions, step behavior, concurrency, retries, remote actions, or trust boundaries. Use when a Wuko workflow fails, skips unexpectedly, produces the wrong output, or needs a minimal reproducible diagnosis.
+description: Diagnose Wuko workflow validation and runtime failures involving schema, templates, conditions, environment, finally cleanup, JSONPath selection, semantic versions, step behavior, concurrency, retries, remote actions, or trust boundaries. Use when a Wuko workflow fails, skips unexpectedly, produces the wrong output, or needs a minimal reproducible diagnosis.
 ---
 
 # Wuko Workflow Debugger
@@ -23,6 +23,8 @@ Find the smallest evidence-backed cause of a Wuko workflow failure before changi
    - Semantic versions: strict version syntax, normalized `v` prefixes, precedence versus build
      metadata, prerelease constraint matching, and increment-part behavior.
    - Concurrency and retry: pre-group snapshots, non-interactive children, deadlines, cancellation, duplicate writes, and at-least-once effects.
+   - Finally cleanup: main status, committed-state visibility, structured errors, continued cleanup
+     failures, detached cancellation, action attempts, and forced-shutdown limits.
    - Remote actions and trust: source resolution, archive contents, digest pinning, credentials, and executable permissions.
 5. Confirm the diagnosis with the smallest targeted command or test. Separate observed facts from hypotheses and state what evidence would disprove the diagnosis.
 6. Implement a fix only when the request includes implementation; otherwise provide the root cause, reproduction, safe workaround, and focused next check.
@@ -35,6 +37,9 @@ Find the smallest evidence-backed cause of a Wuko workflow failure before changi
   companion template files.
 - Distinguish parse-time template errors from runtime data errors. Validation can prove syntax and
   named references; `.steps` values exist only when an earlier sequential producer has succeeded.
+- For cleanup failures, inspect `finally.status` separately from the progressively accumulated
+  `finally.errors`. Failed main and cleanup steps do not commit outputs; match stable status and
+  step metadata rather than error-message text. Consult `docs/finally.md` when available.
 - If a template failure is difficult to trace, inline one-use aliases and reduce nested template
   calls before adding helpers. Do not use templating to conceal ordering, condition, or typed-data
   problems; use workflow `if` and action-input `expr` where those semantics belong.

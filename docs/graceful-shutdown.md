@@ -14,6 +14,11 @@ The first `SIGINT` or `SIGTERM` starts graceful shutdown:
 5. Every active child and iteration receives the canceled context.
 6. Wuko waits for active work and cleanup to return.
 
+If the workflow or action declares `finally`, Wuko detaches that cleanup list from the first
+cancellation so it can run during graceful shutdown. The same 10-second process-wide budget and
+second-signal force still apply. See [Finally cleanup](finally.md) for cleanup context, error data,
+timeouts, and limitations.
+
 If shutdown completes normally, the workflow is reported as canceled and the CLI exits with
 status 1. Send a second signal to stop waiting and force process termination with status 130.
 Wuko also forces termination after waiting 10 seconds from the first signal.

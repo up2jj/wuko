@@ -40,6 +40,7 @@ commands or inline shell, and launch an external agent such as Codex.
   - [Waits and polling](#waits-and-polling)
   - [Retries and execution timeouts](#retries-and-execution-timeouts)
   - [Graceful shutdown](#graceful-shutdown)
+  - [Finally cleanup](#finally-cleanup)
   - [Execution progress and statistics](#execution-progress-and-statistics)
   - [Debug tracing](#debug-tracing)
   - [Remote composite actions](#remote-composite-actions)
@@ -256,6 +257,7 @@ vars:
 env:
   API_TOKEN: "{{ .env.API_TOKEN }}"
 steps: []
+finally: []
 ```
 
 Strings use strict Go templates. Reusable named templates can be declared inline or loaded from
@@ -605,6 +607,23 @@ children or iterations started, succeeded, and were not run so partial effects c
 
 See [Graceful shutdown](docs/graceful-shutdown.md) for signal escalation, workflow-control
 behavior, timeout boundaries, subprocess termination, and guidance for custom runners.
+
+### Finally cleanup
+
+Workflows and composite actions can declare one `finally` step list. Cleanup runs after main
+runtime success, failure, timeout, or cancellation, continues after individual cleanup failures,
+and can use committed state plus structured `finally.status` and `finally.errors` outcome data.
+
+```yaml
+finally:
+  - id: release_lock
+    type: shell
+    timeout: 30s
+    with: {command: ./release-lock}
+```
+
+See [Finally cleanup](docs/finally.md) for lifecycle order, conditional cleanup, state and error
+visibility, composite-action retries, cancellation behavior, inspection commands, and limitations.
 
 ### Execution progress and statistics
 

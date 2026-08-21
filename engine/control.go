@@ -38,7 +38,10 @@ func (e *Engine) validateControl(ctx context.Context, definition *workflow.Defin
 		}
 	}
 	childState := cloneState(state)
-	childState.Bindings = validationBindings(workflowStep)
+	if childState.Bindings == nil {
+		childState.Bindings = make(map[string]any)
+	}
+	maps.Copy(childState.Bindings, validationBindings(workflowStep))
 	childOptions := options
 	childOptions.depth += 2
 	childOptions.Interactive = childOptions.Interactive && maxConcurrency == 1
@@ -133,7 +136,10 @@ func (e *Engine) executeControl(ctx context.Context, definition *workflow.Defini
 	}
 	outcomes, runErr := controlpkg.Run(ctx, iterations, policy, observer, func(iterationCtx context.Context, iteration controlpkg.Iteration) (controlExecution, error) {
 		iterationState := cloneState(state)
-		iterationState.Bindings = cloneMap(iteration.Bindings)
+		if iterationState.Bindings == nil {
+			iterationState.Bindings = make(map[string]any)
+		}
+		maps.Copy(iterationState.Bindings, cloneMap(iteration.Bindings))
 		bodyTotal := leafStepCount(children)
 		bodyStats := RunStats{StartedAt: time.Now(), Total: bodyTotal, Steps: make([]StepStats, 0, bodyTotal)}
 		err := e.executeSequence(iterationCtx, definition, children, childOptions, iterationState, &bodyStats, 1, bodyTotal)

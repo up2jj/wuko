@@ -44,6 +44,7 @@ type Action struct {
 	Inputs      map[string]ActionInput        `yaml:"inputs,omitempty"`
 	Outputs     map[string]ActionOutput       `yaml:"outputs,omitempty"`
 	Steps       []Step                        `yaml:"steps"`
+	Finally     []Step                        `yaml:"finally,omitempty"`
 	Dir         string                        `yaml:"-"`
 	Files       map[string]ActionFile         `yaml:"-"`
 	Location    diagnostic.Location           `yaml:"-"`
@@ -187,6 +188,10 @@ func (loader *Loader) Load(ctx context.Context, filename string, options LoadOpt
 	}
 	cache := make(map[string]*Action)
 	if err := loader.resolveActions(ctx, definition.Name, definition.Steps, renderer, data, environment, options.RunDir, definition.Dir, cache, options.Diagnostics); err != nil {
+		traceFinish(options.Diagnostics, started, diagnostic.PhaseLoad, diagnostic.StatusFailed, definition.Location, definition.Name, "", "", "", nil)
+		return nil, err
+	}
+	if err := loader.resolveActions(ctx, definition.Name, definition.Finally, renderer, data, environment, options.RunDir, definition.Dir, cache, options.Diagnostics); err != nil {
 		traceFinish(options.Diagnostics, started, diagnostic.PhaseLoad, diagnostic.StatusFailed, definition.Location, definition.Name, "", "", "", nil)
 		return nil, err
 	}
@@ -493,7 +498,7 @@ func validateAction(action *Action) error {
 			return fmt.Errorf("output %q value is required", name)
 		}
 	}
-	definition := &Definition{Version: 1, Name: action.Name, Steps: action.Steps}
+	definition := &Definition{Version: 1, Name: action.Name, Steps: action.Steps, Finally: action.Finally}
 	return validateDefinition(definition, false)
 }
 
