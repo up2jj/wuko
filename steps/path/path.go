@@ -34,7 +34,7 @@ type Config struct {
 
 type Runner struct{ config Config }
 
-func Register(registry *step.Registry) error { return registry.Register("path", New) }
+func Register(registry *step.Registry) error { return registry.Register("tui_path", New) }
 
 func New(raw map[string]any) (step.Runner, error) {
 	var config Config

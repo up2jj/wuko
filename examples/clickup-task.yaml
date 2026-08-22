@@ -4,7 +4,7 @@ description: Fetch a ClickUp task, create a branch, and hand it to Claude or Cod
 
 steps:
   - id: task_id
-    type: input
+    type: tui_input
     with:
       variable: task_id
       message: Enter the ClickUp task ID
@@ -123,7 +123,7 @@ steps:
       args: ["{{ .steps.fetch.branch }}"]
 
   - id: agent
-    type: choice
+    type: tui_choice
     with:
       variable: agent
       message: Select the agent to run

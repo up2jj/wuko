@@ -187,11 +187,11 @@ Each linked guide contains multiple examples for every step.
 
 | Step | Use it to | Examples |
 | --- | --- | --- |
-| `input` | Collect editable text or typed JSON/lists | [Interactive steps](docs/steps-interactive.md#input) |
-| `password` | Collect masked text | [Interactive steps](docs/steps-interactive.md#password) |
-| `choice` | Select one or many static/dynamic values | [Interactive steps](docs/steps-interactive.md#choice) |
-| `path` | Select one or many files/directories | [Interactive steps](docs/steps-interactive.md#path) |
-| `confirm` | Collect a boolean decision | [Interactive steps](docs/steps-interactive.md#confirm) |
+| `tui_input` | Collect editable text or typed JSON/lists | [Interactive steps](docs/steps-interactive.md#tui_input) |
+| `tui_password` | Collect masked text | [Interactive steps](docs/steps-interactive.md#tui_password) |
+| `tui_choice` | Select one or many static/dynamic values | [Interactive steps](docs/steps-interactive.md#tui_choice) |
+| `tui_path` | Select one or many files/directories | [Interactive steps](docs/steps-interactive.md#tui_path) |
+| `tui_confirm` | Collect a boolean decision | [Interactive steps](docs/steps-interactive.md#tui_confirm) |
 | `set` | Assign a literal or expression result | [Data steps](docs/steps-data.md#set) |
 | `assert` | Stop unless an expression is true | [Data steps](docs/steps-data.md#assert) |
 | `import_vars` | Load JSON or TOML into workflow state | [Data steps](docs/steps-data.md#import_vars) |

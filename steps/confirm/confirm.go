@@ -18,7 +18,7 @@ type Config struct {
 
 type Runner struct{ config Config }
 
-func Register(registry *step.Registry) error { return registry.Register("confirm", New) }
+func Register(registry *step.Registry) error { return registry.Register("tui_confirm", New) }
 
 func New(raw map[string]any) (step.Runner, error) {
 	var config Config

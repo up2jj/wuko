@@ -18,8 +18,9 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
 
 ## Step selection
 
-- Use `confirm` for boolean approval, `choice` for enumerated values, `input` for visible text,
-  `password` for masked text, and `path` for rooted selection of existing files or directories.
+- Use `tui_confirm` for boolean approval, `tui_choice` for enumerated values, `tui_input` for
+  visible text, `tui_password` for masked text, and `tui_path` for rooted selection of existing
+  files or directories.
   Keep path patterns relative to the picker root and supply prompt variables explicitly in
   non-interactive runs.
 - Use `set` for JSON-compatible literals and Expr-based values; use Lua only when transformation

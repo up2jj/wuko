@@ -7,7 +7,7 @@ Interactive steps write their result to `.steps.<id>` and to the variable named 
 `values`. A value supplied with `--var` skips the prompt. Non-interactive runs, and interactive
 steps inside concurrent groups, require a supplied value.
 
-## `input`
+## `tui_input`
 
 Collect editable text. Use `required`, validation rules, or modifiers when the workflow needs a
 specific shape.
@@ -16,7 +16,7 @@ Prompt for a release name:
 
 ```yaml
 - id: release_name
-  type: input
+  type: tui_input
   with:
     variable: release_name
     message: Enter the release name
@@ -32,7 +32,7 @@ Collect a trimmed list:
 
 ```yaml
 - id: reviewers
-  type: input
+  type: tui_input
   with:
     variable: reviewers
     message: Enter comma-separated reviewers
@@ -43,7 +43,7 @@ Collect one typed JSON value:
 
 ```yaml
 - id: deployment
-  type: input
+  type: tui_input
   with:
     variable: deployment
     message: Enter deployment settings as JSON
@@ -54,16 +54,16 @@ Collect one typed JSON value:
 when combined with `trim`, each item is trimmed. `json` preserves JSON objects, lists, strings,
 numbers, booleans, and null. `split` and `json` are mutually exclusive.
 
-## `password`
+## `tui_password`
 
-Collect masked text. Passwords support the same `required` and `validation` fields as `input`, but
-not its conversion modifiers.
+Collect masked text. Passwords support the same `required` and `validation` fields as `tui_input`,
+but not its conversion modifiers.
 
 Prompt for a token:
 
 ```yaml
 - id: credentials
-  type: password
+  type: tui_password
   with:
     variable: api_token
     message: Enter the API token
@@ -74,7 +74,7 @@ Require a minimum-length passphrase:
 
 ```yaml
 - id: signing
-  type: password
+  type: tui_password
   with:
     variable: signing_passphrase
     message: Enter the signing passphrase
@@ -87,7 +87,7 @@ For unattended use, supply the variable explicitly, for example
 `wuko run release --var api_token=secret`. Prefer environment-backed secrets where practical so
 they do not appear in shell history.
 
-## `choice`
+## `tui_choice`
 
 Choose one value or an ordered list of values.
 
@@ -95,7 +95,7 @@ Use static choices:
 
 ```yaml
 - id: environment
-  type: choice
+  type: tui_choice
   with:
     variable: environment
     message: Select an environment
@@ -108,7 +108,7 @@ Select multiple objects from an earlier step:
 
 ```yaml
 - id: projects
-  type: choice
+  type: tui_choice
   with:
     variable: project_ids
     message: Select projects
@@ -122,7 +122,7 @@ Use scalar dynamic values without field mappings:
 
 ```yaml
 - id: region
-  type: choice
+  type: tui_choice
   with:
     variable: region
     message: Select a region
@@ -133,7 +133,7 @@ Dynamic sources must be non-empty lists. A scalar item is both its label and val
 use `label_field` and `value_field`, which may be dotted paths. Single selection stores a scalar;
 multiple selection stores an ordered list.
 
-## `path`
+## `tui_path`
 
 Select existing files or directories with a rooted filesystem browser. The selected variable
 contains slash-normalized paths relative to `root`, making the default configuration portable
@@ -143,7 +143,7 @@ Select several Go source files:
 
 ```yaml
 - id: sources
-  type: path
+  type: tui_path
   with:
     variable: source_paths
     message: Select source files
@@ -159,7 +159,7 @@ Select one directory, including the configured root itself as `.`:
 
 ```yaml
 - id: project
-  type: path
+  type: tui_path
   with:
     variable: project_dir
     message: Select a project directory
@@ -192,7 +192,7 @@ With `required: false`, selecting no path stores an empty string in single mode 
 multiple mode. Pre-supplied values skip the browser but must still be relative, exist, match the
 declared kind and patterns, and remain inside the resolved root.
 
-## `confirm`
+## `tui_confirm`
 
 Collect a boolean decision. `default` selects the initial interactive answer; it does not answer a
 non-interactive prompt automatically.
@@ -201,7 +201,7 @@ Guard deployment:
 
 ```yaml
 - id: approval
-  type: confirm
+  type: tui_confirm
   with:
     variable: approved
     message: Deploy this release?
@@ -217,7 +217,7 @@ Guard a destructive file operation:
 
 ```yaml
 - id: replace
-  type: confirm
+  type: tui_confirm
   with:
     variable: replace_existing
     message: Replace the existing artifact?

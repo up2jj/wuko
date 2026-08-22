@@ -31,7 +31,7 @@ func TestPortableStepsShareTypedState(t *testing.T) {
 	definition := &workflow.Definition{
 		Version: 1, Name: "portable", Dir: root, Vars: map[string]any{"approved": true, "target": "linux"},
 		Steps: []workflow.Step{
-			{ID: "approval", Type: "confirm", With: map[string]any{"variable": "approved", "message": "Continue?"}},
+			{ID: "approval", Type: "tui_confirm", With: map[string]any{"variable": "approved", "message": "Continue?"}},
 			{ID: "release", Type: "http", With: map[string]any{"url": server.URL, "response": "json"}},
 			{ID: "artifact", Type: "set", With: map[string]any{"variable": "artifact", "expr": `steps.release.value.version + "-" + vars.target`}},
 			{ID: "write", Type: "file", If: "steps.approval.value", With: map[string]any{

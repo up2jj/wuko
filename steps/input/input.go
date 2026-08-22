@@ -34,7 +34,7 @@ type Runner struct {
 	modify   func(string) (any, error)
 }
 
-func Register(registry *step.Registry) error { return registry.Register("input", New) }
+func Register(registry *step.Registry) error { return registry.Register("tui_input", New) }
 
 func New(raw map[string]any) (step.Runner, error) {
 	var config Config
