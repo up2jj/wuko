@@ -55,9 +55,13 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
   truncation, bounded tails, permissions, and timestamps. Consult
   `docs/filesystem-operations.md` for the strict fields, outputs, symlink rules, and failure guarantees.
   Quote modes such as `"0755"`, opt into overwrites, and use recursive removal narrowly.
-- Use `temp` for an empty file or directory that should live through the complete root run and be
-  removed automatically after explicit `finally`. Consume its absolute `path` output in later
-  steps; use `file` afterward when content or custom permissions are required.
+- Use `temp` for an empty file, directory, or POSIX FIFO that should live through the complete root
+  run and be removed automatically after explicit `finally`. Consume its absolute `path` output in
+  later steps; use `file` afterward when file content or custom permissions are required. Prefer an
+  ordinary shell pipeline when both programs can start together. When a filesystem FIFO path is
+  required, run its producer and consumer concurrently and bound them with a timeout because opening
+  either endpoint can block. FIFOs connect same-host, same-user processes and are not automatically
+  visible inside executor containers.
 - Use `glob` to discover regular files with portable `*`, `?`, character-class, and recursive `**`
   patterns. Keep patterns relative to its `root` and consume the sorted metadata from `files`.
 - Use `watch` to block until the first selected create, modify, rename, or remove notification below

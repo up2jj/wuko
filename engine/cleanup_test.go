@@ -11,8 +11,10 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/up2jj/wuko/step"
+	"github.com/up2jj/wuko/steps/shell"
 	tempstep "github.com/up2jj/wuko/steps/temp"
 	"github.com/up2jj/wuko/workflow"
 )
@@ -91,18 +93,23 @@ func TestManagedTempValidationAndDryRunCreateNothing(t *testing.T) {
 	if err := tempstep.Register(registry); err != nil {
 		t.Fatal(err)
 	}
-	pattern := "wuko-no-execute-test-*"
+	patterns := []string{"wuko-no-execute-test-*", "wuko-fifo-*"}
 	matches := func() []string {
-		values, err := filepath.Glob(filepath.Join(os.TempDir(), pattern))
-		if err != nil {
-			t.Fatal(err)
+		var values []string
+		for _, pattern := range patterns {
+			matches, err := filepath.Glob(filepath.Join(os.TempDir(), pattern))
+			if err != nil {
+				t.Fatal(err)
+			}
+			values = append(values, matches...)
 		}
 		return values
 	}
 	before := matches()
-	definition := testDefinition(t, "no-execute", workflow.Step{
-		ID: "workspace", Type: "temp", With: map[string]any{"kind": "directory", "pattern": pattern},
-	})
+	definition := testDefinition(t, "no-execute",
+		workflow.Step{ID: "workspace", Type: "temp", With: map[string]any{"kind": "directory", "pattern": patterns[0]}},
+		workflow.Step{ID: "channel", Type: "temp", With: map[string]any{"kind": "fifo", "pattern": "wuko-no-execute-fifo-*"}},
+	)
 
 	engine := New(registry)
 	if err := engine.Validate(t.Context(), definition, Options{Stdout: io.Discard, Stderr: io.Discard}); err != nil {
@@ -113,6 +120,68 @@ func TestManagedTempValidationAndDryRunCreateNothing(t *testing.T) {
 	}
 	if after := matches(); !reflect.DeepEqual(after, before) {
 		t.Fatalf("temporary paths changed: before=%#v after=%#v", before, after)
+	}
+}
+
+func TestManagedFIFOConnectsConcurrentProcessesAndLivesThroughFinally(t *testing.T) {
+	var observed bool
+	registry := newTestRegistry(t, map[string]step.Builder{"observe_fifo": func(raw map[string]any) (step.Runner, error) {
+		path, _ := raw["path"].(string)
+		return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+			info, err := os.Lstat(path)
+			if err != nil {
+				return step.Result{}, fmt.Errorf("observing managed FIFO: %w", err)
+			}
+			if info.Mode()&os.ModeNamedPipe == 0 {
+				return step.Result{}, fmt.Errorf("managed path %s is not a FIFO", path)
+			}
+			observed = true
+			return step.Result{}, nil
+		}), nil
+	}})
+	for _, register := range []func(*step.Registry) error{tempstep.Register, shell.Register} {
+		if err := register(registry); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	timeout := workflow.Duration(5 * time.Second)
+	definition := testDefinition(t, "managed-fifo",
+		workflow.Step{ID: "channel", Type: "temp", With: map[string]any{"kind": "fifo", "pattern": "events-*"}},
+		workflow.Step{Concurrent: &workflow.ConcurrentGroup{
+			MaxConcurrency: 2,
+			FailFast:       true,
+			Timeout:        &timeout,
+			Steps: []workflow.Step{
+				{ID: "reader", Type: "shell", With: map[string]any{
+					"script": `cat "$1"`, "args": []any{"{{ .steps.channel.path }}"},
+				}},
+				{ID: "writer", Type: "shell", With: map[string]any{
+					"script": `printf %s "$2" > "$1"`, "args": []any{"{{ .steps.channel.path }}", "hello through fifo"},
+				}},
+			},
+		}},
+	)
+	definition.Finally = []workflow.Step{{ID: "observe", Type: "observe_fifo", With: map[string]any{
+		"path": "{{ .steps.channel.path }}",
+	}}}
+
+	state, err := New(registry).Run(t.Context(), definition, Options{Stdout: io.Discard, Stderr: io.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !observed {
+		t.Fatal("finally did not observe the managed FIFO")
+	}
+	if output := state.Steps["reader"].(map[string]any)["stdout"]; output != "hello through fifo" {
+		t.Fatalf("reader stdout = %q", output)
+	}
+	path := state.Steps["channel"].(map[string]any)["path"].(string)
+	if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("managed FIFO remains after Run: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Dir(path)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("managed FIFO directory remains after Run: %v", err)
 	}
 }
 

@@ -132,8 +132,8 @@ host filesystem and is rejected inside executor blocks.
 
 ## `temp`
 
-Create a managed empty file or directory. Wuko removes it after root workflow cleanup, including
-when the resource was created in an action, retry, polling loop, or concurrent branch.
+Create a managed empty file, directory, or POSIX FIFO. Wuko removes it after root workflow cleanup,
+including when the resource was created in an action, retry, polling loop, or concurrent branch.
 
 Create a build directory:
 
@@ -165,8 +165,82 @@ Create a response file:
     overwrite: true
 ```
 
-`kind` is `file` or `directory`. The optional `pattern` defaults to `wuko-*`. Outputs are `path`
-and `kind`; validation and dry runs create nothing.
+Create a FIFO before starting cooperating processes, then use its committed path from both
+concurrent branches:
+
+```yaml
+- id: channel
+  type: temp
+  with: {kind: fifo, pattern: events-*}
+
+- concurrent:
+    max_concurrency: 2
+    timeout: 30s
+    steps:
+      - id: consumer
+        type: shell
+        with:
+          script: cat "$1" > received.txt
+          args: ["{{ .steps.channel.path }}"]
+      - id: producer
+        type: shell
+        with:
+          script: printf '%s\n' "$2" > "$1"
+          args: ["{{ .steps.channel.path }}", "ready"]
+```
+
+The FIFO can also connect a process that Wuko did not launch. Publish its generated path through a
+known, unused rendezvous file and keep the workflow active while the external process connects:
+
+```yaml
+steps:
+  - id: channel
+    type: temp
+    with: {kind: fifo}
+  - id: publish_channel
+    type: file
+    with:
+      operation: write
+      path: "{{ .vars.rendezvous }}"
+      content: "{{ .steps.channel.path }}"
+  - id: receive
+    type: shell
+    timeout: 10m
+    with:
+      script: cat "$1"
+      args: ["{{ .steps.channel.path }}"]
+
+finally:
+  - id: remove_rendezvous
+    type: file
+    with: {operation: remove, path: "{{ .vars.rendezvous }}"}
+```
+
+Run that workflow with an unused path in one terminal:
+
+```sh
+wuko run external-fifo --var rendezvous="$PWD/.channel-path"
+```
+
+Then write from another terminal as the same operating-system user:
+
+```sh
+fifo_path=$(cat .channel-path)
+printf '%s\n' "external message" > "$fifo_path"
+```
+
+Prefer an ordinary shell pipeline such as `producer | consumer` when both programs can be launched
+together and do not require a filesystem path. Opening a FIFO may block until its opposite endpoint
+connects, so run its producer and consumer concurrently and bound the operation with a timeout. A
+FIFO is a byte stream and provides no message boundaries.
+
+`kind` is `file`, `directory`, or `fifo`. The optional `pattern` defaults to `wuko-*`. Outputs are
+`path` and `kind`; validation and dry runs create nothing. FIFOs use mode `0600` inside a private
+`0700` temporary directory. They are available only to same-host, same-user processes while the
+workflow is running, and they are not automatically visible inside executor containers. Version 1
+does not support arbitrary or persistent FIFO paths, configurable FIFO permissions, or FIFO
+read/write operations in the `temp` step. The FIFO kind is supported on Wuko's Linux and macOS
+release targets.
 
 ## `cache`
 
