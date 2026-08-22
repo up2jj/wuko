@@ -83,6 +83,10 @@ func New(registry *step.Registry, options ...Option) *Engine {
 func (e *Engine) Validate(ctx context.Context, definition *workflow.Definition, options Options) error {
 	started := time.Now()
 	trace(options, diagnostic.Event{Phase: diagnostic.PhaseValidation, Status: diagnostic.StatusStarted, Time: started, WorkflowName: definition.Name, Location: definition.Location, Message: "validating workflow"})
+	if err := definition.ValidateStructure(); err != nil {
+		trace(options, diagnostic.Event{Phase: diagnostic.PhaseValidation, Status: diagnostic.StatusFailed, WorkflowName: definition.Name, Location: definition.Location, Duration: time.Since(started), Error: err})
+		return err
+	}
 	if options.renderer == nil {
 		var err error
 		options.renderer, err = workflow.NewRenderer(definition.Templates)
@@ -96,16 +100,12 @@ func (e *Engine) Validate(ctx context.Context, definition *workflow.Definition, 
 		trace(options, diagnostic.Event{Phase: diagnostic.PhaseValidation, Status: diagnostic.StatusFailed, WorkflowName: definition.Name, Location: definition.Location, Duration: time.Since(started)})
 		return err
 	}
-	err = e.validateSteps(ctx, definition, definition.Steps, options, state, false)
+	err = e.validateSteps(ctx, definition, definition.Steps, options, state)
 	if err == nil && len(definition.Finally) > 0 {
-		if containsReturn(definition.Finally) {
-			err = fmt.Errorf("finally: return is not supported inside finally")
-		} else {
-			state.Bindings = map[string]any{"finally": map[string]any{
-				"status": string(StatusSucceeded), "errors": []any{},
-			}}
-			err = e.validateSteps(ctx, definition, definition.Finally, options, state, false)
-		}
+		state.Bindings = map[string]any{"finally": map[string]any{
+			"status": string(StatusSucceeded), "errors": []any{},
+		}}
+		err = e.validateSteps(ctx, definition, definition.Finally, options, state)
 	}
 	status := diagnostic.StatusSucceeded
 	if err != nil {
@@ -115,7 +115,7 @@ func (e *Engine) Validate(ctx context.Context, definition *workflow.Definition, 
 	return err
 }
 
-func (e *Engine) validateSteps(ctx context.Context, definition *workflow.Definition, steps []workflow.Step, options Options, state *State, insideConcurrent bool) error {
+func (e *Engine) validateSteps(ctx context.Context, definition *workflow.Definition, steps []workflow.Step, options Options, state *State) error {
 	for _, workflowStep := range steps {
 		if workflowStep.IsExecutorBlock() {
 			if err := e.validateExecutorBlock(ctx, definition, workflowStep, options, state); err != nil {
@@ -124,7 +124,7 @@ func (e *Engine) validateSteps(ctx context.Context, definition *workflow.Definit
 			continue
 		}
 		if workflowStep.IsWorkingDirectoryBlock() {
-			if err := e.validateWorkingDirectoryBlock(ctx, definition, workflowStep, options, state, insideConcurrent); err != nil {
+			if err := e.validateWorkingDirectoryBlock(ctx, definition, workflowStep, options, state); err != nil {
 				return err
 			}
 			continue
@@ -142,21 +142,10 @@ func (e *Engine) validateSteps(ctx context.Context, definition *workflow.Definit
 				})
 				return err
 			}
-			if insideConcurrent {
-				return fail(fmt.Errorf("conditional blocks are not supported inside concurrent groups"))
-			}
-			if err := workflowStep.ValidateBlock(); err != nil {
-				return fail(err)
-			}
 			if _, err := compileCondition(workflowStep.If); err != nil {
 				return fail(fmt.Errorf("conditional block if: %w", err))
 			}
-			for _, child := range workflowStep.Steps {
-				if child.IsConditionalBlock() {
-					return fail(fmt.Errorf("nested conditional blocks are not supported"))
-				}
-			}
-			if err := e.validateSteps(ctx, definition, workflowStep.Steps, options, state, false); err != nil {
+			if err := e.validateSteps(ctx, definition, workflowStep.Steps, options, state); err != nil {
 				return fail(fmt.Errorf("conditional block: %w", err))
 			}
 			trace(options, diagnostic.Event{
@@ -172,9 +161,6 @@ func (e *Engine) validateSteps(ctx context.Context, definition *workflow.Definit
 			continue
 		}
 		if workflowStep.Return != nil {
-			if insideConcurrent {
-				return fmt.Errorf("return is not supported inside concurrent groups")
-			}
 			if err := e.validateReturn(workflowStep); err != nil {
 				return fmt.Errorf("return: %w", err)
 			}
@@ -183,19 +169,11 @@ func (e *Engine) validateSteps(ctx context.Context, definition *workflow.Definit
 		if workflowStep.Concurrent != nil {
 			started := time.Now()
 			trace(options, diagnostic.Event{Phase: diagnostic.PhaseConcurrent, Status: diagnostic.StatusStarted, Time: started, WorkflowName: definition.Name, Location: workflowStep.Location, Message: "validating concurrent group", Attributes: []diagnostic.Attribute{diagnostic.Attr("steps", fmt.Sprint(len(workflowStep.Concurrent.Steps)))}})
-			if insideConcurrent {
-				trace(options, diagnostic.Event{Phase: diagnostic.PhaseConcurrent, Status: diagnostic.StatusFailed, WorkflowName: definition.Name, Location: workflowStep.Location, Duration: time.Since(started), Error: fmt.Errorf("nested concurrent groups are not supported")})
-				return fmt.Errorf("concurrent group: nested concurrent groups are not supported")
-			}
-			if err := workflowStep.Concurrent.Validate(); err != nil {
-				trace(options, diagnostic.Event{Phase: diagnostic.PhaseConcurrent, Status: diagnostic.StatusFailed, WorkflowName: definition.Name, Location: workflowStep.Location, Duration: time.Since(started), Error: err})
-				return fmt.Errorf("concurrent group: %w", err)
-			}
 			childOptions := options
 			childOptions.Interactive = false
 			childOptions.Stdin = nil
 			childOptions.depth++
-			if err := e.validateSteps(ctx, definition, workflowStep.Concurrent.Steps, childOptions, state, true); err != nil {
+			if err := e.validateSteps(ctx, definition, workflowStep.Concurrent.Steps, childOptions, state); err != nil {
 				trace(options, diagnostic.Event{Phase: diagnostic.PhaseConcurrent, Status: diagnostic.StatusFailed, WorkflowName: definition.Name, Location: workflowStep.Location, Duration: time.Since(started)})
 				return fmt.Errorf("concurrent group: %w", err)
 			}
@@ -204,10 +182,6 @@ func (e *Engine) validateSteps(ctx context.Context, definition *workflow.Definit
 		}
 		started := time.Now()
 		traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusStarted, time.Time{}, "validating step", nil)
-		if err := workflowStep.ValidateExecutionPolicy(); err != nil {
-			traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusFailed, started, "", err)
-			return fmt.Errorf("step %q: %w", workflowStep.ID, err)
-		}
 		if workflowStep.If != "" {
 			if _, err := compileCondition(workflowStep.If); err != nil {
 				traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusFailed, started, "compiling condition", err)

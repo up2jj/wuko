@@ -549,7 +549,7 @@ func validateAction(action *Action) error {
 		}
 	}
 	definition := &Definition{Version: 1, Name: action.Name, Steps: action.Steps, Finally: action.Finally}
-	if err := validateDefinition(definition, false); err != nil {
+	if err := validateDefinitionStructure(definition, false); err != nil {
 		return err
 	}
 	return action.ValidateReturnContracts()

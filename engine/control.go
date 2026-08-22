@@ -32,9 +32,6 @@ func (e *Engine) validateControl(ctx context.Context, definition *workflow.Defin
 	if err != nil {
 		return err
 	}
-	if containsReturn(children) {
-		return fmt.Errorf("return is not supported inside %s controls", kind)
-	}
 	for _, expression := range expressions {
 		if err := controlpkg.ValidateExpression(expression.value); err != nil {
 			return fmt.Errorf("%s %s: %w", kind, expression.label, err)
@@ -51,7 +48,7 @@ func (e *Engine) validateControl(ctx context.Context, definition *workflow.Defin
 	if !childOptions.Interactive {
 		childOptions.Stdin = nil
 	}
-	if err := e.validateSteps(ctx, definition, children, childOptions, childState, false); err != nil {
+	if err := e.validateSteps(ctx, definition, children, childOptions, childState); err != nil {
 		return fmt.Errorf("%s body: %w", kind, err)
 	}
 	return nil
@@ -205,15 +202,9 @@ func controlDeclaration(workflowStep workflow.Step) (kind string, children []wor
 	switch {
 	case workflowStep.Foreach != nil:
 		group := workflowStep.Foreach
-		if validationErr := group.Validate(); validationErr != nil {
-			err = validationErr
-		}
 		return "foreach", group.Steps, []controlExpression{{label: "items", value: group.Items}}, group.MaxConcurrency, effectiveMaxIterations(group.MaxIterations), durationValue(group.Timeout), group.FailFast, err
 	case workflowStep.Matrix != nil:
 		group := workflowStep.Matrix
-		if validationErr := group.Validate(); validationErr != nil {
-			err = validationErr
-		}
 		for _, axis := range group.Axes {
 			if axis.Expression != "" {
 				expressions = append(expressions, controlExpression{label: "axis " + axis.Name, value: axis.Expression})

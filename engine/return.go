@@ -14,9 +14,6 @@ import (
 )
 
 func (e *Engine) validateReturn(workflowStep workflow.Step) error {
-	if err := workflowStep.ValidateReturnControl(); err != nil {
-		return err
-	}
 	if workflowStep.If != "" {
 		if _, err := compileCondition(workflowStep.If); err != nil {
 			return fmt.Errorf("if: %w", err)
@@ -72,33 +69,4 @@ func (e *Engine) executeReturn(ctx context.Context, definition *workflow.Definit
 	state.didReturn = true
 	trace(options, diagnostic.Event{Phase: diagnostic.PhaseControl, Status: diagnostic.StatusSucceeded, Time: time.Now(), Duration: time.Since(started), WorkflowName: definition.Name, Location: workflowStep.Location, Message: "workflow returned successfully", Attributes: []diagnostic.Attribute{diagnostic.Attr("outputs", fmt.Sprint(len(outputs)))}})
 	return true, nil
-}
-
-func containsReturn(steps []workflow.Step) bool {
-	for _, workflowStep := range steps {
-		if workflowStep.IsExecutorBlock() {
-			if containsReturn(workflowStep.Steps) || containsReturn(workflowStep.Finally) {
-				return true
-			}
-			continue
-		}
-		if workflowStep.Return != nil {
-			return true
-		}
-		if workflowStep.IsWorkingDirectoryBlock() || workflowStep.IsConditionalBlock() {
-			if containsReturn(workflowStep.Steps) {
-				return true
-			}
-		}
-		if workflowStep.Concurrent != nil && containsReturn(workflowStep.Concurrent.Steps) {
-			return true
-		}
-		if workflowStep.Foreach != nil && containsReturn(workflowStep.Foreach.Steps) {
-			return true
-		}
-		if workflowStep.Matrix != nil && containsReturn(workflowStep.Matrix.Steps) {
-			return true
-		}
-	}
-	return false
 }

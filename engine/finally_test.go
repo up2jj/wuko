@@ -194,30 +194,16 @@ func TestCompositeActionFinallyRunsPerAttemptAndFeedsOutputs(t *testing.T) {
 	}
 }
 
-func TestFinallyBindingIsPreservedInsideControl(t *testing.T) {
-	registry := newTestRegistry(t, nil)
-	registerFinallyTestRunner(t, registry, "main_fail", func(context.Context, step.Request) (step.Result, error) {
-		return step.Result{}, errors.New("broken")
-	})
-	childRan := false
-	registerFinallyTestRunner(t, registry, "control_cleanup", func(_ context.Context, request step.Request) (step.Result, error) {
-		childRan = true
-		finally := request.Bindings["finally"].(map[string]any)
-		foreach := request.Bindings["foreach"].(map[string]any)
-		if finally["status"] != "failed" || foreach["item"] != "resource" {
-			t.Fatalf("control bindings = %#v", request.Bindings)
-		}
-		return step.Result{}, nil
-	})
-	definition := testDefinition(t, "control-cleanup", workflow.Step{ID: "main", Type: "main_fail"})
+func TestFinallyRejectsControlBeforeContextValidation(t *testing.T) {
+	definition := testDefinition(t, "control-cleanup", workflow.Step{ID: "main", Type: "main"})
 	definition.Vars = map[string]any{"items": []any{"resource"}}
 	definition.Finally = []workflow.Step{{ID: "cleanup", Foreach: &workflow.ForeachGroup{
 		Items: "vars.items", MaxConcurrency: 1, FailFast: true,
-		Steps: []workflow.Step{{ID: "remove", Type: "control_cleanup"}},
+		Steps: []workflow.Step{{ID: "remove", Type: "cleanup"}},
 	}}}
-	_, err := New(registry).Run(t.Context(), definition, Options{})
-	if err == nil || !childRan {
-		t.Fatalf("Run() error = %v, child ran = %v", err, childRan)
+	err := New(newTestRegistry(t, nil)).Validate(t.Context(), definition, Options{})
+	if err == nil || !strings.Contains(err.Error(), "nested foreach controls are not supported") {
+		t.Fatalf("Validate() error = %v", err)
 	}
 }
 

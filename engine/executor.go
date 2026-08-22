@@ -36,10 +36,10 @@ func (e *Engine) validateExecutorBlock(ctx context.Context, definition *workflow
 	}
 	childOptions := options
 	childOptions.insideExecutor = true
-	if err := e.validateSteps(ctx, definition, block.Steps, childOptions, state, false); err != nil {
+	if err := e.validateSteps(ctx, definition, block.Steps, childOptions, state); err != nil {
 		return fail(fmt.Errorf("steps: %w", err))
 	}
-	if err := e.validateSteps(ctx, definition, block.Finally, childOptions, state, false); err != nil {
+	if err := e.validateSteps(ctx, definition, block.Finally, childOptions, state); err != nil {
 		return fail(fmt.Errorf("finally: %w", err))
 	}
 	trace(options, diagnostic.Event{Phase: diagnostic.PhaseValidation, Status: diagnostic.StatusSucceeded, Time: time.Now(), Duration: time.Since(started), WorkflowName: definition.Name, Location: block.Location, Message: "validated executor " + block.Executor.Type})

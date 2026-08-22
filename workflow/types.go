@@ -146,8 +146,14 @@ func (workflowStep Step) IsWorkingDirectoryBlock() bool {
 func (workflowStep Step) IsExecutorBlock() bool { return workflowStep.Executor != nil }
 
 // ValidateBlock validates the intrinsic shape of a conditional or working-directory block.
-// Parent-scope restrictions and child declarations are validated by the workflow walker.
+// Parent-scope restrictions and child declarations are validated by Definition.ValidateStructure.
 func (workflowStep Step) ValidateBlock() error {
+	return workflowStep.validateBlock()
+}
+
+// validateBlock validates the intrinsic shape of a conditional or working-directory block.
+// Parent-scope restrictions and child declarations are validated by the workflow walker.
+func (workflowStep Step) validateBlock() error {
 	switch {
 	case workflowStep.IsWorkingDirectoryBlock():
 		if strings.TrimSpace(workflowStep.WorkingDirectory) == "" {
@@ -467,7 +473,11 @@ func loadLocalWithDiagnostics(path string, reporter diagnostic.Reporter, sourceR
 	}
 	traceFinish(reporter, requireStarted, diagnostic.PhaseRequire, diagnostic.StatusSucceeded, definition.Location, definition.Name, "", "", "", nil, countAttr("steps", len(definition.Steps)))
 	validationStarted := traceStart(reporter, diagnostic.PhaseValidation, definition.Location, definition.Name, "", "", "validating workflow schema")
-	if err := validateDefinition(&definition, true); err != nil {
+	if err := definition.ValidateStructure(); err != nil {
+		traceFinish(reporter, validationStarted, diagnostic.PhaseValidation, diagnostic.StatusFailed, validationLocation(&definition, err), definition.Name, "", "", "", err)
+		return nil, fmt.Errorf("validating workflow %s: %w", path, err)
+	}
+	if _, err := NewRenderer(definition.Templates); err != nil {
 		traceFinish(reporter, validationStarted, diagnostic.PhaseValidation, diagnostic.StatusFailed, validationLocation(&definition, err), definition.Name, "", "", "", err)
 		return nil, fmt.Errorf("validating workflow %s: %w", path, err)
 	}
@@ -481,7 +491,12 @@ func loadLocalWithDiagnostics(path string, reporter diagnostic.Reporter, sourceR
 	return &definition, nil
 }
 
-func validateDefinition(definition *Definition, allowActions bool) error {
+// ValidateStructure validates the workflow declaration independently of templates and runtime context.
+func (definition *Definition) ValidateStructure() error {
+	return validateDefinitionStructure(definition, true)
+}
+
+func validateDefinitionStructure(definition *Definition, allowActions bool) error {
 	if err := validateDefinitionHeader(definition); err != nil {
 		return err
 	}
@@ -503,9 +518,6 @@ func validateDefinition(definition *Definition, allowActions bool) error {
 		if !environmentPattern.MatchString(name) {
 			return fmt.Errorf("invalid environment name %q", name)
 		}
-	}
-	if _, err := NewRenderer(definition.Templates); err != nil {
-		return err
 	}
 	return nil
 }
@@ -647,14 +659,14 @@ func validateSteps(steps []Step, allowActions bool, scope stepScope, seen map[st
 }
 
 func validateWorkingDirectoryBlock(workflowStep Step, scope stepScope, allowActions bool, seen map[string]struct{}) error {
-	if err := workflowStep.ValidateBlock(); err != nil {
+	if err := workflowStep.validateBlock(); err != nil {
 		return err
 	}
 	return validateSteps(workflowStep.Steps, allowActions, scope, seen)
 }
 
 func validateConditionalBlock(workflowStep Step, scope stepScope, allowActions bool, seen map[string]struct{}) error {
-	if err := workflowStep.ValidateBlock(); err != nil {
+	if err := workflowStep.validateBlock(); err != nil {
 		return err
 	}
 	if scope == scopeConcurrent {

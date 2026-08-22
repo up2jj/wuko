@@ -94,7 +94,7 @@ func TestValidateRejectsInvalidOrNonBooleanCondition(t *testing.T) {
 	}
 }
 
-func TestValidateUsesWorkflowBlockValidation(t *testing.T) {
+func TestValidateUsesWorkflowStructuralValidation(t *testing.T) {
 	tests := []struct {
 		name string
 		step workflow.Step
@@ -106,16 +106,32 @@ func TestValidateUsesWorkflowBlockValidation(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			shapeErr := test.step.ValidateBlock()
-			if shapeErr == nil {
-				t.Fatal("expected workflow block validation error")
-			}
 			definition := testDefinition(t, "invalid", test.step)
+			structureErr := definition.ValidateStructure()
+			if structureErr == nil {
+				t.Fatal("expected workflow structural validation error")
+			}
 			err := New(newTestRegistry(t, nil)).Validate(t.Context(), definition, Options{})
-			if err == nil || !strings.Contains(err.Error(), shapeErr.Error()) {
-				t.Fatalf("engine error = %v, want workflow error %q", err, shapeErr)
+			if err == nil || !strings.Contains(err.Error(), structureErr.Error()) {
+				t.Fatalf("engine error = %v, want workflow error %q", err, structureErr)
 			}
 		})
+	}
+}
+
+func TestStructuralValidationPrecedesStepConstruction(t *testing.T) {
+	built := false
+	registry := newTestRegistry(t, map[string]step.Builder{"capture": func(map[string]any) (step.Runner, error) {
+		built = true
+		return countingRunner{}, nil
+	}})
+	definition := testDefinition(t, "invalid", workflow.Step{ID: "not-valid", Type: "capture"})
+	err := New(registry).Validate(t.Context(), definition, Options{})
+	if err == nil || !strings.Contains(err.Error(), "invalid id") {
+		t.Fatalf("error = %v, want invalid id", err)
+	}
+	if built {
+		t.Fatal("step was constructed before structural validation completed")
 	}
 }
 

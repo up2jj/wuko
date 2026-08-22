@@ -12,7 +12,7 @@ import (
 	"github.com/up2jj/wuko/workflow"
 )
 
-func (e *Engine) validateWorkingDirectoryBlock(ctx context.Context, definition *workflow.Definition, block workflow.Step, options Options, state *State, insideConcurrent bool) error {
+func (e *Engine) validateWorkingDirectoryBlock(ctx context.Context, definition *workflow.Definition, block workflow.Step, options Options, state *State) error {
 	started := time.Now()
 	trace(options, diagnostic.Event{
 		Phase: diagnostic.PhaseValidation, Status: diagnostic.StatusStarted, Time: started,
@@ -25,9 +25,6 @@ func (e *Engine) validateWorkingDirectoryBlock(ctx context.Context, definition *
 		})
 		return err
 	}
-	if err := block.ValidateBlock(); err != nil {
-		return fail(err)
-	}
 	if err := validateTemplates(options.renderer, block.WorkingDirectory, false); err != nil {
 		return fail(fmt.Errorf("working_directory template: %w", err))
 	}
@@ -38,7 +35,7 @@ func (e *Engine) validateWorkingDirectoryBlock(ctx context.Context, definition *
 	} else {
 		childOptions.deferContextValidation = true
 	}
-	if err := e.validateSteps(ctx, definition, block.Steps, childOptions, state, insideConcurrent); err != nil {
+	if err := e.validateSteps(ctx, definition, block.Steps, childOptions, state); err != nil {
 		return fail(fmt.Errorf("working_directory block: %w", err))
 	}
 	trace(options, diagnostic.Event{
@@ -80,7 +77,7 @@ func (e *Engine) executeWorkingDirectoryBlock(ctx context.Context, definition *w
 	childOptions := options
 	childOptions.RunDir = dir
 	childOptions.deferContextValidation = false
-	if err := e.validateSteps(ctx, definition, block.Steps, childOptions, state, false); err != nil {
+	if err := e.validateSteps(ctx, definition, block.Steps, childOptions, state); err != nil {
 		return fmt.Errorf("workflow %q working_directory block: validating scoped steps: %w", definition.Name, err)
 	}
 	return e.executeSequence(ctx, definition, block.Steps, childOptions, state, stats, firstIndex, total)

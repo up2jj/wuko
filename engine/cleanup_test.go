@@ -200,7 +200,7 @@ func TestManagedCleanupConcurrentAndFanoutRegistration(t *testing.T) {
 		children[index] = workflow.Step{ID: fmt.Sprintf("child_%d", index), Type: "managed_parallel", With: map[string]any{"label": fmt.Sprintf("child_%d", index)}}
 	}
 	definition := testDefinition(t, "parallel-cleanup",
-		workflow.Step{ID: "parallel", Concurrent: &workflow.ConcurrentGroup{Steps: children, MaxConcurrency: 8, FailFast: false}},
+		workflow.Step{Concurrent: &workflow.ConcurrentGroup{Steps: children, MaxConcurrency: 8, FailFast: false}},
 		workflow.Step{ID: "fanout", Foreach: &workflow.ForeachGroup{
 			Items: "vars.items", MaxConcurrency: 4, FailFast: true,
 			Steps: []workflow.Step{{ID: "iteration", Type: "managed_parallel", With: map[string]any{"label": "{{ .foreach.item }}"}}},
