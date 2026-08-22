@@ -193,7 +193,8 @@ timeout boundaries, atomic result commits, and partial external effects.
 
 Parallel controls are non-interactive so iterations cannot compete for terminal input. Sequential
 controls retain normal interactive behavior. Pre-supplied `tui_input`, `tui_password`, and
-`tui_choice` variables remain usable in parallel iterations.
+`tui_choice` variables remain usable in parallel iterations. An optional `tui_choice` without a
+supplied variable resolves to no selection.
 
 ## State and nesting
 

@@ -12,19 +12,21 @@ import (
 )
 
 type Config struct {
-	Variable   string         `yaml:"variable"`
-	Message    string         `yaml:"message"`
-	Multiple   bool           `yaml:"multiple,omitempty"`
-	Required   *bool          `yaml:"required,omitempty"`
-	Choices    []ChoiceConfig `yaml:"choices,omitempty"`
-	From       string         `yaml:"from,omitempty"`
-	LabelField string         `yaml:"label_field,omitempty"`
-	ValueField string         `yaml:"value_field,omitempty"`
+	Variable         string         `yaml:"variable"`
+	Message          string         `yaml:"message"`
+	Multiple         bool           `yaml:"multiple,omitempty"`
+	Required         *bool          `yaml:"required,omitempty"`
+	Choices          []ChoiceConfig `yaml:"choices,omitempty"`
+	From             string         `yaml:"from,omitempty"`
+	LabelField       string         `yaml:"label_field,omitempty"`
+	ValueField       string         `yaml:"value_field,omitempty"`
+	DescriptionField string         `yaml:"description_field,omitempty"`
 }
 
 type ChoiceConfig struct {
-	Label string `yaml:"label"`
-	Value any    `yaml:"value"`
+	Label       string `yaml:"label"`
+	Description string `yaml:"description,omitempty"`
+	Value       any    `yaml:"value"`
 }
 
 type Runner struct{ config Config }
@@ -56,7 +58,7 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 	if err != nil {
 		return step.Result{}, err
 	}
-	if len(options) == 0 {
+	if len(options) == 0 && r.required() {
 		return step.Result{}, fmt.Errorf("choice set is empty")
 	}
 	if err := ensureUnique(options); err != nil {
@@ -67,9 +69,14 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 		return r.preSupplied(supplied, options)
 	}
 	if !request.Interactive {
+		if !r.required() {
+			return r.selected(nil, options), nil
+		}
 		return step.Result{}, fmt.Errorf("variable %q is required when stdin is non-interactive; supply it with --var", r.config.Variable)
 	}
-	indexes, err := tui.Choose(ctx, request.Stdin, request.Stdout, r.config.Message, options, r.config.Multiple, r.required())
+	indexes, err := tui.Choose(ctx, request.Stdin, request.Stdout, tui.ChoicePickerConfig{
+		Message: r.config.Message, Options: options, Multiple: r.config.Multiple, Required: r.required(),
+	})
 	if err != nil {
 		return step.Result{}, fmt.Errorf("choosing: %w", err)
 	}
@@ -86,7 +93,7 @@ func (r *Runner) options(request step.Request) ([]tui.Option, error) {
 			if !scalar(choice.Value) {
 				return nil, fmt.Errorf("choice %d value must be a scalar", i+1)
 			}
-			options[i] = tui.Option{Label: choice.Label, Value: choice.Value}
+			options[i] = tui.Option{Label: choice.Label, Description: choice.Description, Value: choice.Value}
 		}
 		return options, nil
 	}
@@ -116,7 +123,15 @@ func (r *Runner) options(request step.Request) ([]tui.Option, error) {
 		if !scalar(value) {
 			return nil, fmt.Errorf("choice source item %d value must be a scalar", i+1)
 		}
-		options = append(options, tui.Option{Label: fmt.Sprint(label), Value: value})
+		description := ""
+		if r.config.DescriptionField != "" {
+			resolved, err := step.LookupValue(item, r.config.DescriptionField)
+			if err != nil {
+				return nil, fmt.Errorf("choice source item %d description: %w", i+1, err)
+			}
+			description = fmt.Sprint(resolved)
+		}
+		options = append(options, tui.Option{Label: fmt.Sprint(label), Description: description, Value: value})
 	}
 	return options, nil
 }
@@ -125,6 +140,9 @@ func (r *Runner) preSupplied(value any, options []tui.Option) (step.Result, erro
 	if !r.config.Multiple {
 		index := optionIndex(options, value)
 		if index < 0 {
+			if !r.required() && value == nil {
+				return r.selected(nil, options), nil
+			}
 			return step.Result{}, fmt.Errorf("pre-supplied variable %q is not an available choice", r.config.Variable)
 		}
 		return r.selected([]int{index}, options), nil
@@ -154,8 +172,17 @@ func (r *Runner) preSupplied(value any, options []tui.Option) (step.Result, erro
 
 func (r *Runner) selected(indexes []int, options []tui.Option) step.Result {
 	if !r.config.Multiple {
+		if len(indexes) == 0 {
+			return step.Result{
+				Outputs:   map[string]any{"value": nil, "label": "", "selected": false},
+				Variables: map[string]any{r.config.Variable: nil},
+			}
+		}
 		option := options[indexes[0]]
-		return step.Result{Outputs: map[string]any{"value": option.Value, "label": option.Label}, Variables: map[string]any{r.config.Variable: option.Value}}
+		return step.Result{
+			Outputs:   map[string]any{"value": option.Value, "label": option.Label, "selected": true},
+			Variables: map[string]any{r.config.Variable: option.Value},
+		}
 	}
 	values := make([]any, 0, len(indexes))
 	labels := make([]any, 0, len(indexes))
@@ -163,7 +190,10 @@ func (r *Runner) selected(indexes []int, options []tui.Option) step.Result {
 		values = append(values, options[index].Value)
 		labels = append(labels, options[index].Label)
 	}
-	return step.Result{Outputs: map[string]any{"values": values, "labels": labels}, Variables: map[string]any{r.config.Variable: values}}
+	return step.Result{
+		Outputs:   map[string]any{"values": values, "labels": labels, "count": len(values)},
+		Variables: map[string]any{r.config.Variable: values},
+	}
 }
 
 func (r *Runner) required() bool { return r.config.Required == nil || *r.config.Required }

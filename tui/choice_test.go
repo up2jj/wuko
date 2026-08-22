@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -8,20 +10,78 @@ import (
 )
 
 func TestChoiceModelMultipleSelection(t *testing.T) {
-	model := newChoiceModel("Pick", []Option{{Label: "A", Value: "a"}, {Label: "B", Value: "b"}}, true, true)
+	model := newChoiceModel(ChoicePickerConfig{
+		Message: "Pick", Options: []Option{{Label: "A", Value: "a"}, {Label: "B", Value: "b"}},
+		Multiple: true, Required: true,
+	})
 	updated, _ := model.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	model = updated.(choiceModel)
+	updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
+	model = updated.(choiceModel)
+	updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 	model = updated.(choiceModel)
 	updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
 	model = updated.(choiceModel)
 	updated, command := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	model = updated.(choiceModel)
-	if command == nil || len(model.result) != 1 || model.result[0] != 1 {
+	if command == nil || !slices.Equal(model.result, []int{1, 0}) {
 		t.Fatalf("result = %#v, command nil = %v", model.result, command == nil)
 	}
 }
 
+func TestChoiceModelOptionalSingleSelection(t *testing.T) {
+	model := newChoiceModel(ChoicePickerConfig{
+		Message: "Pick", Options: []Option{{Label: "A", Value: "a"}}, Required: false,
+	})
+	if len(model.visible) != 2 || !model.visible[0].none {
+		t.Fatalf("visible = %#v", model.visible)
+	}
+	updated, command := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = updated.(choiceModel)
+	if command == nil || !model.done || len(model.result) != 0 {
+		t.Fatalf("result = %#v, done = %v, command nil = %v", model.result, model.done, command == nil)
+	}
+}
+
+func TestChoiceModelFiltersDescriptions(t *testing.T) {
+	model := newChoiceModel(ChoicePickerConfig{Message: "Pick", Options: []Option{
+		{Label: "A", Description: "primary"}, {Label: "B", Description: "secondary"},
+	}, Required: true})
+	model.filter.SetValue("secondary")
+	model.refreshVisible()
+	if len(model.visible) != 1 || model.visible[0].label != "B" {
+		t.Fatalf("visible = %#v", model.visible)
+	}
+	view := model.View().Content
+	for _, want := range []string{"B", "secondary", "/ filter"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("view = %q, want %q", view, want)
+		}
+	}
+}
+
+func TestChoiceModelPaginatesAndWrapsHelp(t *testing.T) {
+	options := make([]Option, 12)
+	for index := range options {
+		options[index] = Option{Label: fmt.Sprintf("Option %d", index)}
+	}
+	model := newChoiceModel(ChoicePickerConfig{Message: "Pick", Options: options, Multiple: true, Required: true})
+	model.width = 18
+	model.height = 6
+	model.cursor = len(model.visible) - 1
+	start, end := model.visibleRange()
+	if start == 0 || end != len(model.visible) || end-start >= len(model.visible) {
+		t.Fatalf("range = %d:%d for %d choices", start, end, len(model.visible))
+	}
+	if strings.Count(model.help(), "\n") < 2 {
+		t.Fatalf("help did not wrap: %q", model.help())
+	}
+}
+
 func TestConfirmModelUsesDefaultSelection(t *testing.T) {
-	model := newChoiceModel("Continue?", []Option{{Label: "Yes", Value: true}, {Label: "No", Value: false}}, false, true)
+	model := newChoiceModel(ChoicePickerConfig{
+		Message: "Continue?", Options: []Option{{Label: "Yes", Value: true}, {Label: "No", Value: false}}, Required: true,
+	})
 	model.cursor = 1
 	updated, command := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	model = updated.(choiceModel)

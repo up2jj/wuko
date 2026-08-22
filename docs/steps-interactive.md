@@ -5,7 +5,8 @@
 Interactive steps write their result to `.steps.<id>` and to the variable named by
 `with.variable`. Single-value steps expose `value`; multiple choice and path selections expose
 `values`. A value supplied with `--var` skips the prompt. Non-interactive runs, and interactive
-steps inside concurrent groups, require a supplied value.
+steps inside concurrent groups, require a supplied value unless an optional `tui_choice` resolves
+to no selection.
 
 ## `tui_input`
 
@@ -100,8 +101,8 @@ Use static choices:
     variable: environment
     message: Select an environment
     choices:
-      - {label: Development, value: dev}
-      - {label: Production, value: prod}
+      - {label: Development, description: Local and test infrastructure, value: dev}
+      - {label: Production, description: Customer-facing infrastructure, value: prod}
 ```
 
 Select multiple objects from an earlier step:
@@ -116,6 +117,7 @@ Select multiple objects from an earlier step:
     from: steps.fetch.value.projects
     label_field: name
     value_field: id
+    description_field: summary
 ```
 
 Use scalar dynamic values without field mappings:
@@ -129,9 +131,21 @@ Use scalar dynamic values without field mappings:
     from: vars.available_regions
 ```
 
-Dynamic sources must be non-empty lists. A scalar item is both its label and value. Object lists
-use `label_field` and `value_field`, which may be dotted paths. Single selection stores a scalar;
-multiple selection stores an ordered list.
+Static choices require `label` and scalar `value`; `description` is optional. A scalar dynamic item
+is both its label and value. Object lists use `label_field` and `value_field`, which may be dotted
+paths. Set `description_field` to display additional searchable text from each object.
+
+The picker supports arrow keys or `j`/`k`, Home, End, Page Up, and Page Down. `/` filters labels
+and descriptions. In multiple mode, Space toggles values and Enter confirms them in selection
+order. Shortcut help wraps on narrow terminals.
+
+`multiple` defaults to `false` and `required` defaults to `true`. Single selection exposes
+`.steps.<id>.value`, `.steps.<id>.label`, and `.steps.<id>.selected`. With `required: false`, the
+explicit `(none)` entry produces `selected: false`, `value: null`, and an empty label. A real
+`null` choice remains distinguishable because it produces `selected: true`. Multiple selection
+exposes `.steps.<id>.values`, `.steps.<id>.labels`, and `.steps.<id>.count`; optional empty choice
+sets and empty selections succeed with empty lists. In non-interactive runs, an optional choice
+without a supplied variable resolves directly to no selection.
 
 ## `tui_path`
 
