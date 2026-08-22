@@ -63,7 +63,7 @@ func newValidateCmd(deps dependencies) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				if err := engine.New(deps.registry).Validate(command.Context(), definition, engine.Options{
+				if err := workflowEngine(deps).Validate(command.Context(), definition, engine.Options{
 					Vars: vars, Env: env, BaseEnv: baseEnv, RunDir: cwd, Stdin: command.InOrStdin(), Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(),
 					LocalValueDir: filepath.Join(definition.Dir, ".wuko", "values"), GlobalValueDir: filepath.Join(config, "wuko", "values"),
 					Diagnostics: reporter,

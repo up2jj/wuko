@@ -1,0 +1,133 @@
+package engine
+
+import (
+	"context"
+	"errors"
+	"io"
+	"strings"
+	"testing"
+
+	"github.com/up2jj/wuko/executor"
+	"github.com/up2jj/wuko/process"
+	"github.com/up2jj/wuko/step"
+	"github.com/up2jj/wuko/steps/shell"
+	"github.com/up2jj/wuko/workflow"
+)
+
+type recordingExecutor struct {
+	commands []string
+	closed   int
+	fail     string
+}
+
+func (executor *recordingExecutor) Run(_ context.Context, options process.Options) (process.Result, error) {
+	executor.commands = append(executor.commands, options.Command+" "+strings.Join(options.Args, " "))
+	result := process.Result{Stdout: options.Command + "-output", ExitCode: 0}
+	if options.Command == executor.fail {
+		result.ExitCode = 7
+		return result, &process.ExitError{Command: options.Command, Code: 7}
+	}
+	return result, nil
+}
+
+func (executor *recordingExecutor) Close(context.Context) error {
+	executor.closed++
+	return nil
+}
+
+type recordingProvider struct{ session *recordingExecutor }
+
+func (provider recordingProvider) Open(context.Context, executor.Request) (executor.Session, error) {
+	return provider.session, nil
+}
+
+func executorTestEngine(t *testing.T, session *recordingExecutor) *Engine {
+	t.Helper()
+	steps := step.NewRegistry()
+	if err := shell.Register(steps); err != nil {
+		t.Fatal(err)
+	}
+	executors := executor.NewRegistry()
+	if err := executors.Register("recording", func(map[string]any) (executor.Provider, error) {
+		return recordingProvider{session: session}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return New(steps, WithExecutors(executors))
+}
+
+func TestExecutorScopeRestoresParentAndSharesOutputs(t *testing.T) {
+	scoped := &recordingExecutor{}
+	local := &recordingExecutor{}
+	definition := testDefinition(t, "mixed",
+		workflow.Step{Executor: &workflow.ExecutorScope{Type: "recording", With: map[string]any{}},
+			Steps:   []workflow.Step{{ID: "build", Type: "shell", With: map[string]any{"command": "container-build"}}},
+			Finally: []workflow.Step{{ID: "clean", Type: "shell", With: map[string]any{"command": "container-clean"}}}},
+		workflow.Step{ID: "package", Type: "shell", With: map[string]any{"command": "local-package", "args": []any{"{{ .steps.build.stdout }}"}}},
+	)
+	state, err := executorTestEngine(t, scoped).Run(t.Context(), definition, Options{RunDir: t.TempDir(), Executor: local, Stdout: io.Discard, Stderr: io.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(scoped.commands, ","); got != "container-build ,container-clean " {
+		t.Fatalf("scoped commands = %q", got)
+	}
+	if got := strings.Join(local.commands, ","); got != "local-package container-build-output" {
+		t.Fatalf("local commands = %q", got)
+	}
+	if scoped.closed != 1 || state.Steps["build"].(map[string]any)["stdout"] != "container-build-output" {
+		t.Fatalf("closed = %d, state = %#v", scoped.closed, state.Steps)
+	}
+}
+
+func TestExecutorScopeRunsFinallyAfterFailure(t *testing.T) {
+	scoped := &recordingExecutor{fail: "fail"}
+	definition := testDefinition(t, "cleanup",
+		workflow.Step{Executor: &workflow.ExecutorScope{Type: "recording", With: map[string]any{}},
+			Steps:   []workflow.Step{{ID: "work", Type: "shell", With: map[string]any{"command": "fail"}}},
+			Finally: []workflow.Step{{ID: "clean", Type: "shell", With: map[string]any{"command": "clean"}}}},
+	)
+	state, err := executorTestEngine(t, scoped).Run(t.Context(), definition, Options{RunDir: t.TempDir(), Stdout: io.Discard, Stderr: io.Discard})
+	if err == nil || !errors.As(err, new(*process.ExitError)) {
+		t.Fatalf("error = %v", err)
+	}
+	if state != nil {
+		t.Fatalf("failed state = %#v", state)
+	}
+	if got := strings.Join(scoped.commands, ","); got != "fail ,clean " || scoped.closed != 1 {
+		t.Fatalf("commands = %q, closed = %d", got, scoped.closed)
+	}
+}
+
+func TestExecutorScopeRejectsNonAwareRunner(t *testing.T) {
+	steps := newTestRegistry(t, map[string]step.Builder{"host_only": func(map[string]any) (step.Runner, error) {
+		return countingRunner{}, nil
+	}})
+	executors := executor.NewRegistry()
+	if err := executors.Register("recording", func(map[string]any) (executor.Provider, error) {
+		return recordingProvider{session: &recordingExecutor{}}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	definition := testDefinition(t, "invalid", workflow.Step{
+		Executor: &workflow.ExecutorScope{Type: "recording", With: map[string]any{}},
+		Steps:    []workflow.Step{{ID: "host", Type: "host_only", With: map[string]any{}}},
+	})
+	err := New(steps, WithExecutors(executors)).Validate(t.Context(), definition, Options{RunDir: t.TempDir()})
+	if err == nil || !strings.Contains(err.Error(), "not supported inside executor blocks") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestExecutorScopeRejectsWait(t *testing.T) {
+	definition := testDefinition(t, "invalid-wait", workflow.Step{
+		Executor: &workflow.ExecutorScope{Type: "recording", With: map[string]any{}},
+		Steps: []workflow.Step{{
+			ID: "pause", Type: "wait", With: map[string]any{"duration": "1s"},
+		}},
+	})
+	err := executorTestEngine(t, &recordingExecutor{}).Validate(t.Context(), definition, Options{RunDir: t.TempDir()})
+	if err == nil || !strings.Contains(err.Error(), `step type "wait" is not supported inside executor blocks`) {
+		t.Fatalf("error = %v", err)
+	}
+}

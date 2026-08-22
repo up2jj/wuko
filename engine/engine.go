@@ -11,13 +11,22 @@ import (
 
 	"github.com/expr-lang/expr"
 	"github.com/up2jj/wuko/diagnostic"
+	"github.com/up2jj/wuko/executor"
 	wukoexpr "github.com/up2jj/wuko/expression"
+	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
 )
 
 type Engine struct {
-	registry *step.Registry
+	registry  *step.Registry
+	executors *executor.Registry
+}
+
+type Option func(*Engine)
+
+func WithExecutors(registry *executor.Registry) Option {
+	return func(engine *Engine) { engine.executors = registry }
 }
 
 type Options struct {
@@ -34,6 +43,7 @@ type Options struct {
 	Stderr         io.Writer
 	Interactive    bool
 	DryRun         bool
+	Executor       process.Executor
 	// Progress receives structured workflow, step, attempt, retry, poll, and timing events.
 	Progress func(ProgressEvent)
 	// Diagnostics receives opt-in loading, validation, and execution phase events.
@@ -44,6 +54,7 @@ type Options struct {
 	runtime                *runRuntime
 	renderer               *workflow.Renderer
 	deferContextValidation bool
+	insideExecutor         bool
 }
 
 type State struct {
@@ -61,7 +72,13 @@ type State struct {
 	didReturn   bool
 }
 
-func New(registry *step.Registry) *Engine { return &Engine{registry: registry} }
+func New(registry *step.Registry, options ...Option) *Engine {
+	engine := &Engine{registry: registry}
+	for _, option := range options {
+		option(engine)
+	}
+	return engine
+}
 
 func (e *Engine) Validate(ctx context.Context, definition *workflow.Definition, options Options) error {
 	started := time.Now()
@@ -100,6 +117,12 @@ func (e *Engine) Validate(ctx context.Context, definition *workflow.Definition, 
 
 func (e *Engine) validateSteps(ctx context.Context, definition *workflow.Definition, steps []workflow.Step, options Options, state *State, insideConcurrent bool) error {
 	for _, workflowStep := range steps {
+		if workflowStep.IsExecutorBlock() {
+			if err := e.validateExecutorBlock(ctx, definition, workflowStep, options, state); err != nil {
+				return err
+			}
+			continue
+		}
 		if workflowStep.IsWorkingDirectoryBlock() {
 			if err := e.validateWorkingDirectoryBlock(ctx, definition, workflowStep, options, state, insideConcurrent); err != nil {
 				return err
@@ -128,7 +151,7 @@ func (e *Engine) validateSteps(ctx context.Context, definition *workflow.Definit
 			if len(workflowStep.Steps) == 0 {
 				return fail(fmt.Errorf("conditional block must contain at least one step"))
 			}
-			if workflowStep.ID != "" || workflowStep.Type != "" || !workflowStep.Uses.Empty() || workflowStep.Require != nil || workflowStep.Concurrent != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil || workflowStep.Return != nil || workflowStep.SHA256 != "" || workflowStep.Timeout != nil || workflowStep.Retry != nil || workflowStep.With != nil {
+			if workflowStep.ID != "" || workflowStep.Type != "" || !workflowStep.Uses.Empty() || workflowStep.Require != nil || workflowStep.Executor != nil || workflowStep.Finally != nil || workflowStep.Concurrent != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil || workflowStep.Return != nil || workflowStep.SHA256 != "" || workflowStep.Timeout != nil || workflowStep.Retry != nil || workflowStep.With != nil {
 				return fail(fmt.Errorf("conditional block cannot be combined with other step fields"))
 			}
 			if _, err := compileCondition(workflowStep.If); err != nil {
@@ -216,6 +239,11 @@ func (e *Engine) validateSteps(ctx context.Context, definition *workflow.Definit
 			continue
 		}
 		if workflowStep.Type == "wait" {
+			if options.insideExecutor {
+				err := fmt.Errorf("step type %q is not supported inside executor blocks", workflowStep.Type)
+				traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusFailed, started, "validating executor support", err)
+				return fmt.Errorf("step %q: %w", workflowStep.ID, err)
+			}
 			if err := e.validateWaitStep(ctx, definition, workflowStep, options, state, !options.deferContextValidation); err != nil {
 				traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusFailed, started, "validating wait", err)
 				return fmt.Errorf("step %q: %w", workflowStep.ID, err)
@@ -231,6 +259,13 @@ func (e *Engine) validateSteps(ctx context.Context, definition *workflow.Definit
 		if err != nil {
 			traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusFailed, started, "building runner", err)
 			return fmt.Errorf("step %q: %w", workflowStep.ID, err)
+		}
+		if options.insideExecutor {
+			if _, ok := runner.(step.ExecutorAware); !ok {
+				err := fmt.Errorf("step type %q is not supported inside executor blocks", workflowStep.Type)
+				traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusFailed, started, "validating executor support", err)
+				return fmt.Errorf("step %q: %w", workflowStep.ID, err)
+			}
 		}
 		validator, ok := runner.(step.Validator)
 		if !ok || options.deferContextValidation {
@@ -312,7 +347,11 @@ func (e *Engine) Run(ctx context.Context, definition *workflow.Definition, optio
 }
 
 func (e *Engine) executeFinally(ctx context.Context, definition *workflow.Definition, options Options, state *State, stats *RunStats, mainErr error, total int) []error {
-	if len(definition.Finally) == 0 {
+	return e.executeFinallySteps(ctx, definition, definition.Finally, options, state, stats, mainErr, stats.Steps, leafStepCount(definition.Steps)+1, total)
+}
+
+func (e *Engine) executeFinallySteps(ctx context.Context, definition *workflow.Definition, cleanupSteps []workflow.Step, options Options, state *State, stats *RunStats, mainErr error, mainStats []StepStats, firstIndex, total int) []error {
+	if len(cleanupSteps) == 0 {
 		return nil
 	}
 	bindingsWereNil := state.Bindings == nil
@@ -320,7 +359,7 @@ func (e *Engine) executeFinally(ctx context.Context, definition *workflow.Defini
 		state.Bindings = make(map[string]any)
 	}
 	previousBinding, hadPreviousBinding := state.Bindings["finally"]
-	errorsValue := finallyErrorRecords(stats.Steps)
+	errorsValue := finallyErrorRecords(mainStats)
 	if mainErr != nil && len(errorsValue) == 0 {
 		errorsValue = append(errorsValue, finallyErrorRecord(statusFromError(mainErr), "", "", mainErr))
 	}
@@ -338,9 +377,9 @@ func (e *Engine) executeFinally(ctx context.Context, definition *workflow.Defini
 		}
 	}()
 
-	index := leafStepCount(definition.Steps) + 1
+	index := firstIndex
 	cleanupErrors := make([]error, 0)
-	for _, cleanupStep := range definition.Finally {
+	for _, cleanupStep := range cleanupSteps {
 		before := len(stats.Steps)
 		err := e.executeSequence(ctx, definition, []workflow.Step{cleanupStep}, options, state, stats, index, total)
 		if err != nil {
@@ -386,6 +425,17 @@ func finallyErrorRecord(status ExecutionStatus, stepID, stepType string, err err
 func (e *Engine) executeSequence(ctx context.Context, definition *workflow.Definition, steps []workflow.Step, options Options, state *State, stats *RunStats, firstIndex, total int) error {
 	index := firstIndex
 	for position, workflowStep := range steps {
+		if workflowStep.IsExecutorBlock() {
+			if err := e.executeExecutorBlock(ctx, definition, workflowStep, options, state, stats, index, total); err != nil {
+				return err
+			}
+			index += leafStepCount(workflowStep.Steps) + leafStepCount(workflowStep.Finally)
+			if state.returning {
+				recordSkippedSteps(definition, steps[position+1:], options, stats, index, total)
+				return nil
+			}
+			continue
+		}
 		if workflowStep.IsWorkingDirectoryBlock() {
 			if err := e.executeWorkingDirectoryBlock(ctx, definition, workflowStep, options, state, stats, index, total); err != nil {
 				return err
@@ -500,6 +550,13 @@ func evaluateConditionalBlock(definition *workflow.Definition, workflowStep work
 func recordSkippedSteps(definition *workflow.Definition, steps []workflow.Step, options Options, stats *RunStats, firstIndex, total int) {
 	index := firstIndex
 	for _, workflowStep := range steps {
+		if workflowStep.IsExecutorBlock() {
+			recordSkippedSteps(definition, workflowStep.Steps, options, stats, index, total)
+			index += leafStepCount(workflowStep.Steps)
+			recordSkippedSteps(definition, workflowStep.Finally, options, stats, index, total)
+			index += leafStepCount(workflowStep.Finally)
+			continue
+		}
 		if workflowStep.IsWorkingDirectoryBlock() {
 			recordSkippedSteps(definition, workflowStep.Steps, options, stats, index, total)
 			index += leafStepCount(workflowStep.Steps)
@@ -701,6 +758,10 @@ func commitStepResult(state *State, stepID string, result step.Result) {
 func leafStepCount(steps []workflow.Step) int {
 	total := 0
 	for _, workflowStep := range steps {
+		if workflowStep.IsExecutorBlock() {
+			total += leafStepCount(workflowStep.Steps) + leafStepCount(workflowStep.Finally)
+			continue
+		}
 		if workflowStep.IsWorkingDirectoryBlock() {
 			total += leafStepCount(workflowStep.Steps)
 			continue
@@ -841,6 +902,7 @@ func makeRequest(definition *workflow.Definition, stepID string, options Options
 		Steps: cloneMap(state.Steps), Bindings: cloneMap(state.Bindings), Stdin: options.Stdin, Stdout: options.Stdout,
 		Stderr: options.Stderr, Interactive: options.Interactive,
 		Attempt: attempt, MaxAttempts: maxAttempts, OperationID: operationID,
+		Executor: options.Executor,
 	}
 }
 

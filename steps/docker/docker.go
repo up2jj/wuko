@@ -127,6 +127,9 @@ type dockerClient interface {
 	ContainerWait(context.Context, string, client.ContainerWaitOptions) client.ContainerWaitResult
 	ContainerStop(context.Context, string, client.ContainerStopOptions) (client.ContainerStopResult, error)
 	ContainerRemove(context.Context, string, client.ContainerRemoveOptions) (client.ContainerRemoveResult, error)
+	ExecCreate(context.Context, string, client.ExecCreateOptions) (client.ExecCreateResult, error)
+	ExecAttach(context.Context, string, client.ExecAttachOptions) (client.ExecAttachResult, error)
+	ExecInspect(context.Context, string, client.ExecInspectOptions) (client.ExecInspectResult, error)
 	Close() error
 }
 

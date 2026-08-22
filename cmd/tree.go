@@ -129,6 +129,27 @@ func writeTreeStepsWithFollowing(writer io.Writer, steps []workflow.Step, prefix
 			branch = "└── "
 			childPrefix = prefix + "    "
 		}
+		if workflowStep.IsExecutorBlock() {
+			if _, err := fmt.Fprintf(writer, "%s%sexecutor: %s\n", prefix, branch, workflowStep.Executor.Type); err != nil {
+				return err
+			}
+			if len(workflowStep.Finally) == 0 {
+				if err := writeTreeSteps(writer, workflowStep.Steps, childPrefix); err != nil {
+					return err
+				}
+				continue
+			}
+			if err := writeTreeStepsWithFollowing(writer, workflowStep.Steps, childPrefix, true); err != nil {
+				return err
+			}
+			if _, err := fmt.Fprintf(writer, "%s└── finally\n", childPrefix); err != nil {
+				return err
+			}
+			if err := writeTreeSteps(writer, workflowStep.Finally, childPrefix+"    "); err != nil {
+				return err
+			}
+			continue
+		}
 		if workflowStep.IsWorkingDirectoryBlock() {
 			if _, err := fmt.Fprintf(writer, "%s%sworking_directory: %s\n", prefix, branch, workflowStep.WorkingDirectory); err != nil {
 				return err

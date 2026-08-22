@@ -97,6 +97,11 @@ steps through their execution request, so independently scoped concurrent branch
 IDs, outputs, and variables remain in the surrounding namespace, and only executable leaf steps
 appear in run statistics and progress.
 
+Use an [executor scope](executors.md) when selected shell steps should run in a persistent Docker
+container while the rest of the workflow stays local. Executor scopes share workflow state and
+bind-mounted workspace files, restore local execution on exit, and may declare cleanup steps that
+run before the executor session closes.
+
 Paths may be absolute or relative and may use templates. The block path is rendered when the block
 is entered, using the enclosing `.run.dir` and all state committed by earlier sequential steps:
 

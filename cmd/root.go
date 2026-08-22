@@ -16,6 +16,8 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/up2jj/wuko/diagnostic"
+	"github.com/up2jj/wuko/engine"
+	"github.com/up2jj/wuko/executor"
 	workflowschedule "github.com/up2jj/wuko/schedule"
 	"github.com/up2jj/wuko/step"
 	agentstep "github.com/up2jj/wuko/steps/agent"
@@ -93,6 +95,7 @@ type dependencies struct {
 	configDir     func() (string, error)
 	agentLookPath func(string) (string, error)
 	registry      *step.Registry
+	executors     *executor.Registry
 	loader        *workflow.Loader
 	isInteractive func(io.Reader) bool
 	now           func() time.Time
@@ -137,6 +140,7 @@ func executeWithSignals(signals <-chan os.Signal, gracePeriod time.Duration, exe
 
 func NewRootCmd() *cobra.Command {
 	registry := step.NewRegistry()
+	executors := executor.NewRegistry()
 	for _, register := range []func(*step.Registry) error{
 		inputstep.Register, passwordstep.Register, choice.Register, pathstep.Register,
 		confirm.Register, assertstep.Register, setstep.Register, importvarsstep.Register, jsonpathstep.Register, semverstep.Register, httpstep.Register, filestep.Register, tempstep.Register, globstep.Register, cachestep.Register, changedstep.Register,
@@ -146,15 +150,22 @@ func NewRootCmd() *cobra.Command {
 			panic(err)
 		}
 	}
+	if err := dockerstep.RegisterExecutor(executors); err != nil {
+		panic(err)
+	}
 	return newRootCmd(dependencies{
 		stdin: os.Stdin, stdout: os.Stdout, stderr: os.Stderr,
 		cwd: os.Getwd, environment: direnvEnvironment,
-		homeDir: os.UserHomeDir, configDir: os.UserConfigDir, registry: registry,
+		homeDir: os.UserHomeDir, configDir: os.UserConfigDir, registry: registry, executors: executors,
 		agentLookPath: exec.LookPath,
 		loader:        workflow.NewLoader(nil), isInteractive: interactive,
 		now: time.Now, waitUntil: workflowschedule.Wait,
 		getenv: os.Getenv,
 	})
+}
+
+func workflowEngine(deps dependencies) *engine.Engine {
+	return engine.New(deps.registry, engine.WithExecutors(deps.executors))
 }
 
 func newRootCmd(deps dependencies) *cobra.Command {

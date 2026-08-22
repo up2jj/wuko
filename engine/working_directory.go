@@ -25,7 +25,7 @@ func (e *Engine) validateWorkingDirectoryBlock(ctx context.Context, definition *
 		})
 		return err
 	}
-	if block.ID != "" || block.Type != "" || !block.Uses.Empty() || block.Require != nil || block.Concurrent != nil || block.Foreach != nil || block.Matrix != nil || block.Return != nil || block.SHA256 != "" || block.If != "" || block.Timeout != nil || block.Retry != nil || block.With != nil {
+	if block.ID != "" || block.Type != "" || !block.Uses.Empty() || block.Require != nil || block.Executor != nil || block.Finally != nil || block.Concurrent != nil || block.Foreach != nil || block.Matrix != nil || block.Return != nil || block.SHA256 != "" || block.If != "" || block.Timeout != nil || block.Retry != nil || block.With != nil {
 		return fail(fmt.Errorf("working_directory block cannot be combined with other step fields"))
 	}
 	if strings.TrimSpace(block.WorkingDirectory) == "" {

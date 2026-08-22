@@ -38,6 +38,20 @@ func expandRequiredSteps(steps []Step, source string, stack []string) ([]Step, e
 func expandRequiredStepsInSource(steps []Step, source string, stack []string) ([]Step, error) {
 	expanded := make([]Step, 0, len(steps))
 	for i, workflowStep := range steps {
+		if workflowStep.IsExecutorBlock() {
+			children, err := expandRequiredStepsInSource(workflowStep.Steps, source, stack)
+			if err != nil {
+				return nil, fmt.Errorf("executor block at step %d in %s: %w", i+1, source, err)
+			}
+			cleanup, err := expandRequiredStepsInSource(workflowStep.Finally, source, stack)
+			if err != nil {
+				return nil, fmt.Errorf("executor block finally at step %d in %s: %w", i+1, source, err)
+			}
+			workflowStep.Steps = children
+			workflowStep.Finally = cleanup
+			expanded = append(expanded, workflowStep)
+			continue
+		}
 		if workflowStep.IsWorkingDirectoryBlock() {
 			children, err := expandRequiredStepsInSource(workflowStep.Steps, source, stack)
 			if err != nil {
@@ -113,7 +127,7 @@ func expandRequiredStepsInSource(steps []Step, source string, stack []string) ([
 }
 
 func validateRequireEntry(workflowStep Step) error {
-	if workflowStep.ID != "" || workflowStep.Type != "" || !workflowStep.Uses.Empty() || workflowStep.IsConditionalBlock() || workflowStep.IsWorkingDirectoryBlock() || workflowStep.Concurrent != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil || workflowStep.Return != nil || workflowStep.SHA256 != "" || workflowStep.If != "" || workflowStep.Timeout != nil || workflowStep.Retry != nil || workflowStep.With != nil {
+	if workflowStep.ID != "" || workflowStep.Type != "" || !workflowStep.Uses.Empty() || workflowStep.Executor != nil || workflowStep.Finally != nil || workflowStep.IsConditionalBlock() || workflowStep.IsWorkingDirectoryBlock() || workflowStep.Concurrent != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil || workflowStep.Return != nil || workflowStep.SHA256 != "" || workflowStep.If != "" || workflowStep.Timeout != nil || workflowStep.Retry != nil || workflowStep.With != nil {
 		return fmt.Errorf("require cannot be combined with other step fields")
 	}
 	return nil

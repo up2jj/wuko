@@ -15,6 +15,23 @@ func writeDryRun(writer io.Writer, steps []workflow.Step, indent string, parent 
 	for i, workflowStep := range steps {
 		path := append(append([]int(nil), parent...), i+1)
 		index := dryRunIndex(path)
+		if workflowStep.IsExecutorBlock() {
+			if _, err := fmt.Fprintf(writer, "%s%s executor: %s\n", indent, index, workflowStep.Executor.Type); err != nil {
+				return err
+			}
+			if err := writeDryRun(writer, workflowStep.Steps, indent+"   ", path); err != nil {
+				return err
+			}
+			if len(workflowStep.Finally) > 0 {
+				if _, err := fmt.Fprintf(writer, "%s   finally:\n", indent); err != nil {
+					return err
+				}
+				if err := writeDryRun(writer, workflowStep.Finally, indent+"      ", path); err != nil {
+					return err
+				}
+			}
+			continue
+		}
 		if workflowStep.IsWorkingDirectoryBlock() {
 			if _, err := fmt.Fprintf(writer, "%s%s working_directory: %s\n", indent, index, workflowStep.WorkingDirectory); err != nil {
 				return err

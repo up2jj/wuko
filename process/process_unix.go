@@ -52,7 +52,21 @@ type ExitError struct {
 func (e *ExitError) Error() string { return fmt.Sprintf("%s exited with status %d", e.Command, e.Code) }
 func (e *ExitError) Unwrap() error { return e.Err }
 
+// Executor runs commands in one execution environment.
+type Executor interface {
+	Run(context.Context, Options) (Result, error)
+}
+
+// LocalExecutor runs commands as child processes on the current host.
+type LocalExecutor struct{}
+
+// Run executes a command with the local executor.
 func Run(ctx context.Context, options Options) (Result, error) {
+	return LocalExecutor{}.Run(ctx, options)
+}
+
+// Run executes a command as a local child process.
+func (LocalExecutor) Run(ctx context.Context, options Options) (Result, error) {
 	if options.Command == "" {
 		return Result{}, fmt.Errorf("command is required")
 	}

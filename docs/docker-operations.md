@@ -6,6 +6,9 @@ The `docker` step runs temporary containers and performs image, registry, build,
 volume operations. Set `operation` to select behavior. Omitting it is equivalent to
 `operation: run`, preserving workflows written before the other operations were added.
 
+To run several shell steps in one persistent container and then return to local execution, use a
+[Docker executor scope](executors.md#docker-executor).
+
 | Operation | Purpose |
 | --- | --- |
 | `run` | Run a command in a temporary container |

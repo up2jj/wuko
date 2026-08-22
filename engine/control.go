@@ -285,6 +285,11 @@ func durationValue(duration *workflow.Duration) time.Duration {
 func selectedStepOutputs(state *State, steps []workflow.Step) map[string]any {
 	result := make(map[string]any)
 	for _, workflowStep := range steps {
+		if workflowStep.IsExecutorBlock() {
+			maps.Copy(result, selectedStepOutputs(state, workflowStep.Steps))
+			maps.Copy(result, selectedStepOutputs(state, workflowStep.Finally))
+			continue
+		}
 		if workflowStep.IsWorkingDirectoryBlock() {
 			maps.Copy(result, selectedStepOutputs(state, workflowStep.Steps))
 			continue

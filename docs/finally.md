@@ -184,8 +184,10 @@ plan. Validation and dry-run never execute cleanup.
   validation failures because runtime execution has not begun.
 - Failed, timed-out, canceled, and skipped steps expose no uncommitted outputs or variable writes.
 - `finally` cannot recover from or suppress the main error.
-- A workflow or action supports one top-level `finally` list. There is no per-step `finally`,
-  multiple-clause selection, or `catch` construct.
+- A workflow or action supports one top-level `finally` list. An
+  [executor block](executors.md#cleanup-and-persistence) may additionally have a scoped `finally`
+  list that runs inside its executor before the session closes. There is no ordinary per-step
+  `finally`, multiple-clause selection, or `catch` construct.
 - Error messages are unstable informational text and should not be used as condition keys.
 - There is no block-level cleanup timeout. Bound cleanup with step and control timeouts. CLI cleanup
   may still be forcibly terminated by the shutdown budget or a second signal.

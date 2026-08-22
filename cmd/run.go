@@ -128,7 +128,7 @@ func runWorkflow(command *cobra.Command, deps dependencies, args []string, confi
 	}
 	execute := func(ctx context.Context, definition *workflow.Definition) error {
 		workflowName = definition.Name
-		state, err := engine.New(deps.registry).Run(ctx, definition, optionsFor(definition))
+		state, err := workflowEngine(deps).Run(ctx, definition, optionsFor(definition))
 		runState = state
 		return err
 	}
@@ -137,7 +137,7 @@ func runWorkflow(command *cobra.Command, deps dependencies, args []string, confi
 		return execute(command.Context(), definition)
 	}
 
-	if err := engine.New(deps.registry).Validate(command.Context(), definition, optionsFor(definition)); err != nil {
+	if err := workflowEngine(deps).Validate(command.Context(), definition, optionsFor(definition)); err != nil {
 		cleanup()
 		return err
 	}
@@ -147,7 +147,7 @@ func runWorkflow(command *cobra.Command, deps dependencies, args []string, confi
 			if err != nil {
 				return nil, func() {}, err
 			}
-			if err := engine.New(deps.registry).Validate(ctx, definition, optionsFor(definition)); err != nil {
+			if err := workflowEngine(deps).Validate(ctx, definition, optionsFor(definition)); err != nil {
 				release()
 				return nil, func() {}, err
 			}

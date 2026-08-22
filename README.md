@@ -175,6 +175,7 @@ For workflow syntax and execution behavior, see:
 
 - [Execution and composition](docs/execution.md) — conditions, concurrency, scheduling, waits,
   retries, required files, remote reuse, progress, and debugging.
+- [Executor scopes](docs/executors.md) — mix local shell steps with persistent Docker sessions.
 - [Workflow controls](docs/workflow-control.md) — foreach and matrix expansion.
 - [Early successful return](docs/return.md) — finish workflows and actions with explicit outputs.
 - [Finally cleanup](docs/finally.md) and [graceful shutdown](docs/graceful-shutdown.md).

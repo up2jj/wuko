@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/up2jj/wuko/process"
 	"gopkg.in/yaml.v3"
 )
 
@@ -33,6 +34,8 @@ type Request struct {
 	Attempt     int
 	MaxAttempts int
 	OperationID string
+	// Executor runs process-backed work. A nil executor means local execution.
+	Executor process.Executor
 	// PreviousAttempt is the most recent failed attempt that produced a complete result.
 	// It is nil on the first attempt and remains immutable for the duration of Run.
 	PreviousAttempt *Result
@@ -59,6 +62,12 @@ type Cleaner interface {
 
 type Validator interface {
 	Validate(context.Context, Request) error
+}
+
+// ExecutorAware marks a runner that can execute through Request.Executor.
+// Executor scopes reject runners without this capability rather than silently running them locally.
+type ExecutorAware interface {
+	ExecutorAware()
 }
 
 // ObservationError reports that a failed runner still produced a complete, usable observation.

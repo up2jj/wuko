@@ -25,6 +25,8 @@ type Config struct {
 
 type Runner struct{ config Config }
 
+func (*Runner) ExecutorAware() {}
+
 func Register(registry *step.Registry) error { return registry.Register("shell", New) }
 
 func New(raw map[string]any) (step.Runner, error) {
@@ -54,7 +56,11 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 	environment := maps.Clone(request.Env)
 	maps.Copy(environment, r.config.Env)
 	environment = step.ApplyAttemptEnvironment(environment, request)
-	result, err := process.Run(ctx, process.Options{
+	executor := request.Executor
+	if executor == nil {
+		executor = process.LocalExecutor{}
+	}
+	result, err := executor.Run(ctx, process.Options{
 		Command: command, Args: args, Dir: dir, Env: environment, User: r.config.User,
 		Stdin: process.StringInput(r.config.Stdin), Stdout: request.Stdout, Stderr: request.Stderr,
 	})

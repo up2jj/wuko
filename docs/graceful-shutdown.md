@@ -40,6 +40,12 @@ process group is outside the original process group and cannot be terminated by 
 Cancellation-aware waits, retry delays, polling delays, HTTP requests, Docker operations, and
 built-in file or data steps return when their context is canceled.
 
+A shell command running in a [Docker executor scope](executors.md) causes that scope's container to
+be forcibly removed when its context is canceled. The scoped `finally` list then runs with the
+detached cleanup context; if necessary, Wuko opens a fresh container with the same mounts and
+configuration. Bind-mounted state remains available, while container-local state from the canceled
+session is gone.
+
 ## Workflow controls
 
 External workflow cancellation always takes precedence over `fail_fast`:

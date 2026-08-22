@@ -335,6 +335,8 @@ type fakeClient struct {
 	closeErr                error
 	removedIDs              []string
 	removedOptions          client.ContainerRemoveOptions
+	execOptions             client.ExecCreateOptions
+	execCreates             int
 }
 
 func (f *fakeClient) ImageInspect(_ context.Context, _ string, options ...client.ImageInspectOption) (client.ImageInspectResult, error) {
@@ -409,11 +411,24 @@ func (f *fakeClient) ContainerAttach(_ context.Context, _ string, options client
 }
 
 func (f *fakeClient) ContainerStart(context.Context, string, client.ContainerStartOptions) (client.ContainerStartResult, error) {
-	if !f.attached {
-		return client.ContainerStartResult{}, errors.New("container must be attached before start")
-	}
 	f.started = true
 	return client.ContainerStartResult{}, nil
+}
+
+func (f *fakeClient) ExecCreate(_ context.Context, _ string, options client.ExecCreateOptions) (client.ExecCreateResult, error) {
+	f.execOptions = options
+	f.execCreates++
+	return client.ExecCreateResult{ID: "exec-id"}, nil
+}
+
+func (f *fakeClient) ExecAttach(context.Context, string, client.ExecAttachOptions) (client.ExecAttachResult, error) {
+	connA, connB := net.Pipe()
+	_ = connB.Close()
+	return client.ExecAttachResult{HijackedResponse: client.HijackedResponse{Conn: connA, Reader: bufio.NewReader(bytes.NewReader(f.output))}}, nil
+}
+
+func (f *fakeClient) ExecInspect(context.Context, string, client.ExecInspectOptions) (client.ExecInspectResult, error) {
+	return client.ExecInspectResult{ID: "exec-id", ExitCode: int(f.exitCode)}, nil
 }
 
 func (f *fakeClient) ContainerWait(ctx context.Context, _ string, options client.ContainerWaitOptions) client.ContainerWaitResult {

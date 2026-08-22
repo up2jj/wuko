@@ -76,6 +76,12 @@ func (e *Engine) executeReturn(ctx context.Context, definition *workflow.Definit
 
 func containsReturn(steps []workflow.Step) bool {
 	for _, workflowStep := range steps {
+		if workflowStep.IsExecutorBlock() {
+			if containsReturn(workflowStep.Steps) || containsReturn(workflowStep.Finally) {
+				return true
+			}
+			continue
+		}
 		if workflowStep.Return != nil {
 			return true
 		}

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"io"
 	"sync"
+
+	"github.com/up2jj/wuko/process"
 	"time"
 )
 
@@ -206,6 +208,9 @@ func synchronizeWriter(mu *sync.Mutex, writer io.Writer) io.Writer {
 }
 
 func prepareRunOptions(options Options) Options {
+	if options.Executor == nil {
+		options.Executor = process.LocalExecutor{}
+	}
 	if options.runtime != nil {
 		return options
 	}
