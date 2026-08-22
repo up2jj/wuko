@@ -5,9 +5,24 @@ import (
 	"io"
 	"strings"
 
+	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
 )
+
+// SelectionIntent describes whether a list selection requested its primary or alternate action.
+type SelectionIntent uint8
+
+const (
+	SelectionPrimary SelectionIntent = iota
+	SelectionAlternate
+)
+
+// Selection contains the selected option and the requested action.
+type Selection struct {
+	Option Option
+	Intent SelectionIntent
+}
 
 type listOption struct {
 	Option
@@ -22,6 +37,7 @@ func (item listOption) FilterValue() string {
 type selectionModel struct {
 	list      list.Model
 	selected  Option
+	intent    SelectionIntent
 	done      bool
 	cancelled bool
 }
@@ -34,6 +50,10 @@ func newSelectionModel(title string, options []Option) selectionModel {
 	delegate := list.NewDefaultDelegate()
 	workflowList := list.New(items, delegate, 80, 20)
 	workflowList.Title = title
+	run := key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "run"))
+	printCommand := key.NewBinding(key.WithKeys("shift+enter"), key.WithHelp("shift+enter", "print command"))
+	workflowList.AdditionalShortHelpKeys = func() []key.Binding { return []key.Binding{run, printCommand} }
+	workflowList.AdditionalFullHelpKeys = func() []key.Binding { return []key.Binding{run, printCommand} }
 	return selectionModel{list: workflowList}
 }
 
@@ -42,11 +62,14 @@ func (m selectionModel) Init() tea.Cmd { return nil }
 func (m selectionModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	if key, ok := message.(tea.KeyPressMsg); ok {
 		switch key.String() {
-		case "enter":
+		case "enter", "shift+enter":
 			if !m.list.SettingFilter() {
 				item, ok := m.list.SelectedItem().(listOption)
 				if ok {
 					m.selected = item.Option
+					if key.String() == "shift+enter" {
+						m.intent = SelectionAlternate
+					}
 					m.done = true
 					return m, tea.Quit
 				}
@@ -73,17 +96,23 @@ func (m selectionModel) View() tea.View {
 	return tea.NewView(m.list.View())
 }
 
-// Select runs a filterable single-selection list and returns the selected option.
-func Select(ctx context.Context, input io.Reader, output io.Writer, title string, options []Option) (Option, error) {
+// SelectWithIntent runs a filterable list and reports the selected action.
+func SelectWithIntent(ctx context.Context, input io.Reader, output io.Writer, title string, options []Option) (Selection, error) {
 	program := tea.NewProgram(newSelectionModel(title, options),
 		tea.WithContext(ctx), tea.WithInput(input), tea.WithOutput(output), tea.WithoutSignalHandler())
 	final, err := program.Run()
 	if err != nil {
-		return Option{}, err
+		return Selection{}, err
 	}
 	model := final.(selectionModel)
 	if model.cancelled || !model.done {
-		return Option{}, context.Canceled
+		return Selection{}, context.Canceled
 	}
-	return model.selected, nil
+	return Selection{Option: model.selected, Intent: model.intent}, nil
+}
+
+// Select runs a filterable single-selection list and returns the selected option.
+func Select(ctx context.Context, input io.Reader, output io.Writer, title string, options []Option) (Option, error) {
+	selection, err := SelectWithIntent(ctx, input, output, title, options)
+	return selection.Option, err
 }

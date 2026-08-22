@@ -34,6 +34,7 @@ import (
 	keyvaluestep "github.com/up2jj/wuko/steps/key_value"
 	luastep "github.com/up2jj/wuko/steps/lua"
 	passwordstep "github.com/up2jj/wuko/steps/password"
+	pathstep "github.com/up2jj/wuko/steps/path"
 	semverstep "github.com/up2jj/wuko/steps/semver"
 	setstep "github.com/up2jj/wuko/steps/set"
 	"github.com/up2jj/wuko/steps/shell"
@@ -136,7 +137,7 @@ func executeWithSignals(signals <-chan os.Signal, gracePeriod time.Duration, exe
 func NewRootCmd() *cobra.Command {
 	registry := step.NewRegistry()
 	for _, register := range []func(*step.Registry) error{
-		inputstep.Register, passwordstep.Register, choice.Register,
+		inputstep.Register, passwordstep.Register, choice.Register, pathstep.Register,
 		confirm.Register, assertstep.Register, setstep.Register, importvarsstep.Register, jsonpathstep.Register, semverstep.Register, httpstep.Register, filestep.Register, tempstep.Register, globstep.Register, cachestep.Register, changedstep.Register,
 		dockerstep.Register, keyvaluestep.Register, luastep.Register, shell.Register, agentstep.Register,
 	} {
@@ -226,18 +227,21 @@ func runWorkflowPicker(command *cobra.Command, deps dependencies) error {
 			Value:       source,
 		}
 	}
-	selected, err := tui.Select(command.Context(), command.InOrStdin(), command.OutOrStdout(), "Workflows", options)
+	selection, err := tui.SelectWithIntent(command.Context(), command.InOrStdin(), command.OutOrStdout(), "Workflows", options)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			return nil
 		}
 		return err
 	}
-	source, ok := selected.Value.(workflow.Source)
+	source, ok := selection.Option.Value.(workflow.Source)
 	if !ok {
 		return fmt.Errorf("workflow selection did not contain a workflow")
 	}
 	diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseSelection, Status: diagnostic.StatusSucceeded, Location: diagnostic.Location{Source: source.Path}, Message: source.Name})
+	if selection.Intent == tui.SelectionPrimary {
+		return runWorkflow(command, deps, nil, runWorkflowConfig{workflowFile: source.Path})
+	}
 	if source.Effective {
 		fmt.Fprintf(command.OutOrStdout(), "wuko run %s\n", shellQuote(source.Name))
 		return nil

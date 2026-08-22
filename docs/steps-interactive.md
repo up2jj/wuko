@@ -2,9 +2,10 @@
 
 [Back to the available steps](../README.md#available-steps)
 
-Interactive steps write their result to `.steps.<id>.value` and to the variable named by
-`with.variable`. A value supplied with `--var` skips the prompt. Non-interactive runs, and
-interactive steps inside concurrent groups, require a supplied value.
+Interactive steps write their result to `.steps.<id>` and to the variable named by
+`with.variable`. Single-value steps expose `value`; multiple choice and path selections expose
+`values`. A value supplied with `--var` skips the prompt. Non-interactive runs, and interactive
+steps inside concurrent groups, require a supplied value.
 
 ## `input`
 
@@ -131,6 +132,65 @@ Use scalar dynamic values without field mappings:
 Dynamic sources must be non-empty lists. A scalar item is both its label and value. Object lists
 use `label_field` and `value_field`, which may be dotted paths. Single selection stores a scalar;
 multiple selection stores an ordered list.
+
+## `path`
+
+Select existing files or directories with a rooted filesystem browser. The selected variable
+contains slash-normalized paths relative to `root`, making the default configuration portable
+between machines.
+
+Select several Go source files:
+
+```yaml
+- id: sources
+  type: path
+  with:
+    variable: source_paths
+    message: Select source files
+    root: .
+    kind: file
+    multiple: true
+    required: true
+    patterns: ['**/*.go']
+    show_hidden: false
+```
+
+Select one directory, including the configured root itself as `.`:
+
+```yaml
+- id: project
+  type: path
+  with:
+    variable: project_dir
+    message: Select a project directory
+    root: projects
+    kind: directory
+```
+
+`root` defaults to the active `.run.dir`. A relative root resolves from that directory, including
+inside a `working_directory` block; an absolute root is also allowed. The resolved root must be an
+existing directory and the browser cannot navigate above it. Symlinks are usable only when their
+resolved targets remain inside the root.
+
+`kind` accepts `file`, `directory`, or `either` and defaults to `file`. `multiple` defaults to
+`false`, `required` defaults to `true`, and `show_hidden` defaults to `false`. `patterns` uses the
+same relative doublestar syntax as the `glob` step and restricts selectable files; directories
+remain visible for navigation. Patterns cannot be combined with `kind: directory`.
+
+The picker always shows its active shortcuts. Use arrow keys or `j`/`k` to move, right or `l` to
+open a directory, and left, `h`, or backspace to return. Enter selects in single mode; Space
+toggles paths and Enter confirms in multiple mode. `/` filters the current listing, `ctrl+h`
+toggles hidden entries, and Esc cancels. While filtering, Enter applies the filter and Esc clears
+it. Shortcut help wraps on narrow terminals instead of disappearing.
+
+Single selection exposes `.steps.<id>.value` and `.steps.<id>.root`. Multiple selection exposes
+`.steps.<id>.values`, `.steps.<id>.count`, and `.steps.<id>.root`; list order follows selection
+order. The `root` output is the canonical absolute root. Combine it with a selected relative path
+when a later command needs an absolute path.
+
+With `required: false`, selecting no path stores an empty string in single mode or an empty list in
+multiple mode. Pre-supplied values skip the browser but must still be relative, exist, match the
+declared kind and patterns, and remain inside the resolved root.
 
 ## `confirm`
 

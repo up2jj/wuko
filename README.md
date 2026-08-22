@@ -7,7 +7,8 @@ with typed data and files, call APIs, run scripts or containers, and start codin
 ## Features
 
 - **Local-first workflows** — keep readable automation beside the code it changes.
-- **Interactive runs** — collect text, passwords, choices, and confirmations in the terminal.
+- **Interactive runs** — collect text, passwords, choices, filesystem paths, and confirmations in
+  the terminal.
 - **Typed workflow state** — use variables, step outputs, JSON/TOML imports, JSONPath, semantic
   versions, templates, and expressions without converting everything to strings.
 - **Useful execution controls** — conditions, early successful returns, retries, timeouts, polling,
@@ -88,9 +89,10 @@ wuko run check --var package=./cmd/...
 wuko run check --dry-run
 ```
 
-Bare `wuko` opens a searchable picker in a terminal. `wuko run NAME` searches the nearest
-`.wuko/workflows/` directory first, then the user workflow directories. Use `--file` for an
-explicit path:
+Bare `wuko` opens a searchable picker in a terminal. Press Enter to run the selected workflow or
+Shift+Enter to print its reproducible `wuko run` command. `wuko run NAME` searches the nearest
+`.wuko/workflows/` directory first, then the user workflow directories. Use `--file` for an explicit
+path:
 
 ```sh
 wuko run --file ./workflows/release.yaml
@@ -164,6 +166,7 @@ Each linked guide contains multiple examples for every step.
 | `input` | Collect editable text or typed JSON/lists | [Interactive steps](docs/steps-interactive.md#input) |
 | `password` | Collect masked text | [Interactive steps](docs/steps-interactive.md#password) |
 | `choice` | Select one or many static/dynamic values | [Interactive steps](docs/steps-interactive.md#choice) |
+| `path` | Select one or many files/directories | [Interactive steps](docs/steps-interactive.md#path) |
 | `confirm` | Collect a boolean decision | [Interactive steps](docs/steps-interactive.md#confirm) |
 | `set` | Assign a literal or expression result | [Data steps](docs/steps-data.md#set) |
 | `assert` | Stop unless an expression is true | [Data steps](docs/steps-data.md#assert) |

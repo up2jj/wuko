@@ -178,14 +178,41 @@ func (writer synchronizedWriter) Write(data []byte) (int, error) {
 	return writer.writer.Write(data)
 }
 
+// terminalFile is the capability terminal UI libraries use to recognize an
+// interactive output and query its dimensions. Keep it local so the engine
+// does not need to depend on a particular terminal package.
+type terminalFile interface {
+	io.ReadWriteCloser
+	Fd() uintptr
+}
+
+type synchronizedTerminalWriter struct {
+	terminalFile
+	mu *sync.Mutex
+}
+
+func (writer synchronizedTerminalWriter) Write(data []byte) (int, error) {
+	writer.mu.Lock()
+	defer writer.mu.Unlock()
+	return writer.terminalFile.Write(data)
+}
+
+func synchronizeWriter(mu *sync.Mutex, writer io.Writer) io.Writer {
+	writer = writerOrDiscard(writer)
+	if terminal, ok := writer.(terminalFile); ok {
+		return synchronizedTerminalWriter{terminalFile: terminal, mu: mu}
+	}
+	return synchronizedWriter{mu: mu, writer: writer}
+}
+
 func prepareRunOptions(options Options) Options {
 	if options.runtime != nil {
 		return options
 	}
 	runtime := &runRuntime{}
 	options.runtime = runtime
-	options.Stdout = synchronizedWriter{mu: &runtime.mu, writer: writerOrDiscard(options.Stdout)}
-	options.Stderr = synchronizedWriter{mu: &runtime.mu, writer: writerOrDiscard(options.Stderr)}
+	options.Stdout = synchronizeWriter(&runtime.mu, options.Stdout)
+	options.Stderr = synchronizeWriter(&runtime.mu, options.Stderr)
 	return options
 }
 

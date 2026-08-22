@@ -4,13 +4,42 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
 )
+
+func TestSynchronizeWriterPreservesTerminalFileCapability(t *testing.T) {
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = reader.Close()
+		_ = writer.Close()
+	})
+
+	wrapped := synchronizeWriter(&sync.Mutex{}, writer)
+	terminal, ok := wrapped.(terminalFile)
+	if !ok {
+		t.Fatalf("synchronized writer type %T does not preserve terminal capability", wrapped)
+	}
+	if terminal.Fd() != writer.Fd() {
+		t.Fatalf("fd = %d, want %d", terminal.Fd(), writer.Fd())
+	}
+}
+
+func TestSynchronizeWriterKeepsGenericWriterGeneric(t *testing.T) {
+	wrapped := synchronizeWriter(&sync.Mutex{}, &strings.Builder{})
+	if _, ok := wrapped.(terminalFile); ok {
+		t.Fatalf("generic synchronized writer type %T unexpectedly has terminal capability", wrapped)
+	}
+}
 
 func TestRunReportsProgressAndCollectsStats(t *testing.T) {
 	var requests []step.Request

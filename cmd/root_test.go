@@ -902,7 +902,7 @@ func TestListCommandIncludesScope(t *testing.T) {
 	}
 }
 
-func TestBareCommandInteractiveSelectionPrintsRunCommand(t *testing.T) {
+func TestBareCommandInteractiveEnterRunsWorkflow(t *testing.T) {
 	root := t.TempDir()
 	localDir := filepath.Join(root, ".wuko", "workflows")
 	globalDir := filepath.Join(root, "home", ".wuko", "workflows")
@@ -915,8 +915,36 @@ func TestBareCommandInteractiveSelectionPrintsRunCommand(t *testing.T) {
 	writeTestWorkflow(t, filepath.Join(localDir, "local.yaml"), "local workflow")
 	writeTestWorkflow(t, filepath.Join(globalDir, "global.yaml"), "global workflow")
 	var output bytes.Buffer
+	registry := step.NewRegistry()
+	if err := shell.Register(registry); err != nil {
+		t.Fatal(err)
+	}
 	command := newRootCmd(dependencies{
 		stdin: bytes.NewBufferString("\r"), stdout: &output, stderr: &output,
+		cwd:       func() (string, error) { return root, nil },
+		homeDir:   func() (string, error) { return filepath.Join(root, "home"), nil },
+		configDir: func() (string, error) { return filepath.Join(root, "config"), nil },
+		registry:  registry, isInteractive: func(io.Reader) bool { return true },
+	})
+	command.SetArgs(nil)
+	if err := command.ExecuteContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(output.String(), "wuko run global") || !strings.Contains(output.String(), "Workflow global succeeded") {
+		t.Fatalf("output = %q", output.String())
+	}
+}
+
+func TestBareCommandInteractiveShiftEnterPrintsRunCommand(t *testing.T) {
+	root := t.TempDir()
+	workflowDir := filepath.Join(root, ".wuko", "workflows")
+	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeTestWorkflow(t, filepath.Join(workflowDir, "build.yaml"), "build workflow")
+	var output bytes.Buffer
+	command := newRootCmd(dependencies{
+		stdin: bytes.NewBufferString("\x1b[13;2u"), stdout: &output, stderr: &output,
 		cwd:       func() (string, error) { return root, nil },
 		homeDir:   func() (string, error) { return filepath.Join(root, "home"), nil },
 		configDir: func() (string, error) { return filepath.Join(root, "config"), nil },
@@ -926,7 +954,7 @@ func TestBareCommandInteractiveSelectionPrintsRunCommand(t *testing.T) {
 	if err := command.ExecuteContext(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), "wuko run global") {
+	if !strings.Contains(output.String(), "wuko run build") || strings.Contains(output.String(), "Workflow build succeeded") {
 		t.Fatalf("output = %q", output.String())
 	}
 }

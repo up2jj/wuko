@@ -1,6 +1,6 @@
 ---
 name: wuko-workflow-author
-description: Create or update Wuko version-1 YAML workflows, including cron schedules, templates, conditions, early returns, finally cleanup, foreach and matrix controls, required files, composite actions, waits, polling, retries, concurrency, interactive prompts, typed and imported variables, JSONPath selection, semantic versions, HTTP, files, managed temporary resources, glob discovery, persistent change detectors, content-addressed directory caches, Lua, shell, Docker, and agent steps. Use when designing workflow files, extending existing workflows, or reviewing workflow structure before execution.
+description: Create or update Wuko version-1 YAML workflows, including cron schedules, templates, conditions, early returns, finally cleanup, foreach and matrix controls, required files, composite actions, waits, polling, retries, concurrency, interactive prompts and path selection, typed and imported variables, JSONPath selection, semantic versions, HTTP, files, managed temporary resources, glob discovery, persistent change detectors, content-addressed directory caches, Lua, shell, Docker, and agent steps. Use when designing workflow files, extending existing workflows, or reviewing workflow structure before execution.
 ---
 
 # Wuko Workflow Author
@@ -18,8 +18,10 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
 
 ## Step selection
 
-- Use `confirm` for boolean approval, `choice` for enumerated values, `input` for visible text, and
-  `password` for masked text. Supply their variables explicitly in non-interactive runs.
+- Use `confirm` for boolean approval, `choice` for enumerated values, `input` for visible text,
+  `password` for masked text, and `path` for rooted selection of existing files or directories.
+  Keep path patterns relative to the picker root and supply prompt variables explicitly in
+  non-interactive runs.
 - Use `set` for JSON-compatible literals and Expr-based values; use Lua only when transformation
   needs imperative logic.
 - Use `import_vars` for runtime JSON or TOML variable files. Keep its ordered `files` paths

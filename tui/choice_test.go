@@ -39,6 +39,18 @@ func TestSelectionModelNavigationAndEnter(t *testing.T) {
 	if command == nil || model.selected.Label != "deploy" || !model.done {
 		t.Fatalf("selected = %#v, done = %v, command nil = %v", model.selected, model.done, command == nil)
 	}
+	if model.intent != SelectionPrimary {
+		t.Fatalf("intent = %v, want primary", model.intent)
+	}
+}
+
+func TestSelectionModelShiftEnterUsesAlternateIntent(t *testing.T) {
+	model := newSelectionModel("Workflows", []Option{{Label: "build"}})
+	updated, command := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModShift})
+	model = updated.(selectionModel)
+	if command == nil || !model.done || model.selected.Label != "build" || model.intent != SelectionAlternate {
+		t.Fatalf("selected = %#v, intent = %v, done = %v, command nil = %v", model.selected, model.intent, model.done, command == nil)
+	}
 }
 
 func TestSelectionModelFiltering(t *testing.T) {
@@ -66,5 +78,10 @@ func TestSelectionModelViewIncludesDescription(t *testing.T) {
 	model := newSelectionModel("Workflows", []Option{{Label: "build", Description: "local • Build it • /tmp/build.yaml"}})
 	if !strings.Contains(model.View().Content, "local") {
 		t.Fatalf("view = %q", model.View().Content)
+	}
+	for _, shortcut := range []string{"enter", "run", "shift+enter", "print command"} {
+		if !strings.Contains(model.View().Content, shortcut) {
+			t.Fatalf("view = %q, want shortcut %q", model.View().Content, shortcut)
+		}
 	}
 }

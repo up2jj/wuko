@@ -73,8 +73,9 @@ order, not which definition wins.
 - `wuko validate NAME` and `wuko tree NAME` use effective discovery; without a name, `validate`
   validates every effective workflow.
 - Bare `wuko` calls `DiscoverAll`. In an interactive terminal it shows effective and shadowed
-  sources in the picker. Selecting an effective source prints `wuko run NAME`; selecting a
-  shadowed source prints `wuko run --file PATH` so the selected file remains unambiguous.
+  sources in the picker. Enter runs the exact selected source. Shift+Enter prints `wuko run NAME`
+  for an effective source or `wuko run --file PATH` for a shadowed source so the printed command
+  remains unambiguous.
 - Bare `wuko` in a non-interactive context prints all discovered sources as tab-separated rows.
 - Shell completion returns effective workflow names only.
 - `wuko run --file PATH` bypasses discovery. HTTP and `github:` locators also bypass local
