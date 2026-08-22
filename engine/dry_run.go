@@ -70,7 +70,7 @@ func writeDryRun(writer io.Writer, steps []workflow.Step, indent string, parent 
 			continue
 		}
 		if workflowStep.Foreach != nil {
-			if _, err := fmt.Fprintf(writer, "%s%s %s (foreach %s)%s%s\n", indent, index, workflowStep.ID, workflowStep.Foreach.Items, fanoutPolicySuffix(workflowStep.Foreach.MaxConcurrency, workflowStep.Foreach.MaxIterations, workflowStep.Foreach.Timeout, workflowStep.Foreach.FailFast), dryRunCondition(workflowStep)); err != nil {
+			if _, err := fmt.Fprintf(writer, "%s%s %s (foreach %s%s)%s%s\n", indent, index, workflowStep.ID, workflowStep.Foreach.Items, fanoutCollectSuffix(workflowStep.Foreach.Collect), fanoutPolicySuffix(workflowStep.Foreach.MaxConcurrency, workflowStep.Foreach.MaxIterations, workflowStep.Foreach.Timeout, workflowStep.Foreach.FailFast), dryRunCondition(workflowStep)); err != nil {
 				return err
 			}
 			if err := writeDryRun(writer, workflowStep.Foreach.Steps, indent+"   ", path); err != nil {
@@ -79,7 +79,7 @@ func writeDryRun(writer io.Writer, steps []workflow.Step, indent string, parent 
 			continue
 		}
 		if workflowStep.Matrix != nil {
-			if _, err := fmt.Fprintf(writer, "%s%s %s (matrix %s)%s%s\n", indent, index, workflowStep.ID, matrixAxisNames(workflowStep.Matrix.Axes), fanoutPolicySuffix(workflowStep.Matrix.MaxConcurrency, workflowStep.Matrix.MaxIterations, workflowStep.Matrix.Timeout, workflowStep.Matrix.FailFast), dryRunCondition(workflowStep)); err != nil {
+			if _, err := fmt.Fprintf(writer, "%s%s %s (matrix %s%s)%s%s\n", indent, index, workflowStep.ID, matrixAxisNames(workflowStep.Matrix.Axes), fanoutCollectSuffix(workflowStep.Matrix.Collect), fanoutPolicySuffix(workflowStep.Matrix.MaxConcurrency, workflowStep.Matrix.MaxIterations, workflowStep.Matrix.Timeout, workflowStep.Matrix.FailFast), dryRunCondition(workflowStep)); err != nil {
 				return err
 			}
 			if err := writeDryRun(writer, workflowStep.Matrix.Steps, indent+"   ", path); err != nil {
@@ -113,6 +113,13 @@ func writeDryRun(writer io.Writer, steps []workflow.Step, indent string, parent 
 		}
 	}
 	return nil
+}
+
+func fanoutCollectSuffix(collect string) string {
+	if collect == "" {
+		return ""
+	}
+	return "; collect " + collect
 }
 
 func writeDryRunFinally(writer io.Writer, steps []workflow.Step) error {

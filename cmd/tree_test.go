@@ -241,11 +241,12 @@ func TestWorkflowTreeDisplaysWorkingDirectoryBlock(t *testing.T) {
 func TestWorkflowTreeDisplaysFanoutControls(t *testing.T) {
 	definition := &workflow.Definition{Name: "fanout", Steps: []workflow.Step{
 		{ID: "deploy", If: "vars.deploy", Foreach: &workflow.ForeachGroup{
-			Items: "vars.targets", MaxConcurrency: 1, FailFast: true,
+			Items: "vars.targets", Collect: "steps.run.url", MaxConcurrency: 1, FailFast: true,
 			Steps: []workflow.Step{{ID: "run", Type: "shell"}},
 		}},
 		{ID: "checks", Matrix: &workflow.MatrixGroup{
 			Axes:           workflow.MatrixAxes{{Name: "os", Values: []any{"linux"}}, {Name: "go", Values: []any{"1.26"}}},
+			Collect:        `{"os": matrix.os, "path": steps.test.path}`,
 			MaxConcurrency: 2, FailFast: false,
 			Steps: []workflow.Step{{ID: "test", Type: "shell"}},
 		}},
@@ -255,9 +256,9 @@ func TestWorkflowTreeDisplaysFanoutControls(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := `fanout
-├── deploy (foreach vars.targets) [max 1, max 10000 iterations, fail fast] if: vars.deploy
+├── deploy (foreach vars.targets; collect steps.run.url) [max 1, max 10000 iterations, fail fast] if: vars.deploy
 │   └── run (shell)
-└── checks (matrix os × go) [max 2, max 10000 iterations, wait for all]
+└── checks (matrix os × go; collect {"os": matrix.os, "path": steps.test.path}) [max 2, max 10000 iterations, wait for all]
     └── test (shell)
 `
 	if output.String() != want {

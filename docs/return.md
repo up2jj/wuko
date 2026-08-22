@@ -152,6 +152,7 @@ steps:
   - id: deployments
     foreach:
       items: vars.targets
+      collect: '{"target": foreach.item, "stdout": steps.deploy.stdout}'
       max_concurrency: 4
       steps:
         - id: deploy

@@ -11,6 +11,7 @@ import (
 // ForeachGroup repeats a child step block for each item returned by an expression.
 type ForeachGroup struct {
 	Items          string    `yaml:"items"`
+	Collect        string    `yaml:"collect,omitempty"`
 	Steps          []Step    `yaml:"steps"`
 	MaxConcurrency int       `yaml:"max_concurrency,omitempty"`
 	MaxIterations  int       `yaml:"max_iterations,omitempty"`
@@ -23,8 +24,11 @@ func (group *ForeachGroup) UnmarshalYAML(node *yaml.Node) error {
 		return fmt.Errorf("foreach must be an object")
 	}
 	if err := rejectUnknownFields(node, "foreach", map[string]bool{
-		"items": true, "steps": true, "max_concurrency": true, "max_iterations": true, "timeout": true, "fail_fast": true,
+		"items": true, "collect": true, "steps": true, "max_concurrency": true, "max_iterations": true, "timeout": true, "fail_fast": true,
 	}); err != nil {
+		return err
+	}
+	if err := validateCollectNode(node, "foreach"); err != nil {
 		return err
 	}
 	type plain ForeachGroup
@@ -87,6 +91,7 @@ func (axes *MatrixAxes) UnmarshalYAML(node *yaml.Node) error {
 // MatrixGroup repeats a child step block for the Cartesian product of ordered axes.
 type MatrixGroup struct {
 	Axes           MatrixAxes `yaml:"axes"`
+	Collect        string     `yaml:"collect,omitempty"`
 	Steps          []Step     `yaml:"steps"`
 	MaxConcurrency int        `yaml:"max_concurrency,omitempty"`
 	MaxIterations  int        `yaml:"max_iterations,omitempty"`
@@ -99,8 +104,11 @@ func (group *MatrixGroup) UnmarshalYAML(node *yaml.Node) error {
 		return fmt.Errorf("matrix must be an object")
 	}
 	if err := rejectUnknownFields(node, "matrix", map[string]bool{
-		"axes": true, "steps": true, "max_concurrency": true, "max_iterations": true, "timeout": true, "fail_fast": true,
+		"axes": true, "collect": true, "steps": true, "max_concurrency": true, "max_iterations": true, "timeout": true, "fail_fast": true,
 	}); err != nil {
+		return err
+	}
+	if err := validateCollectNode(node, "matrix"); err != nil {
 		return err
 	}
 	type plain MatrixGroup
@@ -112,6 +120,20 @@ func (group *MatrixGroup) UnmarshalYAML(node *yaml.Node) error {
 		return fmt.Errorf("matrix max_iterations must be between 1 and %d", controlpkg.MaxIterations)
 	}
 	*group = MatrixGroup(decoded)
+	return nil
+}
+
+func validateCollectNode(node *yaml.Node, kind string) error {
+	collect := mappingValue(node, "collect")
+	if collect == nil {
+		return nil
+	}
+	if collect.Kind != yaml.ScalarNode || collect.Tag != "!!str" {
+		return fmt.Errorf("%s collect must be an expression string", kind)
+	}
+	if strings.TrimSpace(collect.Value) == "" {
+		return fmt.Errorf("%s collect must be a non-empty expression", kind)
+	}
 	return nil
 }
 

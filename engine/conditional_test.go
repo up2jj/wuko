@@ -114,7 +114,7 @@ func TestConditionalBlockInsideForeachCollectsTransparentOutputs(t *testing.T) {
 	var runs int
 	registry := conditionalTestRegistry(t, &runs)
 	definition := testDefinition(t, "foreach-conditional", workflow.Step{ID: "loop", Foreach: &workflow.ForeachGroup{
-		Items: "vars.items", MaxConcurrency: 1, FailFast: true,
+		Items: "vars.items", Collect: "steps.inside", MaxConcurrency: 1, FailFast: true,
 		Steps: []workflow.Step{{If: "true", Steps: []workflow.Step{
 			{ID: "inside", Type: "capture", With: map[string]any{"value": "{{ .foreach.item }}"}},
 		}}},
@@ -124,10 +124,9 @@ func TestConditionalBlockInsideForeachCollectsTransparentOutputs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	record := state.Steps["loop"].(map[string]any)["results"].([]any)[0].(map[string]any)
-	inside := record["steps"].(map[string]any)["inside"].(map[string]any)
+	inside := state.Steps["loop"].(map[string]any)["results"].([]any)[0].(map[string]any)
 	if inside["value"] != "one" || runs != 1 {
-		t.Fatalf("record = %#v, runs = %d", record, runs)
+		t.Fatalf("result = %#v, runs = %d", inside, runs)
 	}
 }
 

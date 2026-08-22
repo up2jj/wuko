@@ -37,6 +37,11 @@ func (e *Engine) validateControl(ctx context.Context, definition *workflow.Defin
 			return fmt.Errorf("%s %s: %w", kind, expression.label, err)
 		}
 	}
+	if collect := controlCollect(workflowStep); collect != "" {
+		if err := controlpkg.ValidateExpression(collect); err != nil {
+			return fmt.Errorf("%s collect: %w", kind, err)
+		}
+	}
 	childState := cloneState(state)
 	if childState.Bindings == nil {
 		childState.Bindings = make(map[string]any)
@@ -167,35 +172,76 @@ func (e *Engine) executeControl(ctx context.Context, definition *workflow.Defini
 			Duration: item.Duration, Error: item.Err, Steps: stats.Steps,
 		})
 	}
-	finishedAt := time.Now()
-	report(options, ProgressEvent{
-		Kind: ControlFinished, Status: statusFromError(runErr), Time: finishedAt, WorkflowName: definition.Name,
-		Depth: options.depth, StepID: workflowStep.ID, ControlKind: kind, Iterations: len(iterations),
-		MaxConcurrency: maxConcurrency, FailFast: failFast, Timeout: timeout,
-		Started: startedIterations, Succeeded: succeededIterations,
-		Duration: finishedAt.Sub(startedAt), Error: runErr,
-	})
 	if runErr != nil {
 		stepErr := fmt.Errorf("workflow %q step %q (%s): %w", definition.Name, workflowStep.ID, kind, runErr)
+		reportControlFinished(options, definition, workflowStep, kind, iterations, maxConcurrency, failFast, timeout, startedAt, startedIterations, succeededIterations, stepErr)
 		finish(statusFromError(runErr), stepErr, iterationStats, nested)
 		outcome.err = stepErr
 		return outcome
 	}
 
-	resultRecords := make([]any, len(outcomes))
-	for i, item := range outcomes {
-		steps := selectedStepOutputs(item.Value.state, children)
-		record := map[string]any{"index": item.Iteration.Index, "steps": steps}
-		if kind == "foreach" {
-			record["item"] = cloneAny(bindingRoot(item.Iteration.Bindings, "foreach")["item"])
-		} else {
-			record["matrix"] = cloneAny(bindingRoot(item.Iteration.Bindings, "matrix"))
+	outputs := map[string]any{"count": len(iterations)}
+	if collect := controlCollect(workflowStep); collect != "" {
+		collectionStarted := time.Now()
+		traceStep(options, definition, workflowStep, diagnostic.PhaseControl, diagnostic.StatusStarted, time.Time{}, "collecting "+kind+" results", nil)
+		results, err := collectControlResults(ctx, definition, options.RunDir, collect, outcomes)
+		if err != nil {
+			traceStep(options, definition, workflowStep, diagnostic.PhaseControl, diagnostic.StatusFailed, collectionStarted, "collecting "+kind+" results", err)
+			stepErr := fmt.Errorf("workflow %q step %q (%s): %w", definition.Name, workflowStep.ID, kind, err)
+			reportControlFinished(options, definition, workflowStep, kind, iterations, maxConcurrency, failFast, timeout, startedAt, startedIterations, succeededIterations, stepErr)
+			finish(statusFromError(stepErr), stepErr, iterationStats, nested)
+			outcome.err = stepErr
+			return outcome
 		}
-		resultRecords[i] = record
+		traceStep(options, definition, workflowStep, diagnostic.PhaseControl, diagnostic.StatusSucceeded, collectionStarted, "collected "+kind+" results", nil, diagnostic.Attr("results", fmt.Sprint(len(results))))
+		outputs["results"] = results
 	}
-	outcome.result = step.Result{Outputs: map[string]any{"count": len(resultRecords), "results": resultRecords}}
+	reportControlFinished(options, definition, workflowStep, kind, iterations, maxConcurrency, failFast, timeout, startedAt, startedIterations, succeededIterations, nil)
+	outcome.result = step.Result{Outputs: outputs}
 	finish(StatusSucceeded, nil, iterationStats, nested)
 	return outcome
+}
+
+func collectControlResults(ctx context.Context, definition *workflow.Definition, runDir, expression string, outcomes []controlpkg.Outcome[controlExecution]) ([]any, error) {
+	results := make([]any, len(outcomes))
+	for i, item := range outcomes {
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("collect iteration %d: %w", item.Iteration.Index, err)
+		}
+		value, err := controlpkg.EvaluateExpression(expression, templateData(definition, runDir, item.Value.state))
+		if err != nil {
+			return nil, fmt.Errorf("collect iteration %d: %w", item.Iteration.Index, err)
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("collect iteration %d: %w", item.Iteration.Index, err)
+		}
+		if !workflow.ActionDataValue(value) {
+			return nil, fmt.Errorf("collect iteration %d: expression returned %T, want YAML/JSON-compatible value", item.Iteration.Index, value)
+		}
+		results[i] = cloneAny(value)
+	}
+	return results, nil
+}
+
+func reportControlFinished(options Options, definition *workflow.Definition, workflowStep workflow.Step, kind string, iterations []controlpkg.Iteration, maxConcurrency int, failFast bool, timeout time.Duration, startedAt time.Time, startedIterations, succeededIterations int, err error) {
+	finishedAt := time.Now()
+	report(options, ProgressEvent{
+		Kind: ControlFinished, Status: statusFromError(err), Time: finishedAt, WorkflowName: definition.Name,
+		Depth: options.depth, StepID: workflowStep.ID, ControlKind: kind, Iterations: len(iterations),
+		MaxConcurrency: maxConcurrency, FailFast: failFast, Timeout: timeout,
+		Started: startedIterations, Succeeded: succeededIterations,
+		Duration: finishedAt.Sub(startedAt), Error: err,
+	})
+}
+
+func controlCollect(workflowStep workflow.Step) string {
+	if workflowStep.Foreach != nil {
+		return workflowStep.Foreach.Collect
+	}
+	if workflowStep.Matrix != nil {
+		return workflowStep.Matrix.Collect
+	}
+	return ""
 }
 
 func controlDeclaration(workflowStep workflow.Step) (kind string, children []workflow.Step, expressions []controlExpression, maxConcurrency, maxIterations int, timeout time.Duration, failFast bool, err error) {
@@ -281,11 +327,7 @@ func selectedStepOutputs(state *State, steps []workflow.Step) map[string]any {
 			maps.Copy(result, selectedStepOutputs(state, workflowStep.Finally))
 			continue
 		}
-		if workflowStep.IsWorkingDirectoryBlock() {
-			maps.Copy(result, selectedStepOutputs(state, workflowStep.Steps))
-			continue
-		}
-		if workflowStep.IsConditionalBlock() {
+		if workflowStep.IsWorkingDirectoryBlock() || workflowStep.IsConditionalBlock() {
 			maps.Copy(result, selectedStepOutputs(state, workflowStep.Steps))
 			continue
 		}

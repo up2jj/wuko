@@ -232,7 +232,7 @@ func TestWorkingDirectoryComposesWithForeachAndCompositeActions(t *testing.T) {
 		Version: 1, Name: "composed", Dir: root, Vars: map[string]any{"services": []any{"api"}},
 		Steps: []workflow.Step{{WorkingDirectory: "services", Steps: []workflow.Step{{
 			ID: "service_loop", Foreach: &workflow.ForeachGroup{
-				Items: "vars.services", MaxConcurrency: 1, FailFast: true,
+				Items: "vars.services", Collect: "steps.call", MaxConcurrency: 1, FailFast: true,
 				Steps: []workflow.Step{{WorkingDirectory: "{{ .foreach.item }}", Steps: []workflow.Step{{
 					ID: "call", Uses: workflow.ActionSource{URL: "https://example.test/action"}, Action: action, With: map[string]any{},
 				}}}},
@@ -243,8 +243,7 @@ func TestWorkingDirectoryComposesWithForeachAndCompositeActions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	iteration := state.Steps["service_loop"].(map[string]any)["results"].([]any)[0].(map[string]any)
-	call := iteration["steps"].(map[string]any)["call"].(map[string]any)
+	call := state.Steps["service_loop"].(map[string]any)["results"].([]any)[0].(map[string]any)
 	if call["dir"] != service {
 		t.Fatalf("action dir = %#v, want %q", call["dir"], service)
 	}

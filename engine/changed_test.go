@@ -59,7 +59,7 @@ func TestChangedStepSupportsTemplatedForeachKeys(t *testing.T) {
 		Version: 1, Name: "changed-foreach", Dir: root, Vars: map[string]any{"targets": []any{"linux", "darwin"}},
 		Location: diagnostic.Location{Source: filepath.Join(root, "workflow.yaml")},
 		Steps: []workflow.Step{{ID: "targets", Foreach: &workflow.ForeachGroup{
-			Items: "vars.targets", MaxConcurrency: 1, MaxIterations: 10, FailFast: true,
+			Items: "vars.targets", Collect: "steps.detect.changed", MaxConcurrency: 1, MaxIterations: 10, FailFast: true,
 			Steps: []workflow.Step{
 				{ID: "detect", Type: "changed", With: map[string]any{
 					"key": "target-{{ .foreach.item }}", "values": map[string]any{"target": "{{ .foreach.item }}"},
@@ -84,12 +84,8 @@ func TestChangedStepSupportsTemplatedForeachKeys(t *testing.T) {
 	}
 	results := state.Steps["targets"].(map[string]any)["results"].([]any)
 	for _, result := range results {
-		steps := result.(map[string]any)["steps"].(map[string]any)
-		if steps["detect"].(map[string]any)["changed"] != false {
-			t.Fatalf("iteration steps = %#v", steps)
-		}
-		if _, exists := steps["build"]; exists {
-			t.Fatalf("unchanged build is present: %#v", steps)
+		if result != false {
+			t.Fatalf("collected result = %#v", result)
 		}
 	}
 }

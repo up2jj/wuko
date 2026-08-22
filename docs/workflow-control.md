@@ -8,8 +8,9 @@ Wuko has three controls for scheduling or repeating operations: `concurrent`, `f
 - Use `matrix` when every combination of several named dimensions must run.
 
 Both `foreach` and `matrix` are logical parent steps. Each iteration receives an isolated copy of
-the state that existed before the parent began, runs its child steps in order, and contributes one
-record to the parent's ordered result.
+the state that existed before the parent began and runs its child steps in order. The optional
+`collect` expression controls which value each completed iteration contributes to the parent's
+ordered result.
 
 An anonymous `if` wrapper can guard a sequential block containing any of these controls:
 
@@ -43,12 +44,14 @@ steps:
   - id: deployments
     foreach:
       items: vars.targets
+      collect: '{"target": foreach.item, "url": steps.deploy.url}'
       steps:
         - id: deploy
-          type: shell
+          type: lua
           with:
-            command: ./deploy
-            args: ["{{ .foreach.item }}"]
+            args: {target: "{{ .foreach.item }}"}
+            source: |
+              wuko.output("url", "https://example.com/" .. wuko.args.target)
 ```
 
 Inside the block, templates use `.foreach.item` and `.foreach.index`. Conditions and other Expr
@@ -70,27 +73,46 @@ fields omit the leading dot:
 Indexes are zero-based. Lua steps can read the same values from `wuko.foreach.item` and
 `wuko.foreach.index`.
 
-A successful parent exposes an ordered aggregate:
+A successful parent with `collect` exposes one evaluated value per iteration in expansion order:
 
 ```yaml
 steps.deployments:
   count: 2
   results:
-    - index: 0
-      item: api
-      steps:
-        deploy:
-          stdout: deployed api
-          exit_code: 0
-    - index: 1
-      item: worker
-      steps:
-        deploy:
-          stdout: deployed worker
-          exit_code: 0
+    - {target: api, url: "https://example.com/api"}
+    - {target: worker, url: "https://example.com/worker"}
 ```
 
-An empty input list succeeds and exposes `count: 0` and `results: []`.
+`collect` is a typed Expr expression evaluated against each iteration's final state after every
+iteration succeeds. It can read `steps`, iteration-local `vars`, `inputs`, `env`, `run`, and the
+active `foreach` or `matrix` binding. It may return null, a scalar, a list, or an object. Nested
+lists remain nested.
+
+Iteration-local variables can be exported deliberately even though they do not otherwise escape:
+
+```yaml
+- id: generated
+  foreach:
+    items: vars.targets
+    collect: vars.artifact
+    steps:
+      - id: prepare
+        type: lua
+        with:
+          args: {target: "{{ .foreach.item }}"}
+          source: |
+            wuko.set_var("artifact", "dist/" .. wuko.args.target .. ".tgz")
+```
+
+Without `collect`, a successful parent exposes only its expansion count:
+
+```yaml
+steps.deployments:
+  count: 2
+```
+
+An empty input list succeeds. With `collect` it exposes `count: 0` and `results: []`; without
+`collect` it exposes only `count: 0`.
 
 ## Matrix
 
@@ -108,16 +130,18 @@ steps:
       axes:
         os: [linux, darwin]
         go_version: vars.go_versions
+      collect: steps.build.path
       max_concurrency: 2
       max_iterations: 100
       steps:
-        - id: test
-          type: shell
+        - id: build
+          type: lua
           with:
-            command: ./test-platform
             args:
-              - "{{ .matrix.os }}"
-              - "{{ .matrix.go_version }}"
+              os: "{{ .matrix.os }}"
+              go_version: "{{ .matrix.go_version }}"
+            source: |
+              wuko.output("path", "dist/app-" .. wuko.args.os .. "-" .. wuko.args.go_version)
 ```
 
 Axis declaration order is significant and preserved. The rightmost axis changes fastest, so the
@@ -136,15 +160,21 @@ finish in a different order:
 steps.checks:
   count: 4
   results:
-    - index: 0
-      matrix: {os: linux, go_version: "1.25"}
-      steps:
-        test: {exit_code: 0}
+    - dist/app-linux-1.25
+    - dist/app-linux-1.26
+    - dist/app-darwin-1.25
+    - dist/app-darwin-1.26
+```
+
+Collect an object when later steps also need the matrix coordinates:
+
+```yaml
+collect: '{"os": matrix.os, "version": matrix.go_version, "artifact": steps.build.path}'
 ```
 
 A matrix must declare at least one axis. If any axis is empty, the complete matrix has zero
-combinations and succeeds with an empty result. Duplicate axis values are allowed and produce
-duplicate combinations.
+combinations and succeeds with `count: 0` plus `results: []` when `collect` is present. Duplicate
+axis values are allowed and produce duplicate combinations.
 
 ## Scheduling and failures
 
@@ -172,21 +202,34 @@ Both controls accept the same policies:
 - `fail_fast` defaults to `true`. After an iteration fails, Wuko cancels running siblings and does
   not start queued work where possible. With `false`, Wuko runs every iteration and reports all
   failures in expansion order.
-- `timeout` is optional and begins after collection expressions and expansion complete. It covers
+- `timeout` is optional and begins after fan-out input expressions and expansion complete. It covers
   queueing, child steps, retries, polling delays, and nested concurrent groups during the execution
   phase. It cancels active work at the deadline and then waits for cleanup, so total wall-clock
   duration can be longer.
 - Each child retains its own condition, timeout, retry, polling, and action behavior.
 
-The parent result is committed only after every iteration succeeds. A failure exposes no partial
-`steps.<parent-id>` aggregate. Commands, files, HTTP requests, containers, agents, and other
-external effects completed before a failure are not rolled back.
+The parent result is committed only after every iteration and every collection evaluation
+succeeds. A failure exposes no partial `steps.<parent-id>` aggregate. Commands, files, HTTP
+requests, containers, agents, and other external effects completed before a failure are not
+rolled back.
+
+Collection runs after all child work. Expressions are evaluated sequentially in expansion order;
+the first error fails the parent with its zero-based iteration index. For example, this fails when
+`inspect` was skipped and therefore published no output:
+
+```yaml
+collect: steps.inspect.value
+```
+
+Returning `nil` explicitly is valid and adds a null entry. Other collected values must be
+YAML/JSON-compatible.
 
 Cancellation and fail-fast scheduling stop admitting queued iterations and wait for all active
 iterations to return. Terminal progress reports how many iterations started, succeeded, and were
 not run. Expansion itself checks cancellation while cloning foreach values and constructing matrix
 bindings. Expr does not accept a context during expression evaluation, so cancellation is checked
-immediately before and after each collection expression rather than during its evaluation.
+immediately before and after each fan-out input or `collect` expression rather than during its
+evaluation.
 
 See [Graceful shutdown](graceful-shutdown.md) for signal escalation, nested-control propagation,
 timeout boundaries, atomic result commits, and partial external effects.
@@ -195,13 +238,11 @@ Parallel controls are non-interactive so iterations cannot compete for terminal 
 controls retain normal interactive behavior. Pre-supplied `tui_input`, `tui_password`, and
 `tui_choice` variables remain usable in parallel iterations. An optional `tui_choice` without a
 supplied variable resolves to no selection.
-
 ## State and nesting
 
 Each iteration starts from the same pre-parent state. Its child steps run sequentially and may
 consume variables and outputs written by earlier children in that iteration. Those variables do
-not escape the iteration. The aggregate contains child step outputs, but not iteration-local
-variables.
+not escape the iteration except through an explicit `collect` expression.
 
 Child IDs are local to a control body, so separate controls may both use an ID such as `build`.
 A child ID may not collide with an ID in its enclosing workflow or composite action.

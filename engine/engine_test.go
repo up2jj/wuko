@@ -173,14 +173,14 @@ func TestDryRunPrintsButDoesNotEvaluateCondition(t *testing.T) {
 func TestDryRunPrintsUnexpandedControls(t *testing.T) {
 	registry := newTestRegistry(t, map[string]step.Builder{"capture": func(map[string]any) (step.Runner, error) { return countingRunner{}, nil }})
 	definition := testDefinition(t, "fanout-dry-run", workflow.Step{ID: "loop", Foreach: &workflow.ForeachGroup{
-		Items: "vars.missing", MaxConcurrency: 1, FailFast: true,
+		Items: "vars.missing", Collect: "steps.run.value", MaxConcurrency: 1, FailFast: true,
 		Steps: []workflow.Step{{ID: "run", Type: "capture", With: map[string]any{"value": "{{ .foreach.item }}"}}},
 	}})
 	var output bytes.Buffer
 	if _, err := New(registry).Run(t.Context(), definition, Options{DryRun: true, Stdout: &output, Stderr: io.Discard}); err != nil {
 		t.Fatal(err)
 	}
-	if want := "1. loop (foreach vars.missing) [max 1, max 10000 iterations, fail fast]\n   1.1 run (capture)\n"; output.String() != want {
+	if want := "1. loop (foreach vars.missing; collect steps.run.value) [max 1, max 10000 iterations, fail fast]\n   1.1 run (capture)\n"; output.String() != want {
 		t.Fatalf("output = %q, want %q", output.String(), want)
 	}
 }

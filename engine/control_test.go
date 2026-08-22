@@ -21,14 +21,16 @@ func TestRunForeachAggregatesOrderedIsolatedResults(t *testing.T) {
 		}), nil
 	}})
 	definition := testDefinition(t, "foreach", workflow.Step{ID: "deploy", Foreach: &workflow.ForeachGroup{
-		Items: "vars.targets", MaxConcurrency: 1, FailFast: true,
+		Items: "vars.targets", Collect: `{"item": foreach.item, "value": steps.second.value, "local": vars.temporary, "input": inputs.seed, "env": env.COLLECT, "dir": run.dir}`, MaxConcurrency: 1, FailFast: true,
 		Steps: []workflow.Step{
 			{ID: "first", Type: "capture", With: map[string]any{"value": "{{ .foreach.index }}:{{ .foreach.item }}"}},
 			{ID: "second", Type: "capture", If: "foreach.index >= 0", With: map[string]any{"value": "{{ .vars.temporary }}"}},
 		},
 	}})
 	definition.Vars = map[string]any{"targets": []any{"linux", "darwin"}}
-	state, err := New(registry).Run(t.Context(), definition, Options{})
+	definition.Env = workflow.Environment{"COLLECT": "available"}
+	runDir := t.TempDir()
+	state, err := New(registry).Run(t.Context(), definition, Options{inputs: map[string]any{"seed": 42}, RunDir: runDir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,9 +44,8 @@ func TestRunForeachAggregatesOrderedIsolatedResults(t *testing.T) {
 	if first["item"] != "linux" || second["item"] != "darwin" {
 		t.Fatalf("records = %#v", records)
 	}
-	firstSteps := first["steps"].(map[string]any)
-	if firstSteps["second"].(map[string]any)["value"] != "0:linux" {
-		t.Fatalf("first steps = %#v", firstSteps)
+	if first["value"] != "0:linux" || first["local"] != "0:linux" || first["input"] != 42 || first["env"] != "available" || first["dir"] != runDir {
+		t.Fatalf("first result = %#v", first)
 	}
 	if _, exists := state.Vars["temporary"]; exists {
 		t.Fatalf("iteration variable escaped: %#v", state.Vars)
@@ -65,7 +66,7 @@ func TestRunMatrixUsesDeterministicBindings(t *testing.T) {
 			{Name: "os", Values: []any{"linux", "darwin"}},
 			{Name: "version", Expression: "vars.versions"},
 		},
-		MaxConcurrency: 1, FailFast: true,
+		Collect: "matrix", MaxConcurrency: 2, FailFast: true,
 		Steps: []workflow.Step{{ID: "test", Type: "binding", With: map[string]any{}}},
 	}})
 	definition.Vars = map[string]any{"versions": []any{"1", "2"}}
@@ -76,7 +77,7 @@ func TestRunMatrixUsesDeterministicBindings(t *testing.T) {
 	records := state.Steps["checks"].(map[string]any)["results"].([]any)
 	var got []map[string]any
 	for _, raw := range records {
-		got = append(got, raw.(map[string]any)["matrix"].(map[string]any))
+		got = append(got, raw.(map[string]any))
 	}
 	want := []map[string]any{
 		{"os": "linux", "version": "1"}, {"os": "linux", "version": "2"},
@@ -153,7 +154,7 @@ func TestForeachPassesBindingToCompositeActionInput(t *testing.T) {
 	action.Inputs = map[string]workflow.ActionInput{"target": {Type: "string", Required: true}}
 	action.Outputs = map[string]workflow.ActionOutput{"result": {Value: "steps.echo.value"}}
 	definition := testDefinition(t, "caller", workflow.Step{ID: "calls", Foreach: &workflow.ForeachGroup{
-		Items: "vars.targets", MaxConcurrency: 1, FailFast: true,
+		Items: "vars.targets", Collect: "steps.remote", MaxConcurrency: 1, FailFast: true,
 		Steps: []workflow.Step{{
 			ID: "remote", Uses: workflow.ActionSource{URL: "https://example.test/action"}, Action: action,
 			With: map[string]any{"target": map[string]any{"expr": "foreach.item"}},
@@ -164,8 +165,7 @@ func TestForeachPassesBindingToCompositeActionInput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	record := state.Steps["calls"].(map[string]any)["results"].([]any)[0].(map[string]any)
-	remote := record["steps"].(map[string]any)["remote"].(map[string]any)
+	remote := state.Steps["calls"].(map[string]any)["results"].([]any)[0].(map[string]any)
 	if remote["result"] != "api" {
 		t.Fatalf("remote output = %#v", remote)
 	}
@@ -189,7 +189,7 @@ func TestControlInteractivePolicyAndNestedConcurrent(t *testing.T) {
 			Steps: []workflow.Step{{ID: "prompt", Type: "observe", With: map[string]any{"label": "serial"}}},
 		}},
 		workflow.Step{ID: "parallel", Matrix: &workflow.MatrixGroup{
-			Axes: workflow.MatrixAxes{{Name: "os", Values: []any{"linux"}}}, MaxConcurrency: 2, FailFast: true,
+			Axes: workflow.MatrixAxes{{Name: "os", Values: []any{"linux"}}}, Collect: `{"first": steps.first, "second": steps.second}`, MaxConcurrency: 2, FailFast: true,
 			Steps: []workflow.Step{{Concurrent: &workflow.ConcurrentGroup{
 				MaxConcurrency: 2, FailFast: true,
 				Steps: []workflow.Step{
@@ -208,7 +208,120 @@ func TestControlInteractivePolicyAndNestedConcurrent(t *testing.T) {
 		t.Fatalf("interactive observations = %#v", seen)
 	}
 	parallel := state.Steps["parallel"].(map[string]any)["results"].([]any)[0].(map[string]any)
-	if len(parallel["steps"].(map[string]any)) != 2 {
+	if len(parallel) != 2 {
 		t.Fatalf("parallel result = %#v", parallel)
+	}
+}
+
+func TestRunControlWithoutCollectExposesCountOnly(t *testing.T) {
+	registry := newTestRegistry(t, map[string]step.Builder{"value": func(map[string]any) (step.Runner, error) {
+		return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+			return step.Result{Outputs: map[string]any{"hidden": true}}, nil
+		}), nil
+	}})
+	definition := testDefinition(t, "count-only", workflow.Step{ID: "loop", Foreach: &workflow.ForeachGroup{
+		Items: "[1, 2]", MaxConcurrency: 1, FailFast: true,
+		Steps: []workflow.Step{{ID: "run", Type: "value", With: map[string]any{}}},
+	}})
+	state, err := New(registry).Run(t.Context(), definition, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := state.Steps["loop"].(map[string]any)
+	if !reflect.DeepEqual(got, map[string]any{"count": 2}) {
+		t.Fatalf("outputs = %#v", got)
+	}
+}
+
+func TestRunControlCollectsEmptyResults(t *testing.T) {
+	registry := newTestRegistry(t, map[string]step.Builder{"noop": func(map[string]any) (step.Runner, error) {
+		return runnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
+	}})
+	definition := testDefinition(t, "empty", workflow.Step{ID: "loop", Foreach: &workflow.ForeachGroup{
+		Items: "[]", Collect: "foreach.item", MaxConcurrency: 1, FailFast: true,
+		Steps: []workflow.Step{{ID: "run", Type: "noop", With: map[string]any{}}},
+	}})
+	state, err := New(registry).Run(t.Context(), definition, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outputs := state.Steps["loop"].(map[string]any)
+	if outputs["count"] != 0 || len(outputs["results"].([]any)) != 0 {
+		t.Fatalf("outputs = %#v", outputs)
+	}
+}
+
+func TestRunControlCollectPreservesNestedTypedValues(t *testing.T) {
+	registry := newTestRegistry(t, map[string]step.Builder{"noop": func(map[string]any) (step.Runner, error) {
+		return runnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
+	}})
+	definition := testDefinition(t, "typed", workflow.Step{ID: "loop", Foreach: &workflow.ForeachGroup{
+		Items: "[true]", Collect: `[foreach.item, nil, {"nested": [1, "two"]}]`, MaxConcurrency: 1, FailFast: true,
+		Steps: []workflow.Step{{ID: "run", Type: "noop", With: map[string]any{}}},
+	}})
+	state, err := New(registry).Run(t.Context(), definition, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := state.Steps["loop"].(map[string]any)["results"].([]any)[0]
+	want := []any{true, nil, map[string]any{"nested": []any{1, "two"}}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("result = %#v, want %#v", got, want)
+	}
+}
+
+func TestValidateControlRejectsInvalidCollectExpression(t *testing.T) {
+	registry := newTestRegistry(t, map[string]step.Builder{"noop": func(map[string]any) (step.Runner, error) {
+		return runnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
+	}})
+	definition := testDefinition(t, "invalid", workflow.Step{ID: "loop", Foreach: &workflow.ForeachGroup{
+		Items: "[1]", Collect: "steps.", MaxConcurrency: 1, FailFast: true,
+		Steps: []workflow.Step{{ID: "run", Type: "noop", With: map[string]any{}}},
+	}})
+	if err := New(registry).Validate(t.Context(), definition, Options{}); err == nil || !strings.Contains(err.Error(), "foreach collect") {
+		t.Fatalf("Validate() error = %v", err)
+	}
+}
+
+func TestRunControlCollectFailureIsAtomic(t *testing.T) {
+	registry := newTestRegistry(t, map[string]step.Builder{
+		"value": func(map[string]any) (step.Runner, error) {
+			return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+				return step.Result{Outputs: map[string]any{"ok": true}}, nil
+			}), nil
+		},
+		"unsupported": func(map[string]any) (step.Runner, error) {
+			return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+				return step.Result{Outputs: map[string]any{"value": make(chan struct{})}}, nil
+			}), nil
+		},
+	})
+	for _, test := range []struct {
+		name       string
+		stepType   string
+		expression string
+		want       string
+	}{
+		{name: "missing output", stepType: "value", expression: "steps.missing.value", want: "collect iteration 0"},
+		{name: "unsupported value", stepType: "unsupported", expression: "steps.run.value", want: "YAML/JSON-compatible"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			definition := testDefinition(t, test.name, workflow.Step{ID: "loop", Foreach: &workflow.ForeachGroup{
+				Items: "[1]", Collect: test.expression, MaxConcurrency: 1, FailFast: true,
+				Steps: []workflow.Step{{ID: "run", Type: test.stepType, With: map[string]any{}}},
+			}})
+			var finished ProgressEvent
+			state, err := New(registry).Run(t.Context(), definition, Options{Progress: func(event ProgressEvent) {
+				if event.Kind == ControlFinished {
+					finished = event
+				}
+			}})
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v, want %q", err, test.want)
+			}
+			if state != nil || finished.Status != StatusFailed || finished.Succeeded != 1 {
+				t.Fatalf("state = %#v, progress = %#v", state, finished)
+			}
+		})
 	}
 }

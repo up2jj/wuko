@@ -189,7 +189,7 @@ func writeTreeStepsWithFollowing(writer io.Writer, steps []workflow.Step, prefix
 		}
 		if workflowStep.Foreach != nil {
 			condition := treeCondition(workflowStep)
-			if _, err := fmt.Fprintf(writer, "%s%s%s (foreach %s)%s%s\n", prefix, branch, workflowStep.ID, workflowStep.Foreach.Items, treeFanoutPolicy(workflowStep.Foreach.MaxConcurrency, workflowStep.Foreach.MaxIterations, workflowStep.Foreach.Timeout, workflowStep.Foreach.FailFast), condition); err != nil {
+			if _, err := fmt.Fprintf(writer, "%s%s%s (foreach %s%s)%s%s\n", prefix, branch, workflowStep.ID, workflowStep.Foreach.Items, treeFanoutCollectSuffix(workflowStep.Foreach.Collect), treeFanoutPolicy(workflowStep.Foreach.MaxConcurrency, workflowStep.Foreach.MaxIterations, workflowStep.Foreach.Timeout, workflowStep.Foreach.FailFast), condition); err != nil {
 				return err
 			}
 			if err := writeTreeSteps(writer, workflowStep.Foreach.Steps, childPrefix); err != nil {
@@ -199,7 +199,7 @@ func writeTreeStepsWithFollowing(writer io.Writer, steps []workflow.Step, prefix
 		}
 		if workflowStep.Matrix != nil {
 			condition := treeCondition(workflowStep)
-			if _, err := fmt.Fprintf(writer, "%s%s%s (matrix %s)%s%s\n", prefix, branch, workflowStep.ID, treeMatrixAxes(workflowStep.Matrix.Axes), treeFanoutPolicy(workflowStep.Matrix.MaxConcurrency, workflowStep.Matrix.MaxIterations, workflowStep.Matrix.Timeout, workflowStep.Matrix.FailFast), condition); err != nil {
+			if _, err := fmt.Fprintf(writer, "%s%s%s (matrix %s%s)%s%s\n", prefix, branch, workflowStep.ID, treeMatrixAxes(workflowStep.Matrix.Axes), treeFanoutCollectSuffix(workflowStep.Matrix.Collect), treeFanoutPolicy(workflowStep.Matrix.MaxConcurrency, workflowStep.Matrix.MaxIterations, workflowStep.Matrix.Timeout, workflowStep.Matrix.FailFast), condition); err != nil {
 				return err
 			}
 			if err := writeTreeSteps(writer, workflowStep.Matrix.Steps, childPrefix); err != nil {
@@ -225,6 +225,13 @@ func writeTreeStepsWithFollowing(writer io.Writer, steps []workflow.Step, prefix
 		}
 	}
 	return nil
+}
+
+func treeFanoutCollectSuffix(collect string) string {
+	if collect == "" {
+		return ""
+	}
+	return "; collect " + collect
 }
 
 func treeCondition(workflowStep workflow.Step) string {

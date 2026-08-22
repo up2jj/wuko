@@ -123,10 +123,13 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
   work fails. It is unavailable to direct remote workflows and does not react to file timestamps
   or permissions.
 - Foreach and matrix iterations also start from one pre-control snapshot, but steps within an
-  iteration remain sequential. Read bindings from `.foreach` or `.matrix`; consume ordered results
-  beneath the parent step ID. Iteration variables do not escape, fan-out controls cannot nest, and
-  parallel controls are non-interactive. Consult `docs/workflow-control.md` when it is available in
-  the project for the complete schema and limitations.
+  iteration remain sequential. Read bindings from `.foreach` or `.matrix`. Add a typed `collect`
+  Expr to expose one ordered value per iteration; it can read the final iteration's steps, local
+  variables, runtime roots, and active binding. Without `collect`, the parent exposes only `count`.
+  Collect only the fields later steps need. Iteration variables do not otherwise escape, fan-out
+  controls cannot nest, and parallel controls are non-interactive. Consult
+  `docs/workflow-control.md` when it is available in the project for the complete schema and
+  limitations.
 - Pin remote composite actions with an immutable release and `sha256` when reproducibility or supply-chain trust matters.
 - Keep provider-specific CLI flags in the `agent` step configuration. Keep the prompt itself portable across Claude and Codex.
 
