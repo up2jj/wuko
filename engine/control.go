@@ -2,8 +2,11 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"maps"
+	"math"
+	"reflect"
 	"time"
 
 	controlpkg "github.com/up2jj/wuko/control"
@@ -235,6 +238,9 @@ func reportControlFinished(options Options, definition *workflow.Definition, wor
 }
 
 func controlCollect(workflowStep workflow.Step) string {
+	if workflowStep.Batch != nil {
+		return workflowStep.Batch.Collect
+	}
 	if workflowStep.Foreach != nil {
 		return workflowStep.Foreach.Collect
 	}
@@ -246,6 +252,13 @@ func controlCollect(workflowStep workflow.Step) string {
 
 func controlDeclaration(workflowStep workflow.Step) (kind string, children []workflow.Step, expressions []controlExpression, maxConcurrency, maxIterations int, timeout time.Duration, failFast bool, err error) {
 	switch {
+	case workflowStep.Batch != nil:
+		group := workflowStep.Batch
+		expressions = append(expressions, controlExpression{label: "items", value: group.Items})
+		if group.Size.Expression != "" {
+			expressions = append(expressions, controlExpression{label: "size", value: group.Size.Expression})
+		}
+		return "batch", group.Steps, expressions, group.MaxConcurrency, effectiveMaxIterations(group.MaxIterations), durationValue(group.Timeout), group.FailFast, err
 	case workflowStep.Foreach != nil:
 		group := workflowStep.Foreach
 		return "foreach", group.Steps, []controlExpression{{label: "items", value: group.Items}}, group.MaxConcurrency, effectiveMaxIterations(group.MaxIterations), durationValue(group.Timeout), group.FailFast, err
@@ -265,6 +278,23 @@ func controlDeclaration(workflowStep workflow.Step) (kind string, children []wor
 func expandControl(ctx context.Context, workflowStep workflow.Step, environment map[string]any, maxIterations int) ([]controlpkg.Iteration, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+	if workflowStep.Batch != nil {
+		items, err := controlpkg.EvaluateList(workflowStep.Batch.Items, environment)
+		if err != nil {
+			return nil, fmt.Errorf("items: %w", err)
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		size, err := evaluateBatchSize(workflowStep.Batch.Size, environment)
+		if err != nil {
+			return nil, fmt.Errorf("size: %w", err)
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		return controlpkg.BatchContext(ctx, items, size, maxIterations)
 	}
 	if workflowStep.Foreach != nil {
 		items, err := controlpkg.EvaluateList(workflowStep.Foreach.Items, environment)
@@ -302,6 +332,9 @@ func effectiveMaxIterations(value int) int {
 }
 
 func validationBindings(workflowStep workflow.Step) map[string]any {
+	if workflowStep.Batch != nil {
+		return map[string]any{"batch": map[string]any{"index": 0, "items": []any{}}}
+	}
 	if workflowStep.Foreach != nil {
 		return map[string]any{"foreach": map[string]any{"index": 0, "item": nil}}
 	}
@@ -310,6 +343,56 @@ func validationBindings(workflowStep workflow.Step) map[string]any {
 		matrix[axis.Name] = nil
 	}
 	return map[string]any{"matrix": matrix}
+}
+
+func evaluateBatchSize(size workflow.BatchSize, environment map[string]any) (int, error) {
+	if size.Literal != 0 {
+		return size.Literal, nil
+	}
+	value, err := controlpkg.EvaluateExpression(size.Expression, environment)
+	if err != nil {
+		return 0, err
+	}
+	return positiveInteger(value)
+}
+
+func positiveInteger(value any) (int, error) {
+	if number, ok := value.(json.Number); ok {
+		if integer, err := number.Int64(); err == nil {
+			return positiveInteger(integer)
+		}
+		floating, err := number.Float64()
+		if err != nil {
+			return 0, fmt.Errorf("expression returned invalid number %q", number)
+		}
+		return positiveInteger(floating)
+	}
+	reflected := reflect.ValueOf(value)
+	if !reflected.IsValid() {
+		return 0, fmt.Errorf("expression returned nil, want positive integer")
+	}
+	maxInt := uint64(^uint(0) >> 1)
+	switch reflected.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		integer := reflected.Int()
+		if integer > 0 && uint64(integer) <= maxInt {
+			return int(integer), nil
+		}
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		integer := reflected.Uint()
+		if integer > 0 && integer <= maxInt {
+			return int(integer), nil
+		}
+	case reflect.Float32, reflect.Float64:
+		floating := reflected.Float()
+		if floating > 0 && !math.IsInf(floating, 0) && !math.IsNaN(floating) && math.Trunc(floating) == floating && floating <= float64(maxInt) {
+			integer := int(floating)
+			if integer > 0 && float64(integer) == floating {
+				return integer, nil
+			}
+		}
+	}
+	return 0, fmt.Errorf("expression returned %T, want positive integer", value)
 }
 
 func durationValue(duration *workflow.Duration) time.Duration {

@@ -72,6 +72,10 @@ func annotateSteps(steps []Step, sequence *yaml.Node, source string) {
 			group := mappingValue(node, "concurrent")
 			annotateSteps(steps[i].Concurrent.Steps, mappingValue(group, "steps"), source)
 		}
+		if steps[i].Batch != nil {
+			group := mappingValue(node, "batch")
+			annotateSteps(steps[i].Batch.Steps, mappingValue(group, "steps"), source)
+		}
 		if steps[i].Foreach != nil {
 			group := mappingValue(node, "foreach")
 			annotateSteps(steps[i].Foreach.Steps, mappingValue(group, "steps"), source)
@@ -123,6 +127,9 @@ func remapStepLocations(steps []Step, materializedRoot, logicalSource string) {
 		}
 		if steps[i].Concurrent != nil {
 			remapStepLocations(steps[i].Concurrent.Steps, materializedRoot, logicalSource)
+		}
+		if steps[i].Batch != nil {
+			remapStepLocations(steps[i].Batch.Steps, materializedRoot, logicalSource)
 		}
 		if steps[i].Foreach != nil {
 			remapStepLocations(steps[i].Foreach.Steps, materializedRoot, logicalSource)
@@ -195,6 +202,11 @@ func flattenSteps(steps []Step) []Step {
 		}
 		if workflowStep.Concurrent != nil {
 			flattened = append(flattened, flattenSteps(workflowStep.Concurrent.Steps)...)
+			continue
+		}
+		if workflowStep.Batch != nil {
+			flattened = append(flattened, workflowStep)
+			flattened = append(flattened, flattenSteps(workflowStep.Batch.Steps)...)
 			continue
 		}
 		if workflowStep.Foreach != nil {

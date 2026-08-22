@@ -34,6 +34,7 @@ type waitEnvironment struct {
 	Vars     map[string]any    `expr:"vars"`
 	Env      map[string]string `expr:"env"`
 	Steps    map[string]any    `expr:"steps"`
+	Batch    map[string]any    `expr:"batch"`
 	Foreach  map[string]any    `expr:"foreach"`
 	Matrix   map[string]any    `expr:"matrix"`
 	Finally  map[string]any    `expr:"finally"`
@@ -251,6 +252,7 @@ func (e *Engine) pollExecutor(definition *workflow.Definition, workflowStep work
 func evaluateWaitCondition(program *vm.Program, request step.Request, result map[string]any, errorValue any, poll int) (bool, error) {
 	value, err := expr.Run(program, waitEnvironment{
 		Inputs: request.Inputs, Vars: request.Vars, Env: request.Env, Steps: request.Steps,
+		Batch:   bindingRoot(request.Bindings, "batch"),
 		Foreach: bindingRoot(request.Bindings, "foreach"), Matrix: bindingRoot(request.Bindings, "matrix"),
 		Finally:  bindingRoot(request.Bindings, "finally"),
 		Workflow: conditionWorkflow{Name: request.WorkflowName, Dir: request.WorkflowDir},

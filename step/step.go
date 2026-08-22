@@ -25,7 +25,7 @@ type Request struct {
 	Inputs         map[string]any
 	Env            map[string]string
 	Steps          map[string]any
-	// Bindings contains active lifecycle and workflow-control roots such as finally, foreach, and matrix.
+	// Bindings contains active lifecycle and workflow-control roots such as batch, finally, foreach, and matrix.
 	Bindings    map[string]any
 	Stdin       io.Reader
 	Stdout      io.Writer

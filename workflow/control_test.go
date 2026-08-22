@@ -48,6 +48,44 @@ steps:
 	}
 }
 
+func TestLoadBatchControls(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "workflow.yaml")
+	writeTestFile(t, path, `version: 1
+name: batch
+steps:
+  - id: static
+    batch:
+      items: vars.targets
+      size: 2
+      collect: steps.run.stdout
+      max_iterations: 20
+      steps: [{id: run, type: shell}]
+  - id: dynamic
+    batch:
+      items: vars.targets
+      size: vars.batch_size
+      max_concurrency: 2
+      timeout: 5m
+      fail_fast: false
+      steps: [{id: run, type: shell}]
+`)
+	definition, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	static := definition.Steps[0].Batch
+	if static == nil || static.Size.Literal != 2 || static.Size.Expression != "" || static.MaxConcurrency != 1 || static.MaxIterations != 20 || !static.FailFast || static.Collect != "steps.run.stdout" {
+		t.Fatalf("static batch = %#v", static)
+	}
+	dynamic := definition.Steps[1].Batch
+	if dynamic == nil || dynamic.Size.Expression != "vars.batch_size" || dynamic.Size.Literal != 0 || dynamic.MaxConcurrency != 2 || dynamic.MaxIterations != 10_000 || dynamic.FailFast || dynamic.Timeout.Value() != 5*time.Minute {
+		t.Fatalf("dynamic batch = %#v", dynamic)
+	}
+	if dynamic.Steps[0].Location.Source != path || dynamic.Steps[0].Location.Line == 0 {
+		t.Fatalf("batch child location = %#v", dynamic.Steps[0].Location)
+	}
+}
+
 func TestControlValidationAndScopedIDs(t *testing.T) {
 	tests := []struct {
 		name string
@@ -55,6 +93,11 @@ func TestControlValidationAndScopedIDs(t *testing.T) {
 		want string
 	}{
 		{name: "missing items", body: "  - id: loop\n    foreach:\n      steps: [{id: run, type: shell}]\n", want: "items"},
+		{name: "batch missing items", body: "  - id: loop\n    batch:\n      size: 2\n      steps: [{id: run, type: shell}]\n", want: "items"},
+		{name: "batch missing size", body: "  - id: loop\n    batch:\n      items: vars.items\n      steps: [{id: run, type: shell}]\n", want: "size is required"},
+		{name: "batch zero size", body: "  - id: loop\n    batch:\n      items: vars.items\n      size: 0\n      steps: [{id: run, type: shell}]\n", want: "positive integer"},
+		{name: "batch non-scalar size", body: "  - id: loop\n    batch:\n      items: vars.items\n      size: [2]\n      steps: [{id: run, type: shell}]\n", want: "positive integer or expression"},
+		{name: "batch empty size expression", body: "  - id: loop\n    batch:\n      items: vars.items\n      size: '  '\n      steps: [{id: run, type: shell}]\n", want: "must not be empty"},
 		{name: "no axes", body: "  - id: loop\n    matrix:\n      axes: {}\n      steps: [{id: run, type: shell}]\n", want: "at least one axis"},
 		{name: "zero max iterations", body: "  - id: loop\n    foreach:\n      items: vars.items\n      max_iterations: 0\n      steps: [{id: run, type: shell}]\n", want: "max_iterations"},
 		{name: "excessive max iterations", body: "  - id: loop\n    matrix:\n      axes: {os: [linux]}\n      max_iterations: 1000001\n      steps: [{id: run, type: shell}]\n", want: "max_iterations"},
@@ -62,6 +105,7 @@ func TestControlValidationAndScopedIDs(t *testing.T) {
 		{name: "foreach collect is not a string", body: "  - id: loop\n    foreach:\n      items: vars.items\n      collect: [steps.run.value]\n      steps: [{id: run, type: shell}]\n", want: "collect must be an expression string"},
 		{name: "matrix collect is empty", body: "  - id: loop\n    matrix:\n      axes: {os: [linux]}\n      collect: '  '\n      steps: [{id: run, type: shell}]\n", want: "collect must be a non-empty expression"},
 		{name: "nested fanout", body: "  - id: outer\n    foreach:\n      items: vars.items\n      steps:\n        - id: inner\n          matrix:\n            axes: {os: [linux]}\n            steps: [{id: run, type: shell}]\n", want: "nested matrix"},
+		{name: "nested batch", body: "  - id: outer\n    batch:\n      items: vars.items\n      size: 2\n      steps:\n        - id: inner\n          foreach:\n            items: vars.items\n            steps: [{id: run, type: shell}]\n", want: "nested foreach"},
 		{name: "inside concurrent", body: "  - concurrent:\n      steps:\n        - id: loop\n          foreach:\n            items: vars.items\n            steps: [{id: run, type: shell}]\n        - {id: other, type: shell}\n", want: "nested foreach"},
 		{name: "outer collision", body: "  - {id: prepare, type: shell}\n  - id: loop\n    foreach:\n      items: vars.items\n      steps: [{id: prepare, type: shell}]\n", want: `duplicate step id "prepare"`},
 		{name: "unknown foreach child field", body: "  - id: loop\n    foreach:\n      items: vars.items\n      steps: [{id: run, type: shell, timout: 1s}]\n", want: "field timout"},
@@ -92,6 +136,11 @@ steps:
       items: vars.items
       steps: [{require: child.yaml}]
   - id: second
+    batch:
+      items: vars.items
+      size: 2
+      steps: [{require: child.yaml}]
+  - id: third
     matrix:
       axes: {os: [linux]}
       steps: [{id: run, type: shell}]
@@ -100,7 +149,7 @@ steps:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if definition.Steps[0].Foreach.Steps[0].ID != "run" || definition.Steps[1].Matrix.Steps[0].ID != "run" {
+	if definition.Steps[0].Foreach.Steps[0].ID != "run" || definition.Steps[1].Batch.Steps[0].ID != "run" || definition.Steps[2].Matrix.Steps[0].ID != "run" {
 		t.Fatalf("definition = %#v", definition)
 	}
 }

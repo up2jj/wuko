@@ -240,6 +240,10 @@ func TestWorkflowTreeDisplaysWorkingDirectoryBlock(t *testing.T) {
 
 func TestWorkflowTreeDisplaysFanoutControls(t *testing.T) {
 	definition := &workflow.Definition{Name: "fanout", Steps: []workflow.Step{
+		{ID: "uploads", Batch: &workflow.BatchGroup{
+			Items: "vars.files", Size: workflow.BatchSize{Expression: "vars.batch_size"}, Collect: "steps.upload.stdout", MaxConcurrency: 4, FailFast: true,
+			Steps: []workflow.Step{{ID: "upload", Type: "shell"}},
+		}},
 		{ID: "deploy", If: "vars.deploy", Foreach: &workflow.ForeachGroup{
 			Items: "vars.targets", Collect: "steps.run.url", MaxConcurrency: 1, FailFast: true,
 			Steps: []workflow.Step{{ID: "run", Type: "shell"}},
@@ -256,6 +260,8 @@ func TestWorkflowTreeDisplaysFanoutControls(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := `fanout
+├── uploads (batch vars.files by vars.batch_size; collect steps.upload.stdout) [max 4, max 10000 iterations, fail fast]
+│   └── upload (shell)
 ├── deploy (foreach vars.targets; collect steps.run.url) [max 1, max 10000 iterations, fail fast] if: vars.deploy
 │   └── run (shell)
 └── checks (matrix os × go; collect {"os": matrix.os, "path": steps.test.path}) [max 2, max 10000 iterations, wait for all]

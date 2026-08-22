@@ -231,6 +231,12 @@ func (loader *Loader) resolveActions(ctx context.Context, workflowName string, s
 			}
 			continue
 		}
+		if workflowStep.Batch != nil {
+			if err := loader.resolveActions(ctx, workflowName, workflowStep.Batch.Steps, renderer, data, environment, runDir, runDirKnown, definitionDir, cache, reporter); err != nil {
+				return err
+			}
+			continue
+		}
 		if workflowStep.Foreach != nil {
 			if err := loader.resolveActions(ctx, workflowName, workflowStep.Foreach.Steps, renderer, data, environment, runDir, runDirKnown, definitionDir, cache, reporter); err != nil {
 				return err

@@ -49,6 +49,7 @@ func TestDefinitionValidateStructure(t *testing.T) {
 		{name: "conditional", steps: []Step{{If: "true", Steps: []Step{step("run")}}}},
 		{name: "working directory", steps: []Step{{WorkingDirectory: "build", Steps: []Step{step("run")}}}},
 		{name: "concurrent", steps: []Step{{Concurrent: &ConcurrentGroup{Steps: []Step{step("one"), step("two")}, MaxConcurrency: 2}}}},
+		{name: "batch", steps: []Step{{ID: "loop", Batch: &BatchGroup{Items: "[]", Size: BatchSize{Literal: 2}, Steps: []Step{step("run")}, MaxConcurrency: 1}}}},
 		{name: "foreach", steps: []Step{{ID: "loop", Foreach: &ForeachGroup{Items: "[]", Steps: []Step{step("run")}, MaxConcurrency: 1}}}},
 		{name: "matrix", steps: []Step{{ID: "loop", Matrix: &MatrixGroup{Axes: MatrixAxes{{Name: "os", Values: []any{"linux"}}}, Steps: []Step{step("run")}, MaxConcurrency: 1}}}},
 		{name: "executor", steps: []Step{{Executor: &ExecutorScope{Type: "docker"}, Steps: []Step{step("run")}}}},

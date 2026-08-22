@@ -55,6 +55,96 @@ func TestRunForeachAggregatesOrderedIsolatedResults(t *testing.T) {
 	}
 }
 
+func TestRunBatchUsesDynamicSizeAndCollectsOrderedBindings(t *testing.T) {
+	registry := newTestRegistry(t, map[string]step.Builder{"capture_batch": func(raw map[string]any) (step.Runner, error) {
+		value := raw["value"]
+		return runnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
+			return step.Result{Outputs: map[string]any{"value": value, "binding": request.Bindings["batch"]}}, nil
+		}), nil
+	}})
+	definition := testDefinition(t, "batch", workflow.Step{ID: "groups", Batch: &workflow.BatchGroup{
+		Items: "vars.targets", Size: workflow.BatchSize{Expression: "vars.batch_size"},
+		Collect: `{"index": batch.index, "items": batch.items, "value": steps.run.value}`, MaxConcurrency: 2, FailFast: true,
+		Steps: []workflow.Step{{
+			ID: "run", Type: "capture_batch", If: "batch.index >= 0",
+			With: map[string]any{"value": "{{ .batch.items | toJSONCompact }}"},
+		}},
+	}})
+	definition.Vars = map[string]any{"targets": []any{"api", "worker", "web"}, "batch_size": 2}
+	state, err := New(registry).Run(t.Context(), definition, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outputs := state.Steps["groups"].(map[string]any)
+	if outputs["count"] != 2 {
+		t.Fatalf("outputs = %#v", outputs)
+	}
+	got := outputs["results"].([]any)
+	want := []any{
+		map[string]any{"index": 0, "items": []any{"api", "worker"}, "value": `["api","worker"]`},
+		map[string]any{"index": 1, "items": []any{"web"}, "value": `["web"]`},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("results = %#v, want %#v", got, want)
+	}
+	if len(state.Stats.Steps[0].Iterations) != 2 || state.Stats.Steps[0].Type != "batch" {
+		t.Fatalf("stats = %#v", state.Stats)
+	}
+}
+
+func TestRunBatchValidatesDynamicSizeResult(t *testing.T) {
+	registry := newTestRegistry(t, map[string]step.Builder{"noop": func(map[string]any) (step.Runner, error) {
+		return runnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
+	}})
+	tests := []struct {
+		name string
+		size any
+	}{
+		{name: "zero", size: 0},
+		{name: "negative", size: -1},
+		{name: "fractional", size: 1.5},
+		{name: "string", size: "two"},
+		{name: "list", size: []any{2}},
+		{name: "overflow", size: ^uint64(0)},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			definition := testDefinition(t, test.name, workflow.Step{ID: "groups", Batch: &workflow.BatchGroup{
+				Items: "vars.items", Size: workflow.BatchSize{Expression: "vars.size"}, MaxConcurrency: 1, FailFast: true,
+				Steps: []workflow.Step{{ID: "run", Type: "noop", With: map[string]any{}}},
+			}})
+			definition.Vars = map[string]any{"items": []any{1, 2}, "size": test.size}
+			_, err := New(registry).Run(t.Context(), definition, Options{})
+			if err == nil || !strings.Contains(err.Error(), "want positive integer") {
+				t.Fatalf("Run() error = %v", err)
+			}
+		})
+	}
+
+	valid := testDefinition(t, "integral-float", workflow.Step{ID: "groups", Batch: &workflow.BatchGroup{
+		Items: "vars.items", Size: workflow.BatchSize{Expression: "vars.size"}, MaxConcurrency: 1, FailFast: true,
+		Steps: []workflow.Step{{ID: "run", Type: "noop", With: map[string]any{}}},
+	}})
+	valid.Vars = map[string]any{"items": []any{1, 2, 3}, "size": 2.0}
+	state, err := New(registry).Run(t.Context(), valid, Options{})
+	if err != nil || state.Steps["groups"].(map[string]any)["count"] != 2 {
+		t.Fatalf("integral float state = %#v, error = %v", state, err)
+	}
+}
+
+func TestValidateBatchRejectsInvalidSizeExpression(t *testing.T) {
+	registry := newTestRegistry(t, map[string]step.Builder{"noop": func(map[string]any) (step.Runner, error) {
+		return runnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
+	}})
+	definition := testDefinition(t, "invalid-size", workflow.Step{ID: "groups", Batch: &workflow.BatchGroup{
+		Items: "[]", Size: workflow.BatchSize{Expression: "vars."}, MaxConcurrency: 1, FailFast: true,
+		Steps: []workflow.Step{{ID: "run", Type: "noop", With: map[string]any{}}},
+	}})
+	if err := New(registry).Validate(t.Context(), definition, Options{}); err == nil || !strings.Contains(err.Error(), "batch size") {
+		t.Fatalf("Validate() error = %v", err)
+	}
+}
+
 func TestRunMatrixUsesDeterministicBindings(t *testing.T) {
 	registry := newTestRegistry(t, map[string]step.Builder{"binding": func(map[string]any) (step.Runner, error) {
 		return runnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
@@ -168,6 +258,33 @@ func TestForeachPassesBindingToCompositeActionInput(t *testing.T) {
 	remote := state.Steps["calls"].(map[string]any)["results"].([]any)[0].(map[string]any)
 	if remote["result"] != "api" {
 		t.Fatalf("remote output = %#v", remote)
+	}
+}
+
+func TestBatchPassesBindingToCompositeActionInput(t *testing.T) {
+	registry := newTestRegistry(t, map[string]step.Builder{"echo": func(raw map[string]any) (step.Runner, error) {
+		return runnerFunc(func(_ context.Context, _ step.Request) (step.Result, error) {
+			return step.Result{Outputs: map[string]any{"value": raw["value"]}}, nil
+		}), nil
+	}})
+	action := testAction(t, "batch-action", workflow.Step{ID: "echo", Type: "echo", With: map[string]any{"value": "{{ .inputs.targets | toJSONCompact }}"}})
+	action.Inputs = map[string]workflow.ActionInput{"targets": {Type: "array", Required: true}}
+	action.Outputs = map[string]workflow.ActionOutput{"result": {Value: "steps.echo.value"}}
+	definition := testDefinition(t, "caller", workflow.Step{ID: "calls", Batch: &workflow.BatchGroup{
+		Items: "vars.targets", Size: workflow.BatchSize{Literal: 2}, Collect: "steps.remote", MaxConcurrency: 1, FailFast: true,
+		Steps: []workflow.Step{{
+			ID: "remote", Uses: workflow.ActionSource{URL: "https://example.test/action"}, Action: action,
+			With: map[string]any{"targets": map[string]any{"expr": "batch.items"}},
+		}},
+	}})
+	definition.Vars = map[string]any{"targets": []any{"api", "worker", "web"}}
+	state, err := New(registry).Run(t.Context(), definition, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	results := state.Steps["calls"].(map[string]any)["results"].([]any)
+	if results[0].(map[string]any)["result"] != `["api","worker"]` || results[1].(map[string]any)["result"] != `["web"]` {
+		t.Fatalf("results = %#v", results)
 	}
 }
 

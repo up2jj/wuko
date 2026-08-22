@@ -35,11 +35,12 @@ func TestAssertionUsesAllExpressionRoots(t *testing.T) {
 }
 
 func TestAssertionUsesControlBindings(t *testing.T) {
-	runner, err := New(map[string]any{"expr": `foreach.item == "api" && matrix.os == "linux"`, "message": "wrong binding"})
+	runner, err := New(map[string]any{"expr": `len(batch.items) == 2 && foreach.item == "api" && matrix.os == "linux"`, "message": "wrong binding"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, err = runner.Run(t.Context(), step.Request{Bindings: map[string]any{
+		"batch":   map[string]any{"items": []any{"api", "worker"}},
 		"foreach": map[string]any{"item": "api"}, "matrix": map[string]any{"os": "linux"},
 	}})
 	if err != nil {

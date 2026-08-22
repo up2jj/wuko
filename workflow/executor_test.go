@@ -44,6 +44,7 @@ func TestExecutorBlockSchemaRestrictions(t *testing.T) {
 		{name: "empty working directory", body: "  - executor: {type: docker, with: {image: alpine}}\n    working_directory: \"\"\n    steps: [{id: run, type: shell}]\n", want: "cannot be combined with other step fields"},
 		{name: "nested executor", body: "  - executor: {type: docker, with: {image: alpine}}\n    steps:\n      - executor: {type: docker, with: {image: alpine}}\n        steps: [{id: run, type: shell}]\n", want: "only supported in sequential workflow scopes"},
 		{name: "parallel fanout", body: "  - executor: {type: docker, with: {image: alpine}}\n    steps:\n      - id: loop\n        foreach: {items: '[1]', max_concurrency: 2, steps: [{id: run, type: shell}]}\n", want: "max_concurrency 1"},
+		{name: "parallel batch", body: "  - executor: {type: docker, with: {image: alpine}}\n    steps:\n      - id: loop\n        batch: {items: '[1, 2]', size: 1, max_concurrency: 2, steps: [{id: run, type: shell}]}\n", want: "max_concurrency 1"},
 		{name: "return in cleanup", body: "  - executor: {type: docker, with: {image: alpine}}\n    steps: [{id: run, type: shell}]\n    finally:\n      - return: {outputs: {result: '\"done\"'}}\n", want: "not supported inside finally"},
 		{name: "action", body: "  - executor: {type: docker, with: {image: alpine}}\n    steps: [{id: run, uses: 'https://example.test/action'}]\n", want: "actions are not supported"},
 	}

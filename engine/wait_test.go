@@ -90,6 +90,19 @@ func TestWaitRejectsInvalidConfiguration(t *testing.T) {
 	}
 }
 
+func TestWaitConditionUsesBatchBinding(t *testing.T) {
+	program, err := compileWaitCondition(`batch.index == 1 && len(batch.items) == 2`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	matched, err := evaluateWaitCondition(program, step.Request{Bindings: map[string]any{
+		"batch": map[string]any{"index": 1, "items": []any{"api", "worker"}},
+	}}, map[string]any{}, nil, 1)
+	if err != nil || !matched {
+		t.Fatalf("matched = %v, error = %v", matched, err)
+	}
+}
+
 func TestFixedWaitCompletesAndHonorsTimeout(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		state, err := New(newTestRegistry(t, nil)).Run(t.Context(), waitDefinition(map[string]any{"duration": "2s"}, nil), Options{})

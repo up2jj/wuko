@@ -8,6 +8,70 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// BatchSize is either a positive literal chunk size or an expression evaluated at runtime.
+type BatchSize struct {
+	Literal    int
+	Expression string
+}
+
+func (size *BatchSize) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind != yaml.ScalarNode {
+		return fmt.Errorf("batch size must be a positive integer or expression string")
+	}
+	switch node.Tag {
+	case "!!int":
+		var value int
+		if err := node.Decode(&value); err != nil || value < 1 {
+			return fmt.Errorf("batch size must be a positive integer or expression string")
+		}
+		size.Literal = value
+	case "!!str":
+		if strings.TrimSpace(node.Value) == "" {
+			return fmt.Errorf("batch size expression must not be empty")
+		}
+		size.Expression = node.Value
+	default:
+		return fmt.Errorf("batch size must be a positive integer or expression string")
+	}
+	return nil
+}
+
+// BatchGroup repeats a child step block for fixed-size chunks of an expression list.
+type BatchGroup struct {
+	Items          string    `yaml:"items"`
+	Size           BatchSize `yaml:"size"`
+	Collect        string    `yaml:"collect,omitempty"`
+	Steps          []Step    `yaml:"steps"`
+	MaxConcurrency int       `yaml:"max_concurrency,omitempty"`
+	MaxIterations  int       `yaml:"max_iterations,omitempty"`
+	Timeout        *Duration `yaml:"timeout,omitempty"`
+	FailFast       bool      `yaml:"fail_fast"`
+}
+
+func (group *BatchGroup) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("batch must be an object")
+	}
+	if err := rejectUnknownFields(node, "batch", map[string]bool{
+		"items": true, "size": true, "collect": true, "steps": true, "max_concurrency": true, "max_iterations": true, "timeout": true, "fail_fast": true,
+	}); err != nil {
+		return err
+	}
+	if err := validateCollectNode(node, "batch"); err != nil {
+		return err
+	}
+	type plain BatchGroup
+	decoded := plain{MaxConcurrency: 1, MaxIterations: controlpkg.DefaultMaxIterations, FailFast: true}
+	if err := node.Decode(&decoded); err != nil {
+		return err
+	}
+	if decoded.MaxIterations == 0 && hasMappingField(node, "max_iterations") {
+		return fmt.Errorf("batch max_iterations must be between 1 and %d", controlpkg.MaxIterations)
+	}
+	*group = BatchGroup(decoded)
+	return nil
+}
+
 // ForeachGroup repeats a child step block for each item returned by an expression.
 type ForeachGroup struct {
 	Items          string    `yaml:"items"`
@@ -180,6 +244,24 @@ func (group ForeachGroup) Validate() error {
 		return fmt.Errorf("foreach items must be a non-empty expression")
 	}
 	return validateFanoutPolicy("foreach", len(group.Steps), group.MaxConcurrency, group.MaxIterations, group.Timeout)
+}
+
+// Validate checks the batch declaration and execution limits.
+func (group BatchGroup) Validate() error {
+	if strings.TrimSpace(group.Items) == "" {
+		return fmt.Errorf("batch items must be a non-empty expression")
+	}
+	sizeExpression := strings.TrimSpace(group.Size.Expression)
+	if group.Size.Literal < 0 {
+		return fmt.Errorf("batch size must be a positive integer or expression string")
+	}
+	if group.Size.Literal > 0 && sizeExpression != "" {
+		return fmt.Errorf("batch size must set exactly one of literal or expression")
+	}
+	if group.Size.Literal == 0 && sizeExpression == "" {
+		return fmt.Errorf("batch size is required")
+	}
+	return validateFanoutPolicy("batch", len(group.Steps), group.MaxConcurrency, group.MaxIterations, group.Timeout)
 }
 
 // Validate checks the matrix declaration and execution limits.

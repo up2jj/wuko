@@ -137,6 +137,14 @@ func TestLoaderResolvesStaticActionsInsideFanoutControls(t *testing.T) {
 name: caller
 vars: {targets: [linux]}
 steps:
+  - id: batch_action
+    batch:
+      items: vars.targets
+      size: 1
+      steps:
+        - id: remote
+          uses: https://actions.example.test/build
+          with: {target: {expr: 'batch.items[0]'}}
   - id: foreach_action
     foreach:
       items: vars.targets
@@ -156,7 +164,7 @@ steps:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if definition.Steps[0].Foreach.Steps[0].Action == nil || definition.Steps[1].Matrix.Steps[0].Action == nil {
+	if definition.Steps[0].Batch.Steps[0].Action == nil || definition.Steps[1].Foreach.Steps[0].Action == nil || definition.Steps[2].Matrix.Steps[0].Action == nil {
 		t.Fatalf("actions were not resolved: %#v", definition.Steps)
 	}
 
@@ -165,13 +173,14 @@ name: invalid
 vars: {targets: [linux]}
 steps:
   - id: dynamic
-    foreach:
+    batch:
       items: vars.targets
+      size: 1
       steps:
         - id: remote
-          uses: https://actions.example.test/{{ .foreach.item }}
+          uses: https://actions.example.test/{{ .batch.items }}
 `)
-	if _, err := NewLoader(client).Load(t.Context(), workflowPath, LoadOptions{RunDir: t.TempDir()}); err == nil || !strings.Contains(err.Error(), "foreach") {
+	if _, err := NewLoader(client).Load(t.Context(), workflowPath, LoadOptions{RunDir: t.TempDir()}); err == nil || !strings.Contains(err.Error(), "batch") {
 		t.Fatalf("dynamic action source error = %v", err)
 	}
 }

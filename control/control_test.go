@@ -27,6 +27,30 @@ func TestForeachBindings(t *testing.T) {
 	}
 }
 
+func TestBatchBindings(t *testing.T) {
+	iterations, err := Batch([]any{"api", map[string]any{"name": "worker"}, "web"}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Iteration{
+		{Index: 0, Bindings: map[string]any{"batch": map[string]any{"index": 0, "items": []any{"api", map[string]any{"name": "worker"}}}}},
+		{Index: 1, Bindings: map[string]any{"batch": map[string]any{"index": 1, "items": []any{"web"}}}},
+	}
+	if !reflect.DeepEqual(iterations, want) {
+		t.Fatalf("iterations = %#v, want %#v", iterations, want)
+	}
+	if _, err := Batch(map[string]any{"a": 1}, 2); err == nil {
+		t.Fatal("expected map source error")
+	}
+	if _, err := Batch([]any{"item"}, 0); err == nil || !strings.Contains(err.Error(), "positive integer") {
+		t.Fatalf("Batch() error = %v", err)
+	}
+	empty, err := Batch([]any{}, 2)
+	if err != nil || len(empty) != 0 {
+		t.Fatalf("empty batch = %#v, %v", empty, err)
+	}
+}
+
 func TestMatrixExpansionOrder(t *testing.T) {
 	iterations, err := Matrix([]Axis{
 		{Name: "os", Values: []any{"linux", "darwin"}},
@@ -104,11 +128,17 @@ func TestExpansionLimitsAndCancellation(t *testing.T) {
 	if _, err := Matrix(axes); err == nil || !strings.Contains(err.Error(), "exceeds max_iterations 10000") {
 		t.Fatalf("Matrix() error = %v", err)
 	}
+	if _, err := BatchContext(t.Context(), []any{1, 2, 3, 4, 5}, 2, 2); err == nil || !strings.Contains(err.Error(), "exceeds max_iterations 2") {
+		t.Fatalf("BatchContext() error = %v", err)
+	}
 
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	if _, err := ForeachContext(ctx, []any{"item"}, 1); !errors.Is(err, context.Canceled) {
 		t.Fatalf("ForeachContext() error = %v, want context.Canceled", err)
+	}
+	if _, err := BatchContext(ctx, []any{"item"}, 1, 1); !errors.Is(err, context.Canceled) {
+		t.Fatalf("BatchContext() error = %v, want context.Canceled", err)
 	}
 	if _, err := MatrixContext(ctx, []Axis{{Name: "axis", Values: []any{"value"}}}, 1); !errors.Is(err, context.Canceled) {
 		t.Fatalf("MatrixContext() error = %v, want context.Canceled", err)

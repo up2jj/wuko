@@ -12,7 +12,7 @@ with typed data and files, call APIs, run scripts or containers, and start codin
 - **Typed workflow state** — use variables, step outputs, JSON/TOML imports, JSONPath, semantic
   versions, templates, and expressions without converting everything to strings.
 - **Useful execution controls** — conditions, early successful returns, retries, timeouts, polling,
-  concurrency, foreach and matrix expansion, scoped working-directory blocks, scheduled runs, dry
+  concurrency, batch, foreach and matrix expansion, scoped working-directory blocks, scheduled runs, dry
   runs, execution trees, and guaranteed cleanup.
 - **Portable operations** — use built-in HTTP, filesystem, glob, native watches, cache, change detection,
   key-value, temporary resource, and Docker steps instead of platform-specific shell commands.
@@ -171,12 +171,27 @@ Steps run in declaration order. A successful step publishes outputs under `.step
 templates and `steps.<id>` for expressions. Variables live under `.vars`/`vars`. A failed step
 stops ordinary execution; `finally` still runs.
 
+Use `batch` when one operation should receive fixed-size chunks of a runtime list:
+
+```yaml
+- id: deployments
+  batch:
+    items: vars.targets
+    size: vars.batch_size
+    steps:
+      - id: deploy
+        type: shell
+        with:
+          command: ./deploy-batch
+          args: ['{{ .batch.items | toJSONCompact }}']
+```
+
 For workflow syntax and execution behavior, see:
 
 - [Execution and composition](docs/execution.md) — conditions, concurrency, scheduling, waits,
   retries, required files, remote reuse, progress, and debugging.
 - [Executor scopes](docs/executors.md) — mix local shell steps with persistent Docker sessions.
-- [Workflow controls](docs/workflow-control.md) — foreach and matrix expansion.
+- [Workflow controls](docs/workflow-control.md) — batch, foreach, and matrix expansion.
 - [Early successful return](docs/return.md) — finish workflows and actions with explicit outputs.
 - [Finally cleanup](docs/finally.md) and [graceful shutdown](docs/graceful-shutdown.md).
 - [Templates](docs/templates.md) and [template, Expr, and Lua functions](docs/template-functions.md).

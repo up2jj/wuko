@@ -75,8 +75,8 @@ func TestReturnSkipsLaterFanoutWithoutExpansion(t *testing.T) {
 	}
 	definition := testDefinition(t, "skip-fanout",
 		workflow.Step{Return: &workflow.ReturnControl{Outputs: map[string]string{}}},
-		workflow.Step{ID: "later", Foreach: &workflow.ForeachGroup{
-			Items: "vars.missing", MaxConcurrency: 1, MaxIterations: 10, FailFast: true,
+		workflow.Step{ID: "later", Batch: &workflow.BatchGroup{
+			Items: "vars.missing", Size: workflow.BatchSize{Expression: "vars.missing_size"}, MaxConcurrency: 1, MaxIterations: 10, FailFast: true,
 			Steps: []workflow.Step{{ID: "child", Type: "capture_return", With: map[string]any{}}},
 		}},
 	)
@@ -85,7 +85,7 @@ func TestReturnSkipsLaterFanoutWithoutExpansion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state.Stats.Total != 1 || state.Stats.Skipped != 1 || len(state.Stats.Steps) != 1 || state.Stats.Steps[0].Type != "foreach" {
+	if state.Stats.Total != 1 || state.Stats.Skipped != 1 || len(state.Stats.Steps) != 1 || state.Stats.Steps[0].Type != "batch" {
 		t.Fatalf("stats = %#v", state.Stats)
 	}
 }
@@ -189,6 +189,7 @@ func TestValidateRejectsReturnInProgrammaticParallelControls(t *testing.T) {
 		step workflow.Step
 	}{
 		{name: "concurrent", step: workflow.Step{Concurrent: &workflow.ConcurrentGroup{MaxConcurrency: 1, Steps: []workflow.Step{returnStep, {ID: "work", Type: "missing", With: map[string]any{}}}}}},
+		{name: "batch", step: workflow.Step{ID: "loop", Batch: &workflow.BatchGroup{Items: "[]", Size: workflow.BatchSize{Literal: 1}, MaxConcurrency: 1, MaxIterations: 10, Steps: []workflow.Step{returnStep}}}},
 		{name: "foreach", step: workflow.Step{ID: "loop", Foreach: &workflow.ForeachGroup{Items: "[]", MaxConcurrency: 1, MaxIterations: 10, Steps: []workflow.Step{returnStep}}}},
 	}
 	for _, test := range tests {

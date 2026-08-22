@@ -64,7 +64,7 @@ type State struct {
 	Steps  map[string]any
 	// Outputs contains values explicitly produced by a return control.
 	Outputs map[string]any
-	// Bindings contains lifecycle and iteration-local roots such as finally, foreach, and matrix.
+	// Bindings contains lifecycle and iteration-local roots such as batch, finally, foreach, and matrix.
 	Bindings    map[string]any
 	Stats       RunStats
 	writtenVars map[string]struct{}
@@ -154,7 +154,7 @@ func (e *Engine) validateSteps(ctx context.Context, definition *workflow.Definit
 			})
 			continue
 		}
-		if workflowStep.Foreach != nil || workflowStep.Matrix != nil {
+		if workflowStep.Batch != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil {
 			if err := e.validateControl(ctx, definition, workflowStep, options, state); err != nil {
 				return fmt.Errorf("step %q: %w", workflowStep.ID, err)
 			}
@@ -460,7 +460,7 @@ func (e *Engine) executeSequence(ctx context.Context, definition *workflow.Defin
 			continue
 		}
 		var outcome stepOutcome
-		if workflowStep.Foreach != nil || workflowStep.Matrix != nil {
+		if workflowStep.Batch != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil {
 			outcome = e.executeControl(ctx, definition, workflowStep, options, state, index, total)
 		} else {
 			outcome = e.executeStep(ctx, definition, workflowStep, options, state, index, total)
@@ -555,6 +555,9 @@ func recordSkippedSteps(definition *workflow.Definition, steps []workflow.Step, 
 }
 
 func skippedStepKind(workflowStep workflow.Step) string {
+	if workflowStep.Batch != nil {
+		return "batch"
+	}
 	if workflowStep.Foreach != nil {
 		return "foreach"
 	}
@@ -745,7 +748,7 @@ func leafStepCount(steps []workflow.Step) int {
 		if workflowStep.Return != nil {
 			continue
 		}
-		if workflowStep.Foreach != nil || workflowStep.Matrix != nil {
+		if workflowStep.Batch != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil {
 			total++
 			continue
 		}

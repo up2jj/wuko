@@ -23,7 +23,7 @@ finally:
 ```
 
 `finally` contains ordinary Wuko steps. They may use conditions, retries, timeouts, composite
-actions, concurrent groups, foreach, and matrix subject to their normal schema and nesting rules.
+actions, concurrent groups, batch, foreach, and matrix subject to their normal schema and nesting rules.
 Workflow cleanup may also use local required step files; action manifests retain their existing
 restriction against `require`. Step IDs are unique across both `steps` and `finally`.
 
@@ -169,8 +169,8 @@ resource.
 
 ## Timeouts, controls, and inspection
 
-Every cleanup step retains its ordinary `timeout` and `retry` behavior. Concurrent, foreach, and
-matrix cleanup entries retain their existing group timeout, `fail_fast`, concurrency, interaction,
+Every cleanup step retains its ordinary `timeout` and `retry` behavior. Concurrent, batch, foreach,
+and matrix cleanup entries retain their existing group timeout, `fail_fast`, concurrency, interaction,
 nesting, and iteration limits. A failed concurrent or fan-out cleanup entry does not commit its
 aggregate result, but Wuko continues to the next top-level cleanup entry.
 

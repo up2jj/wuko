@@ -52,6 +52,52 @@ type Axis struct {
 	Values []any
 }
 
+// Batch expands an ordered collection into fixed-size batch bindings.
+func Batch(items any, size int) ([]Iteration, error) {
+	return BatchContext(context.Background(), items, size, DefaultMaxIterations)
+}
+
+// BatchContext expands fixed-size chunks up to maxIterations while honoring cancellation.
+func BatchContext(ctx context.Context, items any, size, maxIterations int) ([]Iteration, error) {
+	if err := validateMaxIterations(maxIterations); err != nil {
+		return nil, err
+	}
+	if size < 1 {
+		return nil, fmt.Errorf("batch size must be a positive integer")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	values, ok := asSlice(items)
+	if !ok {
+		return nil, fmt.Errorf("items returned %T, want list or array", items)
+	}
+	count := len(values) / size
+	if len(values)%size != 0 {
+		count++
+	}
+	if count > maxIterations {
+		return nil, fmt.Errorf("batch iteration count %d exceeds max_iterations %d", count, maxIterations)
+	}
+	iterations := make([]Iteration, 0, count)
+	for start := 0; start < len(values); start += size {
+		end := min(start+size, len(values))
+		items := make([]any, end-start)
+		for i, item := range values[start:end] {
+			cloned, err := cloneContext(ctx, item)
+			if err != nil {
+				return nil, err
+			}
+			items[i] = cloned
+		}
+		index := len(iterations)
+		iterations = append(iterations, Iteration{Index: index, Bindings: map[string]any{
+			"batch": map[string]any{"index": index, "items": items},
+		}})
+	}
+	return iterations, nil
+}
+
 // Foreach expands an ordered collection into foreach bindings.
 func Foreach(items any) ([]Iteration, error) {
 	return ForeachContext(context.Background(), items, DefaultMaxIterations)

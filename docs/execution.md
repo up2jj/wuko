@@ -121,7 +121,7 @@ resolves relative to the active scoped `.run.dir`.
 
 Command-backed composite-action sources are resolved while the workflow is loaded. When such an
 action is inside a `working_directory` block, the block path must therefore be resolvable from the
-initial workflow values; it cannot depend on earlier step outputs or active foreach or matrix
+initial workflow values; it cannot depend on earlier step outputs or active batch, foreach, or matrix
 bindings. HTTPS action sources remain loadable inside runtime-resolved directory blocks, and their
 internal steps receive the scoped directory when the action executes.
 
@@ -132,8 +132,8 @@ internal steps receive the scoped directory when the action executes.
 | With `if` | The fields cannot share one wrapper; place one block inside the other. |
 | Around `concurrent` | Every concurrent branch inherits the scoped directory. |
 | Directly inside `concurrent` | The block is one atomic branch; its children run sequentially using one concurrency slot and commit together. |
-| Around `foreach` or `matrix` | The directory is resolved once, then inherited by every iteration. |
-| Inside `foreach` or `matrix` | The directory is resolved per iteration and may use `.foreach` or `.matrix`. |
+| Around `batch`, `foreach`, or `matrix` | The directory is resolved once, then inherited by every iteration. |
+| Inside `batch`, `foreach`, or `matrix` | The directory is resolved per iteration and may use the active `.batch`, `.foreach`, or `.matrix` binding. |
 | Nested `working_directory` | Relative paths resolve from the enclosing scoped directory. |
 | Composite actions | Internal action steps inherit the caller's active scoped directory. |
 | `finally` | The scope behaves normally and is restored when the block finishes. |
@@ -241,7 +241,7 @@ finally:
 ```
 
 Working-directory wrappers preserve the normal nesting rules. They cannot be used to bypass the
-restrictions on directly nested conditional, concurrent, foreach, or matrix controls.
+restrictions on directly nested conditional, concurrent, batch, foreach, or matrix controls.
 
 ## Concurrency
 
@@ -268,7 +268,7 @@ committed in declaration order only after the whole group succeeds. Children can
 outputs or write the same variable. Interactive children require pre-supplied values. Directly
 nested concurrent groups are not supported.
 
-For repeated blocks, use [foreach and matrix controls](workflow-control.md).
+For repeated blocks, use [batch, foreach, and matrix controls](workflow-control.md).
 
 ## Timeouts and retries
 

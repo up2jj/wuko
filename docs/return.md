@@ -121,10 +121,10 @@ steps:
 ```
 
 Steps following a triggered return do not run. Ordinary and concurrent leaves are reported
-skipped; a later foreach or matrix parent is skipped without expanding its iterations. Previously
+skipped; a later batch, foreach, or matrix parent is skipped without expanding its iterations. Previously
 committed state remains available to cleanup.
 
-## Concurrent, foreach, and matrix boundaries
+## Concurrent, batch, foreach, and matrix boundaries
 
 `return` may follow a completed parallel control and consume its committed outputs:
 
@@ -165,7 +165,7 @@ steps:
         deployments: steps.deployments.results
 ```
 
-A return cannot appear inside `concurrent`, `foreach`, or `matrix`. Parallel branches or
+A return cannot appear inside `concurrent`, `batch`, `foreach`, or `matrix`. Parallel branches or
 iterations could otherwise race to publish conflicting results:
 
 ```yaml

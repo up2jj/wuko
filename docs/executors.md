@@ -34,7 +34,7 @@ An executor block is an anonymous sequential scope:
 
 The block has no `id` and publishes no block result. Its child IDs and outputs remain directly in
 the surrounding `.steps` namespace. An executor block cannot also declare `type`, `uses`,
-`working_directory`, `if`, `timeout`, `retry`, `foreach`, `matrix`, `concurrent`, or `with` at the
+`working_directory`, `if`, `timeout`, `retry`, `batch`, `foreach`, `matrix`, `concurrent`, or `with` at the
 block level. Put those controls inside the block where supported.
 
 `executor.type` is static. String values beneath `executor.with` may use templates and are rendered
@@ -85,14 +85,14 @@ nested in version 1, that currently means returning to the local executor. A roo
 container.
 
 Version 1 executor scopes support shell steps, working-directory and conditional blocks, early
-return, and sequential foreach or matrix controls. Other leaf steps, actions, waits, concurrent
+return, and sequential batch, foreach, or matrix controls. Other leaf steps, actions, waits, concurrent
 groups, parallel fan-out, and nested executor blocks are rejected instead of running unexpectedly
 on the host.
 
-For `foreach` or `matrix` inside an executor block, explicitly set `max_concurrency: 1`. Every
+For `batch`, `foreach`, or `matrix` inside an executor block, explicitly set `max_concurrency: 1`. Every
 iteration then uses the one persistent session sequentially. Transparent conditional and
 working-directory blocks may wrap an executor block, and may also appear inside it. Executor blocks
-cannot be placed inside a foreach or matrix body, concurrent group, or composite action.
+cannot be placed inside a batch, foreach, or matrix body, concurrent group, or composite action.
 
 ## Docker executor
 

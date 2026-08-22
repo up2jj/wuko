@@ -22,6 +22,7 @@ type expressionEnvironment struct {
 	Vars     map[string]any    `expr:"vars"`
 	Env      map[string]string `expr:"env"`
 	Steps    map[string]any    `expr:"steps"`
+	Batch    map[string]any    `expr:"batch"`
 	Foreach  map[string]any    `expr:"foreach"`
 	Matrix   map[string]any    `expr:"matrix"`
 	Finally  map[string]any    `expr:"finally"`
@@ -72,6 +73,7 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 		Vars:    request.Vars,
 		Env:     request.Env,
 		Steps:   request.Steps,
+		Batch:   bindingRoot(request.Bindings, "batch"),
 		Foreach: bindingRoot(request.Bindings, "foreach"),
 		Matrix:  bindingRoot(request.Bindings, "matrix"),
 		Finally: bindingRoot(request.Bindings, "finally"),

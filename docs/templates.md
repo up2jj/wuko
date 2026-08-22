@@ -17,6 +17,7 @@ Every rendered string can access these roots:
 | `.workflow.dir` | The directory containing the owning workflow or materialized action. |
 | `.run.dir` | The active run directory: initially where Wuko was invoked, or the directory established by an enclosing `working_directory` block. |
 | `.inputs` | Composite-action inputs; empty in a top-level workflow. |
+| `.batch` | Active zero-based batch index and current item chunk; available only inside a batch body. |
 | `.foreach` | Active foreach item and zero-based index; available only inside a foreach body. |
 | `.matrix` | Active named axis values; available only inside a matrix body. |
 
@@ -200,9 +201,9 @@ steps:
 ```
 
 Concurrent children share the state snapshot taken before their group starts and cannot consume
-one another's results. Foreach and matrix iterations also use isolated snapshots; see
+one another's results. Batch, foreach, and matrix iterations also use isolated snapshots; see
 [Workflow controls](workflow-control.md). Action sources are rendered before execution and
-therefore cannot depend on `.steps`, `.foreach`, or `.matrix`.
+therefore cannot depend on `.steps`, `.batch`, `.foreach`, or `.matrix`.
 
 ## Safety
 

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -43,19 +44,20 @@ wuko.set_var("done", true)
 
 func TestLuaControlBindings(t *testing.T) {
 	runner, err := New(map[string]any{
-		"source": `wuko.output("binding", {item = wuko.foreach.item, os = wuko.matrix.os})`,
+		"source": `wuko.output("binding", {batch_index = wuko.batch.index, batch_items = wuko.batch.items, item = wuko.foreach.item, os = wuko.matrix.os})`,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	result, err := runner.Run(t.Context(), step.Request{Bindings: map[string]any{
+		"batch":   map[string]any{"index": 1, "items": []any{"api", "worker"}},
 		"foreach": map[string]any{"item": "api"}, "matrix": map[string]any{"os": "linux"},
 	}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]any{"item": "api", "os": "linux"}
-	if got := result.Outputs["binding"].(map[string]any); got["item"] != want["item"] || got["os"] != want["os"] {
+	want := map[string]any{"batch_index": float64(1), "batch_items": []any{"api", "worker"}, "item": "api", "os": "linux"}
+	if got := result.Outputs["binding"].(map[string]any); got["batch_index"] != want["batch_index"] || !reflect.DeepEqual(got["batch_items"], want["batch_items"]) || got["item"] != want["item"] || got["os"] != want["os"] {
 		t.Fatalf("binding = %#v", got)
 	}
 }

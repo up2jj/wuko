@@ -54,6 +54,7 @@ External workflow cancellation always takes precedence over `fail_fast`:
 | --- | --- | --- | --- |
 | Sequential steps | Later steps do not start | Current step is canceled | Earlier commits are retained internally, but failed runs do not return partial state |
 | `concurrent` | Queued children do not execute | All children receive cancellation | No child results from the group are committed |
+| `batch` | Queued chunks do not execute | All iterations receive cancellation | No parent aggregate is committed |
 | `foreach` | Queued iterations do not execute | All iterations receive cancellation | No parent aggregate is committed |
 | `matrix` | Queued combinations do not execute | All iterations receive cancellation | No parent aggregate is committed |
 
@@ -61,13 +62,13 @@ For ordinary execution failures, `fail_fast: true` cancels active siblings and s
 `fail_fast: false` waits for every child or iteration and reports failures in declaration or
 expansion order.
 
-A foreach or matrix can contain a concurrent group. Cancellation then propagates through the
+A batch, foreach, or matrix can contain a concurrent group. Cancellation then propagates through the
 control, into each active iteration, and into all active children of its nested concurrent group.
 Nested fan-out controls and fan-out controls inside concurrent groups are rejected during loading.
 
 ## Expansion limits and cancellation
 
-Foreach and matrix accept `max_iterations`. It defaults to 10,000 and may not exceed the absolute
+Batch, foreach, and matrix accept `max_iterations`. It defaults to 10,000 and may not exceed the absolute
 limit of 1,000,000:
 
 ```yaml
@@ -87,11 +88,11 @@ steps:
             args: ["{{ .matrix.os }}", "{{ .matrix.go }}"]
 ```
 
-Wuko rejects an oversized foreach list or Cartesian product before allocating iteration state.
-Expansion checks cancellation while cloning foreach values and constructing matrix bindings.
+Wuko rejects an oversized batch chunk count, foreach list, or Cartesian product before allocating
+iteration state. Expansion checks cancellation while cloning batch/foreach values and constructing matrix bindings.
 Expr does not accept a context during expression evaluation, so cancellation is observed
-immediately before and after evaluating `foreach.items` or a dynamic matrix axis, not during that
-individual expression evaluation.
+immediately before and after evaluating `batch.items`, a dynamic `batch.size`, `foreach.items`, or
+a dynamic matrix axis, not during that individual expression evaluation.
 
 `wuko tree` and `wuko run --dry-run` display the effective iteration limit without expanding
 runtime values.
@@ -108,7 +109,7 @@ The earliest applicable deadline wins:
 - a step timeout covers one attempt;
 - retry `max_elapsed_time` covers attempts and retry delays;
 - a concurrent timeout covers queueing and all children;
-- a foreach or matrix timeout starts after expression evaluation and expansion, then covers
+- a batch, foreach, or matrix timeout starts after expression evaluation and expansion, then covers
   queueing, iterations, retries, polling, and nested concurrent groups;
 - workflow cancellation covers the complete active execution tree.
 

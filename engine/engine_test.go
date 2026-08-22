@@ -185,6 +185,21 @@ func TestDryRunPrintsUnexpandedControls(t *testing.T) {
 	}
 }
 
+func TestDryRunPrintsUnexpandedBatch(t *testing.T) {
+	registry := newTestRegistry(t, map[string]step.Builder{"capture": func(map[string]any) (step.Runner, error) { return countingRunner{}, nil }})
+	definition := testDefinition(t, "batch-dry-run", workflow.Step{ID: "groups", Batch: &workflow.BatchGroup{
+		Items: "vars.missing", Size: workflow.BatchSize{Expression: "vars.batch_size"}, Collect: "steps.run.value", MaxConcurrency: 2, FailFast: false,
+		Steps: []workflow.Step{{ID: "run", Type: "capture", With: map[string]any{"value": "{{ .batch.items }}"}}},
+	}})
+	var output bytes.Buffer
+	if _, err := New(registry).Run(t.Context(), definition, Options{DryRun: true, Stdout: &output, Stderr: io.Discard}); err != nil {
+		t.Fatal(err)
+	}
+	if want := "1. groups (batch vars.missing by vars.batch_size; collect steps.run.value) [max 2, max 10000 iterations, wait for all]\n   1.1 run (capture)\n"; output.String() != want {
+		t.Fatalf("output = %q, want %q", output.String(), want)
+	}
+}
+
 type countingRunner struct {
 	value any
 	runs  *int

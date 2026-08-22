@@ -69,6 +69,15 @@ func writeDryRun(writer io.Writer, steps []workflow.Step, indent string, parent 
 			}
 			continue
 		}
+		if workflowStep.Batch != nil {
+			if _, err := fmt.Fprintf(writer, "%s%s %s (batch %s by %s%s)%s%s\n", indent, index, workflowStep.ID, workflowStep.Batch.Items, batchSizeLabel(workflowStep.Batch.Size), fanoutCollectSuffix(workflowStep.Batch.Collect), fanoutPolicySuffix(workflowStep.Batch.MaxConcurrency, workflowStep.Batch.MaxIterations, workflowStep.Batch.Timeout, workflowStep.Batch.FailFast), dryRunCondition(workflowStep)); err != nil {
+				return err
+			}
+			if err := writeDryRun(writer, workflowStep.Batch.Steps, indent+"   ", path); err != nil {
+				return err
+			}
+			continue
+		}
 		if workflowStep.Foreach != nil {
 			if _, err := fmt.Fprintf(writer, "%s%s %s (foreach %s%s)%s%s\n", indent, index, workflowStep.ID, workflowStep.Foreach.Items, fanoutCollectSuffix(workflowStep.Foreach.Collect), fanoutPolicySuffix(workflowStep.Foreach.MaxConcurrency, workflowStep.Foreach.MaxIterations, workflowStep.Foreach.Timeout, workflowStep.Foreach.FailFast), dryRunCondition(workflowStep)); err != nil {
 				return err
@@ -145,6 +154,13 @@ func matrixAxisNames(axes workflow.MatrixAxes) string {
 		names[i] = axis.Name
 	}
 	return strings.Join(names, " × ")
+}
+
+func batchSizeLabel(size workflow.BatchSize) string {
+	if size.Literal != 0 {
+		return strconv.Itoa(size.Literal)
+	}
+	return size.Expression
 }
 
 func fanoutPolicySuffix(maxConcurrency, maxIterations int, timeout *workflow.Duration, failFast bool) string {

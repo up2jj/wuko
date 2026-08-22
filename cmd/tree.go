@@ -187,6 +187,16 @@ func writeTreeStepsWithFollowing(writer io.Writer, steps []workflow.Step, prefix
 			}
 			continue
 		}
+		if workflowStep.Batch != nil {
+			condition := treeCondition(workflowStep)
+			if _, err := fmt.Fprintf(writer, "%s%s%s (batch %s by %s%s)%s%s\n", prefix, branch, workflowStep.ID, workflowStep.Batch.Items, treeBatchSize(workflowStep.Batch.Size), treeFanoutCollectSuffix(workflowStep.Batch.Collect), treeFanoutPolicy(workflowStep.Batch.MaxConcurrency, workflowStep.Batch.MaxIterations, workflowStep.Batch.Timeout, workflowStep.Batch.FailFast), condition); err != nil {
+				return err
+			}
+			if err := writeTreeSteps(writer, workflowStep.Batch.Steps, childPrefix); err != nil {
+				return err
+			}
+			continue
+		}
 		if workflowStep.Foreach != nil {
 			condition := treeCondition(workflowStep)
 			if _, err := fmt.Fprintf(writer, "%s%s%s (foreach %s%s)%s%s\n", prefix, branch, workflowStep.ID, workflowStep.Foreach.Items, treeFanoutCollectSuffix(workflowStep.Foreach.Collect), treeFanoutPolicy(workflowStep.Foreach.MaxConcurrency, workflowStep.Foreach.MaxIterations, workflowStep.Foreach.Timeout, workflowStep.Foreach.FailFast), condition); err != nil {
@@ -247,6 +257,13 @@ func treeMatrixAxes(axes workflow.MatrixAxes) string {
 		names[i] = axis.Name
 	}
 	return strings.Join(names, " × ")
+}
+
+func treeBatchSize(size workflow.BatchSize) string {
+	if size.Literal != 0 {
+		return fmt.Sprint(size.Literal)
+	}
+	return size.Expression
 }
 
 func treeFanoutPolicy(maxConcurrency, maxIterations int, timeout *workflow.Duration, failFast bool) string {

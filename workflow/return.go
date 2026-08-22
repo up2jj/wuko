@@ -78,19 +78,19 @@ func (workflowStep Step) ValidateReturnControl() error {
 }
 
 func validateReturnEntry(workflowStep Step, scope stepScope) error {
-	if workflowStep.ID != "" || workflowStep.Type != "" || !workflowStep.Uses.Empty() || workflowStep.Require != nil || workflowStep.Executor != nil || workflowStep.Finally != nil || workflowStep.IsWorkingDirectoryBlock() || workflowStep.Steps != nil || workflowStep.Concurrent != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil || workflowStep.SHA256 != "" || workflowStep.Timeout != nil || workflowStep.Retry != nil || workflowStep.With != nil {
+	if workflowStep.ID != "" || workflowStep.Type != "" || !workflowStep.Uses.Empty() || workflowStep.Require != nil || workflowStep.Executor != nil || workflowStep.Finally != nil || workflowStep.IsWorkingDirectoryBlock() || workflowStep.Steps != nil || workflowStep.Concurrent != nil || workflowStep.Batch != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil || workflowStep.SHA256 != "" || workflowStep.Timeout != nil || workflowStep.Retry != nil || workflowStep.With != nil {
 		return fmt.Errorf("return cannot be combined with other step fields")
 	}
 	switch scope {
 	case scopeTop, scopeExecutor:
 	case scopeControl:
-		return fmt.Errorf("return is not supported inside foreach or matrix controls")
+		return fmt.Errorf("return is not supported inside foreach or matrix controls or inside batch controls")
 	case scopeConcurrent:
 		return fmt.Errorf("return is not supported inside concurrent groups")
 	case scopeFinally, scopeExecutorFinally:
 		return fmt.Errorf("return is not supported inside finally")
 	case scopeExecutorControl:
-		return fmt.Errorf("return is not supported inside foreach or matrix controls")
+		return fmt.Errorf("return is not supported inside foreach or matrix controls or inside batch controls")
 	}
 	return workflowStep.Return.Validate()
 }

@@ -46,17 +46,17 @@ func TestExpressionUsesAllRoots(t *testing.T) {
 }
 
 func TestExpressionUsesControlBindings(t *testing.T) {
-	runner, err := New(map[string]any{"variable": "value", "expr": `foreach.index + matrix.offset`})
+	runner, err := New(map[string]any{"variable": "value", "expr": `len(batch.items) + foreach.index + matrix.offset`})
 	if err != nil {
 		t.Fatal(err)
 	}
 	result, err := runner.Run(t.Context(), step.Request{Bindings: map[string]any{
-		"foreach": map[string]any{"index": 2}, "matrix": map[string]any{"offset": 3},
+		"batch": map[string]any{"items": []any{"api", "worker"}}, "foreach": map[string]any{"index": 2}, "matrix": map[string]any{"offset": 3},
 	}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Outputs["value"] != 5 {
+	if result.Outputs["value"] != 7 {
 		t.Fatalf("result = %#v", result)
 	}
 }

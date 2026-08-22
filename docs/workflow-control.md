@@ -1,13 +1,14 @@
 # Workflow controls
 
-Wuko has three controls for scheduling or repeating operations: `concurrent`, `foreach`, and
-`matrix`.
+Wuko has four controls for scheduling or repeating operations: `concurrent`, `batch`, `foreach`,
+and `matrix`.
 
 - Use `concurrent` for a fixed set of independent steps.
+- Use `batch` when each block should receive a fixed-size chunk of one runtime list.
 - Use `foreach` when one runtime list determines how many times a block runs.
 - Use `matrix` when every combination of several named dimensions must run.
 
-Both `foreach` and `matrix` are logical parent steps. Each iteration receives an isolated copy of
+`batch`, `foreach`, and `matrix` are logical parent steps. Each iteration receives an isolated copy of
 the state that existed before the parent began and runs its child steps in order. The optional
 `collect` expression controls which value each completed iteration contributes to the parent's
 ordered result.
@@ -26,7 +27,7 @@ An anonymous `if` wrapper can guard a sequential block containing any of these c
 
 The condition is evaluated once. The wrapper adds no ID, state, output, or step-count entry of its
 own. A false condition reports its ordinary children and concurrent leaves as skipped and skips
-fan-out parents without expansion. Conditional wrappers may appear inside foreach and matrix
+fan-out parents without expansion. Conditional wrappers may appear inside batch, foreach, and matrix
 bodies, but not directly inside a concurrent group; wrappers cannot be directly nested.
 
 ## Foreach
@@ -85,7 +86,7 @@ steps.deployments:
 
 `collect` is a typed Expr expression evaluated against each iteration's final state after every
 iteration succeeds. It can read `steps`, iteration-local `vars`, `inputs`, `env`, `run`, and the
-active `foreach` or `matrix` binding. It may return null, a scalar, a list, or an object. Nested
+active `batch`, `foreach`, or `matrix` binding. It may return null, a scalar, a list, or an object. Nested
 lists remain nested.
 
 Iteration-local variables can be exported deliberately even though they do not otherwise escape:
@@ -113,6 +114,133 @@ steps.deployments:
 
 An empty input list succeeds. With `collect` it exposes `count: 0` and `results: []`; without
 `collect` it exposes only `count: 0`.
+
+## Batch
+
+`batch.items` is an Expr expression whose result must be a list or array. `batch.size` accepts a
+positive YAML integer or a non-empty Expr string evaluated when execution reaches the parent.
+Items retain their input order, and the final chunk is shorter when the list does not divide
+evenly.
+
+```yaml
+version: 1
+name: deploy-batches
+vars:
+  targets: [api, worker, web, cron, admin]
+steps:
+  - id: deployments
+    batch:
+      items: vars.targets
+      size: 2
+      steps:
+        - id: deploy
+          type: shell
+          with:
+            command: ./deploy-batch
+            args: ['{{ .batch.items | toJSONCompact }}']
+```
+
+This runs three blocks with `[api, worker]`, `[web, cron]`, and `[admin]`. Templates use
+`.batch.items` and the zero-based `.batch.index`; Expr fields omit the leading dot. Conditions can
+therefore select individual chunks:
+
+```yaml
+- id: checked
+  batch:
+    items: vars.targets
+    size: 2
+    steps:
+      - id: deploy
+        type: shell
+        if: batch.index < 10
+        with:
+          command: ./deploy-batch
+          args: ['{{ .batch.items | toJSONCompact }}']
+```
+
+Use an expression when the size is runtime data. It may read inputs, variables, environment
+values, workflow/run metadata, and outputs committed by earlier steps:
+
+```yaml
+vars:
+  targets: [api, worker, web, cron]
+  batch_size: 2
+steps:
+  - id: deployments
+    batch:
+      items: vars.targets
+      size: vars.batch_size
+      steps:
+        - id: deploy
+          type: shell
+          with:
+            command: ./deploy-batch
+            args: ['{{ .batch.items | toJSONCompact }}']
+```
+
+An expression such as `size: 'vars.worker_count * 2'` is also valid. Its result must be positive,
+exactly integral, and within the platform `int` range. Zero, negative, fractional, non-numeric,
+and overflowing results fail the parent during expansion before any child starts. The `batch`
+binding does not exist while `items` or `size` is being evaluated.
+
+`collect` evaluates once per completed chunk and preserves expansion order even when chunks run
+concurrently:
+
+```yaml
+- id: processed
+  batch:
+    items: vars.records
+    size: 100
+    collect: |
+      {
+        "batch": batch.index,
+        "items": batch.items,
+        "stdout": steps.process.stdout
+      }
+    max_concurrency: 4
+    max_iterations: 100
+    timeout: 15m
+    fail_fast: false
+    steps:
+      - id: process
+        type: shell
+        with:
+          command: ./process-records
+          args: ['{{ .batch.items | toJSONCompact }}']
+```
+
+The parent exposes the chunk count and ordered collected values:
+
+```yaml
+steps.processed:
+  count: 3
+  results:
+    - {batch: 0, items: [...], stdout: "..."}
+    - {batch: 1, items: [...], stdout: "..."}
+    - {batch: 2, items: [...], stdout: "..."}
+```
+
+Lua steps use `wuko.batch.index` and `wuko.batch.items`:
+
+```yaml
+- id: transformed
+  batch:
+    items: vars.values
+    size: 10
+    collect: steps.transform.values
+    steps:
+      - id: transform
+        type: lua
+        with:
+          source: |
+            wuko.output("values", {
+              index = wuko.batch.index,
+              items = wuko.batch.items,
+            })
+```
+
+An empty source succeeds with `count: 0` and, when `collect` is present, `results: []`.
+`max_iterations` counts chunks rather than source items.
 
 ## Matrix
 
@@ -178,7 +306,7 @@ axis values are allowed and produce duplicate combinations.
 
 ## Scheduling and failures
 
-Both controls accept the same policies:
+All three fan-out controls accept the same policies:
 
 ```yaml
 - id: work
@@ -198,7 +326,7 @@ Both controls accept the same policies:
   external effects; larger values allow iterations to overlap.
 - `max_iterations` defaults to `10,000`, may be lowered for a workflow-specific safety bound, and
   cannot exceed the absolute limit of `1,000,000`. Expansion fails before iteration state is
-  allocated when the foreach list or Cartesian product exceeds the configured limit.
+  allocated when the batch chunk count, foreach list, or Cartesian product exceeds the configured limit.
 - `fail_fast` defaults to `true`. After an iteration fails, Wuko cancels running siblings and does
   not start queued work where possible. With `false`, Wuko runs every iteration and reports all
   failures in expansion order.
@@ -226,8 +354,8 @@ YAML/JSON-compatible.
 
 Cancellation and fail-fast scheduling stop admitting queued iterations and wait for all active
 iterations to return. Terminal progress reports how many iterations started, succeeded, and were
-not run. Expansion itself checks cancellation while cloning foreach values and constructing matrix
-bindings. Expr does not accept a context during expression evaluation, so cancellation is checked
+not run. Expansion itself checks cancellation while cloning batch/foreach values and constructing
+matrix bindings. Expr does not accept a context during expression evaluation, so cancellation is checked
 immediately before and after each fan-out input or `collect` expression rather than during its
 evaluation.
 
@@ -250,16 +378,15 @@ A child ID may not collide with an ID in its enclosing workflow or composite act
 A control body may contain one existing `concurrent` group for a fixed set of independent child
 steps. The following are not supported:
 
-- foreach inside foreach or matrix;
-- matrix inside matrix or foreach;
-- foreach or matrix inside a concurrent group;
+- batch, foreach, or matrix inside another fan-out control;
+- batch, foreach, or matrix inside a concurrent group;
 - nested concurrent groups;
 - conditional blocks directly inside concurrent groups;
 - directly nested conditional blocks.
 
 Put dependent work after the inner concurrent group or after the complete control parent.
 
-An early [`return`](return.md) may follow a completed concurrent, foreach, or matrix control and
+An early [`return`](return.md) may follow a completed concurrent, batch, foreach, or matrix control and
 consume its committed outputs. It cannot appear inside a concurrent branch or fan-out body because
 parallel branches or iterations could race to publish conflicting workflow results. A composite
 action used by a branch or iteration may return internally; that finishes only the individual
@@ -267,12 +394,12 @@ action invocation.
 
 ## Composite actions and required files
 
-Required step fragments can appear inside foreach and matrix bodies. Relative paths continue to
+Required step fragments can appear inside batch, foreach, and matrix bodies. Relative paths continue to
 resolve from the file containing the `require` entry.
 
 Composite actions may also be children. Their `with` values and typed input expressions can use
-the active foreach or matrix bindings. The `uses` source is resolved while loading the workflow,
-before iterations exist, so it cannot reference `.foreach` or `.matrix`. Choose a static action
+the active batch, foreach, or matrix bindings. The `uses` source is resolved while loading the workflow,
+before iterations exist, so it cannot reference `.batch`, `.foreach`, or `.matrix`. Choose a static action
 source and pass the varying value as an action input.
 
 ## Conditions, inspection, and dry runs
@@ -286,7 +413,7 @@ each body once. It does not evaluate runtime collections or predict their expans
 
 ## Limitations
 
-- Foreach items and dynamic matrix axes must be lists or arrays; map iteration is not supported.
+- Batch/foreach items and dynamic matrix axes must be lists or arrays; map iteration is not supported.
 - Matrix is Cartesian-only. GitHub Actions-style `include` and `exclude` rules are not supported.
 - Fan-out controls cannot be nested.
 - Action sources are static with respect to iteration bindings.

@@ -125,8 +125,8 @@ Use `"key" in object` as an idiomatic alternative to `hasKey(object, "key")`.
 ## Expr-only typed collection operations
 
 Expr provides higher-order operations for transforming typed lists. These functions are available
-wherever Wuko accepts Expr, including `set.expr`, `assert.expr`, conditions, foreach items, and
-matrix axes. They are not Go-template or Lua helpers.
+wherever Wuko accepts Expr, including `set.expr`, `assert.expr`, conditions, batch items/sizes,
+foreach items, and matrix axes. They are not Go-template or Lua helpers.
 
 | Function | Example | Result |
 | --- | --- | --- |
@@ -171,8 +171,12 @@ Use `set` to retain a transformed value for later steps:
     expr: 'indexBy(vars.services, "id")'
 ```
 
-A collection expression can also feed foreach directly. Here each iteration receives a list of up
-to ten targets in `.foreach.item`:
+A collection expression can also feed foreach directly. This remains useful when further Expr
+composition determines the chunks. For ordinary fixed-size execution, prefer the first-class
+[`batch` control](workflow-control.md#batch), which provides `.batch.index`, `.batch.items`, fan-out
+limits, and clearer tree/progress output.
+
+The equivalent manual foreach form passes each list through `.foreach.item`:
 
 ```yaml
 - id: deploy_batches
@@ -210,8 +214,8 @@ spec:
 ## Availability and safety
 
 Helpers are available in named and inline Go templates, in every Wuko Expr surface, and in Lua as
-`wuko.helpers`. Expr surfaces include step conditions, polling `until` expressions, foreach and
-matrix expressions, composite-action inputs and outputs, and the `set` and `assert` steps.
+`wuko.helpers`. Expr surfaces include step conditions, polling `until` expressions, batch, foreach,
+and matrix expressions, composite-action inputs and outputs, and the `set` and `assert` steps.
 
 Wuko intentionally keeps these helpers side-effect-free. They cannot read the process environment
 or filesystem, execute commands, access the network, obtain the current time, generate random

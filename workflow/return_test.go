@@ -44,6 +44,7 @@ func TestReturnSchemaValidation(t *testing.T) {
 		{name: "inside concurrent", body: "  - concurrent:\n      steps:\n        - return: {outputs: {}}\n        - {id: work, type: shell}\n", want: "inside concurrent"},
 		{name: "inside foreach", body: "  - id: loop\n    foreach:\n      items: vars.items\n      steps:\n        - return: {outputs: {}}\n", want: "inside foreach or matrix"},
 		{name: "inside matrix", body: "  - id: loop\n    matrix:\n      axes: {os: [linux]}\n      steps:\n        - return: {outputs: {}}\n", want: "inside foreach or matrix"},
+		{name: "inside batch", body: "  - id: loop\n    batch:\n      items: vars.items\n      size: 2\n      steps:\n        - return: {outputs: {}}\n", want: "inside batch controls"},
 		{name: "inside finally", body: "  - {id: work, type: shell}\nfinally:\n  - return: {outputs: {}}\n", want: "inside finally"},
 	}
 	for _, test := range tests {
