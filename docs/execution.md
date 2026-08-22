@@ -316,6 +316,34 @@ workflow before every occurrence. A run or reload failure is reported and schedu
 Stop the process with Ctrl+C. Cron descriptors such as `@daily` and embedded `CRON_TZ` prefixes are
 not supported.
 
+Use `--once` when another system owns the schedule and Wuko should execute immediately instead of
+waiting for cron occurrences:
+
+```sh
+wuko run cleanup --once
+```
+
+## Run reporters
+
+With no reporter flags, `wuko run` uses the `plain` reporter for terminal progress. Select one or
+more reporters explicitly by repeating `--reporter`; events are delivered in declaration order:
+
+```sh
+wuko run check --reporter plain --reporter github
+```
+
+The `github` reporter requires the `GITHUB_OUTPUT` and `GITHUB_STEP_SUMMARY` files provided to a
+GitHub Actions run step. It emits error annotations for located workflow diagnostics, appends a
+run-statistics summary, and exports successful workflow return values. String values are preserved;
+other values are compact JSON. Each value is available under its declared return name, and the
+complete typed map is available as JSON under `wuko_outputs`. Output values are not written for
+failed or dry runs. The name `wuko_outputs` is reserved by the GitHub reporter; rename a workflow
+return value with that name before enabling the reporter.
+
+Reporters affect presentation and integration only. They do not change interactivity, scheduling,
+or exit status; pair the GitHub reporter with `--once` when GitHub owns the schedule. GitHub
+environment variables do not enable the reporter implicitly.
+
 ## Splitting a workflow across files
 
 `require` inserts steps from another local YAML file at that location:

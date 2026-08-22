@@ -97,6 +97,7 @@ type dependencies struct {
 	isInteractive func(io.Reader) bool
 	now           func() time.Time
 	waitUntil     func(context.Context, time.Time) error
+	getenv        func(string) string
 	debug         *bool
 }
 
@@ -152,6 +153,7 @@ func NewRootCmd() *cobra.Command {
 		agentLookPath: exec.LookPath,
 		loader:        workflow.NewLoader(nil), isInteractive: interactive,
 		now: time.Now, waitUntil: workflowschedule.Wait,
+		getenv: os.Getenv,
 	})
 }
 
@@ -167,6 +169,9 @@ func newRootCmd(deps dependencies) *cobra.Command {
 	}
 	if deps.waitUntil == nil {
 		deps.waitUntil = workflowschedule.Wait
+	}
+	if deps.getenv == nil {
+		deps.getenv = os.Getenv
 	}
 	debug := false
 	deps.debug = &debug

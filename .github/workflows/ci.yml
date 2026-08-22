@@ -15,6 +15,18 @@ jobs:
         with:
           go-version: "1.26"
           cache: true
+      - name: build CI reporter smoke binary
+        run: go build -o "$RUNNER_TEMP/wuko" .
+      - name: run CI reporter smoke workflow
+        id: wuko_smoke
+        run: "$RUNNER_TEMP/wuko" run --file .github/fixtures/ci-smoke.yaml --once --reporter plain --reporter github
+      - name: verify CI reporter outputs
+        env:
+          RESULT: ${{ steps.wuko_smoke.outputs.result }}
+          WUKO_OUTPUTS: ${{ steps.wuko_smoke.outputs.wuko_outputs }}
+        run: |
+          test "$RESULT" = "ready"
+          test "$WUKO_OUTPUTS" = '{"result":"ready"}'
       - name: gofmt
         run: |
           test -z "$(gofmt -l .)" || { echo "Unformatted files:"; gofmt -l .; exit 1; }

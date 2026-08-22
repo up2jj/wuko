@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"time"
@@ -9,7 +10,6 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/engine"
-	"github.com/up2jj/wuko/tui"
 	"github.com/up2jj/wuko/workflow"
 )
 
@@ -27,7 +27,12 @@ func newRunCmd(deps dependencies) *cobra.Command {
 	command.Flags().StringArrayVar(&config.variableFiles, "var-file", nil, "import workflow variables from a JSON or TOML file (repeatable)")
 	command.Flags().StringArrayVar(&config.environment, "env", nil, "override an environment variable (KEY=value; repeatable)")
 	command.Flags().BoolVar(&config.dryRun, "dry-run", false, "validate and print steps without running them")
+	command.Flags().BoolVar(&config.once, "once", false, "run immediately once, ignoring a declared cron schedule")
+	command.Flags().StringArrayVar(&config.reporters, "reporter", nil, "enable a run reporter (plain or github; repeatable; defaults to plain)")
 	command.Flags().StringVar(&config.workflowFile, "file", "", "run a workflow from a file path")
+	_ = command.RegisterFlagCompletionFunc("reporter", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
+		return []string{"plain", "github"}, cobra.ShellCompDirectiveNoFileComp
+	})
 	command.ValidArgsFunction = workflowCompletion(deps)
 	return command
 }
@@ -36,17 +41,27 @@ type runWorkflowConfig struct {
 	variables     []string
 	variableFiles []string
 	environment   []string
+	reporters     []string
 	dryRun        bool
+	once          bool
 	workflowFile  string
 }
 
-func runWorkflow(command *cobra.Command, deps dependencies, args []string, config runWorkflowConfig) error {
+func runWorkflow(command *cobra.Command, deps dependencies, args []string, config runWorkflowConfig) (runErr error) {
 	cwd, home, configDir, err := directories(deps)
 	if err != nil {
 		return err
 	}
-	reporter := diagnosticsFor(command, deps, cwd)
-	diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseInvocation, Status: diagnostic.StatusStarted, Message: "run workflow", Attributes: []diagnostic.Attribute{diagnostic.Attr("run_dir", cwd), diagnostic.Attr("variable_files", fmt.Sprint(len(config.variableFiles))), diagnostic.Attr("variables", fmt.Sprint(len(config.variables))), diagnostic.Attr("environment", fmt.Sprint(len(config.environment)))}})
+	reporters, err := newRunReporters(command, deps, cwd, config.reporters)
+	if err != nil {
+		return err
+	}
+	var workflowName string
+	var runState *engine.State
+	defer func() {
+		runErr = errors.Join(runErr, reporters.Finish(workflowName, runState, runErr, config.dryRun))
+	}()
+	diagnostic.Emit(reporters.Diagnostic, diagnostic.Event{Phase: diagnostic.PhaseInvocation, Status: diagnostic.StatusStarted, Message: "run workflow", Attributes: []diagnostic.Attribute{diagnostic.Attr("run_dir", cwd), diagnostic.Attr("variable_files", fmt.Sprint(len(config.variableFiles))), diagnostic.Attr("variables", fmt.Sprint(len(config.variables))), diagnostic.Attr("environment", fmt.Sprint(len(config.environment)))}})
 	if config.workflowFile != "" && len(args) > 0 {
 		return fmt.Errorf("workflow selector and --file cannot be used together")
 	}
@@ -76,28 +91,28 @@ func runWorkflow(command *cobra.Command, deps dependencies, args []string, confi
 		target = workflowRunTarget{locator: args[0], remote: true}
 	} else {
 		discoveryStarted := time.Now()
-		diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusStarted, Time: discoveryStarted, Message: args[0]})
+		diagnostic.Emit(reporters.Diagnostic, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusStarted, Time: discoveryStarted, Message: args[0]})
 		source, err := workflow.Find(cwd, home, configDir, args[0])
 		if err != nil {
-			diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusFailed, Duration: time.Since(discoveryStarted), Error: err})
+			diagnostic.Emit(reporters.Diagnostic, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusFailed, Duration: time.Since(discoveryStarted), Error: err})
 			return err
 		}
-		diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusSucceeded, Duration: time.Since(discoveryStarted), Location: diagnostic.Location{Source: source.Path}, Message: source.Name})
+		diagnostic.Emit(reporters.Diagnostic, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusSucceeded, Duration: time.Since(discoveryStarted), Location: diagnostic.Location{Source: source.Path}, Message: source.Name})
 		target.path = source.Path
 	}
 	loader := deps.loader
 	if loader == nil {
 		loader = workflow.NewLoader(nil)
 	}
-	loadOptions := workflow.LoadOptions{Vars: vars, Env: env, BaseEnv: baseEnv, RunDir: cwd, Diagnostics: reporter}
+	loadOptions := workflow.LoadOptions{Vars: vars, Env: env, BaseEnv: baseEnv, RunDir: cwd, Diagnostics: reporters.Diagnostic}
 	definition, cleanup, err := target.load(command.Context(), loader, loadOptions)
 	if err != nil {
 		return err
 	}
+	workflowName = definition.Name
 	if config.dryRun {
 		fmt.Fprintf(command.OutOrStdout(), "Workflow %s (%s)\n", definition.Name, definition.Path)
 	}
-	progress := tui.NewProgress(command.ErrOrStderr(), colorEnabled(command.ErrOrStderr()))
 	optionsFor := func(definition *workflow.Definition) engine.Options {
 		localValueDir := ""
 		if !target.remote {
@@ -107,15 +122,17 @@ func runWorkflow(command *cobra.Command, deps dependencies, args []string, confi
 			Vars: vars, Env: env, BaseEnv: baseEnv, RunDir: cwd, Stdin: command.InOrStdin(),
 			LocalValueDir: localValueDir, GlobalValueDir: filepath.Join(configDir, "wuko", "values"),
 			Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(),
-			Interactive: interactive(command.InOrStdin()), DryRun: config.dryRun, Progress: progress.Report,
-			Diagnostics: reporter,
+			Interactive: interactive(command.InOrStdin()), DryRun: config.dryRun, Progress: reporters.Progress,
+			Diagnostics: reporters.Diagnostic,
 		}
 	}
 	execute := func(ctx context.Context, definition *workflow.Definition) error {
-		_, err := engine.New(deps.registry).Run(ctx, definition, optionsFor(definition))
+		workflowName = definition.Name
+		state, err := engine.New(deps.registry).Run(ctx, definition, optionsFor(definition))
+		runState = state
 		return err
 	}
-	if config.dryRun || definition.Cron == "" {
+	if config.dryRun || config.once || definition.Cron == "" {
 		defer cleanup()
 		return execute(command.Context(), definition)
 	}
@@ -137,7 +154,7 @@ func runWorkflow(command *cobra.Command, deps dependencies, args []string, confi
 			return definition, release, nil
 		},
 		execute: execute, now: deps.now, wait: deps.waitUntil,
-		stderr: command.ErrOrStderr(), diagnostics: reporter,
+		stderr: command.ErrOrStderr(), diagnostics: reporters.Diagnostic,
 	}
 	return runner.run(command.Context(), definition, cleanup)
 }

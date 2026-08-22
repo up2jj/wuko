@@ -101,6 +101,30 @@ wuko run --file ./workflows/release.yaml
 See [Workflow discovery](docs/workflow-discovery.md) for search order, shadowing, and
 non-interactive behavior.
 
+## GitHub Actions
+
+Wuko can report a run through GitHub Actions without changing the workflow format. Reporters are
+explicit and repeatable: `plain` keeps the normal progress log, while `github` adds error
+annotations, a job summary, and step outputs. GitHub supplies the output and summary files to every
+run step.
+
+```yaml
+- name: Run Wuko checks
+  id: wuko
+  run: wuko run check --once --reporter plain --reporter github
+  env:
+    API_TOKEN: ${{ secrets.API_TOKEN }}
+
+- uses: actions/upload-artifact@v4
+  with:
+    path: ${{ steps.wuko.outputs.artifact }}
+```
+
+`--once` runs a workflow immediately even when it declares `cron`, leaving GitHub responsible for
+the schedule. Values produced by a successful workflow `return` are exported by name. Wuko also
+exports the complete typed output map as JSON under `wuko_outputs`. The GitHub reporter is never
+enabled automatically; omit all `--reporter` flags to use only the default plain reporter.
+
 ## Workflow building blocks
 
 Every workflow has a schema version, name, and ordered steps. It may also define a description,
