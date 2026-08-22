@@ -14,7 +14,7 @@ with typed data and files, call APIs, run scripts or containers, and start codin
 - **Useful execution controls** — conditions, early successful returns, retries, timeouts, polling,
   concurrency, foreach and matrix expansion, scoped working-directory blocks, scheduled runs, dry
   runs, execution trees, and guaranteed cleanup.
-- **Portable operations** — use built-in HTTP, filesystem, glob, cache, change detection,
+- **Portable operations** — use built-in HTTP, filesystem, glob, native watches, cache, change detection,
   key-value, temporary resource, and Docker steps instead of platform-specific shell commands.
 - **Extensible automation** — run Lua, direct commands, inline shell, or an external agent such as
   Codex.
@@ -205,6 +205,7 @@ Each linked guide contains multiple examples for every step.
 | `require_tool` | Require an executable and optionally validate its version | [System steps](docs/steps-system.md#require_tool) |
 | `file` | Perform shell-independent filesystem operations | [System steps](docs/steps-system.md#file) |
 | `glob` | Discover regular files with portable patterns | [System steps](docs/steps-system.md#glob) |
+| `watch` | Wait for native filesystem events | [System steps](docs/steps-system.md#watch) |
 | `temp` | Create automatically cleaned files/directories | [System steps](docs/steps-system.md#temp) |
 | `cache` | Restore and save directory caches | [System steps](docs/steps-system.md#cache) |
 | `http` | Make structured HTTP API calls | [System steps](docs/steps-system.md#http) |

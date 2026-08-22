@@ -1,6 +1,6 @@
 ---
 name: wuko-workflow-author
-description: Create or update Wuko version-1 YAML workflows, including cron schedules, templates, conditions, early returns, finally cleanup, foreach and matrix controls, required files, composite actions, waits, polling, retries, concurrency, interactive prompts and path selection, typed and imported variables, JSONPath selection, semantic versions, HTTP, files, managed temporary resources, glob discovery, persistent change detectors, content-addressed directory caches, Lua, shell, Docker, and agent steps. Use when designing workflow files, extending existing workflows, or reviewing workflow structure before execution.
+description: Create or update Wuko version-1 YAML workflows, including cron schedules, templates, conditions, early returns, finally cleanup, foreach and matrix controls, required files, composite actions, waits, polling, retries, concurrency, interactive prompts and path selection, typed and imported variables, JSONPath selection, semantic versions, HTTP, files, managed temporary resources, glob discovery, native filesystem watches, persistent change detectors, content-addressed directory caches, Lua, shell, Docker, and agent steps. Use when designing workflow files, extending existing workflows, or reviewing workflow structure before execution.
 ---
 
 # Wuko Workflow Author
@@ -60,6 +60,9 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
   steps; use `file` afterward when content or custom permissions are required.
 - Use `glob` to discover regular files with portable `*`, `?`, character-class, and recursive `**`
   patterns. Keep patterns relative to its `root` and consume the sorted metadata from `files`.
+- Use `watch` to block until the first selected create, modify, rename, or remove notification below
+  an existing local root. Prefer it over polling a shell probe, keep recursive roots narrow, give
+  bounded waits a top-level timeout, and consume the relative `path` plus `operations` list.
 - Use `changed` before guarded work that should run only when selected file contents or named
   values differ from the detector's previous local snapshot. Branch on its `changed` output, and
   give repeated foreach, matrix, or action detectors a templated key containing their binding.

@@ -343,6 +343,33 @@ steps:
 	}
 }
 
+func TestRootCommandRegistersWatchStepWithoutWaiting(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "watch.yaml")
+	data := `version: 1
+name: watch
+steps:
+  - id: source_changed
+    type: watch
+    timeout: 5m
+    with:
+      root: .
+      patterns: ["src/**/*.go"]
+      events: [create, modify, rename, remove]
+`
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	command := NewRootCmd()
+	command.SetIn(bytes.NewReader(nil))
+	command.SetOut(io.Discard)
+	command.SetErr(io.Discard)
+	command.SetArgs([]string{"run", "--file", path, "--dry-run"})
+	if err := command.ExecuteContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRootCommandRegistersTempStep(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "temp.yaml")

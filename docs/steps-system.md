@@ -94,6 +94,42 @@ Match normally hidden workflow files explicitly:
 Patterns form a union and results are deduplicated and path-sorted. Wildcards skip hidden paths
 unless the leading dot is explicit. Outputs include absolute `root`, `count`, and `files` metadata.
 
+## `watch`
+
+Wait for the first matching native filesystem notification without polling or invoking a shell.
+Patterns use the same relative, forward-slash syntax and hidden-path behavior as `glob`.
+
+Wait up to five minutes for Go source activity:
+
+```yaml
+- id: source_changed
+  type: watch
+  timeout: 5m
+  with:
+    root: .
+    patterns: ["src/**/*.go"]
+    events: [create, modify, rename, remove]
+```
+
+`root` defaults to `.` and must already be a directory. `patterns` is required and forms a union.
+`events` defaults to all four supported operations; `modify` means file content was written and
+does not include permission-only changes. The step returns absolute `root`, slash-normalized
+relative `path`, and an `operations` list. Native notifications may combine operations, so consume
+the list rather than assuming exactly one value.
+
+Wuko watches every existing directory below `root`, adds newly created directory trees, and does
+not follow directory symlinks. Recursive trees consume one or more operating-system watch
+resources per directory, so keep the root narrow. A directory moved into the tree is watched from
+that point onward, but native APIs may not report activity that happened within it before Wuko
+registered the new directories.
+
+A rename reports the old path. When both locations are watched, the destination normally arrives
+as a separate create notification; because version 1 returns the first match, that later event is
+not included. Native notifications require filesystem support and are unavailable or unreliable on
+NFS, SMB, FUSE, `/proc`, and `/sys`; there is no polling fallback. The step may wait indefinitely,
+so use a top-level `timeout` unless an unbounded workflow is intentional. `watch` observes the local
+host filesystem and is rejected inside executor blocks.
+
 ## `temp`
 
 Create a managed empty file or directory. Wuko removes it after root workflow cleanup, including
