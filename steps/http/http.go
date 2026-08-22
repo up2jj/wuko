@@ -173,8 +173,6 @@ func newClient(transport http.RoundTripper, jar http.CookieJar) *http.Client {
 	}}
 }
 
-func (r *Runner) Validate(_ context.Context, _ step.Request) error { return r.validate(false) }
-
 func (r *Runner) Run(ctx context.Context, execution step.Request) (result step.Result, resultErr error) {
 	if err := r.validate(true); err != nil {
 		return step.Result{}, err

@@ -34,7 +34,7 @@ type Validator interface {
 	Validate(context.Context, Request) error
 }
 
-// Builder strictly decodes one executor configuration.
+// Builder strictly decodes and validates one executor configuration.
 type Builder func(map[string]any) (Provider, error)
 
 // Registry maps executor type names to provider builders.

@@ -43,10 +43,6 @@ func New(raw map[string]any) (step.Runner, error) {
 	return runner, nil
 }
 
-func (runner *Runner) Validate(_ context.Context, _ step.Request) error {
-	return runner.validate(false)
-}
-
 func (runner *Runner) Run(ctx context.Context, _ step.Request) (step.Result, error) {
 	if err := runner.validate(true); err != nil {
 		return step.Result{}, err

@@ -85,10 +85,6 @@ func NewExecutor(raw map[string]any) (executor.Provider, error) {
 	return provider, nil
 }
 
-func (provider *ExecutorProvider) Validate(context.Context, executor.Request) error {
-	return validateExecutorConfig(provider.config)
-}
-
 func validateExecutorConfig(config ExecutorConfig) error {
 	if strings.TrimSpace(config.Image) == "" {
 		return fmt.Errorf("image is required")

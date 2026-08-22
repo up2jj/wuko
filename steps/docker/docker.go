@@ -161,13 +161,6 @@ func New(raw map[string]any) (step.Runner, error) {
 	return runner, nil
 }
 
-func (r *Runner) Validate(_ context.Context, _ step.Request) error {
-	if err := validateConfig(r.config, r.present); err != nil {
-		return err
-	}
-	return nil
-}
-
 func (r *Runner) Run(ctx context.Context, request step.Request) (result step.Result, runErr error) {
 	if err := validateConfig(r.config, r.present); err != nil {
 		return step.Result{}, err

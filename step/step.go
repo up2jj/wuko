@@ -60,6 +60,8 @@ type Cleaner interface {
 	Cleanup(Result) error
 }
 
+// Validator performs request-dependent validation without executing the step.
+// Static configuration validation belongs in Builder.
 type Validator interface {
 	Validate(context.Context, Request) error
 }
@@ -97,6 +99,7 @@ func ApplyAttemptEnvironment(environment map[string]string, request Request) map
 	return environment
 }
 
+// Builder strictly decodes and validates one step configuration.
 type Builder func(raw map[string]any) (Runner, error)
 
 type Registry struct {

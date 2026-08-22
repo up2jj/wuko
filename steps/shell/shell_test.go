@@ -31,6 +31,18 @@ func TestInlineShellArgumentsAndEnvironment(t *testing.T) {
 	}
 }
 
+func TestNewRejectsBlankScript(t *testing.T) {
+	if _, err := New(map[string]any{"script": " \t\n"}); err == nil || !strings.Contains(err.Error(), "script cannot be blank") {
+		t.Fatalf("New() error = %v, want blank script error", err)
+	}
+}
+
+func TestNewAcceptsTemplatedScript(t *testing.T) {
+	if _, err := New(map[string]any{"script": "{{ .vars.script }}"}); err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+}
+
 func TestShellExportsAttemptMetadataAfterStepEnvironment(t *testing.T) {
 	runner, err := New(map[string]any{
 		"script": `printf '%s:%s:%s' "$WUKO_STEP_ATTEMPT" "$WUKO_STEP_MAX_ATTEMPTS" "$WUKO_STEP_OPERATION_ID"`,

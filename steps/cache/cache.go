@@ -72,10 +72,6 @@ func New(raw map[string]any) (step.Runner, error) {
 	return &Runner{config: config}, nil
 }
 
-func (r *Runner) Validate(_ context.Context, _ step.Request) error {
-	return validateConfig(r.config)
-}
-
 func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, error) {
 	if err := ctx.Err(); err != nil {
 		return step.Result{}, err

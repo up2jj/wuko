@@ -37,6 +37,9 @@ func New(raw map[string]any) (step.Runner, error) {
 	if (config.Command == "") == (config.Script == "") {
 		return nil, fmt.Errorf("exactly one of command or script is required")
 	}
+	if config.Script != "" && strings.TrimSpace(config.Script) == "" {
+		return nil, fmt.Errorf("script cannot be blank")
+	}
 	for key := range config.Env {
 		if !workflow.ValidEnvironmentName(key) {
 			return nil, fmt.Errorf("invalid environment name %q", key)
@@ -82,11 +85,4 @@ func (r *Runner) command() (string, []string) {
 	args := []string{"-c", r.config.Script, "wuko"}
 	args = append(args, r.config.Args...)
 	return shell, args
-}
-
-func (r *Runner) Validate(_ context.Context, _ step.Request) error {
-	if r.config.Script != "" && strings.TrimSpace(r.config.Script) == "" {
-		return fmt.Errorf("script cannot be blank")
-	}
-	return nil
 }
