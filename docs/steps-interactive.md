@@ -206,6 +206,31 @@ With `required: false`, selecting no path stores an empty string in single mode 
 multiple mode. Pre-supplied values skip the browser but must still be relative, exist, match the
 declared kind and patterns, and remain inside the resolved root.
 
+## `tui_review`
+
+Review scrollable plain text or a colored unified diff and collect a boolean approval decision.
+
+```yaml
+- id: review
+  type: tui_review
+  with:
+    variable: approved
+    message: Review the deployment plan
+    content: "{{ .steps.plan.stdout }}"
+    format: diff
+    default: false
+```
+
+`format` accepts `plain` or `diff` and defaults to `plain`. Plain text wraps to the terminal width;
+diff lines retain their alignment, color additions, removals, headers, and hunks, and support
+horizontal panning. Use arrows or `j`/`k` to scroll, Page Up and Page Down to move by a page,
+left/right or `h`/`l` to focus Reject or Approve, and Enter to submit. Shift+Left and Shift+Right
+pan a diff horizontally. Shortcut help wraps on narrow terminals.
+
+Reject is selected by default and returns `false` without failing the workflow. Set `default: true`
+to focus Approve initially. A supplied variable must be a boolean and skips the review; a missing
+variable fails a non-interactive run.
+
 ## `tui_confirm`
 
 Collect a boolean decision. `default` selects the initial interactive answer; it does not answer a

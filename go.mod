@@ -8,6 +8,7 @@ require (
 	charm.land/lipgloss/v2 v2.0.4
 	github.com/Masterminds/semver/v3 v3.5.0
 	github.com/bmatcuk/doublestar/v4 v4.10.0
+	github.com/charmbracelet/x/ansi v0.11.7
 	github.com/containerd/errdefs v1.0.0
 	github.com/expr-lang/expr v1.17.8
 	github.com/moby/docker-image-spec v1.3.1
@@ -33,7 +34,6 @@ require (
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/charmbracelet/colorprofile v0.4.3 // indirect
 	github.com/charmbracelet/ultraviolet v0.0.0-20260525132238-948f4557a654 // indirect
-	github.com/charmbracelet/x/ansi v0.11.7 // indirect
 	github.com/charmbracelet/x/term v0.2.2 // indirect
 	github.com/charmbracelet/x/termios v0.1.1 // indirect
 	github.com/charmbracelet/x/windows v0.2.2 // indirect
