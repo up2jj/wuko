@@ -101,8 +101,13 @@ Use static choices:
     variable: environment
     message: Select an environment
     choices:
-      - {label: Development, description: Local and test infrastructure, value: dev}
-      - {label: Production, description: Customer-facing infrastructure, value: prod}
+      - {label: Development, description: Local and test infrastructure, value: dev, default: true}
+      - {label: Staging, description: Shared release verification, value: staging}
+      - label: Production
+        description: Customer-facing infrastructure
+        value: prod
+        disabled: true
+        reason: Production access is not configured
 ```
 
 Select multiple objects from an earlier step:
@@ -114,10 +119,15 @@ Select multiple objects from an earlier step:
     variable: project_ids
     message: Select projects
     multiple: true
+    min_selected: 2
+    max_selected: 4
     from: steps.fetch.value.projects
     label_field: name
     value_field: id
     description_field: summary
+    disabled_field: selection.disabled
+    reason_field: selection.reason
+    default_field: selection.default
 ```
 
 Use scalar dynamic values without field mappings:
@@ -131,21 +141,41 @@ Use scalar dynamic values without field mappings:
     from: vars.available_regions
 ```
 
-Static choices require `label` and scalar `value`; `description` is optional. A scalar dynamic item
-is both its label and value. Object lists use `label_field` and `value_field`, which may be dotted
-paths. Set `description_field` to display additional searchable text from each object.
+Static choices require `label` and scalar `value`; `description`, `disabled`, `reason`, and
+`default` are optional. Every disabled choice requires a non-empty reason and cannot be a default.
+In single mode, at most one choice may be the default; the picker initially focuses it. In multiple
+mode, all defaults start selected in source order.
+
+A scalar dynamic item is both its label and value and does not carry choice metadata. Object lists
+use `label_field` and `value_field`, which may be dotted paths. `description_field` displays
+additional searchable text. `disabled_field` and `default_field` must resolve to booleans. When
+`disabled_field` is true, `reason_field` must resolve to a non-empty string. Disabled choices remain
+visible and focusable, show their reason inline, and cannot be selected. Labels, descriptions, and
+disabled reasons are all searchable.
 
 The picker supports arrow keys or `j`/`k`, Home, End, Page Up, and Page Down. `/` filters labels
-and descriptions. In multiple mode, Space toggles values and Enter confirms them in selection
-order. Shortcut help wraps on narrow terminals.
+and metadata. In multiple mode, Space toggles values and Enter confirms them in selection order.
+Outside filter editing, Ctrl+A selects enabled visible matches up to the remaining maximum and
+Ctrl+X clears visible matches. Selections hidden by the filter are preserved. The header shows the
+live selected count and configured minimum or maximum. Shortcut help wraps on narrow terminals.
 
 `multiple` defaults to `false` and `required` defaults to `true`. Single selection exposes
 `.steps.<id>.value`, `.steps.<id>.label`, and `.steps.<id>.selected`. With `required: false`, the
 explicit `(none)` entry produces `selected: false`, `value: null`, and an empty label. A real
 `null` choice remains distinguishable because it produces `selected: true`. Multiple selection
-exposes `.steps.<id>.values`, `.steps.<id>.labels`, and `.steps.<id>.count`; optional empty choice
-sets and empty selections succeed with empty lists. In non-interactive runs, an optional choice
-without a supplied variable resolves directly to no selection.
+exposes `.steps.<id>.values`, `.steps.<id>.labels`, and `.steps.<id>.count`.
+
+`min_selected` and `max_selected` are non-negative integers available only in multiple mode. When
+either is present, these explicit bounds supersede `required`: an omitted minimum is 0 and an
+omitted maximum is unlimited. The minimum cannot exceed the maximum or the number of enabled
+choices. Defaults may start below the minimum so the user can add choices, but cannot exceed the
+maximum. `max_selected: 0` is valid when the effective minimum is zero.
+
+Pre-supplied values skip the picker but still reject disabled choices and enforce the bounds after
+duplicate values are removed. Defaults only initialize an interactive picker; they never supply a
+missing value in a non-interactive run. Without explicit bounds, optional empty choice sets and
+empty selections succeed with empty lists, and an optional missing non-interactive value resolves
+directly to no selection.
 
 ## `tui_path`
 

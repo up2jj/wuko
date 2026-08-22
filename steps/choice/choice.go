@@ -16,17 +16,25 @@ type Config struct {
 	Message          string         `yaml:"message"`
 	Multiple         bool           `yaml:"multiple,omitempty"`
 	Required         *bool          `yaml:"required,omitempty"`
+	MinSelected      *int           `yaml:"min_selected,omitempty"`
+	MaxSelected      *int           `yaml:"max_selected,omitempty"`
 	Choices          []ChoiceConfig `yaml:"choices,omitempty"`
 	From             string         `yaml:"from,omitempty"`
 	LabelField       string         `yaml:"label_field,omitempty"`
 	ValueField       string         `yaml:"value_field,omitempty"`
 	DescriptionField string         `yaml:"description_field,omitempty"`
+	DisabledField    string         `yaml:"disabled_field,omitempty"`
+	ReasonField      string         `yaml:"reason_field,omitempty"`
+	DefaultField     string         `yaml:"default_field,omitempty"`
 }
 
 type ChoiceConfig struct {
 	Label       string `yaml:"label"`
 	Description string `yaml:"description,omitempty"`
 	Value       any    `yaml:"value"`
+	Disabled    bool   `yaml:"disabled,omitempty"`
+	Reason      string `yaml:"reason,omitempty"`
+	Default     bool   `yaml:"default,omitempty"`
 }
 
 type Runner struct{ config Config }
@@ -44,6 +52,9 @@ func New(raw map[string]any) (step.Runner, error) {
 	if (len(config.Choices) == 0) == (config.From == "") {
 		return nil, fmt.Errorf("exactly one of choices or from is required")
 	}
+	if err := validateBounds(config); err != nil {
+		return nil, err
+	}
 	if config.LabelField == "" {
 		config.LabelField = "label"
 	}
@@ -58,10 +69,10 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 	if err != nil {
 		return step.Result{}, err
 	}
-	if len(options) == 0 && r.required() {
-		return step.Result{}, fmt.Errorf("choice set is empty")
-	}
 	if err := ensureUnique(options); err != nil {
+		return step.Result{}, err
+	}
+	if err := r.validateOptions(options); err != nil {
 		return step.Result{}, err
 	}
 
@@ -69,13 +80,14 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 		return r.preSupplied(supplied, options)
 	}
 	if !request.Interactive {
-		if !r.required() {
+		if r.minimum() == 0 {
 			return r.selected(nil, options), nil
 		}
 		return step.Result{}, fmt.Errorf("variable %q is required when stdin is non-interactive; supply it with --var", r.config.Variable)
 	}
 	indexes, err := tui.Choose(ctx, request.Stdin, request.Stdout, tui.ChoicePickerConfig{
 		Message: r.config.Message, Options: options, Multiple: r.config.Multiple, Required: r.required(),
+		MinSelected: r.config.MinSelected, MaxSelected: r.config.MaxSelected,
 	})
 	if err != nil {
 		return step.Result{}, fmt.Errorf("choosing: %w", err)
@@ -93,7 +105,13 @@ func (r *Runner) options(request step.Request) ([]tui.Option, error) {
 			if !scalar(choice.Value) {
 				return nil, fmt.Errorf("choice %d value must be a scalar", i+1)
 			}
-			options[i] = tui.Option{Label: choice.Label, Description: choice.Description, Value: choice.Value}
+			if choice.Disabled && strings.TrimSpace(choice.Reason) == "" {
+				return nil, fmt.Errorf("choice %d is disabled without a reason", i+1)
+			}
+			options[i] = tui.Option{
+				Label: choice.Label, Description: choice.Description, Value: choice.Value,
+				Disabled: choice.Disabled, DisabledReason: choice.Reason, Default: choice.Default,
+			}
 		}
 		return options, nil
 	}
@@ -131,7 +149,33 @@ func (r *Runner) options(request step.Request) ([]tui.Option, error) {
 			}
 			description = fmt.Sprint(resolved)
 		}
-		options = append(options, tui.Option{Label: fmt.Sprint(label), Description: description, Value: value})
+		disabled, err := boolField(item, r.config.DisabledField)
+		if err != nil {
+			return nil, fmt.Errorf("choice source item %d disabled: %w", i+1, err)
+		}
+		defaultChoice, err := boolField(item, r.config.DefaultField)
+		if err != nil {
+			return nil, fmt.Errorf("choice source item %d default: %w", i+1, err)
+		}
+		reason := ""
+		if disabled {
+			if r.config.ReasonField == "" {
+				return nil, fmt.Errorf("choice source item %d is disabled without a reason field", i+1)
+			}
+			resolved, err := step.LookupValue(item, r.config.ReasonField)
+			if err != nil {
+				return nil, fmt.Errorf("choice source item %d reason: %w", i+1, err)
+			}
+			var ok bool
+			reason, ok = resolved.(string)
+			if !ok || strings.TrimSpace(reason) == "" {
+				return nil, fmt.Errorf("choice source item %d reason must be a non-empty string", i+1)
+			}
+		}
+		options = append(options, tui.Option{
+			Label: fmt.Sprint(label), Description: description, Value: value,
+			Disabled: disabled, DisabledReason: reason, Default: defaultChoice,
+		})
 	}
 	return options, nil
 }
@@ -145,14 +189,14 @@ func (r *Runner) preSupplied(value any, options []tui.Option) (step.Result, erro
 			}
 			return step.Result{}, fmt.Errorf("pre-supplied variable %q is not an available choice", r.config.Variable)
 		}
+		if options[index].Disabled {
+			return step.Result{}, fmt.Errorf("pre-supplied variable %q is a disabled choice: %s", r.config.Variable, options[index].DisabledReason)
+		}
 		return r.selected([]int{index}, options), nil
 	}
 	values, ok := asSlice(value)
 	if !ok {
 		return step.Result{}, fmt.Errorf("pre-supplied variable %q must be a list", r.config.Variable)
-	}
-	if r.required() && len(values) == 0 {
-		return step.Result{}, fmt.Errorf("pre-supplied variable %q must contain at least one value", r.config.Variable)
 	}
 	indexes := make([]int, 0, len(values))
 	seen := make(map[int]struct{})
@@ -161,11 +205,20 @@ func (r *Runner) preSupplied(value any, options []tui.Option) (step.Result, erro
 		if index < 0 {
 			return step.Result{}, fmt.Errorf("pre-supplied variable %q contains an unavailable choice %v", r.config.Variable, selected)
 		}
+		if options[index].Disabled {
+			return step.Result{}, fmt.Errorf("pre-supplied variable %q contains disabled choice %v: %s", r.config.Variable, selected, options[index].DisabledReason)
+		}
 		if _, duplicate := seen[index]; duplicate {
 			continue
 		}
 		seen[index] = struct{}{}
 		indexes = append(indexes, index)
+	}
+	if len(indexes) < r.minimum() {
+		return step.Result{}, fmt.Errorf("pre-supplied variable %q must contain at least %d values", r.config.Variable, r.minimum())
+	}
+	if r.config.MaxSelected != nil && len(indexes) > *r.config.MaxSelected {
+		return step.Result{}, fmt.Errorf("pre-supplied variable %q must contain at most %d values", r.config.Variable, *r.config.MaxSelected)
 	}
 	return r.selected(indexes, options), nil
 }
@@ -197,6 +250,83 @@ func (r *Runner) selected(indexes []int, options []tui.Option) step.Result {
 }
 
 func (r *Runner) required() bool { return r.config.Required == nil || *r.config.Required }
+
+func (r *Runner) minimum() int {
+	if !r.config.Multiple {
+		if r.required() {
+			return 1
+		}
+		return 0
+	}
+	if r.config.MinSelected != nil || r.config.MaxSelected != nil {
+		if r.config.MinSelected != nil {
+			return *r.config.MinSelected
+		}
+		return 0
+	}
+	if r.required() {
+		return 1
+	}
+	return 0
+}
+
+func (r *Runner) validateOptions(options []tui.Option) error {
+	enabled := 0
+	defaults := 0
+	for index, option := range options {
+		if option.Disabled {
+			if option.Default {
+				return fmt.Errorf("choice %d cannot be both disabled and default", index+1)
+			}
+		} else {
+			enabled++
+		}
+		if option.Default {
+			defaults++
+		}
+	}
+	if !r.config.Multiple && defaults > 1 {
+		return fmt.Errorf("single choice mode allows at most one default")
+	}
+	if r.minimum() > enabled {
+		return fmt.Errorf("minimum selected %d exceeds %d enabled choices", r.minimum(), enabled)
+	}
+	if r.config.MaxSelected != nil && defaults > *r.config.MaxSelected {
+		return fmt.Errorf("%d default choices exceed maximum selected %d", defaults, *r.config.MaxSelected)
+	}
+	return nil
+}
+
+func validateBounds(config Config) error {
+	if (config.MinSelected != nil || config.MaxSelected != nil) && !config.Multiple {
+		return fmt.Errorf("min_selected and max_selected require multiple: true")
+	}
+	if config.MinSelected != nil && *config.MinSelected < 0 {
+		return fmt.Errorf("min_selected cannot be negative")
+	}
+	if config.MaxSelected != nil && *config.MaxSelected < 0 {
+		return fmt.Errorf("max_selected cannot be negative")
+	}
+	if config.MinSelected != nil && config.MaxSelected != nil && *config.MinSelected > *config.MaxSelected {
+		return fmt.Errorf("min_selected cannot exceed max_selected")
+	}
+	return nil
+}
+
+func boolField(item any, path string) (bool, error) {
+	if path == "" {
+		return false, nil
+	}
+	value, err := step.LookupValue(item, path)
+	if err != nil {
+		return false, err
+	}
+	result, ok := value.(bool)
+	if !ok {
+		return false, fmt.Errorf("field %q must be a boolean", path)
+	}
+	return result, nil
+}
 
 func ensureUnique(options []tui.Option) error {
 	seen := make(map[string]struct{}, len(options))

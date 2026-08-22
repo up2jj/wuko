@@ -21,9 +21,12 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
 - Use `tui_confirm` for boolean approval, `tui_choice` for enumerated values, `tui_input` for
   visible text, `tui_password` for masked text, and `tui_path` for rooted selection of existing
   files or directories.
-  Choice descriptions and `description_field` make large static or dynamic lists searchable;
-  multiple choices preserve selection order, while optional single choices expose `selected` to
-  distinguish no selection from a selected null value.
+  Choice descriptions and `description_field` make large static or dynamic lists searchable.
+  Mark unavailable static choices with `disabled` plus a non-empty `reason`, or map dynamic object
+  metadata with `disabled_field` and `reason_field`; use `default` or `default_field` only to
+  initialize interactive selection. Multiple choices preserve selection order and may use
+  `min_selected` and `max_selected`; explicit bounds supersede `required`. Optional single choices
+  expose `selected` to distinguish no selection from a selected null value.
   Keep path patterns relative to the picker root and supply prompt variables explicitly in
   non-interactive runs.
 - Use `set` for JSON-compatible literals and Expr-based values; use Lua only when transformation

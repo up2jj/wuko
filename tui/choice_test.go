@@ -78,6 +78,135 @@ func TestChoiceModelPaginatesAndWrapsHelp(t *testing.T) {
 	}
 }
 
+func TestChoiceModelUsesDefaultsAndShowsBounds(t *testing.T) {
+	minimum, maximum := 1, 3
+	model := newChoiceModel(ChoicePickerConfig{
+		Message: "Pick", Multiple: true, Required: true,
+		MinSelected: &minimum, MaxSelected: &maximum,
+		Options: []Option{
+			{Label: "A", Default: true},
+			{Label: "B"},
+			{Label: "C", Default: true},
+		},
+	})
+	if !slices.Equal(model.order, []int{0, 2}) {
+		t.Fatalf("default order = %#v", model.order)
+	}
+	view := model.View().Content
+	for _, want := range []string{"selected: 2", "min: 1", "max: 3", "ctrl+a select all", "ctrl+x clear"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("view = %q, want %q", view, want)
+		}
+	}
+
+	single := newChoiceModel(ChoicePickerConfig{
+		Message: "Pick", Required: false,
+		Options: []Option{{Label: "A"}, {Label: "B", Default: true}},
+	})
+	if single.cursor != 2 || single.visible[single.cursor].label != "B" {
+		t.Fatalf("cursor = %d, visible = %#v", single.cursor, single.visible)
+	}
+}
+
+func TestChoiceModelShowsAndBlocksDisabledChoice(t *testing.T) {
+	model := newChoiceModel(ChoicePickerConfig{
+		Message: "Pick", Required: true,
+		Options: []Option{
+			{Label: "Unavailable", Description: "Production", Disabled: true, DisabledReason: "maintenance window"},
+			{Label: "Available"},
+		},
+	})
+	updated, command := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = updated.(choiceModel)
+	if command != nil || model.done || model.err != "maintenance window" {
+		t.Fatalf("done = %v, err = %q, command nil = %v", model.done, model.err, command == nil)
+	}
+	view := model.View().Content
+	for _, want := range []string{"Unavailable", "Production", "disabled: maintenance window"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("view = %q, want %q", view, want)
+		}
+	}
+	model.filter.SetValue("maintenance")
+	model.refreshVisible()
+	if len(model.visible) != 1 || model.visible[0].label != "Unavailable" {
+		t.Fatalf("visible = %#v", model.visible)
+	}
+}
+
+func TestChoiceModelBulkActionsRespectFilterAndMaximum(t *testing.T) {
+	maximum := 3
+	model := newChoiceModel(ChoicePickerConfig{
+		Message: "Pick", Multiple: true, MaxSelected: &maximum,
+		Options: []Option{
+			{Label: "A", Description: "visible"},
+			{Label: "B", Description: "visible"},
+			{Label: "C", Description: "visible"},
+			{Label: "D", Description: "hidden", Default: true},
+		},
+	})
+	model.filter.SetValue("visible")
+	model.refreshVisible()
+	updated, _ := model.Update(tea.KeyPressMsg{Code: 'a', Mod: tea.ModCtrl})
+	model = updated.(choiceModel)
+	if !slices.Equal(model.order, []int{3, 0, 1}) {
+		t.Fatalf("order after select all = %#v", model.order)
+	}
+	updated, _ = model.Update(tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
+	model = updated.(choiceModel)
+	if !slices.Equal(model.order, []int{3}) || !model.selected[3] {
+		t.Fatalf("order after clear = %#v, selected = %#v", model.order, model.selected)
+	}
+}
+
+func TestChoiceModelEnforcesSelectionBounds(t *testing.T) {
+	minimum, maximum := 2, 2
+	model := newChoiceModel(ChoicePickerConfig{
+		Message: "Pick", Multiple: true, MinSelected: &minimum, MaxSelected: &maximum,
+		Options: []Option{{Label: "A"}, {Label: "B"}, {Label: "C"}},
+	})
+	updated, _ := model.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
+	model = updated.(choiceModel)
+	updated, command := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = updated.(choiceModel)
+	if command != nil || model.err != "select at least 2 values" {
+		t.Fatalf("err = %q, command nil = %v", model.err, command == nil)
+	}
+	model.cursor = 1
+	updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
+	model = updated.(choiceModel)
+	model.cursor = 2
+	updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
+	model = updated.(choiceModel)
+	if model.err != "select at most 2 values" || !slices.Equal(model.order, []int{0, 1}) {
+		t.Fatalf("err = %q, order = %#v", model.err, model.order)
+	}
+}
+
+func TestChoicePickerConfigValidation(t *testing.T) {
+	negative, zero, one := -1, 0, 1
+	tests := []struct {
+		name   string
+		config ChoicePickerConfig
+	}{
+		{name: "bounds in single mode", config: ChoicePickerConfig{MinSelected: &zero}},
+		{name: "negative minimum", config: ChoicePickerConfig{Multiple: true, MinSelected: &negative}},
+		{name: "inverted bounds", config: ChoicePickerConfig{Multiple: true, MinSelected: &one, MaxSelected: &zero}},
+		{name: "disabled without reason", config: ChoicePickerConfig{Options: []Option{{Disabled: true}}}},
+		{name: "disabled default", config: ChoicePickerConfig{Options: []Option{{Disabled: true, DisabledReason: "no", Default: true}}}},
+		{name: "multiple single defaults", config: ChoicePickerConfig{Options: []Option{{Default: true}, {Default: true}}}},
+		{name: "minimum exceeds enabled", config: ChoicePickerConfig{Multiple: true, MinSelected: &one, Options: []Option{{Disabled: true, DisabledReason: "no"}}}},
+		{name: "defaults exceed maximum", config: ChoicePickerConfig{Multiple: true, MaxSelected: &zero, Options: []Option{{Default: true}}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := validateChoicePickerConfig(tt.config); err == nil {
+				t.Fatal("expected validation error")
+			}
+		})
+	}
+}
+
 func TestConfirmModelUsesDefaultSelection(t *testing.T) {
 	model := newChoiceModel(ChoicePickerConfig{
 		Message: "Continue?", Options: []Option{{Label: "Yes", Value: true}, {Label: "No", Value: false}}, Required: true,
