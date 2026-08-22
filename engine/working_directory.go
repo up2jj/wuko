@@ -25,14 +25,8 @@ func (e *Engine) validateWorkingDirectoryBlock(ctx context.Context, definition *
 		})
 		return err
 	}
-	if block.ID != "" || block.Type != "" || !block.Uses.Empty() || block.Require != nil || block.Executor != nil || block.Finally != nil || block.Concurrent != nil || block.Foreach != nil || block.Matrix != nil || block.Return != nil || block.SHA256 != "" || block.If != "" || block.Timeout != nil || block.Retry != nil || block.With != nil {
-		return fail(fmt.Errorf("working_directory block cannot be combined with other step fields"))
-	}
-	if strings.TrimSpace(block.WorkingDirectory) == "" {
-		return fail(fmt.Errorf("working_directory must be a non-empty path"))
-	}
-	if len(block.Steps) == 0 {
-		return fail(fmt.Errorf("working_directory block must contain at least one step"))
+	if err := block.ValidateBlock(); err != nil {
+		return fail(err)
 	}
 	if err := validateTemplates(options.renderer, block.WorkingDirectory, false); err != nil {
 		return fail(fmt.Errorf("working_directory template: %w", err))

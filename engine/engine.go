@@ -145,14 +145,8 @@ func (e *Engine) validateSteps(ctx context.Context, definition *workflow.Definit
 			if insideConcurrent {
 				return fail(fmt.Errorf("conditional blocks are not supported inside concurrent groups"))
 			}
-			if workflowStep.If == "" {
-				return fail(fmt.Errorf("conditional block must set if"))
-			}
-			if len(workflowStep.Steps) == 0 {
-				return fail(fmt.Errorf("conditional block must contain at least one step"))
-			}
-			if workflowStep.ID != "" || workflowStep.Type != "" || !workflowStep.Uses.Empty() || workflowStep.Require != nil || workflowStep.Executor != nil || workflowStep.Finally != nil || workflowStep.Concurrent != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil || workflowStep.Return != nil || workflowStep.SHA256 != "" || workflowStep.Timeout != nil || workflowStep.Retry != nil || workflowStep.With != nil {
-				return fail(fmt.Errorf("conditional block cannot be combined with other step fields"))
+			if err := workflowStep.ValidateBlock(); err != nil {
+				return fail(err)
 			}
 			if _, err := compileCondition(workflowStep.If); err != nil {
 				return fail(fmt.Errorf("conditional block if: %w", err))

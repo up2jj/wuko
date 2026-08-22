@@ -104,15 +104,14 @@ func (workflowStep *Step) UnmarshalYAML(node *yaml.Node) error {
 	if node.Kind != yaml.MappingNode {
 		return fmt.Errorf("step must be an object")
 	}
-	allowed := map[string]bool{
+	if err := rejectUnknownFields(node, "step", map[string]bool{
 		"id": true, "type": true, "uses": true, "require": true, "working_directory": true, "executor": true, "steps": true, "finally": true, "concurrent": true,
 		"foreach": true, "matrix": true, "return": true, "sha256": true, "if": true, "timeout": true,
 		"retry": true, "with": true,
+	}); err != nil {
+		return err
 	}
 	for i := 0; i < len(node.Content); i += 2 {
-		if !allowed[node.Content[i].Value] {
-			return fmt.Errorf("field %s not found in step", node.Content[i].Value)
-		}
 		if node.Content[i].Value == "working_directory" && (node.Content[i+1].Kind != yaml.ScalarNode || node.Content[i+1].Tag != "!!str") {
 			return fmt.Errorf("working_directory must be a string path")
 		}
@@ -145,6 +144,34 @@ func (workflowStep Step) IsWorkingDirectoryBlock() bool {
 
 // IsExecutorBlock reports whether the step temporarily selects an execution provider.
 func (workflowStep Step) IsExecutorBlock() bool { return workflowStep.Executor != nil }
+
+// ValidateBlock validates the intrinsic shape of a conditional or working-directory block.
+// Parent-scope restrictions and child declarations are validated by the workflow walker.
+func (workflowStep Step) ValidateBlock() error {
+	switch {
+	case workflowStep.IsWorkingDirectoryBlock():
+		if strings.TrimSpace(workflowStep.WorkingDirectory) == "" {
+			return fmt.Errorf("working_directory must be a non-empty path")
+		}
+		if len(workflowStep.Steps) == 0 {
+			return fmt.Errorf("working_directory block must contain at least one step")
+		}
+		if workflowStep.ID != "" || workflowStep.Type != "" || !workflowStep.Uses.Empty() || workflowStep.Require != nil || workflowStep.Executor != nil || workflowStep.Finally != nil || workflowStep.Concurrent != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil || workflowStep.Return != nil || workflowStep.SHA256 != "" || workflowStep.If != "" || workflowStep.Timeout != nil || workflowStep.Retry != nil || workflowStep.With != nil {
+			return fmt.Errorf("working_directory block cannot be combined with other step fields")
+		}
+	case workflowStep.IsConditionalBlock():
+		if workflowStep.If == "" {
+			return fmt.Errorf("conditional block must set if")
+		}
+		if len(workflowStep.Steps) == 0 {
+			return fmt.Errorf("conditional block must contain at least one step")
+		}
+		if workflowStep.ID != "" || workflowStep.Type != "" || !workflowStep.Uses.Empty() || workflowStep.Require != nil || workflowStep.Executor != nil || workflowStep.Finally != nil || workflowStep.IsWorkingDirectoryBlock() || workflowStep.Concurrent != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil || workflowStep.Return != nil || workflowStep.SHA256 != "" || workflowStep.Timeout != nil || workflowStep.Retry != nil || workflowStep.With != nil {
+			return fmt.Errorf("conditional block cannot be combined with other step fields")
+		}
+	}
+	return nil
+}
 
 // ExecutorScope selects one registered executor provider for its child steps.
 type ExecutorScope struct {
@@ -187,13 +214,10 @@ func (group *ConcurrentGroup) UnmarshalYAML(node *yaml.Node) error {
 	if node.Kind != yaml.MappingNode {
 		return fmt.Errorf("concurrent must be an object")
 	}
-	allowed := map[string]bool{
+	if err := rejectUnknownFields(node, "concurrent group", map[string]bool{
 		"steps": true, "max_concurrency": true, "timeout": true, "fail_fast": true,
-	}
-	for i := 0; i < len(node.Content); i += 2 {
-		if !allowed[node.Content[i].Value] {
-			return fmt.Errorf("field %s not found in concurrent group", node.Content[i].Value)
-		}
+	}); err != nil {
+		return err
 	}
 	type plainConcurrentGroup ConcurrentGroup
 	decoded := plainConcurrentGroup{MaxConcurrency: 4, FailFast: true}
@@ -623,27 +647,15 @@ func validateSteps(steps []Step, allowActions bool, scope stepScope, seen map[st
 }
 
 func validateWorkingDirectoryBlock(workflowStep Step, scope stepScope, allowActions bool, seen map[string]struct{}) error {
-	if strings.TrimSpace(workflowStep.WorkingDirectory) == "" {
-		return fmt.Errorf("working_directory must be a non-empty path")
-	}
-	if len(workflowStep.Steps) == 0 {
-		return fmt.Errorf("working_directory block must contain at least one step")
-	}
-	if workflowStep.ID != "" || workflowStep.Type != "" || !workflowStep.Uses.Empty() || workflowStep.Require != nil || workflowStep.Executor != nil || workflowStep.Finally != nil || workflowStep.Concurrent != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil || workflowStep.Return != nil || workflowStep.SHA256 != "" || workflowStep.If != "" || workflowStep.Timeout != nil || workflowStep.Retry != nil || workflowStep.With != nil {
-		return fmt.Errorf("working_directory block cannot be combined with other step fields")
+	if err := workflowStep.ValidateBlock(); err != nil {
+		return err
 	}
 	return validateSteps(workflowStep.Steps, allowActions, scope, seen)
 }
 
 func validateConditionalBlock(workflowStep Step, scope stepScope, allowActions bool, seen map[string]struct{}) error {
-	if workflowStep.If == "" {
-		return fmt.Errorf("conditional block must set if")
-	}
-	if len(workflowStep.Steps) == 0 {
-		return fmt.Errorf("conditional block must contain at least one step")
-	}
-	if workflowStep.ID != "" || workflowStep.Type != "" || !workflowStep.Uses.Empty() || workflowStep.Require != nil || workflowStep.Executor != nil || workflowStep.Finally != nil || workflowStep.IsWorkingDirectoryBlock() || workflowStep.Concurrent != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil || workflowStep.Return != nil || workflowStep.SHA256 != "" || workflowStep.Timeout != nil || workflowStep.Retry != nil || workflowStep.With != nil {
-		return fmt.Errorf("conditional block cannot be combined with other step fields")
+	if err := workflowStep.ValidateBlock(); err != nil {
+		return err
 	}
 	if scope == scopeConcurrent {
 		return fmt.Errorf("conditional blocks are not supported inside concurrent groups")

@@ -94,6 +94,31 @@ func TestValidateRejectsInvalidOrNonBooleanCondition(t *testing.T) {
 	}
 }
 
+func TestValidateUsesWorkflowBlockValidation(t *testing.T) {
+	tests := []struct {
+		name string
+		step workflow.Step
+	}{
+		{name: "conditional missing if", step: workflow.Step{Steps: []workflow.Step{{ID: "run", Type: "capture"}}}},
+		{name: "conditional mixed fields", step: workflow.Step{ID: "block", If: "true", Steps: []workflow.Step{{ID: "run", Type: "capture"}}}},
+		{name: "working directory empty children", step: workflow.Step{WorkingDirectory: "build", Steps: []workflow.Step{}}},
+		{name: "working directory mixed fields", step: workflow.Step{ID: "block", WorkingDirectory: "build", Steps: []workflow.Step{{ID: "run", Type: "capture"}}}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			shapeErr := test.step.ValidateBlock()
+			if shapeErr == nil {
+				t.Fatal("expected workflow block validation error")
+			}
+			definition := testDefinition(t, "invalid", test.step)
+			err := New(newTestRegistry(t, nil)).Validate(t.Context(), definition, Options{})
+			if err == nil || !strings.Contains(err.Error(), shapeErr.Error()) {
+				t.Fatalf("engine error = %v, want workflow error %q", err, shapeErr)
+			}
+		})
+	}
+}
+
 func TestRunRejectsNonBooleanConditionAtRuntime(t *testing.T) {
 	registry := newTestRegistry(t, map[string]step.Builder{"capture": func(raw map[string]any) (step.Runner, error) {
 		return countingRunner{}, nil
