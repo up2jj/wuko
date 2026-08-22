@@ -332,6 +332,7 @@ type fakeClient struct {
 	stopped                 bool
 	removed                 bool
 	closed                  bool
+	closeErr                error
 	removedIDs              []string
 	removedOptions          client.ContainerRemoveOptions
 }
@@ -348,6 +349,42 @@ func (f *fakeClient) ImagePull(_ context.Context, _ string, options client.Image
 	f.pullCalled = true
 	f.pullOptions = options
 	return f.pullResponse, nil
+}
+
+func (f *fakeClient) ImagePush(context.Context, string, client.ImagePushOptions) (client.ImagePushResponse, error) {
+	return nil, errors.New("unexpected image push")
+}
+
+func (f *fakeClient) ImageTag(context.Context, client.ImageTagOptions) (client.ImageTagResult, error) {
+	return client.ImageTagResult{}, errors.New("unexpected image tag")
+}
+
+func (f *fakeClient) RegistryLogin(context.Context, client.RegistryLoginOptions) (client.RegistryLoginResult, error) {
+	return client.RegistryLoginResult{}, errors.New("unexpected registry login")
+}
+
+func (f *fakeClient) NetworkInspect(context.Context, string, client.NetworkInspectOptions) (client.NetworkInspectResult, error) {
+	return client.NetworkInspectResult{}, errors.New("unexpected network inspect")
+}
+
+func (f *fakeClient) NetworkCreate(context.Context, string, client.NetworkCreateOptions) (client.NetworkCreateResult, error) {
+	return client.NetworkCreateResult{}, errors.New("unexpected network create")
+}
+
+func (f *fakeClient) NetworkRemove(context.Context, string, client.NetworkRemoveOptions) (client.NetworkRemoveResult, error) {
+	return client.NetworkRemoveResult{}, errors.New("unexpected network remove")
+}
+
+func (f *fakeClient) VolumeInspect(context.Context, string, client.VolumeInspectOptions) (client.VolumeInspectResult, error) {
+	return client.VolumeInspectResult{}, errors.New("unexpected volume inspect")
+}
+
+func (f *fakeClient) VolumeCreate(context.Context, client.VolumeCreateOptions) (client.VolumeCreateResult, error) {
+	return client.VolumeCreateResult{}, errors.New("unexpected volume create")
+}
+
+func (f *fakeClient) VolumeRemove(context.Context, string, client.VolumeRemoveOptions) (client.VolumeRemoveResult, error) {
+	return client.VolumeRemoveResult{}, errors.New("unexpected volume remove")
 }
 
 func (f *fakeClient) ContainerList(context.Context, client.ContainerListOptions) (client.ContainerListResult, error) {
@@ -397,8 +434,10 @@ func (f *fakeClient) ContainerWait(ctx context.Context, _ string, options client
 }
 
 type fakePullResponse struct {
-	waited bool
-	closed bool
+	waited     bool
+	closed     bool
+	messages   []jsonstream.Message
+	messageErr error
 }
 
 func (f *fakePullResponse) Read([]byte) (int, error) { return 0, io.EOF }
@@ -409,7 +448,16 @@ func (f *fakePullResponse) Close() error {
 }
 
 func (f *fakePullResponse) JSONMessages(context.Context) iter.Seq2[jsonstream.Message, error] {
-	return func(func(jsonstream.Message, error) bool) {}
+	return func(yield func(jsonstream.Message, error) bool) {
+		for _, message := range f.messages {
+			if !yield(message, nil) {
+				return
+			}
+		}
+		if f.messageErr != nil {
+			yield(jsonstream.Message{}, f.messageErr)
+		}
+	}
 }
 
 func (f *fakePullResponse) Wait(context.Context) error {
@@ -435,7 +483,7 @@ func (f *fakeClient) removeContainer(id string, options client.ContainerRemoveOp
 
 func (f *fakeClient) Close() error {
 	f.closed = true
-	return nil
+	return f.closeErr
 }
 
 func multiplexedOutput(stdout, stderr string) []byte {

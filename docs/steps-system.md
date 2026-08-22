@@ -280,8 +280,8 @@ between attempts of that one step execution and are not applied to downloads.
 
 ## `docker`
 
-Run one command in a temporary Docker container. The container and anonymous volumes are removed
-after the step.
+Run containers and perform Docker image, registry, build, network, or volume operations. The
+`operation` field defaults to `run`, so existing Docker steps remain compatible.
 
 Run tests with a read-only project mount:
 
@@ -299,18 +299,6 @@ Run tests with a read-only project mount:
     pull: if-missing
 ```
 
-Run an image's default command with explicit input and environment:
-
-```yaml
-- id: formatter
-  type: docker
-  with:
-    image: ghcr.io/acme/formatter:1.2.3
-    env: {FORMAT: json}
-    stdin: "{{ .steps.request.body }}"
-    pull: never
-```
-
-The step supports `env`, `user`, `platform`, `network`, `tty`, `stdin`, mounts, and pull policies.
-Relative mount sources resolve from the run directory; container targets must be absolute. Pin
-production images by digest when reproducibility matters.
+The other operations are `pull`, `push`, `tag`, `inspect`, `login`, `verify_digest`,
+`network_create`, `volume_create`, and `build`. See
+[Docker operations](docker-operations.md) for every field, output, lifecycle rule, and example.

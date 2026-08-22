@@ -177,7 +177,7 @@ Each linked guide contains multiple examples for every step.
 | `temp` | Create automatically cleaned files/directories | [System steps](docs/steps-system.md#temp) |
 | `cache` | Restore and save directory caches | [System steps](docs/steps-system.md#cache) |
 | `http` | Make structured HTTP API calls | [System steps](docs/steps-system.md#http) |
-| `docker` | Run a command in a temporary container | [System steps](docs/steps-system.md#docker) |
+| `docker` | Run containers and manage images, builds, networks, or volumes | [System steps](docs/steps-system.md#docker) |
 | `shell` | Run argv commands or inline shell | [Automation steps](docs/steps-automation.md#shell) |
 | `agent` | Start an external coding agent with a prompt | [Automation steps](docs/steps-automation.md#agent) |
 | `lua` | Run typed in-process automation | [Automation steps](docs/steps-automation.md#lua) |
@@ -247,6 +247,7 @@ Claude skills are installed under `~/.claude/skills/`; Codex skills are installe
 - [System steps](docs/steps-system.md)
 - [Automation steps](docs/steps-automation.md)
 - [Filesystem operation reference](docs/filesystem-operations.md)
+- [Docker operation reference](docs/docker-operations.md)
 - [Workflow controls](docs/workflow-control.md)
 - [Early successful return](docs/return.md)
 - [Workflow discovery](docs/workflow-discovery.md)

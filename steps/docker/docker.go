@@ -9,7 +9,6 @@ import (
 	"maps"
 	"net"
 	"os"
-	"path"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -38,10 +37,12 @@ const (
 	ownerPIDLabel      = "com.up2jj.wuko.owner-pid"
 	workflowLabel      = "com.up2jj.wuko.workflow"
 	stepLabel          = "com.up2jj.wuko.step"
+	ownershipLabel     = "com.up2jj.wuko.ownership"
 )
 
-// Config describes a single Docker container invocation.
+// Config describes one Docker operation.
 type Config struct {
+	Operation        string               `yaml:"operation,omitempty"`
 	Image            string               `yaml:"image"`
 	Command          string               `yaml:"command,omitempty"`
 	Args             []string             `yaml:"args,omitempty"`
@@ -51,21 +52,54 @@ type Config struct {
 	Network          string               `yaml:"network,omitempty"`
 	User             string               `yaml:"user,omitempty"`
 	Platform         string               `yaml:"platform,omitempty"`
-	Pull             string               `yaml:"pull,omitempty"`
+	Pull             any                  `yaml:"pull,omitempty"`
 	TTY              bool                 `yaml:"tty,omitempty"`
 	Stdin            *string              `yaml:"stdin,omitempty"`
+	Auth             *Auth                `yaml:"auth,omitempty"`
+	Source           string               `yaml:"source,omitempty"`
+	Target           string               `yaml:"target,omitempty"`
+	ExpectedDigest   string               `yaml:"expected_digest,omitempty"`
+	Name             string               `yaml:"name,omitempty"`
+	Driver           string               `yaml:"driver,omitempty"`
+	Internal         bool                 `yaml:"internal,omitempty"`
+	Attachable       bool                 `yaml:"attachable,omitempty"`
+	Options          map[string]string    `yaml:"options,omitempty"`
+	Labels           map[string]string    `yaml:"labels,omitempty"`
+	DriverOptions    map[string]string    `yaml:"driver_options,omitempty"`
+	Context          string               `yaml:"context,omitempty"`
+	Dockerfile       string               `yaml:"dockerfile,omitempty"`
+	Tags             []string             `yaml:"tags,omitempty"`
+	Platforms        []string             `yaml:"platforms,omitempty"`
+	Output           string               `yaml:"output,omitempty"`
+	BuildArgs        map[string]string    `yaml:"build_args,omitempty"`
+	NoCache          bool                 `yaml:"no_cache,omitempty"`
+	CacheFrom        []string             `yaml:"cache_from,omitempty"`
+	CacheTo          []string             `yaml:"cache_to,omitempty"`
+	Cleanup          *bool                `yaml:"cleanup,omitempty"`
 }
 
-// Mount describes a bind mount from the Wuko host into the container.
+// Auth contains inline credentials for one registry operation.
+type Auth struct {
+	Username      string `yaml:"username,omitempty"`
+	Password      string `yaml:"password,omitempty"`
+	ServerAddress string `yaml:"server_address,omitempty"`
+	IdentityToken string `yaml:"identity_token,omitempty"`
+	RegistryToken string `yaml:"registry_token,omitempty"`
+}
+
+// Mount describes a bind or named-volume mount into the container.
 type Mount struct {
+	Type     string `yaml:"type,omitempty"`
 	Source   string `yaml:"source"`
 	Target   string `yaml:"target"`
 	ReadOnly bool   `yaml:"read_only,omitempty"`
 }
 
 type Runner struct {
-	config    Config
-	newClient func() (dockerClient, error)
+	config     Config
+	present    map[string]bool
+	newClient  func() (dockerClient, error)
+	runCommand commandRunner
 }
 
 type runInput struct {
@@ -77,6 +111,15 @@ type runInput struct {
 type dockerClient interface {
 	ImageInspect(context.Context, string, ...client.ImageInspectOption) (client.ImageInspectResult, error)
 	ImagePull(context.Context, string, client.ImagePullOptions) (client.ImagePullResponse, error)
+	ImagePush(context.Context, string, client.ImagePushOptions) (client.ImagePushResponse, error)
+	ImageTag(context.Context, client.ImageTagOptions) (client.ImageTagResult, error)
+	RegistryLogin(context.Context, client.RegistryLoginOptions) (client.RegistryLoginResult, error)
+	NetworkInspect(context.Context, string, client.NetworkInspectOptions) (client.NetworkInspectResult, error)
+	NetworkCreate(context.Context, string, client.NetworkCreateOptions) (client.NetworkCreateResult, error)
+	NetworkRemove(context.Context, string, client.NetworkRemoveOptions) (client.NetworkRemoveResult, error)
+	VolumeInspect(context.Context, string, client.VolumeInspectOptions) (client.VolumeInspectResult, error)
+	VolumeCreate(context.Context, client.VolumeCreateOptions) (client.VolumeCreateResult, error)
+	VolumeRemove(context.Context, string, client.VolumeRemoveOptions) (client.VolumeRemoveResult, error)
 	ContainerList(context.Context, client.ContainerListOptions) (client.ContainerListResult, error)
 	ContainerCreate(context.Context, client.ContainerCreateOptions) (client.ContainerCreateResult, error)
 	ContainerAttach(context.Context, string, client.ContainerAttachOptions) (client.ContainerAttachResult, error)
@@ -94,24 +137,43 @@ func New(raw map[string]any) (step.Runner, error) {
 	if err := step.DecodeConfig(raw, &config); err != nil {
 		return nil, err
 	}
-	return &Runner{
-		config: config,
+	present := make(map[string]bool, len(raw))
+	for field := range raw {
+		present[field] = true
+	}
+	runner := &Runner{
+		config:  config,
+		present: present,
 		newClient: func() (dockerClient, error) {
 			return client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 		},
-	}, nil
+		runCommand: defaultCommandRunner,
+	}
+	if err := validateConfig(config, present); err != nil {
+		return nil, err
+	}
+	if managesResource(config) {
+		return &managedRunner{Runner: runner}, nil
+	}
+	return runner, nil
 }
 
 func (r *Runner) Validate(_ context.Context, _ step.Request) error {
-	if err := validateConfig(r.config); err != nil {
+	if err := validateConfig(r.config, r.present); err != nil {
 		return err
 	}
 	return nil
 }
 
 func (r *Runner) Run(ctx context.Context, request step.Request) (result step.Result, runErr error) {
-	if err := validateConfig(r.config); err != nil {
+	if err := validateConfig(r.config, r.present); err != nil {
 		return step.Result{}, err
+	}
+	if operation(r.config) == operationBuild {
+		return r.runBuild(ctx, request)
+	}
+	if operation(r.config) != operationRun {
+		return r.runEngineOperation(ctx, request)
 	}
 	input, err := r.input(request)
 	if err != nil {
@@ -146,7 +208,8 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (result step.Res
 	if err != nil {
 		return step.Result{}, err
 	}
-	if err := ensureImage(ctx, dockerClient, r.config.Image, r.config.Pull, platform); err != nil {
+	pullPolicy, _ := r.config.Pull.(string)
+	if err := ensureImage(ctx, dockerClient, r.config.Image, pullPolicy, platform); err != nil {
 		return step.Result{}, err
 	}
 
@@ -283,17 +346,23 @@ func (r *Runner) containerConfig(request step.Request, ownerHost string, attachS
 
 	containerMounts := make([]mount.Mount, 0, len(r.config.Mounts))
 	for _, configured := range r.config.Mounts {
+		mountType := mount.TypeBind
 		source := configured.Source
-		if !filepath.IsAbs(source) {
-			source = filepath.Join(request.RunDir, source)
-		}
-		absoluteSource, err := filepath.Abs(source)
-		if err != nil {
-			return nil, nil, fmt.Errorf("resolving Docker mount source %q: %w", configured.Source, err)
+		if configured.Type == "volume" {
+			mountType = mount.TypeVolume
+		} else {
+			if !filepath.IsAbs(source) {
+				source = filepath.Join(request.RunDir, source)
+			}
+			absoluteSource, err := filepath.Abs(source)
+			if err != nil {
+				return nil, nil, fmt.Errorf("resolving Docker mount source %q: %w", configured.Source, err)
+			}
+			source = absoluteSource
 		}
 		containerMounts = append(containerMounts, mount.Mount{
-			Type:     mount.TypeBind,
-			Source:   absoluteSource,
+			Type:     mountType,
+			Source:   source,
 			Target:   configured.Target,
 			ReadOnly: configured.ReadOnly,
 		})
@@ -327,40 +396,6 @@ func (r *Runner) containerConfig(request step.Request, ownerHost string, attachS
 		NetworkMode: container.NetworkMode(r.config.Network),
 		Mounts:      containerMounts,
 	}, nil
-}
-
-func validateConfig(config Config) error {
-	if strings.TrimSpace(config.Image) == "" {
-		return fmt.Errorf("image is required")
-	}
-	if config.Command == "" && len(config.Args) > 0 {
-		return fmt.Errorf("args require command")
-	}
-	if config.WorkingDirectory != "" && !path.IsAbs(config.WorkingDirectory) {
-		return fmt.Errorf("working_directory must be an absolute container path")
-	}
-	for key := range config.Env {
-		if !workflow.ValidEnvironmentName(key) {
-			return fmt.Errorf("invalid environment name %q", key)
-		}
-	}
-	for i, configured := range config.Mounts {
-		if strings.TrimSpace(configured.Source) == "" {
-			return fmt.Errorf("mount %d source is required", i+1)
-		}
-		if !path.IsAbs(configured.Target) {
-			return fmt.Errorf("mount %d target must be an absolute container path", i+1)
-		}
-	}
-	switch normalizePullPolicy(config.Pull) {
-	case "never", "if-missing", "always":
-	default:
-		return fmt.Errorf("pull must be one of never, if-missing, or always")
-	}
-	if _, err := parsePlatform(config.Platform); err != nil {
-		return err
-	}
-	return nil
 }
 
 func normalizePullPolicy(policy string) string {
