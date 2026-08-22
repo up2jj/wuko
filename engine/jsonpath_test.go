@@ -6,27 +6,23 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/engine"
-	"github.com/up2jj/wuko/step"
 	jsonpathstep "github.com/up2jj/wuko/steps/jsonpath"
 	"github.com/up2jj/wuko/workflow"
 )
 
 func TestJSONPathTemplatesAndCommitsTypedResults(t *testing.T) {
-	definition := &workflow.Definition{
-		Version: 1, Name: "selection", Dir: t.TempDir(),
-		Vars: map[string]any{
-			"source": "vars.document", "collection": "projects", "mode": "all",
-			"document": map[string]any{"projects": []any{
-				map[string]any{"id": "one", "active": true},
-				map[string]any{"id": "two", "active": false},
-			}},
-		},
-		Steps: []workflow.Step{{ID: "active", Type: "jsonpath", With: map[string]any{
-			"from": "{{ .vars.source }}", "query": "$.{{ .vars.collection }}[?@.active == true].id",
-			"result": "{{ .vars.mode }}", "variable": "active_ids",
-		}}},
+	definition := testDefinition(t, "selection", workflow.Step{ID: "active", Type: "jsonpath", With: map[string]any{
+		"from": "{{ .vars.source }}", "query": "$.{{ .vars.collection }}[?@.active == true].id",
+		"result": "{{ .vars.mode }}", "variable": "active_ids",
+	}})
+	definition.Vars = map[string]any{
+		"source": "vars.document", "collection": "projects", "mode": "all",
+		"document": map[string]any{"projects": []any{
+			map[string]any{"id": "one", "active": true},
+			map[string]any{"id": "two", "active": false},
+		}},
 	}
-	registry := step.NewRegistry()
+	registry := newTestRegistry(t, nil)
 	if err := jsonpathstep.Register(registry); err != nil {
 		t.Fatal(err)
 	}

@@ -10,23 +10,17 @@ import (
 )
 
 func TestKeyValueOutputIsAvailableToSubsequentSteps(t *testing.T) {
-	registry := step.NewRegistry()
+	registry := newTestRegistry(t, map[string]step.Builder{"capture": func(raw map[string]any) (step.Runner, error) {
+		return countingRunner{value: raw["value"]}, nil
+	}})
 	if err := keyvaluestep.Register(registry); err != nil {
 		t.Fatal(err)
 	}
-	if err := registry.Register("capture", func(raw map[string]any) (step.Runner, error) {
-		return countingRunner{value: raw["value"]}, nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	definition := &workflow.Definition{
-		Version: 1, Name: "values", Dir: t.TempDir(), Vars: map[string]any{}, Env: workflow.Environment{},
-		Steps: []workflow.Step{
-			{ID: "save", Type: "key_value", With: map[string]any{"operation": "set", "scope": "local", "store": "prefs", "key": "theme", "value": "dark"}},
-			{ID: "load", Type: "key_value", With: map[string]any{"operation": "get", "scope": "local", "store": "prefs", "key": "theme"}},
-			{ID: "consume", Type: "capture", If: "steps.load.found", With: map[string]any{"value": "{{ .steps.load.value }}"}},
-		},
-	}
+	definition := testDefinition(t, "values",
+		workflow.Step{ID: "save", Type: "key_value", With: map[string]any{"operation": "set", "scope": "local", "store": "prefs", "key": "theme", "value": "dark"}},
+		workflow.Step{ID: "load", Type: "key_value", With: map[string]any{"operation": "get", "scope": "local", "store": "prefs", "key": "theme"}},
+		workflow.Step{ID: "consume", Type: "capture", If: "steps.load.found", With: map[string]any{"value": "{{ .steps.load.value }}"}},
+	)
 	state, err := New(registry).Run(t.Context(), definition, Options{
 		LocalValueDir: t.TempDir(), GlobalValueDir: t.TempDir(), Stdout: io.Discard, Stderr: io.Discard,
 	})
@@ -39,31 +33,24 @@ func TestKeyValueOutputIsAvailableToSubsequentSteps(t *testing.T) {
 }
 
 func TestKeyValueTemplatesAndNumericConditions(t *testing.T) {
-	registry := step.NewRegistry()
+	registry := newTestRegistry(t, map[string]step.Builder{"capture": func(raw map[string]any) (step.Runner, error) {
+		return countingRunner{value: raw["value"]}, nil
+	}})
 	if err := keyvaluestep.Register(registry); err != nil {
 		t.Fatal(err)
 	}
-	if err := registry.Register("capture", func(raw map[string]any) (step.Runner, error) {
-		return countingRunner{value: raw["value"]}, nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	definition := &workflow.Definition{
-		Version: 1, Name: "templated-values", Dir: t.TempDir(),
-		Vars: map[string]any{"set_operation": "set", "get_operation": "get", "scope": "local", "suffix": "numbers"},
-		Env:  workflow.Environment{},
-		Steps: []workflow.Step{
-			{ID: "save", Type: "key_value", With: map[string]any{
-				"operation": "{{ .vars.set_operation }}", "scope": "{{ .vars.scope }}",
-				"store": "prefs-{{ .vars.suffix }}", "key": "count", "value": 3,
-			}},
-			{ID: "load", Type: "key_value", With: map[string]any{
-				"operation": "{{ .vars.get_operation }}", "scope": "{{ .vars.scope }}",
-				"store": "prefs-{{ .vars.suffix }}", "key": "count",
-			}},
-			{ID: "consume", Type: "capture", If: "steps.load.value > 2", With: map[string]any{"value": "matched"}},
-		},
-	}
+	definition := testDefinition(t, "templated-values",
+		workflow.Step{ID: "save", Type: "key_value", With: map[string]any{
+			"operation": "{{ .vars.set_operation }}", "scope": "{{ .vars.scope }}",
+			"store": "prefs-{{ .vars.suffix }}", "key": "count", "value": 3,
+		}},
+		workflow.Step{ID: "load", Type: "key_value", With: map[string]any{
+			"operation": "{{ .vars.get_operation }}", "scope": "{{ .vars.scope }}",
+			"store": "prefs-{{ .vars.suffix }}", "key": "count",
+		}},
+		workflow.Step{ID: "consume", Type: "capture", If: "steps.load.value > 2", With: map[string]any{"value": "matched"}},
+	)
+	definition.Vars = map[string]any{"set_operation": "set", "get_operation": "get", "scope": "local", "suffix": "numbers"}
 	state, err := New(registry).Run(t.Context(), definition, Options{
 		LocalValueDir: t.TempDir(), GlobalValueDir: t.TempDir(), Stdout: io.Discard, Stderr: io.Discard,
 	})
@@ -76,22 +63,16 @@ func TestKeyValueTemplatesAndNumericConditions(t *testing.T) {
 }
 
 func TestCompositeActionInheritsCallerValueRoots(t *testing.T) {
-	registry := step.NewRegistry()
+	registry := newTestRegistry(t, nil)
 	if err := keyvaluestep.Register(registry); err != nil {
 		t.Fatal(err)
 	}
-	action := &workflow.Action{
-		Version: 1, Name: "store-action", Dir: t.TempDir(),
-		Outputs: map[string]workflow.ActionOutput{"value": {Value: "steps.load.value"}},
-		Steps: []workflow.Step{
-			{ID: "save", Type: "key_value", With: map[string]any{"operation": "set", "scope": "local", "store": "shared", "key": "from_action", "value": true}},
-			{ID: "load", Type: "key_value", With: map[string]any{"operation": "get", "scope": "local", "store": "shared", "key": "from_action"}},
-		},
-	}
-	definition := &workflow.Definition{
-		Version: 1, Name: "caller", Dir: t.TempDir(), Vars: map[string]any{}, Env: workflow.Environment{},
-		Steps: []workflow.Step{{ID: "call", Uses: workflow.ActionSource{URL: "https://example.test/action"}, Action: action, With: map[string]any{}}},
-	}
+	action := testAction(t, "store-action",
+		workflow.Step{ID: "save", Type: "key_value", With: map[string]any{"operation": "set", "scope": "local", "store": "shared", "key": "from_action", "value": true}},
+		workflow.Step{ID: "load", Type: "key_value", With: map[string]any{"operation": "get", "scope": "local", "store": "shared", "key": "from_action"}},
+	)
+	action.Outputs = map[string]workflow.ActionOutput{"value": {Value: "steps.load.value"}}
+	definition := testDefinition(t, "caller", workflow.Step{ID: "call", Uses: workflow.ActionSource{URL: "https://example.test/action"}, Action: action})
 	localRoot := t.TempDir()
 	state, err := New(registry).Run(t.Context(), definition, Options{
 		LocalValueDir: localRoot, GlobalValueDir: t.TempDir(), Stdout: io.Discard, Stderr: io.Discard,

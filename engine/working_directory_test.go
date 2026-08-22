@@ -43,7 +43,7 @@ func (runner scopedValidationRunner) Run(_ context.Context, request step.Request
 
 func workingDirectoryRegistry(t *testing.T) *step.Registry {
 	t.Helper()
-	registry := step.NewRegistry()
+	registry := newTestRegistry(t, nil)
 	if err := registry.Register("capture_dir", func(raw map[string]any) (step.Runner, error) {
 		variable, _ := raw["variable"].(string)
 		return directoryCaptureRunner{variable: variable}, nil
@@ -94,7 +94,7 @@ func TestWorkingDirectoryValidatorReceivesScopedRunDirectory(t *testing.T) {
 	if err := os.Mkdir(project, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	registry := step.NewRegistry()
+	registry := newTestRegistry(t, nil)
 	if err := registry.Register("validate_dir", func(map[string]any) (step.Runner, error) {
 		return scopedValidationRunner{expected: project}, nil
 	}); err != nil {
@@ -119,7 +119,7 @@ func TestWorkingDirectoryDefersValidationUntilRuntimeDirectoryIsKnown(t *testing
 	if err := os.Mkdir(project, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	registry := step.NewRegistry()
+	registry := newTestRegistry(t, nil)
 	if err := registry.Register("select_dir", func(map[string]any) (step.Runner, error) {
 		return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
 			return step.Result{Outputs: map[string]any{"dir": project}}, nil
@@ -251,9 +251,10 @@ func TestWorkingDirectoryComposesWithForeachAndCompositeActions(t *testing.T) {
 }
 
 func TestWorkingDirectoryDryRunDisplaysNestedPlan(t *testing.T) {
-	definition := &workflow.Definition{Version: 1, Name: "dry", Dir: t.TempDir(), Steps: []workflow.Step{{
+	definition := testDefinition(t, "dry", workflow.Step{
 		WorkingDirectory: "{{ .vars.dir }}", Steps: []workflow.Step{{ID: "run", Type: "capture_dir", With: map[string]any{}}},
-	}}}
+	})
+
 	var output bytes.Buffer
 	if _, err := New(workingDirectoryRegistry(t)).Run(t.Context(), definition, Options{DryRun: true, Stdout: &output, Stderr: io.Discard}); err != nil {
 		t.Fatal(err)

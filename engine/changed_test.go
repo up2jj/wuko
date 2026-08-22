@@ -149,7 +149,7 @@ func TestChangedValidationAndDryRunDoNotCreateSnapshot(t *testing.T) {
 
 func changedRegistry(t *testing.T) (*step.Registry, *int) {
 	t.Helper()
-	registry := step.NewRegistry()
+	registry := newTestRegistry(t, nil)
 	if err := changedstep.Register(registry); err != nil {
 		t.Fatal(err)
 	}

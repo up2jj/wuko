@@ -54,7 +54,7 @@ func waitDefinition(with map[string]any, timeout *workflow.Duration) *workflow.D
 }
 
 func TestWaitRejectsInvalidConfiguration(t *testing.T) {
-	registry := step.NewRegistry()
+	registry := newTestRegistry(t, nil)
 	if err := registry.Register("probe", func(map[string]any) (step.Runner, error) {
 		return &sequencePollRunner{results: []pollResult{{result: step.Result{}}}}, nil
 	}); err != nil {
@@ -92,7 +92,7 @@ func TestWaitRejectsInvalidConfiguration(t *testing.T) {
 
 func TestFixedWaitCompletesAndHonorsTimeout(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		state, err := New(step.NewRegistry()).Run(t.Context(), waitDefinition(map[string]any{"duration": "2s"}, nil), Options{Stdout: io.Discard, Stderr: io.Discard})
+		state, err := New(newTestRegistry(t, nil)).Run(t.Context(), waitDefinition(map[string]any{"duration": "2s"}, nil), Options{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -102,7 +102,7 @@ func TestFixedWaitCompletesAndHonorsTimeout(t *testing.T) {
 	})
 
 	synctest.Test(t, func(t *testing.T) {
-		_, err := New(step.NewRegistry()).Run(t.Context(), waitDefinition(map[string]any{"duration": "2s"}, waitTimeout(time.Second)), Options{Stdout: io.Discard, Stderr: io.Discard})
+		_, err := New(newTestRegistry(t, nil)).Run(t.Context(), waitDefinition(map[string]any{"duration": "2s"}, waitTimeout(time.Second)), Options{})
 		if err == nil || !errors.Is(err, context.DeadlineExceeded) {
 			t.Fatalf("error = %v", err)
 		}
@@ -116,7 +116,7 @@ func TestPollCommitsOnlyMatchingObservationAndReportsProgress(t *testing.T) {
 			{result: step.Result{Outputs: map[string]any{"value": 2}, Variables: map[string]any{"leaked": 2}}},
 			{result: step.Result{Outputs: map[string]any{"value": 3}, Variables: map[string]any{"committed": true}}},
 		}}
-		registry := step.NewRegistry()
+		registry := newTestRegistry(t, nil)
 		if err := registry.Register("probe", func(map[string]any) (step.Runner, error) { return runner, nil }); err != nil {
 			t.Fatal(err)
 		}
@@ -173,14 +173,14 @@ func TestPollHTTPDistinguishesResponsesFromFatalErrors(t *testing.T) {
 			runner := &sequencePollRunner{results: []pollResult{{
 				result: step.Result{Outputs: map[string]any{"status": 404}}, err: tt.pollErr,
 			}}}
-			registry := step.NewRegistry()
+			registry := newTestRegistry(t, nil)
 			if err := registry.Register("http", func(map[string]any) (step.Runner, error) { return runner, nil }); err != nil {
 				t.Fatal(err)
 			}
 			definition := waitDefinition(map[string]any{
 				"step": map[string]any{"type": "http"}, "until": `result.status == 404 && error != nil`,
 			}, waitTimeout(time.Second))
-			state, err := New(registry).Run(t.Context(), definition, Options{Stdout: io.Discard, Stderr: io.Discard})
+			state, err := New(registry).Run(t.Context(), definition, Options{})
 			if tt.wantErr {
 				if err == nil || !strings.Contains(err.Error(), "connection refused") {
 					t.Fatalf("error = %v", err)
@@ -206,7 +206,7 @@ func TestWaitPollsRealHTTPResponses(t *testing.T) {
 		fmt.Fprint(writer, `{"status":"ready"}`)
 	}))
 	defer server.Close()
-	registry := step.NewRegistry()
+	registry := newTestRegistry(t, nil)
 	if err := httpstep.Register(registry); err != nil {
 		t.Fatal(err)
 	}
@@ -217,7 +217,7 @@ func TestWaitPollsRealHTTPResponses(t *testing.T) {
 		}},
 		"until": `result.status == 200 && error == nil && result.value.status == "ready"`,
 	}, waitTimeout(time.Second))
-	state, err := New(registry).Run(t.Context(), definition, Options{Stdout: io.Discard, Stderr: io.Discard})
+	state, err := New(registry).Run(t.Context(), definition, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +231,7 @@ func TestWaitHTTPDecodeFailureStopsImmediately(t *testing.T) {
 		fmt.Fprint(writer, `{not-json`)
 	}))
 	defer server.Close()
-	registry := step.NewRegistry()
+	registry := newTestRegistry(t, nil)
 	if err := httpstep.Register(registry); err != nil {
 		t.Fatal(err)
 	}
@@ -241,14 +241,14 @@ func TestWaitHTTPDecodeFailureStopsImmediately(t *testing.T) {
 		}},
 		"until": "false",
 	}, waitTimeout(time.Second))
-	_, err := New(registry).Run(t.Context(), definition, Options{Stdout: io.Discard, Stderr: io.Discard})
+	_, err := New(registry).Run(t.Context(), definition, Options{})
 	if err == nil || !strings.Contains(err.Error(), "decoding JSON response") {
 		t.Fatalf("error = %v", err)
 	}
 }
 
 func TestWaitPreservesNestedLuaSourceAndUntilText(t *testing.T) {
-	registry := step.NewRegistry()
+	registry := newTestRegistry(t, nil)
 	if err := luastep.Register(registry); err != nil {
 		t.Fatal(err)
 	}
@@ -258,7 +258,7 @@ func TestWaitPreservesNestedLuaSourceAndUntilText(t *testing.T) {
 		}},
 		"until": `result.value == "{{ literal }}"`,
 	}, waitTimeout(time.Second))
-	state, err := New(registry).Run(t.Context(), definition, Options{Stdout: io.Discard, Stderr: io.Discard})
+	state, err := New(registry).Run(t.Context(), definition, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -270,7 +270,7 @@ func TestWaitPreservesNestedLuaSourceAndUntilText(t *testing.T) {
 func TestPollTimeoutCanBeRetried(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		runner := &sequencePollRunner{results: []pollResult{{result: step.Result{Outputs: map[string]any{"ready": false}}}}}
-		registry := step.NewRegistry()
+		registry := newTestRegistry(t, nil)
 		if err := registry.Register("probe", func(map[string]any) (step.Runner, error) { return runner, nil }); err != nil {
 			t.Fatal(err)
 		}
@@ -297,7 +297,7 @@ func TestPollTimeoutCanBeRetried(t *testing.T) {
 }
 
 func TestWaitDryRunShowsModeAndPolicy(t *testing.T) {
-	registry := step.NewRegistry()
+	registry := newTestRegistry(t, nil)
 	if err := registry.Register("probe", func(map[string]any) (step.Runner, error) {
 		return &sequencePollRunner{results: []pollResult{{result: step.Result{}}}}, nil
 	}); err != nil {
@@ -317,7 +317,7 @@ func TestWaitDryRunShowsModeAndPolicy(t *testing.T) {
 
 func TestWaitRunsInsideConcurrentGroupAndCompositeAction(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		registry := step.NewRegistry()
+		registry := newTestRegistry(t, nil)
 		definition := &workflow.Definition{
 			Version: 1, Name: "concurrent-wait", Dir: "/workflow", Vars: map[string]any{}, Env: workflow.Environment{},
 			Steps: []workflow.Step{{Concurrent: &workflow.ConcurrentGroup{
@@ -328,7 +328,7 @@ func TestWaitRunsInsideConcurrentGroupAndCompositeAction(t *testing.T) {
 				},
 			}}},
 		}
-		state, err := New(registry).Run(t.Context(), definition, Options{Stdout: io.Discard, Stderr: io.Discard})
+		state, err := New(registry).Run(t.Context(), definition, Options{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -347,7 +347,7 @@ func TestWaitRunsInsideConcurrentGroupAndCompositeAction(t *testing.T) {
 				ID: "remote", Uses: workflow.ActionSource{URL: "https://example.test/action"}, Action: action, With: map[string]any{},
 			}},
 		}
-		state, err = New(registry).Run(t.Context(), caller, Options{Stdout: io.Discard, Stderr: io.Discard})
+		state, err = New(registry).Run(t.Context(), caller, Options{})
 		if err != nil {
 			t.Fatal(err)
 		}

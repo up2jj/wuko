@@ -18,27 +18,17 @@ import (
 	"github.com/up2jj/wuko/workflow"
 )
 
-type runnerFunc func(context.Context, step.Request) (step.Result, error)
-
-func (run runnerFunc) Run(ctx context.Context, request step.Request) (step.Result, error) {
-	return run(ctx, request)
-}
-
 func concurrentDefinition(t *testing.T, group *workflow.ConcurrentGroup) *workflow.Definition {
 	t.Helper()
-	return &workflow.Definition{
-		Version: 1, Name: "concurrent", Dir: t.TempDir(),
-		Steps: []workflow.Step{{Concurrent: group}},
-	}
+	return testDefinition(t, "concurrent", workflow.Step{Concurrent: group})
 }
 
 func TestRunConcurrentGroupBoundsExecutionAndCommitsInDeclarationOrder(t *testing.T) {
-	registry := step.NewRegistry()
 	started := make(chan string, 3)
 	release := make(chan struct{}, 3)
 	var active atomic.Int32
 	var maximum atomic.Int32
-	if err := registry.Register("gate", func(map[string]any) (step.Runner, error) {
+	registry := newTestRegistry(t, map[string]step.Builder{"gate": func(map[string]any) (step.Runner, error) {
 		return runnerFunc(func(ctx context.Context, request step.Request) (step.Result, error) {
 			current := active.Add(1)
 			defer active.Add(-1)
@@ -56,9 +46,7 @@ func TestRunConcurrentGroupBoundsExecutionAndCommitsInDeclarationOrder(t *testin
 				return step.Result{}, ctx.Err()
 			}
 		}), nil
-	}); err != nil {
-		t.Fatal(err)
-	}
+	}})
 	steps := []workflow.Step{
 		{ID: "first", Type: "gate", With: map[string]any{}},
 		{ID: "second", Type: "gate", With: map[string]any{}},
@@ -71,7 +59,7 @@ func TestRunConcurrentGroupBoundsExecutionAndCommitsInDeclarationOrder(t *testin
 	}
 	done := make(chan runResult, 1)
 	go func() {
-		state, err := New(registry).Run(t.Context(), definition, Options{Stdout: io.Discard, Stderr: io.Discard})
+		state, err := New(registry).Run(t.Context(), definition, Options{})
 		done <- runResult{state: state, err: err}
 	}()
 	<-started
@@ -106,10 +94,9 @@ func TestRunConcurrentGroupBoundsExecutionAndCommitsInDeclarationOrder(t *testin
 }
 
 func TestRunConcurrentGroupRespectsRetriesPerChild(t *testing.T) {
-	registry := step.NewRegistry()
 	var mu sync.Mutex
 	attempts := make(map[string]int)
-	if err := registry.Register("retry_child", func(map[string]any) (step.Runner, error) {
+	registry := newTestRegistry(t, map[string]step.Builder{"retry_child": func(map[string]any) (step.Runner, error) {
 		return runnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
 			mu.Lock()
 			attempts[request.StepID]++
@@ -119,15 +106,13 @@ func TestRunConcurrentGroupRespectsRetriesPerChild(t *testing.T) {
 			}
 			return step.Result{Outputs: map[string]any{"attempt": request.Attempt}}, nil
 		}), nil
-	}); err != nil {
-		t.Fatal(err)
-	}
+	}})
 	policy := &workflow.RetryPolicy{MaxAttempts: 2, BackoffMultiplier: 1}
 	steps := []workflow.Step{
 		{ID: "stable", Type: "retry_child", Retry: policy, With: map[string]any{}},
 		{ID: "flaky", Type: "retry_child", Retry: policy, With: map[string]any{}},
 	}
-	state, err := New(registry).Run(t.Context(), concurrentDefinition(t, &workflow.ConcurrentGroup{Steps: steps, MaxConcurrency: 2, FailFast: true}), Options{Stdout: io.Discard, Stderr: io.Discard})
+	state, err := New(registry).Run(t.Context(), concurrentDefinition(t, &workflow.ConcurrentGroup{Steps: steps, MaxConcurrency: 2, FailFast: true}), Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,9 +134,8 @@ func TestRunConcurrentGroupFailFastControlsQueuedSteps(t *testing.T) {
 		{name: "wait for all", failFast: false, wantRuns: 1},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			registry := step.NewRegistry()
 			var laterRuns atomic.Int32
-			if err := registry.Register("fail_or_count", func(map[string]any) (step.Runner, error) {
+			registry := newTestRegistry(t, map[string]step.Builder{"fail_or_count": func(map[string]any) (step.Runner, error) {
 				return runnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
 					if request.StepID == "first" {
 						return step.Result{}, errors.New("broken")
@@ -159,11 +143,9 @@ func TestRunConcurrentGroupFailFastControlsQueuedSteps(t *testing.T) {
 					laterRuns.Add(1)
 					return step.Result{}, nil
 				}), nil
-			}); err != nil {
-				t.Fatal(err)
-			}
+			}})
 			steps := []workflow.Step{{ID: "first", Type: "fail_or_count", With: map[string]any{}}, {ID: "later", Type: "fail_or_count", With: map[string]any{}}}
-			_, err := New(registry).Run(t.Context(), concurrentDefinition(t, &workflow.ConcurrentGroup{Steps: steps, MaxConcurrency: 1, FailFast: test.failFast}), Options{Stdout: io.Discard, Stderr: io.Discard})
+			_, err := New(registry).Run(t.Context(), concurrentDefinition(t, &workflow.ConcurrentGroup{Steps: steps, MaxConcurrency: 1, FailFast: test.failFast}), Options{})
 			if err == nil || !strings.Contains(err.Error(), "broken") {
 				t.Fatalf("error = %v", err)
 			}
@@ -175,16 +157,13 @@ func TestRunConcurrentGroupFailFastControlsQueuedSteps(t *testing.T) {
 }
 
 func TestRunConcurrentGroupAggregatesErrorsInDeclarationOrder(t *testing.T) {
-	registry := step.NewRegistry()
-	if err := registry.Register("always_fail", func(map[string]any) (step.Runner, error) {
+	registry := newTestRegistry(t, map[string]step.Builder{"always_fail": func(map[string]any) (step.Runner, error) {
 		return runnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
 			return step.Result{}, fmt.Errorf("%s failed", request.StepID)
 		}), nil
-	}); err != nil {
-		t.Fatal(err)
-	}
+	}})
 	steps := []workflow.Step{{ID: "first", Type: "always_fail", With: map[string]any{}}, {ID: "second", Type: "always_fail", With: map[string]any{}}}
-	_, err := New(registry).Run(t.Context(), concurrentDefinition(t, &workflow.ConcurrentGroup{Steps: steps, MaxConcurrency: 2, FailFast: false}), Options{Stdout: io.Discard, Stderr: io.Discard})
+	_, err := New(registry).Run(t.Context(), concurrentDefinition(t, &workflow.ConcurrentGroup{Steps: steps, MaxConcurrency: 2, FailFast: false}), Options{})
 	if err == nil {
 		t.Fatal("expected group failure")
 	}
@@ -198,18 +177,15 @@ func TestRunConcurrentGroupAggregatesErrorsInDeclarationOrder(t *testing.T) {
 
 func TestRunConcurrentGroupTimeoutCancelsChildren(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		registry := step.NewRegistry()
-		if err := registry.Register("block", func(map[string]any) (step.Runner, error) {
+		registry := newTestRegistry(t, map[string]step.Builder{"block": func(map[string]any) (step.Runner, error) {
 			return runnerFunc(func(ctx context.Context, _ step.Request) (step.Result, error) {
 				<-ctx.Done()
 				return step.Result{}, ctx.Err()
 			}), nil
-		}); err != nil {
-			t.Fatal(err)
-		}
+		}})
 		timeout := workflow.Duration(time.Second)
 		steps := []workflow.Step{{ID: "one", Type: "block", With: map[string]any{}}, {ID: "two", Type: "block", With: map[string]any{}}}
-		_, err := New(registry).Run(t.Context(), concurrentDefinition(t, &workflow.ConcurrentGroup{Steps: steps, MaxConcurrency: 2, Timeout: &timeout, FailFast: true}), Options{Stdout: io.Discard, Stderr: io.Discard})
+		_, err := New(registry).Run(t.Context(), concurrentDefinition(t, &workflow.ConcurrentGroup{Steps: steps, MaxConcurrency: 2, Timeout: &timeout, FailFast: true}), Options{})
 		if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "timed out after 1s") {
 			t.Fatalf("error = %v", err)
 		}
@@ -217,19 +193,16 @@ func TestRunConcurrentGroupTimeoutCancelsChildren(t *testing.T) {
 }
 
 func TestRunConcurrentGroupCancellationDoesNotAdmitQueuedChildren(t *testing.T) {
-	registry := step.NewRegistry()
 	started := make(chan struct{}, 1)
 	var runs atomic.Int32
-	if err := registry.Register("block", func(map[string]any) (step.Runner, error) {
+	registry := newTestRegistry(t, map[string]step.Builder{"block": func(map[string]any) (step.Runner, error) {
 		return runnerFunc(func(ctx context.Context, _ step.Request) (step.Result, error) {
 			runs.Add(1)
 			started <- struct{}{}
 			<-ctx.Done()
 			return step.Result{}, ctx.Err()
 		}), nil
-	}); err != nil {
-		t.Fatal(err)
-	}
+	}})
 	steps := []workflow.Step{
 		{ID: "first", Type: "block", With: map[string]any{}},
 		{ID: "queued", Type: "block", With: map[string]any{}},
@@ -259,21 +232,18 @@ func TestRunConcurrentGroupCancellationDoesNotAdmitQueuedChildren(t *testing.T) 
 }
 
 func TestRunConcurrentGroupUsesSnapshotAndRejectsVariableConflicts(t *testing.T) {
-	registry := step.NewRegistry()
-	if err := registry.Register("write", func(raw map[string]any) (step.Runner, error) {
+	registry := newTestRegistry(t, map[string]step.Builder{"write": func(raw map[string]any) (step.Runner, error) {
 		value := maps.Clone(raw)
 		return runnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
 			variable, _ := value["variable"].(string)
 			return step.Result{Outputs: map[string]any{"id": request.StepID}, Variables: map[string]any{variable: request.StepID}}, nil
 		}), nil
-	}); err != nil {
-		t.Fatal(err)
-	}
+	}})
 	steps := []workflow.Step{
 		{ID: "one", Type: "write", With: map[string]any{"variable": "shared"}},
 		{ID: "two", Type: "write", With: map[string]any{"variable": "shared"}},
 	}
-	_, err := New(registry).Run(t.Context(), concurrentDefinition(t, &workflow.ConcurrentGroup{Steps: steps, MaxConcurrency: 2, FailFast: true}), Options{Stdout: io.Discard, Stderr: io.Discard})
+	_, err := New(registry).Run(t.Context(), concurrentDefinition(t, &workflow.ConcurrentGroup{Steps: steps, MaxConcurrency: 2, FailFast: true}), Options{})
 	if err == nil || !strings.Contains(err.Error(), `both write variable "shared"`) {
 		t.Fatalf("conflict error = %v", err)
 	}
@@ -282,15 +252,14 @@ func TestRunConcurrentGroupUsesSnapshotAndRejectsVariableConflicts(t *testing.T)
 		{ID: "producer", Type: "write", With: map[string]any{"variable": "produced"}},
 		{ID: "consumer", Type: "write", With: map[string]any{"variable": "{{ .vars.produced }}"}},
 	}
-	_, err = New(registry).Run(t.Context(), concurrentDefinition(t, &workflow.ConcurrentGroup{Steps: steps, MaxConcurrency: 2, FailFast: false}), Options{Stdout: io.Discard, Stderr: io.Discard})
+	_, err = New(registry).Run(t.Context(), concurrentDefinition(t, &workflow.ConcurrentGroup{Steps: steps, MaxConcurrency: 2, FailFast: false}), Options{})
 	if err == nil || !strings.Contains(err.Error(), `map has no entry for key "produced"`) {
 		t.Fatalf("snapshot error = %v", err)
 	}
 }
 
 func TestRunConcurrentGroupSerializesProgressAndOutput(t *testing.T) {
-	registry := step.NewRegistry()
-	if err := registry.Register("write_output", func(map[string]any) (step.Runner, error) {
+	registry := newTestRegistry(t, map[string]step.Builder{"write_output": func(map[string]any) (step.Runner, error) {
 		return runnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
 			if request.Interactive || request.Stdin != nil {
 				return step.Result{}, errors.New("concurrent child received interactive stdin")
@@ -301,9 +270,7 @@ func TestRunConcurrentGroupSerializesProgressAndOutput(t *testing.T) {
 			}
 			return step.Result{}, nil
 		}), nil
-	}); err != nil {
-		t.Fatal(err)
-	}
+	}})
 	steps := make([]workflow.Step, 12)
 	for i := range steps {
 		steps[i] = workflow.Step{ID: fmt.Sprintf("step_%d", i), Type: "write_output", With: map[string]any{}}
@@ -323,12 +290,9 @@ func TestRunConcurrentGroupSerializesProgressAndOutput(t *testing.T) {
 }
 
 func TestConcurrentGroupDryRunShowsChildrenAndPolicies(t *testing.T) {
-	registry := step.NewRegistry()
-	if err := registry.Register("noop", func(map[string]any) (step.Runner, error) {
+	registry := newTestRegistry(t, map[string]step.Builder{"noop": func(map[string]any) (step.Runner, error) {
 		return runnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
-	}); err != nil {
-		t.Fatal(err)
-	}
+	}})
 	timeout := workflow.Duration(5 * time.Minute)
 	steps := []workflow.Step{
 		{ID: "lint", Type: "noop", With: map[string]any{}},

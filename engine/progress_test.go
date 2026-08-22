@@ -13,20 +13,15 @@ import (
 )
 
 func TestRunReportsProgressAndCollectsStats(t *testing.T) {
-	registry := step.NewRegistry()
 	var requests []step.Request
-	if err := registry.Register("retry", func(map[string]any) (step.Runner, error) {
+	registry := newTestRegistry(t, map[string]step.Builder{"retry": func(map[string]any) (step.Runner, error) {
 		return retryTestRunner{failures: 1, requests: &requests}, nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	definition := &workflow.Definition{
-		Version: 1, Name: "progress", Dir: t.TempDir(), Vars: map[string]any{"run": false},
-		Steps: []workflow.Step{
-			{ID: "publish", Type: "retry", Retry: immediateRetry(2), With: map[string]any{}},
-			{ID: "deploy", Type: "retry", If: "vars.run", With: map[string]any{}},
-		},
-	}
+	}})
+	definition := testDefinition(t, "progress",
+		workflow.Step{ID: "publish", Type: "retry", Retry: immediateRetry(2)},
+		workflow.Step{ID: "deploy", Type: "retry", If: "vars.run"},
+	)
+	definition.Vars = map[string]any{"run": false}
 	var events []ProgressEvent
 	state, err := New(registry).Run(t.Context(), definition, Options{
 		Stdout: io.Discard, Stderr: io.Discard,
@@ -66,11 +61,8 @@ func (alwaysFailRunner) Run(context.Context, step.Request) (step.Result, error) 
 }
 
 func TestRunReportsTerminalFailure(t *testing.T) {
-	registry := step.NewRegistry()
-	if err := registry.Register("fail", func(map[string]any) (step.Runner, error) { return alwaysFailRunner{}, nil }); err != nil {
-		t.Fatal(err)
-	}
-	definition := &workflow.Definition{Version: 1, Name: "failure", Dir: t.TempDir(), Steps: []workflow.Step{{ID: "break", Type: "fail", With: map[string]any{}}}}
+	registry := newTestRegistry(t, map[string]step.Builder{"fail": func(map[string]any) (step.Runner, error) { return alwaysFailRunner{}, nil }})
+	definition := testDefinition(t, "failure", workflow.Step{ID: "break", Type: "fail"})
 	var events []ProgressEvent
 	_, err := New(registry).Run(t.Context(), definition, Options{Progress: func(event ProgressEvent) { events = append(events, event) }})
 	if err == nil {
@@ -83,15 +75,10 @@ func TestRunReportsTerminalFailure(t *testing.T) {
 }
 
 func TestRunReportsDiagnosticFailurePhaseAndLocation(t *testing.T) {
-	registry := step.NewRegistry()
-	if err := registry.Register("fail", func(map[string]any) (step.Runner, error) { return alwaysFailRunner{}, nil }); err != nil {
-		t.Fatal(err)
-	}
+	registry := newTestRegistry(t, map[string]step.Builder{"fail": func(map[string]any) (step.Runner, error) { return alwaysFailRunner{}, nil }})
 	location := diagnostic.Location{Source: "/project/workflow.yaml", Line: 8, Column: 5}
-	definition := &workflow.Definition{
-		Version: 1, Name: "failure", Dir: t.TempDir(), Location: diagnostic.Location{Source: "/project/workflow.yaml", Line: 1, Column: 1},
-		Steps: []workflow.Step{{ID: "break", Type: "fail", With: map[string]any{"token": "secret", "message": "visible"}, Location: location}},
-	}
+	definition := testDefinition(t, "failure", workflow.Step{ID: "break", Type: "fail", With: map[string]any{"token": "secret", "message": "visible"}, Location: location})
+	definition.Location = diagnostic.Location{Source: "/project/workflow.yaml", Line: 1, Column: 1}
 	var events []diagnostic.Event
 	_, err := New(registry).Run(t.Context(), definition, Options{Diagnostics: func(event diagnostic.Event) { events = append(events, event) }})
 	if err == nil {

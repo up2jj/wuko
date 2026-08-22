@@ -18,24 +18,16 @@ type captureRunner struct {
 }
 
 func TestRunSkipsGuardedStepAndDependent(t *testing.T) {
-	registry := step.NewRegistry()
 	var runs int
-	if err := registry.Register("capture", func(raw map[string]any) (step.Runner, error) {
+	registry := newTestRegistry(t, map[string]step.Builder{"capture": func(raw map[string]any) (step.Runner, error) {
 		return countingRunner{value: raw["value"], runs: &runs}, nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	definition := &workflow.Definition{
-		Version: 1,
-		Name:    "conditional",
-		Dir:     t.TempDir(),
-		Vars:    map[string]any{"prepare": false},
-		Steps: []workflow.Step{
-			{ID: "prepare", Type: "capture", If: "vars.prepare", With: map[string]any{"value": "{{ .vars.artifact_path }}"}},
-			{ID: "upload", Type: "capture", If: `"prepare" in steps`, With: map[string]any{"value": "{{ .vars.artifact_path }}"}},
-			{ID: "fallback", Type: "capture", If: `"prepare" not in steps`, With: map[string]any{"value": "fallback"}},
-		},
-	}
+	}})
+	definition := testDefinition(t, "conditional",
+		workflow.Step{ID: "prepare", Type: "capture", If: "vars.prepare", With: map[string]any{"value": "{{ .vars.artifact_path }}"}},
+		workflow.Step{ID: "upload", Type: "capture", If: `"prepare" in steps`, With: map[string]any{"value": "{{ .vars.artifact_path }}"}},
+		workflow.Step{ID: "fallback", Type: "capture", If: `"prepare" not in steps`, With: map[string]any{"value": "fallback"}},
+	)
+	definition.Vars = map[string]any{"prepare": false}
 	var output bytes.Buffer
 	state, err := New(registry).Run(t.Context(), definition, Options{
 		RunDir: t.TempDir(), Stdout: &output, Stderr: io.Discard,
@@ -61,26 +53,18 @@ func TestRunSkipsGuardedStepAndDependent(t *testing.T) {
 }
 
 func TestRunConditionUsesRuntimeState(t *testing.T) {
-	registry := step.NewRegistry()
 	var runs int
-	if err := registry.Register("capture", func(raw map[string]any) (step.Runner, error) {
+	registry := newTestRegistry(t, map[string]step.Builder{"capture": func(raw map[string]any) (step.Runner, error) {
 		return countingRunner{value: raw["value"], runs: &runs}, nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	definition := &workflow.Definition{
-		Version: 1,
-		Name:    "conditional",
-		Dir:     t.TempDir(),
-		Steps: []workflow.Step{
-			{ID: "prepare", Type: "capture", With: map[string]any{"value": true}},
-			{
-				ID: "consume", Type: "capture",
-				If:   `hasKey(steps, "prepare") && steps.prepare.value && vars.result && env.MODE == "test" && workflow.name == "conditional" && run.dir != ""`,
-				With: map[string]any{"value": "consumed"},
-			},
+	}})
+	definition := testDefinition(t, "conditional",
+		workflow.Step{ID: "prepare", Type: "capture", With: map[string]any{"value": true}},
+		workflow.Step{
+			ID: "consume", Type: "capture",
+			If:   `hasKey(steps, "prepare") && steps.prepare.value && vars.result && env.MODE == "test" && workflow.name == "conditional" && run.dir != ""`,
+			With: map[string]any{"value": "consumed"},
 		},
-	}
+	)
 	state, err := New(registry).Run(t.Context(), definition, Options{
 		Env: map[string]string{"MODE": "test"}, RunDir: t.TempDir(), Stdout: io.Discard, Stderr: io.Discard,
 	})
@@ -96,19 +80,13 @@ func TestRunConditionUsesRuntimeState(t *testing.T) {
 }
 
 func TestValidateRejectsInvalidOrNonBooleanCondition(t *testing.T) {
-	registry := step.NewRegistry()
-	if err := registry.Register("capture", func(raw map[string]any) (step.Runner, error) {
+	registry := newTestRegistry(t, map[string]step.Builder{"capture": func(raw map[string]any) (step.Runner, error) {
 		return countingRunner{}, nil
-	}); err != nil {
-		t.Fatal(err)
-	}
+	}})
 	tests := []workflow.Condition{"vars.", "42"}
 	for _, condition := range tests {
 		t.Run(string(condition), func(t *testing.T) {
-			definition := &workflow.Definition{
-				Version: 1, Name: "invalid", Dir: t.TempDir(),
-				Steps: []workflow.Step{{ID: "run", Type: "capture", If: condition, With: map[string]any{}}},
-			}
+			definition := testDefinition(t, "invalid", workflow.Step{ID: "run", Type: "capture", If: condition})
 			if err := New(registry).Validate(t.Context(), definition, Options{}); err == nil {
 				t.Fatal("expected validation error")
 			}
@@ -117,17 +95,12 @@ func TestValidateRejectsInvalidOrNonBooleanCondition(t *testing.T) {
 }
 
 func TestRunRejectsNonBooleanConditionAtRuntime(t *testing.T) {
-	registry := step.NewRegistry()
-	if err := registry.Register("capture", func(raw map[string]any) (step.Runner, error) {
+	registry := newTestRegistry(t, map[string]step.Builder{"capture": func(raw map[string]any) (step.Runner, error) {
 		return countingRunner{}, nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	definition := &workflow.Definition{
-		Version: 1, Name: "invalid", Dir: t.TempDir(), Vars: map[string]any{"enabled": "yes"},
-		Steps: []workflow.Step{{ID: "run", Type: "capture", If: "vars.enabled", With: map[string]any{}}},
-	}
-	_, err := New(registry).Run(t.Context(), definition, Options{Stdout: io.Discard, Stderr: io.Discard})
+	}})
+	definition := testDefinition(t, "invalid", workflow.Step{ID: "run", Type: "capture", If: "vars.enabled"})
+	definition.Vars = map[string]any{"enabled": "yes"}
+	_, err := New(registry).Run(t.Context(), definition, Options{})
 	if err == nil {
 		t.Fatal("expected runtime condition error")
 	}
@@ -137,20 +110,14 @@ func TestRunRejectsNonBooleanConditionAtRuntime(t *testing.T) {
 }
 
 func TestDryRunPrintsButDoesNotEvaluateCondition(t *testing.T) {
-	registry := step.NewRegistry()
-	if err := registry.Register("capture", func(raw map[string]any) (step.Runner, error) {
+	registry := newTestRegistry(t, map[string]step.Builder{"capture": func(raw map[string]any) (step.Runner, error) {
 		return countingRunner{}, nil
-	}); err != nil {
-		t.Fatal(err)
-	}
+	}})
 	timeout := workflow.Duration(2 * time.Second)
-	definition := &workflow.Definition{
-		Version: 1, Name: "dry-run", Dir: t.TempDir(),
-		Steps: []workflow.Step{{
-			ID: "run", Type: "capture", If: "vars.missing",
-			Timeout: &timeout, Retry: immediateRetry(2), With: map[string]any{"value": "{{ .vars.also_missing }}"},
-		}},
-	}
+	definition := testDefinition(t, "dry-run", workflow.Step{
+		ID: "run", Type: "capture", If: "vars.missing",
+		Timeout: &timeout, Retry: immediateRetry(2), With: map[string]any{"value": "{{ .vars.also_missing }}"},
+	})
 	var output bytes.Buffer
 	if _, err := New(registry).Run(t.Context(), definition, Options{
 		DryRun: true, Stdout: &output, Stderr: io.Discard,
@@ -163,17 +130,11 @@ func TestDryRunPrintsButDoesNotEvaluateCondition(t *testing.T) {
 }
 
 func TestDryRunPrintsUnexpandedControls(t *testing.T) {
-	registry := step.NewRegistry()
-	if err := registry.Register("capture", func(map[string]any) (step.Runner, error) { return countingRunner{}, nil }); err != nil {
-		t.Fatal(err)
-	}
-	definition := &workflow.Definition{
-		Version: 1, Name: "fanout-dry-run", Dir: t.TempDir(),
-		Steps: []workflow.Step{{ID: "loop", Foreach: &workflow.ForeachGroup{
-			Items: "vars.missing", MaxConcurrency: 1, FailFast: true,
-			Steps: []workflow.Step{{ID: "run", Type: "capture", With: map[string]any{"value": "{{ .foreach.item }}"}}},
-		}}},
-	}
+	registry := newTestRegistry(t, map[string]step.Builder{"capture": func(map[string]any) (step.Runner, error) { return countingRunner{}, nil }})
+	definition := testDefinition(t, "fanout-dry-run", workflow.Step{ID: "loop", Foreach: &workflow.ForeachGroup{
+		Items: "vars.missing", MaxConcurrency: 1, FailFast: true,
+		Steps: []workflow.Step{{ID: "run", Type: "capture", With: map[string]any{"value": "{{ .foreach.item }}"}}},
+	}})
 	var output bytes.Buffer
 	if _, err := New(registry).Run(t.Context(), definition, Options{DryRun: true, Stdout: &output, Stderr: io.Discard}); err != nil {
 		t.Fatal(err)
@@ -204,20 +165,15 @@ func (r captureRunner) Run(_ context.Context, request step.Request) (step.Result
 }
 
 func TestRunRendersStateAndEnvironment(t *testing.T) {
-	registry := step.NewRegistry()
 	var seen step.Request
-	if err := registry.Register("capture", func(raw map[string]any) (step.Runner, error) {
+	registry := newTestRegistry(t, map[string]step.Builder{"capture": func(raw map[string]any) (step.Runner, error) {
 		return captureRunner{value: raw["value"], seen: &seen}, nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	definition := &workflow.Definition{
-		Version: 1, Name: "test", Dir: t.TempDir(), Vars: map[string]any{"name": "workflow"},
-		Env: map[string]string{
-			"DERIVED":              "{{ .env.WUKO_ENGINE_HOST }}",
-			"WUKO_ENGINE_PRIORITY": "workflow",
-		},
-		Steps: []workflow.Step{{ID: "capture", Type: "capture", With: map[string]any{"value": "{{ .vars.name }}:{{ .env.DERIVED }}"}}},
+	}})
+	definition := testDefinition(t, "test", workflow.Step{ID: "capture", Type: "capture", With: map[string]any{"value": "{{ .vars.name }}:{{ .env.DERIVED }}"}})
+	definition.Vars = map[string]any{"name": "workflow"}
+	definition.Env = map[string]string{
+		"DERIVED":              "{{ .env.WUKO_ENGINE_HOST }}",
+		"WUKO_ENGINE_PRIORITY": "workflow",
 	}
 	state, err := New(registry).Run(t.Context(), definition, Options{
 		Vars:    map[string]any{"name": "cli"},
@@ -240,21 +196,16 @@ func TestRunRendersStateAndEnvironment(t *testing.T) {
 }
 
 func TestRunRendersNamedTemplatesWithRuntimeState(t *testing.T) {
-	registry := step.NewRegistry()
-	if err := registry.Register("capture", func(raw map[string]any) (step.Runner, error) {
+	registry := newTestRegistry(t, map[string]step.Builder{"capture": func(raw map[string]any) (step.Runner, error) {
 		return countingRunner{value: raw["value"]}, nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	definition := &workflow.Definition{
-		Version: 1, Name: "named", Dir: t.TempDir(), Vars: map[string]any{"prefix": "artifact"},
-		Templates: map[string]workflow.TemplateDefinition{
-			"result": {Inline: `{{ .vars.prefix }}={{ .steps.prepare.value }}`},
-		},
-		Steps: []workflow.Step{
-			{ID: "prepare", Type: "capture", With: map[string]any{"value": "ready"}},
-			{ID: "consume", Type: "capture", With: map[string]any{"value": `{{ template "result" . }}`}},
-		},
+	}})
+	definition := testDefinition(t, "named",
+		workflow.Step{ID: "prepare", Type: "capture", With: map[string]any{"value": "ready"}},
+		workflow.Step{ID: "consume", Type: "capture", With: map[string]any{"value": `{{ template "result" . }}`}},
+	)
+	definition.Vars = map[string]any{"prefix": "artifact"}
+	definition.Templates = map[string]workflow.TemplateDefinition{
+		"result": {Inline: `{{ .vars.prefix }}={{ .steps.prepare.value }}`},
 	}
 	state, err := New(registry).Run(t.Context(), definition, Options{RunDir: t.TempDir(), Stdout: io.Discard, Stderr: io.Discard})
 	if err != nil {

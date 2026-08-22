@@ -25,7 +25,7 @@ func TestImportedVariablesAreVisibleToLaterSteps(t *testing.T) {
 			{ID: "artifact", Type: "set", With: map[string]any{"variable": "artifact", "expr": `vars.target + "-archive"`}},
 		},
 	}
-	registry := step.NewRegistry()
+	registry := newTestRegistry(t, nil)
 	for _, register := range []func(*step.Registry) error{importvarsstep.Register, setstep.Register} {
 		if err := register(registry); err != nil {
 			t.Fatal(err)

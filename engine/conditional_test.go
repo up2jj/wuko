@@ -13,26 +13,22 @@ import (
 
 func conditionalTestRegistry(t *testing.T, runs *int) *step.Registry {
 	t.Helper()
-	registry := step.NewRegistry()
-	if err := registry.Register("capture", func(raw map[string]any) (step.Runner, error) {
+	return newTestRegistry(t, map[string]step.Builder{"capture": func(raw map[string]any) (step.Runner, error) {
 		return countingRunner{value: raw["value"], runs: runs}, nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	return registry
+	}})
 }
 
 func TestConditionalBlockRunsSequentiallyAfterOneConditionEvaluation(t *testing.T) {
 	var runs int
 	registry := conditionalTestRegistry(t, &runs)
-	definition := &workflow.Definition{
-		Version: 1, Name: "conditional", Dir: t.TempDir(),
-		Steps: []workflow.Step{{If: `!hasKey(vars, "result")`, Steps: []workflow.Step{
+	definition := testDefinition(
+		t, "conditional",
+		workflow.Step{If: `!hasKey(vars, "result")`, Steps: []workflow.Step{
 			{ID: "first", Type: "capture", With: map[string]any{"value": "produced"}},
 			{ID: "second", Type: "capture", If: `steps.first.value == "produced"`, With: map[string]any{"value": "{{ .vars.result }}"}},
-		}}},
-	}
-	state, err := New(registry).Run(t.Context(), definition, Options{Stdout: io.Discard, Stderr: io.Discard})
+		}})
+
+	state, err := New(registry).Run(t.Context(), definition, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,9 +43,9 @@ func TestConditionalBlockRunsSequentiallyAfterOneConditionEvaluation(t *testing.
 func TestConditionalBlockFalseRecordsLeafAndControlSkips(t *testing.T) {
 	var runs int
 	registry := conditionalTestRegistry(t, &runs)
-	definition := &workflow.Definition{
-		Version: 1, Name: "skipped", Dir: t.TempDir(),
-		Steps: []workflow.Step{{If: "false", Steps: []workflow.Step{
+	definition := testDefinition(
+		t, "skipped",
+		workflow.Step{If: "false", Steps: []workflow.Step{
 			{ID: "ordinary", Type: "capture", With: map[string]any{"value": "{{ .vars.missing }}"}},
 			{Concurrent: &workflow.ConcurrentGroup{MaxConcurrency: 2, FailFast: true, Steps: []workflow.Step{
 				{ID: "parallel_one", Type: "capture", With: map[string]any{"value": "one"}},
@@ -58,8 +54,8 @@ func TestConditionalBlockFalseRecordsLeafAndControlSkips(t *testing.T) {
 			{ID: "loop", Foreach: &workflow.ForeachGroup{Items: "[1]", MaxConcurrency: 1, FailFast: true, Steps: []workflow.Step{
 				{ID: "iteration", Type: "capture", With: map[string]any{"value": "iteration"}},
 			}}},
-		}}},
-	}
+		}})
+
 	var events []ProgressEvent
 	state, err := New(registry).Run(t.Context(), definition, Options{
 		Stdout: io.Discard, Stderr: io.Discard,
@@ -98,15 +94,15 @@ func TestConditionalBlockStopsAfterChildFailure(t *testing.T) {
 	if err := registry.Register("fail", func(map[string]any) (step.Runner, error) { return alwaysFailRunner{}, nil }); err != nil {
 		t.Fatal(err)
 	}
-	definition := &workflow.Definition{
-		Version: 1, Name: "failure", Dir: t.TempDir(),
-		Steps: []workflow.Step{{If: "true", Steps: []workflow.Step{
+	definition := testDefinition(
+		t, "failure",
+		workflow.Step{If: "true", Steps: []workflow.Step{
 			{ID: "before", Type: "capture", With: map[string]any{"value": "before"}},
 			{ID: "broken", Type: "fail", With: map[string]any{}},
 			{ID: "after", Type: "capture", With: map[string]any{"value": "after"}},
-		}}},
-	}
-	if _, err := New(registry).Run(t.Context(), definition, Options{Stdout: io.Discard, Stderr: io.Discard}); err == nil || !strings.Contains(err.Error(), "broken") {
+		}})
+
+	if _, err := New(registry).Run(t.Context(), definition, Options{}); err == nil || !strings.Contains(err.Error(), "broken") {
 		t.Fatalf("error = %v", err)
 	}
 	if runs != 1 {
@@ -117,16 +113,14 @@ func TestConditionalBlockStopsAfterChildFailure(t *testing.T) {
 func TestConditionalBlockInsideForeachCollectsTransparentOutputs(t *testing.T) {
 	var runs int
 	registry := conditionalTestRegistry(t, &runs)
-	definition := &workflow.Definition{
-		Version: 1, Name: "foreach-conditional", Dir: t.TempDir(), Vars: map[string]any{"items": []any{"one"}},
-		Steps: []workflow.Step{{ID: "loop", Foreach: &workflow.ForeachGroup{
-			Items: "vars.items", MaxConcurrency: 1, FailFast: true,
-			Steps: []workflow.Step{{If: "true", Steps: []workflow.Step{
-				{ID: "inside", Type: "capture", With: map[string]any{"value": "{{ .foreach.item }}"}},
-			}}},
+	definition := testDefinition(t, "foreach-conditional", workflow.Step{ID: "loop", Foreach: &workflow.ForeachGroup{
+		Items: "vars.items", MaxConcurrency: 1, FailFast: true,
+		Steps: []workflow.Step{{If: "true", Steps: []workflow.Step{
+			{ID: "inside", Type: "capture", With: map[string]any{"value": "{{ .foreach.item }}"}},
 		}}},
-	}
-	state, err := New(registry).Run(t.Context(), definition, Options{Stdout: io.Discard, Stderr: io.Discard})
+	}})
+	definition.Vars = map[string]any{"items": []any{"one"}}
+	state, err := New(registry).Run(t.Context(), definition, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,21 +134,15 @@ func TestConditionalBlockInsideForeachCollectsTransparentOutputs(t *testing.T) {
 func TestConditionalBlocksRunInCompositeActionsAndFinally(t *testing.T) {
 	var runs int
 	registry := conditionalTestRegistry(t, &runs)
-	action := &workflow.Action{
-		Version: 1, Name: "composite", Dir: t.TempDir(),
-		Outputs: map[string]workflow.ActionOutput{"value": {Value: "steps.inside.value"}},
-		Steps: []workflow.Step{{If: "true", Steps: []workflow.Step{
-			{ID: "inside", Type: "capture", With: map[string]any{"value": "action"}},
-		}}},
-	}
-	definition := &workflow.Definition{
-		Version: 1, Name: "caller", Dir: t.TempDir(),
-		Steps: []workflow.Step{{ID: "call", Uses: workflow.ActionSource{URL: "https://example.test/action"}, Action: action, With: map[string]any{}}},
-		Finally: []workflow.Step{{If: `finally.status == "succeeded"`, Steps: []workflow.Step{
-			{ID: "cleanup", Type: "capture", With: map[string]any{"value": "cleanup"}},
-		}}},
-	}
-	state, err := New(registry).Run(t.Context(), definition, Options{Stdout: io.Discard, Stderr: io.Discard})
+	action := testAction(t, "composite", workflow.Step{If: "true", Steps: []workflow.Step{
+		{ID: "inside", Type: "capture", With: map[string]any{"value": "action"}},
+	}})
+	action.Outputs = map[string]workflow.ActionOutput{"value": {Value: "steps.inside.value"}}
+	definition := testDefinition(t, "caller", workflow.Step{ID: "call", Uses: workflow.ActionSource{URL: "https://example.test/action"}, Action: action})
+	definition.Finally = []workflow.Step{{If: `finally.status == "succeeded"`, Steps: []workflow.Step{
+		{ID: "cleanup", Type: "capture", With: map[string]any{"value": "cleanup"}},
+	}}}
+	state, err := New(registry).Run(t.Context(), definition, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,13 +154,13 @@ func TestConditionalBlocksRunInCompositeActionsAndFinally(t *testing.T) {
 func TestConditionalBlockDryRunDisplaysNestedPlan(t *testing.T) {
 	var runs int
 	registry := conditionalTestRegistry(t, &runs)
-	definition := &workflow.Definition{
-		Version: 1, Name: "dry", Dir: t.TempDir(),
-		Steps: []workflow.Step{{If: "vars.enabled", Steps: []workflow.Step{
+	definition := testDefinition(
+		t, "dry",
+		workflow.Step{If: "vars.enabled", Steps: []workflow.Step{
 			{ID: "first", Type: "capture", With: map[string]any{"value": "first"}},
 			{ID: "second", Type: "capture", With: map[string]any{"value": "second"}},
-		}}},
-	}
+		}})
+
 	var output bytes.Buffer
 	if _, err := New(registry).Run(t.Context(), definition, Options{DryRun: true, Stdout: &output, Stderr: io.Discard}); err != nil {
 		t.Fatal(err)
@@ -187,12 +175,12 @@ func TestConditionalBlockValidationDiagnosticUsesWrapperLocation(t *testing.T) {
 	var runs int
 	registry := conditionalTestRegistry(t, &runs)
 	wrapperLocation := diagnostic.Location{Source: "workflow.yaml", Line: 7, Column: 3}
-	definition := &workflow.Definition{
-		Version: 1, Name: "invalid", Dir: t.TempDir(),
-		Steps: []workflow.Step{{If: "vars.", Location: wrapperLocation, Steps: []workflow.Step{
+	definition := testDefinition(
+		t, "invalid",
+		workflow.Step{If: "vars.", Location: wrapperLocation, Steps: []workflow.Step{
 			{ID: "run", Type: "capture", With: map[string]any{"value": "unused"}},
-		}}},
-	}
+		}})
+
 	var events []diagnostic.Event
 	err := New(registry).Validate(t.Context(), definition, Options{
 		Diagnostics: func(event diagnostic.Event) { events = append(events, event) },

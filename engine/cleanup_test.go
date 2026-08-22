@@ -18,12 +18,8 @@ import (
 )
 
 func TestManagedTempRemainsAvailableThroughFinally(t *testing.T) {
-	registry := step.NewRegistry()
-	if err := tempstep.Register(registry); err != nil {
-		t.Fatal(err)
-	}
 	var observedPath string
-	if err := registry.Register("observe_path", func(raw map[string]any) (step.Runner, error) {
+	registry := newTestRegistry(t, map[string]step.Builder{"observe_path": func(raw map[string]any) (step.Runner, error) {
 		path, _ := raw["path"].(string)
 		return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
 			if _, err := os.Stat(path); err != nil {
@@ -32,17 +28,15 @@ func TestManagedTempRemainsAvailableThroughFinally(t *testing.T) {
 			observedPath = path
 			return step.Result{}, nil
 		}), nil
-	}); err != nil {
+	}})
+	if err := tempstep.Register(registry); err != nil {
 		t.Fatal(err)
 	}
-	definition := &workflow.Definition{
-		Version: 1, Name: "managed-temp", Dir: t.TempDir(),
-		Steps: []workflow.Step{{ID: "workspace", Type: "temp", With: map[string]any{"kind": "directory"}}},
-		Finally: []workflow.Step{{ID: "observe", Type: "observe_path", With: map[string]any{
-			"path": "{{ .steps.workspace.path }}",
-		}}},
-	}
-	state, err := New(registry).Run(t.Context(), definition, Options{Stdout: io.Discard, Stderr: io.Discard})
+	definition := testDefinition(t, "managed-temp", workflow.Step{ID: "workspace", Type: "temp", With: map[string]any{"kind": "directory"}})
+	definition.Finally = []workflow.Step{{ID: "observe", Type: "observe_path", With: map[string]any{
+		"path": "{{ .steps.workspace.path }}",
+	}}}
+	state, err := New(registry).Run(t.Context(), definition, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,12 +50,8 @@ func TestManagedTempRemainsAvailableThroughFinally(t *testing.T) {
 }
 
 func TestManagedTempInsideActionLivesUntilRootCleanup(t *testing.T) {
-	registry := step.NewRegistry()
-	if err := tempstep.Register(registry); err != nil {
-		t.Fatal(err)
-	}
 	var observedPath string
-	if err := registry.Register("observe_action_path", func(raw map[string]any) (step.Runner, error) {
+	registry := newTestRegistry(t, map[string]step.Builder{"observe_action_path": func(raw map[string]any) (step.Runner, error) {
 		path, _ := raw["path"].(string)
 		return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
 			if _, err := os.Stat(path); err != nil {
@@ -70,25 +60,20 @@ func TestManagedTempInsideActionLivesUntilRootCleanup(t *testing.T) {
 			observedPath = path
 			return step.Result{}, nil
 		}), nil
-	}); err != nil {
+	}})
+	if err := tempstep.Register(registry); err != nil {
 		t.Fatal(err)
 	}
-	action := &workflow.Action{
-		Version: 1, Name: "temporary-action", Dir: t.TempDir(),
-		Outputs: map[string]workflow.ActionOutput{"path": {Value: "steps.workspace.path"}},
-		Steps:   []workflow.Step{{ID: "workspace", Type: "temp", With: map[string]any{"kind": "file"}}},
-	}
-	definition := &workflow.Definition{
-		Version: 1, Name: "caller", Dir: t.TempDir(),
-		Steps: []workflow.Step{{
-			ID: "action", Uses: workflow.ActionSource{URL: "https://example.test/action"},
-			Action: action, With: map[string]any{},
-		}},
-		Finally: []workflow.Step{{ID: "observe", Type: "observe_action_path", With: map[string]any{
-			"path": "{{ .steps.action.path }}",
-		}}},
-	}
-	state, err := New(registry).Run(t.Context(), definition, Options{Stdout: io.Discard, Stderr: io.Discard})
+	action := testAction(t, "temporary-action", workflow.Step{ID: "workspace", Type: "temp", With: map[string]any{"kind": "file"}})
+	action.Outputs = map[string]workflow.ActionOutput{"path": {Value: "steps.workspace.path"}}
+	definition := testDefinition(t, "caller", workflow.Step{
+		ID: "action", Uses: workflow.ActionSource{URL: "https://example.test/action"},
+		Action: action,
+	})
+	definition.Finally = []workflow.Step{{ID: "observe", Type: "observe_action_path", With: map[string]any{
+		"path": "{{ .steps.action.path }}",
+	}}}
+	state, err := New(registry).Run(t.Context(), definition, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +87,7 @@ func TestManagedTempInsideActionLivesUntilRootCleanup(t *testing.T) {
 }
 
 func TestManagedTempValidationAndDryRunCreateNothing(t *testing.T) {
-	registry := step.NewRegistry()
+	registry := newTestRegistry(t, nil)
 	if err := tempstep.Register(registry); err != nil {
 		t.Fatal(err)
 	}
@@ -115,9 +100,10 @@ func TestManagedTempValidationAndDryRunCreateNothing(t *testing.T) {
 		return values
 	}
 	before := matches()
-	definition := &workflow.Definition{Version: 1, Name: "no-execute", Dir: t.TempDir(), Steps: []workflow.Step{{
+	definition := testDefinition(t, "no-execute", workflow.Step{
 		ID: "workspace", Type: "temp", With: map[string]any{"kind": "directory", "pattern": pattern},
-	}}}
+	})
+
 	engine := New(registry)
 	if err := engine.Validate(t.Context(), definition, Options{Stdout: io.Discard, Stderr: io.Discard}); err != nil {
 		t.Fatal(err)
@@ -131,7 +117,7 @@ func TestManagedTempValidationAndDryRunCreateNothing(t *testing.T) {
 }
 
 func TestManagedCleanupRunsInReverseAndJoinsErrors(t *testing.T) {
-	registry := step.NewRegistry()
+	registry := newTestRegistry(t, nil)
 	var mu sync.Mutex
 	var cleaned []string
 	if err := registry.Register("managed", func(raw map[string]any) (step.Runner, error) {
@@ -141,12 +127,13 @@ func TestManagedCleanupRunsInReverseAndJoinsErrors(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	definition := &workflow.Definition{Version: 1, Name: "cleanup-order", Dir: t.TempDir(), Steps: []workflow.Step{
-		{ID: "first", Type: "managed", With: map[string]any{"label": "first", "fail": true}},
-		{ID: "second", Type: "managed", With: map[string]any{"label": "second"}},
-		{ID: "third", Type: "managed", With: map[string]any{"label": "third", "fail": true}},
-	}}
-	state, err := New(registry).Run(t.Context(), definition, Options{Stdout: io.Discard, Stderr: io.Discard})
+	definition := testDefinition(t, "cleanup-order",
+		workflow.Step{ID: "first", Type: "managed", With: map[string]any{"label": "first", "fail": true}},
+		workflow.Step{ID: "second", Type: "managed", With: map[string]any{"label": "second"}},
+		workflow.Step{ID: "third", Type: "managed", With: map[string]any{"label": "third", "fail": true}},
+	)
+
+	state, err := New(registry).Run(t.Context(), definition, Options{})
 	if state != nil || err == nil {
 		t.Fatalf("state=%#v error=%v, want cleanup failure", state, err)
 	}
@@ -159,19 +146,20 @@ func TestManagedCleanupRunsInReverseAndJoinsErrors(t *testing.T) {
 }
 
 func TestManagedCleanupRegistersEverySuccessfulPoll(t *testing.T) {
-	registry := step.NewRegistry()
+	registry := newTestRegistry(t, nil)
 	runner := &pollCleanupRunner{}
 	if err := registry.Register("managed_poll", func(map[string]any) (step.Runner, error) { return runner, nil }); err != nil {
 		t.Fatal(err)
 	}
 	timeout := workflow.Duration(1_000_000_000)
-	definition := &workflow.Definition{Version: 1, Name: "poll-cleanup", Dir: t.TempDir(), Steps: []workflow.Step{{
+	definition := testDefinition(t, "poll-cleanup", workflow.Step{
 		ID: "wait", Type: "wait", Timeout: &timeout, With: map[string]any{
 			"step":  map[string]any{"type": "managed_poll", "with": map[string]any{}},
 			"until": "result.poll == 3", "interval": "1ns",
 		},
-	}}}
-	if _, err := New(registry).Run(t.Context(), definition, Options{Stdout: io.Discard, Stderr: io.Discard}); err != nil {
+	})
+
+	if _, err := New(registry).Run(t.Context(), definition, Options{}); err != nil {
 		t.Fatal(err)
 	}
 	if want := []int{3, 2, 1}; !reflect.DeepEqual(runner.cleaned, want) {
@@ -180,15 +168,16 @@ func TestManagedCleanupRegistersEverySuccessfulPoll(t *testing.T) {
 }
 
 func TestManagedCleanupRegistersOnlySuccessfulRetry(t *testing.T) {
-	registry := step.NewRegistry()
+	registry := newTestRegistry(t, nil)
 	runner := &retryCleanupRunner{}
 	if err := registry.Register("managed_retry", func(map[string]any) (step.Runner, error) { return runner, nil }); err != nil {
 		t.Fatal(err)
 	}
-	definition := &workflow.Definition{Version: 1, Name: "retry-cleanup", Dir: t.TempDir(), Steps: []workflow.Step{{
+	definition := testDefinition(t, "retry-cleanup", workflow.Step{
 		ID: "retry", Type: "managed_retry", Retry: &workflow.RetryPolicy{MaxAttempts: 2, BackoffMultiplier: 1}, With: map[string]any{},
-	}}}
-	if _, err := New(registry).Run(t.Context(), definition, Options{Stdout: io.Discard, Stderr: io.Discard}); err != nil {
+	})
+
+	if _, err := New(registry).Run(t.Context(), definition, Options{}); err != nil {
 		t.Fatal(err)
 	}
 	if runner.attempts != 2 || !reflect.DeepEqual(runner.cleaned, []int{2}) {
@@ -197,7 +186,7 @@ func TestManagedCleanupRegistersOnlySuccessfulRetry(t *testing.T) {
 }
 
 func TestManagedCleanupConcurrentAndFanoutRegistration(t *testing.T) {
-	registry := step.NewRegistry()
+	registry := newTestRegistry(t, nil)
 	var mu sync.Mutex
 	var cleaned []string
 	if err := registry.Register("managed_parallel", func(raw map[string]any) (step.Runner, error) {
@@ -210,14 +199,15 @@ func TestManagedCleanupConcurrentAndFanoutRegistration(t *testing.T) {
 	for index := range children {
 		children[index] = workflow.Step{ID: fmt.Sprintf("child_%d", index), Type: "managed_parallel", With: map[string]any{"label": fmt.Sprintf("child_%d", index)}}
 	}
-	definition := &workflow.Definition{Version: 1, Name: "parallel-cleanup", Dir: t.TempDir(), Steps: []workflow.Step{
-		{ID: "parallel", Concurrent: &workflow.ConcurrentGroup{Steps: children, MaxConcurrency: 8, FailFast: false}},
-		{ID: "fanout", Foreach: &workflow.ForeachGroup{
+	definition := testDefinition(t, "parallel-cleanup",
+		workflow.Step{ID: "parallel", Concurrent: &workflow.ConcurrentGroup{Steps: children, MaxConcurrency: 8, FailFast: false}},
+		workflow.Step{ID: "fanout", Foreach: &workflow.ForeachGroup{
 			Items: "vars.items", MaxConcurrency: 4, FailFast: true,
 			Steps: []workflow.Step{{ID: "iteration", Type: "managed_parallel", With: map[string]any{"label": "{{ .foreach.item }}"}}},
 		}},
-	}, Vars: map[string]any{"items": []any{"a", "b", "c", "d"}}}
-	if _, err := New(registry).Run(t.Context(), definition, Options{Stdout: io.Discard, Stderr: io.Discard}); err != nil {
+	)
+	definition.Vars = map[string]any{"items": []any{"a", "b", "c", "d"}}
+	if _, err := New(registry).Run(t.Context(), definition, Options{}); err != nil {
 		t.Fatal(err)
 	}
 	if len(cleaned) != 20 {

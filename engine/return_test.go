@@ -14,25 +14,20 @@ import (
 )
 
 func TestReturnFinishesWorkflowWithTypedOutputsAndSkippedSteps(t *testing.T) {
-	registry := step.NewRegistry()
 	var runs int
-	if err := registry.Register("capture_return", func(raw map[string]any) (step.Runner, error) {
+	registry := newTestRegistry(t, map[string]step.Builder{"capture_return": func(raw map[string]any) (step.Runner, error) {
 		return countingRunner{value: raw["value"], runs: &runs}, nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	definition := &workflow.Definition{
-		Version: 1, Name: "early", Dir: t.TempDir(), Vars: map[string]any{"enabled": true},
-		Steps: []workflow.Step{
-			{ID: "prepare", Type: "capture_return", With: map[string]any{"value": "artifact.tar.gz"}},
-			{Return: &workflow.ReturnControl{Outputs: map[string]string{
-				"artifact": "steps.prepare.value", "cached": "true", "count": "2",
-				"items": `[steps.prepare.value, "checksum"]`, "metadata": `{"source": "cache"}`,
-			}}, If: "vars.enabled"},
-			{ID: "after", Type: "capture_return", With: map[string]any{"value": "not-run"}},
-		},
-	}
-	state, err := New(registry).Run(t.Context(), definition, Options{Stdout: io.Discard, Stderr: io.Discard})
+	}})
+	definition := testDefinition(t, "early",
+		workflow.Step{ID: "prepare", Type: "capture_return", With: map[string]any{"value": "artifact.tar.gz"}},
+		workflow.Step{Return: &workflow.ReturnControl{Outputs: map[string]string{
+			"artifact": "steps.prepare.value", "cached": "true", "count": "2",
+			"items": `[steps.prepare.value, "checksum"]`, "metadata": `{"source": "cache"}`,
+		}}, If: "vars.enabled"},
+		workflow.Step{ID: "after", Type: "capture_return", With: map[string]any{"value": "not-run"}},
+	)
+	definition.Vars = map[string]any{"enabled": true}
+	state, err := New(registry).Run(t.Context(), definition, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,18 +47,19 @@ func TestReturnFinishesWorkflowWithTypedOutputsAndSkippedSteps(t *testing.T) {
 }
 
 func TestReturnConditionFalseContinues(t *testing.T) {
-	registry := step.NewRegistry()
+	registry := newTestRegistry(t, nil)
 	var runs int
 	if err := registry.Register("capture_return", func(raw map[string]any) (step.Runner, error) {
 		return countingRunner{value: raw["value"], runs: &runs}, nil
 	}); err != nil {
 		t.Fatal(err)
 	}
-	definition := &workflow.Definition{Version: 1, Name: "continue", Dir: t.TempDir(), Steps: []workflow.Step{
-		{Return: &workflow.ReturnControl{Outputs: map[string]string{}}, If: "false"},
-		{ID: "after", Type: "capture_return", With: map[string]any{"value": "ran"}},
-	}}
-	state, err := New(registry).Run(t.Context(), definition, Options{Stdout: io.Discard, Stderr: io.Discard})
+	definition := testDefinition(t, "continue",
+		workflow.Step{Return: &workflow.ReturnControl{Outputs: map[string]string{}}, If: "false"},
+		workflow.Step{ID: "after", Type: "capture_return", With: map[string]any{"value": "ran"}},
+	)
+
+	state, err := New(registry).Run(t.Context(), definition, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,18 +69,19 @@ func TestReturnConditionFalseContinues(t *testing.T) {
 }
 
 func TestReturnSkipsLaterFanoutWithoutExpansion(t *testing.T) {
-	registry := step.NewRegistry()
+	registry := newTestRegistry(t, nil)
 	if err := registry.Register("capture_return", func(map[string]any) (step.Runner, error) { return countingRunner{}, nil }); err != nil {
 		t.Fatal(err)
 	}
-	definition := &workflow.Definition{Version: 1, Name: "skip-fanout", Dir: t.TempDir(), Steps: []workflow.Step{
-		{Return: &workflow.ReturnControl{Outputs: map[string]string{}}},
-		{ID: "later", Foreach: &workflow.ForeachGroup{
+	definition := testDefinition(t, "skip-fanout",
+		workflow.Step{Return: &workflow.ReturnControl{Outputs: map[string]string{}}},
+		workflow.Step{ID: "later", Foreach: &workflow.ForeachGroup{
 			Items: "vars.missing", MaxConcurrency: 1, MaxIterations: 10, FailFast: true,
 			Steps: []workflow.Step{{ID: "child", Type: "capture_return", With: map[string]any{}}},
 		}},
-	}}
-	state, err := New(registry).Run(t.Context(), definition, Options{Stdout: io.Discard, Stderr: io.Discard})
+	)
+
+	state, err := New(registry).Run(t.Context(), definition, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +91,7 @@ func TestReturnSkipsLaterFanoutWithoutExpansion(t *testing.T) {
 }
 
 func TestReturnPropagatesThroughSequentialBlocksAndRunsFinally(t *testing.T) {
-	registry := step.NewRegistry()
+	registry := newTestRegistry(t, nil)
 	cleanupRan := false
 	if err := registry.Register("return_cleanup", func(map[string]any) (step.Runner, error) {
 		return runnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
@@ -128,10 +125,11 @@ func TestReturnPropagatesThroughSequentialBlocksAndRunsFinally(t *testing.T) {
 }
 
 func TestReturnExpressionFailureFailsWorkflowAtomically(t *testing.T) {
-	definition := &workflow.Definition{Version: 1, Name: "broken", Dir: t.TempDir(), Steps: []workflow.Step{{
+	definition := testDefinition(t, "broken", workflow.Step{
 		Return: &workflow.ReturnControl{Outputs: map[string]string{"good": "true", "missing": "steps.unknown.value"}},
-	}}}
-	state, err := New(step.NewRegistry()).Run(t.Context(), definition, Options{Stdout: io.Discard, Stderr: io.Discard})
+	})
+
+	state, err := New(newTestRegistry(t, nil)).Run(t.Context(), definition, Options{})
 	if err == nil || !strings.Contains(err.Error(), `return output "missing"`) {
 		t.Fatalf("state = %#v, error = %v", state, err)
 	}
@@ -140,39 +138,38 @@ func TestReturnExpressionFailureFailsWorkflowAtomically(t *testing.T) {
 func TestCanceledContextPreventsReturn(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	definition := &workflow.Definition{Version: 1, Name: "canceled-return", Dir: t.TempDir(), Steps: []workflow.Step{{
+	definition := testDefinition(t, "canceled-return", workflow.Step{
 		Return: &workflow.ReturnControl{Outputs: map[string]string{"result": `"done"`}},
-	}}}
-	_, err := New(step.NewRegistry()).Run(ctx, definition, Options{Stdout: io.Discard, Stderr: io.Discard})
+	})
+
+	_, err := New(newTestRegistry(t, nil)).Run(ctx, definition, Options{})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("error = %v", err)
 	}
 }
 
 func TestCompositeActionReturnSuppliesDeclaredOutputsWithoutRetry(t *testing.T) {
-	registry := step.NewRegistry()
+	registry := newTestRegistry(t, nil)
 	var runs int
 	if err := registry.Register("capture_return", func(raw map[string]any) (step.Runner, error) {
 		return countingRunner{value: raw["value"], runs: &runs}, nil
 	}); err != nil {
 		t.Fatal(err)
 	}
-	action := &workflow.Action{
-		Version: 1, Name: "returning-action", Dir: t.TempDir(),
-		Inputs: map[string]workflow.ActionInput{"result": {Type: "string", Required: true}},
-		Outputs: map[string]workflow.ActionOutput{
-			"result": {Value: `"fallback"`}, "cached": {Value: "false"},
-		},
-		Steps: []workflow.Step{
-			{Return: &workflow.ReturnControl{Outputs: map[string]string{"result": "inputs.result", "cached": "true"}}},
-			{ID: "after", Type: "capture_return", With: map[string]any{"value": "not-run"}},
-		},
+	action := testAction(t, "returning-action",
+		workflow.Step{Return: &workflow.ReturnControl{Outputs: map[string]string{"result": "inputs.result", "cached": "true"}}},
+		workflow.Step{ID: "after", Type: "capture_return", With: map[string]any{"value": "not-run"}},
+	)
+	action.Inputs = map[string]workflow.ActionInput{"result": {Type: "string", Required: true}}
+	action.Outputs = map[string]workflow.ActionOutput{
+		"result": {Value: `"fallback"`}, "cached": {Value: "false"},
 	}
-	definition := &workflow.Definition{Version: 1, Name: "caller", Dir: t.TempDir(), Steps: []workflow.Step{{
+	definition := testDefinition(t, "caller", workflow.Step{
 		ID: "call", Uses: workflow.ActionSource{URL: "https://example.test/action"}, Action: action,
 		With: map[string]any{"result": "returned"}, Retry: immediateRetry(3),
-	}}}
-	state, err := New(registry).Run(t.Context(), definition, Options{Stdout: io.Discard, Stderr: io.Discard})
+	})
+
+	state, err := New(registry).Run(t.Context(), definition, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,8 +193,8 @@ func TestValidateRejectsReturnInProgrammaticParallelControls(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			definition := &workflow.Definition{Version: 1, Name: "invalid", Dir: t.TempDir(), Steps: []workflow.Step{test.step}}
-			err := New(step.NewRegistry()).Validate(t.Context(), definition, Options{})
+			definition := testDefinition(t, "invalid", test.step)
+			err := New(newTestRegistry(t, nil)).Validate(t.Context(), definition, Options{})
 			if err == nil || !strings.Contains(err.Error(), "return is not supported") {
 				t.Fatalf("error = %v", err)
 			}
@@ -206,32 +203,31 @@ func TestValidateRejectsReturnInProgrammaticParallelControls(t *testing.T) {
 }
 
 func TestReturnDoesNotMaskFinallyFailure(t *testing.T) {
-	registry := step.NewRegistry()
+	registry := newTestRegistry(t, nil)
 	cleanupErr := errors.New("cleanup failed")
 	if err := registry.Register("return_cleanup_fail", func(map[string]any) (step.Runner, error) {
 		return runnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, cleanupErr }), nil
 	}); err != nil {
 		t.Fatal(err)
 	}
-	definition := &workflow.Definition{Version: 1, Name: "cleanup-failure", Dir: t.TempDir(),
-		Steps:   []workflow.Step{{Return: &workflow.ReturnControl{Outputs: map[string]string{"result": `"done"`}}}},
-		Finally: []workflow.Step{{ID: "cleanup", Type: "return_cleanup_fail", With: map[string]any{}}},
-	}
-	_, err := New(registry).Run(t.Context(), definition, Options{Stdout: io.Discard, Stderr: io.Discard})
+	definition := testDefinition(t, "cleanup-failure", workflow.Step{Return: &workflow.ReturnControl{Outputs: map[string]string{"result": `"done"`}}})
+	definition.Finally = []workflow.Step{{ID: "cleanup", Type: "return_cleanup_fail"}}
+	_, err := New(registry).Run(t.Context(), definition, Options{})
 	if !errors.Is(err, cleanupErr) {
 		t.Fatalf("error = %v", err)
 	}
 }
 
 func TestDryRunDisplaysReturnControl(t *testing.T) {
-	registry := step.NewRegistry()
+	registry := newTestRegistry(t, nil)
 	if err := registry.Register("capture_return", func(map[string]any) (step.Runner, error) { return countingRunner{}, nil }); err != nil {
 		t.Fatal(err)
 	}
-	definition := &workflow.Definition{Version: 1, Name: "dry-return", Dir: t.TempDir(), Steps: []workflow.Step{
-		{Return: &workflow.ReturnControl{Outputs: map[string]string{"cached": "true", "artifact": "steps.build.path"}}, If: "vars.cached"},
-		{ID: "build", Type: "capture_return", With: map[string]any{}},
-	}}
+	definition := testDefinition(t, "dry-return",
+		workflow.Step{Return: &workflow.ReturnControl{Outputs: map[string]string{"cached": "true", "artifact": "steps.build.path"}}, If: "vars.cached"},
+		workflow.Step{ID: "build", Type: "capture_return"},
+	)
+
 	var output bytes.Buffer
 	if _, err := New(registry).Run(t.Context(), definition, Options{DryRun: true, Stdout: &output, Stderr: io.Discard}); err != nil {
 		t.Fatal(err)

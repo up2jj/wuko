@@ -73,15 +73,16 @@ func TestHTTPRetriesAndCommitsSuccessfulResponse(t *testing.T) {
 	}))
 	defer server.Close()
 
-	definition := &workflow.Definition{Version: 1, Name: "retry", Dir: t.TempDir(), Steps: []workflow.Step{{
+	definition := testDefinition(t, "retry", workflow.Step{
 		ID: "request", Type: "http", With: map[string]any{"url": server.URL},
 		Retry: &workflow.RetryPolicy{MaxAttempts: 2, BackoffMultiplier: 1},
-	}}}
-	registry := step.NewRegistry()
+	})
+
+	registry := newTestRegistry(t, nil)
 	if err := httpstep.Register(registry); err != nil {
 		t.Fatal(err)
 	}
-	state, err := engine.New(registry).Run(t.Context(), definition, engine.Options{Stdout: io.Discard, Stderr: io.Discard})
+	state, err := engine.New(registry).Run(t.Context(), definition, engine.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,14 +117,15 @@ func TestHTTPRetryRevalidatesPreviousResponse(t *testing.T) {
 	defer server.Close()
 
 	policy := &workflow.RetryPolicy{MaxAttempts: 2, BackoffMultiplier: 1}
-	definition := &workflow.Definition{Version: 1, Name: "revalidate", Dir: t.TempDir(), Steps: []workflow.Step{{
+	definition := testDefinition(t, "revalidate", workflow.Step{
 		ID: "request", Type: "http", With: map[string]any{"url": server.URL}, Retry: policy,
-	}}}
-	registry := step.NewRegistry()
+	})
+
+	registry := newTestRegistry(t, nil)
 	if err := httpstep.Register(registry); err != nil {
 		t.Fatal(err)
 	}
-	state, err := engine.New(registry).Run(t.Context(), definition, engine.Options{Stdout: io.Discard, Stderr: io.Discard})
+	state, err := engine.New(registry).Run(t.Context(), definition, engine.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +141,7 @@ func TestHTTPRetryRevalidatesPreviousResponse(t *testing.T) {
 
 func portableRegistry(t *testing.T) *step.Registry {
 	t.Helper()
-	registry := step.NewRegistry()
+	registry := newTestRegistry(t, nil)
 	for _, register := range []func(*step.Registry) error{
 		confirm.Register, httpstep.Register, setstep.Register, filestep.Register,
 	} {

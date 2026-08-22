@@ -5,21 +5,17 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/engine"
-	"github.com/up2jj/wuko/step"
 	semverstep "github.com/up2jj/wuko/steps/semver"
 	"github.com/up2jj/wuko/workflow"
 )
 
 func TestSemVerTemplatesAndCommitsTypedResults(t *testing.T) {
-	definition := &workflow.Definition{
-		Version: 1, Name: "release", Dir: t.TempDir(),
-		Vars: map[string]any{"version": "v1.4.2", "operation": "constrain", "constraint": "^1.4"},
-		Steps: []workflow.Step{{ID: "supported", Type: "semver", With: map[string]any{
-			"operation": "{{ .vars.operation }}", "version": "{{ .vars.version }}",
-			"constraint": "{{ .vars.constraint }}", "variable": "is_supported",
-		}}},
-	}
-	registry := step.NewRegistry()
+	definition := testDefinition(t, "release", workflow.Step{ID: "supported", Type: "semver", With: map[string]any{
+		"operation": "{{ .vars.operation }}", "version": "{{ .vars.version }}",
+		"constraint": "{{ .vars.constraint }}", "variable": "is_supported",
+	}})
+	definition.Vars = map[string]any{"version": "v1.4.2", "operation": "constrain", "constraint": "^1.4"}
+	registry := newTestRegistry(t, nil)
 	if err := semverstep.Register(registry); err != nil {
 		t.Fatal(err)
 	}
