@@ -285,6 +285,31 @@ steps:
 	}
 }
 
+func TestRootCommandRegistersRequireToolStep(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "require-tool.yaml")
+	data := `version: 1
+name: require-tool
+steps:
+  - id: shell
+    type: require_tool
+    with:
+      tool: sh
+      version_args: [-c, "exit 0"]
+`
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	command := NewRootCmd()
+	command.SetIn(bytes.NewReader(nil))
+	command.SetOut(io.Discard)
+	command.SetErr(io.Discard)
+	command.SetArgs([]string{"run", "--file", path})
+	if err := command.ExecuteContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRootCommandRegistersGlobStep(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n"), 0o644); err != nil {

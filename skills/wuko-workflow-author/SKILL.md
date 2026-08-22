@@ -43,6 +43,9 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
 - Use `semver` for strict semantic-version parsing, precedence comparison, constraint checks, and
   major/minor/patch increments. Read the operation's primary typed result from `value`; remember
   that build metadata does not affect comparison and ordinary constraints exclude prereleases.
+- Use `require_tool` before external commands that need an executable or supported tool version.
+  Configure nonstandard version flags with `version_args`, and consume its `path` or checked
+  `version` output only after the guard succeeds.
 - Use `http` for structured API calls with typed JSON responses, status validation, retries, and
   timeouts. Keep authorization values in environment-backed headers.
 - Use `wait` with `duration` for a fixed delay, or embed a `type`/`with` step and an Expr `until`

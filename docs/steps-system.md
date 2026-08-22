@@ -5,6 +5,28 @@
 System steps provide portable filesystem, network, cache, temporary-resource, and container
 operations. Relative runtime paths normally resolve from the directory where Wuko was invoked.
 
+## `require_tool`
+
+Require an executable before dependent work begins. The step runs the configured version command
+in the current execution environment, including inside an executor block.
+
+```yaml
+- id: require_go
+  type: require_tool
+  with:
+    tool: go
+    version_args: [version]
+    constraint: ">= 1.25.0"
+```
+
+`tool` is required. `version_args` defaults to `[--version]`; set it to `[]` for tools whose
+availability probe takes no arguments. Without `constraint`, a successful invocation is enough.
+With a constraint, Wuko extracts the first complete semantic version from stdout, then stderr,
+and validates it with the same constraint syntax as the `semver` step. A lowercase `v` prefix is
+accepted. Outputs include `path`, plus normalized `version` when a constraint was checked. On the
+local host, `path` is resolved through `PATH`; inside an executor it is the configured tool name or
+path.
+
 ## `file`
 
 Perform strict, shell-independent filesystem operations.

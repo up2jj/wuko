@@ -10,6 +10,7 @@ import (
 	"github.com/up2jj/wuko/executor"
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/step"
+	requiretoolstep "github.com/up2jj/wuko/steps/require_tool"
 	"github.com/up2jj/wuko/steps/shell"
 	"github.com/up2jj/wuko/workflow"
 )
@@ -47,6 +48,9 @@ func executorTestEngine(t *testing.T, session *recordingExecutor) *Engine {
 	if err := shell.Register(steps); err != nil {
 		t.Fatal(err)
 	}
+	if err := requiretoolstep.Register(steps); err != nil {
+		t.Fatal(err)
+	}
 	executors := executor.NewRegistry()
 	if err := executors.Register("recording", func(map[string]any) (executor.Provider, error) {
 		return recordingProvider{session: session}, nil
@@ -54,6 +58,28 @@ func executorTestEngine(t *testing.T, session *recordingExecutor) *Engine {
 		t.Fatal(err)
 	}
 	return New(steps, WithExecutors(executors))
+}
+
+func TestExecutorScopeSupportsRequireTool(t *testing.T) {
+	scoped := &recordingExecutor{}
+	definition := testDefinition(t, "tools", workflow.Step{
+		Executor: &workflow.ExecutorScope{Type: "recording", With: map[string]any{}},
+		Steps: []workflow.Step{{ID: "tool", Type: "require_tool", With: map[string]any{
+			"tool": "go", "version_args": []any{"version"},
+		}}},
+	})
+	state, err := executorTestEngine(t, scoped).Run(t.Context(), definition, Options{
+		RunDir: t.TempDir(), Stdout: io.Discard, Stderr: io.Discard,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(scoped.commands, ","); got != "go version" {
+		t.Fatalf("scoped commands = %q", got)
+	}
+	if state.Steps["tool"].(map[string]any)["path"] != "go" {
+		t.Fatalf("steps = %#v", state.Steps)
+	}
 }
 
 func TestExecutorScopeRestoresParentAndSharesOutputs(t *testing.T) {

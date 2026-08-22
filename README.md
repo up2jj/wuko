@@ -202,6 +202,7 @@ Each linked guide contains multiple examples for every step.
 | `semver` | Parse, compare, constrain, or increment versions | [Data steps](docs/steps-data.md#semver) |
 | `key_value` | Persist JSON-compatible values between runs | [Data steps](docs/steps-data.md#key_value) |
 | `changed` | Detect changed files or structured inputs | [Data steps](docs/steps-data.md#changed) |
+| `require_tool` | Require an executable and optionally validate its version | [System steps](docs/steps-system.md#require_tool) |
 | `file` | Perform shell-independent filesystem operations | [System steps](docs/steps-system.md#file) |
 | `glob` | Discover regular files with portable patterns | [System steps](docs/steps-system.md#glob) |
 | `temp` | Create automatically cleaned files/directories | [System steps](docs/steps-system.md#temp) |

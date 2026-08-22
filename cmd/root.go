@@ -38,6 +38,7 @@ import (
 	luastep "github.com/up2jj/wuko/steps/lua"
 	passwordstep "github.com/up2jj/wuko/steps/password"
 	pathstep "github.com/up2jj/wuko/steps/path"
+	requiretoolstep "github.com/up2jj/wuko/steps/require_tool"
 	"github.com/up2jj/wuko/steps/review"
 	semverstep "github.com/up2jj/wuko/steps/semver"
 	setstep "github.com/up2jj/wuko/steps/set"
@@ -145,7 +146,7 @@ func NewRootCmd() *cobra.Command {
 	executors := executor.NewRegistry()
 	for _, register := range []func(*step.Registry) error{
 		inputstep.Register, passwordstep.Register, choice.Register, pathstep.Register, review.Register,
-		confirm.Register, assertstep.Register, setstep.Register, importvarsstep.Register, jsonpathstep.Register, extractstep.Register, semverstep.Register, httpstep.Register, filestep.Register, tempstep.Register, globstep.Register, cachestep.Register, changedstep.Register,
+		confirm.Register, assertstep.Register, setstep.Register, importvarsstep.Register, jsonpathstep.Register, extractstep.Register, semverstep.Register, httpstep.Register, filestep.Register, tempstep.Register, globstep.Register, cachestep.Register, changedstep.Register, requiretoolstep.Register,
 		dockerstep.Register, keyvaluestep.Register, luastep.Register, shell.Register, agentstep.Register,
 	} {
 		if err := register(registry); err != nil {
