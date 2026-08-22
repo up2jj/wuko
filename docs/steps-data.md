@@ -111,6 +111,23 @@ Require exactly one version:
 `from` is a dotted path rooted at `vars` or `steps`. `all` returns an ordered list and permits no
 matches; `one` requires exactly one match. Results also include `count` and normalized `paths`.
 
+## `extract`
+
+Extract named, typed fields from exactly one line of text with a friendly format:
+
+```yaml
+- id: release
+  type: extract
+  with:
+    from: steps.build.stdout
+    format: 'Release {version:string} build {build:integer}'
+    variables: {version: release_version}
+```
+
+Raw named Go regular-expression captures are available for substring and multiline matching. See
+[Text extraction](extract.md) for the complete syntax, capture types, examples, failure behavior,
+and RE2 limitations.
+
 ## `semver`
 
 Parse, compare, constrain, or increment semantic versions. A lowercase `v` prefix is accepted and

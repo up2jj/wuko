@@ -197,6 +197,7 @@ Each linked guide contains multiple examples for every step.
 | `assert` | Stop unless an expression is true | [Data steps](docs/steps-data.md#assert) |
 | `import_vars` | Load JSON or TOML into workflow state | [Data steps](docs/steps-data.md#import_vars) |
 | `jsonpath` | Select values with RFC 9535 JSONPath | [Data steps](docs/steps-data.md#jsonpath) |
+| `extract` | Extract typed fields from text | [Text extraction](docs/extract.md) |
 | `semver` | Parse, compare, constrain, or increment versions | [Data steps](docs/steps-data.md#semver) |
 | `key_value` | Persist JSON-compatible values between runs | [Data steps](docs/steps-data.md#key_value) |
 | `changed` | Detect changed files or structured inputs | [Data steps](docs/steps-data.md#changed) |
