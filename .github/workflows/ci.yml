@@ -19,7 +19,8 @@ jobs:
         run: go build -o "$RUNNER_TEMP/wuko" .
       - name: run CI reporter smoke workflow
         id: wuko_smoke
-        run: "$RUNNER_TEMP/wuko" run --file .github/fixtures/ci-smoke.yaml --once --reporter plain --reporter github
+        run: |
+          "$RUNNER_TEMP/wuko" run --file .github/fixtures/ci-smoke.yaml --once --reporter plain --reporter github
       - name: verify CI reporter outputs
         env:
           RESULT: ${{ steps.wuko_smoke.outputs.result }}
