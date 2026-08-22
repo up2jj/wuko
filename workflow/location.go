@@ -115,27 +115,8 @@ func remapDefinitionLocations(definition *Definition, materializedRoot, logicalS
 func remapStepLocations(steps []Step, materializedRoot, logicalSource string) {
 	for i := range steps {
 		steps[i].Location.Source = remapSource(steps[i].Location.Source, materializedRoot, logicalSource)
-		if steps[i].IsExecutorBlock() {
-			remapStepLocations(steps[i].Steps, materializedRoot, logicalSource)
-			remapStepLocations(steps[i].Finally, materializedRoot, logicalSource)
-		}
-		if steps[i].IsWorkingDirectoryBlock() {
-			remapStepLocations(steps[i].Steps, materializedRoot, logicalSource)
-		}
-		if steps[i].IsConditionalBlock() {
-			remapStepLocations(steps[i].Steps, materializedRoot, logicalSource)
-		}
-		if steps[i].Concurrent != nil {
-			remapStepLocations(steps[i].Concurrent.Steps, materializedRoot, logicalSource)
-		}
-		if steps[i].Batch != nil {
-			remapStepLocations(steps[i].Batch.Steps, materializedRoot, logicalSource)
-		}
-		if steps[i].Foreach != nil {
-			remapStepLocations(steps[i].Foreach.Steps, materializedRoot, logicalSource)
-		}
-		if steps[i].Matrix != nil {
-			remapStepLocations(steps[i].Matrix.Steps, materializedRoot, logicalSource)
+		for _, child := range steps[i].ChildSequences() {
+			remapStepLocations(child.Steps, materializedRoot, logicalSource)
 		}
 	}
 }
@@ -187,39 +168,17 @@ func validationLocation(definition *Definition, err error) diagnostic.Location {
 func flattenSteps(steps []Step) []Step {
 	var flattened []Step
 	for _, workflowStep := range steps {
-		if workflowStep.IsExecutorBlock() {
-			flattened = append(flattened, flattenSteps(workflowStep.Steps)...)
-			flattened = append(flattened, flattenSteps(workflowStep.Finally)...)
-			continue
-		}
-		if workflowStep.IsWorkingDirectoryBlock() {
-			flattened = append(flattened, flattenSteps(workflowStep.Steps)...)
-			continue
-		}
-		if workflowStep.IsConditionalBlock() {
-			flattened = append(flattened, flattenSteps(workflowStep.Steps)...)
-			continue
-		}
-		if workflowStep.Concurrent != nil {
-			flattened = append(flattened, flattenSteps(workflowStep.Concurrent.Steps)...)
-			continue
-		}
-		if workflowStep.Batch != nil {
+		children := workflowStep.ChildSequences()
+		if len(children) == 0 {
 			flattened = append(flattened, workflowStep)
-			flattened = append(flattened, flattenSteps(workflowStep.Batch.Steps)...)
 			continue
 		}
-		if workflowStep.Foreach != nil {
+		if workflowStep.Batch != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil {
 			flattened = append(flattened, workflowStep)
-			flattened = append(flattened, flattenSteps(workflowStep.Foreach.Steps)...)
-			continue
 		}
-		if workflowStep.Matrix != nil {
-			flattened = append(flattened, workflowStep)
-			flattened = append(flattened, flattenSteps(workflowStep.Matrix.Steps)...)
-			continue
+		for _, child := range children {
+			flattened = append(flattened, flattenSteps(child.Steps)...)
 		}
-		flattened = append(flattened, workflowStep)
 	}
 	return flattened
 }

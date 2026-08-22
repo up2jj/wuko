@@ -548,30 +548,18 @@ func validateStepScope(steps []Step, allowActions bool, scope stepScope, inherit
 
 func collectScopeIDs(steps []Step, seen map[string]struct{}) error {
 	for i, workflowStep := range steps {
-		if workflowStep.IsExecutorBlock() {
-			if err := collectScopeIDs(workflowStep.Steps, seen); err != nil {
-				return fmt.Errorf("step %d executor: %w", i+1, err)
-			}
-			if err := collectScopeIDs(workflowStep.Finally, seen); err != nil {
-				return fmt.Errorf("step %d executor finally: %w", i+1, err)
-			}
-			continue
-		}
-		if workflowStep.IsWorkingDirectoryBlock() {
-			if err := collectScopeIDs(workflowStep.Steps, seen); err != nil {
-				return fmt.Errorf("step %d: %w", i+1, err)
-			}
-			continue
-		}
-		if workflowStep.IsConditionalBlock() {
-			if err := collectScopeIDs(workflowStep.Steps, seen); err != nil {
-				return fmt.Errorf("step %d: %w", i+1, err)
-			}
-			continue
-		}
-		if workflowStep.Concurrent != nil {
-			if err := collectScopeIDs(workflowStep.Concurrent.Steps, seen); err != nil {
-				return fmt.Errorf("step %d: %w", i+1, err)
+		if workflowStep.IsExecutorBlock() || workflowStep.IsWorkingDirectoryBlock() || workflowStep.IsConditionalBlock() || workflowStep.Concurrent != nil {
+			for _, child := range workflowStep.ChildSequences() {
+				if err := collectScopeIDs(child.Steps, seen); err != nil {
+					context := fmt.Sprintf("step %d", i+1)
+					if workflowStep.IsExecutorBlock() {
+						context += " executor"
+						if child.Role == ChildFinally {
+							context += " finally"
+						}
+					}
+					return fmt.Errorf("%s: %w", context, err)
+				}
 			}
 			continue
 		}

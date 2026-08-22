@@ -38,71 +38,17 @@ func expandRequiredSteps(steps []Step, source string, stack []string) ([]Step, e
 func expandRequiredStepsInSource(steps []Step, source string, stack []string) ([]Step, error) {
 	expanded := make([]Step, 0, len(steps))
 	for i, workflowStep := range steps {
-		if workflowStep.IsExecutorBlock() {
-			children, err := expandRequiredStepsInSource(workflowStep.Steps, source, stack)
+		if len(workflowStep.childSequenceRefs()) > 0 {
+			err := workflowStep.transformChildSequences(func(role ChildRole, children []Step) ([]Step, error) {
+				expandedChildren, err := expandRequiredStepsInSource(children, source, stack)
+				if err != nil {
+					return nil, fmt.Errorf("%s at step %d in %s: %w", requiredChildContext(workflowStep, role), i+1, source, err)
+				}
+				return expandedChildren, nil
+			})
 			if err != nil {
-				return nil, fmt.Errorf("executor block at step %d in %s: %w", i+1, source, err)
+				return nil, err
 			}
-			cleanup, err := expandRequiredStepsInSource(workflowStep.Finally, source, stack)
-			if err != nil {
-				return nil, fmt.Errorf("executor block finally at step %d in %s: %w", i+1, source, err)
-			}
-			workflowStep.Steps = children
-			workflowStep.Finally = cleanup
-			expanded = append(expanded, workflowStep)
-			continue
-		}
-		if workflowStep.IsWorkingDirectoryBlock() {
-			children, err := expandRequiredStepsInSource(workflowStep.Steps, source, stack)
-			if err != nil {
-				return nil, fmt.Errorf("working_directory block at step %d in %s: %w", i+1, source, err)
-			}
-			workflowStep.Steps = children
-			expanded = append(expanded, workflowStep)
-			continue
-		}
-		if workflowStep.IsConditionalBlock() {
-			children, err := expandRequiredStepsInSource(workflowStep.Steps, source, stack)
-			if err != nil {
-				return nil, fmt.Errorf("conditional block at step %d in %s: %w", i+1, source, err)
-			}
-			workflowStep.Steps = children
-			expanded = append(expanded, workflowStep)
-			continue
-		}
-		if workflowStep.Concurrent != nil {
-			children, err := expandRequiredStepsInSource(workflowStep.Concurrent.Steps, source, stack)
-			if err != nil {
-				return nil, fmt.Errorf("concurrent group at step %d in %s: %w", i+1, source, err)
-			}
-			workflowStep.Concurrent.Steps = children
-			expanded = append(expanded, workflowStep)
-			continue
-		}
-		if workflowStep.Batch != nil {
-			children, err := expandRequiredStepsInSource(workflowStep.Batch.Steps, source, stack)
-			if err != nil {
-				return nil, fmt.Errorf("batch group at step %d in %s: %w", i+1, source, err)
-			}
-			workflowStep.Batch.Steps = children
-			expanded = append(expanded, workflowStep)
-			continue
-		}
-		if workflowStep.Foreach != nil {
-			children, err := expandRequiredStepsInSource(workflowStep.Foreach.Steps, source, stack)
-			if err != nil {
-				return nil, fmt.Errorf("foreach group at step %d in %s: %w", i+1, source, err)
-			}
-			workflowStep.Foreach.Steps = children
-			expanded = append(expanded, workflowStep)
-			continue
-		}
-		if workflowStep.Matrix != nil {
-			children, err := expandRequiredStepsInSource(workflowStep.Matrix.Steps, source, stack)
-			if err != nil {
-				return nil, fmt.Errorf("matrix group at step %d in %s: %w", i+1, source, err)
-			}
-			workflowStep.Matrix.Steps = children
 			expanded = append(expanded, workflowStep)
 			continue
 		}
@@ -133,6 +79,29 @@ func expandRequiredStepsInSource(steps []Step, source string, stack []string) ([
 		expanded = append(expanded, required...)
 	}
 	return expanded, nil
+}
+
+func requiredChildContext(workflowStep Step, role ChildRole) string {
+	switch {
+	case workflowStep.IsExecutorBlock() && role == ChildFinally:
+		return "executor block finally"
+	case workflowStep.IsExecutorBlock():
+		return "executor block"
+	case workflowStep.IsWorkingDirectoryBlock():
+		return "working_directory block"
+	case workflowStep.IsConditionalBlock():
+		return "conditional block"
+	case workflowStep.Concurrent != nil:
+		return "concurrent group"
+	case workflowStep.Batch != nil:
+		return "batch group"
+	case workflowStep.Foreach != nil:
+		return "foreach group"
+	case workflowStep.Matrix != nil:
+		return "matrix group"
+	default:
+		panic("step has no child sequence")
+	}
 }
 
 func validateRequireEntry(workflowStep Step) error {

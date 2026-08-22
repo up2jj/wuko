@@ -518,26 +518,11 @@ func evaluateConditionalBlock(definition *workflow.Definition, workflowStep work
 func recordSkippedSteps(definition *workflow.Definition, steps []workflow.Step, options Options, stats *RunStats, firstIndex, total int) {
 	index := firstIndex
 	for _, workflowStep := range steps {
-		if workflowStep.IsExecutorBlock() {
-			recordSkippedSteps(definition, workflowStep.Steps, options, stats, index, total)
-			index += leafStepCount(workflowStep.Steps)
-			recordSkippedSteps(definition, workflowStep.Finally, options, stats, index, total)
-			index += leafStepCount(workflowStep.Finally)
-			continue
-		}
-		if workflowStep.IsWorkingDirectoryBlock() {
-			recordSkippedSteps(definition, workflowStep.Steps, options, stats, index, total)
-			index += leafStepCount(workflowStep.Steps)
-			continue
-		}
-		if workflowStep.IsConditionalBlock() {
-			recordSkippedSteps(definition, workflowStep.Steps, options, stats, index, total)
-			index += leafStepCount(workflowStep.Steps)
-			continue
-		}
-		if workflowStep.Concurrent != nil {
-			recordSkippedSteps(definition, workflowStep.Concurrent.Steps, options, stats, index, total)
-			index += leafStepCount(workflowStep.Concurrent.Steps)
+		if children, transparent := transparentChildSequences(workflowStep); transparent {
+			for _, child := range children {
+				recordSkippedSteps(definition, child.Steps, options, stats, index, total)
+				index += leafStepCount(child.Steps)
+			}
 			continue
 		}
 		if workflowStep.Return != nil {
@@ -729,20 +714,10 @@ func commitStepResult(state *State, stepID string, result step.Result) {
 func leafStepCount(steps []workflow.Step) int {
 	total := 0
 	for _, workflowStep := range steps {
-		if workflowStep.IsExecutorBlock() {
-			total += leafStepCount(workflowStep.Steps) + leafStepCount(workflowStep.Finally)
-			continue
-		}
-		if workflowStep.IsWorkingDirectoryBlock() {
-			total += leafStepCount(workflowStep.Steps)
-			continue
-		}
-		if workflowStep.IsConditionalBlock() {
-			total += leafStepCount(workflowStep.Steps)
-			continue
-		}
-		if workflowStep.Concurrent != nil {
-			total += leafStepCount(workflowStep.Concurrent.Steps)
+		if children, transparent := transparentChildSequences(workflowStep); transparent {
+			for _, child := range children {
+				total += leafStepCount(child.Steps)
+			}
 			continue
 		}
 		if workflowStep.Return != nil {
@@ -755,6 +730,13 @@ func leafStepCount(steps []workflow.Step) int {
 		total++
 	}
 	return total
+}
+
+func transparentChildSequences(workflowStep workflow.Step) ([]workflow.ChildSequence, bool) {
+	if workflowStep.IsExecutorBlock() || workflowStep.IsWorkingDirectoryBlock() || workflowStep.IsConditionalBlock() || workflowStep.Concurrent != nil {
+		return workflowStep.ChildSequences(), true
+	}
+	return nil, false
 }
 
 func rollupNestedMetrics(stats *RunStats, nested RunStats) {

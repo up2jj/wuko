@@ -203,49 +203,18 @@ func (loader *Loader) Load(ctx context.Context, filename string, options LoadOpt
 func (loader *Loader) resolveActions(ctx context.Context, workflowName string, steps []Step, renderer *Renderer, data map[string]any, environment map[string]string, runDir string, runDirKnown bool, definitionDir string, cache map[string]*Action, reporter diagnostic.Reporter) error {
 	for i := range steps {
 		workflowStep := &steps[i]
-		if workflowStep.IsExecutorBlock() {
-			if err := loader.resolveActions(ctx, workflowName, workflowStep.Steps, renderer, data, environment, runDir, runDirKnown, definitionDir, cache, reporter); err != nil {
-				return err
-			}
-			if err := loader.resolveActions(ctx, workflowName, workflowStep.Finally, renderer, data, environment, runDir, runDirKnown, definitionDir, cache, reporter); err != nil {
-				return err
-			}
-			continue
-		}
-		if workflowStep.IsWorkingDirectoryBlock() {
+		if !workflowStep.IsExecutorBlock() && workflowStep.IsWorkingDirectoryBlock() {
 			childData, childRunDir, childRunDirKnown := actionWorkingDirectoryScope(renderer, data, runDir, runDirKnown, workflowStep.WorkingDirectory)
 			if err := loader.resolveActions(ctx, workflowName, workflowStep.Steps, renderer, childData, environment, childRunDir, childRunDirKnown, definitionDir, cache, reporter); err != nil {
 				return err
 			}
 			continue
 		}
-		if workflowStep.IsConditionalBlock() {
-			if err := loader.resolveActions(ctx, workflowName, workflowStep.Steps, renderer, data, environment, runDir, runDirKnown, definitionDir, cache, reporter); err != nil {
-				return err
-			}
-			continue
-		}
-		if workflowStep.Concurrent != nil {
-			if err := loader.resolveActions(ctx, workflowName, workflowStep.Concurrent.Steps, renderer, data, environment, runDir, runDirKnown, definitionDir, cache, reporter); err != nil {
-				return err
-			}
-			continue
-		}
-		if workflowStep.Batch != nil {
-			if err := loader.resolveActions(ctx, workflowName, workflowStep.Batch.Steps, renderer, data, environment, runDir, runDirKnown, definitionDir, cache, reporter); err != nil {
-				return err
-			}
-			continue
-		}
-		if workflowStep.Foreach != nil {
-			if err := loader.resolveActions(ctx, workflowName, workflowStep.Foreach.Steps, renderer, data, environment, runDir, runDirKnown, definitionDir, cache, reporter); err != nil {
-				return err
-			}
-			continue
-		}
-		if workflowStep.Matrix != nil {
-			if err := loader.resolveActions(ctx, workflowName, workflowStep.Matrix.Steps, renderer, data, environment, runDir, runDirKnown, definitionDir, cache, reporter); err != nil {
-				return err
+		if children := workflowStep.ChildSequences(); len(children) > 0 {
+			for _, child := range children {
+				if err := loader.resolveActions(ctx, workflowName, child.Steps, renderer, data, environment, runDir, runDirKnown, definitionDir, cache, reporter); err != nil {
+					return err
+				}
 			}
 			continue
 		}
@@ -568,15 +537,14 @@ func (action *Action) ValidateReturnContracts() error {
 
 func validateActionReturnContracts(steps []Step, outputs map[string]ActionOutput) error {
 	for _, workflowStep := range steps {
-		if workflowStep.IsExecutorBlock() {
-			if err := validateActionReturnContracts(workflowStep.Steps, outputs); err != nil {
-				return err
-			}
-			continue
-		}
-		if workflowStep.IsWorkingDirectoryBlock() || workflowStep.IsConditionalBlock() {
-			if err := validateActionReturnContracts(workflowStep.Steps, outputs); err != nil {
-				return err
+		if workflowStep.IsExecutorBlock() || workflowStep.IsWorkingDirectoryBlock() || workflowStep.IsConditionalBlock() {
+			for _, child := range workflowStep.ChildSequences() {
+				if child.Role == ChildFinally {
+					continue
+				}
+				if err := validateActionReturnContracts(child.Steps, outputs); err != nil {
+					return err
+				}
 			}
 			continue
 		}

@@ -50,6 +50,33 @@ steps:
 	}
 }
 
+func TestLoadReplacesNestedRequiredSequenceWithExpandedSteps(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "workflow.yaml"), `version: 1
+name: nested-expansion
+steps:
+  - id: grouped
+    batch:
+      items: vars.items
+      size: 2
+      steps:
+        - require: fragment.yaml
+`)
+	writeTestFile(t, filepath.Join(dir, "fragment.yaml"), `
+- {id: prepare, type: shell}
+- {id: run, type: shell}
+`)
+
+	definition, err := Load(filepath.Join(dir, "workflow.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	children := definition.Steps[0].Batch.Steps
+	if len(children) != 2 || children[0].ID != "prepare" || children[1].ID != "run" {
+		t.Fatalf("expanded children = %#v", children)
+	}
+}
+
 func TestLoadValidatesExpandedRequiredStepsTogether(t *testing.T) {
 	dir := t.TempDir()
 	writeTestFile(t, filepath.Join(dir, "workflow.yaml"), `version: 1

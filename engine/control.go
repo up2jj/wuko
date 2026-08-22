@@ -405,17 +405,10 @@ func durationValue(duration *workflow.Duration) time.Duration {
 func selectedStepOutputs(state *State, steps []workflow.Step) map[string]any {
 	result := make(map[string]any)
 	for _, workflowStep := range steps {
-		if workflowStep.IsExecutorBlock() {
-			maps.Copy(result, selectedStepOutputs(state, workflowStep.Steps))
-			maps.Copy(result, selectedStepOutputs(state, workflowStep.Finally))
-			continue
-		}
-		if workflowStep.IsWorkingDirectoryBlock() || workflowStep.IsConditionalBlock() {
-			maps.Copy(result, selectedStepOutputs(state, workflowStep.Steps))
-			continue
-		}
-		if workflowStep.Concurrent != nil {
-			maps.Copy(result, selectedStepOutputs(state, workflowStep.Concurrent.Steps))
+		if children, transparent := transparentChildSequences(workflowStep); transparent {
+			for _, child := range children {
+				maps.Copy(result, selectedStepOutputs(state, child.Steps))
+			}
 			continue
 		}
 		if value, exists := state.Steps[workflowStep.ID]; exists {
