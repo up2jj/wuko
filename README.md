@@ -264,12 +264,28 @@ Each linked guide contains multiple examples for every step.
 Choose the composition mechanism by the boundary you need:
 
 - Use `depends_on` when another discovered workflow must run first and publish declared outputs.
+- Set `invokable: false` on a workflow that exists only to serve as a `depends_on` prerequisite.
 - Use `require` to split one workflow across files while keeping the same state and step sequence.
 - Use `uses` for a reusable composite action with explicit inputs, isolated internals, and declared
   outputs.
 
 See [Choosing a composition mechanism](docs/execution.md#choosing-a-composition-mechanism) for a
 side-by-side comparison and examples.
+
+For example, a dependency-only producer remains available to `wuko list`, `wuko validate`, and
+`wuko tree`, but cannot be selected by bare `wuko`, `wuko run`, or `wuko ui`:
+
+```yaml
+version: 1
+name: build-artifacts
+invokable: false
+outputs:
+  artifact: {type: string, value: steps.build.path}
+steps:
+  - id: build
+    type: shell
+    with: {command: ./build.sh}
+```
 
 Split a long workflow at the point where the steps should be inserted:
 

@@ -1037,6 +1037,43 @@ func TestRunCommandFromFile(t *testing.T) {
 	}
 }
 
+func TestRunAndUIRejectDependencyOnlyNamedAndFileWorkflows(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, ".wuko", "workflows")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "build.yaml")
+	data := `version: 1
+name: build
+invokable: false
+steps:
+  - id: action
+    uses:
+      command: wuko-test-must-not-run
+`
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"run", "build"}, {"run", "--file", path},
+		{"ui", "build"}, {"ui", "--file", path},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			command := newRootCmd(dependencies{
+				stdin: bytes.NewReader(nil), stdout: io.Discard, stderr: io.Discard,
+				cwd: func() (string, error) { return root, nil }, homeDir: func() (string, error) { return "", nil },
+				configDir: func() (string, error) { return "", nil }, registry: step.NewRegistry(),
+			})
+			command.SetArgs(args)
+			err := command.ExecuteContext(t.Context())
+			if err == nil || !strings.Contains(err.Error(), `workflow "build" is not directly invokable`) {
+				t.Fatalf("error = %v", err)
+			}
+		})
+	}
+}
+
 func TestRunCommandRejectsMissingOrConflictingWorkflowSelector(t *testing.T) {
 	for _, args := range [][]string{{"run"}, {"run", "name", "--file", "workflow.yaml"}} {
 		command := newRootCmd(dependencies{
@@ -1086,6 +1123,99 @@ steps:
 	}
 	if !strings.Contains(output.String(), "release\tlocal\tPublish a release\t"+filepath.Join(workflowDir, "release.yaml")+"\tdepends on build=build-artifacts, checks") {
 		t.Fatalf("output = %q", output.String())
+	}
+}
+
+func TestDependencyOnlyWorkflowVisibilityAndCompletion(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, ".wuko", "workflows")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeTestWorkflow(t, filepath.Join(dir, "release.yaml"), "Publish release")
+	dependency := "version: 1\nname: build\ndescription: Build artifacts\ninvokable: false\nsteps:\n  - return: {outputs: {}}\n"
+	if err := os.WriteFile(filepath.Join(dir, "build.yaml"), []byte(dependency), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	deps := dependencies{
+		stdin: bytes.NewReader(nil), stdout: io.Discard, stderr: io.Discard,
+		cwd: func() (string, error) { return root, nil }, homeDir: func() (string, error) { return "", nil },
+		configDir: func() (string, error) { return "", nil }, registry: step.NewRegistry(), isInteractive: func(io.Reader) bool { return false },
+	}
+
+	var bare bytes.Buffer
+	deps.stdout = &bare
+	command := newRootCmd(deps)
+	command.SetArgs(nil)
+	if err := command.ExecuteContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(bare.String(), "build\t") || !strings.Contains(bare.String(), "release\t") {
+		t.Fatalf("bare output = %q", bare.String())
+	}
+
+	var listed bytes.Buffer
+	deps.stdout = &listed
+	command = newRootCmd(deps)
+	command.SetArgs([]string{"list"})
+	if err := command.ExecuteContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(listed.String(), "build\tlocal\tBuild artifacts\t"+filepath.Join(dir, "build.yaml")+"\tnot directly invokable") {
+		t.Fatalf("list output = %q", listed.String())
+	}
+
+	for _, check := range []struct {
+		args []string
+		want string
+	}{
+		{args: []string{"validate", "build"}, want: "build: valid"},
+		{args: []string{"tree", "build"}, want: "build\n"},
+	} {
+		var output bytes.Buffer
+		deps.stdout = &output
+		command = newRootCmd(deps)
+		command.SetArgs(check.args)
+		if err := command.ExecuteContext(t.Context()); err != nil {
+			t.Fatalf("%v: %v", check.args, err)
+		}
+		if !strings.Contains(output.String(), check.want) {
+			t.Fatalf("%v output = %q", check.args, output.String())
+		}
+	}
+
+	direct, directive := workflowCompletion(deps, true)(nil, nil, "")
+	if directive == 0 || strings.Contains(strings.Join(direct, "\n"), "build\t") || !strings.Contains(strings.Join(direct, "\n"), "release\t") {
+		t.Fatalf("direct completion = %#v, directive = %v", direct, directive)
+	}
+	inspection, _ := workflowCompletion(deps, false)(nil, nil, "")
+	if !strings.Contains(strings.Join(inspection, "\n"), "build\t") {
+		t.Fatalf("inspection completion = %#v", inspection)
+	}
+}
+
+func TestBareCommandReportsNoDirectlyInvokableWorkflows(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, ".wuko", "workflows")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data := "version: 1\nname: build\ninvokable: false\nsteps:\n  - return: {outputs: {}}\n"
+	if err := os.WriteFile(filepath.Join(dir, "build.yaml"), []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	command := newRootCmd(dependencies{
+		stdin: bytes.NewReader(nil), stdout: &output, stderr: io.Discard,
+		cwd: func() (string, error) { return root, nil }, homeDir: func() (string, error) { return "", nil },
+		configDir: func() (string, error) { return "", nil }, registry: step.NewRegistry(), isInteractive: func(io.Reader) bool { return true },
+	})
+	command.SetArgs(nil)
+	if err := command.ExecuteContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if got := output.String(); got != noInvokableWorkflowsHelp {
+		t.Fatalf("output = %q, want %q", got, noInvokableWorkflowsHelp)
 	}
 }
 

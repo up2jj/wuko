@@ -22,6 +22,7 @@ func TestRunCommandExecutesDependencyChainAndExportsRootOutputs(t *testing.T) {
 	}
 	writeWorkflowData(t, filepath.Join(dir, "build.yaml"), `version: 1
 name: build
+invokable: false
 outputs:
   artifact: {type: string, value: '"fallback"'}
 steps:

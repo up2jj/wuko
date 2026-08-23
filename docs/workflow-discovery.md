@@ -27,7 +27,9 @@ Directories are skipped. The workflow selector is the filename stem, so `deploy.
 The YAML `name` field is still required and validated, but it is metadata for the loaded workflow;
 lookup by `NAME` uses the filename stem. The description shown by `wuko list` and the picker comes
 from the YAML `description` field. Workflows with `depends_on` also show a sorted `depends on ...`
-summary; aliases that differ from their workflow name use `alias=workflow`.
+summary; aliases that differ from their workflow name use `alias=workflow`. The optional
+`invokable` boolean defaults to `true`. Set it to `false` for a workflow that may run only as a
+`depends_on` prerequisite.
 
 Within a directory, workflow names are sorted before loading. Declaring both `name.yaml` and
 `name.yml` in the same directory is an error.
@@ -56,6 +58,10 @@ workflows. Between global locations, the home workflow wins over the platform-co
 `Discover` returns only effective sources. `DiscoverAll` returns effective and shadowed sources and
 marks each source with `Effective: true` or `false`.
 
+Invocation metadata does not affect precedence. An effective workflow with `invokable: false`
+still shadows same-named workflows in lower-precedence locations and remains resolvable as a
+dependency.
+
 For example, if all of these exist, the project copy is selected:
 
 ```text
@@ -69,20 +75,24 @@ order, not which definition wins.
 
 ## Command behavior
 
-- `wuko run NAME` calls effective discovery and runs the selected source.
+- `wuko run NAME` calls effective discovery and runs the selected source only when it is directly
+  invokable. The same check applies to `wuko run --file`, HTTPS, and `github:` selectors and to all
+  equivalent `wuko ui` selectors.
 - `wuko list` displays effective sources as tab-separated name, scope, description, and path. A
-  workflow with prerequisites has an additional trailing `depends on ...` field.
+  workflow with prerequisites has an additional trailing `depends on ...` field; a workflow with
+  `invokable: false` has a trailing `not directly invokable` field.
 - `wuko validate NAME` and `wuko tree NAME` use effective discovery; without a name, `validate`
-  validates every effective workflow.
+  validates every effective workflow. Both inspection commands accept dependency-only workflows.
 - Bare `wuko` calls `DiscoverAll`. In an interactive terminal it shows effective and shadowed
-  sources in the picker, including each workflow's direct prerequisites. Enter runs the exact
-  selected source. Shift+Enter prints `wuko run NAME` for an effective source or
+  directly invokable sources in the picker, including each workflow's direct prerequisites. Enter
+  runs the exact selected source. Shift+Enter prints `wuko run NAME` for an effective source or
   `wuko run --file PATH` for a shadowed source so the printed command remains unambiguous.
-- Bare `wuko` in a non-interactive context prints all discovered sources as tab-separated rows,
-  appending the dependency summary when present.
-- Shell completion returns effective workflow names only.
+- Bare `wuko` in a non-interactive context prints directly invokable discovered sources as
+  tab-separated rows, appending the dependency summary when present.
+- Shell completion returns effective workflow names. Run and UI completion omit dependency-only
+  workflows; validation and tree completion retain them.
 - `wuko run --file PATH` bypasses discovery. HTTP and `github:` locators also bypass local
-  discovery and use the remote workflow loader.
+  discovery and use the remote workflow loader, but none bypass `invokable: false`.
 
 ## Implementation
 

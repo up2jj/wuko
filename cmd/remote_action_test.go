@@ -115,6 +115,49 @@ steps:
 	}
 }
 
+func TestRunAndUIRejectDependencyOnlyRemoteWorkflows(t *testing.T) {
+	workflowData := `version: 1
+name: remote-build
+invokable: false
+steps:
+  - id: action
+    uses:
+      command: wuko-test-must-not-run
+`
+	for _, tt := range []struct {
+		name    string
+		command string
+		locator string
+	}{
+		{name: "run https", command: "run", locator: "https://workflows.example.test/build.yaml"},
+		{name: "ui https", command: "ui", locator: "https://workflows.example.test/build.yaml"},
+		{name: "run github", command: "run", locator: "github:acme/workflows:build.yaml"},
+		{name: "ui github", command: "ui", locator: "github:acme/workflows:build.yaml"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			requests := 0
+			client := &http.Client{Transport: commandRoundTripFunc(func(*http.Request) (*http.Response, error) {
+				requests++
+				return &http.Response{StatusCode: http.StatusOK, Status: "200 OK", Body: io.NopCloser(strings.NewReader(workflowData)), Header: make(http.Header)}, nil
+			})}
+			root := t.TempDir()
+			command := newRootCmd(dependencies{
+				stdin: bytes.NewReader(nil), stdout: io.Discard, stderr: io.Discard,
+				cwd: func() (string, error) { return root, nil }, homeDir: func() (string, error) { return "", nil },
+				configDir: func() (string, error) { return "", nil }, registry: step.NewRegistry(), loader: workflow.NewLoader(client),
+			})
+			command.SetArgs([]string{tt.command, tt.locator})
+			err := command.ExecuteContext(t.Context())
+			if err == nil || !strings.Contains(err.Error(), `workflow "remote-build" is not directly invokable`) {
+				t.Fatalf("error = %v", err)
+			}
+			if requests != 1 {
+				t.Fatalf("requests = %d, want 1", requests)
+			}
+		})
+	}
+}
+
 func TestRemoteWorkflowValueStoreScopes(t *testing.T) {
 	tests := []struct {
 		name      string

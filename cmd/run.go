@@ -33,7 +33,7 @@ func newRunCmd(deps dependencies) *cobra.Command {
 	_ = command.RegisterFlagCompletionFunc("reporter", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 		return []string{"plain", "github"}, cobra.ShellCompDirectiveNoFileComp
 	})
-	command.ValidArgsFunction = workflowCompletion(deps)
+	command.ValidArgsFunction = workflowCompletion(deps, true)
 	return command
 }
 
@@ -200,11 +200,26 @@ type workflowRunTarget struct {
 }
 
 func (target workflowRunTarget) load(ctx context.Context, loader *workflow.Loader, options workflow.LoadOptions) (*workflow.Definition, func(), error) {
-	if target.remote {
-		return loader.LoadRemote(ctx, target.locator, options)
+	definition, cleanup, err := target.decode(ctx, loader, options)
+	if err != nil {
+		return nil, func() {}, err
 	}
-	definition, err := loader.Load(ctx, target.path, options)
-	return definition, func() {}, err
+	if err := requireDirectlyInvokable(definition); err != nil {
+		cleanup()
+		return nil, func() {}, err
+	}
+	if err := loader.Prepare(ctx, definition, options); err != nil {
+		cleanup()
+		return nil, func() {}, err
+	}
+	return definition, cleanup, nil
+}
+
+func requireDirectlyInvokable(definition *workflow.Definition) error {
+	if definition.IsInvokable() {
+		return nil
+	}
+	return fmt.Errorf("workflow %q is not directly invokable", definition.Name)
 }
 
 func invocationEnvironment(command *cobra.Command, deps dependencies, cwd string) (map[string]string, error) {

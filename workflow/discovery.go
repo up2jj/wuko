@@ -14,6 +14,7 @@ type Source struct {
 	Name        string
 	Path        string
 	Description string
+	Invokable   bool
 	DependsOn   map[string]string
 	HasForm     bool
 	Scope       string
@@ -78,7 +79,8 @@ func DiscoverAll(cwd, homeDir, configDir string) ([]Source, error) {
 			}
 			sources = append(sources, Source{
 				Name: name, Path: path, Description: definition.Description,
-				DependsOn: maps.Clone(definition.DependsOn), HasForm: definition.HasForm(), Scope: location.scope,
+				Invokable: definition.IsInvokable(), DependsOn: maps.Clone(definition.DependsOn),
+				HasForm: definition.HasForm(), Scope: location.scope,
 			})
 		}
 	}

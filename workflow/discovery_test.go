@@ -88,6 +88,51 @@ func TestDiscoverIncludesWorkflowDependencies(t *testing.T) {
 	}
 }
 
+func TestDiscoverIncludesDependencyOnlyWorkflowMetadata(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, ".wuko", "workflows")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data := "version: 1\nname: build\ninvokable: false\nsteps:\n  - return: {outputs: {}}\n"
+	if err := os.WriteFile(filepath.Join(dir, "build.yaml"), []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sources, err := Discover(root, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sources) != 1 || sources[0].Invokable {
+		t.Fatalf("sources = %#v", sources)
+	}
+}
+
+func TestDependencyOnlyWorkflowPreservesEffectivePrecedence(t *testing.T) {
+	root := t.TempDir()
+	project := filepath.Join(root, "project")
+	home := filepath.Join(root, "home")
+	projectDir := filepath.Join(project, ".wuko", "workflows")
+	homeDir := filepath.Join(home, ".wuko", "workflows")
+	for _, dir := range []string{projectDir, homeDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeWorkflow(t, filepath.Join(homeDir, "build.yaml"), "global")
+	data := "version: 1\nname: build\ndescription: local\ninvokable: false\nsteps:\n  - return: {outputs: {}}\n"
+	localPath := filepath.Join(projectDir, "build.yaml")
+	if err := os.WriteFile(localPath, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sources, err := Discover(project, home, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sources) != 1 || sources[0].Path != localPath || sources[0].Invokable {
+		t.Fatalf("sources = %#v", sources)
+	}
+}
+
 func TestDiscoverRejectsDuplicateExtensions(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, ".wuko", "workflows")

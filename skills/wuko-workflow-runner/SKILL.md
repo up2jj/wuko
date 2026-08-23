@@ -15,7 +15,8 @@ Run a trusted existing workflow only after its source, inputs, and expected effe
 2. For a local workflow, inspect its YAML, recursively required files, referenced templates, and
    visible action sources before invoking Wuko. Identify shell, Lua, Docker, HTTP, file, agent,
    persistent key-value, retry, polling, and concurrent effects. Do not edit the workflow while
-   preparing to run it.
+   preparing to run it. If it declares `invokable: false`, do not try another selector: it may run
+   only as another workflow's `depends_on` prerequisite.
 3. Treat a remote workflow or action as trusted executable code. Before the first command that
    loads one, show its locator, whether it is pinned, and the fact that loading may download
    content. Require explicit trust confirmation. A command-based `uses` source requires the same
@@ -35,7 +36,9 @@ then check only whether its name is present. Do not display secret-bearing varia
    `wuko validate NAME` for a discovered local workflow, `wuko tree NAME` or
    `wuko tree --file PATH` for structure, and `wuko run ... --dry-run` for final rendered
    validation. Use the same non-secret variable overrides and variable files, and the same
-   inherited environment, intended for the real run.
+   inherited environment, intended for the real run. Validation and tree inspection accept
+   dependency-only workflows, but dry-run is a direct invocation and does not bypass
+   `invokable: false`.
 2. Avoid redundant loads when loading itself has effects. In particular, choose one sufficient
    preview command for a workflow with a command-based action source instead of executing that
    resolver through validate, tree, and dry-run separately.

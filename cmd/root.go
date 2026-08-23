@@ -90,6 +90,11 @@ More help:
   wuko --help
 `
 
+const noInvokableWorkflowsHelp = `No directly invokable workflows found.
+
+Use wuko list to inspect dependency-only workflows.
+`
+
 type dependencies struct {
 	stdin         io.Reader
 	stdout        io.Writer
@@ -225,7 +230,9 @@ func runWorkflowPicker(command *cobra.Command, deps dependencies) error {
 		diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusFailed, Duration: time.Since(discoveryStarted), Error: err})
 		return err
 	}
-	diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusSucceeded, Duration: time.Since(discoveryStarted), Attributes: []diagnostic.Attribute{diagnostic.Attr("workflows", fmt.Sprint(len(sources)))}})
+	discovered := len(sources)
+	diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusSucceeded, Duration: time.Since(discoveryStarted), Attributes: []diagnostic.Attribute{diagnostic.Attr("workflows", fmt.Sprint(discovered))}})
+	sources = slices.DeleteFunc(sources, func(source workflow.Source) bool { return !source.Invokable })
 	if !deps.isInteractive(command.InOrStdin()) {
 		for _, source := range sources {
 			if err := writeWorkflowSource(command.OutOrStdout(), source); err != nil {
@@ -235,6 +242,10 @@ func runWorkflowPicker(command *cobra.Command, deps dependencies) error {
 		return nil
 	}
 	if len(sources) == 0 {
+		if discovered > 0 {
+			fmt.Fprint(command.OutOrStdout(), noInvokableWorkflowsHelp)
+			return nil
+		}
 		fmt.Fprint(command.OutOrStdout(), noWorkflowsHelp)
 		return nil
 	}
@@ -298,6 +309,11 @@ func writeWorkflowSource(writer io.Writer, source workflow.Source) error {
 	}
 	if dependencies := workflowDependencySummary(source.DependsOn); dependencies != "" {
 		if _, err := fmt.Fprintf(writer, "\t%s", dependencies); err != nil {
+			return err
+		}
+	}
+	if !source.Invokable {
+		if _, err := fmt.Fprint(writer, "\tnot directly invokable"); err != nil {
 			return err
 		}
 	}

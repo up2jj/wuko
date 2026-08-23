@@ -96,7 +96,7 @@ func newTreeCmd(deps dependencies) *cobra.Command {
 	command.Flags().StringArrayVar(&variableFiles, "var-file", nil, "import workflow variables from a JSON or TOML file (repeatable)")
 	command.Flags().StringArrayVar(&environment, "env", nil, "override an environment variable (KEY=value; repeatable)")
 	command.Flags().StringVar(&workflowFile, "file", "", "display a workflow from a file path")
-	command.ValidArgsFunction = workflowCompletion(deps)
+	command.ValidArgsFunction = workflowCompletion(deps, false)
 	return command
 }
 

@@ -30,6 +30,7 @@ type Definition struct {
 	Version     int                       `yaml:"version"`
 	Name        string                    `yaml:"name"`
 	Description string                    `yaml:"description,omitempty"`
+	Invokable   *bool                     `yaml:"invokable,omitempty"`
 	DependsOn   map[string]string         `yaml:"depends_on,omitempty"`
 	Outputs     map[string]WorkflowOutput `yaml:"outputs,omitempty"`
 	// Form is intentionally opaque to core workflow execution. The optional browser UI decodes it.
@@ -46,6 +47,12 @@ type Definition struct {
 	Location    diagnostic.Location           `yaml:"-"`
 	sourceRoot  string
 	sourceLabel string
+}
+
+// IsInvokable reports whether the workflow may be selected as a direct run or UI root.
+// Workflows are invokable by default so existing definitions remain compatible.
+func (definition *Definition) IsInvokable() bool {
+	return definition != nil && (definition.Invokable == nil || *definition.Invokable)
 }
 
 // HasForm reports whether the workflow contains a non-null browser form declaration.

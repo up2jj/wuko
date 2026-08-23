@@ -12,7 +12,7 @@ you need, not merely where the YAML lives:
 
 | Mechanism | Use it when | Boundary and data flow |
 | --- | --- | --- |
-| `depends_on` | Another discovered workflow is a runnable prerequisite | Runs the prerequisite first in its own workflow state; only declared typed workflow outputs cross through `.dependencies` |
+| `depends_on` | Another discovered workflow is a prerequisite | Runs the prerequisite first in its own workflow state; only declared typed workflow outputs cross through `.dependencies` |
 | `require` | One workflow is too large for one file | Inserts the fragment's steps into the current workflow; steps share the same IDs, variables, environment, state, and execution flow |
 | `uses` | A step-sized capability should be reusable behind a stable interface | Invokes a composite action with declared inputs and outputs; internal steps and variables are isolated from the caller |
 
@@ -63,7 +63,7 @@ steps:
       args: ["{{ .steps.build.artifact }}"]
 ```
 
-As a quick rule: choose `depends_on` for orchestration between runnable workflows, `require` for
+As a quick rule: choose `depends_on` for orchestration between discovered workflows, `require` for
 file organization within one workflow, and `uses` for reusable encapsulated behavior. Do not use
 `require` to simulate an action interface, or wrap a simple file split in a separate dependency.
 
@@ -124,6 +124,7 @@ identifiers, and output values must match one of `string`, `boolean`, `number`, 
 ```yaml
 version: 1
 name: build-artifacts
+invokable: false
 
 outputs:
   artifact:
@@ -139,6 +140,11 @@ steps:
     type: shell
     with: {command: ./package.sh}
 ```
+
+Set `invokable: false` when a producer exists only as a prerequisite. It remains discoverable by
+`depends_on` and available to `wuko list`, `wuko validate`, and `wuko tree`, but direct `wuko run`
+and `wuko ui` selectors—including file and remote selectors—reject it. Omitting `invokable` keeps
+the default directly invokable behavior.
 
 Use `.dependencies.<alias>.<output>` in Go templates and
 `dependencies.<alias>.<output>` in Expr:
@@ -186,9 +192,10 @@ Dependency values are runtime state. They may be used by step templates, step an
 conditions, controls, and workflow output expressions. They cannot determine top-level `env`, a
 composite action `uses` source, or another field resolved while loading the workflow.
 
-`validate`, `tree`, and `run --dry-run` resolve and check the complete graph without executing
-prerequisites. A prerequisite's own `cron` is ignored when it is invoked by another workflow. A
-scheduled root reloads and executes its dependency graph for every occurrence.
+`validate` and `tree` resolve and check the complete graph without executing prerequisites and may
+inspect a dependency-only workflow directly. `run --dry-run` is still a direct invocation and
+rejects a dependency-only root. A prerequisite's own `cron` is ignored when it is invoked by
+another workflow. A scheduled root reloads and executes its dependency graph for every occurrence.
 
 `tree` renders the requested workflow as the root and nests the complete transitive chain beneath
 `depends_on`. Aliases that differ from their workflow names show both values. In a diamond, the
@@ -551,8 +558,8 @@ Paths are relative to the file containing `require`, so fragments may require ot
 All expanded IDs must be unique. Cycles are rejected. Remote archives can bundle required files;
 direct remote YAML files cannot. Required steps remain part of the caller: they do not declare
 inputs or outputs, receive a separate state, or run independently. Use a composite action instead
-when reuse needs an explicit interface, or a workflow dependency when the included work is a
-runnable prerequisite.
+when reuse needs an explicit interface, or a workflow dependency when the included work needs a
+separate prerequisite state.
 
 ## Remote workflows
 
@@ -664,7 +671,7 @@ action in schema version 1.
 
 An action is not a child workflow: it follows the action manifest schema, receives only declared
 inputs, isolates its internal IDs and variables, and exports only declared outputs. Use
-`depends_on` to compose runnable workflows and `require` to split one workflow's steps without an
+`depends_on` to compose discovered workflows and `require` to split one workflow's steps without an
 input/output boundary.
 
 ## Environment and templates

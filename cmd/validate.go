@@ -86,11 +86,11 @@ func newValidateCmd(deps dependencies) *cobra.Command {
 	command.Flags().StringArrayVar(&variables, "var", nil, "set a workflow variable (key=value; repeatable)")
 	command.Flags().StringArrayVar(&variableFiles, "var-file", nil, "import workflow variables from a JSON or TOML file (repeatable)")
 	command.Flags().StringArrayVar(&environment, "env", nil, "override an environment variable (KEY=value; repeatable)")
-	command.ValidArgsFunction = workflowCompletion(deps)
+	command.ValidArgsFunction = workflowCompletion(deps, false)
 	return command
 }
 
-func workflowCompletion(deps dependencies) cobra.CompletionFunc {
+func workflowCompletion(deps dependencies, invokableOnly bool) cobra.CompletionFunc {
 	return func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
 		cwd, home, config, err := directories(deps)
 		if err != nil {
@@ -102,6 +102,9 @@ func workflowCompletion(deps dependencies) cobra.CompletionFunc {
 		}
 		values := make([]string, 0, len(sources))
 		for _, source := range sources {
+			if invokableOnly && !source.Invokable {
+				continue
+			}
 			values = append(values, source.Name+"\t"+source.Description)
 		}
 		return values, cobra.ShellCompDirectiveNoFileComp

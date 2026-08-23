@@ -1,6 +1,8 @@
 package workflow
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -74,6 +76,42 @@ func TestDefinitionScheduleValidation(t *testing.T) {
 			}
 			if err == nil || !strings.Contains(err.Error(), tt.wantError) {
 				t.Fatalf("error = %v, want %q", err, tt.wantError)
+			}
+		})
+	}
+}
+
+func TestDefinitionInvokableDefaultsAndValidation(t *testing.T) {
+	tests := []struct {
+		name      string
+		field     string
+		want      bool
+		wantError string
+	}{
+		{name: "omitted", want: true},
+		{name: "true", field: "invokable: true\n", want: true},
+		{name: "false", field: "invokable: false\n"},
+		{name: "non boolean", field: "invokable: dependency-only\n", wantError: "cannot unmarshal"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "workflow.yaml")
+			data := "version: 1\nname: workflow\n" + tt.field + "steps:\n  - return: {outputs: {}}\n"
+			if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			definition, err := NewLoader(nil).Decode(path, LoadOptions{})
+			if tt.wantError != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantError) {
+					t.Fatalf("error = %v, want %q", err, tt.wantError)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := definition.IsInvokable(); got != tt.want {
+				t.Fatalf("IsInvokable() = %t, want %t", got, tt.want)
 			}
 		})
 	}

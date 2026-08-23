@@ -44,7 +44,7 @@ func newUICmd(deps dependencies) *cobra.Command {
 	command.Flags().StringArrayVar(&config.reporters, "reporter", nil, "enable a run reporter (plain or github; repeatable; defaults to plain)")
 	command.Flags().StringVar(&config.workflowFile, "file", "", "run a workflow form from a file path")
 	command.Flags().BoolVar(&config.noOpen, "no-open", false, "print the local URL without opening a browser")
-	command.ValidArgsFunction = workflowCompletion(deps)
+	command.ValidArgsFunction = workflowCompletion(deps, true)
 	return command
 }
 
@@ -85,6 +85,9 @@ func runWorkflowUI(command *cobra.Command, deps dependencies, args []string, con
 		return err
 	}
 	defer cleanup()
+	if err := requireDirectlyInvokable(definition); err != nil {
+		return err
+	}
 	if !definition.HasForm() {
 		return fmt.Errorf("workflow %q does not declare a form", definition.Name)
 	}
