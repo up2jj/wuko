@@ -393,6 +393,10 @@ func (f *fakeClient) ContainerList(context.Context, client.ContainerListOptions)
 	return client.ContainerListResult{Items: f.containers}, nil
 }
 
+func (f *fakeClient) ContainerInspect(context.Context, string, client.ContainerInspectOptions) (client.ContainerInspectResult, error) {
+	return client.ContainerInspectResult{}, errors.New("unexpected container inspect")
+}
+
 func (f *fakeClient) ContainerCreate(_ context.Context, options client.ContainerCreateOptions) (client.ContainerCreateResult, error) {
 	f.created = options
 	return client.ContainerCreateResult{ID: "container-id"}, nil

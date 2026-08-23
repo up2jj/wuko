@@ -13,17 +13,22 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/containerd/errdefs"
 	"github.com/moby/moby/api/pkg/authconfig"
+	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/jsonstream"
 	"github.com/moby/moby/api/types/registry"
 	"github.com/moby/moby/client"
 	"github.com/opencontainers/go-digest"
 	"github.com/opencontainers/image-spec/specs-go/v1"
 
+	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/step"
 )
+
+const healthPollInterval = time.Second
 
 type managedRunner struct{ *Runner }
 
@@ -51,6 +56,8 @@ func (r *Runner) runEngineOperation(ctx context.Context, request step.Request) (
 		return r.tagImage(ctx, dockerClient)
 	case operationInspect:
 		return r.inspectImage(ctx, dockerClient)
+	case operationHealthWait:
+		return r.waitForHealthyContainer(ctx, dockerClient)
 	case operationLogin:
 		return r.login(ctx, dockerClient)
 	case operationNetworkCreate:
@@ -62,6 +69,117 @@ func (r *Runner) runEngineOperation(ctx context.Context, request step.Request) (
 	default:
 		panic("validated Docker operation")
 	}
+}
+
+type healthWaitError struct {
+	message    string
+	cause      error
+	attributes []diagnostic.Attribute
+}
+
+func (err healthWaitError) Error() string { return err.message }
+
+func (err healthWaitError) Unwrap() error { return err.cause }
+
+func (err healthWaitError) DiagnosticAttributes() []diagnostic.Attribute {
+	return slices.Clone(err.attributes)
+}
+
+func (r *Runner) waitForHealthyContainer(ctx context.Context, dockerClient dockerClient) (step.Result, error) {
+	wait := r.waitHealth
+	if wait == nil {
+		wait = waitForHealthPoll
+	}
+	var last step.Result
+	for {
+		inspected, err := dockerClient.ContainerInspect(ctx, r.config.Container, client.ContainerInspectOptions{})
+		if err != nil {
+			if last.Outputs == nil {
+				last = dockerHealthResult(r.config.Container, client.ContainerInspectResult{})
+			}
+			if ctx.Err() != nil {
+				return last, healthFailure(last, fmt.Sprintf("waiting for Docker container %q health: %v", r.config.Container, ctx.Err()), ctx.Err())
+			}
+			return last, healthFailure(last, fmt.Sprintf("inspecting Docker container %q: %v", r.config.Container, err), err)
+		}
+
+		last = dockerHealthResult(r.config.Container, inspected)
+		state := inspected.Container.State
+		if state == nil {
+			return last, healthFailure(last, fmt.Sprintf("Docker container %q has no state", r.config.Container), nil)
+		}
+		if !state.Running {
+			return last, healthFailure(last, fmt.Sprintf("Docker container %q is not running (status %s, exit code %d)", r.config.Container, state.Status, state.ExitCode), nil)
+		}
+		if state.Health == nil || state.Health.Status == container.NoHealthcheck {
+			return last, healthFailure(last, fmt.Sprintf("Docker container %q has no healthcheck", r.config.Container), nil)
+		}
+		switch state.Health.Status {
+		case container.Healthy:
+			return last, nil
+		case container.Unhealthy:
+			return last, healthFailure(last, fmt.Sprintf("Docker container %q is unhealthy (failing streak %d)", r.config.Container, state.Health.FailingStreak), nil)
+		case container.Starting:
+			if err := wait(ctx, healthPollInterval); err != nil {
+				return last, healthFailure(last, fmt.Sprintf("waiting for Docker container %q health: %v", r.config.Container, err), err)
+			}
+		default:
+			return last, healthFailure(last, fmt.Sprintf("Docker container %q reported unknown health status %q", r.config.Container, state.Health.Status), nil)
+		}
+	}
+}
+
+func waitForHealthPoll(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func dockerHealthResult(reference string, inspected client.ContainerInspectResult) step.Result {
+	outputs := map[string]any{
+		"container": reference, "id": inspected.Container.ID,
+		"container_status": "", "health_status": string(container.NoHealthcheck),
+		"failing_streak": 0, "health_checks": []map[string]any{},
+	}
+	state := inspected.Container.State
+	if state == nil {
+		return step.Result{Outputs: outputs}
+	}
+	outputs["container_status"] = string(state.Status)
+	if state.Health == nil {
+		return step.Result{Outputs: outputs}
+	}
+	outputs["health_status"] = string(state.Health.Status)
+	outputs["failing_streak"] = state.Health.FailingStreak
+	checks := make([]map[string]any, 0, len(state.Health.Log))
+	for _, check := range state.Health.Log {
+		if check == nil {
+			continue
+		}
+		checks = append(checks, map[string]any{
+			"started_at": check.Start.Format(time.RFC3339Nano), "finished_at": check.End.Format(time.RFC3339Nano),
+			"exit_code": check.ExitCode, "output": check.Output,
+		})
+	}
+	outputs["health_checks"] = checks
+	return step.Result{Outputs: outputs}
+}
+
+func healthFailure(result step.Result, message string, cause error) error {
+	outputs := result.Outputs
+	return healthWaitError{message: message, cause: cause, attributes: []diagnostic.Attribute{
+		diagnostic.Attr("container", fmt.Sprint(outputs["container"])),
+		diagnostic.Attr("container_id", fmt.Sprint(outputs["id"])),
+		diagnostic.Attr("container_status", fmt.Sprint(outputs["container_status"])),
+		diagnostic.Attr("health_status", fmt.Sprint(outputs["health_status"])),
+		diagnostic.Attr("failing_streak", fmt.Sprint(outputs["failing_streak"])),
+		diagnostic.Attr("health_checks", diagnostic.RedactedJSON(outputs["health_checks"])),
+	}}
 }
 
 func (r *Runner) pullImage(ctx context.Context, request step.Request, dockerClient dockerClient) (step.Result, error) {

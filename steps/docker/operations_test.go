@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"maps"
 	"os"
@@ -12,10 +13,12 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/containerd/errdefs"
 	"github.com/moby/docker-image-spec/specs-go/v1"
 	"github.com/moby/moby/api/pkg/authconfig"
+	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/jsonstream"
 	"github.com/moby/moby/api/types/registry"
 	"github.com/moby/moby/api/types/volume"
@@ -23,6 +26,7 @@ import (
 	"github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 
+	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -35,6 +39,11 @@ func TestOperationValidation(t *testing.T) {
 	}{
 		{name: "implicit run", raw: map[string]any{"image": "alpine"}},
 		{name: "pull", raw: map[string]any{"operation": "pull", "image": "alpine"}},
+		{name: "health wait", raw: map[string]any{"operation": "health_wait", "container": "api"}},
+		{name: "templated health wait", raw: map[string]any{"operation": "health_wait", "container": "{{ .vars.container }}"}},
+		{name: "health wait requires container", raw: map[string]any{"operation": "health_wait"}, wantErr: "container is required"},
+		{name: "health wait isolates fields", raw: map[string]any{"operation": "health_wait", "container": "api", "image": "alpine"}, wantErr: "image is not allowed for health_wait"},
+		{name: "operation list includes health wait", raw: map[string]any{"operation": "missing"}, wantErr: "health_wait"},
 		{name: "push auth", raw: map[string]any{"operation": "push", "image": "example/app", "auth": map[string]any{"username": "a", "password": "b"}}},
 		{name: "verify", raw: map[string]any{"operation": "verify_digest", "image": "alpine", "expected_digest": validDigest}},
 		{name: "templated verify", raw: map[string]any{"operation": "verify_digest", "image": "alpine", "expected_digest": "{{ .steps.push.digest }}"}},
@@ -67,6 +76,158 @@ func TestOperationValidation(t *testing.T) {
 				t.Fatalf("New() error = %v, want substring %q", err, test.wantErr)
 			}
 		})
+	}
+}
+
+func TestHealthWaitReturnsHealthySnapshot(t *testing.T) {
+	started := time.Date(2026, time.August, 23, 8, 0, 0, 123, time.UTC)
+	finished := started.Add(250 * time.Millisecond)
+	inspected := containerInspection(container.Healthy, true)
+	inspected.Container.State.Health.Log = []*container.HealthcheckResult{{
+		Start: started, End: finished, ExitCode: 0, Output: "ready\n",
+	}}
+	apiClient := &operationClient{fakeClient: &fakeClient{}, containerInspects: []client.ContainerInspectResult{inspected}}
+	runner := &Runner{config: Config{Operation: operationHealthWait, Container: "api"}, newClient: func() (dockerClient, error) { return apiClient, nil }}
+
+	result, err := runner.Run(t.Context(), step.Request{})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.Outputs["container"] != "api" || result.Outputs["id"] != "container-id" || result.Outputs["container_status"] != "running" || result.Outputs["health_status"] != "healthy" {
+		t.Fatalf("outputs = %#v", result.Outputs)
+	}
+	checks, ok := result.Outputs["health_checks"].([]map[string]any)
+	if !ok || len(checks) != 1 {
+		t.Fatalf("health_checks = %#v", result.Outputs["health_checks"])
+	}
+	if checks[0]["started_at"] != started.Format(time.RFC3339Nano) || checks[0]["finished_at"] != finished.Format(time.RFC3339Nano) || checks[0]["exit_code"] != 0 || checks[0]["output"] != "ready\n" {
+		t.Fatalf("health check = %#v", checks[0])
+	}
+}
+
+func TestHealthWaitPollsStartingContainerWithoutSleeping(t *testing.T) {
+	apiClient := &operationClient{fakeClient: &fakeClient{}, containerInspects: []client.ContainerInspectResult{
+		containerInspection(container.Starting, true), containerInspection(container.Healthy, true),
+	}}
+	var delays []time.Duration
+	runner := &Runner{
+		config:    Config{Operation: operationHealthWait, Container: "api"},
+		newClient: func() (dockerClient, error) { return apiClient, nil },
+		waitHealth: func(_ context.Context, delay time.Duration) error {
+			delays = append(delays, delay)
+			return nil
+		},
+	}
+
+	result, err := runner.Run(t.Context(), step.Request{})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if apiClient.containerInspectCalls != 2 || !slices.Equal(delays, []time.Duration{time.Second}) {
+		t.Fatalf("inspect calls/delays = %d/%v", apiClient.containerInspectCalls, delays)
+	}
+	if result.Outputs["health_status"] != "healthy" {
+		t.Fatalf("outputs = %#v", result.Outputs)
+	}
+}
+
+func TestHealthWaitFailureReturnsStructuredDiagnostics(t *testing.T) {
+	inspected := containerInspection(container.Unhealthy, true)
+	inspected.Container.State.Health.FailingStreak = 3
+	inspected.Container.State.Health.Log = []*container.HealthcheckResult{{
+		Start: time.Date(2026, time.August, 23, 8, 0, 0, 0, time.UTC),
+		End:   time.Date(2026, time.August, 23, 8, 0, 1, 0, time.UTC), ExitCode: 1, Output: "connection refused",
+	}}
+	apiClient := &operationClient{fakeClient: &fakeClient{}, containerInspects: []client.ContainerInspectResult{inspected}}
+	runner := &Runner{config: Config{Operation: operationHealthWait, Container: "api"}, newClient: func() (dockerClient, error) { return apiClient, nil }}
+
+	result, err := runner.Run(t.Context(), step.Request{})
+	if err == nil || !strings.Contains(err.Error(), "unhealthy") || !strings.Contains(err.Error(), "failing streak 3") {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.Outputs["health_status"] != "unhealthy" || result.Outputs["failing_streak"] != 3 {
+		t.Fatalf("outputs = %#v", result.Outputs)
+	}
+	attributes := diagnostic.ErrorAttributes(fmt.Errorf("wrapped health failure: %w", err))
+	values := make(map[string]string, len(attributes))
+	for _, attribute := range attributes {
+		values[attribute.Key] = attribute.Value
+	}
+	if values["container"] != "api" || values["container_id"] != "container-id" || values["health_status"] != "unhealthy" || values["failing_streak"] != "3" || !strings.Contains(values["health_checks"], "connection refused") {
+		t.Fatalf("diagnostic attributes = %#v", values)
+	}
+}
+
+func TestHealthWaitRejectsTerminalContainerStates(t *testing.T) {
+	tests := []struct {
+		name       string
+		inspect    client.ContainerInspectResult
+		inspectErr error
+		want       string
+	}{
+		{name: "stopped", inspect: containerInspection(container.Starting, false), want: "not running"},
+		{name: "missing healthcheck", inspect: containerInspection(container.NoHealthcheck, true), want: "no healthcheck"},
+		{name: "nil healthcheck", inspect: containerInspection(container.Healthy, true), want: "no healthcheck"},
+		{name: "nil state", inspect: containerInspection(container.Healthy, true), want: "has no state"},
+		{name: "missing container", inspectErr: errdefs.ErrNotFound, want: "inspecting Docker container"},
+	}
+	tests[2].inspect.Container.State.Health = nil
+	tests[3].inspect.Container.State = nil
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			apiClient := &operationClient{fakeClient: &fakeClient{}, containerInspects: []client.ContainerInspectResult{test.inspect}, containerInspectErr: test.inspectErr}
+			runner := &Runner{config: Config{Operation: operationHealthWait, Container: "api"}, newClient: func() (dockerClient, error) { return apiClient, nil }}
+			result, err := runner.Run(t.Context(), step.Request{})
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("Run() error = %v, want substring %q", err, test.want)
+			}
+			if len(diagnostic.ErrorAttributes(err)) == 0 || result.Outputs["container"] != "api" {
+				t.Fatalf("result/attributes = %#v/%#v", result.Outputs, diagnostic.ErrorAttributes(err))
+			}
+			if test.inspectErr != nil && !errors.Is(err, test.inspectErr) {
+				t.Fatalf("Run() error = %v, want cause %v", err, test.inspectErr)
+			}
+		})
+	}
+}
+
+func TestHealthWaitCancellationReturnsLatestSnapshot(t *testing.T) {
+	apiClient := &operationClient{fakeClient: &fakeClient{}, containerInspects: []client.ContainerInspectResult{containerInspection(container.Starting, true)}}
+	ctx, cancel := context.WithCancel(t.Context())
+	runner := &Runner{
+		config:    Config{Operation: operationHealthWait, Container: "api"},
+		newClient: func() (dockerClient, error) { return apiClient, nil },
+		waitHealth: func(ctx context.Context, _ time.Duration) error {
+			cancel()
+			return ctx.Err()
+		},
+	}
+
+	result, err := runner.Run(ctx, step.Request{})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run() error = %v, want context.Canceled", err)
+	}
+	if result.Outputs["health_status"] != "starting" || len(diagnostic.ErrorAttributes(err)) == 0 {
+		t.Fatalf("result/attributes = %#v/%#v", result.Outputs, diagnostic.ErrorAttributes(err))
+	}
+}
+
+func TestHealthWaitTimeoutReturnsLatestSnapshot(t *testing.T) {
+	apiClient := &operationClient{fakeClient: &fakeClient{}, containerInspects: []client.ContainerInspectResult{containerInspection(container.Starting, true)}}
+	runner := &Runner{
+		config:    Config{Operation: operationHealthWait, Container: "api"},
+		newClient: func() (dockerClient, error) { return apiClient, nil },
+		waitHealth: func(context.Context, time.Duration) error {
+			return context.DeadlineExceeded
+		},
+	}
+
+	result, err := runner.Run(t.Context(), step.Request{})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Run() error = %v, want context.DeadlineExceeded", err)
+	}
+	if result.Outputs["health_status"] != "starting" || len(diagnostic.ErrorAttributes(err)) == 0 {
+		t.Fatalf("result/attributes = %#v/%#v", result.Outputs, diagnostic.ErrorAttributes(err))
 	}
 }
 
@@ -481,25 +642,40 @@ func TestBuildxAvailabilityAndCancellation(t *testing.T) {
 
 type operationClient struct {
 	*fakeClient
-	inspect          client.ImageInspectResult
-	pull             *fakePullResponse
-	push             *fakePullResponse
-	pullOptions      client.ImagePullOptions
-	pushOptions      client.ImagePushOptions
-	tagOptions       client.ImageTagOptions
-	loginOptions     client.RegistryLoginOptions
-	login            client.RegistryLoginResult
-	networkName      string
-	networkOptions   client.NetworkCreateOptions
-	network          client.NetworkCreateResult
-	networkExists    bool
-	removedNetwork   string
-	networkRemoveErr error
-	volumeOptions    client.VolumeCreateOptions
-	volume           client.VolumeCreateResult
-	volumeExists     bool
-	removedVolume    string
-	volumeRemoveErr  error
+	containerInspects     []client.ContainerInspectResult
+	containerInspectErr   error
+	containerInspectCalls int
+	inspect               client.ImageInspectResult
+	pull                  *fakePullResponse
+	push                  *fakePullResponse
+	pullOptions           client.ImagePullOptions
+	pushOptions           client.ImagePushOptions
+	tagOptions            client.ImageTagOptions
+	loginOptions          client.RegistryLoginOptions
+	login                 client.RegistryLoginResult
+	networkName           string
+	networkOptions        client.NetworkCreateOptions
+	network               client.NetworkCreateResult
+	networkExists         bool
+	removedNetwork        string
+	networkRemoveErr      error
+	volumeOptions         client.VolumeCreateOptions
+	volume                client.VolumeCreateResult
+	volumeExists          bool
+	removedVolume         string
+	volumeRemoveErr       error
+}
+
+func (f *operationClient) ContainerInspect(_ context.Context, _ string, _ client.ContainerInspectOptions) (client.ContainerInspectResult, error) {
+	f.containerInspectCalls++
+	if f.containerInspectErr != nil {
+		return client.ContainerInspectResult{}, f.containerInspectErr
+	}
+	if len(f.containerInspects) == 0 {
+		return client.ContainerInspectResult{}, errors.New("unexpected container inspect")
+	}
+	index := min(f.containerInspectCalls-1, len(f.containerInspects)-1)
+	return f.containerInspects[index], nil
 }
 
 func (f *operationClient) ImageInspect(context.Context, string, ...client.ImageInspectOption) (client.ImageInspectResult, error) {
@@ -583,6 +759,20 @@ func imageInspection() client.ImageInspectResult {
 	result.Config = &v1.DockerOCIImageConfig{}
 	result.Config.Labels = map[string]string{"org.example": "test"}
 	result.Descriptor = &ocispec.Descriptor{Digest: digest.Digest("sha256:" + strings.Repeat("e", 64))}
+	return result
+}
+
+func containerInspection(status container.HealthStatus, running bool) client.ContainerInspectResult {
+	result := client.ContainerInspectResult{}
+	result.Container.ID = "container-id"
+	result.Container.State = &container.State{
+		Status: container.ContainerState("running"), Running: running,
+		Health: &container.Health{Status: status},
+	}
+	if !running {
+		result.Container.State.Status = container.ContainerState("exited")
+		result.Container.State.ExitCode = 1
+	}
 	return result
 }
 

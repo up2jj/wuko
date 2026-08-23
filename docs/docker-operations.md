@@ -2,9 +2,10 @@
 
 [Back to system steps](steps-system.md#docker)
 
-The `docker` step runs temporary containers and performs image, registry, build, network, and
-volume operations. Set `operation` to select behavior. Omitting it is equivalent to
-`operation: run`, preserving workflows written before the other operations were added.
+The `docker` step runs temporary containers, waits for container health, and performs image,
+registry, build, network, and volume operations. Set `operation` to select behavior. Omitting it
+is equivalent to `operation: run`, preserving workflows written before the other operations were
+added.
 
 To run several shell steps in one persistent container and then return to local execution, use a
 [Docker executor scope](executors.md#docker-executor).
@@ -16,6 +17,7 @@ To run several shell steps in one persistent container and then return to local 
 | `push` | Push a local image to a registry |
 | `tag` | Add a tag to a local image |
 | `inspect` | Return stable metadata for a local image |
+| `health_wait` | Wait for an existing container to become healthy |
 | `login` | Validate registry credentials without persisting them |
 | `verify_digest` | Verify a local image's OCI digest |
 | `network_create` | Create a workflow-scoped Docker network |
@@ -62,6 +64,44 @@ directory, while container targets must be absolute.
 
 The outputs are `stdout`, `stderr`, and `exit_code`. Wuko streams output while retaining these
 values, then removes the temporary container and its anonymous volumes.
+
+## Wait for container health
+
+Wait for an existing container, addressed by name or ID, to pass its Docker healthcheck:
+
+```yaml
+- id: api_ready
+  type: docker
+  timeout: 2m
+  with:
+    operation: health_wait
+    container: api
+```
+
+`health_wait` inspects immediately and then once per second while Docker reports `starting`.
+It succeeds only when the container is running with health status `healthy`. It fails immediately
+when Docker reports `unhealthy`, the container is not running, or the container has no configured
+healthcheck. A missing container or inspection failure also fails the step.
+
+Use the standard top-level `timeout` to bound the wait. Without one, Wuko waits until Docker
+reports a terminal state or the workflow context is canceled. Normal step-level `retry` can start
+a new wait after an unhealthy result.
+
+Successful results contain the same structured snapshot attached to health-related failure
+diagnostics:
+
+| Output | Meaning |
+| --- | --- |
+| `container` | Requested container name or ID |
+| `id` | Docker's resolved container ID |
+| `container_status` | Docker container state such as `running` or `exited` |
+| `health_status` | Docker health status: `starting`, `healthy`, `unhealthy`, or `none` |
+| `failing_streak` | Consecutive failed healthchecks reported by Docker |
+| `health_checks` | Ordered Docker healthcheck history with `started_at`, `finished_at`, `exit_code`, and `output` |
+
+When diagnostics are enabled, failures expose these fields as structured attributes, including a
+compact representation of `health_checks`. `health_wait` does not collect the container's general
+stdout or stderr logs.
 
 ## Pull and inspect images
 

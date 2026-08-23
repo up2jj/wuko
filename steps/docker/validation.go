@@ -18,6 +18,7 @@ const (
 	operationPush          = "push"
 	operationTag           = "tag"
 	operationInspect       = "inspect"
+	operationHealthWait    = "health_wait"
 	operationLogin         = "login"
 	operationNetworkCreate = "network_create"
 	operationVolumeCreate  = "volume_create"
@@ -88,6 +89,11 @@ func validateConfig(config Config, configuredFields ...map[string]bool) error {
 		}
 		if err := validatePlatformValue(config.Platform); err != nil {
 			return err
+		}
+	case operationHealthWait:
+		allow("container")
+		if strings.TrimSpace(config.Container) == "" {
+			return fmt.Errorf("container is required for health_wait")
 		}
 	case operationLogin:
 		allow("auth")
@@ -164,7 +170,7 @@ func validateConfig(config Config, configuredFields ...map[string]bool) error {
 			}
 		}
 	default:
-		return fmt.Errorf("operation must be run, build, pull, push, tag, inspect, login, network_create, volume_create, or verify_digest")
+		return fmt.Errorf("operation must be run, build, pull, push, tag, inspect, health_wait, login, network_create, volume_create, or verify_digest")
 	}
 
 	for field := range present {

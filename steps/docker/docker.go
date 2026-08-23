@@ -59,6 +59,7 @@ type Config struct {
 	Source           string               `yaml:"source,omitempty"`
 	Target           string               `yaml:"target,omitempty"`
 	ExpectedDigest   string               `yaml:"expected_digest,omitempty"`
+	Container        string               `yaml:"container,omitempty"`
 	Name             string               `yaml:"name,omitempty"`
 	Driver           string               `yaml:"driver,omitempty"`
 	Internal         bool                 `yaml:"internal,omitempty"`
@@ -100,6 +101,7 @@ type Runner struct {
 	present    map[string]bool
 	newClient  func() (dockerClient, error)
 	runCommand commandRunner
+	waitHealth func(context.Context, time.Duration) error
 }
 
 type runInput struct {
@@ -121,6 +123,7 @@ type dockerClient interface {
 	VolumeCreate(context.Context, client.VolumeCreateOptions) (client.VolumeCreateResult, error)
 	VolumeRemove(context.Context, string, client.VolumeRemoveOptions) (client.VolumeRemoveResult, error)
 	ContainerList(context.Context, client.ContainerListOptions) (client.ContainerListResult, error)
+	ContainerInspect(context.Context, string, client.ContainerInspectOptions) (client.ContainerInspectResult, error)
 	ContainerCreate(context.Context, client.ContainerCreateOptions) (client.ContainerCreateResult, error)
 	ContainerAttach(context.Context, string, client.ContainerAttachOptions) (client.ContainerAttachResult, error)
 	ContainerStart(context.Context, string, client.ContainerStartOptions) (client.ContainerStartResult, error)
@@ -151,6 +154,7 @@ func New(raw map[string]any) (step.Runner, error) {
 			return client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 		},
 		runCommand: defaultCommandRunner,
+		waitHealth: waitForHealthPoll,
 	}
 	if err := validateConfig(config, present); err != nil {
 		return nil, err

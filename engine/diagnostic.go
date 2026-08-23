@@ -26,6 +26,7 @@ func trace(options Options, event diagnostic.Event) {
 }
 
 func traceStep(options Options, definition *workflow.Definition, workflowStep workflow.Step, phase diagnostic.Phase, status diagnostic.Status, started time.Time, message string, err error, attributes ...diagnostic.Attribute) {
+	attributes = append(attributes, diagnostic.ErrorAttributes(err)...)
 	event := diagnostic.Event{
 		Phase: phase, Status: status, Time: time.Now(), WorkflowName: definition.Name,
 		StepID: workflowStep.ID, StepType: executionKind(workflowStep), Location: workflowStep.Location,

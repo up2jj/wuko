@@ -1,7 +1,11 @@
 // Package diagnostic defines structured, opt-in workflow debugging events.
 package diagnostic
 
-import "time"
+import (
+	"errors"
+	"slices"
+	"time"
+)
 
 // Phase identifies one operation in the workflow lifecycle.
 type Phase string
@@ -57,6 +61,22 @@ type Location struct {
 type Attribute struct {
 	Key   string
 	Value string
+}
+
+// AttributeError enriches a failure with structured diagnostic attributes. Implementations
+// should return safe, preformatted values suitable for diagnostic reporters.
+type AttributeError interface {
+	error
+	DiagnosticAttributes() []Attribute
+}
+
+// ErrorAttributes returns the attributes exposed by the first attributed error in err's chain.
+func ErrorAttributes(err error) []Attribute {
+	var attributed AttributeError
+	if !errors.As(err, &attributed) {
+		return nil
+	}
+	return slices.Clone(attributed.DiagnosticAttributes())
 }
 
 // Event is one synchronous diagnostic record.
