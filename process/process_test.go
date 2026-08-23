@@ -50,7 +50,7 @@ func TestRunAsCurrentUser(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err := Run(t.Context(), Options{
-		Command: "sh", Args: []string{"-c", "id -u"}, Env: map[string]string{}, User: current.Uid,
+		Command: "sh", Args: []string{"-c", "id -u"}, Env: testEnvironment(), User: current.Uid,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -130,7 +130,7 @@ sh -c 'trap "" TERM; while :; do sleep 10; done' &
 printf '%d %d\n' "$$" "$!"
 wait
 `},
-			Env: map[string]string{}, Stdout: ready,
+			Env: testEnvironment(), Stdout: ready,
 		})
 		done <- err
 	}()
@@ -193,7 +193,7 @@ printf 'diagnostic\n' >&2
 stty size
 exit 7
 `},
-			Env: map[string]string{}, Stdin: terminal, Stdout: output, Stderr: io.Discard, TTY: true, CaptureLimit: 1 << 20,
+			Env: testEnvironment(), Stdin: terminal, Stdout: output, Stderr: io.Discard, TTY: true, CaptureLimit: 1 << 20,
 		})
 		done <- struct {
 			result Result
@@ -244,7 +244,7 @@ func TestRunTTYBoundsCaptureWithoutLimitingStream(t *testing.T) {
 	var streamed bytes.Buffer
 	result, err := Run(t.Context(), Options{
 		Command: "sh", Args: []string{"-c", "awk 'BEGIN { for (i = 0; i < 4096; i++) print \"0123456789abcdef\" }'; printf 'END-MARKER'"},
-		Env: map[string]string{}, Stdin: terminal, Stdout: &streamed, TTY: true, CaptureLimit: 1024,
+		Env: testEnvironment(), Stdin: terminal, Stdout: &streamed, TTY: true, CaptureLimit: 1024,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -279,7 +279,7 @@ func TestRunTTYCancellationRestoresTerminal(t *testing.T) {
 	go func() {
 		_, runErr := Run(ctx, Options{
 			Command: "sh", Args: []string{"-c", "printf 'ready:'; sleep 30"},
-			Env: map[string]string{}, Stdin: terminal, Stdout: output, TTY: true,
+			Env: testEnvironment(), Stdin: terminal, Stdout: output, TTY: true,
 		})
 		done <- runErr
 	}()
@@ -324,6 +324,10 @@ func testTerminal(t *testing.T, rows, cols uint16) (*os.File, *os.File) {
 		t.Fatal(err)
 	}
 	return terminal, input
+}
+
+func testEnvironment() map[string]string {
+	return map[string]string{"PATH": os.Getenv("PATH")}
 }
 
 type readyOutput struct {
