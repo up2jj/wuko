@@ -20,8 +20,8 @@ with typed data and files, call APIs, run scripts or containers, and start codin
   key-value, temporary resource, and Docker steps instead of platform-specific shell commands.
 - **Extensible automation** — run Lua, direct commands, inline shell, or an external agent such as
   Codex.
-- **Reusable definitions** — split steps across files and consume public remote workflows or
-  pinned composite actions.
+- **Reusable definitions** — split steps across files, compose local actions, and consume public
+  remote workflows or pinned remote actions.
 - **Visible execution** — get live progress, retry and polling details, run statistics, and
   redacted debug tracing.
 
@@ -256,6 +256,16 @@ Each linked guide contains multiple examples for every step.
 
 ## Common workflow patterns
 
+Choose the composition mechanism by the boundary you need:
+
+- Use `depends_on` when another discovered workflow must run first and publish declared outputs.
+- Use `require` to split one workflow across files while keeping the same state and step sequence.
+- Use `uses` for a reusable composite action with explicit inputs, isolated internals, and declared
+  outputs.
+
+See [Choosing a composition mechanism](docs/execution.md#choosing-a-composition-mechanism) for a
+side-by-side comparison and examples.
+
 Split a long workflow at the point where the steps should be inserted:
 
 ```yaml
@@ -330,7 +340,7 @@ Claude skills are installed under `~/.claude/skills/`; Codex skills are installe
 
 ## Trust model
 
-Workflows and remote actions are trusted code. Lua, shell, agent, Docker, and command-based action
+Workflows and composite actions are trusted code. Lua, shell, agent, Docker, and command-based action
 sources can access local resources with the permissions granted to Wuko. Review publishers, pin
 immutable remote action releases with SHA-256, and do not mount the Docker socket for untrusted
 workflows. Safe archive extraction is not an execution sandbox, and Wuko does not provide a

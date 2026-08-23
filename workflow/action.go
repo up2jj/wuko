@@ -133,7 +133,7 @@ func (action *Action) Materialize() (string, func(), error) {
 	return dir, cleanup, nil
 }
 
-// Loader resolves remote actions while loading a local workflow.
+// Loader resolves composite actions while loading a workflow.
 type Loader struct {
 	client *http.Client
 }
@@ -173,6 +173,12 @@ func (loader *Loader) Decode(filename string, options LoadOptions) (*Definition,
 
 // Prepare resolves value-dependent workflow environment and composite actions in a decoded definition.
 func (loader *Loader) Prepare(ctx context.Context, definition *Definition, options LoadOptions) error {
+	if options.sourceRoot == "" {
+		options.sourceRoot = definition.sourceRoot
+	}
+	if options.sourceLabel == "" {
+		options.sourceLabel = definition.sourceLabel
+	}
 	displaySource := definition.Path
 	if options.sourceLabel != "" {
 		displaySource = options.sourceLabel
@@ -193,16 +199,16 @@ func (loader *Loader) Prepare(ctx context.Context, definition *Definition, optio
 		return err
 	}
 	cache := make(map[string]*Action)
-	if err := loader.resolveActions(ctx, definition.Name, definition.Steps, renderer, data, environment, options.RunDir, true, definition.Dir, cache, options.Diagnostics); err != nil {
+	if err := loader.resolveActions(ctx, definition.Name, definition.Steps, renderer, data, environment, options.RunDir, true, definition.Path, options.sourceRoot, options.sourceLabel, cache, options.Diagnostics); err != nil {
 		return err
 	}
-	if err := loader.resolveActions(ctx, definition.Name, definition.Finally, renderer, data, environment, options.RunDir, true, definition.Dir, cache, options.Diagnostics); err != nil {
+	if err := loader.resolveActions(ctx, definition.Name, definition.Finally, renderer, data, environment, options.RunDir, true, definition.Path, options.sourceRoot, options.sourceLabel, cache, options.Diagnostics); err != nil {
 		return err
 	}
 	return nil
 }
 
-// Load reads a local workflow, expands required step files, and resolves all remote actions.
+// Load reads a local workflow, expands required step files, and resolves all composite actions.
 func (loader *Loader) Load(ctx context.Context, filename string, options LoadOptions) (*Definition, error) {
 	displaySource := filename
 	if options.sourceLabel != "" {
@@ -222,19 +228,19 @@ func (loader *Loader) Load(ctx context.Context, filename string, options LoadOpt
 	return definition, nil
 }
 
-func (loader *Loader) resolveActions(ctx context.Context, workflowName string, steps []Step, renderer *Renderer, data map[string]any, environment map[string]string, runDir string, runDirKnown bool, definitionDir string, cache map[string]*Action, reporter diagnostic.Reporter) error {
+func (loader *Loader) resolveActions(ctx context.Context, workflowName string, steps []Step, renderer *Renderer, data map[string]any, environment map[string]string, runDir string, runDirKnown bool, definitionPath, sourceRoot, sourceLabel string, cache map[string]*Action, reporter diagnostic.Reporter) error {
 	for i := range steps {
 		workflowStep := &steps[i]
 		if !workflowStep.IsExecutorBlock() && workflowStep.IsWorkingDirectoryBlock() {
 			childData, childRunDir, childRunDirKnown := actionWorkingDirectoryScope(renderer, data, runDir, runDirKnown, workflowStep.WorkingDirectory)
-			if err := loader.resolveActions(ctx, workflowName, workflowStep.Steps, renderer, childData, environment, childRunDir, childRunDirKnown, definitionDir, cache, reporter); err != nil {
+			if err := loader.resolveActions(ctx, workflowName, workflowStep.Steps, renderer, childData, environment, childRunDir, childRunDirKnown, definitionPath, sourceRoot, sourceLabel, cache, reporter); err != nil {
 				return err
 			}
 			continue
 		}
 		if children := workflowStep.ChildSequences(); len(children) > 0 {
 			for _, child := range children {
-				if err := loader.resolveActions(ctx, workflowName, child.Steps, renderer, data, environment, runDir, runDirKnown, definitionDir, cache, reporter); err != nil {
+				if err := loader.resolveActions(ctx, workflowName, child.Steps, renderer, data, environment, runDir, runDirKnown, definitionPath, sourceRoot, sourceLabel, cache, reporter); err != nil {
 					return err
 				}
 			}
@@ -244,47 +250,66 @@ func (loader *Loader) resolveActions(ctx context.Context, workflowName string, s
 			continue
 		}
 		started := traceStart(reporter, diagnostic.PhaseActionResolve, workflowStep.Location, workflowName, workflowStep.ID, "uses", "resolving composite action")
-		if workflowStep.SHA256 != "" && !sha256Pattern.MatchString(workflowStep.SHA256) {
-			err := fmt.Errorf("sha256 must be a 64-character hexadecimal digest")
-			traceFinish(reporter, started, diagnostic.PhaseActionResolve, diagnostic.StatusFailed, workflowStep.Location, workflowName, workflowStep.ID, "uses", "", err)
-			return fmt.Errorf("step %q: sha256 must be a 64-character hexadecimal digest", workflowStep.ID)
+		declarationPath := workflowStep.sourcePath
+		if declarationPath == "" {
+			declarationPath = definitionPath
 		}
-		resolved, key, sourceDescription, fetch, err := loader.resolveSource(ctx, workflowStep.Uses, renderer, data, environment, runDir, runDirKnown)
+		resolution, err := loader.resolveSource(ctx, workflowStep.Uses, renderer, data, environment, runDir, runDirKnown, declarationPath, sourceRoot, sourceLabel)
 		if err != nil {
 			traceFinish(reporter, started, diagnostic.PhaseActionResolve, diagnostic.StatusFailed, workflowStep.Location, workflowName, workflowStep.ID, "uses", "", err)
 			return fmt.Errorf("step %q uses: %w", workflowStep.ID, err)
 		}
-		key += "\x00" + strings.ToLower(workflowStep.SHA256)
+		if resolution.local && workflowStep.SHA256 != "" {
+			err := fmt.Errorf("sha256 is not supported for local actions")
+			traceFinish(reporter, started, diagnostic.PhaseActionResolve, diagnostic.StatusFailed, workflowStep.Location, workflowName, workflowStep.ID, "uses", "", err)
+			return fmt.Errorf("step %q: %w", workflowStep.ID, err)
+		}
+		if !resolution.local && workflowStep.SHA256 != "" && !sha256Pattern.MatchString(workflowStep.SHA256) {
+			err := fmt.Errorf("sha256 must be a 64-character hexadecimal digest")
+			traceFinish(reporter, started, diagnostic.PhaseActionResolve, diagnostic.StatusFailed, workflowStep.Location, workflowName, workflowStep.ID, "uses", "", err)
+			return fmt.Errorf("step %q: %w", workflowStep.ID, err)
+		}
+		key := resolution.key + "\x00" + strings.ToLower(workflowStep.SHA256)
 		action := cache[key]
 		if action == nil {
-			fetchStarted := traceStart(reporter, diagnostic.PhaseActionFetch, workflowStep.Location, workflowName, workflowStep.ID, "uses", sourceDescription)
-			payload, err := fetch()
+			fetchStarted := traceStart(reporter, diagnostic.PhaseActionFetch, workflowStep.Location, workflowName, workflowStep.ID, "uses", resolution.description)
+			payload, err := resolution.fetch()
 			if err != nil {
 				traceFinish(reporter, fetchStarted, diagnostic.PhaseActionFetch, diagnostic.StatusFailed, workflowStep.Location, workflowName, workflowStep.ID, "uses", "", err)
 				traceFinish(reporter, started, diagnostic.PhaseActionResolve, diagnostic.StatusFailed, workflowStep.Location, workflowName, workflowStep.ID, "uses", "", nil)
 				return fmt.Errorf("step %q uses: %w", workflowStep.ID, err)
 			}
 			traceFinish(reporter, fetchStarted, diagnostic.PhaseActionFetch, diagnostic.StatusSucceeded, workflowStep.Location, workflowName, workflowStep.ID, "uses", "", nil, countAttr("bytes", len(payload)))
-			checksumStarted := traceStart(reporter, diagnostic.PhaseActionChecksum, workflowStep.Location, workflowName, workflowStep.ID, "uses", "verifying action checksum")
-			if err := verifyChecksum(payload, workflowStep.SHA256); err != nil {
-				traceFinish(reporter, checksumStarted, diagnostic.PhaseActionChecksum, diagnostic.StatusFailed, workflowStep.Location, workflowName, workflowStep.ID, "uses", "", err)
-				traceFinish(reporter, started, diagnostic.PhaseActionResolve, diagnostic.StatusFailed, workflowStep.Location, workflowName, workflowStep.ID, "uses", "", nil)
-				return fmt.Errorf("step %q: %w", workflowStep.ID, err)
+			if !resolution.local {
+				checksumStarted := traceStart(reporter, diagnostic.PhaseActionChecksum, workflowStep.Location, workflowName, workflowStep.ID, "uses", "verifying action checksum")
+				if err := verifyChecksum(payload, workflowStep.SHA256); err != nil {
+					traceFinish(reporter, checksumStarted, diagnostic.PhaseActionChecksum, diagnostic.StatusFailed, workflowStep.Location, workflowName, workflowStep.ID, "uses", "", err)
+					traceFinish(reporter, started, diagnostic.PhaseActionResolve, diagnostic.StatusFailed, workflowStep.Location, workflowName, workflowStep.ID, "uses", "", nil)
+					return fmt.Errorf("step %q: %w", workflowStep.ID, err)
+				}
+				traceFinish(reporter, checksumStarted, diagnostic.PhaseActionChecksum, diagnostic.StatusSucceeded, workflowStep.Location, workflowName, workflowStep.ID, "uses", "", nil)
 			}
-			traceFinish(reporter, checksumStarted, diagnostic.PhaseActionChecksum, diagnostic.StatusSucceeded, workflowStep.Location, workflowName, workflowStep.ID, "uses", "", nil)
-			decodeStarted := traceStart(reporter, diagnostic.PhaseActionDecode, workflowStep.Location, workflowName, workflowStep.ID, "uses", sourceDescription)
-			action, err = decodeActionPayload(payload, definitionDir, sourceDescription)
+			decodeStarted := traceStart(reporter, diagnostic.PhaseActionDecode, workflowStep.Location, workflowName, workflowStep.ID, "uses", resolution.description)
+			if resolution.local {
+				if isZIP(payload) || len(payload) >= 2 && payload[0] == 0x1f && payload[1] == 0x8b {
+					err = fmt.Errorf("local action path must reference a YAML manifest; archives are not supported")
+				} else {
+					action, err = decodeAction(payload, "local action manifest", resolution.actionDir, nil, resolution.description, resolution.actionDir)
+				}
+			} else {
+				action, err = decodeActionPayload(payload, filepath.Dir(definitionPath), resolution.description)
+			}
 			if err != nil {
 				traceFinish(reporter, decodeStarted, diagnostic.PhaseActionDecode, diagnostic.StatusFailed, workflowStep.Location, workflowName, workflowStep.ID, "uses", "", err)
 				traceFinish(reporter, started, diagnostic.PhaseActionResolve, diagnostic.StatusFailed, workflowStep.Location, workflowName, workflowStep.ID, "uses", "", nil)
-				return fmt.Errorf("step %q action %s: %w", workflowStep.ID, sourceDescription, err)
+				return fmt.Errorf("step %q action %s: %w", workflowStep.ID, resolution.description, err)
 			}
 			traceFinish(reporter, decodeStarted, diagnostic.PhaseActionDecode, diagnostic.StatusSucceeded, action.Location, workflowName, workflowStep.ID, "uses", action.Name, nil, countAttr("steps", len(action.Steps)))
 			cache[key] = action
 		} else {
 			diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseActionFetch, Status: diagnostic.StatusSkipped, WorkflowName: workflowName, StepID: workflowStep.ID, StepType: "uses", Location: workflowStep.Location, Message: "using cached action"})
 		}
-		workflowStep.Uses = resolved
+		workflowStep.Uses = resolution.source
 		workflowStep.Action = action
 		traceFinish(reporter, started, diagnostic.PhaseActionResolve, diagnostic.StatusSucceeded, workflowStep.Location, workflowName, workflowStep.ID, "uses", action.Name, nil)
 	}
@@ -312,45 +337,70 @@ func templateDataWithRunDir(data map[string]any, runDir string) map[string]any {
 	return result
 }
 
-func (loader *Loader) resolveSource(ctx context.Context, source ActionSource, renderer *Renderer, data map[string]any, environment map[string]string, runDir string, runDirKnown bool) (ActionSource, string, string, func() ([]byte, error), error) {
-	if source.URL != "" {
-		resolved, err := renderer.Render(source.URL, data)
+type actionSourceResolution struct {
+	source      ActionSource
+	key         string
+	description string
+	fetch       func() ([]byte, error)
+	actionDir   string
+	local       bool
+}
+
+func (loader *Loader) resolveSource(ctx context.Context, source ActionSource, renderer *Renderer, data map[string]any, environment map[string]string, runDir string, runDirKnown bool, declarationPath, sourceRoot, sourceLabel string) (actionSourceResolution, error) {
+	if source.URL != "" || source.Path != "" {
+		reference := source.URL
+		if reference == "" {
+			reference = source.Path
+		}
+		resolved, err := renderer.Render(reference, data)
 		if err != nil {
-			return ActionSource{}, "", "", nil, err
+			return actionSourceResolution{}, err
+		}
+		if strings.TrimSpace(resolved) == "" {
+			return actionSourceResolution{}, fmt.Errorf("rendered action source is empty")
 		}
 		if !runDirKnown && strings.Contains(resolved, dynamicRunDir) {
-			return ActionSource{}, "", "", nil, fmt.Errorf("action URL depends on a working_directory that is resolved at runtime")
+			return actionSourceResolution{}, fmt.Errorf("action source depends on a working_directory that is resolved at runtime")
 		}
-		remoteURL, err := validateActionURL(resolved)
-		if err != nil {
-			return ActionSource{}, "", "", nil, err
+		if filepath.IsAbs(resolved) {
+			return actionSourceResolution{}, fmt.Errorf("local action path %q must be relative", resolved)
 		}
-		return ActionSource{URL: resolved}, "url\x00" + remoteURL.String(), safeURL(remoteURL), func() ([]byte, error) {
-			return loader.fetch(ctx, remoteURL)
-		}, nil
+		parsed, parseErr := url.Parse(resolved)
+		if source.URL != "" || strings.Contains(resolved, "://") || parseErr == nil && parsed.Scheme != "" {
+			remoteURL, err := validateActionURL(resolved)
+			if err != nil {
+				return actionSourceResolution{}, err
+			}
+			return actionSourceResolution{
+				source: ActionSource{URL: resolved},
+				key:    "url\x00" + remoteURL.String(), description: safeURL(remoteURL),
+				fetch: func() ([]byte, error) { return loader.fetch(ctx, remoteURL) },
+			}, nil
+		}
+		return resolveLocalActionSource(resolved, declarationPath, sourceRoot, sourceLabel)
 	}
 	if !runDirKnown {
-		return ActionSource{}, "", "", nil, fmt.Errorf("command action source requires a working_directory that can be resolved while loading the workflow")
+		return actionSourceResolution{}, fmt.Errorf("command action source requires a working_directory that can be resolved while loading the workflow")
 	}
 
 	command, err := renderer.Render(source.Command, data)
 	if err != nil {
-		return ActionSource{}, "", "", nil, fmt.Errorf("rendering command: %w", err)
+		return actionSourceResolution{}, fmt.Errorf("rendering command: %w", err)
 	}
 	if strings.TrimSpace(command) == "" {
-		return ActionSource{}, "", "", nil, fmt.Errorf("rendered command is empty")
+		return actionSourceResolution{}, fmt.Errorf("rendered command is empty")
 	}
 	args := make([]string, len(source.Args))
 	for i, argument := range source.Args {
 		args[i], err = renderer.Render(argument, data)
 		if err != nil {
-			return ActionSource{}, "", "", nil, fmt.Errorf("rendering command argument %d: %w", i+1, err)
+			return actionSourceResolution{}, fmt.Errorf("rendering command argument %d: %w", i+1, err)
 		}
 	}
 	resolved := ActionSource{Command: command, Args: args}
 	keyData, err := json.Marshal(resolved)
 	if err != nil {
-		return ActionSource{}, "", "", nil, fmt.Errorf("encoding command source: %w", err)
+		return actionSourceResolution{}, fmt.Errorf("encoding command source: %w", err)
 	}
 	fetch := func() ([]byte, error) {
 		commandCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -374,7 +424,89 @@ func (loader *Loader) resolveSource(ctx context.Context, source ActionSource, re
 		}
 		return []byte(result.Stdout), nil
 	}
-	return resolved, "command\x00" + runDir + "\x00" + string(keyData), fmt.Sprintf("command %q", command), fetch, nil
+	return actionSourceResolution{
+		source:      resolved,
+		key:         "command\x00" + runDir + "\x00" + string(keyData),
+		description: fmt.Sprintf("command %q", command), fetch: fetch,
+	}, nil
+}
+
+func resolveLocalActionSource(reference, declarationPath, sourceRoot, sourceLabel string) (actionSourceResolution, error) {
+	if filepath.IsAbs(reference) {
+		return actionSourceResolution{}, fmt.Errorf("local action path %q must be relative", reference)
+	}
+	manifestPath := filepath.Join(filepath.Dir(declarationPath), filepath.FromSlash(reference))
+	info, err := os.Stat(manifestPath)
+	if err != nil {
+		return actionSourceResolution{}, fmt.Errorf("locating local action %q: %w", reference, err)
+	}
+	if info.IsDir() {
+		manifestPath, err = localActionManifest(manifestPath)
+		if err != nil {
+			return actionSourceResolution{}, fmt.Errorf("locating local action %q: %w", reference, err)
+		}
+	} else if !info.Mode().IsRegular() {
+		return actionSourceResolution{}, fmt.Errorf("local action path %q must reference a regular file or directory", reference)
+	}
+	manifestPath, err = canonicalFilePath(manifestPath)
+	if err != nil {
+		return actionSourceResolution{}, fmt.Errorf("resolving local action %q: %w", reference, err)
+	}
+	description := manifestPath
+	if sourceLabel != "" {
+		logicalRoot := sourceRoot
+		if canonicalRoot, canonicalErr := filepath.EvalSymlinks(sourceRoot); canonicalErr == nil {
+			logicalRoot = canonicalRoot
+		}
+		description = remapSource(manifestPath, logicalRoot, sourceLabel)
+	}
+	return actionSourceResolution{
+		source: ActionSource{Path: reference},
+		key:    "path\x00" + manifestPath, description: description,
+		fetch:     func() ([]byte, error) { return readLocalActionManifest(manifestPath) },
+		actionDir: filepath.Dir(manifestPath), local: true,
+	}, nil
+}
+
+func localActionManifest(directory string) (string, error) {
+	var manifest string
+	for _, name := range []string{"action.yml", "action.yaml"} {
+		candidate := filepath.Join(directory, name)
+		info, err := os.Stat(candidate)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return "", err
+		}
+		if !info.Mode().IsRegular() {
+			return "", fmt.Errorf("%s must be a regular file", name)
+		}
+		if manifest != "" {
+			return "", fmt.Errorf("directory contains both action.yml and action.yaml")
+		}
+		manifest = candidate
+	}
+	if manifest == "" {
+		return "", fmt.Errorf("directory must contain action.yml or action.yaml")
+	}
+	return manifest, nil
+}
+
+func readLocalActionManifest(manifestPath string) ([]byte, error) {
+	file, err := os.Open(manifestPath)
+	if err != nil {
+		return nil, fmt.Errorf("reading local action manifest: %w", err)
+	}
+	defer file.Close()
+	payload, err := io.ReadAll(io.LimitReader(file, maxManifestSize+1))
+	if err != nil {
+		return nil, fmt.Errorf("reading local action manifest: %w", err)
+	}
+	if len(payload) > maxManifestSize {
+		return nil, fmt.Errorf("local action manifest exceeds %d-byte limit", maxManifestSize)
+	}
+	return payload, nil
 }
 
 func validateActionURL(raw string) (*url.URL, error) {
@@ -450,18 +582,18 @@ func decodeActionPayload(payload []byte, callerDir, source string) (*Action, err
 		if err != nil {
 			return nil, err
 		}
-		return decodeAction(manifest, "archived action", "", files, archivedActionSource(source, files))
+		return decodeAction(manifest, "archived action", "", files, archivedActionSource(source, files), "")
 	case len(payload) >= 2 && payload[0] == 0x1f && payload[1] == 0x8b:
 		manifest, files, err := unpackTarGzip(payload)
 		if err != nil {
 			return nil, err
 		}
-		return decodeAction(manifest, "archived action", "", files, archivedActionSource(source, files))
+		return decodeAction(manifest, "archived action", "", files, archivedActionSource(source, files), "")
 	default:
 		if len(payload) > maxManifestSize {
 			return nil, fmt.Errorf("manifest exceeds %d-byte limit", maxManifestSize)
 		}
-		return decodeAction(payload, "action manifest", callerDir, nil, source)
+		return decodeAction(payload, "action manifest", callerDir, nil, source, "")
 	}
 }
 
@@ -472,7 +604,7 @@ func archivedActionSource(source string, files map[string]ActionFile) string {
 	return source + "::action.yml"
 }
 
-func decodeAction(data []byte, description, dir string, files map[string]ActionFile, logicalSource string) (*Action, error) {
+func decodeAction(data []byte, description, dir string, files map[string]ActionFile, logicalSource, localFileRoot string) (*Action, error) {
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	decoder.KnownFields(true)
 	var action Action
@@ -488,14 +620,14 @@ func decodeAction(data []byte, description, dir string, files map[string]ActionF
 	}
 	action.Dir = dir
 	action.Files = files
-	if action.Files == nil {
+	if action.Files == nil && localFileRoot == "" {
 		for name, definition := range action.Templates {
 			if definition.File != "" {
 				return nil, fmt.Errorf("loading %s templates: template %q file %q requires a packaged action", description, name, definition.File)
 			}
 		}
 	}
-	if err := resolveTemplateFiles(action.Templates, action.Dir, action.Files, ""); err != nil {
+	if err := resolveTemplateFiles(action.Templates, action.Dir, action.Files, localFileRoot); err != nil {
 		return nil, fmt.Errorf("loading %s templates: %w", description, err)
 	}
 	annotateActionLocations(data, &action, logicalSource)

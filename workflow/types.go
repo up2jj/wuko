@@ -33,17 +33,19 @@ type Definition struct {
 	DependsOn   map[string]string         `yaml:"depends_on,omitempty"`
 	Outputs     map[string]WorkflowOutput `yaml:"outputs,omitempty"`
 	// Form is intentionally opaque to core workflow execution. The optional browser UI decodes it.
-	Form      yaml.Node                     `yaml:"form,omitempty"`
-	Cron      string                        `yaml:"cron,omitempty"`
-	Timezone  string                        `yaml:"timezone,omitempty"`
-	Templates map[string]TemplateDefinition `yaml:"templates,omitempty"`
-	Vars      map[string]any                `yaml:"vars,omitempty"`
-	Env       Environment                   `yaml:"env,omitempty"`
-	Steps     []Step                        `yaml:"steps"`
-	Finally   []Step                        `yaml:"finally,omitempty"`
-	Path      string                        `yaml:"-"`
-	Dir       string                        `yaml:"-"`
-	Location  diagnostic.Location           `yaml:"-"`
+	Form        yaml.Node                     `yaml:"form,omitempty"`
+	Cron        string                        `yaml:"cron,omitempty"`
+	Timezone    string                        `yaml:"timezone,omitempty"`
+	Templates   map[string]TemplateDefinition `yaml:"templates,omitempty"`
+	Vars        map[string]any                `yaml:"vars,omitempty"`
+	Env         Environment                   `yaml:"env,omitempty"`
+	Steps       []Step                        `yaml:"steps"`
+	Finally     []Step                        `yaml:"finally,omitempty"`
+	Path        string                        `yaml:"-"`
+	Dir         string                        `yaml:"-"`
+	Location    diagnostic.Location           `yaml:"-"`
+	sourceRoot  string
+	sourceLabel string
 }
 
 // HasForm reports whether the workflow contains a non-null browser form declaration.
@@ -85,7 +87,7 @@ func (c *Condition) UnmarshalYAML(node *yaml.Node) error {
 }
 
 // Step declares a concrete step, a transparent conditional or working-directory block, a return
-// control, a remote composite action, or a local step-file requirement.
+// control, a composite action, or a local step-file requirement.
 type Step struct {
 	ID               string              `yaml:"id"`
 	Type             string              `yaml:"type,omitempty"`
@@ -108,6 +110,7 @@ type Step struct {
 	Action           *Action             `yaml:"-"`
 	Location         diagnostic.Location `yaml:"-"`
 	hasWorkingDir    bool
+	sourcePath       string
 }
 
 func (workflowStep *Step) UnmarshalYAML(node *yaml.Node) error {
@@ -350,9 +353,10 @@ func (policy *RetryPolicy) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
-// ActionSource identifies action bytes fetched from HTTPS or produced by a local command.
+// ActionSource identifies an action loaded from HTTPS, a local path, or a command.
 type ActionSource struct {
 	URL     string
+	Path    string
 	Command string
 	Args    []string
 }
@@ -361,9 +365,13 @@ func (source *ActionSource) UnmarshalYAML(node *yaml.Node) error {
 	switch node.Kind {
 	case yaml.ScalarNode:
 		if node.Tag != "!!str" || strings.TrimSpace(node.Value) == "" {
-			return fmt.Errorf("uses must be a non-empty HTTPS URL or command object")
+			return fmt.Errorf("uses must be a non-empty HTTPS URL, relative path, or command object")
 		}
-		source.URL = node.Value
+		if strings.HasPrefix(node.Value, "https://") || strings.HasPrefix(node.Value, "http://") {
+			source.URL = node.Value
+		} else {
+			source.Path = node.Value
+		}
 		return nil
 	case yaml.MappingNode:
 		allowed := map[string]bool{"command": true, "args": true}
@@ -385,12 +393,14 @@ func (source *ActionSource) UnmarshalYAML(node *yaml.Node) error {
 		source.Command, source.Args = raw.Command, raw.Args
 		return nil
 	default:
-		return fmt.Errorf("uses must be a non-empty HTTPS URL or command object")
+		return fmt.Errorf("uses must be a non-empty HTTPS URL, relative path, or command object")
 	}
 }
 
 // Empty reports whether no action source was declared.
-func (source ActionSource) Empty() bool { return source.URL == "" && source.Command == "" }
+func (source ActionSource) Empty() bool {
+	return source.URL == "" && source.Path == "" && source.Command == ""
+}
 
 // Display returns a safe description that excludes command arguments and URL query strings.
 func (source ActionSource) Display() string {
@@ -401,6 +411,9 @@ func (source ActionSource) Display() string {
 			return parsed.String()
 		}
 		return source.URL
+	}
+	if source.Path != "" {
+		return source.Path
 	}
 	return source.Command
 }
@@ -458,6 +471,8 @@ func loadLocalWithDiagnostics(path string, reporter diagnostic.Reporter, sourceR
 	}
 	definition.Path = abs
 	definition.Dir = filepath.Dir(abs)
+	definition.sourceRoot = sourceRoot
+	definition.sourceLabel = sourceLabel
 	if err := resolveTemplateFiles(definition.Templates, definition.Dir, nil, sourceRoot); err != nil {
 		return nil, fmt.Errorf("loading workflow templates from %s: %w", displaySource, err)
 	}
@@ -651,7 +666,7 @@ func validateSteps(steps []Step, allowActions bool, scope stepScope, seen map[st
 			return fmt.Errorf("step %q must set exactly one of type or uses", workflowStep.ID)
 		}
 		if !workflowStep.Uses.Empty() && !allowActions {
-			return fmt.Errorf("step %q: nested remote actions are not supported", workflowStep.ID)
+			return fmt.Errorf("step %q: nested composite actions are not supported", workflowStep.ID)
 		}
 		if workflowStep.Uses.Empty() && workflowStep.SHA256 != "" {
 			return fmt.Errorf("step %q: sha256 requires uses", workflowStep.ID)

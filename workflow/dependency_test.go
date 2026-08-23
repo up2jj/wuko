@@ -149,7 +149,8 @@ func TestLoaderRejectsDependencyOutputsInLoadTimeFields(t *testing.T) {
 		want string
 	}{
 		{name: "environment", body: "env:\n  TOKEN: '{{ .dependencies.auth.token }}'\nsteps:\n  - return: {outputs: {}}\n", want: "available only at runtime"},
-		{name: "action source", body: "steps:\n  - id: call\n    uses: https://example.test/{{ .dependencies.build.version }}\n", want: "action sources are resolved while loading"},
+		{name: "remote action source", body: "steps:\n  - id: call\n    uses: https://example.test/{{ .dependencies.build.version }}\n", want: "action sources are resolved while loading"},
+		{name: "local action source", body: "steps:\n  - id: call\n    uses: ./actions/{{ .dependencies.build.version }}\n", want: "action sources are resolved while loading"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

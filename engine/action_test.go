@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -18,6 +20,96 @@ type actionRetryRunner struct {
 	kind       string
 	failures   *int
 	recordKeys *[]string
+}
+
+func TestLocalActionUsesCompositeInputOutputExecutionModel(t *testing.T) {
+	dir := t.TempDir()
+	actionDir := filepath.Join(dir, "actions", "echo")
+	if err := os.MkdirAll(actionDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(actionDir, "action.yaml"), []byte(`version: 1
+name: local-echo
+inputs:
+  value: {type: string, required: true}
+outputs:
+  result: {value: steps.echo.value}
+steps:
+  - id: echo
+    type: capture
+    with: {value: '{{ .inputs.value }}'}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	workflowPath := filepath.Join(dir, "workflow.yaml")
+	if err := os.WriteFile(workflowPath, []byte(`version: 1
+name: caller
+steps:
+  - id: local
+    uses: ./actions/echo
+    with: {value: hello}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	definition, err := workflow.NewLoader(nil).Load(t.Context(), workflowPath, workflow.LoadOptions{RunDir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var runs int
+	registry := newTestRegistry(t, map[string]step.Builder{"capture": func(raw map[string]any) (step.Runner, error) {
+		return countingRunner{value: raw["value"], runs: &runs}, nil
+	}})
+	state, err := New(registry).Run(t.Context(), definition, Options{RunDir: dir, Stdout: io.Discard, Stderr: io.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runs != 1 {
+		t.Fatalf("local action runs = %d, want 1", runs)
+	}
+	if got := state.Steps["local"].(map[string]any)["result"]; got != "hello" {
+		t.Fatalf("local action output = %#v", got)
+	}
+}
+
+func TestLocalActionResolvesCompanionLuaFromActionRoot(t *testing.T) {
+	dir := t.TempDir()
+	actionDir := filepath.Join(dir, "action")
+	if err := os.MkdirAll(filepath.Join(actionDir, "scripts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(actionDir, "action.yml"), []byte(`version: 1
+name: local-script
+outputs:
+  result: {value: steps.script.value}
+steps:
+  - id: script
+    type: lua
+    with: {file: scripts/action.lua}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(actionDir, "scripts", "action.lua"), []byte(`wuko.output("value", "from-local-action")`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	workflowPath := filepath.Join(dir, "workflow.yaml")
+	if err := os.WriteFile(workflowPath, []byte("version: 1\nname: caller\nsteps:\n  - id: local\n    uses: ./action\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	definition, err := workflow.NewLoader(nil).Load(t.Context(), workflowPath, workflow.LoadOptions{RunDir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := newTestRegistry(t, nil)
+	if err := luastep.Register(registry); err != nil {
+		t.Fatal(err)
+	}
+	state, err := New(registry).Run(t.Context(), definition, Options{RunDir: dir, Stdout: io.Discard, Stderr: io.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := state.Steps["local"].(map[string]any)["result"]; got != "from-local-action" {
+		t.Fatalf("local action output = %#v", got)
+	}
 }
 
 func (runner actionRetryRunner) Run(_ context.Context, request step.Request) (step.Result, error) {

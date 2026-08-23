@@ -127,9 +127,10 @@ templates/
 A workflow fetched as a single YAML document has no companion files. Publish a ZIP or gzip tar
 archive when it uses file-backed templates.
 
-Composite actions may declare their own inline and file-backed templates. File-backed action
-templates must be included in an action archive alongside `action.yml` or `action.yaml`; a
-standalone action manifest cannot reference companion template files.
+Composite actions may declare their own inline and file-backed templates. A local action reads
+template files from its manifest directory and keeps them within that action root. A remote or
+command-fetched action must include file-backed templates in an archive alongside `action.yml` or
+`action.yaml`; a standalone fetched manifest cannot carry companion template files.
 
 Caller and action template namespaces are isolated. Templates used in the caller's `with`
 bindings come from the caller workflow. Templates used by the action's internal steps come from

@@ -10,11 +10,11 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
 ## Workflow
 
 1. Inspect `README.md`, nearby workflows, referenced files, and the repository state before editing. Treat the task brief and existing workflow behavior as requirements.
-2. Model the workflow with `version: 1`, a stable `name`, a useful `description`, explicit `vars` and `env`, and an ordered `steps` list. Wuko does not infer a dependency graph or reorder steps.
+2. Model the workflow with `version: 1`, a stable `name`, a useful `description`, explicit `vars` and `env`, and an ordered `steps` list. Wuko does not infer a dependency graph or reorder steps. Use `depends_on` for independently runnable prerequisite workflows with declared outputs, `require` only to split the current workflow without a state boundary, and `uses` for reusable behavior behind declared action inputs and outputs.
 3. Choose the smallest appropriate step type. Declare every producer before its consumers. Use an anonymous `if` plus `steps` wrapper when several sequential children share one condition, `working_directory` plus `steps` when children share an existing run directory, `concurrent` for a fixed set of independent children, `foreach` for a runtime list, and `matrix` for a Cartesian product. Put consumers after the complete group or control.
 4. Render dynamic values with the documented template roots. Keep one-off substitutions inline; introduce a named template only for genuine reuse or a substantial multiline artifact. Use `if` only for boolean expressions and guard references to skipped steps with membership checks.
 5. Keep local paths relative to the file or workflow context that resolves them. Preserve unique step IDs across required files, concurrent children, main steps, finally cleanup, and composite actions.
-6. Treat shell, Lua, Docker, remote actions, and agents as trusted executable code. Keep credentials in environment values, never in workflow text, arguments, URLs, logs, or operation IDs.
+6. Treat shell, Lua, Docker, composite actions, and agents as trusted executable code. Keep credentials in environment values, never in workflow text, arguments, URLs, logs, or operation IDs.
 
 ## Step selection
 
@@ -134,7 +134,11 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
   controls cannot nest, and parallel controls are non-interactive. Consult
   `docs/workflow-control.md` when it is available in the project for the complete schema and
   limitations.
-- Pin remote composite actions with an immutable release and `sha256` when reproducibility or supply-chain trust matters.
+- Use a relative `uses` path for a local composite action. It may name a manifest or a directory
+  containing exactly one `action.yml` or `action.yaml`, and resolves from the workflow or required
+  fragment containing the declaration. Local actions use companion files from their action root
+  and reject `sha256`; pin remote composite actions with an immutable release and `sha256` when
+  reproducibility or supply-chain trust matters.
 - Keep provider-specific CLI flags in the `agent` step configuration. Keep the prompt itself portable across Claude and Codex.
 
 ## Verification

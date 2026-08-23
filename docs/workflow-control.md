@@ -398,9 +398,11 @@ Required step fragments can appear inside batch, foreach, and matrix bodies. Rel
 resolve from the file containing the `require` entry.
 
 Composite actions may also be children. Their `with` values and typed input expressions can use
-the active batch, foreach, or matrix bindings. The `uses` source is resolved while loading the workflow,
-before iterations exist, so it cannot reference `.batch`, `.foreach`, or `.matrix`. Choose a static action
-source and pass the varying value as an action input.
+the active batch, foreach, or matrix bindings. Every `uses` source is resolved while loading the
+workflow, before iterations exist, so it cannot reference `.batch`, `.foreach`, or `.matrix`.
+Choose a static action source and pass the varying value as an action input. A local action path in
+a required fragment resolves from the fragment containing the `uses`, not from the top-level
+workflow or an active `working_directory`.
 
 ## Conditions, inspection, and dry runs
 

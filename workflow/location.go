@@ -55,6 +55,7 @@ func annotateSteps(steps []Step, sequence *yaml.Node, source string) {
 	for i := range min(len(steps), len(sequence.Content)) {
 		node := sequence.Content[i]
 		steps[i].Location = nodeLocation(node, source)
+		steps[i].sourcePath = source
 		if node.Kind != yaml.MappingNode {
 			continue
 		}

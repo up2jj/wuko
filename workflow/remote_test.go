@@ -204,6 +204,35 @@ func TestLoadRemoteArchiveExpandsRequiredStepFiles(t *testing.T) {
 	}
 }
 
+func TestLoadRemoteArchiveResolvesLocalActionFromRequiredFragment(t *testing.T) {
+	payload := makeZIP(t, map[string]archiveTestFile{
+		"wuko.yaml": {
+			data: []byte("version: 1\nname: remote\nsteps:\n  - require: fragments/build.yaml\n"),
+			mode: 0o644,
+		},
+		"fragments/build.yaml": {
+			data: []byte("- id: build\n  uses: ../actions/build\n  with: {target: linux}\n"),
+			mode: 0o644,
+		},
+		"actions/build/action.yaml": {data: []byte(validAction), mode: 0o644},
+	})
+	client := testHTTPClient(func(*http.Request) (*http.Response, error) {
+		return testResponse(http.StatusOK, payload), nil
+	})
+
+	definition, cleanup, err := NewLoader(client).LoadRemote(t.Context(), "https://example.test/workflow.zip", LoadOptions{RunDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	if definition.Steps[0].Action == nil {
+		t.Fatal("local action was not resolved from remote workflow archive")
+	}
+	if got := definition.Steps[0].Action.Location.Source; got != "https://example.test/workflow.zip::actions/build/action.yaml" {
+		t.Fatalf("action source = %q", got)
+	}
+}
+
 func TestLoadRemoteRejectsInvalidWorkflowArchives(t *testing.T) {
 	tests := map[string][]byte{
 		"missing manifest": makeZIP(t, map[string]archiveTestFile{

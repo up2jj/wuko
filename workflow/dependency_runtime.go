@@ -16,7 +16,7 @@ func validateDependencyRuntimeOnly(definition *Definition) error {
 
 func validateActionSourcesWithoutDependencies(steps []Step) error {
 	for _, workflowStep := range steps {
-		if dependencyReference(workflowStep.Uses.URL) || dependencyReference(workflowStep.Uses.Command) {
+		if dependencyReference(workflowStep.Uses.URL) || dependencyReference(workflowStep.Uses.Path) || dependencyReference(workflowStep.Uses.Command) {
 			return fmt.Errorf("step %q uses cannot reference dependencies; action sources are resolved while loading", workflowStep.ID)
 		}
 		for _, arg := range workflowStep.Uses.Args {

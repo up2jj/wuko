@@ -39,9 +39,9 @@ single-document Wuko workflow: known YAML fields, version, required steps, step 
 schema are checked. `require` step fragments are expanded relative to the file that references
 them, including nested fragments.
 
-Discovery does not fetch or resolve remote composite actions referenced by `uses`. Remote action
-resolution happens later when a workflow is fully loaded for execution, validation, or tree
-rendering.
+Discovery does not resolve composite actions referenced by `uses`, whether their source is a local
+path, HTTPS URL, or command. Action resolution happens later when a workflow is fully prepared for
+execution, validation, or tree rendering.
 
 An error in any discovered candidate aborts the discovery operation, including an error in a
 workflow that would otherwise be shadowed by a closer definition. Missing directories are the

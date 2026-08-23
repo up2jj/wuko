@@ -82,6 +82,143 @@ steps:
 	}
 }
 
+func TestLoaderResolvesAndCachesLocalActionFileAndDirectory(t *testing.T) {
+	dir := t.TempDir()
+	actionDir := filepath.Join(dir, "actions", "build")
+	writeTestFile(t, filepath.Join(actionDir, "action.yaml"), `version: 1
+name: local-build
+templates:
+  message:
+    file: templates/message.tmpl
+inputs:
+  target: {type: string, required: true}
+outputs:
+  result: {value: steps.build.value}
+steps:
+  - id: build
+    type: capture
+    with: {value: '{{ template "message" . }}'}
+`)
+	writeTestFile(t, filepath.Join(actionDir, "templates", "message.tmpl"), "building {{ .inputs.target }}")
+	workflowPath := filepath.Join(dir, "workflow.yaml")
+	writeTestFile(t, workflowPath, `version: 1
+name: caller
+vars: {action: build}
+steps:
+  - id: directory
+    uses: ./actions/{{ .vars.action }}
+    with: {target: linux}
+  - id: manifest
+    uses: ./actions/build/action.yaml
+    with: {target: darwin}
+`)
+
+	definition, err := NewLoader(nil).Load(t.Context(), workflowPath, LoadOptions{RunDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, second := definition.Steps[0], definition.Steps[1]
+	if first.Action == nil || first.Action != second.Action {
+		t.Fatalf("local actions were not resolved through one cache entry: %#v %#v", first.Action, second.Action)
+	}
+	canonicalDir, err := filepath.EvalSymlinks(actionDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Action.Dir != canonicalDir {
+		t.Fatalf("action dir = %q, want %q", first.Action.Dir, canonicalDir)
+	}
+	if got := first.Action.Templates["message"].Body; got != "building {{ .inputs.target }}" {
+		t.Fatalf("template body = %q", got)
+	}
+	if first.Uses.Path != "./actions/build" || second.Uses.Path != "./actions/build/action.yaml" {
+		t.Fatalf("resolved uses = %#v, %#v", first.Uses, second.Uses)
+	}
+	if want := filepath.Join(canonicalDir, "action.yaml"); first.Action.Location.Source != want {
+		t.Fatalf("action source = %q, want %q", first.Action.Location.Source, want)
+	}
+}
+
+func TestLoaderResolvesLocalActionRelativeToRequiredFragment(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "workflow.yaml"), "version: 1\nname: caller\nsteps:\n  - require: fragments/build.yaml\n")
+	writeTestFile(t, filepath.Join(dir, "fragments", "build.yaml"), "- id: build\n  uses: ./actions/build\n  with: {target: linux}\n")
+	writeTestFile(t, filepath.Join(dir, "fragments", "actions", "build", "action.yml"), validAction)
+
+	definition, err := NewLoader(nil).Load(t.Context(), filepath.Join(dir, "workflow.yaml"), LoadOptions{RunDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := filepath.EvalSymlinks(filepath.Join(dir, "fragments", "actions", "build"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := definition.Steps[0].Action.Dir; got != want {
+		t.Fatalf("action dir = %q, want %q", got, want)
+	}
+}
+
+func TestLoaderRejectsInvalidLocalActionSources(t *testing.T) {
+	tests := []struct {
+		name  string
+		uses  func(string) string
+		setup func(*testing.T, string)
+		sha   string
+		want  string
+	}{
+		{name: "absolute", uses: func(dir string) string { return filepath.Join(dir, "action.yaml") }, want: "must be relative"},
+		{name: "missing", uses: func(string) string { return "./missing" }, want: "locating local action"},
+		{name: "empty directory", uses: func(string) string { return "./action" }, setup: func(t *testing.T, dir string) {
+			t.Helper()
+			if err := os.MkdirAll(filepath.Join(dir, "action"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}, want: "must contain action.yml or action.yaml"},
+		{name: "ambiguous directory", uses: func(string) string { return "./action" }, setup: func(t *testing.T, dir string) {
+			t.Helper()
+			writeTestFile(t, filepath.Join(dir, "action", "action.yml"), validAction)
+			writeTestFile(t, filepath.Join(dir, "action", "action.yaml"), validAction)
+		}, want: "contains both"},
+		{name: "archive", uses: func(string) string { return "./action.zip" }, setup: func(t *testing.T, dir string) {
+			t.Helper()
+			if err := os.WriteFile(filepath.Join(dir, "action.zip"), makeZIP(t, map[string]archiveTestFile{"action.yml": {data: []byte(validAction), mode: 0o644}}), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}, want: "archives are not supported"},
+		{name: "oversized manifest", uses: func(string) string { return "./action.yaml" }, setup: func(t *testing.T, dir string) {
+			t.Helper()
+			if err := os.WriteFile(filepath.Join(dir, "action.yaml"), bytes.Repeat([]byte("x"), maxManifestSize+1), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}, want: "exceeds"},
+		{name: "malformed manifest", uses: func(string) string { return "./action.yaml" }, setup: func(t *testing.T, dir string) {
+			t.Helper()
+			writeTestFile(t, filepath.Join(dir, "action.yaml"), "version: [")
+		}, want: "decoding local action manifest"},
+		{name: "checksum", uses: func(string) string { return "./action.yaml" }, setup: func(t *testing.T, dir string) {
+			t.Helper()
+			writeTestFile(t, filepath.Join(dir, "action.yaml"), validAction)
+		}, sha: strings.Repeat("0", 64), want: "sha256 is not supported for local actions"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if tt.setup != nil {
+				tt.setup(t, dir)
+			}
+			sha := ""
+			if tt.sha != "" {
+				sha = "    sha256: " + tt.sha + "\n"
+			}
+			writeTestFile(t, filepath.Join(dir, "workflow.yaml"), "version: 1\nname: caller\nsteps:\n  - id: action\n    uses: "+tt.uses(dir)+"\n"+sha)
+			_, err := NewLoader(nil).Load(t.Context(), filepath.Join(dir, "workflow.yaml"), LoadOptions{RunDir: t.TempDir()})
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want substring %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestLoaderRendersActionSourceWithNamedTemplate(t *testing.T) {
 	client := testHTTPClient(func(request *http.Request) (*http.Response, error) {
 		if request.URL.Path != "/v2/build" {
@@ -203,7 +340,7 @@ func TestLoaderRejectsChecksumAndNestedAction(t *testing.T) {
 		nestedClient := testHTTPClient(func(*http.Request) (*http.Response, error) { return testResponse(http.StatusOK, []byte(nested)), nil })
 		path := writeActionWorkflow(t, "version: 1\nname: caller\nsteps:\n  - id: remote\n    uses: https://actions.example.test/action\n")
 		_, err := NewLoader(nestedClient).Load(t.Context(), path, LoadOptions{})
-		if err == nil || !strings.Contains(err.Error(), "nested remote actions") {
+		if err == nil || !strings.Contains(err.Error(), "nested composite actions") {
 			t.Fatalf("error = %v", err)
 		}
 	})

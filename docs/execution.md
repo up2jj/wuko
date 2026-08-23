@@ -5,6 +5,68 @@
 This guide covers the workflow-level features that connect Wuko steps: state, conditions,
 concurrency, scheduling, failure policies, file composition, and remote reuse.
 
+## Choosing a composition mechanism
+
+Wuko offers three deliberately different ways to compose automation. Choose based on the boundary
+you need, not merely where the YAML lives:
+
+| Mechanism | Use it when | Boundary and data flow |
+| --- | --- | --- |
+| `depends_on` | Another discovered workflow is a runnable prerequisite | Runs the prerequisite first in its own workflow state; only declared typed workflow outputs cross through `.dependencies` |
+| `require` | One workflow is too large for one file | Inserts the fragment's steps into the current workflow; steps share the same IDs, variables, environment, state, and execution flow |
+| `uses` | A step-sized capability should be reusable behind a stable interface | Invokes a composite action with declared inputs and outputs; internal steps and variables are isolated from the caller |
+
+Use `depends_on` when the producer makes sense as an independently discoverable workflow—for
+example, a build workflow that a release workflow must run first. Dependencies form a validated
+execution graph, have their own `finally`, and do not expose internal variables or step results:
+
+```yaml
+depends_on:
+  build: build-artifacts
+
+steps:
+  - id: publish
+    type: shell
+    with:
+      command: ./publish.sh
+      args: ["{{ .dependencies.build.artifact }}"]
+```
+
+Use `require` only to organize one logical workflow across files. It is structural inclusion, not a
+call: the inserted steps behave as if they were written at the `require` location and can consume
+earlier workflow state directly:
+
+```yaml
+steps:
+  - id: prepare
+    type: shell
+    with: {command: ./prepare.sh}
+  - require: steps/build.yaml
+  - id: publish
+    type: shell
+    with: {command: ./publish.sh}
+```
+
+Use `uses` when callers should pass explicit inputs and receive explicit outputs without seeing the
+implementation's internal state. A local action is reusable by multiple workflows but is not
+itself discovered or run as a workflow:
+
+```yaml
+steps:
+  - id: build
+    uses: ../actions/build
+    with: {target: linux}
+  - id: publish
+    type: shell
+    with:
+      command: ./publish.sh
+      args: ["{{ .steps.build.artifact }}"]
+```
+
+As a quick rule: choose `depends_on` for orchestration between runnable workflows, `require` for
+file organization within one workflow, and `uses` for reusable encapsulated behavior. Do not use
+`require` to simulate an action interface, or wrap a simple file split in a separate dependency.
+
 ## State and execution order
 
 Top-level steps run in declaration order. After a step succeeds, Wuko commits its outputs beneath
@@ -487,7 +549,10 @@ The required file may be a bare list or wrap the list in `steps`:
 
 Paths are relative to the file containing `require`, so fragments may require other fragments.
 All expanded IDs must be unique. Cycles are rejected. Remote archives can bundle required files;
-direct remote YAML files cannot.
+direct remote YAML files cannot. Required steps remain part of the caller: they do not declare
+inputs or outputs, receive a separate state, or run independently. Use a composite action instead
+when reuse needs an explicit interface, or a workflow dependency when the included work is a
+runnable prerequisite.
 
 ## Remote workflows
 
@@ -506,7 +571,36 @@ not digest-pinned in schema version 1.
 
 ## Composite actions
 
-Invoke a Wuko-native action at a step position:
+Invoke a Wuko-native action at a step position. A local reference may name an action directory:
+
+```yaml
+- id: build
+  uses: ../actions/build
+  with:
+    target: linux
+```
+
+The directory must contain exactly one root `action.yml` or `action.yaml`. A direct manifest path
+is also accepted:
+
+```yaml
+- id: build
+  uses: ../actions/build/action.yaml
+  with: {target: linux}
+```
+
+Local paths are resolved from the file containing the `uses` declaration. A reference inside a
+required step fragment therefore resolves from that fragment's directory, including when the
+fragment belongs to a packaged remote workflow. Caller `working_directory` scopes and the process
+working directory do not change this path base. `../` traversal is allowed as long as the rendered
+reference remains relative.
+
+Local actions execute in place. Their manifest directory is the action root, so internal steps and
+file-backed templates can use companion files such as `scripts/build.sh` or
+`templates/message.tmpl`. Local action archives and `sha256` are not supported; local actions are
+trusted workspace content.
+
+An HTTPS reference fetches an action instead:
 
 ```yaml
 - id: build
@@ -554,8 +648,24 @@ or archive:
   with: {target: linux}
 ```
 
-Action references are resolved before execution and therefore cannot use prior `.steps` values.
-Remote actions cannot invoke another remote action in schema version 1.
+The available source forms are:
+
+| `uses` form | Resolves from | Companion files | `sha256` |
+| --- | --- | --- | --- |
+| Relative file or directory | Declaring workflow or fragment | Read from the local action root | Rejected |
+| HTTPS URL | Network | Only when the response is an action archive | Optional and recommended |
+| Command object | Active load-time run directory | Only when stdout is an action archive | Optional and recommended |
+
+Scalar references may use load-time templates based on workflow variables and environment values.
+After rendering they must be either a valid HTTPS URL or a relative local path. Action references
+are resolved before execution and therefore cannot use prior `.steps` values or active
+`.batch`, `.foreach`, or `.matrix` bindings. Composite actions cannot invoke another composite
+action in schema version 1.
+
+An action is not a child workflow: it follows the action manifest schema, receives only declared
+inputs, isolates its internal IDs and variables, and exports only declared outputs. Use
+`depends_on` to compose runnable workflows and `require` to split one workflow's steps without an
+input/output boundary.
 
 ## Environment and templates
 

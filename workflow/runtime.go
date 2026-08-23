@@ -10,7 +10,7 @@ import (
 	"github.com/up2jj/wuko/diagnostic"
 )
 
-// LoadOptions supplies the pre-run values used to resolve remote action references.
+// LoadOptions supplies the pre-run values used to resolve composite action references.
 type LoadOptions struct {
 	Vars map[string]any
 	Env  map[string]string
