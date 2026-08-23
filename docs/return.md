@@ -95,6 +95,24 @@ An explicitly empty output map is valid when “nothing to do” is itself the s
 Embedders receive top-level workflow values through `engine.State.Outputs`. The `wuko run` command
 does not print them automatically.
 
+## Declared workflow outputs
+
+A workflow used as a prerequisite declares the names and types it exports with top-level
+`outputs`. The `value` expression is evaluated after normal completion and `finally`:
+
+```yaml
+outputs:
+  artifact:
+    type: string
+    description: Path to the release archive
+    value: steps.package.path
+```
+
+Supported types are `string`, `boolean`, `number`, `array`, and `object`. If the workflow returns
+early, that return must provide exactly the declared names and each result must match its declared
+type. Standalone workflows without an output contract retain the existing unrestricted return
+behavior. See [Workflow prerequisites](execution.md#workflow-prerequisites) for consumption syntax.
+
 ## Sequential blocks
 
 A return may appear directly in the main step list or inside transparent conditional and

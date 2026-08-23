@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -13,6 +14,7 @@ type Source struct {
 	Name        string
 	Path        string
 	Description string
+	DependsOn   map[string]string
 	Scope       string
 	Effective   bool
 }
@@ -74,7 +76,8 @@ func DiscoverAll(cwd, homeDir, configDir string) ([]Source, error) {
 				return nil, err
 			}
 			sources = append(sources, Source{
-				Name: name, Path: path, Description: definition.Description, Scope: location.scope,
+				Name: name, Path: path, Description: definition.Description,
+				DependsOn: maps.Clone(definition.DependsOn), Scope: location.scope,
 			})
 		}
 	}
@@ -93,7 +96,7 @@ func DiscoverAll(cwd, homeDir, configDir string) ([]Source, error) {
 
 // Find returns the effective workflow matching name.
 func Find(cwd, homeDir, configDir, name string) (Source, error) {
-	if name == "" || filepath.Base(name) != name || strings.ContainsAny(name, `/\\`) {
+	if !ValidWorkflowName(name) {
 		return Source{}, fmt.Errorf("invalid workflow name %q", name)
 	}
 	sources, err := Discover(cwd, homeDir, configDir)

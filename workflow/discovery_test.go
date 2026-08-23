@@ -69,6 +69,25 @@ func TestDiscoverAllIncludesScopesAndEffectivePrecedence(t *testing.T) {
 	}
 }
 
+func TestDiscoverIncludesWorkflowDependencies(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, ".wuko", "workflows")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data := "version: 1\nname: release\ndepends_on: {build: build-artifacts}\nsteps:\n  - return: {outputs: {}}\n"
+	if err := os.WriteFile(filepath.Join(dir, "release.yaml"), []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sources, err := Discover(root, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sources) != 1 || sources[0].DependsOn["build"] != "build-artifacts" {
+		t.Fatalf("sources = %#v", sources)
+	}
+}
+
 func TestDiscoverRejectsDuplicateExtensions(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, ".wuko", "workflows")

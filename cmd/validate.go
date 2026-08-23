@@ -63,11 +63,19 @@ func newValidateCmd(deps dependencies) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				if err := workflowEngine(deps).Validate(command.Context(), definition, engine.Options{
-					Vars: vars, Env: env, BaseEnv: baseEnv, RunDir: cwd, Stdin: command.InOrStdin(), Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(),
-					LocalValueDir: filepath.Join(definition.Dir, ".wuko", "values"), GlobalValueDir: filepath.Join(config, "wuko", "values"),
-					Diagnostics: reporter,
-				}); err != nil {
+				plan, err := resolveDependencyPlan(command.Context(), definition, loader, workflow.LoadOptions{Vars: vars, Env: env, BaseEnv: baseEnv, RunDir: cwd, Diagnostics: reporter}, cwd, home, config)
+				if err != nil {
+					return err
+				}
+				optionsFor := func(definition *workflow.Definition, dependencies map[string]map[string]any) engine.Options {
+					return engine.Options{
+						Vars: vars, Env: env, BaseEnv: baseEnv, Dependencies: dependencies, RunDir: cwd,
+						Stdin: command.InOrStdin(), Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(),
+						LocalValueDir: filepath.Join(definition.Dir, ".wuko", "values"), GlobalValueDir: filepath.Join(config, "wuko", "values"),
+						Diagnostics: reporter,
+					}
+				}
+				if err := validateDependencyPlan(command.Context(), plan, func() *engine.Engine { return workflowEngine(deps) }, optionsFor); err != nil {
 					return err
 				}
 				fmt.Fprintf(command.OutOrStdout(), "%s: valid\n", source.Name)

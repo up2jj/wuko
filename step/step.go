@@ -25,6 +25,8 @@ type Request struct {
 	Inputs         map[string]any
 	Env            map[string]string
 	Steps          map[string]any
+	// Dependencies contains outputs from direct prerequisite workflows keyed by alias.
+	Dependencies map[string]map[string]any
 	// Bindings contains active lifecycle and workflow-control roots such as batch, finally, foreach, and matrix.
 	Bindings    map[string]any
 	Stdin       io.Reader

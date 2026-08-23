@@ -1,0 +1,16 @@
+version: 1
+name: checks
+description: Second branch of the example diamond
+
+depends_on:
+  prepare: prepare
+
+outputs:
+  approved:
+    type: boolean
+    value: "true"
+
+steps:
+  - return:
+      outputs:
+        approved: "true"

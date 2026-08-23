@@ -1,0 +1,24 @@
+version: 1
+name: release
+description: Consume outputs from two direct prerequisites
+
+depends_on:
+  build: build
+  checks: checks
+
+outputs:
+  artifact:
+    type: string
+    value: dependencies.build.artifact
+
+steps:
+  - id: select_artifact
+    type: set
+    if: dependencies.checks.approved
+    with:
+      variable: release_artifact
+      value: "{{ .dependencies.build.artifact }}"
+
+  - return:
+      outputs:
+        artifact: vars.release_artifact

@@ -20,16 +20,17 @@ type Config struct {
 }
 
 type expressionEnvironment struct {
-	Inputs   map[string]any    `expr:"inputs"`
-	Vars     map[string]any    `expr:"vars"`
-	Env      map[string]string `expr:"env"`
-	Steps    map[string]any    `expr:"steps"`
-	Batch    map[string]any    `expr:"batch"`
-	Foreach  map[string]any    `expr:"foreach"`
-	Matrix   map[string]any    `expr:"matrix"`
-	Finally  map[string]any    `expr:"finally"`
-	Workflow workflowValue     `expr:"workflow"`
-	Run      runValue          `expr:"run"`
+	Inputs       map[string]any            `expr:"inputs"`
+	Vars         map[string]any            `expr:"vars"`
+	Env          map[string]string         `expr:"env"`
+	Steps        map[string]any            `expr:"steps"`
+	Dependencies map[string]map[string]any `expr:"dependencies"`
+	Batch        map[string]any            `expr:"batch"`
+	Foreach      map[string]any            `expr:"foreach"`
+	Matrix       map[string]any            `expr:"matrix"`
+	Finally      map[string]any            `expr:"finally"`
+	Workflow     workflowValue             `expr:"workflow"`
+	Run          runValue                  `expr:"run"`
 }
 
 type workflowValue struct {
@@ -86,14 +87,15 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 	if !r.hasValue {
 		var err error
 		value, err = expr.Run(r.program, expressionEnvironment{
-			Inputs:  request.Inputs,
-			Vars:    request.Vars,
-			Env:     request.Env,
-			Steps:   request.Steps,
-			Batch:   bindingRoot(request.Bindings, "batch"),
-			Foreach: bindingRoot(request.Bindings, "foreach"),
-			Matrix:  bindingRoot(request.Bindings, "matrix"),
-			Finally: bindingRoot(request.Bindings, "finally"),
+			Inputs:       request.Inputs,
+			Vars:         request.Vars,
+			Env:          request.Env,
+			Steps:        request.Steps,
+			Dependencies: request.Dependencies,
+			Batch:        bindingRoot(request.Bindings, "batch"),
+			Foreach:      bindingRoot(request.Bindings, "foreach"),
+			Matrix:       bindingRoot(request.Bindings, "matrix"),
+			Finally:      bindingRoot(request.Bindings, "finally"),
 			Workflow: workflowValue{
 				Name: request.WorkflowName,
 				Dir:  request.WorkflowDir,

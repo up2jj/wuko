@@ -10,16 +10,17 @@ import (
 )
 
 type conditionEnvironment struct {
-	Inputs   map[string]any    `expr:"inputs"`
-	Vars     map[string]any    `expr:"vars"`
-	Env      map[string]string `expr:"env"`
-	Steps    map[string]any    `expr:"steps"`
-	Batch    map[string]any    `expr:"batch"`
-	Foreach  map[string]any    `expr:"foreach"`
-	Matrix   map[string]any    `expr:"matrix"`
-	Finally  map[string]any    `expr:"finally"`
-	Workflow conditionWorkflow `expr:"workflow"`
-	Run      conditionRun      `expr:"run"`
+	Inputs       map[string]any            `expr:"inputs"`
+	Vars         map[string]any            `expr:"vars"`
+	Env          map[string]string         `expr:"env"`
+	Steps        map[string]any            `expr:"steps"`
+	Dependencies map[string]map[string]any `expr:"dependencies"`
+	Batch        map[string]any            `expr:"batch"`
+	Foreach      map[string]any            `expr:"foreach"`
+	Matrix       map[string]any            `expr:"matrix"`
+	Finally      map[string]any            `expr:"finally"`
+	Workflow     conditionWorkflow         `expr:"workflow"`
+	Run          conditionRun              `expr:"run"`
 }
 
 type conditionWorkflow struct {
@@ -64,14 +65,15 @@ func evaluateCondition(condition workflow.Condition, environment conditionEnviro
 
 func makeConditionEnvironment(definition *workflow.Definition, runDir string, state *State) conditionEnvironment {
 	return conditionEnvironment{
-		Inputs:  state.Inputs,
-		Vars:    state.Vars,
-		Env:     state.Env,
-		Steps:   state.Steps,
-		Batch:   bindingRoot(state.Bindings, "batch"),
-		Foreach: bindingRoot(state.Bindings, "foreach"),
-		Matrix:  bindingRoot(state.Bindings, "matrix"),
-		Finally: bindingRoot(state.Bindings, "finally"),
+		Inputs:       state.Inputs,
+		Vars:         state.Vars,
+		Env:          state.Env,
+		Steps:        state.Steps,
+		Dependencies: state.Dependencies,
+		Batch:        bindingRoot(state.Bindings, "batch"),
+		Foreach:      bindingRoot(state.Bindings, "foreach"),
+		Matrix:       bindingRoot(state.Bindings, "matrix"),
+		Finally:      bindingRoot(state.Bindings, "finally"),
 		Workflow: conditionWorkflow{
 			Name: definition.Name,
 			Dir:  definition.Dir,

@@ -29,7 +29,9 @@ func newListCmd(deps dependencies) *cobra.Command {
 			}
 			diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusSucceeded, Duration: time.Since(started), Attributes: []diagnostic.Attribute{diagnostic.Attr("workflows", fmt.Sprint(len(sources)))}})
 			for _, source := range sources {
-				fmt.Fprintf(command.OutOrStdout(), "%s\t%s\t%s\t%s\n", source.Name, source.Scope, source.Description, source.Path)
+				if err := writeWorkflowSource(command.OutOrStdout(), source); err != nil {
+					return err
+				}
 			}
 			return nil
 		},

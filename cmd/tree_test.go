@@ -119,6 +119,50 @@ func TestTreeCommandSupportsFileAndRemoteWorkflowSelectors(t *testing.T) {
 	}
 }
 
+func TestWriteDependencyPlanTreeShowsFullChainAndSharedDependencies(t *testing.T) {
+	prepare := &workflow.DependencyNode{Definition: &workflow.Definition{
+		Name:  "prepare",
+		Steps: []workflow.Step{{ID: "workspace", Type: "shell"}},
+	}}
+	build := &workflow.DependencyNode{
+		Definition:   &workflow.Definition{Name: "build", Steps: []workflow.Step{{ID: "compile", Type: "shell"}}},
+		Dependencies: map[string]*workflow.DependencyNode{"prepare": prepare},
+	}
+	checks := &workflow.DependencyNode{
+		Definition:   &workflow.Definition{Name: "checks", Steps: []workflow.Step{{ID: "test", Type: "shell"}}},
+		Dependencies: map[string]*workflow.DependencyNode{"prepare": prepare},
+	}
+	release := &workflow.DependencyNode{
+		Definition: &workflow.Definition{Name: "release", Steps: []workflow.Step{{ID: "publish", Type: "shell"}}},
+		Dependencies: map[string]*workflow.DependencyNode{
+			"artifacts": build,
+			"checks":    checks,
+		},
+	}
+	plan := &workflow.DependencyPlan{Root: release, Order: []*workflow.DependencyNode{prepare, build, checks, release}}
+
+	var output bytes.Buffer
+	if err := writeDependencyPlanTree(&output, plan); err != nil {
+		t.Fatal(err)
+	}
+	want := `release
+├── depends_on
+│   ├── artifacts (build)
+│   │   ├── depends_on
+│   │   │   └── prepare
+│   │   │       └── workspace (shell)
+│   │   └── compile (shell)
+│   └── checks
+│       ├── depends_on
+│       │   └── prepare (shared; shown above)
+│       └── test (shell)
+└── publish (shell)
+`
+	if output.String() != want {
+		t.Fatalf("output = %q, want %q", output.String(), want)
+	}
+}
+
 func TestTreeCommandRejectsMissingOrConflictingWorkflowSelector(t *testing.T) {
 	for _, args := range [][]string{{"tree"}, {"tree", "name", "--file", "workflow.yaml"}} {
 		command := newRootCmd(dependencies{

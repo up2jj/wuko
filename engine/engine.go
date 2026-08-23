@@ -32,6 +32,8 @@ func WithExecutors(registry *executor.Registry) Option {
 type Options struct {
 	Vars map[string]any
 	Env  map[string]string
+	// Dependencies contains outputs from direct prerequisite workflows keyed by alias.
+	Dependencies map[string]map[string]any
 	// BaseEnv overrides the current process environment when non-nil.
 	BaseEnv map[string]string
 	RunDir  string
@@ -62,8 +64,10 @@ type State struct {
 	Vars   map[string]any
 	Env    map[string]string
 	Steps  map[string]any
-	// Outputs contains values explicitly produced by a return control.
+	// Outputs contains values produced by a return control or declared output expressions.
 	Outputs map[string]any
+	// Dependencies contains immutable outputs from direct prerequisite workflows.
+	Dependencies map[string]map[string]any
 	// Bindings contains lifecycle and iteration-local roots such as batch, finally, foreach, and matrix.
 	Bindings    map[string]any
 	Stats       RunStats
@@ -84,6 +88,10 @@ func (e *Engine) Validate(ctx context.Context, definition *workflow.Definition, 
 	started := time.Now()
 	trace(options, diagnostic.Event{Phase: diagnostic.PhaseValidation, Status: diagnostic.StatusStarted, Time: started, WorkflowName: definition.Name, Location: definition.Location, Message: "validating workflow"})
 	if err := definition.ValidateStructure(); err != nil {
+		trace(options, diagnostic.Event{Phase: diagnostic.PhaseValidation, Status: diagnostic.StatusFailed, WorkflowName: definition.Name, Location: definition.Location, Duration: time.Since(started), Error: err})
+		return err
+	}
+	if err := validateWorkflowOutputExpressions(definition); err != nil {
 		trace(options, diagnostic.Event{Phase: diagnostic.PhaseValidation, Status: diagnostic.StatusFailed, WorkflowName: definition.Name, Location: definition.Location, Duration: time.Since(started), Error: err})
 		return err
 	}
@@ -274,6 +282,7 @@ func (e *Engine) Run(ctx context.Context, definition *workflow.Definition, optio
 		if err := writeDryRunFinally(options.Stdout, definition.Finally); err != nil {
 			return nil, err
 		}
+		state.Outputs = workflow.OutputPlaceholders(definition.Outputs)
 		return state, nil
 	}
 
@@ -310,6 +319,9 @@ func (e *Engine) Run(ctx context.Context, definition *workflow.Definition, optio
 	runErr = errors.Join(append([]error{mainErr}, cleanupErrors...)...)
 	if runErr != nil {
 		return nil, runErr
+	}
+	if err := e.finishWorkflowOutputs(definition, options, state); err != nil {
+		return nil, err
 	}
 	return state, nil
 }
@@ -840,11 +852,14 @@ func initialState(definition *workflow.Definition, options Options) (*State, err
 	if err != nil {
 		return nil, err
 	}
-	return &State{Inputs: cloneMap(options.inputs), Vars: vars, Env: environment, Steps: make(map[string]any), Outputs: make(map[string]any)}, nil
+	return &State{
+		Inputs: cloneMap(options.inputs), Vars: vars, Env: environment, Steps: make(map[string]any), Outputs: make(map[string]any),
+		Dependencies: cloneDependencies(options.Dependencies),
+	}, nil
 }
 
 func templateData(definition *workflow.Definition, runDir string, state *State) map[string]any {
-	return workflow.TemplateDataWithBindings(definition, runDir, state.Inputs, state.Vars, state.Env, state.Steps, state.Bindings)
+	return workflow.TemplateDataWithDependencies(definition, runDir, state.Inputs, state.Vars, state.Env, state.Steps, state.Dependencies, state.Bindings)
 }
 
 func makeRequest(definition *workflow.Definition, stepID string, options Options, state *State, attempt, maxAttempts int, operationID string) step.Request {
@@ -852,7 +867,7 @@ func makeRequest(definition *workflow.Definition, stepID string, options Options
 		StepID: stepID, WorkflowName: definition.Name, WorkflowSource: definition.Location.Source, WorkflowDir: definition.Dir,
 		RunDir: options.RunDir, LocalValueDir: options.LocalValueDir, GlobalValueDir: options.GlobalValueDir,
 		Inputs: cloneMap(state.Inputs), Vars: cloneMap(state.Vars), Env: maps.Clone(state.Env),
-		Steps: cloneMap(state.Steps), Bindings: cloneMap(state.Bindings), Stdin: options.Stdin, Stdout: options.Stdout,
+		Steps: cloneMap(state.Steps), Dependencies: cloneDependencies(state.Dependencies), Bindings: cloneMap(state.Bindings), Stdin: options.Stdin, Stdout: options.Stdout,
 		Stderr: options.Stderr, Interactive: options.Interactive,
 		Attempt: attempt, MaxAttempts: maxAttempts, OperationID: operationID,
 		Executor: options.Executor,
@@ -1051,6 +1066,10 @@ func cloneMap(source map[string]any) map[string]any {
 		result[key] = cloneAny(value)
 	}
 	return result
+}
+
+func cloneDependencies(source map[string]map[string]any) map[string]map[string]any {
+	return workflow.CloneDependencies(source)
 }
 
 func cloneAny(value any) any {

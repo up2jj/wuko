@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -226,7 +227,9 @@ func runWorkflowPicker(command *cobra.Command, deps dependencies) error {
 	diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusSucceeded, Duration: time.Since(discoveryStarted), Attributes: []diagnostic.Attribute{diagnostic.Attr("workflows", fmt.Sprint(len(sources)))}})
 	if !deps.isInteractive(command.InOrStdin()) {
 		for _, source := range sources {
-			fmt.Fprintf(command.OutOrStdout(), "%s\t%s\t%s\t%s\n", source.Name, source.Scope, source.Description, source.Path)
+			if err := writeWorkflowSource(command.OutOrStdout(), source); err != nil {
+				return err
+			}
 		}
 		return nil
 	}
@@ -237,15 +240,7 @@ func runWorkflowPicker(command *cobra.Command, deps dependencies) error {
 
 	options := make([]tui.Option, len(sources))
 	for i, source := range sources {
-		description := source.Description
-		if description == "" {
-			description = "(no description)"
-		}
-		options[i] = tui.Option{
-			Label:       source.Name,
-			Description: fmt.Sprintf("%s • %s • %s", source.Scope, description, source.Path),
-			Value:       source,
-		}
+		options[i] = workflowPickerOption(source)
 	}
 	selection, err := tui.SelectWithIntent(command.Context(), command.InOrStdin(), command.OutOrStdout(), "Workflows", options)
 	if err != nil {
@@ -268,6 +263,48 @@ func runWorkflowPicker(command *cobra.Command, deps dependencies) error {
 	}
 	fmt.Fprintf(command.OutOrStdout(), "wuko run --file %s\n", shellQuote(source.Path))
 	return nil
+}
+
+func workflowPickerOption(source workflow.Source) tui.Option {
+	description := source.Description
+	if description == "" {
+		description = "(no description)"
+	}
+	parts := []string{source.Scope, description}
+	if dependencies := workflowDependencySummary(source.DependsOn); dependencies != "" {
+		parts = append(parts, dependencies)
+	}
+	parts = append(parts, source.Path)
+	return tui.Option{Label: source.Name, Description: strings.Join(parts, " • "), Value: source}
+}
+
+func writeWorkflowSource(writer io.Writer, source workflow.Source) error {
+	if _, err := fmt.Fprintf(writer, "%s\t%s\t%s\t%s", source.Name, source.Scope, source.Description, source.Path); err != nil {
+		return err
+	}
+	if dependencies := workflowDependencySummary(source.DependsOn); dependencies != "" {
+		if _, err := fmt.Fprintf(writer, "\t%s", dependencies); err != nil {
+			return err
+		}
+	}
+	_, err := fmt.Fprintln(writer)
+	return err
+}
+
+func workflowDependencySummary(dependencies map[string]string) string {
+	if len(dependencies) == 0 {
+		return ""
+	}
+	items := make([]string, 0, len(dependencies))
+	for _, alias := range slices.Sorted(maps.Keys(dependencies)) {
+		name := dependencies[alias]
+		if alias == name {
+			items = append(items, name)
+			continue
+		}
+		items = append(items, alias+"="+name)
+	}
+	return "depends on " + strings.Join(items, ", ")
 }
 
 func diagnosticsFor(command *cobra.Command, deps dependencies, runDir string) diagnostic.Reporter {

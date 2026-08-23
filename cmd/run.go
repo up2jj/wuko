@@ -110,53 +110,87 @@ func runWorkflow(command *cobra.Command, deps dependencies, args []string, confi
 		return err
 	}
 	workflowName = definition.Name
-	if config.dryRun {
-		fmt.Fprintf(command.OutOrStdout(), "Workflow %s (%s)\n", definition.Name, definition.Path)
+	remoteDefinitions := make(map[string]bool)
+	if target.remote {
+		remoteDefinitions[definition.Path] = true
 	}
-	optionsFor := func(definition *workflow.Definition) engine.Options {
+	plan, err := resolveDependencyPlan(command.Context(), definition, loader, loadOptions, cwd, home, configDir)
+	if err != nil {
+		cleanup()
+		return err
+	}
+	optionsFor := func(definition *workflow.Definition, dependencies map[string]map[string]any) engine.Options {
 		localValueDir := ""
-		if !target.remote {
+		if !remoteDefinitions[definition.Path] {
 			localValueDir = filepath.Join(definition.Dir, ".wuko", "values")
+		}
+		if config.dryRun {
+			fmt.Fprintf(command.OutOrStdout(), "Workflow %s (%s)\n", definition.Name, definition.Path)
 		}
 		return engine.Options{
 			Vars: vars, Env: env, BaseEnv: baseEnv, RunDir: cwd, Stdin: command.InOrStdin(),
+			Dependencies:  dependencies,
 			LocalValueDir: localValueDir, GlobalValueDir: filepath.Join(configDir, "wuko", "values"),
 			Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(),
 			Interactive: interactive(command.InOrStdin()), DryRun: config.dryRun, Progress: reporters.Progress,
 			Diagnostics: reporters.Diagnostic,
 		}
 	}
-	execute := func(ctx context.Context, definition *workflow.Definition) error {
-		workflowName = definition.Name
-		state, err := workflowEngine(deps).Run(ctx, definition, optionsFor(definition))
+	engineFor := func() *engine.Engine { return workflowEngine(deps) }
+	executePlan := func(ctx context.Context, active *workflow.DependencyPlan) error {
+		state, err := executeDependencyPlan(ctx, active, engineFor, optionsFor)
 		runState = state
 		return err
 	}
 	if config.dryRun || config.once || definition.Cron == "" {
 		defer cleanup()
-		return execute(command.Context(), definition)
+		return executePlan(command.Context(), plan)
 	}
 
-	if err := workflowEngine(deps).Validate(command.Context(), definition, optionsFor(definition)); err != nil {
+	if err := validateDependencyPlan(command.Context(), plan, engineFor, optionsFor); err != nil {
 		cleanup()
 		return err
 	}
+	plans := map[*workflow.Definition]*workflow.DependencyPlan{definition: plan}
 	runner := scheduledRunner{
 		load: func(ctx context.Context) (*workflow.Definition, func(), error) {
 			definition, release, err := target.load(ctx, loader, loadOptions)
 			if err != nil {
 				return nil, func() {}, err
 			}
-			if err := workflowEngine(deps).Validate(ctx, definition, optionsFor(definition)); err != nil {
+			if target.remote {
+				remoteDefinitions[definition.Path] = true
+			}
+			active, err := resolveDependencyPlan(ctx, definition, loader, loadOptions, cwd, home, configDir)
+			if err != nil {
 				release()
 				return nil, func() {}, err
 			}
-			return definition, release, nil
+			if err := validateDependencyPlan(ctx, active, engineFor, optionsFor); err != nil {
+				release()
+				return nil, func() {}, err
+			}
+			plans[definition] = active
+			return definition, releaseDependencyPlan(plans, definition, release), nil
 		},
-		execute: execute, now: deps.now, wait: deps.waitUntil,
+		execute: func(ctx context.Context, definition *workflow.Definition) error {
+			active := plans[definition]
+			delete(plans, definition)
+			if active == nil {
+				return fmt.Errorf("scheduled workflow %q dependency plan is unavailable", definition.Name)
+			}
+			return executePlan(ctx, active)
+		}, now: deps.now, wait: deps.waitUntil,
 		stderr: command.ErrOrStderr(), diagnostics: reporters.Diagnostic,
 	}
-	return runner.run(command.Context(), definition, cleanup)
+	return runner.run(command.Context(), definition, releaseDependencyPlan(plans, definition, cleanup))
+}
+
+func releaseDependencyPlan(plans map[*workflow.Definition]*workflow.DependencyPlan, definition *workflow.Definition, release func()) func() {
+	return func() {
+		delete(plans, definition)
+		release()
+	}
 }
 
 type workflowRunTarget struct {

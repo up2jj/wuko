@@ -24,14 +24,123 @@ steps:
       args: ["{{ .steps.build.stdout }}"]
 ```
 
-Templates use `.steps` and `.vars`; Expr conditions use `steps` and `vars`. Schema version 1 has no
-dependency graph or `needs` field. Failed and skipped steps commit no state. Concurrent children
-share the snapshot from group entry and cannot consume sibling results.
+Templates use `.steps` and `.vars`; Expr conditions use `steps` and `vars`. Steps remain sequential
+and have no `needs` field; workflow-level prerequisites are described below. Failed and skipped
+steps commit no state. Concurrent children share the snapshot from group entry and cannot consume
+sibling results.
 
 Use the anonymous `return` control to finish the current workflow or composite action successfully
 with typed Expr outputs. It may appear in sequential conditional or working-directory scopes, still
 runs `finally`, and cannot appear inside concurrent or fan-out bodies. See
 [Early successful return](return.md) for the complete contract and examples.
+
+## Workflow prerequisites
+
+Use `depends_on` when one discovered workflow must finish successfully before another starts. The
+mapping key is a local alias and the value is a workflow name resolved through the normal project
+and user discovery order:
+
+```yaml
+version: 1
+name: release
+
+depends_on:
+  build: build-artifacts
+
+steps:
+  - id: publish
+    type: shell
+    with:
+      command: ./publish.sh
+      args: ["{{ .dependencies.build.artifact }}"]
+```
+
+The prerequisite declares the values it exports. Output names and dependency aliases are
+identifiers, and output values must match one of `string`, `boolean`, `number`, `array`, or
+`object`:
+
+```yaml
+version: 1
+name: build-artifacts
+
+outputs:
+  artifact:
+    type: string
+    description: Path to the release archive
+    value: steps.package.path
+  publishable:
+    type: boolean
+    value: steps.package.exit_code == 0
+
+steps:
+  - id: package
+    type: shell
+    with: {command: ./package.sh}
+```
+
+Use `.dependencies.<alias>.<output>` in Go templates and
+`dependencies.<alias>.<output>` in Expr:
+
+```yaml
+- id: publish
+  type: shell
+  if: dependencies.build.publishable
+  with:
+    command: ./publish.sh
+    args: ["{{ .dependencies.build.artifact }}"]
+```
+
+Dependencies may form chains. If `release` depends on `package`, and `package` depends on `build`,
+the execution order is `build`, `package`, `release`. Shared prerequisites in a diamond run once per
+root invocation. Independent prerequisites run sequentially in alias order. Cycles, missing
+workflows, and references to undeclared outputs fail before execution begins.
+
+Only direct dependency outputs are visible. A workflow that needs a transitive prerequisite's
+output must also declare that workflow directly; deduplication prevents a second run. Workflows do
+not share variables, step results, environment mutations, cleanup state, or statistics. Invocation
+`--var`, `--var-file`, and `--env` overrides are applied independently to every workflow.
+
+Declared output expressions are evaluated after ordinary steps and `finally` finish successfully.
+An early `return` in a workflow with an output contract must supply exactly the declared names and
+matching types:
+
+```yaml
+outputs:
+  artifact: {type: string, value: steps.build.path}
+  cached: {type: boolean, value: "false"}
+
+steps:
+  - return:
+      outputs:
+        artifact: steps.restore.path
+        cached: "true"
+    if: steps.restore.hit
+  - id: build
+    type: shell
+    with: {command: ./build.sh}
+```
+
+Dependency values are runtime state. They may be used by step templates, step and control
+conditions, controls, and workflow output expressions. They cannot determine top-level `env`, a
+composite action `uses` source, or another field resolved while loading the workflow.
+
+`validate`, `tree`, and `run --dry-run` resolve and check the complete graph without executing
+prerequisites. A prerequisite's own `cron` is ignored when it is invoked by another workflow. A
+scheduled root reloads and executes its dependency graph for every occurrence.
+
+`tree` renders the requested workflow as the root and nests the complete transitive chain beneath
+`depends_on`. Aliases that differ from their workflow names show both values. In a diamond, the
+first occurrence is expanded and later occurrences are marked `shared; shown above`.
+
+```sh
+wuko validate release
+wuko tree release
+wuko run release --dry-run
+wuko run release --var target=linux --env MODE=production
+```
+
+Runnable chain, diamond, conditional-output, early-return, and scheduling examples live in
+[`examples/dependencies/`](../examples/dependencies/).
 
 ## Conditions
 

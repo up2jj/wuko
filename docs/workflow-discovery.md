@@ -26,7 +26,8 @@ Directories are skipped. The workflow selector is the filename stem, so `deploy.
 
 The YAML `name` field is still required and validated, but it is metadata for the loaded workflow;
 lookup by `NAME` uses the filename stem. The description shown by `wuko list` and the picker comes
-from the YAML `description` field.
+from the YAML `description` field. Workflows with `depends_on` also show a sorted `depends on ...`
+summary; aliases that differ from their workflow name use `alias=workflow`.
 
 Within a directory, workflow names are sorted before loading. Declaring both `name.yaml` and
 `name.yml` in the same directory is an error.
@@ -69,14 +70,16 @@ order, not which definition wins.
 ## Command behavior
 
 - `wuko run NAME` calls effective discovery and runs the selected source.
-- `wuko list` displays effective sources as tab-separated name, scope, description, and path.
+- `wuko list` displays effective sources as tab-separated name, scope, description, and path. A
+  workflow with prerequisites has an additional trailing `depends on ...` field.
 - `wuko validate NAME` and `wuko tree NAME` use effective discovery; without a name, `validate`
   validates every effective workflow.
 - Bare `wuko` calls `DiscoverAll`. In an interactive terminal it shows effective and shadowed
-  sources in the picker. Enter runs the exact selected source. Shift+Enter prints `wuko run NAME`
-  for an effective source or `wuko run --file PATH` for a shadowed source so the printed command
-  remains unambiguous.
-- Bare `wuko` in a non-interactive context prints all discovered sources as tab-separated rows.
+  sources in the picker, including each workflow's direct prerequisites. Enter runs the exact
+  selected source. Shift+Enter prints `wuko run NAME` for an effective source or
+  `wuko run --file PATH` for a shadowed source so the printed command remains unambiguous.
+- Bare `wuko` in a non-interactive context prints all discovered sources as tab-separated rows,
+  appending the dependency summary when present.
 - Shell completion returns effective workflow names only.
 - `wuko run --file PATH` bypasses discovery. HTTP and `github:` locators also bypass local
   discovery and use the remote workflow loader.

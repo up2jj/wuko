@@ -30,19 +30,20 @@ type waitNestedStep struct {
 }
 
 type waitEnvironment struct {
-	Inputs   map[string]any    `expr:"inputs"`
-	Vars     map[string]any    `expr:"vars"`
-	Env      map[string]string `expr:"env"`
-	Steps    map[string]any    `expr:"steps"`
-	Batch    map[string]any    `expr:"batch"`
-	Foreach  map[string]any    `expr:"foreach"`
-	Matrix   map[string]any    `expr:"matrix"`
-	Finally  map[string]any    `expr:"finally"`
-	Workflow conditionWorkflow `expr:"workflow"`
-	Run      conditionRun      `expr:"run"`
-	Result   map[string]any    `expr:"result"`
-	Error    any               `expr:"error"`
-	Poll     int               `expr:"poll"`
+	Inputs       map[string]any            `expr:"inputs"`
+	Vars         map[string]any            `expr:"vars"`
+	Env          map[string]string         `expr:"env"`
+	Steps        map[string]any            `expr:"steps"`
+	Dependencies map[string]map[string]any `expr:"dependencies"`
+	Batch        map[string]any            `expr:"batch"`
+	Foreach      map[string]any            `expr:"foreach"`
+	Matrix       map[string]any            `expr:"matrix"`
+	Finally      map[string]any            `expr:"finally"`
+	Workflow     conditionWorkflow         `expr:"workflow"`
+	Run          conditionRun              `expr:"run"`
+	Result       map[string]any            `expr:"result"`
+	Error        any                       `expr:"error"`
+	Poll         int                       `expr:"poll"`
 }
 
 type waitMetrics struct {
@@ -251,7 +252,7 @@ func (e *Engine) pollExecutor(definition *workflow.Definition, workflowStep work
 
 func evaluateWaitCondition(program *vm.Program, request step.Request, result map[string]any, errorValue any, poll int) (bool, error) {
 	value, err := expr.Run(program, waitEnvironment{
-		Inputs: request.Inputs, Vars: request.Vars, Env: request.Env, Steps: request.Steps,
+		Inputs: request.Inputs, Vars: request.Vars, Env: request.Env, Steps: request.Steps, Dependencies: request.Dependencies,
 		Batch:   bindingRoot(request.Bindings, "batch"),
 		Foreach: bindingRoot(request.Bindings, "foreach"), Matrix: bindingRoot(request.Bindings, "matrix"),
 		Finally:  bindingRoot(request.Bindings, "finally"),

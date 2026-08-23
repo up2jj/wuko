@@ -18,6 +18,7 @@ import (
 	keyvaluestep "github.com/up2jj/wuko/steps/key_value"
 	luastep "github.com/up2jj/wuko/steps/lua"
 	"github.com/up2jj/wuko/steps/shell"
+	"github.com/up2jj/wuko/workflow"
 )
 
 func TestExecuteWithSignalsCancelsGracefully(t *testing.T) {
@@ -1048,6 +1049,53 @@ func TestRunCommandRejectsMissingOrConflictingWorkflowSelector(t *testing.T) {
 		if err := command.ExecuteContext(t.Context()); err == nil {
 			t.Fatalf("args %v: expected error", args)
 		}
+	}
+}
+
+func TestBareCommandShowsWorkflowDependencies(t *testing.T) {
+	root := t.TempDir()
+	workflowDir := filepath.Join(root, ".wuko", "workflows")
+	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeTestWorkflow(t, filepath.Join(workflowDir, "build-artifacts.yaml"), "Build artifacts")
+	release := `version: 1
+name: release
+description: Publish a release
+depends_on:
+  build: build-artifacts
+  checks: checks
+steps:
+  - return: {outputs: {}}
+`
+	if err := os.WriteFile(filepath.Join(workflowDir, "release.yaml"), []byte(release), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeTestWorkflow(t, filepath.Join(workflowDir, "checks.yaml"), "Run checks")
+
+	var output bytes.Buffer
+	command := newRootCmd(dependencies{
+		stdin: bytes.NewReader(nil), stdout: &output, stderr: io.Discard,
+		cwd: func() (string, error) { return root, nil }, homeDir: func() (string, error) { return "", nil },
+		configDir: func() (string, error) { return "", nil }, registry: step.NewRegistry(),
+		isInteractive: func(io.Reader) bool { return false },
+	})
+	command.SetArgs(nil)
+	if err := command.ExecuteContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "release\tlocal\tPublish a release\t"+filepath.Join(workflowDir, "release.yaml")+"\tdepends on build=build-artifacts, checks") {
+		t.Fatalf("output = %q", output.String())
+	}
+}
+
+func TestWorkflowPickerOptionShowsWorkflowDependencies(t *testing.T) {
+	option := workflowPickerOption(workflow.Source{
+		Name: "release", Scope: "local", Description: "Publish",
+		Path: "/project/release.yaml", DependsOn: map[string]string{"checks": "checks", "build": "build-artifacts"},
+	})
+	if want := "local • Publish • depends on build=build-artifacts, checks • /project/release.yaml"; option.Description != want {
+		t.Fatalf("description = %q, want %q", option.Description, want)
 	}
 }
 

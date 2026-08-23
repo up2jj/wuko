@@ -30,6 +30,8 @@ type Definition struct {
 	Version     int                           `yaml:"version"`
 	Name        string                        `yaml:"name"`
 	Description string                        `yaml:"description,omitempty"`
+	DependsOn   map[string]string             `yaml:"depends_on,omitempty"`
+	Outputs     map[string]WorkflowOutput     `yaml:"outputs,omitempty"`
 	Cron        string                        `yaml:"cron,omitempty"`
 	Timezone    string                        `yaml:"timezone,omitempty"`
 	Templates   map[string]TemplateDefinition `yaml:"templates,omitempty"`
@@ -501,6 +503,9 @@ func validateDefinitionStructure(definition *Definition, allowActions bool) erro
 	if err := validateDefinitionHeader(definition); err != nil {
 		return err
 	}
+	if err := definition.ValidateOutputContract(); err != nil {
+		return err
+	}
 
 	seen := make(map[string]struct{}, len(definition.Steps)+len(definition.Finally))
 	if err := collectScopeIDs(definition.Steps, seen); err != nil {
@@ -518,6 +523,14 @@ func validateDefinitionStructure(definition *Definition, allowActions bool) erro
 	for name := range definition.Env {
 		if !environmentPattern.MatchString(name) {
 			return fmt.Errorf("invalid environment name %q", name)
+		}
+	}
+	for alias, name := range definition.DependsOn {
+		if !identifierPattern.MatchString(alias) {
+			return fmt.Errorf("invalid dependency alias %q", alias)
+		}
+		if !ValidWorkflowName(name) {
+			return fmt.Errorf("dependency %q has invalid workflow name %q", alias, name)
 		}
 	}
 	return nil
@@ -871,3 +884,8 @@ func validateDefinitionHeader(definition *Definition) error {
 
 // ValidEnvironmentName reports whether name is a portable POSIX-style environment name.
 func ValidEnvironmentName(name string) bool { return environmentPattern.MatchString(name) }
+
+// ValidWorkflowName reports whether name can be resolved through workflow discovery.
+func ValidWorkflowName(name string) bool {
+	return name != "" && filepath.Base(name) == name && !strings.ContainsAny(name, `/\\`)
+}

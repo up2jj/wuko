@@ -89,8 +89,9 @@ wuko run check --var package=./cmd/...
 wuko run check --dry-run
 ```
 
-Bare `wuko` opens a searchable picker in a terminal. Press Enter to run the selected workflow or
-Shift+Enter to print its reproducible `wuko run` command. `wuko run NAME` searches the nearest
+Bare `wuko` opens a searchable picker in a terminal and shows each workflow's direct prerequisites.
+Press Enter to run the selected workflow or Shift+Enter to print its reproducible `wuko run`
+command. `wuko run NAME` searches the nearest
 `.wuko/workflows/` directory first, then the user workflow directories. Use `--file` for an explicit
 path:
 
@@ -171,6 +172,25 @@ Steps run in declaration order. A successful step publishes outputs under `.step
 templates and `steps.<id>` for expressions. Variables live under `.vars`/`vars`. A failed step
 stops ordinary execution; `finally` still runs.
 
+A workflow can require other discovered workflows and consume their declared typed outputs:
+
+```yaml
+version: 1
+name: release
+depends_on:
+  build: build-artifacts
+steps:
+  - id: publish
+    type: shell
+    with:
+      command: ./publish.sh
+      args: ["{{ .dependencies.build.artifact }}"]
+```
+
+Prerequisites form sequential chains, shared prerequisites run once per invocation, and failures
+stop dependent workflows. See [Workflow prerequisites](docs/execution.md#workflow-prerequisites)
+for output contracts, validation rules, scheduling behavior, and runnable examples.
+
 Use `batch` when one operation should receive fixed-size chunks of a runtime list:
 
 ```yaml
@@ -188,8 +208,8 @@ Use `batch` when one operation should receive fixed-size chunks of a runtime lis
 
 For workflow syntax and execution behavior, see:
 
-- [Execution and composition](docs/execution.md) — conditions, concurrency, scheduling, waits,
-  retries, required files, remote reuse, progress, and debugging.
+- [Execution and composition](docs/execution.md) — prerequisites, conditions, concurrency,
+  scheduling, waits, retries, required files, remote reuse, progress, and debugging.
 - [Executor scopes](docs/executors.md) — mix local shell steps with persistent Docker sessions.
 - [Workflow controls](docs/workflow-control.md) — batch, foreach, and matrix expansion.
 - [Early successful return](docs/return.md) — finish workflows and actions with explicit outputs.

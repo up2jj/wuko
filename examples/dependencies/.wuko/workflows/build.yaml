@@ -1,0 +1,30 @@
+version: 1
+name: build
+description: Produce an artifact and demonstrate a typed early return
+
+depends_on:
+  prepare: prepare
+
+vars:
+  cached: false
+
+outputs:
+  artifact:
+    type: string
+    description: Path to the generated artifact
+    value: '"dist/app.tar.gz"'
+  cached:
+    type: boolean
+    value: "false"
+
+steps:
+  - return:
+      outputs:
+        artifact: '"dist/cached-app.tar.gz"'
+        cached: "true"
+    if: vars.cached
+
+  - return:
+      outputs:
+        artifact: '"dist/app.tar.gz"'
+        cached: "false"

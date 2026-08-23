@@ -60,6 +60,11 @@ func TemplateData(definition *Definition, runDir string, inputs, vars map[string
 
 // TemplateDataWithBindings constructs template roots including active workflow-control bindings.
 func TemplateDataWithBindings(definition *Definition, runDir string, inputs, vars map[string]any, environment map[string]string, steps, bindings map[string]any) map[string]any {
+	return TemplateDataWithDependencies(definition, runDir, inputs, vars, environment, steps, nil, bindings)
+}
+
+// TemplateDataWithDependencies constructs template roots including direct workflow dependencies.
+func TemplateDataWithDependencies(definition *Definition, runDir string, inputs, vars map[string]any, environment map[string]string, steps map[string]any, dependencies map[string]map[string]any, bindings map[string]any) map[string]any {
 	if inputs == nil {
 		inputs = map[string]any{}
 	}
@@ -69,11 +74,15 @@ func TemplateDataWithBindings(definition *Definition, runDir string, inputs, var
 	if steps == nil {
 		steps = map[string]any{}
 	}
+	if dependencies == nil {
+		dependencies = map[string]map[string]any{}
+	}
 	result := map[string]any{
-		"inputs": inputs,
-		"vars":   vars,
-		"env":    EnvironmentValues(environment),
-		"steps":  steps,
+		"inputs":       inputs,
+		"vars":         vars,
+		"env":          EnvironmentValues(environment),
+		"steps":        steps,
+		"dependencies": CloneDependencies(dependencies),
 		"workflow": map[string]any{
 			"name": definition.Name,
 			"dir":  definition.Dir,
@@ -82,6 +91,15 @@ func TemplateDataWithBindings(definition *Definition, runDir string, inputs, var
 	}
 	for key, value := range bindings {
 		result[key] = Clone(value)
+	}
+	return result
+}
+
+// CloneDependencies recursively clones dependency output maps.
+func CloneDependencies(source map[string]map[string]any) map[string]map[string]any {
+	result := make(map[string]map[string]any, len(source))
+	for alias, outputs := range source {
+		result[alias] = CloneMap(outputs)
 	}
 	return result
 }

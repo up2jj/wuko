@@ -85,7 +85,11 @@ func newTreeCmd(deps dependencies) *cobra.Command {
 				}
 			}
 
-			return writeWorkflowTree(command.OutOrStdout(), definition)
+			plan, err := resolveDependencyPlan(command.Context(), definition, loader, options, cwd, home, config)
+			if err != nil {
+				return err
+			}
+			return writeDependencyPlanTree(command.OutOrStdout(), plan)
 		},
 	}
 	command.Flags().StringArrayVar(&variables, "var", nil, "set a workflow variable (key=value; repeatable)")
@@ -94,6 +98,65 @@ func newTreeCmd(deps dependencies) *cobra.Command {
 	command.Flags().StringVar(&workflowFile, "file", "", "display a workflow from a file path")
 	command.ValidArgsFunction = workflowCompletion(deps)
 	return command
+}
+
+func writeDependencyPlanTree(writer io.Writer, plan *workflow.DependencyPlan) error {
+	if plan == nil || plan.Root == nil {
+		return fmt.Errorf("dependency plan root is required")
+	}
+	if _, err := fmt.Fprintln(writer, plan.Root.Definition.Name); err != nil {
+		return err
+	}
+	return writeDependencyWorkflowContents(writer, plan.Root, "", make(map[*workflow.DependencyNode]bool))
+}
+
+func writeDependencyWorkflowContents(writer io.Writer, node *workflow.DependencyNode, prefix string, expanded map[*workflow.DependencyNode]bool) error {
+	expanded[node] = true
+	hasWorkflowPlan := len(node.Definition.Steps) > 0 || len(node.Definition.Finally) > 0
+	if len(node.Dependencies) > 0 {
+		branch := "├── "
+		childPrefix := prefix + "│   "
+		if !hasWorkflowPlan {
+			branch = "└── "
+			childPrefix = prefix + "    "
+		}
+		if _, err := fmt.Fprintf(writer, "%s%sdepends_on\n", prefix, branch); err != nil {
+			return err
+		}
+		aliases := slices.Sorted(maps.Keys(node.Dependencies))
+		for index, alias := range aliases {
+			dependency := node.Dependencies[alias]
+			last := index == len(aliases)-1
+			if err := writeDependencyWorkflowNode(writer, dependency, alias, childPrefix, last, expanded); err != nil {
+				return err
+			}
+		}
+	}
+	if hasWorkflowPlan {
+		return writeTreePlan(writer, node.Definition.Steps, node.Definition.Finally, prefix)
+	}
+	return nil
+}
+
+func writeDependencyWorkflowNode(writer io.Writer, node *workflow.DependencyNode, alias, prefix string, last bool, expanded map[*workflow.DependencyNode]bool) error {
+	branch := "├── "
+	childPrefix := prefix + "│   "
+	if last {
+		branch = "└── "
+		childPrefix = prefix + "    "
+	}
+	label := alias
+	if alias != node.Definition.Name {
+		label += " (" + node.Definition.Name + ")"
+	}
+	if expanded[node] {
+		_, err := fmt.Fprintf(writer, "%s%s%s (shared; shown above)\n", prefix, branch, label)
+		return err
+	}
+	if _, err := fmt.Fprintf(writer, "%s%s%s\n", prefix, branch, label); err != nil {
+		return err
+	}
+	return writeDependencyWorkflowContents(writer, node, childPrefix, expanded)
 }
 
 func writeWorkflowTree(writer io.Writer, definition *workflow.Definition) error {

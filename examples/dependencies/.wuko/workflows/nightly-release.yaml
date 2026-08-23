@@ -1,0 +1,17 @@
+version: 1
+name: nightly-release
+description: Scheduled root whose prerequisite schedules are ignored
+cron: "0 2 * * *"
+
+depends_on:
+  release: release
+
+outputs:
+  artifact:
+    type: string
+    value: dependencies.release.artifact
+
+steps:
+  - return:
+      outputs:
+        artifact: dependencies.release.artifact

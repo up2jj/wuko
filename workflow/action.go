@@ -173,6 +173,10 @@ func (loader *Loader) Load(ctx context.Context, filename string, options LoadOpt
 		traceFinish(options.Diagnostics, started, diagnostic.PhaseLoad, diagnostic.StatusFailed, diagnostic.Location{Source: displaySource}, "", "", "", "", nil)
 		return nil, err
 	}
+	if err := validateDependencyRuntimeOnly(definition); err != nil {
+		traceFinish(options.Diagnostics, started, diagnostic.PhaseLoad, diagnostic.StatusFailed, definition.Location, definition.Name, "", "", "", err)
+		return nil, fmt.Errorf("validating workflow %s: %w", displaySource, err)
+	}
 	valuesStarted := traceStart(options.Diagnostics, diagnostic.PhaseValues, definition.Location, definition.Name, "", "", "preparing workflow values")
 	vars, environment, err := PrepareValues(definition, options)
 	if err != nil {

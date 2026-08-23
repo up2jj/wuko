@@ -1,0 +1,13 @@
+version: 1
+name: prepare
+description: Shared prerequisite at the base of the example diamond
+
+outputs:
+  workspace:
+    type: string
+    value: '"prepared"'
+
+steps:
+  - return:
+      outputs:
+        workspace: '"prepared"'
