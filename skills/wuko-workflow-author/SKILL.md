@@ -67,6 +67,9 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
 - Use `watch` to block until the first selected create, modify, rename, or remove notification below
   an existing local root. Prefer it over polling a shell probe, keep recursive roots narrow, give
   bounded waits a top-level timeout, and consume the relative `path` plus `operations` list.
+- Use `log_wait` to follow an existing or newly created regular log file until a regex matches.
+  Scan existing content first, set a top-level timeout and an appropriate `max_bytes`, and consume
+  its `match` plus named `captures` outputs.
 - Use `changed` before guarded work that should run only when selected file contents or named
   values differ from the detector's previous local snapshot. Branch on its `changed` output, and
   give repeated foreach, matrix, or action detectors a templated key containing their binding.

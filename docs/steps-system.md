@@ -130,6 +130,34 @@ NFS, SMB, FUSE, `/proc`, and `/sys`; there is no polling fallback. The step may 
 so use a top-level `timeout` unless an unbounded workflow is intentional. `watch` observes the local
 host filesystem and is rejected inside executor blocks.
 
+## `log_wait`
+
+Follow a growing regular file until a Go regular expression matches. Existing content is scanned
+first, so a readiness message written before the step starts is still observed.
+
+Wait for a service to report readiness:
+
+```yaml
+- id: await_service
+  type: log_wait
+  timeout: 2m
+  with:
+    path: logs/service.log
+    pattern: 'ready on port (?P<port>[0-9]+)'
+    max_bytes: 2MiB
+```
+
+`path` is resolved from the workflow run directory. The containing directory must already exist,
+but the file may be created after the step starts. The follower handles truncation and atomic file
+replacement by reopening and scanning the replacement from the beginning; a present non-regular
+file is an error. `max_bytes` defaults to `1MiB` and bounds unmatched content retained in memory.
+
+Successful output contains the resolved `path`, the full matched `match`, and a `captures` object
+containing named regular-expression captures. Unnamed expressions are supported and produce an
+empty captures object. Use a top-level `timeout` because the step waits indefinitely until a match,
+timeout, or cancellation. `log_wait` observes the host filesystem and is rejected inside executor
+blocks.
+
 ## `temp`
 
 Create a managed empty file, directory, or POSIX FIFO. Wuko removes it after root workflow cleanup,

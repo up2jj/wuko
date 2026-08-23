@@ -250,6 +250,7 @@ Each linked guide contains multiple examples for every step.
 | `file` | Perform shell-independent filesystem operations | [System steps](docs/steps-system.md#file) |
 | `glob` | Discover regular files with portable patterns | [System steps](docs/steps-system.md#glob) |
 | `watch` | Wait for native filesystem events | [System steps](docs/steps-system.md#watch) |
+| `log_wait` | Follow a growing log until a regex matches | [System steps](docs/steps-system.md#log_wait) |
 | `temp` | Create automatically cleaned files, directories, or FIFOs | [System steps](docs/steps-system.md#temp) |
 | `cache` | Restore and save directory caches | [System steps](docs/steps-system.md#cache) |
 | `http` | Make structured HTTP API calls | [System steps](docs/steps-system.md#http) |
