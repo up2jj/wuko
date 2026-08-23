@@ -136,8 +136,8 @@ func runWorkflowUI(command *cobra.Command, deps dependencies, args []string, con
 			}
 			return engine.Options{
 				Vars: activeVars, Env: env, BaseEnv: baseEnv, Dependencies: dependencies, RunDir: cwd,
-				Stdin: command.InOrStdin(), Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(),
-				Interactive: interactive(command.InOrStdin()), Progress: activeReporters.Progress, Diagnostics: activeReporters.Diagnostic,
+				Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(),
+				Interactive: false, Progress: activeReporters.Progress, Diagnostics: activeReporters.Diagnostic,
 				LocalValueDir: localValueDir, GlobalValueDir: filepath.Join(configDir, "wuko", "values"),
 			}
 		}

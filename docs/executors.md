@@ -149,7 +149,8 @@ being interpreted as an unrelated container path.
 Each child is invoked with Docker exec; the image entrypoint is not rerun for every step. The
 command or shell named by the shell step must exist in the image. Workflow and step environment
 values, retry metadata, stdin, stdout, stderr, exit codes, timeouts, and shell output capture retain
-their normal shell-step behavior.
+their normal shell-step behavior. Interactive `shell.with.tty` is local-only and is rejected inside
+Docker executor blocks.
 
 ## Sharing files with local steps
 

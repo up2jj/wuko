@@ -278,6 +278,9 @@ func (session *dockerExecutorSession) mounts() ([]mount.Mount, []pathMapping, er
 }
 
 func (session *dockerExecutorSession) Run(ctx context.Context, options process.Options) (process.Result, error) {
+	if options.TTY {
+		return process.Result{}, fmt.Errorf("tty is not supported by the Docker executor")
+	}
 	session.mu.Lock()
 	defer session.mu.Unlock()
 	if options.Command == "" {

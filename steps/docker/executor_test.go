@@ -56,6 +56,18 @@ func TestDockerExecutorSharesWorkspaceAndRunsCommands(t *testing.T) {
 	}
 }
 
+func TestDockerExecutorRejectsTTYBeforeStartingSession(t *testing.T) {
+	client := &fakeClient{}
+	session := &dockerExecutorSession{client: client}
+	_, err := session.Run(t.Context(), process.Options{Command: "sh", TTY: true})
+	if err == nil || !strings.Contains(err.Error(), "tty is not supported") {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if session.containerID != "" || client.created.Config != nil {
+		t.Fatalf("TTY rejection started session: id=%q config=%#v", session.containerID, client.created.Config)
+	}
+}
+
 func TestDockerExecutorConfigurationValidation(t *testing.T) {
 	tests := []struct {
 		name string

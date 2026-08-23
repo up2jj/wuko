@@ -40,7 +40,30 @@ Run as another Unix account when Wuko has permission:
 ```
 
 Live output is forwarded and also captured as `stdout`, `stderr`, and `exit_code`. `user` uses
-native process credentials; Wuko does not invoke `sudo` or rewrite `HOME` and `USER`.
+native process credentials; Wuko does not invoke `sudo` or rewrite `HOME` and `USER`. The boolean
+outputs `stdout_truncated` and `stderr_truncated` report whether capture reached its configured
+bound.
+
+Set `tty: true` for a local command that needs an interactive terminal, such as a shell, SSH
+session, REPL, or terminal UI:
+
+```yaml
+- id: console
+  type: shell
+  with:
+    command: /bin/sh
+    args: [-i]
+    tty: true
+```
+
+TTY mode connects the command to the workflow terminal, switches the terminal to raw mode for the
+command's lifetime, and follows terminal resizes. The combined terminal stream is forwarded live
+and the first 1 MiB is captured as `stdout`; `stderr` is empty and `stdout_truncated` is true when
+more output was streamed. This keeps memory bounded for long-running interactive commands.
+
+TTY mode requires an interactive, file-backed terminal and is unavailable in browser runs,
+concurrent execution, and executor blocks. It cannot be combined with non-empty `stdin`. Terminal
+state is restored when the command succeeds, fails, times out, or is canceled.
 
 ## `agent`
 

@@ -12,6 +12,8 @@ import (
 	"github.com/up2jj/wuko/workflow"
 )
 
+const ttyCaptureLimit = 1 << 20
+
 type Config struct {
 	Command          string               `yaml:"command,omitempty"`
 	Script           string               `yaml:"script,omitempty"`
@@ -21,6 +23,7 @@ type Config struct {
 	Env              workflow.Environment `yaml:"env,omitempty"`
 	User             string               `yaml:"user,omitempty"`
 	Stdin            string               `yaml:"stdin,omitempty"`
+	TTY              bool                 `yaml:"tty,omitempty"`
 }
 
 type Runner struct{ config Config }
@@ -40,6 +43,9 @@ func New(raw map[string]any) (step.Runner, error) {
 	if config.Script != "" && strings.TrimSpace(config.Script) == "" {
 		return nil, fmt.Errorf("script cannot be blank")
 	}
+	if config.TTY && config.Stdin != "" {
+		return nil, fmt.Errorf("tty and stdin cannot be combined")
+	}
 	for key := range config.Env {
 		if !workflow.ValidEnvironmentName(key) {
 			return nil, fmt.Errorf("invalid environment name %q", key)
@@ -49,6 +55,9 @@ func New(raw map[string]any) (step.Runner, error) {
 }
 
 func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, error) {
+	if r.config.TTY && (!request.Interactive || request.Stdin == nil) {
+		return step.Result{}, fmt.Errorf("tty requires an interactive terminal")
+	}
 	command, args := r.command()
 	dir := r.config.WorkingDirectory
 	if dir == "" {
@@ -63,11 +72,20 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 	if executor == nil {
 		executor = process.LocalExecutor{}
 	}
+	stdin := process.StringInput(r.config.Stdin)
+	captureLimit := int64(0)
+	if r.config.TTY {
+		stdin = request.Stdin
+		captureLimit = ttyCaptureLimit
+	}
 	result, err := executor.Run(ctx, process.Options{
 		Command: command, Args: args, Dir: dir, Env: environment, User: r.config.User,
-		Stdin: process.StringInput(r.config.Stdin), Stdout: request.Stdout, Stderr: request.Stderr,
+		Stdin: stdin, Stdout: request.Stdout, Stderr: request.Stderr, TTY: r.config.TTY, CaptureLimit: captureLimit,
 	})
-	outputs := map[string]any{"stdout": result.Stdout, "stderr": result.Stderr, "exit_code": result.ExitCode}
+	outputs := map[string]any{
+		"stdout": result.Stdout, "stderr": result.Stderr, "exit_code": result.ExitCode,
+		"stdout_truncated": result.StdoutTruncated, "stderr_truncated": result.StderrTruncated,
+	}
 	if err != nil {
 		return step.Result{Outputs: outputs}, err
 	}

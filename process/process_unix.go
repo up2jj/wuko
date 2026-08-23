@@ -10,12 +10,18 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"os/user"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
+
+	"github.com/creack/pty"
+	"github.com/muesli/cancelreader"
+	"golang.org/x/term"
 )
 
 const terminationGracePeriod = 2 * time.Second
@@ -30,6 +36,8 @@ type Options struct {
 	Stdin  io.Reader
 	Stdout io.Writer
 	Stderr io.Writer
+	// TTY runs the command in a pseudo-terminal connected to a file-backed terminal Stdin.
+	TTY bool
 	// CaptureLimit bounds each captured output stream. Zero means unlimited. Output written to
 	// Stdout and Stderr is unaffected.
 	CaptureLimit int64
@@ -77,6 +85,9 @@ func (LocalExecutor) Run(ctx context.Context, options Options) (Result, error) {
 	if credentialErr != nil {
 		return Result{}, credentialErr
 	}
+	if options.TTY {
+		return runTTY(ctx, options, credential)
+	}
 	command := exec.Command(options.Command, options.Args...)
 	command.Dir = options.Dir
 	command.Env = environment(options.Env)
@@ -121,6 +132,141 @@ func (LocalExecutor) Run(ctx context.Context, options Options) (Result, error) {
 		return result, &ExitError{Command: options.Command, Code: result.ExitCode, Err: err}
 	}
 	return result, fmt.Errorf("starting %s: %w", options.Command, err)
+}
+
+func runTTY(ctx context.Context, options Options, credential *syscall.Credential) (result Result, runErr error) {
+	terminal, ok := options.Stdin.(*os.File)
+	if !ok || !term.IsTerminal(int(terminal.Fd())) {
+		return Result{}, fmt.Errorf("tty requires file-backed terminal stdin")
+	}
+
+	size, err := pty.GetsizeFull(terminal)
+	if err != nil {
+		return Result{}, fmt.Errorf("reading terminal size: %w", err)
+	}
+	input, err := cancelreader.NewReader(terminal)
+	if err != nil {
+		return Result{}, fmt.Errorf("preparing terminal input: %w", err)
+	}
+	defer func() {
+		if closeErr := input.Close(); closeErr != nil {
+			runErr = errors.Join(runErr, fmt.Errorf("closing terminal input: %w", closeErr))
+		}
+	}()
+
+	state, err := term.MakeRaw(int(terminal.Fd()))
+	if err != nil {
+		return Result{}, fmt.Errorf("enabling raw terminal mode: %w", err)
+	}
+	defer func() {
+		if restoreErr := term.Restore(int(terminal.Fd()), state); restoreErr != nil {
+			runErr = errors.Join(runErr, fmt.Errorf("restoring terminal mode: %w", restoreErr))
+		}
+	}()
+
+	command := exec.Command(options.Command, options.Args...)
+	command.Dir = options.Dir
+	command.Env = environment(options.Env)
+	command.WaitDelay = terminationGracePeriod + time.Second
+	attrs := &syscall.SysProcAttr{Setsid: true, Setctty: true, Credential: credential}
+	ptmx, err := pty.StartWithAttrs(command, size, attrs)
+	if err != nil {
+		if options.User != "" {
+			return Result{}, fmt.Errorf("starting %s as user %q with TTY: %w", options.Command, options.User, err)
+		}
+		return Result{}, fmt.Errorf("starting %s with TTY: %w", options.Command, err)
+	}
+
+	resizeSignals := make(chan os.Signal, 1)
+	resizeStop := make(chan struct{})
+	resizeDone := make(chan struct{})
+	var resizeOnce sync.Once
+	signal.Notify(resizeSignals, syscall.SIGWINCH)
+	go func() {
+		defer close(resizeDone)
+		for {
+			select {
+			case <-resizeSignals:
+				_ = pty.InheritSize(terminal, ptmx)
+			case <-resizeStop:
+				return
+			}
+		}
+	}()
+	stopResize := func() {
+		resizeOnce.Do(func() {
+			signal.Stop(resizeSignals)
+			close(resizeStop)
+			<-resizeDone
+		})
+	}
+	defer stopResize()
+
+	stdout := newCaptureBuffer(options.CaptureLimit)
+	outputDone := make(chan error, 1)
+	go func() {
+		_, copyErr := io.Copy(io.MultiWriter(writerOrDiscard(options.Stdout), &stdout), ptmx)
+		outputDone <- copyErr
+	}()
+	inputDone := make(chan error, 1)
+	go func() {
+		_, copyErr := io.Copy(ptmx, input)
+		inputDone <- copyErr
+	}()
+	wait := make(chan error, 1)
+	go func() { wait <- command.Wait() }()
+
+	canceled := false
+	select {
+	case err = <-wait:
+	case <-ctx.Done():
+		canceled = true
+		err = terminateProcessGroup(command.Process.Pid, wait)
+	}
+	input.Cancel()
+	inputErr := <-inputDone
+	stopResize()
+	outputErr := drainPTYOutput(ptmx, outputDone)
+
+	result = Result{Stdout: stdout.String(), ExitCode: 0, StdoutTruncated: stdout.truncated}
+	if !expectedPTYStreamError(inputErr) {
+		runErr = errors.Join(runErr, fmt.Errorf("writing terminal input: %w", inputErr))
+	}
+	if !expectedPTYStreamError(outputErr) {
+		runErr = errors.Join(runErr, fmt.Errorf("reading terminal output: %w", outputErr))
+	}
+	if canceled {
+		return result, errors.Join(ctx.Err(), runErr)
+	}
+	if err == nil {
+		return result, runErr
+	}
+	if ctx.Err() != nil {
+		return result, errors.Join(ctx.Err(), runErr)
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		result.ExitCode = exitErr.ExitCode()
+		return result, errors.Join(&ExitError{Command: options.Command, Code: result.ExitCode, Err: err}, runErr)
+	}
+	return result, errors.Join(fmt.Errorf("waiting for %s: %w", options.Command, err), runErr)
+}
+
+func drainPTYOutput(ptmx *os.File, outputDone <-chan error) error {
+	timer := time.NewTimer(terminationGracePeriod + time.Second)
+	defer timer.Stop()
+	select {
+	case err := <-outputDone:
+		_ = ptmx.Close()
+		return err
+	case <-timer.C:
+		_ = ptmx.Close()
+		return <-outputDone
+	}
+}
+
+func expectedPTYStreamError(err error) bool {
+	return err == nil || errors.Is(err, cancelreader.ErrCanceled) || errors.Is(err, os.ErrClosed) || errors.Is(err, syscall.EIO)
 }
 
 func credentialForUser(identity string) (*syscall.Credential, error) {
