@@ -28,17 +28,14 @@ func IsRemoteLocator(locator string) bool {
 	return strings.HasPrefix(locator, "https://") || strings.HasPrefix(locator, "http://") || strings.HasPrefix(locator, "github:")
 }
 
-// LoadRemote fetches and loads a workflow from an HTTPS URL or a public GitHub locator.
-// The returned cleanup function removes the temporary materialization directory and must be
-// called after the workflow has finished executing.
-func (loader *Loader) LoadRemote(ctx context.Context, locator string, options LoadOptions) (*Definition, func(), error) {
+// DecodeRemote fetches and decodes a workflow without preparing its composite actions.
+// The returned cleanup function must be called after preparation and execution finish.
+func (loader *Loader) DecodeRemote(ctx context.Context, locator string, options LoadOptions) (*Definition, func(), error) {
 	location := diagnostic.Location{Source: diagnostic.SafeURLString(locator)}
-	started := traceStart(options.Diagnostics, diagnostic.PhaseLoad, location, "", "", "", "loading remote workflow")
 	fetchStarted := traceStart(options.Diagnostics, diagnostic.PhaseWorkflowFetch, location, "", "", "", "fetching remote workflow")
 	payload, description, err := loader.fetchWorkflow(ctx, locator)
 	if err != nil {
 		traceFinish(options.Diagnostics, fetchStarted, diagnostic.PhaseWorkflowFetch, diagnostic.StatusFailed, location, "", "", "", "", err)
-		traceFinish(options.Diagnostics, started, diagnostic.PhaseLoad, diagnostic.StatusFailed, location, "", "", "", "", nil)
 		return nil, func() {}, err
 	}
 	location.Source = description
@@ -46,19 +43,36 @@ func (loader *Loader) LoadRemote(ctx context.Context, locator string, options Lo
 
 	path, cleanup, err := materializeRemoteWorkflow(payload, description)
 	if err != nil {
-		traceFinish(options.Diagnostics, started, diagnostic.PhaseLoad, diagnostic.StatusFailed, diagnostic.Location{Source: description}, "", "", "", "", err)
 		return nil, func() {}, fmt.Errorf("materializing workflow %s: %w", description, err)
 	}
 	options.sourceRoot = filepath.Dir(path)
 	options.sourceLabel = description
-	definition, err := loader.Load(ctx, path, options)
+	definition, err := loader.Decode(path, options)
 	if err != nil {
 		cleanup()
-		traceFinish(options.Diagnostics, started, diagnostic.PhaseLoad, diagnostic.StatusFailed, diagnostic.Location{Source: description}, "", "", "", "", nil)
 		return nil, func() {}, err
 	}
 	remapDefinitionLocations(definition, filepath.Dir(path), description)
-	traceFinish(options.Diagnostics, started, diagnostic.PhaseLoad, diagnostic.StatusSucceeded, definition.Location, definition.Name, "", "", "", nil, countAttr("bytes", len(payload)))
+	return definition, cleanup, nil
+}
+
+// LoadRemote fetches and loads a workflow from an HTTPS URL or a public GitHub locator.
+// The returned cleanup function removes the temporary materialization directory and must be
+// called after the workflow has finished executing.
+func (loader *Loader) LoadRemote(ctx context.Context, locator string, options LoadOptions) (*Definition, func(), error) {
+	location := diagnostic.Location{Source: diagnostic.SafeURLString(locator)}
+	started := traceStart(options.Diagnostics, diagnostic.PhaseLoad, location, "", "", "", "loading remote workflow")
+	definition, cleanup, err := loader.DecodeRemote(ctx, locator, options)
+	if err != nil {
+		traceFinish(options.Diagnostics, started, diagnostic.PhaseLoad, diagnostic.StatusFailed, location, "", "", "", "", nil)
+		return nil, func() {}, err
+	}
+	if err := loader.Prepare(ctx, definition, options); err != nil {
+		cleanup()
+		traceFinish(options.Diagnostics, started, diagnostic.PhaseLoad, diagnostic.StatusFailed, definition.Location, definition.Name, "", "", "", nil)
+		return nil, func() {}, err
+	}
+	traceFinish(options.Diagnostics, started, diagnostic.PhaseLoad, diagnostic.StatusSucceeded, definition.Location, definition.Name, "", "", "", nil, countAttr("steps", len(definition.Steps)))
 	return definition, cleanup, nil
 }
 

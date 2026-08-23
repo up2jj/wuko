@@ -1099,6 +1099,15 @@ func TestWorkflowPickerOptionShowsWorkflowDependencies(t *testing.T) {
 	}
 }
 
+func TestWorkflowPickerOptionShowsFormAvailability(t *testing.T) {
+	option := workflowPickerOption(workflow.Source{
+		Name: "release", Scope: "local", Description: "Publish", Path: "/project/release.yaml", HasForm: true,
+	})
+	if want := "local • Publish • form • /project/release.yaml"; option.Description != want {
+		t.Fatalf("description = %q, want %q", option.Description, want)
+	}
+}
+
 func writeTestWorkflow(t *testing.T, path, description string) {
 	t.Helper()
 	name := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))

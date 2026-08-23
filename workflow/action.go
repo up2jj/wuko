@@ -161,6 +161,47 @@ func NewLoader(client *http.Client) *Loader {
 	return &Loader{client: &copy}
 }
 
+// Decode reads and validates a local workflow without resolving composite actions. Call Prepare
+// before execution. This split lets callers collect values from optional adapters first.
+func (loader *Loader) Decode(filename string, options LoadOptions) (*Definition, error) {
+	definition, err := loadLocalWithDiagnostics(filename, options.Diagnostics, options.sourceRoot, options.sourceLabel)
+	if err != nil {
+		return nil, err
+	}
+	return definition, nil
+}
+
+// Prepare resolves value-dependent workflow environment and composite actions in a decoded definition.
+func (loader *Loader) Prepare(ctx context.Context, definition *Definition, options LoadOptions) error {
+	displaySource := definition.Path
+	if options.sourceLabel != "" {
+		displaySource = options.sourceLabel
+	}
+	if err := validateDependencyRuntimeOnly(definition); err != nil {
+		return fmt.Errorf("validating workflow %s: %w", displaySource, err)
+	}
+	valuesStarted := traceStart(options.Diagnostics, diagnostic.PhaseValues, definition.Location, definition.Name, "", "", "preparing workflow values")
+	vars, environment, err := PrepareValues(definition, options)
+	if err != nil {
+		traceFinish(options.Diagnostics, valuesStarted, diagnostic.PhaseValues, diagnostic.StatusFailed, definition.Location, definition.Name, "", "", "", err)
+		return err
+	}
+	traceFinish(options.Diagnostics, valuesStarted, diagnostic.PhaseValues, diagnostic.StatusSucceeded, definition.Location, definition.Name, "", "", "", nil, countAttr("variables", len(vars)), countAttr("environment", len(environment)))
+	data := TemplateData(definition, options.RunDir, nil, vars, environment, nil)
+	renderer, err := NewRenderer(definition.Templates)
+	if err != nil {
+		return err
+	}
+	cache := make(map[string]*Action)
+	if err := loader.resolveActions(ctx, definition.Name, definition.Steps, renderer, data, environment, options.RunDir, true, definition.Dir, cache, options.Diagnostics); err != nil {
+		return err
+	}
+	if err := loader.resolveActions(ctx, definition.Name, definition.Finally, renderer, data, environment, options.RunDir, true, definition.Dir, cache, options.Diagnostics); err != nil {
+		return err
+	}
+	return nil
+}
+
 // Load reads a local workflow, expands required step files, and resolves all remote actions.
 func (loader *Loader) Load(ctx context.Context, filename string, options LoadOptions) (*Definition, error) {
 	displaySource := filename
@@ -168,39 +209,16 @@ func (loader *Loader) Load(ctx context.Context, filename string, options LoadOpt
 		displaySource = remapSource(filename, options.sourceRoot, options.sourceLabel)
 	}
 	started := traceStart(options.Diagnostics, diagnostic.PhaseLoad, diagnostic.Location{Source: displaySource}, "", "", "", "loading workflow")
-	definition, err := loadLocalWithDiagnostics(filename, options.Diagnostics, options.sourceRoot, options.sourceLabel)
+	definition, err := loader.Decode(filename, options)
 	if err != nil {
 		traceFinish(options.Diagnostics, started, diagnostic.PhaseLoad, diagnostic.StatusFailed, diagnostic.Location{Source: displaySource}, "", "", "", "", nil)
 		return nil, err
 	}
-	if err := validateDependencyRuntimeOnly(definition); err != nil {
-		traceFinish(options.Diagnostics, started, diagnostic.PhaseLoad, diagnostic.StatusFailed, definition.Location, definition.Name, "", "", "", err)
-		return nil, fmt.Errorf("validating workflow %s: %w", displaySource, err)
-	}
-	valuesStarted := traceStart(options.Diagnostics, diagnostic.PhaseValues, definition.Location, definition.Name, "", "", "preparing workflow values")
-	vars, environment, err := PrepareValues(definition, options)
-	if err != nil {
-		traceFinish(options.Diagnostics, valuesStarted, diagnostic.PhaseValues, diagnostic.StatusFailed, definition.Location, definition.Name, "", "", "", err)
+	if err := loader.Prepare(ctx, definition, options); err != nil {
 		traceFinish(options.Diagnostics, started, diagnostic.PhaseLoad, diagnostic.StatusFailed, definition.Location, definition.Name, "", "", "", nil)
 		return nil, err
 	}
-	traceFinish(options.Diagnostics, valuesStarted, diagnostic.PhaseValues, diagnostic.StatusSucceeded, definition.Location, definition.Name, "", "", "", nil, countAttr("variables", len(vars)), countAttr("environment", len(environment)))
-	data := TemplateData(definition, options.RunDir, nil, vars, environment, nil)
-	renderer, err := NewRenderer(definition.Templates)
-	if err != nil {
-		traceFinish(options.Diagnostics, started, diagnostic.PhaseLoad, diagnostic.StatusFailed, definition.Location, definition.Name, "", "", "", nil)
-		return nil, err
-	}
-	cache := make(map[string]*Action)
-	if err := loader.resolveActions(ctx, definition.Name, definition.Steps, renderer, data, environment, options.RunDir, true, definition.Dir, cache, options.Diagnostics); err != nil {
-		traceFinish(options.Diagnostics, started, diagnostic.PhaseLoad, diagnostic.StatusFailed, definition.Location, definition.Name, "", "", "", nil)
-		return nil, err
-	}
-	if err := loader.resolveActions(ctx, definition.Name, definition.Finally, renderer, data, environment, options.RunDir, true, definition.Dir, cache, options.Diagnostics); err != nil {
-		traceFinish(options.Diagnostics, started, diagnostic.PhaseLoad, diagnostic.StatusFailed, definition.Location, definition.Name, "", "", "", nil)
-		return nil, err
-	}
-	traceFinish(options.Diagnostics, started, diagnostic.PhaseLoad, diagnostic.StatusSucceeded, definition.Location, definition.Name, "", "", "", nil, countAttr("steps", len(definition.Steps)), countAttr("actions", len(cache)))
+	traceFinish(options.Diagnostics, started, diagnostic.PhaseLoad, diagnostic.StatusSucceeded, definition.Location, definition.Name, "", "", "", nil, countAttr("steps", len(definition.Steps)))
 	return definition, nil
 }
 

@@ -52,6 +52,20 @@ func TestFanoutReporterPreservesOrderAndJoinsFinishErrors(t *testing.T) {
 	}
 }
 
+func TestFinishReportersOnceFinalizesOnlyFirstOutcome(t *testing.T) {
+	var events []string
+	finish := finishReportersOnce(fanoutReporter{recordingReporter{name: "run", events: &events}})
+	if err, called := finish("check", nil, errors.New("preparation failed"), false); err != nil || !called {
+		t.Fatalf("first finish = (%v, %v), want (nil, true)", err, called)
+	}
+	if err, called := finish("check", &engine.State{}, nil, false); err != nil || called {
+		t.Fatalf("second finish = (%v, %v), want (nil, false)", err, called)
+	}
+	if got := strings.Join(events, ","); got != "run:finish" {
+		t.Fatalf("events = %q, want one finish", got)
+	}
+}
+
 func TestNewRunReportersDefaultsToPlainAndComposesExplicitReporters(t *testing.T) {
 	command := &cobra.Command{}
 	command.SetOut(new(bytes.Buffer))

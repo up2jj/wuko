@@ -9,6 +9,8 @@ with typed data and files, call APIs, run scripts or containers, and start codin
 - **Local-first workflows** — keep readable automation beside the code it changes.
 - **Interactive runs** — collect text, passwords, choices, filesystem paths, and confirmations in
   the terminal.
+- **Local browser forms** — collect typed variables, load dynamic choices, follow live progress,
+  and render explicit workflow results without changing standard runs.
 - **Typed workflow state** — use variables, step outputs, JSON/TOML imports, JSONPath, semantic
   versions, templates, and expressions without converting everything to strings.
 - **Useful execution controls** — conditions, early successful returns, retries, timeouts, polling,
@@ -85,13 +87,14 @@ wuko list
 wuko tree check
 wuko validate check
 wuko run check
+wuko ui check
 wuko run check --var package=./cmd/...
 wuko run check --dry-run
 ```
 
 Bare `wuko` opens a searchable picker in a terminal and shows each workflow's direct prerequisites.
-Press Enter to run the selected workflow or Shift+Enter to print its reproducible `wuko run`
-command. `wuko run NAME` searches the nearest
+Press Enter to run the selected workflow, `u` to open a declared browser form, or Shift+Enter to
+print its reproducible `wuko run` command. `wuko run NAME` searches the nearest
 `.wuko/workflows/` directory first, then the user workflow directories. Use `--file` for an explicit
 path:
 
@@ -216,6 +219,7 @@ For workflow syntax and execution behavior, see:
 - [Finally cleanup](docs/finally.md) and [graceful shutdown](docs/graceful-shutdown.md).
 - [Templates](docs/templates.md) and [template, Expr, and Lua functions](docs/template-functions.md).
 - [Variable imports](docs/variable-imports.md).
+- [Browser forms](docs/forms.md) — typed fields, dynamic pre-run data, live progress, and results.
 
 ## Available steps
 

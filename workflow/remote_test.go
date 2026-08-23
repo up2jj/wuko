@@ -85,6 +85,32 @@ func TestLoadRemoteYAMLAndCleansUp(t *testing.T) {
 	}
 }
 
+func TestLoadRemoteReportsPreparationFailureAsLoadFailure(t *testing.T) {
+	workflowData := []byte("version: 1\nname: remote\nsteps:\n  - id: action\n    uses: https://actions.example.test/missing\n")
+	client := testHTTPClient(func(request *http.Request) (*http.Response, error) {
+		if request.URL.Host == "example.test" {
+			return testResponse(http.StatusOK, workflowData), nil
+		}
+		return testResponse(http.StatusNotFound, nil), nil
+	})
+	var events []diagnostic.Event
+	_, _, err := NewLoader(client).LoadRemote(t.Context(), "https://example.test/workflow.yaml", LoadOptions{
+		Diagnostics: func(event diagnostic.Event) { events = append(events, event) },
+	})
+	if err == nil {
+		t.Fatal("LoadRemote() error = nil")
+	}
+	var statuses []diagnostic.Status
+	for _, event := range events {
+		if event.Phase == diagnostic.PhaseLoad {
+			statuses = append(statuses, event.Status)
+		}
+	}
+	if got, want := fmt.Sprint(statuses), fmt.Sprint([]diagnostic.Status{diagnostic.StatusStarted, diagnostic.StatusFailed}); got != want {
+		t.Fatalf("load statuses = %s, want %s", got, want)
+	}
+}
+
 func TestLoadRemoteArchivesWorkflowAndCompanionFiles(t *testing.T) {
 	workflowData := []byte("version: 1\nname: remote\nsteps:\n  - id: run\n    type: lua\n    with:\n      file: companion.lua\n")
 	for name, payload := range map[string][]byte{

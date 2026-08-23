@@ -106,6 +106,7 @@ type dependencies struct {
 	now           func() time.Time
 	waitUntil     func(context.Context, time.Time) error
 	getenv        func(string) string
+	openURL       func(string) error
 	debug         *bool
 }
 
@@ -206,7 +207,7 @@ func newRootCmd(deps dependencies) *cobra.Command {
 	root.SetOut(deps.stdout)
 	root.SetErr(deps.stderr)
 	root.PersistentFlags().BoolVar(&debug, "debug", false, "trace workflow loading, validation, and execution to stderr (may expose non-secret configuration)")
-	root.AddCommand(newRunCmd(deps), newListCmd(deps), newTreeCmd(deps), newValidateCmd(deps), newAgentCmd(deps), newCompletionCmd())
+	root.AddCommand(newRunCmd(deps), newUICmd(deps), newListCmd(deps), newTreeCmd(deps), newValidateCmd(deps), newAgentCmd(deps), newCompletionCmd())
 	return root
 }
 
@@ -242,27 +243,37 @@ func runWorkflowPicker(command *cobra.Command, deps dependencies) error {
 	for i, source := range sources {
 		options[i] = workflowPickerOption(source)
 	}
-	selection, err := tui.SelectWithIntent(command.Context(), command.InOrStdin(), command.OutOrStdout(), "Workflows", options)
-	if err != nil {
-		if errors.Is(err, context.Canceled) {
+	for {
+		selection, err := tui.SelectWithIntent(command.Context(), command.InOrStdin(), command.OutOrStdout(), "Workflows", options)
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return nil
+			}
+			return err
+		}
+		source, ok := selection.Option.Value.(workflow.Source)
+		if !ok {
+			return fmt.Errorf("workflow selection did not contain a workflow")
+		}
+		diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseSelection, Status: diagnostic.StatusSucceeded, Location: diagnostic.Location{Source: source.Path}, Message: source.Name})
+		switch selection.Intent {
+		case tui.SelectionPrimary:
+			return runWorkflow(command, deps, nil, runWorkflowConfig{workflowFile: source.Path})
+		case tui.SelectionUI:
+			if !source.HasForm {
+				fmt.Fprintf(command.OutOrStdout(), "Workflow %s does not declare a form.\n", source.Name)
+				continue
+			}
+			return runWorkflowUI(command, deps, nil, uiWorkflowConfig{workflowFile: source.Path})
+		default:
+			if source.Effective {
+				fmt.Fprintf(command.OutOrStdout(), "wuko run %s\n", shellQuote(source.Name))
+				return nil
+			}
+			fmt.Fprintf(command.OutOrStdout(), "wuko run --file %s\n", shellQuote(source.Path))
 			return nil
 		}
-		return err
 	}
-	source, ok := selection.Option.Value.(workflow.Source)
-	if !ok {
-		return fmt.Errorf("workflow selection did not contain a workflow")
-	}
-	diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseSelection, Status: diagnostic.StatusSucceeded, Location: diagnostic.Location{Source: source.Path}, Message: source.Name})
-	if selection.Intent == tui.SelectionPrimary {
-		return runWorkflow(command, deps, nil, runWorkflowConfig{workflowFile: source.Path})
-	}
-	if source.Effective {
-		fmt.Fprintf(command.OutOrStdout(), "wuko run %s\n", shellQuote(source.Name))
-		return nil
-	}
-	fmt.Fprintf(command.OutOrStdout(), "wuko run --file %s\n", shellQuote(source.Path))
-	return nil
 }
 
 func workflowPickerOption(source workflow.Source) tui.Option {
@@ -271,6 +282,9 @@ func workflowPickerOption(source workflow.Source) tui.Option {
 		description = "(no description)"
 	}
 	parts := []string{source.Scope, description}
+	if source.HasForm {
+		parts = append(parts, "form")
+	}
 	if dependencies := workflowDependencySummary(source.DependsOn); dependencies != "" {
 		parts = append(parts, dependencies)
 	}

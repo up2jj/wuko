@@ -27,21 +27,28 @@ var (
 
 // Definition is a fully loaded workflow document.
 type Definition struct {
-	Version     int                           `yaml:"version"`
-	Name        string                        `yaml:"name"`
-	Description string                        `yaml:"description,omitempty"`
-	DependsOn   map[string]string             `yaml:"depends_on,omitempty"`
-	Outputs     map[string]WorkflowOutput     `yaml:"outputs,omitempty"`
-	Cron        string                        `yaml:"cron,omitempty"`
-	Timezone    string                        `yaml:"timezone,omitempty"`
-	Templates   map[string]TemplateDefinition `yaml:"templates,omitempty"`
-	Vars        map[string]any                `yaml:"vars,omitempty"`
-	Env         Environment                   `yaml:"env,omitempty"`
-	Steps       []Step                        `yaml:"steps"`
-	Finally     []Step                        `yaml:"finally,omitempty"`
-	Path        string                        `yaml:"-"`
-	Dir         string                        `yaml:"-"`
-	Location    diagnostic.Location           `yaml:"-"`
+	Version     int                       `yaml:"version"`
+	Name        string                    `yaml:"name"`
+	Description string                    `yaml:"description,omitempty"`
+	DependsOn   map[string]string         `yaml:"depends_on,omitempty"`
+	Outputs     map[string]WorkflowOutput `yaml:"outputs,omitempty"`
+	// Form is intentionally opaque to core workflow execution. The optional browser UI decodes it.
+	Form      yaml.Node                     `yaml:"form,omitempty"`
+	Cron      string                        `yaml:"cron,omitempty"`
+	Timezone  string                        `yaml:"timezone,omitempty"`
+	Templates map[string]TemplateDefinition `yaml:"templates,omitempty"`
+	Vars      map[string]any                `yaml:"vars,omitempty"`
+	Env       Environment                   `yaml:"env,omitempty"`
+	Steps     []Step                        `yaml:"steps"`
+	Finally   []Step                        `yaml:"finally,omitempty"`
+	Path      string                        `yaml:"-"`
+	Dir       string                        `yaml:"-"`
+	Location  diagnostic.Location           `yaml:"-"`
+}
+
+// HasForm reports whether the workflow contains a non-null browser form declaration.
+func (definition *Definition) HasForm() bool {
+	return definition != nil && definition.Form.Kind != 0 && definition.Form.Tag != "!!null"
 }
 
 // Environment is a strictly string-valued environment overlay.

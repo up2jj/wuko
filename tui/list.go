@@ -16,6 +16,7 @@ type SelectionIntent uint8
 const (
 	SelectionPrimary SelectionIntent = iota
 	SelectionAlternate
+	SelectionUI
 )
 
 // Selection contains the selected option and the requested action.
@@ -52,8 +53,9 @@ func newSelectionModel(title string, options []Option) selectionModel {
 	workflowList.Title = title
 	run := key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "run"))
 	printCommand := key.NewBinding(key.WithKeys("shift+enter"), key.WithHelp("shift+enter", "print command"))
-	workflowList.AdditionalShortHelpKeys = func() []key.Binding { return []key.Binding{run, printCommand} }
-	workflowList.AdditionalFullHelpKeys = func() []key.Binding { return []key.Binding{run, printCommand} }
+	openUI := key.NewBinding(key.WithKeys("u"), key.WithHelp("u", "open UI"))
+	workflowList.AdditionalShortHelpKeys = func() []key.Binding { return []key.Binding{run, openUI, printCommand} }
+	workflowList.AdditionalFullHelpKeys = func() []key.Binding { return []key.Binding{run, openUI, printCommand} }
 	return selectionModel{list: workflowList}
 }
 
@@ -62,13 +64,15 @@ func (m selectionModel) Init() tea.Cmd { return nil }
 func (m selectionModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	if key, ok := message.(tea.KeyPressMsg); ok {
 		switch key.String() {
-		case "enter", "shift+enter":
+		case "enter", "shift+enter", "u":
 			if !m.list.SettingFilter() {
 				item, ok := m.list.SelectedItem().(listOption)
 				if ok {
 					m.selected = item.Option
 					if key.String() == "shift+enter" {
 						m.intent = SelectionAlternate
+					} else if key.String() == "u" {
+						m.intent = SelectionUI
 					}
 					m.done = true
 					return m, tea.Quit

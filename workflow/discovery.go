@@ -15,6 +15,7 @@ type Source struct {
 	Path        string
 	Description string
 	DependsOn   map[string]string
+	HasForm     bool
 	Scope       string
 	Effective   bool
 }
@@ -77,7 +78,7 @@ func DiscoverAll(cwd, homeDir, configDir string) ([]Source, error) {
 			}
 			sources = append(sources, Source{
 				Name: name, Path: path, Description: definition.Description,
-				DependsOn: maps.Clone(definition.DependsOn), Scope: location.scope,
+				DependsOn: maps.Clone(definition.DependsOn), HasForm: definition.HasForm(), Scope: location.scope,
 			})
 		}
 	}

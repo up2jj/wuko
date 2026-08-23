@@ -242,6 +242,15 @@ func TestSelectionModelShiftEnterUsesAlternateIntent(t *testing.T) {
 	}
 }
 
+func TestSelectionModelUUsesBrowserUIIntent(t *testing.T) {
+	model := newSelectionModel("Workflows", []Option{{Label: "build"}})
+	updated, command := model.Update(tea.KeyPressMsg{Code: 'u'})
+	model = updated.(selectionModel)
+	if command == nil || !model.done || model.selected.Label != "build" || model.intent != SelectionUI {
+		t.Fatalf("selected = %#v, intent = %v, done = %v, command nil = %v", model.selected, model.intent, model.done, command == nil)
+	}
+}
+
 func TestSelectionModelFiltering(t *testing.T) {
 	model := newSelectionModel("Workflows", []Option{{Label: "build", Description: "local"}, {Label: "deploy", Description: "global"}})
 	model.list.SetFilterText("global")
@@ -268,7 +277,7 @@ func TestSelectionModelViewIncludesDescription(t *testing.T) {
 	if !strings.Contains(model.View().Content, "local") {
 		t.Fatalf("view = %q", model.View().Content)
 	}
-	for _, shortcut := range []string{"enter", "run", "shift+enter", "print command"} {
+	for _, shortcut := range []string{"enter", "run", "u", "open UI", "shift+enter", "print command"} {
 		if !strings.Contains(model.View().Content, shortcut) {
 			t.Fatalf("view = %q, want shortcut %q", model.View().Content, shortcut)
 		}
