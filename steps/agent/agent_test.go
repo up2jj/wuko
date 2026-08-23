@@ -2,6 +2,7 @@ package agent
 
 import (
 	"io"
+	"os"
 	"testing"
 
 	"github.com/up2jj/wuko/step"
@@ -12,7 +13,7 @@ func TestAgentSendsPromptOnStdin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := runner.Run(t.Context(), step.Request{RunDir: t.TempDir(), Env: map[string]string{}, Stdout: io.Discard, Stderr: io.Discard})
+	result, err := runner.Run(t.Context(), step.Request{RunDir: t.TempDir(), Env: map[string]string{"PATH": os.Getenv("PATH")}, Stdout: io.Discard, Stderr: io.Discard})
 	if err != nil {
 		t.Fatal(err)
 	}
