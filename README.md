@@ -199,21 +199,6 @@ Prerequisites form sequential chains, shared prerequisites run once per invocati
 stop dependent workflows. See [Workflow prerequisites](docs/execution.md#workflow-prerequisites)
 for output contracts, validation rules, scheduling behavior, and runnable examples.
 
-Use `batch` when one operation should receive fixed-size chunks of a runtime list:
-
-```yaml
-- id: deployments
-  batch:
-    items: vars.targets
-    size: vars.batch_size
-    steps:
-      - id: deploy
-        type: shell
-        with:
-          command: ./deploy-batch
-          args: ['{{ .batch.items | toJSONCompact }}']
-```
-
 For workflow syntax and execution behavior, see:
 
 - [Execution and composition](docs/execution.md) — prerequisites, conditions, concurrency,
@@ -260,15 +245,27 @@ Each linked guide contains multiple examples for every step.
 | `lua` | Run typed in-process automation | [Automation steps](docs/steps-automation.md#lua) |
 | `wait` | Delay or poll another step | [Automation steps](docs/steps-automation.md#wait) |
 
+## Workflow controls
+
+Use controls to run independent work or repeat a block over runtime data.
+
+| Control | Use it to | Examples |
+| --- | --- | --- |
+| `concurrent` | Run a fixed set of independent steps in parallel | [Execution and composition](docs/execution.md#concurrency) |
+| `batch` | Process a runtime list in fixed-size chunks | [Workflow controls](docs/workflow-control.md#batch) |
+| `foreach` | Run a block once per item in a runtime list | [Workflow controls](docs/workflow-control.md#foreach) |
+| `matrix` | Run every combination of named dimensions | [Workflow controls](docs/workflow-control.md#matrix) |
+
 ## Common workflow patterns
 
 Choose the composition mechanism by the boundary you need:
 
-- Use `depends_on` when another discovered workflow must run first and publish declared outputs.
-- Set `invokable: false` on a workflow that exists only to serve as a `depends_on` prerequisite.
-- Use `require` to split one workflow across files while keeping the same state and step sequence.
-- Use `uses` for a reusable composite action with explicit inputs, isolated internals, and declared
-  outputs.
+| Pattern | Use it to | Examples |
+| --- | --- | --- |
+| `depends_on` | Run another discovered workflow first and consume its declared outputs | [Workflow prerequisites](docs/execution.md#workflow-prerequisites) |
+| `invokable: false` | Keep a workflow available as a prerequisite without allowing direct invocation | [Workflow prerequisites](docs/execution.md#workflow-prerequisites) |
+| `require` | Split one workflow across files while keeping the same state and step sequence | [Splitting a workflow across files](docs/execution.md#splitting-a-workflow-across-files) |
+| `uses` | Reuse a composite action with explicit inputs, isolated internals, and declared outputs | [Composite actions](docs/execution.md#composite-actions) |
 
 See [Choosing a composition mechanism](docs/execution.md#choosing-a-composition-mechanism) for a
 side-by-side comparison and examples.
