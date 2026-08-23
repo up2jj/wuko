@@ -397,6 +397,18 @@ func (f *fakeClient) ContainerInspect(context.Context, string, client.ContainerI
 	return client.ContainerInspectResult{}, errors.New("unexpected container inspect")
 }
 
+func (f *fakeClient) ContainerStatPath(context.Context, string, client.ContainerStatPathOptions) (client.ContainerStatPathResult, error) {
+	return client.ContainerStatPathResult{}, errors.New("unexpected container stat")
+}
+
+func (f *fakeClient) CopyToContainer(context.Context, string, client.CopyToContainerOptions) (client.CopyToContainerResult, error) {
+	return client.CopyToContainerResult{}, errors.New("unexpected copy to container")
+}
+
+func (f *fakeClient) CopyFromContainer(context.Context, string, client.CopyFromContainerOptions) (client.CopyFromContainerResult, error) {
+	return client.CopyFromContainerResult{}, errors.New("unexpected copy from container")
+}
+
 func (f *fakeClient) ContainerCreate(_ context.Context, options client.ContainerCreateOptions) (client.ContainerCreateResult, error) {
 	f.created = options
 	return client.ContainerCreateResult{ID: "container-id"}, nil

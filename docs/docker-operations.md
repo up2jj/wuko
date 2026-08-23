@@ -2,10 +2,10 @@
 
 [Back to system steps](steps-system.md#docker)
 
-The `docker` step runs temporary containers, waits for container health, and performs image,
-registry, build, network, and volume operations. Set `operation` to select behavior. Omitting it
-is equivalent to `operation: run`, preserving workflows written before the other operations were
-added.
+The `docker` step runs temporary containers, waits for container health, transfers container
+files, and performs image, registry, build, network, and volume operations. Set `operation` to
+select behavior. Omitting it is equivalent to `operation: run`, preserving workflows written
+before the other operations were added.
 
 To run several shell steps in one persistent container and then return to local execution, use a
 [Docker executor scope](executors.md#docker-executor).
@@ -18,6 +18,8 @@ To run several shell steps in one persistent container and then return to local 
 | `tag` | Add a tag to a local image |
 | `inspect` | Return stable metadata for a local image |
 | `health_wait` | Wait for an existing container to become healthy |
+| `copy_to` | Copy a host file or directory into a container |
+| `copy_from` | Copy a container file or directory onto the host |
 | `login` | Validate registry credentials without persisting them |
 | `verify_digest` | Verify a local image's OCI digest |
 | `network_create` | Create a workflow-scoped Docker network |
@@ -102,6 +104,44 @@ diagnostics:
 When diagnostics are enabled, failures expose these fields as structured attributes, including a
 compact representation of `health_checks`. `health_wait` does not collect the container's general
 stdout or stderr logs.
+
+## Copy files to and from containers
+
+Copy a host build artifact into a container, then copy a generated report back into the workflow
+run directory:
+
+```yaml
+- id: upload_artifact
+  type: docker
+  with:
+    operation: copy_to
+    container: integration-api
+    source: dist/app
+    target: /opt/app
+
+- id: download_report
+  type: docker
+  with:
+    operation: copy_from
+    container: integration-api
+    source: /var/reports/result.json
+    target: artifacts/result.json
+```
+
+Both operations require `container`, `source`, and `target`. `container` accepts any name or ID
+known to the configured Docker daemon; the container may be running or stopped and does not need
+to have been created by Wuko. For `copy_to`, `source` is the host path and `target` is the
+container path. For `copy_from`, their roles are reversed. Relative host paths resolve from the
+workflow run directory, while container paths use Docker's root-relative path rules.
+
+Copy behavior matches `docker cp`: files may be renamed by a non-directory target, directories
+merge into existing directories, source symlinks are copied without following them, and a source
+ending in `/.` copies the directory's contents. Existing files may be replaced, but a directory
+cannot replace a non-directory or vice versa. The destination's parent directory must already
+exist. Ownership uses Docker's defaults rather than preserving the source UID and GID.
+
+Both operations return `container`, `source`, and `target` exactly as configured. They do not
+stream tar archives through workflow stdin or stdout and do not copy directly between containers.
 
 ## Pull and inspect images
 

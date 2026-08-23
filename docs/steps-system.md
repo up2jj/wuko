@@ -412,9 +412,9 @@ between attempts of that one step execution and are not applied to downloads.
 
 ## `docker`
 
-Run containers, wait for container health, and perform Docker image, registry, build, network, or
-volume operations. The `operation` field defaults to `run`, so existing Docker steps remain
-compatible.
+Run containers, wait for container health, transfer container files, and perform Docker image,
+registry, build, network, or volume operations. The `operation` field defaults to `run`, so
+existing Docker steps remain compatible.
 
 Run tests with a read-only project mount:
 
@@ -432,6 +432,6 @@ Run tests with a read-only project mount:
     pull: if-missing
 ```
 
-The other operations are `pull`, `push`, `tag`, `inspect`, `health_wait`, `login`, `verify_digest`,
-`network_create`, `volume_create`, and `build`. See
+The other operations are `pull`, `push`, `tag`, `inspect`, `health_wait`, `copy_to`, `copy_from`,
+`login`, `verify_digest`, `network_create`, `volume_create`, and `build`. See
 [Docker operations](docker-operations.md) for every field, output, lifecycle rule, and example.

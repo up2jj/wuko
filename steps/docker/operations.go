@@ -58,6 +58,10 @@ func (r *Runner) runEngineOperation(ctx context.Context, request step.Request) (
 		return r.inspectImage(ctx, dockerClient)
 	case operationHealthWait:
 		return r.waitForHealthyContainer(ctx, dockerClient)
+	case operationCopyTo:
+		return r.copyToContainer(ctx, request, dockerClient)
+	case operationCopyFrom:
+		return r.copyFromContainer(ctx, request, dockerClient)
 	case operationLogin:
 		return r.login(ctx, dockerClient)
 	case operationNetworkCreate:

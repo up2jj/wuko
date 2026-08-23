@@ -19,6 +19,8 @@ const (
 	operationTag           = "tag"
 	operationInspect       = "inspect"
 	operationHealthWait    = "health_wait"
+	operationCopyTo        = "copy_to"
+	operationCopyFrom      = "copy_from"
 	operationLogin         = "login"
 	operationNetworkCreate = "network_create"
 	operationVolumeCreate  = "volume_create"
@@ -95,6 +97,17 @@ func validateConfig(config Config, configuredFields ...map[string]bool) error {
 		if strings.TrimSpace(config.Container) == "" {
 			return fmt.Errorf("container is required for health_wait")
 		}
+	case operationCopyTo, operationCopyFrom:
+		allow("container", "source", "target")
+		if strings.TrimSpace(config.Container) == "" {
+			return fmt.Errorf("container is required for %s", op)
+		}
+		if strings.TrimSpace(config.Source) == "" {
+			return fmt.Errorf("source is required for %s", op)
+		}
+		if strings.TrimSpace(config.Target) == "" {
+			return fmt.Errorf("target is required for %s", op)
+		}
 	case operationLogin:
 		allow("auth")
 		if config.Auth == nil {
@@ -170,7 +183,7 @@ func validateConfig(config Config, configuredFields ...map[string]bool) error {
 			}
 		}
 	default:
-		return fmt.Errorf("operation must be run, build, pull, push, tag, inspect, health_wait, login, network_create, volume_create, or verify_digest")
+		return fmt.Errorf("operation must be run, build, pull, push, tag, inspect, health_wait, copy_to, copy_from, login, network_create, volume_create, or verify_digest")
 	}
 
 	for field := range present {
