@@ -199,17 +199,8 @@ Prerequisites form sequential chains, shared prerequisites run once per invocati
 stop dependent workflows. See [Workflow prerequisites](docs/execution.md#workflow-prerequisites)
 for output contracts, validation rules, scheduling behavior, and runnable examples.
 
-For workflow syntax and execution behavior, see:
-
-- [Execution and composition](docs/execution.md) — prerequisites, conditions, concurrency,
-  scheduling, waits, retries, required files, remote reuse, progress, and debugging.
-- [Executor scopes](docs/executors.md) — mix local shell steps with persistent Docker sessions.
-- [Workflow controls](docs/workflow-control.md) — batch, foreach, and matrix expansion.
-- [Early successful return](docs/return.md) — finish workflows and actions with explicit outputs.
-- [Finally cleanup](docs/finally.md) and [graceful shutdown](docs/graceful-shutdown.md).
-- [Templates](docs/templates.md) and [template, Expr, and Lua functions](docs/template-functions.md).
-- [Variable imports](docs/variable-imports.md).
-- [Browser forms](docs/forms.md) — typed fields, dynamic pre-run data, live progress, and results.
+See the [Documentation](#documentation) section for detailed workflow syntax and execution
+guides.
 
 ## Available steps
 
@@ -251,14 +242,20 @@ Use controls to run independent work or repeat a block over runtime data.
 
 | Control | Use it to | Examples |
 | --- | --- | --- |
+| `if` | Run a step or sequential block only when an expression is true | [Execution and composition](docs/execution.md#conditions) |
+| `working_directory` | Run a block from an existing directory | [Execution and composition](docs/execution.md#scoped-working-directories) |
 | `concurrent` | Run a fixed set of independent steps in parallel | [Execution and composition](docs/execution.md#concurrency) |
 | `batch` | Process a runtime list in fixed-size chunks | [Workflow controls](docs/workflow-control.md#batch) |
 | `foreach` | Run a block once per item in a runtime list | [Workflow controls](docs/workflow-control.md#foreach) |
 | `matrix` | Run every combination of named dimensions | [Workflow controls](docs/workflow-control.md#matrix) |
+| `timeout` | Bound how long a step or control may run | [Execution and composition](docs/execution.md#timeouts-and-retries) |
+| `retry` | Retry failed operations with backoff | [Execution and composition](docs/execution.md#timeouts-and-retries) |
+| `return` | Finish successfully early and publish explicit outputs | [Early successful return](docs/return.md) |
+| `defer` | Attach cleanup to a successful step | [Finally cleanup](docs/finally.md) |
+| `finally` | Run workflow-level cleanup after the main phase | [Finally cleanup](docs/finally.md) |
+| `cron` | Run a workflow on a schedule | [Execution and composition](docs/execution.md#scheduled-runs) |
 
-## Common workflow patterns
-
-Choose the composition mechanism by the boundary you need:
+## Workflow composition
 
 | Pattern | Use it to | Examples |
 | --- | --- | --- |
@@ -269,61 +266,6 @@ Choose the composition mechanism by the boundary you need:
 
 See [Choosing a composition mechanism](docs/execution.md#choosing-a-composition-mechanism) for a
 side-by-side comparison and examples.
-
-For example, a dependency-only producer remains available to `wuko list`, `wuko validate`, and
-`wuko tree`, but cannot be selected by bare `wuko`, `wuko run`, or `wuko ui`:
-
-```yaml
-version: 1
-name: build-artifacts
-invokable: false
-outputs:
-  artifact: {type: string, value: steps.build.path}
-steps:
-  - id: build
-    type: shell
-    with: {command: ./build.sh}
-```
-
-Split a long workflow at the point where the steps should be inserted:
-
-```yaml
-steps:
-  - require: steps/checks.yaml
-  - require: steps/release.yaml
-```
-
-Run independent work concurrently:
-
-```yaml
-steps:
-  - concurrent:
-      max_concurrency: 2
-      steps:
-        - id: lint
-          type: shell
-          with: {command: golangci-lint, args: [run]}
-        - id: test
-          type: shell
-          with: {command: go, args: [test, ./...]}
-```
-
-Load initial variables and override them from the command line:
-
-```sh
-wuko run release --var-file defaults.toml --var-file local.json
-wuko run release --var target=darwin --env API_TOKEN=secret
-```
-
-Run a public remote workflow:
-
-```sh
-wuko run https://example.com/workflows/release.yaml
-wuko run github:acme/wuko-workflows@v1.2.3:release.yaml
-```
-
-See the [ClickUp task agent example](docs/clickup-task-example.md) for a complete workflow that
-fetches a task, creates a branch, and launches Claude Code or Codex.
 
 ## Agent skills
 
