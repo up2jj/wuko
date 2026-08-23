@@ -24,6 +24,23 @@ type Session interface {
 	Close(context.Context) error
 }
 
+// TaskRequest describes one task-graph invocation supported by an executor.
+type TaskRequest struct {
+	Name         string
+	Mode         string
+	Inputs       map[string]any
+	Stdin        io.Reader
+	Stdout       io.Writer
+	Stderr       io.Writer
+	CaptureLimit int64
+}
+
+// TaskRunner is an optional executor capability for providers that expose a
+// native task graph, such as devenv.
+type TaskRunner interface {
+	RunTask(context.Context, TaskRequest) (process.Result, error)
+}
+
 // Provider opens sessions for one rendered executor configuration.
 type Provider interface {
 	Open(context.Context, Request) (Session, error)
