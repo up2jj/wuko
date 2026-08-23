@@ -63,6 +63,7 @@ func annotateSteps(steps []Step, sequence *yaml.Node, source string) {
 			annotateSteps(steps[i].Steps, mappingValue(node, "steps"), source)
 			annotateSteps(steps[i].Finally, mappingValue(node, "finally"), source)
 		}
+		annotateSteps(steps[i].Defer, mappingValue(node, "defer"), source)
 		if steps[i].IsWorkingDirectoryBlock() {
 			annotateSteps(steps[i].Steps, mappingValue(node, "steps"), source)
 		}
@@ -148,7 +149,8 @@ func validationLocation(definition *Definition, err error) diagnostic.Location {
 		indexedMessage = strings.TrimPrefix(message, "finally: ")
 	}
 	allSteps := append(flattenSteps(definition.Steps), flattenSteps(definition.Finally)...)
-	for _, workflowStep := range allSteps {
+	for i := len(allSteps) - 1; i >= 0; i-- {
+		workflowStep := allSteps[i]
 		quotedID := strconv.Quote(workflowStep.ID)
 		if workflowStep.ID != "" && (strings.Contains(message, "step "+quotedID) || strings.Contains(message, "step id "+quotedID)) {
 			return workflowStep.Location
@@ -174,7 +176,7 @@ func flattenSteps(steps []Step) []Step {
 			flattened = append(flattened, workflowStep)
 			continue
 		}
-		if workflowStep.Batch != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil {
+		if !workflowStep.IsExecutorBlock() && !workflowStep.IsWorkingDirectoryBlock() && !workflowStep.IsConditionalBlock() && workflowStep.Concurrent == nil {
 			flattened = append(flattened, workflowStep)
 		}
 		for _, child := range children {

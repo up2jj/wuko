@@ -10,6 +10,7 @@ func TestStepChildSequences(t *testing.T) {
 		want []ChildSequence
 	}{
 		{name: "ordinary", step: step("run")},
+		{name: "defer", step: Step{ID: "run", Type: "shell", Defer: []Step{step("cleanup")}}, want: []ChildSequence{{Role: ChildDefer, Steps: []Step{step("cleanup")}}}},
 		{name: "resolved action", step: Step{ID: "call", Action: &Action{Steps: []Step{step("internal")}}}},
 		{
 			name: "executor",

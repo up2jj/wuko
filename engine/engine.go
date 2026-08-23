@@ -54,6 +54,7 @@ type Options struct {
 	operationPrefix        string
 	depth                  int
 	runtime                *runRuntime
+	defers                 *deferStack
 	renderer               *workflow.Renderer
 	deferContextValidation bool
 	insideExecutor         bool
@@ -202,6 +203,10 @@ func (e *Engine) validateSteps(ctx context.Context, definition *workflow.Definit
 				return fmt.Errorf("step %q retry operation_id: %w", workflowStep.ID, err)
 			}
 		}
+		if err := e.validateDeferredSteps(ctx, definition, workflowStep, options, state); err != nil {
+			traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusFailed, started, "validating defer", err)
+			return err
+		}
 		if workflowStep.Action != nil {
 			if options.deferContextValidation {
 				traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusSucceeded, started, "deferring context-dependent action validation", nil)
@@ -285,9 +290,11 @@ func (e *Engine) Run(ctx context.Context, definition *workflow.Definition, optio
 		state.Outputs = workflow.OutputPlaceholders(definition.Outputs)
 		return state, nil
 	}
+	options.defers = newDeferStack(definition.Steps)
 
 	startedAt := time.Now()
-	total := leafStepCount(definition.Steps) + leafStepCount(definition.Finally)
+	mainTotal := leafStepCount(definition.Steps) + nestedDeferScopeStepCount(definition.Steps)
+	total := mainTotal + options.defers.stepCount() + leafStepCount(definition.Finally)
 	stats := RunStats{StartedAt: startedAt, Total: total, Steps: make([]StepStats, 0, total)}
 	report(options, ProgressEvent{
 		Kind: WorkflowStarted, Status: StatusRunning, Time: startedAt,
@@ -312,7 +319,7 @@ func (e *Engine) Run(ctx context.Context, definition *workflow.Definition, optio
 
 	mainErr = e.executeSequence(ctx, definition, definition.Steps, options, state, &stats, 1, total)
 	state.returning = false
-	cleanupErrors := e.executeFinally(context.WithoutCancel(ctx), definition, options, state, &stats, mainErr, total)
+	cleanupErrors := e.executeCleanupScope(context.WithoutCancel(ctx), definition, options.defers, definition.Finally, options, state, &stats, mainErr, stats.Steps, mainTotal+1, total)
 	if rootRun {
 		cleanupErrors = append(cleanupErrors, options.runtime.runCleanups()...)
 	}
@@ -326,12 +333,8 @@ func (e *Engine) Run(ctx context.Context, definition *workflow.Definition, optio
 	return state, nil
 }
 
-func (e *Engine) executeFinally(ctx context.Context, definition *workflow.Definition, options Options, state *State, stats *RunStats, mainErr error, total int) []error {
-	return e.executeFinallySteps(ctx, definition, definition.Finally, options, state, stats, mainErr, stats.Steps, leafStepCount(definition.Steps)+1, total)
-}
-
-func (e *Engine) executeFinallySteps(ctx context.Context, definition *workflow.Definition, cleanupSteps []workflow.Step, options Options, state *State, stats *RunStats, mainErr error, mainStats []StepStats, firstIndex, total int) []error {
-	if len(cleanupSteps) == 0 {
+func (e *Engine) executeCleanupScope(ctx context.Context, definition *workflow.Definition, defers *deferStack, finally []workflow.Step, options Options, state *State, stats *RunStats, mainErr error, mainStats []StepStats, firstIndex, total int) []error {
+	if (defers == nil || len(defers.groups) == 0) && len(finally) == 0 {
 		return nil
 	}
 	bindingsWereNil := state.Bindings == nil
@@ -357,6 +360,14 @@ func (e *Engine) executeFinallySteps(ctx context.Context, definition *workflow.D
 		}
 	}()
 
+	cleanupErrors, index := e.executeDeferred(ctx, definition, defers, options, state, stats, firstIndex, total)
+	cleanupErrors = append(cleanupErrors, e.executeCleanupSteps(ctx, definition, finally, options, state, stats, index, total)...)
+	return cleanupErrors
+}
+
+func (e *Engine) executeCleanupSteps(ctx context.Context, definition *workflow.Definition, cleanupSteps []workflow.Step, options Options, state *State, stats *RunStats, firstIndex, total int) []error {
+	binding, _ := state.Bindings["finally"].(map[string]any)
+	errorsValue, _ := binding["errors"].([]any)
 	index := firstIndex
 	cleanupErrors := make([]error, 0)
 	for _, cleanupStep := range cleanupSteps {
@@ -369,7 +380,7 @@ func (e *Engine) executeFinallySteps(ctx context.Context, definition *workflow.D
 				newRecords = append(newRecords, finallyErrorRecord(statusFromError(err), cleanupStep.ID, executionKind(cleanupStep), err))
 			}
 			errorsValue = append(errorsValue, newRecords...)
-			state.Bindings["finally"].(map[string]any)["errors"] = errorsValue
+			binding["errors"] = errorsValue
 		}
 		index += leafStepCount([]workflow.Step{cleanupStep})
 	}
@@ -409,7 +420,7 @@ func (e *Engine) executeSequence(ctx context.Context, definition *workflow.Defin
 			if err := e.executeExecutorBlock(ctx, definition, workflowStep, options, state, stats, index, total); err != nil {
 				return err
 			}
-			index += leafStepCount(workflowStep.Steps) + leafStepCount(workflowStep.Finally)
+			index += leafStepCount(workflowStep.Steps) + newDeferStack(workflowStep.Steps).stepCount() + leafStepCount(workflowStep.Finally)
 			if state.returning {
 				recordSkippedSteps(definition, steps[position+1:], options, stats, index, total)
 				return nil
@@ -495,6 +506,9 @@ func (e *Engine) executeSequence(ctx context.Context, definition *workflow.Defin
 		commitStepResult(state, workflowStep.ID, outcome.result)
 		traceStep(options, definition, workflowStep, diagnostic.PhaseCommit, diagnostic.StatusSucceeded, commitStarted, "", nil,
 			diagnostic.Attr("outputs", fmt.Sprint(len(outcome.result.Outputs))), diagnostic.Attr("variables", fmt.Sprint(len(outcome.result.Variables))))
+		if len(workflowStep.Defer) > 0 {
+			options.defers.register(workflowStep.ID, options)
+		}
 	}
 	return nil
 }
@@ -530,6 +544,18 @@ func evaluateConditionalBlock(definition *workflow.Definition, workflowStep work
 func recordSkippedSteps(definition *workflow.Definition, steps []workflow.Step, options Options, stats *RunStats, firstIndex, total int) {
 	index := firstIndex
 	for _, workflowStep := range steps {
+		if workflowStep.IsExecutorBlock() {
+			recordSkippedSteps(definition, workflowStep.Steps, options, stats, index, total)
+			index += leafStepCount(workflowStep.Steps)
+			stack := newDeferStack(workflowStep.Steps)
+			for groupIndex := len(stack.groups) - 1; groupIndex >= 0; groupIndex-- {
+				recordSkippedSteps(definition, stack.groups[groupIndex].steps, options, stats, index, total)
+				index += leafStepCount(stack.groups[groupIndex].steps)
+			}
+			recordSkippedSteps(definition, workflowStep.Finally, options, stats, index, total)
+			index += leafStepCount(workflowStep.Finally)
+			continue
+		}
 		if children, transparent := transparentChildSequences(workflowStep); transparent {
 			for _, child := range children {
 				recordSkippedSteps(definition, child.Steps, options, stats, index, total)

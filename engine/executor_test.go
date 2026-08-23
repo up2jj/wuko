@@ -125,6 +125,26 @@ func TestExecutorScopeRunsFinallyAfterFailure(t *testing.T) {
 	}
 }
 
+func TestExecutorScopeRunsDeferBeforeFinallyAndClose(t *testing.T) {
+	scoped := &recordingExecutor{}
+	definition := testDefinition(t, "defer-cleanup",
+		workflow.Step{
+			Executor: &workflow.ExecutorScope{Type: "recording", With: map[string]any{}},
+			Steps: []workflow.Step{{
+				ID: "create", Type: "shell", With: map[string]any{"command": "create"},
+				Defer: []workflow.Step{{ID: "defer_clean", Type: "shell", With: map[string]any{"command": "defer-clean"}}},
+			}},
+			Finally: []workflow.Step{{ID: "final_clean", Type: "shell", With: map[string]any{"command": "final-clean"}}},
+		},
+	)
+	if _, err := executorTestEngine(t, scoped).Run(t.Context(), definition, Options{RunDir: t.TempDir(), Stdout: io.Discard, Stderr: io.Discard}); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(scoped.commands, ","); got != "create ,defer-clean ,final-clean " || scoped.closed != 1 {
+		t.Fatalf("commands = %q, closed = %d", got, scoped.closed)
+	}
+}
+
 func TestExecutorScopeRejectsNonAwareRunner(t *testing.T) {
 	steps := newTestRegistry(t, map[string]step.Builder{"host_only": func(map[string]any) (step.Runner, error) {
 		return countingRunner{}, nil

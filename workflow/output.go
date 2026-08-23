@@ -106,7 +106,7 @@ func validateWorkflowReturnContracts(steps []Step, outputs map[string]WorkflowOu
 	for _, workflowStep := range steps {
 		if workflowStep.IsExecutorBlock() || workflowStep.IsWorkingDirectoryBlock() || workflowStep.IsConditionalBlock() {
 			for _, child := range workflowStep.ChildSequences() {
-				if child.Role == ChildFinally {
+				if child.Role == ChildFinally || child.Role == ChildDefer {
 					continue
 				}
 				if err := validateWorkflowReturnContracts(child.Steps, outputs); err != nil {

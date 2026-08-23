@@ -167,16 +167,26 @@ func writeWorkflowTree(writer io.Writer, definition *workflow.Definition) error 
 }
 
 func writeTreePlan(writer io.Writer, steps, finally []workflow.Step, prefix string) error {
+	return writeTreePlanWithFollowing(writer, steps, finally, prefix, false)
+}
+
+func writeTreePlanWithFollowing(writer io.Writer, steps, finally []workflow.Step, prefix string, hasFollowing bool) error {
 	if len(finally) == 0 {
-		return writeTreeSteps(writer, steps, prefix)
+		return writeTreeStepsWithFollowing(writer, steps, prefix, hasFollowing)
 	}
 	if err := writeTreeStepsWithFollowing(writer, steps, prefix, true); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(writer, "%s└── finally\n", prefix); err != nil {
+	branch := "└── "
+	childPrefix := prefix + "    "
+	if hasFollowing {
+		branch = "├── "
+		childPrefix = prefix + "│   "
+	}
+	if _, err := fmt.Fprintf(writer, "%s%sfinally\n", prefix, branch); err != nil {
 		return err
 	}
-	return writeTreeSteps(writer, finally, prefix+"    ")
+	return writeTreeSteps(writer, finally, childPrefix)
 }
 
 func writeTreeSteps(writer io.Writer, steps []workflow.Step, prefix string) error {
@@ -292,7 +302,15 @@ func writeTreeStepsWithFollowing(writer io.Writer, steps []workflow.Step, prefix
 			return err
 		}
 		if workflowStep.Action != nil {
-			if err := writeTreePlan(writer, workflowStep.Action.Steps, workflowStep.Action.Finally, childPrefix); err != nil {
+			if err := writeTreePlanWithFollowing(writer, workflowStep.Action.Steps, workflowStep.Action.Finally, childPrefix, len(workflowStep.Defer) > 0); err != nil {
+				return err
+			}
+		}
+		if len(workflowStep.Defer) > 0 {
+			if _, err := fmt.Fprintf(writer, "%s└── defer\n", childPrefix); err != nil {
+				return err
+			}
+			if err := writeTreeSteps(writer, workflowStep.Defer, childPrefix+"    "); err != nil {
 				return err
 			}
 		}

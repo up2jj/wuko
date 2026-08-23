@@ -8,6 +8,8 @@ const (
 	ChildSteps ChildRole = iota
 	// ChildFinally is the cleanup sequence of an executor block.
 	ChildFinally
+	// ChildDefer is cleanup attached to an ordinary step.
+	ChildDefer
 )
 
 // ChildSequence is a read-only structural view of one nested step sequence. Callers may inspect
@@ -23,8 +25,8 @@ type childSequenceRef struct {
 }
 
 // ChildSequences returns the nested step sequences directly owned by workflowStep. Executor bodies
-// precede their finally sequence. Resolved composite-action implementations are intentionally not
-// declaration children of the caller step.
+// precede their finally sequence, and attached defer cleanup follows other children. Resolved
+// composite-action implementations are intentionally not declaration children of the caller step.
 func (workflowStep Step) ChildSequences() []ChildSequence {
 	references := workflowStep.childSequenceRefs()
 	children := make([]ChildSequence, len(references))
@@ -46,23 +48,29 @@ func (workflowStep *Step) transformChildSequences(transform func(ChildRole, []St
 }
 
 func (workflowStep *Step) childSequenceRefs() []childSequenceRef {
+	deferred := func(children []childSequenceRef) []childSequenceRef {
+		if workflowStep.Defer != nil {
+			children = append(children, childSequenceRef{role: ChildDefer, steps: &workflowStep.Defer})
+		}
+		return children
+	}
 	switch {
 	case workflowStep.IsExecutorBlock():
-		return []childSequenceRef{
+		return deferred([]childSequenceRef{
 			{role: ChildSteps, steps: &workflowStep.Steps},
 			{role: ChildFinally, steps: &workflowStep.Finally},
-		}
+		})
 	case workflowStep.IsWorkingDirectoryBlock(), workflowStep.IsConditionalBlock():
-		return []childSequenceRef{{role: ChildSteps, steps: &workflowStep.Steps}}
+		return deferred([]childSequenceRef{{role: ChildSteps, steps: &workflowStep.Steps}})
 	case workflowStep.Concurrent != nil:
-		return []childSequenceRef{{role: ChildSteps, steps: &workflowStep.Concurrent.Steps}}
+		return deferred([]childSequenceRef{{role: ChildSteps, steps: &workflowStep.Concurrent.Steps}})
 	case workflowStep.Batch != nil:
-		return []childSequenceRef{{role: ChildSteps, steps: &workflowStep.Batch.Steps}}
+		return deferred([]childSequenceRef{{role: ChildSteps, steps: &workflowStep.Batch.Steps}})
 	case workflowStep.Foreach != nil:
-		return []childSequenceRef{{role: ChildSteps, steps: &workflowStep.Foreach.Steps}}
+		return deferred([]childSequenceRef{{role: ChildSteps, steps: &workflowStep.Foreach.Steps}})
 	case workflowStep.Matrix != nil:
-		return []childSequenceRef{{role: ChildSteps, steps: &workflowStep.Matrix.Steps}}
+		return deferred([]childSequenceRef{{role: ChildSteps, steps: &workflowStep.Matrix.Steps}})
 	default:
-		return nil
+		return deferred(nil)
 	}
 }

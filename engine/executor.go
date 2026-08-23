@@ -77,11 +77,12 @@ func (e *Engine) executeExecutorBlock(ctx context.Context, definition *workflow.
 	childOptions := options
 	childOptions.Executor = session
 	childOptions.insideExecutor = true
+	childOptions.defers = newDeferStack(block.Steps)
 	statsStart := len(stats.Steps)
 	mainErr := e.executeSequence(ctx, definition, block.Steps, childOptions, state, stats, firstIndex, total)
 	returning := state.returning
 	state.returning = false
-	cleanupErrors := e.executeFinallySteps(context.WithoutCancel(ctx), definition, block.Finally, childOptions, state, stats, mainErr, stats.Steps[statsStart:], firstIndex+leafStepCount(block.Steps), total)
+	cleanupErrors := e.executeCleanupScope(context.WithoutCancel(ctx), definition, childOptions.defers, block.Finally, childOptions, state, stats, mainErr, stats.Steps[statsStart:], firstIndex+leafStepCount(block.Steps), total)
 	state.returning = returning
 	return errors.Join(append([]error{mainErr}, cleanupErrors...)...)
 }

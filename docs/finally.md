@@ -1,8 +1,8 @@
-# Finally cleanup
+# Defer and finally cleanup
 
-Workflows and composite actions can declare one `finally` list for cleanup that must be attempted
-after runtime execution ends. The list runs after the main `steps` succeed, fail, time out, or are
-canceled.
+Attach `defer` to a resource-creating step to keep its cleanup beside it. Workflows and composite
+actions may also declare one `finally` list for general cleanup. Registered defers run first, then
+`finally`, after main execution succeeds, fails, times out, returns early, or is canceled.
 
 ```yaml
 version: 1
@@ -11,21 +11,33 @@ steps:
   - id: acquire_lock
     type: shell
     with: {command: ./acquire-lock}
+    defer:
+      - id: release_lock
+        type: shell
+        timeout: 30s
+        with: {command: ./release-lock}
   - id: deploy
     type: shell
     with: {command: ./deploy}
 
 finally:
-  - id: release_lock
+  - id: report
     type: shell
-    timeout: 30s
-    with: {command: ./release-lock}
+    with: {command: ./report-result}
 ```
 
-`finally` contains ordinary Wuko steps. They may use conditions, retries, timeouts, composite
-actions, concurrent groups, batch, foreach, and matrix subject to their normal schema and nesting rules.
+`defer` is a non-empty step list attached to an ordinary `type` or `uses` step. It is registered
+only after the owner succeeds and commits its outputs. Skipped, failed, timed-out, and canceled
+owners do not register cleanup. Defer groups unwind in reverse owner order, while entries within
+one group run in declaration order.
+
+Deferred and `finally` cleanup contains ordinary Wuko steps. They may use conditions, retries,
+timeouts, composite actions, concurrent groups, batch, foreach, and matrix subject to their normal
+schema and nesting rules.
 Workflow cleanup may also use local required step files; action manifests retain their existing
-restriction against `require`. Step IDs are unique across both `steps` and `finally`.
+restriction against `require`. Step IDs are unique across `steps`, attached defers, and `finally`.
+Attached defer is supported in sequential workflow/action scopes, conditional and working-directory
+blocks, and executor bodies. It is rejected in concurrent or fan-out bodies and during cleanup.
 
 ## Lifecycle
 
@@ -34,10 +46,11 @@ runtime lifecycle is:
 
 1. Run main `steps` in declaration order until they finish or execution stops.
 2. Record the immutable main outcome as `finally.status`.
-3. Detach cleanup from the main cancellation and run `finally` entries in declaration order.
-4. Commit each successful cleanup result before starting the next entry.
-5. If a cleanup entry fails, record its error and continue with the remaining entries.
-6. Return the main error followed by cleanup errors in declaration order.
+3. Detach cleanup from the main cancellation and unwind registered defer groups.
+4. Run `finally` entries in declaration order.
+5. Commit each successful cleanup result before starting the next entry.
+6. If a cleanup entry fails, record its error and continue with the remaining entries.
+7. Return the main error followed by defer and finally errors in execution order.
 
 A failed main step still stops later main steps. It does not prevent cleanup. A failed cleanup step
 does not prevent later cleanup steps, but it does make an otherwise successful workflow fail.
@@ -94,9 +107,10 @@ step_type: shell
 cancellation between sequential steps. Concurrent and fan-out failures can add multiple records in
 deterministic declaration or expansion order.
 
-At the start of cleanup, the list describes terminal main failures. When a cleanup entry fails,
-its records are appended before Wuko evaluates the next cleanup entry. Conditions should select
-stable metadata rather than matching `message`, whose wording is informational and may change.
+At the start of cleanup, the list describes terminal main failures. When a deferred or final
+cleanup entry fails, its records are appended before Wuko evaluates the next cleanup entry.
+Conditions should select stable metadata rather than matching `message`, whose wording is
+informational and may change.
 
 ```yaml
 finally:
@@ -158,10 +172,10 @@ finally:
     with: {command: ./stop-environment}
 ```
 
-Action cleanup runs once for each attempt of the caller's `uses` step. A cleanup failure fails that
-attempt, so an outer retry can replay the action's main steps and cleanup. Action outputs are
-evaluated only after cleanup succeeds; successful cleanup outputs can therefore feed an action
-output expression.
+Action defer and finally cleanup run once for each attempt of the caller's `uses` step. A cleanup
+failure fails that attempt, so an outer retry can replay the action's main steps and cleanup. Action
+outputs are evaluated only after cleanup succeeds; successful cleanup outputs can therefore feed
+an action output expression.
 
 Cleanup should be idempotent because retries, cancellation, and partial external effects can cause
 it to run after partially completed work. Prefer cleanup commands that tolerate an already-removed
@@ -174,9 +188,9 @@ and matrix cleanup entries retain their existing group timeout, `fail_fast`, con
 nesting, and iteration limits. A failed concurrent or fan-out cleanup entry does not commit its
 aggregate result, but Wuko continues to the next top-level cleanup entry.
 
-`wuko validate` validates both sections. `wuko tree` displays a `finally` branch, including cleanup
-inside composite actions. `wuko run --dry-run` prints a separate `finally:` section after the main
-plan. Validation and dry-run never execute cleanup.
+`wuko validate` validates attached defers and final sections. `wuko tree` and `wuko run --dry-run`
+display each defer beneath its owner and show `finally` as a separate branch. Validation and dry-run
+never execute cleanup.
 
 ## Limitations
 
@@ -186,7 +200,8 @@ plan. Validation and dry-run never execute cleanup.
 - `finally` cannot recover from or suppress the main error.
 - A workflow or action supports one top-level `finally` list. An
   [executor block](executors.md#cleanup-and-persistence) may additionally have a scoped `finally`
-  list that runs inside its executor before the session closes. There is no ordinary per-step
+  list that runs inside its executor before the session closes. Attached defers in an executor run
+  before that list and before the session closes. There is no recursive defer, ordinary per-step
   `finally`, multiple-clause selection, or `catch` construct.
 - Error messages are unstable informational text and should not be used as condition keys.
 - There is no block-level cleanup timeout. Bound cleanup with step and control timeouts. CLI cleanup

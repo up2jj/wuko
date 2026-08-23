@@ -215,6 +215,20 @@ func TestWriteWorkflowTreeShowsFinallySections(t *testing.T) {
 	}
 }
 
+func TestWriteWorkflowTreeShowsAttachedDefer(t *testing.T) {
+	definition := &workflow.Definition{Version: 1, Name: "tree", Steps: []workflow.Step{{
+		ID: "create", Type: "shell", Defer: []workflow.Step{{ID: "remove", Type: "shell"}},
+	}}}
+	var output bytes.Buffer
+	if err := writeWorkflowTree(&output, definition); err != nil {
+		t.Fatal(err)
+	}
+	want := "tree\n└── create (shell)\n    └── defer\n        └── remove (shell)\n"
+	if output.String() != want {
+		t.Fatalf("tree output = %q, want %q", output.String(), want)
+	}
+}
+
 func TestWorkflowTreeDisplaysConcurrentGroup(t *testing.T) {
 	timeout := workflow.Duration(5 * time.Minute)
 	definition := &workflow.Definition{Name: "checks", Steps: []workflow.Step{{Concurrent: &workflow.ConcurrentGroup{

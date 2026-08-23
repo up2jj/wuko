@@ -156,6 +156,10 @@ steps:
     with:
       command: ./build
       args: ["{{ .vars.target }}"]
+    defer:
+      - id: remove_build
+        type: shell
+        with: {command: ./remove-build}
 
   - id: publish
     type: shell
@@ -173,7 +177,8 @@ finally:
 
 Steps run in declaration order. A successful step publishes outputs under `.steps.<id>` for Go
 templates and `steps.<id>` for expressions. Variables live under `.vars`/`vars`. A failed step
-stops ordinary execution; `finally` still runs.
+stops ordinary execution. Cleanup attached with `defer` is registered after its owner succeeds,
+then runs in reverse owner order before `finally`.
 
 A workflow can require other discovered workflows and consume their declared typed outputs:
 

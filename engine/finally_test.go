@@ -226,3 +226,20 @@ func TestFinallyDryRunShowsWorkflowAndActionSections(t *testing.T) {
 		}
 	}
 }
+
+func TestDeferDryRunShowsAttachedSection(t *testing.T) {
+	registry := newTestRegistry(t, nil)
+	registerFinallyTestRunner(t, registry, "noop", func(context.Context, step.Request) (step.Result, error) {
+		return step.Result{}, nil
+	})
+	definition := testDefinition(t, "dry-defer", workflow.Step{
+		ID: "create", Type: "noop", Defer: []workflow.Step{{ID: "remove", Type: "noop"}},
+	})
+	var output bytes.Buffer
+	if _, err := New(registry).Run(t.Context(), definition, Options{DryRun: true, Stdout: &output, Stderr: io.Discard}); err != nil {
+		t.Fatal(err)
+	}
+	if want := "create (noop)\n   defer:\n      1.1 remove (noop)"; !strings.Contains(output.String(), want) {
+		t.Fatalf("dry-run output = %q, want substring %q", output.String(), want)
+	}
+}

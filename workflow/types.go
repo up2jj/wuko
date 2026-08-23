@@ -97,6 +97,7 @@ type Step struct {
 	Executor         *ExecutorScope      `yaml:"executor,omitempty"`
 	Steps            []Step              `yaml:"steps,omitempty"`
 	Finally          []Step              `yaml:"finally,omitempty"`
+	Defer            []Step              `yaml:"defer,omitempty"`
 	Concurrent       *ConcurrentGroup    `yaml:"concurrent,omitempty"`
 	Batch            *BatchGroup         `yaml:"batch,omitempty"`
 	Foreach          *ForeachGroup       `yaml:"foreach,omitempty"`
@@ -118,7 +119,7 @@ func (workflowStep *Step) UnmarshalYAML(node *yaml.Node) error {
 		return fmt.Errorf("step must be an object")
 	}
 	if err := rejectUnknownFields(node, "step", map[string]bool{
-		"id": true, "type": true, "uses": true, "require": true, "working_directory": true, "executor": true, "steps": true, "finally": true, "concurrent": true,
+		"id": true, "type": true, "uses": true, "require": true, "working_directory": true, "executor": true, "steps": true, "finally": true, "defer": true, "concurrent": true,
 		"batch": true, "foreach": true, "matrix": true, "return": true, "sha256": true, "if": true, "timeout": true,
 		"retry": true, "with": true,
 	}); err != nil {
@@ -133,6 +134,9 @@ func (workflowStep *Step) UnmarshalYAML(node *yaml.Node) error {
 		}
 		if node.Content[i].Value == "finally" && node.Content[i+1].Kind != yaml.SequenceNode {
 			return fmt.Errorf("finally must be a list")
+		}
+		if node.Content[i].Value == "defer" && node.Content[i+1].Kind != yaml.SequenceNode {
+			return fmt.Errorf("defer must be a list")
 		}
 	}
 	type plain Step
@@ -175,7 +179,7 @@ func (workflowStep Step) validateBlock() error {
 		if len(workflowStep.Steps) == 0 {
 			return fmt.Errorf("working_directory block must contain at least one step")
 		}
-		if workflowStep.ID != "" || workflowStep.Type != "" || !workflowStep.Uses.Empty() || workflowStep.Require != nil || workflowStep.Executor != nil || workflowStep.Finally != nil || workflowStep.Concurrent != nil || workflowStep.Batch != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil || workflowStep.Return != nil || workflowStep.SHA256 != "" || workflowStep.If != "" || workflowStep.Timeout != nil || workflowStep.Retry != nil || workflowStep.With != nil {
+		if workflowStep.ID != "" || workflowStep.Type != "" || !workflowStep.Uses.Empty() || workflowStep.Require != nil || workflowStep.Executor != nil || workflowStep.Finally != nil || workflowStep.Defer != nil || workflowStep.Concurrent != nil || workflowStep.Batch != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil || workflowStep.Return != nil || workflowStep.SHA256 != "" || workflowStep.If != "" || workflowStep.Timeout != nil || workflowStep.Retry != nil || workflowStep.With != nil {
 			return fmt.Errorf("working_directory block cannot be combined with other step fields")
 		}
 	case workflowStep.IsConditionalBlock():
@@ -185,7 +189,7 @@ func (workflowStep Step) validateBlock() error {
 		if len(workflowStep.Steps) == 0 {
 			return fmt.Errorf("conditional block must contain at least one step")
 		}
-		if workflowStep.ID != "" || workflowStep.Type != "" || !workflowStep.Uses.Empty() || workflowStep.Require != nil || workflowStep.Executor != nil || workflowStep.Finally != nil || workflowStep.IsWorkingDirectoryBlock() || workflowStep.Concurrent != nil || workflowStep.Batch != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil || workflowStep.Return != nil || workflowStep.SHA256 != "" || workflowStep.Timeout != nil || workflowStep.Retry != nil || workflowStep.With != nil {
+		if workflowStep.ID != "" || workflowStep.Type != "" || !workflowStep.Uses.Empty() || workflowStep.Require != nil || workflowStep.Executor != nil || workflowStep.Finally != nil || workflowStep.Defer != nil || workflowStep.IsWorkingDirectoryBlock() || workflowStep.Concurrent != nil || workflowStep.Batch != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil || workflowStep.Return != nil || workflowStep.SHA256 != "" || workflowStep.Timeout != nil || workflowStep.Retry != nil || workflowStep.With != nil {
 			return fmt.Errorf("conditional block cannot be combined with other step fields")
 		}
 	}
@@ -565,9 +569,11 @@ const (
 	scopeControl
 	scopeConcurrent
 	scopeFinally
+	scopeDefer
 	scopeExecutor
 	scopeExecutorControl
 	scopeExecutorFinally
+	scopeExecutorDefer
 )
 
 func validateStepScope(steps []Step, allowActions bool, scope stepScope, inherited map[string]struct{}) error {
@@ -583,7 +589,8 @@ func validateStepScope(steps []Step, allowActions bool, scope stepScope, inherit
 
 func collectScopeIDs(steps []Step, seen map[string]struct{}) error {
 	for i, workflowStep := range steps {
-		if workflowStep.IsExecutorBlock() || workflowStep.IsWorkingDirectoryBlock() || workflowStep.IsConditionalBlock() || workflowStep.Concurrent != nil {
+		container := workflowStep.IsExecutorBlock() || workflowStep.IsWorkingDirectoryBlock() || workflowStep.IsConditionalBlock() || workflowStep.Concurrent != nil
+		if container {
 			for _, child := range workflowStep.ChildSequences() {
 				if err := collectScopeIDs(child.Steps, seen); err != nil {
 					context := fmt.Sprintf("step %d", i+1)
@@ -592,6 +599,9 @@ func collectScopeIDs(steps []Step, seen map[string]struct{}) error {
 						if child.Role == ChildFinally {
 							context += " finally"
 						}
+					}
+					if child.Role == ChildDefer {
+						context += " defer"
 					}
 					return fmt.Errorf("%s: %w", context, err)
 				}
@@ -611,6 +621,9 @@ func collectScopeIDs(steps []Step, seen map[string]struct{}) error {
 			return fmt.Errorf("duplicate step id %q", workflowStep.ID)
 		}
 		seen[workflowStep.ID] = struct{}{}
+		if err := collectScopeIDs(workflowStep.Defer, seen); err != nil {
+			return fmt.Errorf("step %q defer: %w", workflowStep.ID, err)
+		}
 	}
 	return nil
 }
@@ -659,6 +672,24 @@ func validateSteps(steps []Step, allowActions bool, scope stepScope, seen map[st
 		if workflowStep.Finally != nil {
 			return fmt.Errorf("step %q: finally is only supported by executor blocks", workflowStep.ID)
 		}
+		if workflowStep.Defer != nil {
+			if len(workflowStep.Defer) == 0 {
+				return fmt.Errorf("step %q: defer must contain at least one step", workflowStep.ID)
+			}
+			deferScope := scopeDefer
+			switch scope {
+			case scopeTop:
+			case scopeExecutor:
+				deferScope = scopeExecutorDefer
+			case scopeConcurrent, scopeControl, scopeExecutorControl:
+				return fmt.Errorf("step %q: defer is only supported in sequential scopes", workflowStep.ID)
+			case scopeFinally, scopeDefer, scopeExecutorFinally, scopeExecutorDefer:
+				return fmt.Errorf("step %q: defer is not supported inside cleanup", workflowStep.ID)
+			}
+			if err := validateSteps(workflowStep.Defer, allowActions, deferScope, seen); err != nil {
+				return fmt.Errorf("step %q defer: %w", workflowStep.ID, err)
+			}
+		}
 		if executorStepScope(scope) && !workflowStep.Uses.Empty() {
 			return fmt.Errorf("step %q: actions are not supported inside executor blocks", workflowStep.ID)
 		}
@@ -705,7 +736,7 @@ func validateConditionalBlock(workflowStep Step, scope stepScope, allowActions b
 }
 
 func validateConcurrentEntry(workflowStep Step, scope stepScope, allowActions bool, seen map[string]struct{}) error {
-	if workflowStep.ID != "" || workflowStep.Type != "" || !workflowStep.Uses.Empty() || workflowStep.Executor != nil || workflowStep.Finally != nil || workflowStep.IsConditionalBlock() || workflowStep.IsWorkingDirectoryBlock() || workflowStep.Batch != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil || workflowStep.Return != nil || workflowStep.SHA256 != "" || workflowStep.If != "" || workflowStep.Timeout != nil || workflowStep.Retry != nil || workflowStep.With != nil {
+	if workflowStep.ID != "" || workflowStep.Type != "" || !workflowStep.Uses.Empty() || workflowStep.Executor != nil || workflowStep.Finally != nil || workflowStep.Defer != nil || workflowStep.IsConditionalBlock() || workflowStep.IsWorkingDirectoryBlock() || workflowStep.Batch != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil || workflowStep.Return != nil || workflowStep.SHA256 != "" || workflowStep.If != "" || workflowStep.Timeout != nil || workflowStep.Retry != nil || workflowStep.With != nil {
 		return fmt.Errorf("concurrent cannot be combined with other step fields")
 	}
 	if scope == scopeConcurrent {
@@ -722,7 +753,7 @@ func validateConcurrentEntry(workflowStep Step, scope stepScope, allowActions bo
 }
 
 func executorStepScope(scope stepScope) bool {
-	return scope == scopeExecutor || scope == scopeExecutorControl || scope == scopeExecutorFinally
+	return scope == scopeExecutor || scope == scopeExecutorControl || scope == scopeExecutorFinally || scope == scopeExecutorDefer
 }
 
 func validateControlEntry(workflowStep Step, scope stepScope, allowActions bool, enclosing map[string]struct{}) error {
@@ -750,7 +781,7 @@ func validateControlEntry(workflowStep Step, scope stepScope, allowActions bool,
 		children = workflowStep.Foreach.Steps
 		validationErr = workflowStep.Foreach.Validate()
 	}
-	if workflowStep.Type != "" || !workflowStep.Uses.Empty() || workflowStep.Require != nil || workflowStep.Executor != nil || workflowStep.Finally != nil || workflowStep.IsWorkingDirectoryBlock() || workflowStep.Concurrent != nil || workflowStep.Return != nil || workflowStep.SHA256 != "" || workflowStep.Timeout != nil || workflowStep.Retry != nil || workflowStep.With != nil {
+	if workflowStep.Type != "" || !workflowStep.Uses.Empty() || workflowStep.Require != nil || workflowStep.Executor != nil || workflowStep.Finally != nil || workflowStep.Defer != nil || workflowStep.IsWorkingDirectoryBlock() || workflowStep.Concurrent != nil || workflowStep.Return != nil || workflowStep.SHA256 != "" || workflowStep.Timeout != nil || workflowStep.Retry != nil || workflowStep.With != nil {
 		return fmt.Errorf("%s cannot be combined with ordinary step fields", kind)
 	}
 	if scope != scopeTop && scope != scopeExecutor {
@@ -792,7 +823,7 @@ func validateExecutorBlock(workflowStep Step, scope stepScope, allowActions bool
 	if len(workflowStep.Steps) == 0 {
 		return fmt.Errorf("executor block must contain at least one step")
 	}
-	if workflowStep.ID != "" || workflowStep.Type != "" || !workflowStep.Uses.Empty() || workflowStep.Require != nil || workflowStep.IsWorkingDirectoryBlock() || workflowStep.Concurrent != nil || workflowStep.Batch != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil || workflowStep.Return != nil || workflowStep.SHA256 != "" || workflowStep.If != "" || workflowStep.Timeout != nil || workflowStep.Retry != nil || workflowStep.With != nil {
+	if workflowStep.ID != "" || workflowStep.Type != "" || !workflowStep.Uses.Empty() || workflowStep.Require != nil || workflowStep.Defer != nil || workflowStep.IsWorkingDirectoryBlock() || workflowStep.Concurrent != nil || workflowStep.Batch != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil || workflowStep.Return != nil || workflowStep.SHA256 != "" || workflowStep.If != "" || workflowStep.Timeout != nil || workflowStep.Retry != nil || workflowStep.With != nil {
 		return fmt.Errorf("executor block cannot be combined with other step fields")
 	}
 	if err := validateSteps(workflowStep.Steps, allowActions, scopeExecutor, seen); err != nil {

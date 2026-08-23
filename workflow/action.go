@@ -244,7 +244,9 @@ func (loader *Loader) resolveActions(ctx context.Context, workflowName string, s
 					return err
 				}
 			}
-			continue
+			if workflowStep.IsExecutorBlock() || workflowStep.IsConditionalBlock() || workflowStep.Concurrent != nil || workflowStep.Batch != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil {
+				continue
+			}
 		}
 		if workflowStep.Uses.Empty() {
 			continue
@@ -693,7 +695,7 @@ func validateActionReturnContracts(steps []Step, outputs map[string]ActionOutput
 	for _, workflowStep := range steps {
 		if workflowStep.IsExecutorBlock() || workflowStep.IsWorkingDirectoryBlock() || workflowStep.IsConditionalBlock() {
 			for _, child := range workflowStep.ChildSequences() {
-				if child.Role == ChildFinally {
+				if child.Role == ChildFinally || child.Role == ChildDefer {
 					continue
 				}
 				if err := validateActionReturnContracts(child.Steps, outputs); err != nil {

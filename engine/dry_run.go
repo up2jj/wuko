@@ -120,6 +120,14 @@ func writeDryRun(writer io.Writer, steps []workflow.Step, indent string, parent 
 				}
 			}
 		}
+		if len(workflowStep.Defer) > 0 {
+			if _, err := fmt.Fprintf(writer, "%s   defer:\n", indent); err != nil {
+				return err
+			}
+			if err := writeDryRun(writer, workflowStep.Defer, indent+"      ", path); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }

@@ -79,6 +79,35 @@ func TestSchemaDiagnosticUsesFailingStepLocation(t *testing.T) {
 	t.Fatalf("missing validation failure: %#v", events)
 }
 
+func TestSchemaDiagnosticUsesDeferredStepLocation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "workflow.yaml")
+	if err := os.WriteFile(path, []byte(`version: 1
+name: invalid
+steps:
+  - id: create
+    type: shell
+    defer:
+      - id: remove
+        with: {}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var events []diagnostic.Event
+	_, err := loadLocalWithDiagnostics(path, func(event diagnostic.Event) { events = append(events, event) }, "", "")
+	if err == nil {
+		t.Fatal("expected schema error")
+	}
+	for _, event := range events {
+		if event.Phase == diagnostic.PhaseValidation && event.Status == diagnostic.StatusFailed {
+			if event.Location.Source != path || event.Location.Line != 7 {
+				t.Fatalf("failure location = %#v", event.Location)
+			}
+			return
+		}
+	}
+	t.Fatalf("missing validation failure: %#v", events)
+}
+
 func location(source string, line int) diagnostic.Location {
 	return diagnostic.Location{Source: source, Line: line, Column: 1}
 }
