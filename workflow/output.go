@@ -104,7 +104,7 @@ func (definition *Definition) ValidateOutputContract() error {
 
 func validateWorkflowReturnContracts(steps []Step, outputs map[string]WorkflowOutput) error {
 	for _, workflowStep := range steps {
-		if workflowStep.IsExecutorBlock() || workflowStep.IsWorkingDirectoryBlock() || workflowStep.IsConditionalBlock() {
+		if workflowStep.IsExecutorBlock() || workflowStep.IsWorkingDirectoryBlock() || workflowStep.IsWorktreeBlock() || workflowStep.IsConditionalBlock() {
 			for _, child := range workflowStep.ChildSequences() {
 				if child.Role == ChildFinally || child.Role == ChildDefer {
 					continue

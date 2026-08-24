@@ -140,6 +140,46 @@ func TestResolveDependencyPlanChecksOnlySemanticDependencyReferences(t *testing.
 	if err == nil || !strings.Contains(err.Error(), `does not declare output "missing"`) {
 		t.Fatalf("bracket reference error = %v", err)
 	}
+
+	for _, test := range []struct {
+		name  string
+		setup func(*Step)
+	}{
+		{
+			name: "worktree revision",
+			setup: func(step *Step) {
+				step.Worktree = &WorktreeGroup{Revision: "{{ .dependencies.build.missing }}", Path: "auto", Steps: []Step{{ID: "nested", Type: "shell"}}}
+			},
+		},
+		{
+			name: "worktree path",
+			setup: func(step *Step) {
+				step.Worktree = &WorktreeGroup{Revision: "HEAD", Path: "{{ .dependencies.build.missing }}", Steps: []Step{{ID: "nested", Type: "shell"}}}
+			},
+		},
+		{
+			name: "worktree publish branch",
+			setup: func(step *Step) {
+				step.Worktree = &WorktreeGroup{
+					Revision: "HEAD", Path: "auto",
+					Publish: &WorktreePublish{Branch: "{{ .dependencies.build.missing }}"},
+					Steps:   []Step{{ID: "nested", Type: "shell"}},
+				}
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			worktreeConsumer := dependencyDefinition("consumer", "/consumer.yaml")
+			worktreeConsumer.DependsOn = map[string]string{"build": "producer"}
+			worktreeConsumer.Steps = []Step{{ID: "worktree"}}
+			test.setup(&worktreeConsumer.Steps[0])
+
+			_, err := ResolveDependencyPlan(t.Context(), worktreeConsumer, func(context.Context, string) (*Definition, error) { return producer, nil })
+			if err == nil || !strings.Contains(err.Error(), `does not declare output "missing"`) {
+				t.Fatalf("worktree dependency error = %v", err)
+			}
+		})
+	}
 }
 
 func TestLoaderRejectsDependencyOutputsInLoadTimeFields(t *testing.T) {

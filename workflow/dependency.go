@@ -136,6 +136,13 @@ func stepDependencyReferences(steps []Step) []dependencyOutputReference {
 	for _, workflowStep := range steps {
 		references = append(references, expressionDependencyReferences(string(workflowStep.If))...)
 		references = append(references, templateDependencyReferences(workflowStep.WorkingDirectory)...)
+		if workflowStep.Worktree != nil {
+			references = append(references, templateDependencyReferences(workflowStep.Worktree.Revision)...)
+			references = append(references, templateDependencyReferences(workflowStep.Worktree.Path)...)
+			if workflowStep.Worktree.Publish != nil {
+				references = append(references, templateDependencyReferences(workflowStep.Worktree.Publish.Branch)...)
+			}
+		}
 		references = append(references, templateDependencyReferences(workflowStep.Uses.URL)...)
 		references = append(references, templateDependencyReferences(workflowStep.Uses.Command)...)
 		for _, argument := range workflowStep.Uses.Args {

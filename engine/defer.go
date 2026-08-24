@@ -55,6 +55,9 @@ func (stack *deferStack) collect(steps []workflow.Step) {
 		switch {
 		case workflowStep.IsExecutorBlock():
 			// Executor blocks own an independent defer scope.
+		case workflowStep.IsWorktreeBlock():
+			// Worktree blocks own an independent defer scope that must run before
+			// the worktree is removed.
 		case workflowStep.IsWorkingDirectoryBlock(), workflowStep.IsConditionalBlock():
 			stack.collect(workflowStep.Steps)
 		default:

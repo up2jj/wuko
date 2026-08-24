@@ -93,14 +93,15 @@ func (c *Condition) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
-// Step declares a concrete step, a transparent conditional or working-directory block, a return
-// control, a composite action, or a local step-file requirement.
+// Step declares a concrete step, a transparent conditional or working-directory block, a named
+// worktree control, a return control, a composite action, or a local step-file requirement.
 type Step struct {
 	ID               string              `yaml:"id"`
 	Type             string              `yaml:"type,omitempty"`
 	Uses             ActionSource        `yaml:"uses,omitempty"`
 	Require          *string             `yaml:"require,omitempty"`
 	WorkingDirectory string              `yaml:"working_directory,omitempty"`
+	Worktree         *WorktreeGroup      `yaml:"worktree,omitempty"`
 	Executor         *ExecutorScope      `yaml:"executor,omitempty"`
 	Steps            []Step              `yaml:"steps,omitempty"`
 	Finally          []Step              `yaml:"finally,omitempty"`
@@ -126,7 +127,7 @@ func (workflowStep *Step) UnmarshalYAML(node *yaml.Node) error {
 		return fmt.Errorf("step must be an object")
 	}
 	if err := rejectUnknownFields(node, "step", map[string]bool{
-		"id": true, "type": true, "uses": true, "require": true, "working_directory": true, "executor": true, "steps": true, "finally": true, "defer": true, "concurrent": true,
+		"id": true, "type": true, "uses": true, "require": true, "working_directory": true, "worktree": true, "executor": true, "steps": true, "finally": true, "defer": true, "concurrent": true,
 		"batch": true, "foreach": true, "matrix": true, "return": true, "sha256": true, "if": true, "timeout": true,
 		"retry": true, "with": true,
 	}); err != nil {
@@ -166,6 +167,9 @@ func (workflowStep Step) IsWorkingDirectoryBlock() bool {
 	return workflowStep.hasWorkingDir || workflowStep.WorkingDirectory != ""
 }
 
+// IsWorktreeBlock reports whether the step creates and scopes execution to a Git worktree.
+func (workflowStep Step) IsWorktreeBlock() bool { return workflowStep.Worktree != nil }
+
 // IsExecutorBlock reports whether the step temporarily selects an execution provider.
 func (workflowStep Step) IsExecutorBlock() bool { return workflowStep.Executor != nil }
 
@@ -179,6 +183,14 @@ func (workflowStep Step) ValidateBlock() error {
 // Parent-scope restrictions and child declarations are validated by the workflow walker.
 func (workflowStep Step) validateBlock() error {
 	switch {
+	case workflowStep.IsWorktreeBlock():
+		if err := workflowStep.Worktree.Validate(); err != nil {
+			return err
+		}
+		if workflowStep.Type != "" || !workflowStep.Uses.Empty() || workflowStep.Require != nil || workflowStep.IsWorkingDirectoryBlock() || workflowStep.Steps != nil || workflowStep.Executor != nil || workflowStep.Finally != nil || workflowStep.Defer != nil || workflowStep.IsConditionalBlock() || workflowStep.Concurrent != nil || workflowStep.Batch != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil || workflowStep.Return != nil || workflowStep.SHA256 != "" || workflowStep.If != "" || workflowStep.Timeout != nil || workflowStep.Retry != nil || workflowStep.With != nil {
+			return fmt.Errorf("worktree block cannot be combined with other step fields")
+		}
+		return nil
 	case workflowStep.IsWorkingDirectoryBlock():
 		if strings.TrimSpace(workflowStep.WorkingDirectory) == "" {
 			return fmt.Errorf("working_directory must be a non-empty path")
@@ -186,7 +198,7 @@ func (workflowStep Step) validateBlock() error {
 		if len(workflowStep.Steps) == 0 {
 			return fmt.Errorf("working_directory block must contain at least one step")
 		}
-		if workflowStep.ID != "" || workflowStep.Type != "" || !workflowStep.Uses.Empty() || workflowStep.Require != nil || workflowStep.Executor != nil || workflowStep.Finally != nil || workflowStep.Defer != nil || workflowStep.Concurrent != nil || workflowStep.Batch != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil || workflowStep.Return != nil || workflowStep.SHA256 != "" || workflowStep.If != "" || workflowStep.Timeout != nil || workflowStep.Retry != nil || workflowStep.With != nil {
+		if workflowStep.ID != "" || workflowStep.Type != "" || !workflowStep.Uses.Empty() || workflowStep.Require != nil || workflowStep.Worktree != nil || workflowStep.Executor != nil || workflowStep.Finally != nil || workflowStep.Defer != nil || workflowStep.Concurrent != nil || workflowStep.Batch != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil || workflowStep.Return != nil || workflowStep.SHA256 != "" || workflowStep.If != "" || workflowStep.Timeout != nil || workflowStep.Retry != nil || workflowStep.With != nil {
 			return fmt.Errorf("working_directory block cannot be combined with other step fields")
 		}
 	case workflowStep.IsConditionalBlock():
@@ -196,9 +208,87 @@ func (workflowStep Step) validateBlock() error {
 		if len(workflowStep.Steps) == 0 {
 			return fmt.Errorf("conditional block must contain at least one step")
 		}
-		if workflowStep.ID != "" || workflowStep.Type != "" || !workflowStep.Uses.Empty() || workflowStep.Require != nil || workflowStep.Executor != nil || workflowStep.Finally != nil || workflowStep.Defer != nil || workflowStep.IsWorkingDirectoryBlock() || workflowStep.Concurrent != nil || workflowStep.Batch != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil || workflowStep.Return != nil || workflowStep.SHA256 != "" || workflowStep.Timeout != nil || workflowStep.Retry != nil || workflowStep.With != nil {
+		if workflowStep.ID != "" || workflowStep.Type != "" || !workflowStep.Uses.Empty() || workflowStep.Require != nil || workflowStep.Worktree != nil || workflowStep.Executor != nil || workflowStep.Finally != nil || workflowStep.Defer != nil || workflowStep.IsWorkingDirectoryBlock() || workflowStep.Concurrent != nil || workflowStep.Batch != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil || workflowStep.Return != nil || workflowStep.SHA256 != "" || workflowStep.Timeout != nil || workflowStep.Retry != nil || workflowStep.With != nil {
 			return fmt.Errorf("conditional block cannot be combined with other step fields")
 		}
+	}
+	return nil
+}
+
+// WorktreeGroup creates a detached Git worktree and executes child steps inside it.
+type WorktreeGroup struct {
+	Revision string           `yaml:"revision"`
+	Path     string           `yaml:"path,omitempty"`
+	Publish  *WorktreePublish `yaml:"publish,omitempty"`
+	Steps    []Step           `yaml:"steps"`
+}
+
+// WorktreePublish describes the branch to create from the final worktree commit.
+type WorktreePublish struct {
+	Branch string `yaml:"branch"`
+}
+
+func (group *WorktreeGroup) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("worktree must be an object")
+	}
+	if err := rejectUnknownFields(node, "worktree", map[string]bool{
+		"revision": true, "path": true, "publish": true, "steps": true,
+	}); err != nil {
+		return err
+	}
+	for i := 0; i < len(node.Content); i += 2 {
+		if node.Content[i].Value == "revision" || node.Content[i].Value == "path" {
+			value := node.Content[i+1]
+			if value.Kind != yaml.ScalarNode || value.Tag != "!!str" {
+				return fmt.Errorf("worktree %s must be a string", node.Content[i].Value)
+			}
+		}
+		if node.Content[i].Value == "steps" && node.Content[i+1].Kind != yaml.SequenceNode {
+			return fmt.Errorf("worktree steps must be a list")
+		}
+	}
+	type plain WorktreeGroup
+	decoded := plain{Path: "auto"}
+	if err := node.Decode(&decoded); err != nil {
+		return err
+	}
+	if decoded.Publish != nil {
+		if err := validateWorktreePublishNode(mappingValue(node, "publish")); err != nil {
+			return err
+		}
+	}
+	*group = WorktreeGroup(decoded)
+	return nil
+}
+
+func validateWorktreePublishNode(node *yaml.Node) error {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return fmt.Errorf("worktree publish must be an object")
+	}
+	if err := rejectUnknownFields(node, "worktree publish", map[string]bool{"branch": true}); err != nil {
+		return err
+	}
+	branch := mappingValue(node, "branch")
+	if branch != nil && (branch.Kind != yaml.ScalarNode || branch.Tag != "!!str") {
+		return fmt.Errorf("worktree publish branch must be a string")
+	}
+	return nil
+}
+
+// Validate checks the worktree declaration independently of runtime Git state.
+func (group WorktreeGroup) Validate() error {
+	if strings.TrimSpace(group.Revision) == "" {
+		return fmt.Errorf("worktree revision must be a non-empty expression string")
+	}
+	if strings.TrimSpace(group.Path) == "" {
+		return fmt.Errorf("worktree path must be auto or a non-empty path")
+	}
+	if len(group.Steps) == 0 {
+		return fmt.Errorf("worktree block must contain at least one step")
+	}
+	if group.Publish != nil && strings.TrimSpace(group.Publish.Branch) == "" {
+		return fmt.Errorf("worktree publish branch must be a non-empty expression string")
 	}
 	return nil
 }
@@ -596,8 +686,17 @@ func validateStepScope(steps []Step, allowActions bool, scope stepScope, inherit
 
 func collectScopeIDs(steps []Step, seen map[string]struct{}) error {
 	for i, workflowStep := range steps {
-		container := workflowStep.IsExecutorBlock() || workflowStep.IsWorkingDirectoryBlock() || workflowStep.IsConditionalBlock() || workflowStep.Concurrent != nil
+		container := workflowStep.IsExecutorBlock() || workflowStep.IsWorkingDirectoryBlock() || workflowStep.IsWorktreeBlock() || workflowStep.IsConditionalBlock() || workflowStep.Concurrent != nil
 		if container {
+			if workflowStep.IsWorktreeBlock() {
+				if !identifierPattern.MatchString(workflowStep.ID) {
+					return fmt.Errorf("step %d has invalid id %q", i+1, workflowStep.ID)
+				}
+				if _, exists := seen[workflowStep.ID]; exists {
+					return fmt.Errorf("duplicate step id %q", workflowStep.ID)
+				}
+				seen[workflowStep.ID] = struct{}{}
+			}
 			for _, child := range workflowStep.ChildSequences() {
 				if err := collectScopeIDs(child.Steps, seen); err != nil {
 					context := fmt.Sprintf("step %d", i+1)
@@ -645,6 +744,12 @@ func validateSteps(steps []Step, allowActions bool, scope stepScope, seen map[st
 		}
 		if workflowStep.IsWorkingDirectoryBlock() {
 			if err := validateWorkingDirectoryBlock(workflowStep, scope, allowActions, seen); err != nil {
+				return fmt.Errorf("step %d: %w", i+1, err)
+			}
+			continue
+		}
+		if workflowStep.IsWorktreeBlock() {
+			if err := validateWorktreeEntry(workflowStep, scope, allowActions, seen); err != nil {
 				return fmt.Errorf("step %d: %w", i+1, err)
 			}
 			continue
@@ -727,6 +832,19 @@ func validateWorkingDirectoryBlock(workflowStep Step, scope stepScope, allowActi
 	return validateSteps(workflowStep.Steps, allowActions, scope, seen)
 }
 
+func validateWorktreeEntry(workflowStep Step, scope stepScope, allowActions bool, seen map[string]struct{}) error {
+	if err := workflowStep.ValidateBlock(); err != nil {
+		return err
+	}
+	if workflowStep.ID == "" || !identifierPattern.MatchString(workflowStep.ID) {
+		return fmt.Errorf("worktree block requires a valid id")
+	}
+	if workflowStep.Type != "" || !workflowStep.Uses.Empty() || workflowStep.Require != nil || workflowStep.WorkingDirectory != "" || workflowStep.Steps != nil || workflowStep.Executor != nil || workflowStep.Finally != nil || workflowStep.Defer != nil || workflowStep.IsConditionalBlock() || workflowStep.Concurrent != nil || workflowStep.Batch != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil || workflowStep.Return != nil || workflowStep.SHA256 != "" || workflowStep.If != "" || workflowStep.Timeout != nil || workflowStep.Retry != nil || workflowStep.With != nil {
+		return fmt.Errorf("worktree block cannot be combined with other step fields")
+	}
+	return validateSteps(workflowStep.Worktree.Steps, allowActions, scope, seen)
+}
+
 func validateConditionalBlock(workflowStep Step, scope stepScope, allowActions bool, seen map[string]struct{}) error {
 	if err := workflowStep.validateBlock(); err != nil {
 		return err
@@ -743,7 +861,7 @@ func validateConditionalBlock(workflowStep Step, scope stepScope, allowActions b
 }
 
 func validateConcurrentEntry(workflowStep Step, scope stepScope, allowActions bool, seen map[string]struct{}) error {
-	if workflowStep.ID != "" || workflowStep.Type != "" || !workflowStep.Uses.Empty() || workflowStep.Executor != nil || workflowStep.Finally != nil || workflowStep.Defer != nil || workflowStep.IsConditionalBlock() || workflowStep.IsWorkingDirectoryBlock() || workflowStep.Batch != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil || workflowStep.Return != nil || workflowStep.SHA256 != "" || workflowStep.If != "" || workflowStep.Timeout != nil || workflowStep.Retry != nil || workflowStep.With != nil {
+	if workflowStep.ID != "" || workflowStep.Type != "" || !workflowStep.Uses.Empty() || workflowStep.Worktree != nil || workflowStep.Executor != nil || workflowStep.Finally != nil || workflowStep.Defer != nil || workflowStep.IsConditionalBlock() || workflowStep.IsWorkingDirectoryBlock() || workflowStep.Batch != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil || workflowStep.Return != nil || workflowStep.SHA256 != "" || workflowStep.If != "" || workflowStep.Timeout != nil || workflowStep.Retry != nil || workflowStep.With != nil {
 		return fmt.Errorf("concurrent cannot be combined with other step fields")
 	}
 	if scope == scopeConcurrent {
@@ -788,7 +906,7 @@ func validateControlEntry(workflowStep Step, scope stepScope, allowActions bool,
 		children = workflowStep.Foreach.Steps
 		validationErr = workflowStep.Foreach.Validate()
 	}
-	if workflowStep.Type != "" || !workflowStep.Uses.Empty() || workflowStep.Require != nil || workflowStep.Executor != nil || workflowStep.Finally != nil || workflowStep.Defer != nil || workflowStep.IsWorkingDirectoryBlock() || workflowStep.Concurrent != nil || workflowStep.Return != nil || workflowStep.SHA256 != "" || workflowStep.Timeout != nil || workflowStep.Retry != nil || workflowStep.With != nil {
+	if workflowStep.Type != "" || !workflowStep.Uses.Empty() || workflowStep.Require != nil || workflowStep.Worktree != nil || workflowStep.Executor != nil || workflowStep.Finally != nil || workflowStep.Defer != nil || workflowStep.IsWorkingDirectoryBlock() || workflowStep.Concurrent != nil || workflowStep.Return != nil || workflowStep.SHA256 != "" || workflowStep.Timeout != nil || workflowStep.Retry != nil || workflowStep.With != nil {
 		return fmt.Errorf("%s cannot be combined with ordinary step fields", kind)
 	}
 	if scope != scopeTop && scope != scopeExecutor {
@@ -830,7 +948,7 @@ func validateExecutorBlock(workflowStep Step, scope stepScope, allowActions bool
 	if len(workflowStep.Steps) == 0 {
 		return fmt.Errorf("executor block must contain at least one step")
 	}
-	if workflowStep.ID != "" || workflowStep.Type != "" || !workflowStep.Uses.Empty() || workflowStep.Require != nil || workflowStep.Defer != nil || workflowStep.IsWorkingDirectoryBlock() || workflowStep.Concurrent != nil || workflowStep.Batch != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil || workflowStep.Return != nil || workflowStep.SHA256 != "" || workflowStep.If != "" || workflowStep.Timeout != nil || workflowStep.Retry != nil || workflowStep.With != nil {
+	if workflowStep.ID != "" || workflowStep.Type != "" || !workflowStep.Uses.Empty() || workflowStep.Require != nil || workflowStep.Worktree != nil || workflowStep.Defer != nil || workflowStep.IsWorkingDirectoryBlock() || workflowStep.Concurrent != nil || workflowStep.Batch != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil || workflowStep.Return != nil || workflowStep.SHA256 != "" || workflowStep.If != "" || workflowStep.Timeout != nil || workflowStep.Retry != nil || workflowStep.With != nil {
 		return fmt.Errorf("executor block cannot be combined with other step fields")
 	}
 	if err := validateSteps(workflowStep.Steps, allowActions, scopeExecutor, seen); err != nil {

@@ -41,6 +41,19 @@ func writeDryRun(writer io.Writer, steps []workflow.Step, indent string, parent 
 			}
 			continue
 		}
+		if workflowStep.IsWorktreeBlock() {
+			publish := ""
+			if workflowStep.Worktree.Publish != nil {
+				publish = "; publish " + workflowStep.Worktree.Publish.Branch
+			}
+			if _, err := fmt.Fprintf(writer, "%s%s %s (worktree %s%s)\n", indent, index, workflowStep.ID, workflowStep.Worktree.Revision, publish); err != nil {
+				return err
+			}
+			if err := writeDryRun(writer, workflowStep.Worktree.Steps, indent+"   ", path); err != nil {
+				return err
+			}
+			continue
+		}
 		if workflowStep.IsConditionalBlock() {
 			if _, err := fmt.Fprintf(writer, "%s%s if: %s\n", indent, index, workflowStep.If); err != nil {
 				return err

@@ -297,6 +297,42 @@ The inner path above resolves beneath `{{ .vars.project_dir }}`. A step-level
 `with.working_directory`, when supported by that step type, still applies only to that one step and
 resolves relative to the active scoped `.run.dir`.
 
+## Git worktrees
+
+Use a named `worktree` block when a group of steps should run against an isolated detached checkout
+of the repository containing the active `.run.dir`:
+
+```yaml
+- id: apply_fix
+  worktree:
+    revision: HEAD
+    publish:
+      branch: "wuko/fix-{{ .vars.issue }}"
+    steps:
+      - id: edit
+        type: shell
+        with: {command: ./apply-fix.sh}
+      - id: commit
+        type: shell
+        with:
+          command: sh
+          args: [-c, "git add -A && git commit -m 'Apply automated fix'"]
+```
+
+The block runs `git worktree add --detach` from the repository discovered through `.run.dir`. Its
+children inherit the worktree as `.run.dir`, so shell steps, Docker steps, Docker Buildx contexts,
+and relative file operations see the checked-out files. The `docker` step must still bind-mount
+`{{ .run.dir }}` when the container needs access to the host worktree.
+
+Nested steps may create multiple commits. When `publish.branch` is present, Wuko requires at least
+one new commit, refuses to overwrite an existing branch, and creates the result branch at the final
+`HEAD` without checking it out. The parent output contains `path`, `revision`, `base_commit`,
+`commit`, `branch`, and `published`.
+
+The worktree is removed, and Git worktrees are pruned, when the block exits. Cleanup also runs after
+nested failures and cancellation. Attached `defer` cleanup for nested steps runs before the
+worktree is removed. Without `publish`, the block is suitable for isolated build and test work.
+
 Command-backed composite-action sources are resolved while the workflow is loaded. When such an
 action is inside a `working_directory` block, the block path must therefore be resolvable from the
 initial workflow values; it cannot depend on earlier step outputs or active batch, foreach, or matrix

@@ -67,6 +67,10 @@ func annotateSteps(steps []Step, sequence *yaml.Node, source string) {
 		if steps[i].IsWorkingDirectoryBlock() {
 			annotateSteps(steps[i].Steps, mappingValue(node, "steps"), source)
 		}
+		if steps[i].IsWorktreeBlock() {
+			group := mappingValue(node, "worktree")
+			annotateSteps(steps[i].Worktree.Steps, mappingValue(group, "steps"), source)
+		}
 		if steps[i].IsConditionalBlock() {
 			annotateSteps(steps[i].Steps, mappingValue(node, "steps"), source)
 		}

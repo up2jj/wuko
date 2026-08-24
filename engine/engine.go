@@ -138,6 +138,12 @@ func (e *Engine) validateSteps(ctx context.Context, definition *workflow.Definit
 			}
 			continue
 		}
+		if workflowStep.IsWorktreeBlock() {
+			if err := e.validateWorktreeBlock(ctx, definition, workflowStep, options, state); err != nil {
+				return err
+			}
+			continue
+		}
 		if workflowStep.IsConditionalBlock() {
 			started := time.Now()
 			trace(options, diagnostic.Event{
@@ -432,6 +438,29 @@ func (e *Engine) executeSequence(ctx context.Context, definition *workflow.Defin
 				return err
 			}
 			index += leafStepCount(workflowStep.Steps)
+			if state.returning {
+				recordSkippedSteps(definition, steps[position+1:], options, stats, index, total)
+				return nil
+			}
+			continue
+		}
+		if workflowStep.IsWorktreeBlock() {
+			outcome := e.executeWorktreeBlock(ctx, definition, workflowStep, options, state, index, total)
+			if outcome.started {
+				recordStep(stats, outcome.stats)
+				if outcome.nested != nil {
+					rollupNestedMetrics(stats, *outcome.nested)
+				}
+			}
+			index++
+			if outcome.err != nil {
+				return outcome.err
+			}
+			commitStarted := time.Now()
+			traceStep(options, definition, workflowStep, diagnostic.PhaseCommit, diagnostic.StatusStarted, time.Time{}, "committing worktree result", nil)
+			commitStepResult(state, workflowStep.ID, outcome.result)
+			traceStep(options, definition, workflowStep, diagnostic.PhaseCommit, diagnostic.StatusSucceeded, commitStarted, "", nil,
+				diagnostic.Attr("outputs", fmt.Sprint(len(outcome.result.Outputs))))
 			if state.returning {
 				recordSkippedSteps(definition, steps[position+1:], options, stats, index, total)
 				return nil
@@ -809,6 +838,9 @@ func bindingRoot(bindings map[string]any, name string) map[string]any {
 }
 
 func executionKind(workflowStep workflow.Step) string {
+	if workflowStep.IsWorktreeBlock() {
+		return "worktree"
+	}
 	if workflowStep.Action != nil {
 		return "uses"
 	}

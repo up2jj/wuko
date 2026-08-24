@@ -232,6 +232,19 @@ func writeTreeStepsWithFollowing(writer io.Writer, steps []workflow.Step, prefix
 			}
 			continue
 		}
+		if workflowStep.IsWorktreeBlock() {
+			publish := ""
+			if workflowStep.Worktree.Publish != nil {
+				publish = " publish " + workflowStep.Worktree.Publish.Branch
+			}
+			if _, err := fmt.Fprintf(writer, "%s%s%s (worktree %s%s)\n", prefix, branch, workflowStep.ID, workflowStep.Worktree.Revision, publish); err != nil {
+				return err
+			}
+			if err := writeTreeSteps(writer, workflowStep.Worktree.Steps, childPrefix); err != nil {
+				return err
+			}
+			continue
+		}
 		if workflowStep.IsConditionalBlock() {
 			if _, err := fmt.Fprintf(writer, "%s%sif: %s\n", prefix, branch, workflowStep.If); err != nil {
 				return err
