@@ -57,6 +57,40 @@ with:
 The equivalent Expr is `replace(lower(trim(vars.application)), "_", "-")`; Lua uses
 `h.replace(h.lower(h.trim(wuko.args.application)), "_", "-")`.
 
+### Slugification
+
+`slugify` converts text into a deterministic lowercase ASCII slug. It folds accented Latin
+characters, drops remaining non-ASCII characters, replaces runs of punctuation or whitespace,
+and trims separators. The options object is optional:
+
+| Option | Values | Default |
+| --- | --- | --- |
+| `mode` | `"slug"` or `"git"` | `"slug"` |
+| `separator` | `"-"`, `"_"`, or `"."` | `"-"` |
+| `preserve_slash` | Boolean | `false`, or `true` in Git mode |
+
+Go templates pass the value through the pipeline:
+
+```gotemplate
+{{ .vars.name | slugify }}
+{{ .vars.name | slugify (dict "mode" "git") }}
+```
+
+Expr and Lua pass the value first:
+
+```expr
+slugify(vars.name, {"mode": "git"})
+```
+
+```lua
+wuko.helpers.slugify(wuko.args.name, {mode = "git"})
+```
+
+Git mode preserves slash-separated hierarchy by default, producing values such as
+`feature/payment-api`. It only permits `-` and `_` separators in that mode; `.` is rejected to
+avoid Git-invalid trailing-dot and `.lock` components. Empty results and invalid option names or
+types stop evaluation.
+
 ## Defaults and validation
 
 `default`, `coalesce`, and `required` use Go template truth rules. These values are empty:

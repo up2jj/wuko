@@ -155,6 +155,64 @@ func TestLuaHelpersRejectInvalidArguments(t *testing.T) {
 	}
 }
 
+func TestLuaSlugifyHelper(t *testing.T) {
+	runner, err := New(map[string]any{
+		"source": `
+local h = wuko.helpers
+wuko.output("slugs", {
+  default_slug = h.slugify("  Déjà vu / API  "),
+  git = h.slugify("Feature / Payment API", {mode = "git"}),
+  flat_git = h.slugify("Feature / Payment API", {mode = "git", preserve_slash = false}),
+  underscore = h.slugify("Hello, world!", {separator = "_"}),
+})
+`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runner.Run(t.Context(), step.Request{StepID: "slugify", WorkflowName: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	slugs := result.Outputs["slugs"].(map[string]any)
+	wants := map[string]any{
+		"default_slug": "deja-vu-api",
+		"git":          "feature/payment-api",
+		"flat_git":     "feature-payment-api",
+		"underscore":   "hello_world",
+	}
+	for key, want := range wants {
+		if got := slugs[key]; got != want {
+			t.Errorf("%s = %#v, want %#v", key, got, want)
+		}
+	}
+}
+
+func TestLuaSlugifyHelperRejectsInvalidArguments(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{name: "empty result", source: `wuko.helpers.slugify("---")`, want: "result is empty"},
+		{name: "invalid options type", source: `wuko.helpers.slugify("value", "git")`, want: "options must be an object"},
+		{name: "unknown option", source: `wuko.helpers.slugify("value", {unknown = true})`, want: "unknown slugify option"},
+		{name: "dot separator in git mode", source: `wuko.helpers.slugify("value", {mode = "git", separator = "."})`, want: "not supported in git mode"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runner, err := New(map[string]any{"source": tt.source})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = runner.Run(t.Context(), step.Request{StepID: "slugify", WorkflowName: "test"})
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestLuaFinallyBinding(t *testing.T) {
 	runner, err := New(map[string]any{
 		"source": `wuko.output("outcome", {status = wuko.finally.status, step = wuko.finally.errors[1].step_id})`,

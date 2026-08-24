@@ -21,6 +21,7 @@ func helperFunctions() map[string]glua.LGFunction {
 		"replace":         helperReplace,
 		"split":           helperSplit,
 		"join":            helperJoin,
+		"slugify":         helperSlugify,
 		"default":         helperDefault,
 		"coalesce":        helperCoalesce,
 		"required":        helperRequired,
@@ -94,6 +95,29 @@ func helperJoin(state *glua.LState) int {
 	}
 	result, err := expression.Join(value, state.CheckString(2))
 	return pushHelperResult(state, "join", result, err)
+}
+
+func helperSlugify(state *glua.LState) int {
+	if state.GetTop() > 2 {
+		state.RaiseError("helpers.slugify: expected a string and optional options object")
+		return 0
+	}
+	var options map[string]any
+	if state.GetTop() == 2 {
+		value, err := helperValue(state.Get(2))
+		if err != nil {
+			return pushHelperResult(state, "slugify", nil, err)
+		}
+		if value != nil {
+			var ok bool
+			options, ok = value.(map[string]any)
+			if !ok {
+				return pushHelperResult(state, "slugify", nil, fmt.Errorf("options must be an object, got %T", value))
+			}
+		}
+	}
+	result, err := expression.Slugify(state.CheckString(1), options)
+	return pushHelperResult(state, "slugify", result, err)
 }
 
 func helperDefault(state *glua.LState) int {

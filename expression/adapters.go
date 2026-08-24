@@ -22,6 +22,7 @@ func TemplateFuncs() template.FuncMap {
 		"replace":       func(old, replacement, value string) string { return strings.ReplaceAll(value, old, replacement) },
 		"split":         func(separator, value string) []string { return strings.Split(value, separator) },
 		"join":          join,
+		"slugify":       templateSlugify,
 		"default":       defaultValue,
 		"coalesce":      coalesce,
 		"required":      required,
@@ -62,6 +63,7 @@ func exprOptions() []expr.Option {
 		expr.Function("coalesce", func(values ...any) (any, error) {
 			return coalesce(values...), nil
 		}, new(func(...any) any)),
+		expr.Function("slugify", exprSlugify, new(func(...any) string)),
 		expr.Function("required", func(values ...any) (any, error) {
 			return required(values[1].(string), values[0])
 		}, new(func(any, string) any)),
