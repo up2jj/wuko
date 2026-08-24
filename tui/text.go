@@ -32,10 +32,14 @@ func (m textModel) Init() tea.Cmd { return textinput.Blink }
 
 func (m textModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	if key, ok := message.(tea.KeyPressMsg); ok {
-		switch key.String() {
-		case "ctrl+c", "esc":
+		if isCancelKey(key) {
 			m.cancelled = true
 			return m, tea.Quit
+		}
+		if key.String() == "esc" {
+			return m, nil
+		}
+		switch key.String() {
 		case "enter":
 			if m.input.Err != nil {
 				m.err = m.input.Err.Error()
@@ -68,7 +72,7 @@ func (m textModel) View() tea.View {
 	if m.err != "" {
 		view += m.err + "\n"
 	}
-	return tea.NewView(view + "enter confirm • esc cancel\n")
+	return tea.NewView(view + "enter confirm • " + cancelHelp + "\n")
 }
 
 // Text runs an interactive Bubble Tea text prompt with an editable initial value.

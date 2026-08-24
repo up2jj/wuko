@@ -51,4 +51,22 @@ func TestTextModelShowsValidationErrorAndStaysOpen(t *testing.T) {
 	}
 }
 
+func TestTextModelCancelsWithCtrlC(t *testing.T) {
+	model := newTextModel("Name", "", true, textinput.EchoNormal, nil)
+	updated, command := model.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+	model = updated.(textModel)
+	if command == nil || !model.cancelled {
+		t.Fatalf("cancelled = %v, command nil = %v", model.cancelled, command == nil)
+	}
+}
+
+func TestTextModelEscapeDoesNotCancel(t *testing.T) {
+	model := newTextModel("Name", "", true, textinput.EchoNormal, nil)
+	updated, command := model.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	model = updated.(textModel)
+	if command != nil || model.cancelled {
+		t.Fatalf("cancelled = %v, command nil = %v", model.cancelled, command == nil)
+	}
+}
+
 var errTooShort = errors.New("too short")

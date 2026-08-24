@@ -113,11 +113,12 @@ func newSelectionModel(title string, options []Option) selectionModel {
 	openEditor := key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit"))
 	togglePin := key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "pin"))
 	toggleSort := key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "sort"))
+	cancel := key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "cancel"))
 	workflowList.AdditionalShortHelpKeys = func() []key.Binding {
-		return []key.Binding{run, openUI, printCommand, openEditor, togglePin, toggleSort}
+		return []key.Binding{run, openUI, printCommand, openEditor, togglePin, toggleSort, cancel}
 	}
 	workflowList.AdditionalFullHelpKeys = func() []key.Binding {
-		return []key.Binding{run, openUI, printCommand, openEditor, togglePin, toggleSort}
+		return []key.Binding{run, openUI, printCommand, openEditor, togglePin, toggleSort, cancel}
 	}
 	return selectionModel{list: workflowList}
 }
@@ -126,6 +127,10 @@ func (m selectionModel) Init() tea.Cmd { return nil }
 
 func (m selectionModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	if key, ok := message.(tea.KeyPressMsg); ok {
+		if isCancelKey(key) {
+			m.cancelled = true
+			return m, tea.Quit
+		}
 		switch key.String() {
 		case "enter", "shift+enter", "u", "e", "p", "s":
 			if !m.list.SettingFilter() {
@@ -147,13 +152,9 @@ func (m selectionModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 					return m, tea.Quit
 				}
 			}
-		case "ctrl+c":
-			m.cancelled = true
-			return m, tea.Quit
 		case "esc":
 			if m.list.FilterState() == list.Unfiltered {
-				m.cancelled = true
-				return m, tea.Quit
+				return m, nil
 			}
 		}
 	}

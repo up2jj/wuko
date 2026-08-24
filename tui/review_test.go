@@ -72,7 +72,7 @@ func TestReviewScrollPanResizeAndHelp(t *testing.T) {
 	if !strings.Contains(model.View().Content, visible) {
 		t.Fatalf("view did not preserve addition style after panning: %q", model.View().Content)
 	}
-	for _, shortcut := range []string{"↑/↓ scroll", "shift+←/→ pan", "←/→ decision", "esc cancel"} {
+	for _, shortcut := range []string{"↑/↓ scroll", "shift+←/→ pan", "←/→ decision", "ctrl+c cancel"} {
 		if !strings.Contains(model.View().Content, shortcut) {
 			t.Fatalf("view = %q, want %q", model.View().Content, shortcut)
 		}
@@ -94,6 +94,12 @@ func TestReviewPlainWrapsAndSanitizes(t *testing.T) {
 func TestReviewCancellation(t *testing.T) {
 	model := newReviewModel(ReviewConfig{Message: "Review", Content: "change"})
 	updated, command := model.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	unchanged := updated.(reviewModel)
+	if command != nil || unchanged.cancelled {
+		t.Fatalf("cancelled = %v, command nil = %v", unchanged.cancelled, command == nil)
+	}
+
+	updated, command = unchanged.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	if command == nil || !updated.(reviewModel).cancelled {
 		t.Fatalf("cancelled = %v, command nil = %v", updated.(reviewModel).cancelled, command == nil)
 	}

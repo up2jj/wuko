@@ -123,7 +123,7 @@ func (m pathPickerModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.filter.SetWidth(max(m.width-2, 1))
 		return m, nil
 	case tea.KeyPressMsg:
-		if message.String() == "ctrl+c" {
+		if isCancelKey(message) {
 			m.cancelled = true
 			return m, tea.Quit
 		}
@@ -152,9 +152,6 @@ func (m pathPickerModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m pathPickerModel) updateKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch key.String() {
-	case "esc":
-		m.cancelled = true
-		return m, tea.Quit
 	case "/":
 		m.filtering = true
 		return m, m.filter.Focus()
@@ -477,11 +474,11 @@ func (m pathPickerModel) pageSize() int {
 func (m pathPickerModel) help() string {
 	var tokens []string
 	if m.filtering {
-		tokens = []string{"type filter", "enter apply", "esc clear", "ctrl+c cancel"}
+		tokens = []string{"type filter", "enter apply", "esc clear", cancelHelp}
 	} else if m.config.Multiple {
-		tokens = []string{"↑/↓ move", "→ open", "← back", "space toggle", "enter confirm", "/ filter", "ctrl+h hidden", "esc cancel"}
+		tokens = []string{"↑/↓ move", "→ open", "← back", "space toggle", "enter confirm", "/ filter", "ctrl+h hidden", cancelHelp}
 	} else {
-		tokens = []string{"↑/↓ move", "→ open", "← back", "enter select", "/ filter", "ctrl+h hidden", "esc cancel"}
+		tokens = []string{"↑/↓ move", "→ open", "← back", "enter select", "/ filter", "ctrl+h hidden", cancelHelp}
 	}
 	return wrapHelp(tokens, m.width)
 }

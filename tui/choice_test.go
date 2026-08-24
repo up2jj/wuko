@@ -293,10 +293,41 @@ func TestSelectionModelFiltering(t *testing.T) {
 	}
 }
 
-func TestSelectionModelEscapeCancels(t *testing.T) {
+func TestSelectionModelCtrlCCancels(t *testing.T) {
+	model := newSelectionModel("Workflows", []Option{{Label: "build"}})
+	updated, command := model.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+	model = updated.(selectionModel)
+	if command == nil || !model.cancelled {
+		t.Fatalf("cancelled = %v, command nil = %v", model.cancelled, command == nil)
+	}
+}
+
+func TestSelectionModelEscapeDoesNotCancel(t *testing.T) {
 	model := newSelectionModel("Workflows", []Option{{Label: "build"}})
 	updated, command := model.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	model = updated.(selectionModel)
+	if command != nil || model.cancelled {
+		t.Fatalf("cancelled = %v, command nil = %v", model.cancelled, command == nil)
+	}
+}
+
+func TestChoiceModelEscapeDoesNotCancel(t *testing.T) {
+	model := newChoiceModel(ChoicePickerConfig{
+		Message: "Pick", Options: []Option{{Label: "A"}}, Required: true,
+	})
+	updated, command := model.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	model = updated.(choiceModel)
+	if command != nil || model.cancelled {
+		t.Fatalf("cancelled = %v, command nil = %v", model.cancelled, command == nil)
+	}
+}
+
+func TestChoiceModelCancelsWithCtrlC(t *testing.T) {
+	model := newChoiceModel(ChoicePickerConfig{
+		Message: "Pick", Options: []Option{{Label: "A"}}, Required: true,
+	})
+	updated, command := model.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+	model = updated.(choiceModel)
 	if command == nil || !model.cancelled {
 		t.Fatalf("cancelled = %v, command nil = %v", model.cancelled, command == nil)
 	}
@@ -311,7 +342,7 @@ func TestSelectionModelViewIncludesDescription(t *testing.T) {
 	if !strings.Contains(model.View().Content, path) {
 		t.Fatalf("view = %q, want full path", model.View().Content)
 	}
-	for _, shortcut := range []string{"enter", "run", "u", "open UI", "shift+enter", "print command", "e", "edit", "p", "pin", "s", "sort"} {
+	for _, shortcut := range []string{"enter", "run", "u", "open UI", "shift+enter", "print command", "e", "edit", "p", "pin", "s", "sort", "ctrl+c", "cancel"} {
 		if !strings.Contains(model.View().Content, shortcut) {
 			t.Fatalf("view = %q, want shortcut %q", model.View().Content, shortcut)
 		}

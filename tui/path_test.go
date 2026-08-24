@@ -13,14 +13,14 @@ import (
 func TestPathPickerShowsContextualShortcuts(t *testing.T) {
 	root := pathPickerTree(t)
 	single := mustPathModel(t, PathPickerConfig{Message: "Select", Root: root, Kind: "file", Required: true})
-	for _, shortcut := range []string{"↑/↓ move", "→ open", "← back", "enter select", "/ filter", "ctrl+h hidden", "esc cancel"} {
+	for _, shortcut := range []string{"↑/↓ move", "→ open", "← back", "enter select", "/ filter", "ctrl+h hidden", "ctrl+c cancel"} {
 		if !strings.Contains(single.View().Content, shortcut) {
 			t.Fatalf("single view = %q, want %q", single.View().Content, shortcut)
 		}
 	}
 
 	multiple := mustPathModel(t, PathPickerConfig{Message: "Select", Root: root, Kind: "file", Multiple: true, Required: true})
-	for _, shortcut := range []string{"space toggle", "enter confirm", "esc cancel"} {
+	for _, shortcut := range []string{"space toggle", "enter confirm", "ctrl+c cancel"} {
 		if !strings.Contains(multiple.View().Content, shortcut) {
 			t.Fatalf("multiple view = %q, want %q", multiple.View().Content, shortcut)
 		}
@@ -58,7 +58,7 @@ func TestPathPickerWrapsButRetainsNarrowHelp(t *testing.T) {
 	model := mustPathModel(t, PathPickerConfig{Message: "Select", Root: pathPickerTree(t), Kind: "file", Required: true})
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 12, Height: 30})
 	view := updated.(pathPickerModel).View().Content
-	for _, shortcut := range []string{"← back", "enter select", "esc cancel"} {
+	for _, shortcut := range []string{"← back", "enter select", "ctrl+c cancel"} {
 		if !strings.Contains(view, shortcut) {
 			t.Fatalf("view = %q, want %q", view, shortcut)
 		}
@@ -185,6 +185,12 @@ func TestPathPickerOptionalAndCancellation(t *testing.T) {
 
 	model = mustPathModel(t, PathPickerConfig{Message: "Select", Root: pathPickerTree(t), Kind: "file", Required: true})
 	updated, command := model.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	unchanged := updated.(pathPickerModel)
+	if command != nil || unchanged.cancelled {
+		t.Fatalf("cancelled = %v, command nil = %v", unchanged.cancelled, command == nil)
+	}
+
+	updated, command = unchanged.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	cancelled := updated.(pathPickerModel)
 	if command == nil || !cancelled.cancelled {
 		t.Fatalf("cancelled = %v, command nil = %v", cancelled.cancelled, command == nil)

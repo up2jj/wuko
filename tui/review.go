@@ -88,10 +88,11 @@ func (m reviewModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = max(message.Height, 1)
 		m.layout()
 	case tea.KeyPressMsg:
-		switch message.String() {
-		case "ctrl+c", "esc":
+		if isCancelKey(message) {
 			m.cancelled = true
 			return m, tea.Quit
+		}
+		switch message.String() {
 		case "up", "k":
 			m.vertical = max(m.vertical-1, 0)
 		case "down", "j":
@@ -234,9 +235,9 @@ func (m reviewModel) lastVisible() int {
 }
 
 func (m reviewModel) help() string {
-	tokens := []string{"↑/↓ scroll", "pgup/pgdown page", "home/end bounds", "←/→ decision", "enter confirm", "esc cancel"}
+	tokens := []string{"↑/↓ scroll", "pgup/pgdown page", "home/end bounds", "←/→ decision", "enter confirm", cancelHelp}
 	if m.config.Format == reviewDiff {
-		tokens = []string{"↑/↓ scroll", "pgup/pgdown page", "home/end bounds", "shift+←/→ pan", "←/→ decision", "enter confirm", "esc cancel"}
+		tokens = []string{"↑/↓ scroll", "pgup/pgdown page", "home/end bounds", "shift+←/→ pan", "←/→ decision", "enter confirm", cancelHelp}
 	}
 	return wrapHelp(tokens, m.width)
 }
