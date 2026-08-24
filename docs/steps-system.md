@@ -71,6 +71,51 @@ Assert that the repository is currently checked out on the requested branch. Det
     branch: main
 ```
 
+## `github_pr`
+
+Find an open GitHub pull request through the installed `gh` CLI. This is currently a read-only
+operation; it does not open, close, edit, merge, or otherwise mutate pull requests. `operation:
+find` is required so future GitHub operations cannot be confused with lookup behavior. With no
+repository or branch configured, the step uses a pull-request ref or head branch from GitHub Actions
+when available, then falls back to the current Git branch. Set `repository` and `branch` to override
+that inference.
+
+```yaml
+- id: pull_request
+  type: github_pr
+  with:
+    operation: find
+    repository: acme/project
+    branch: feature/release
+```
+
+In GitHub Actions, the following resolves the PR associated with the event or checkout:
+
+```yaml
+- id: pull_request
+  type: github_pr
+  with:
+    operation: find
+```
+
+The result includes `found`, `number`, `url`, `title`, `state`, `is_draft`, `head_branch`,
+`base_branch`, and `repository`. A branch with no open pull request succeeds with `found: false`
+and empty metadata. If multiple open pull requests match a branch, the step fails as ambiguous.
+Authentication, repository, and other `gh` failures also fail the step. Use `require_tool` when a
+workflow should report a missing `gh` executable before attempting the lookup:
+
+```yaml
+- id: require_gh
+  type: require_tool
+  with:
+    tool: gh
+
+- id: pull_request
+  type: github_pr
+  with:
+    operation: find
+```
+
 ## `require_tool`
 
 Require an executable before dependent work begins. The step runs the configured version command

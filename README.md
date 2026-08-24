@@ -262,6 +262,7 @@ Each linked guide contains multiple examples for every step.
 | `git_remote_branch` | Assert local remote-tracking branch existence | [System steps](docs/steps-system.md#git_remote_branch) |
 | `git_branch_name` | Assert that a string is a valid Git branch name | [System steps](docs/steps-system.md#git_branch_name) |
 | `git_on_branch` | Assert the repository's current branch | [System steps](docs/steps-system.md#git_on_branch) |
+| `github_pr` | Find an open GitHub pull request from CI metadata or a Git branch | [System steps](docs/steps-system.md#github_pr) |
 | `file` | Perform shell-independent filesystem operations | [System steps](docs/steps-system.md#file) |
 | `glob` | Discover regular files with portable patterns | [System steps](docs/steps-system.md#glob) |
 | `watch` | Wait for native filesystem events | [System steps](docs/steps-system.md#watch) |
