@@ -90,6 +90,10 @@ wuko run check
 wuko ui check
 wuko run check --var package=./cmd/...
 wuko run check --dry-run
+wuko install https://example.com/workflows/release.yaml
+wuko install --global github:acme/workflows@main:release.yaml
+wuko uninstall release
+wuko uninstall --global --yes release
 ```
 
 Bare `wuko` opens a searchable picker in a terminal and shows each workflow's direct prerequisites.
@@ -108,6 +112,32 @@ wuko run --file ./workflows/release.yaml
 
 See [Workflow discovery](docs/workflow-discovery.md) for search order, shadowing, and
 non-interactive behavior.
+
+`wuko install SOURCE` saves a standalone workflow under the current project’s `.wuko/workflows/`
+directory. Use `--global` to save it under `~/.wuko/workflows/` instead. `SOURCE` may be a local
+YAML file, an HTTPS URL, or a `github:` locator. Remote workflow archives are not installable in
+version 1. Install and uninstall also accept the `--var`, `--var-file`, and `--env` flags for
+lifecycle hooks.
+
+Workflows may declare optional installation lifecycle steps:
+
+```yaml
+install:
+  - id: setup
+    type: shell
+    with: {script: echo setup}
+
+uninstall:
+  - id: cleanup
+    type: shell
+    with: {script: echo cleanup}
+```
+
+Install hooks run before the staged workflow is committed. Uninstall hooks run after confirmation
+and before the workflow is removed. `wuko uninstall` asks for confirmation; use `--yes` for
+non-interactive use. Installed sources must be standalone manifests; local required step files,
+file-backed templates, local actions, and relative lifecycle scripts are rejected. Without
+`--global`, uninstall targets the current project’s workflow copy.
 
 ## GitHub Actions
 
@@ -262,6 +292,8 @@ Use controls to run independent work or repeat a block over runtime data.
 | `return` | Finish successfully early and publish explicit outputs | [Early successful return](docs/return.md) |
 | `defer` | Attach cleanup to a successful step | [Finally cleanup](docs/finally.md) |
 | `finally` | Run workflow-level cleanup after the main phase | [Finally cleanup](docs/finally.md) |
+| `install` | Run steps before an installed workflow is committed | [Workflow installation](docs/execution.md#workflow-installation) |
+| `uninstall` | Run steps before an installed workflow is removed | [Workflow installation](docs/execution.md#workflow-installation) |
 | `cron` | Run a workflow on a schedule | [Execution and composition](docs/execution.md#scheduled-runs) |
 
 ## Workflow composition

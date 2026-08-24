@@ -19,8 +19,10 @@ type LoadOptions struct {
 	RunDir  string
 	// Diagnostics receives opt-in workflow loading and preparation events.
 	Diagnostics diagnostic.Reporter
-	sourceRoot  string
-	sourceLabel string
+	// RejectRemoteArchives prevents remote workflow loading from accepting archive payloads.
+	RejectRemoteArchives bool
+	sourceRoot           string
+	sourceLabel          string
 }
 
 // PrepareValues applies workflow and caller overrides using the same precedence as execution.

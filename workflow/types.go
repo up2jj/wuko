@@ -42,6 +42,8 @@ type Definition struct {
 	Env         Environment                   `yaml:"env,omitempty"`
 	Steps       []Step                        `yaml:"steps"`
 	Finally     []Step                        `yaml:"finally,omitempty"`
+	Install     []Step                        `yaml:"install,omitempty"`
+	Uninstall   []Step                        `yaml:"uninstall,omitempty"`
 	Path        string                        `yaml:"-"`
 	Dir         string                        `yaml:"-"`
 	Location    diagnostic.Location           `yaml:"-"`
@@ -593,9 +595,21 @@ func loadLocalWithDiagnostics(path string, reporter diagnostic.Reporter, sourceR
 		traceFinish(reporter, requireStarted, diagnostic.PhaseRequire, diagnostic.StatusFailed, definition.Location, definition.Name, "", "", "", err)
 		return nil, fmt.Errorf("loading workflow %s finally: %w", path, err)
 	}
+	definition.Install, err = expandRequiredSteps(definition.Install, abs, nil)
+	if err != nil {
+		traceFinish(reporter, requireStarted, diagnostic.PhaseRequire, diagnostic.StatusFailed, definition.Location, definition.Name, "", "", "", err)
+		return nil, fmt.Errorf("loading workflow %s install: %w", path, err)
+	}
+	definition.Uninstall, err = expandRequiredSteps(definition.Uninstall, abs, nil)
+	if err != nil {
+		traceFinish(reporter, requireStarted, diagnostic.PhaseRequire, diagnostic.StatusFailed, definition.Location, definition.Name, "", "", "", err)
+		return nil, fmt.Errorf("loading workflow %s uninstall: %w", path, err)
+	}
 	if sourceLabel != "" {
 		remapStepLocations(definition.Steps, sourceRoot, sourceLabel)
 		remapStepLocations(definition.Finally, sourceRoot, sourceLabel)
+		remapStepLocations(definition.Install, sourceRoot, sourceLabel)
+		remapStepLocations(definition.Uninstall, sourceRoot, sourceLabel)
 	}
 	traceFinish(reporter, requireStarted, diagnostic.PhaseRequire, diagnostic.StatusSucceeded, definition.Location, definition.Name, "", "", "", nil, countAttr("steps", len(definition.Steps)))
 	validationStarted := traceStart(reporter, diagnostic.PhaseValidation, definition.Location, definition.Name, "", "", "validating workflow schema")
@@ -643,6 +657,12 @@ func validateDefinitionStructure(definition *Definition, allowActions bool) erro
 	if err := validateSteps(definition.Finally, allowActions, scopeFinally, seen); err != nil {
 		return fmt.Errorf("finally: %w", err)
 	}
+	if err := validateLifecycleSteps(definition.Install, allowActions, "install"); err != nil {
+		return err
+	}
+	if err := validateLifecycleSteps(definition.Uninstall, allowActions, "uninstall"); err != nil {
+		return err
+	}
 	for name := range definition.Env {
 		if !environmentPattern.MatchString(name) {
 			return fmt.Errorf("invalid environment name %q", name)
@@ -655,6 +675,20 @@ func validateDefinitionStructure(definition *Definition, allowActions bool) erro
 		if !ValidWorkflowName(name) {
 			return fmt.Errorf("dependency %q has invalid workflow name %q", alias, name)
 		}
+	}
+	return nil
+}
+
+func validateLifecycleSteps(steps []Step, allowActions bool, name string) error {
+	if len(steps) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(steps))
+	if err := collectScopeIDs(steps, seen); err != nil {
+		return fmt.Errorf("%s: %w", name, err)
+	}
+	if err := validateSteps(steps, allowActions, scopeTop, seen); err != nil {
+		return fmt.Errorf("%s: %w", name, err)
 	}
 	return nil
 }

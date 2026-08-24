@@ -17,6 +17,8 @@ func annotateDefinitionLocations(data []byte, definition *Definition, source str
 	definition.Location = nodeLocation(root, source)
 	annotateSteps(definition.Steps, mappingValue(root, "steps"), source)
 	annotateSteps(definition.Finally, mappingValue(root, "finally"), source)
+	annotateSteps(definition.Install, mappingValue(root, "install"), source)
+	annotateSteps(definition.Uninstall, mappingValue(root, "uninstall"), source)
 }
 
 func annotateActionLocations(data []byte, action *Action, source string) {
@@ -116,6 +118,8 @@ func remapDefinitionLocations(definition *Definition, materializedRoot, logicalS
 	definition.Location.Source = remapSource(definition.Location.Source, materializedRoot, logicalSource)
 	remapStepLocations(definition.Steps, materializedRoot, logicalSource)
 	remapStepLocations(definition.Finally, materializedRoot, logicalSource)
+	remapStepLocations(definition.Install, materializedRoot, logicalSource)
+	remapStepLocations(definition.Uninstall, materializedRoot, logicalSource)
 }
 
 func remapStepLocations(steps []Step, materializedRoot, logicalSource string) {

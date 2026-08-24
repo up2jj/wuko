@@ -59,3 +59,23 @@ func TestWorkflowDeclaredOutputsProduceDryRunPlaceholders(t *testing.T) {
 		t.Fatalf("outputs = %#v", state.Outputs)
 	}
 }
+
+func TestRunStepsDoesNotEvaluateWorkflowOutputs(t *testing.T) {
+	registry := newTestRegistry(t, map[string]step.Builder{
+		"capture": func(raw map[string]any) (step.Runner, error) {
+			return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+				return step.Result{Outputs: map[string]any{"value": raw["value"]}}, nil
+			}), nil
+		},
+	})
+	definition := testDefinition(t, "lifecycle", workflow.Step{ID: "main", Type: "capture", With: map[string]any{"value": "main"}})
+	definition.Outputs = map[string]workflow.WorkflowOutput{
+		"result": {Type: "string", Value: "steps.main.value"},
+	}
+
+	if _, err := New(registry).RunSteps(t.Context(), definition, []workflow.Step{{
+		ID: "install", Type: "capture", With: map[string]any{"value": "installed"},
+	}}, Options{}); err != nil {
+		t.Fatalf("RunSteps() error = %v", err)
+	}
+}

@@ -612,6 +612,44 @@ An HTTPS response may be YAML or a ZIP/tar.gz archive with exactly one root `wuk
 workflow requires companion files. Remote workflows are fetched without authentication and are
 not digest-pinned in schema version 1.
 
+## Workflow installation
+
+Install a standalone workflow locally or globally:
+
+```sh
+wuko install ./workflow.yaml
+wuko install https://example.com/workflows/release.yaml
+wuko install --global github:acme/workflows@main:release.yaml
+```
+
+Without `--global`, the workflow is saved under `.wuko/workflows/` in the current directory.
+`--global` saves it under `~/.wuko/workflows/`, and the YAML `name` becomes the installed filename.
+HTTPS and GitHub archive payloads are rejected by `install` in schema version 1; use a standalone
+YAML manifest.
+
+The optional `install` and `uninstall` fields contain normal Wuko step lists. Install steps run from
+the staged workflow directory before the new file is committed. Uninstall steps run from the
+installed workflow directory after confirmation and before removal:
+
+```yaml
+install:
+  - id: setup
+    type: shell
+    with: {script: echo setup}
+
+uninstall:
+  - id: cleanup
+    type: shell
+    with: {script: echo cleanup}
+```
+
+Lifecycle hooks receive workflow values and the command’s `--var`, `--var-file`, and `--env`
+overrides. `wuko uninstall NAME` asks for confirmation. Pass `--yes` for non-interactive use;
+without `--global`, it removes the current project’s copy, while `--global` removes the home-global
+copy. Installed sources must be standalone manifests: local required step files, file-backed
+templates, local actions, and relative lifecycle scripts are rejected. Hook failures leave the
+workflow file in place.
+
 ## Composite actions
 
 Invoke a Wuko-native action at a step position. A local reference may name an action directory:

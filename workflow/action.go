@@ -205,6 +205,12 @@ func (loader *Loader) Prepare(ctx context.Context, definition *Definition, optio
 	if err := loader.resolveActions(ctx, definition.Name, definition.Finally, renderer, data, environment, options.RunDir, true, definition.Path, options.sourceRoot, options.sourceLabel, cache, options.Diagnostics); err != nil {
 		return err
 	}
+	if err := loader.resolveActions(ctx, definition.Name, definition.Install, renderer, data, environment, options.RunDir, true, definition.Path, options.sourceRoot, options.sourceLabel, cache, options.Diagnostics); err != nil {
+		return err
+	}
+	if err := loader.resolveActions(ctx, definition.Name, definition.Uninstall, renderer, data, environment, options.RunDir, true, definition.Path, options.sourceRoot, options.sourceLabel, cache, options.Diagnostics); err != nil {
+		return err
+	}
 	return nil
 }
 

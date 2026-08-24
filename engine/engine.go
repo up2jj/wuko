@@ -339,6 +339,24 @@ func (e *Engine) Run(ctx context.Context, definition *workflow.Definition, optio
 	return state, nil
 }
 
+// RunSteps executes a standalone sequence using the workflow's values and runtime context.
+// It is used for lifecycle hooks, which must not execute the workflow's main finally scope.
+func (e *Engine) RunSteps(ctx context.Context, definition *workflow.Definition, steps []workflow.Step, options Options) (*State, error) {
+	if definition == nil {
+		return nil, fmt.Errorf("workflow definition is required")
+	}
+	if len(steps) == 0 {
+		return nil, nil
+	}
+	scoped := *definition
+	scoped.Steps = steps
+	scoped.Finally = nil
+	scoped.Install = nil
+	scoped.Uninstall = nil
+	scoped.Outputs = nil
+	return e.Run(ctx, &scoped, options)
+}
+
 func (e *Engine) executeCleanupScope(ctx context.Context, definition *workflow.Definition, defers *deferStack, finally []workflow.Step, options Options, state *State, stats *RunStats, mainErr error, mainStats []StepStats, firstIndex, total int) []error {
 	if (defers == nil || len(defers.groups) == 0) && len(finally) == 0 {
 		return nil

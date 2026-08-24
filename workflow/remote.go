@@ -41,7 +41,7 @@ func (loader *Loader) DecodeRemote(ctx context.Context, locator string, options 
 	location.Source = description
 	traceFinish(options.Diagnostics, fetchStarted, diagnostic.PhaseWorkflowFetch, diagnostic.StatusSucceeded, location, "", "", "", "", nil, countAttr("bytes", len(payload)))
 
-	path, cleanup, err := materializeRemoteWorkflow(payload, description)
+	path, cleanup, err := materializeRemoteWorkflow(payload, description, options.RejectRemoteArchives)
 	if err != nil {
 		return nil, func() {}, fmt.Errorf("materializing workflow %s: %w", description, err)
 	}
@@ -181,10 +181,13 @@ func validateRemotePath(value string) error {
 	return nil
 }
 
-func materializeRemoteWorkflow(payload []byte, description string) (string, func(), error) {
-	manifest, files, err := decodeRemoteWorkflowPayload(payload)
+func materializeRemoteWorkflow(payload []byte, description string, rejectArchives bool) (string, func(), error) {
+	manifest, files, archive, err := decodeRemoteWorkflowPayload(payload)
 	if err != nil {
 		return "", nil, fmt.Errorf("decoding workflow %s: %w", description, err)
+	}
+	if rejectArchives && archive {
+		return "", nil, fmt.Errorf("workflow archives are not supported for installation")
 	}
 	if files == nil {
 		files = map[string]ActionFile{defaultRemoteWorkflowFile: {Data: manifest, Mode: 0o644}}
@@ -223,25 +226,27 @@ func materializeRemoteWorkflow(payload []byte, description string) (string, func
 	return workflowPath, cleanup, nil
 }
 
-func decodeRemoteWorkflowPayload(payload []byte) ([]byte, map[string]ActionFile, error) {
+func decodeRemoteWorkflowPayload(payload []byte) ([]byte, map[string]ActionFile, bool, error) {
 	switch {
 	case isZIP(payload):
 		files, err := unpackRemoteZIP(payload)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, true, err
 		}
-		return remoteWorkflowManifest(files)
+		manifest, files, err := remoteWorkflowManifest(files)
+		return manifest, files, true, err
 	case len(payload) >= 2 && payload[0] == 0x1f && payload[1] == 0x8b:
 		files, err := unpackRemoteTarGzip(payload)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, true, err
 		}
-		return remoteWorkflowManifest(files)
+		manifest, files, err := remoteWorkflowManifest(files)
+		return manifest, files, true, err
 	default:
 		if len(payload) > maxManifestSize {
-			return nil, nil, fmt.Errorf("manifest exceeds %d-byte limit", maxManifestSize)
+			return nil, nil, false, fmt.Errorf("manifest exceeds %d-byte limit", maxManifestSize)
 		}
-		return payload, nil, nil
+		return payload, nil, false, nil
 	}
 }
 

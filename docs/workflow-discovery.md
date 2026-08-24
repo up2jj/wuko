@@ -95,6 +95,10 @@ order, not which definition wins.
   tab-separated rows, appending the dependency summary when present.
 - Shell completion returns effective workflow names. Run and UI completion omit dependency-only
   workflows; validation and tree completion retain them.
+- `wuko install SOURCE` saves a standalone local, HTTPS, or `github:` workflow under the current
+  directory’s `.wuko/workflows/`; `--global` selects `~/.wuko/workflows/`. The YAML `name` is used
+  as the installed filename. `wuko uninstall NAME` uses the same local/global selection, asks for
+  confirmation, and accepts `--yes` for non-interactive use.
 - `wuko run --file PATH` bypasses discovery. HTTP and `github:` locators also bypass local
   discovery and use the remote workflow loader, but none bypass `invokable: false`.
 

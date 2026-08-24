@@ -204,6 +204,17 @@ func TestLoadRemoteArchiveExpandsRequiredStepFiles(t *testing.T) {
 	}
 }
 
+func TestLoadRemoteRejectsArchivesWhenRequested(t *testing.T) {
+	payload := makeZIP(t, map[string]archiveTestFile{
+		"wuko.yaml": {data: []byte("version: 1\nname: remote\nsteps:\n  - id: run\n    type: shell\n"), mode: 0o644},
+	})
+	client := testHTTPClient(func(*http.Request) (*http.Response, error) { return testResponse(http.StatusOK, payload), nil })
+	_, _, err := NewLoader(client).LoadRemote(t.Context(), "https://example.test/workflow.zip", LoadOptions{RejectRemoteArchives: true})
+	if err == nil || !strings.Contains(err.Error(), "archives are not supported") {
+		t.Fatalf("error = %v, want archive rejection", err)
+	}
+}
+
 func TestLoadRemoteArchiveResolvesLocalActionFromRequiredFragment(t *testing.T) {
 	payload := makeZIP(t, map[string]archiveTestFile{
 		"wuko.yaml": {

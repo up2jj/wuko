@@ -116,3 +116,83 @@ func TestDefinitionInvokableDefaultsAndValidation(t *testing.T) {
 		})
 	}
 }
+
+func TestDefinitionLifecycleHooksLoadAndValidate(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "workflow.yaml")
+	data := `version: 1
+name: lifecycle
+steps:
+  - id: run
+    type: shell
+    with: {command: true}
+install:
+  - id: install
+    type: shell
+    with: {command: true}
+uninstall:
+  - id: uninstall
+    type: shell
+    with: {command: true}
+`
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	definition, err := NewLoader(nil).Load(t.Context(), path, LoadOptions{RunDir: filepath.Dir(path)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(definition.Install) != 1 || definition.Install[0].ID != "install" {
+		t.Fatalf("install hook = %#v", definition.Install)
+	}
+	if len(definition.Uninstall) != 1 || definition.Uninstall[0].ID != "uninstall" {
+		t.Fatalf("uninstall hook = %#v", definition.Uninstall)
+	}
+}
+
+func TestDefinitionLifecycleHookRejectsInvalidStep(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "workflow.yaml")
+	data := `version: 1
+name: lifecycle
+steps:
+  - id: run
+    type: shell
+    with: {command: true}
+install:
+  - type: shell
+    with: {command: true}
+`
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewLoader(nil).Load(t.Context(), path, LoadOptions{RunDir: filepath.Dir(path)}); err == nil || !strings.Contains(err.Error(), "install") {
+		t.Fatalf("error = %v, want install hook validation error", err)
+	}
+}
+
+func TestDefinitionLifecycleHooksExpandRequiredSteps(t *testing.T) {
+	directory := t.TempDir()
+	fragment := filepath.Join(directory, "install.yaml")
+	if err := os.WriteFile(fragment, []byte("- id: setup\n  type: shell\n  with: {command: true}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(directory, "workflow.yaml")
+	data := `version: 1
+name: lifecycle
+steps:
+  - id: run
+    type: shell
+    with: {command: true}
+install:
+  - require: install.yaml
+`
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	definition, err := NewLoader(nil).Load(t.Context(), path, LoadOptions{RunDir: directory})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(definition.Install) != 1 || definition.Install[0].ID != "setup" {
+		t.Fatalf("install hook = %#v, want expanded setup step", definition.Install)
+	}
+}
