@@ -115,6 +115,7 @@ type dependencies struct {
 	waitUntil     func(context.Context, time.Time) error
 	getenv        func(string) string
 	openURL       func(string) error
+	openEditor    func(context.Context, io.Reader, io.Writer, io.Writer, string) error
 	debug         *bool
 }
 
@@ -177,7 +178,8 @@ func NewRootCmd() *cobra.Command {
 		agentLookPath: exec.LookPath,
 		loader:        workflow.NewLoader(nil), isInteractive: interactive,
 		now: time.Now, waitUntil: workflowschedule.Wait,
-		getenv: os.Getenv,
+		getenv:     os.Getenv,
+		openEditor: openWorkflowEditor(os.Getenv),
 	})
 }
 
@@ -200,6 +202,9 @@ func newRootCmd(deps dependencies) *cobra.Command {
 	}
 	if deps.getenv == nil {
 		deps.getenv = os.Getenv
+	}
+	if deps.openEditor == nil {
+		deps.openEditor = openWorkflowEditor(deps.getenv)
 	}
 	debug := false
 	deps.debug = &debug
@@ -238,14 +243,24 @@ func runWorkflowPicker(command *cobra.Command, deps dependencies) error {
 	}
 	discovered := len(sources)
 	diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusSucceeded, Duration: time.Since(discoveryStarted), Attributes: []diagnostic.Attribute{diagnostic.Attr("workflows", fmt.Sprint(discovered))}})
-	sources = slices.DeleteFunc(sources, func(source workflow.Source) bool { return !source.Invokable })
 	if !deps.isInteractive(command.InOrStdin()) {
+		sources = slices.DeleteFunc(sources, func(source workflow.Source) bool { return !source.Invokable })
 		for _, source := range sources {
 			if err := writeWorkflowSource(command.OutOrStdout(), source); err != nil {
 				return err
 			}
 		}
 		return nil
+	}
+	sources = slices.DeleteFunc(sources, func(source workflow.Source) bool { return !source.Invokable })
+	pickerState, stateErr := loadWorkflowPickerState(command.Context(), config)
+	if stateErr != nil {
+		fmt.Fprintf(command.ErrOrStderr(), "Warning: cannot load workflow picker state: %v\n", stateErr)
+	}
+	if stateErr == nil && pickerState.reconcile(sources) {
+		if err := saveWorkflowPickerState(command.Context(), config, pickerState); err != nil {
+			fmt.Fprintf(command.ErrOrStderr(), "Warning: cannot save workflow picker state: %v\n", err)
+		}
 	}
 	if len(sources) == 0 {
 		if discovered > 0 {
@@ -256,12 +271,13 @@ func runWorkflowPicker(command *cobra.Command, deps dependencies) error {
 		return nil
 	}
 
-	options := make([]tui.Option, len(sources))
-	for i, source := range sources {
-		options[i] = workflowPickerOption(source)
-	}
+	sortMode := pickerState.sortMode()
+	selectedPath := ""
 	for {
-		selection, err := tui.SelectWithIntent(command.Context(), command.InOrStdin(), command.OutOrStdout(), "Workflows", options)
+		sortedSources := sortWorkflowSources(sources, pickerState, sortMode)
+		options := workflowPickerOptions(sortedSources, pickerState, selectedPath)
+		title := fmt.Sprintf("Workflows (sort: %s)", sortMode)
+		selection, err := tui.SelectWithIntent(command.Context(), command.InOrStdin(), command.OutOrStdout(), title, options)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
 				return nil
@@ -272,16 +288,43 @@ func runWorkflowPicker(command *cobra.Command, deps dependencies) error {
 		if !ok {
 			return fmt.Errorf("workflow selection did not contain a workflow")
 		}
+		selectedPath = workflowPickerPath(source.Path)
 		diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseSelection, Status: diagnostic.StatusSucceeded, Location: diagnostic.Location{Source: source.Path}, Message: source.Name})
 		switch selection.Intent {
 		case tui.SelectionPrimary:
-			return runWorkflow(command, deps, nil, runWorkflowConfig{workflowFile: source.Path})
+			runErr := runWorkflow(command, deps, nil, runWorkflowConfig{workflowFile: source.Path})
+			if runErr == nil {
+				pickerState.markRecent(source.Path)
+				if err := saveWorkflowPickerState(command.Context(), config, pickerState); err != nil {
+					fmt.Fprintf(command.ErrOrStderr(), "Warning: cannot save workflow picker state: %v\n", err)
+				}
+			}
+			return runErr
 		case tui.SelectionUI:
 			if !source.HasForm {
 				fmt.Fprintf(command.OutOrStdout(), "Workflow %s does not declare a form.\n", source.Name)
 				continue
 			}
 			return runWorkflowUI(command, deps, nil, uiWorkflowConfig{workflowFile: source.Path})
+		case tui.SelectionEditor:
+			if err := deps.openEditor(command.Context(), command.InOrStdin(), command.OutOrStdout(), command.ErrOrStderr(), source.Path); err != nil {
+				fmt.Fprintf(command.ErrOrStderr(), "Warning: %v\n", err)
+			}
+		case tui.SelectionTogglePin:
+			pickerState.togglePinned(source.Path)
+			if err := saveWorkflowPickerState(command.Context(), config, pickerState); err != nil {
+				fmt.Fprintf(command.ErrOrStderr(), "Warning: cannot save workflow picker state: %v\n", err)
+			}
+		case tui.SelectionToggleSort:
+			if sortMode == workflowPickerSortName {
+				sortMode = workflowPickerSortRecent
+			} else {
+				sortMode = workflowPickerSortName
+			}
+			pickerState.Sort = sortMode.String()
+			if err := saveWorkflowPickerState(command.Context(), config, pickerState); err != nil {
+				fmt.Fprintf(command.ErrOrStderr(), "Warning: cannot save workflow picker state: %v\n", err)
+			}
 		default:
 			if source.Effective {
 				fmt.Fprintf(command.OutOrStdout(), "wuko run %s\n", shellQuote(source.Name))
@@ -294,19 +337,7 @@ func runWorkflowPicker(command *cobra.Command, deps dependencies) error {
 }
 
 func workflowPickerOption(source workflow.Source) tui.Option {
-	description := source.Description
-	if description == "" {
-		description = "(no description)"
-	}
-	parts := []string{source.Scope, description}
-	if source.HasForm {
-		parts = append(parts, "form")
-	}
-	if dependencies := workflowDependencySummary(source.DependsOn); dependencies != "" {
-		parts = append(parts, dependencies)
-	}
-	parts = append(parts, source.Path)
-	return tui.Option{Label: source.Name, Description: strings.Join(parts, " • "), Value: source}
+	return workflowPickerOptionWithState(source, false, false)
 }
 
 func writeWorkflowSource(writer io.Writer, source workflow.Source) error {

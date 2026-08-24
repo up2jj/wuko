@@ -251,6 +251,36 @@ func TestSelectionModelUUsesBrowserUIIntent(t *testing.T) {
 	}
 }
 
+func TestSelectionModelSupportsPickerActions(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  tea.KeyPressMsg
+		intent SelectionIntent
+	}{
+		{name: "editor", input: tea.KeyPressMsg{Code: 'e'}, intent: SelectionEditor},
+		{name: "pin", input: tea.KeyPressMsg{Code: 'p'}, intent: SelectionTogglePin},
+		{name: "sort", input: tea.KeyPressMsg{Code: 's'}, intent: SelectionToggleSort},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			model := newSelectionModel("Workflows", []Option{{Label: "build"}})
+			updated, command := model.Update(test.input)
+			model = updated.(selectionModel)
+			if command == nil || !model.done || model.intent != test.intent {
+				t.Fatalf("intent = %v, done = %v, command nil = %v", model.intent, model.done, command == nil)
+			}
+		})
+	}
+}
+
+func TestSelectionModelUsesDefaultOption(t *testing.T) {
+	model := newSelectionModel("Workflows", []Option{{Label: "build"}, {Label: "deploy", Default: true}})
+	item, ok := model.list.SelectedItem().(listOption)
+	if !ok || item.Label != "deploy" {
+		t.Fatalf("selected item = %#v, want deploy", model.list.SelectedItem())
+	}
+}
+
 func TestSelectionModelFiltering(t *testing.T) {
 	model := newSelectionModel("Workflows", []Option{{Label: "build", Description: "local"}, {Label: "deploy", Description: "global"}})
 	model.list.SetFilterText("global")
@@ -273,11 +303,15 @@ func TestSelectionModelEscapeCancels(t *testing.T) {
 }
 
 func TestSelectionModelViewIncludesDescription(t *testing.T) {
-	model := newSelectionModel("Workflows", []Option{{Label: "build", Description: "local • Build it • /tmp/build.yaml"}})
+	path := "/a/" + strings.Repeat("very-long-workflow-directory/", 5) + "build.yaml"
+	model := newSelectionModel("Workflows", []Option{{Label: "build", Description: "local • Build it", Path: path}})
 	if !strings.Contains(model.View().Content, "local") {
 		t.Fatalf("view = %q", model.View().Content)
 	}
-	for _, shortcut := range []string{"enter", "run", "u", "open UI", "shift+enter", "print command"} {
+	if !strings.Contains(model.View().Content, path) {
+		t.Fatalf("view = %q, want full path", model.View().Content)
+	}
+	for _, shortcut := range []string{"enter", "run", "u", "open UI", "shift+enter", "print command", "e", "edit", "p", "pin", "s", "sort"} {
 		if !strings.Contains(model.View().Content, shortcut) {
 			t.Fatalf("view = %q, want shortcut %q", model.View().Content, shortcut)
 		}

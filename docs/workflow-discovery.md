@@ -85,8 +85,12 @@ order, not which definition wins.
   validates every effective workflow. Both inspection commands accept dependency-only workflows.
 - Bare `wuko` calls `DiscoverAll`. In an interactive terminal it shows effective and shadowed
   directly invokable sources in the picker, including each workflow's direct prerequisites. Enter
-  runs the exact selected source. Shift+Enter prints `wuko run NAME` for an effective source or
-  `wuko run --file PATH` for a shadowed source so the printed command remains unambiguous.
+  runs the exact selected source, `u` opens its form, `e` opens its file in `$VISUAL` or `$EDITOR`,
+  `p` toggles a plain-text `[pinned]` marker, and `s` switches between name and recently-used
+  sorting. Shift+Enter prints `wuko run NAME` for an effective source or `wuko run --file PATH`
+  for a shadowed source so the printed command remains unambiguous. Picker state and the selected
+  sort preference are global; successful runs are remembered, and entries for workflows no longer
+  discovered as directly invokable are pruned.
 - Bare `wuko` in a non-interactive context prints directly invokable discovered sources as
   tab-separated rows, appending the dependency summary when present.
 - Shell completion returns effective workflow names. Run and UI completion omit dependency-only

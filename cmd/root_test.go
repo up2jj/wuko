@@ -1224,8 +1224,11 @@ func TestWorkflowPickerOptionShowsWorkflowDependencies(t *testing.T) {
 		Name: "release", Scope: "local", Description: "Publish",
 		Path: "/project/release.yaml", DependsOn: map[string]string{"checks": "checks", "build": "build-artifacts"},
 	})
-	if want := "local • Publish • depends on build=build-artifacts, checks • /project/release.yaml"; option.Description != want {
+	if want := "local • Publish • depends on build=build-artifacts, checks"; option.Description != want {
 		t.Fatalf("description = %q, want %q", option.Description, want)
+	}
+	if option.Path != "/project/release.yaml" {
+		t.Fatalf("path = %q", option.Path)
 	}
 }
 
@@ -1233,8 +1236,11 @@ func TestWorkflowPickerOptionShowsFormAvailability(t *testing.T) {
 	option := workflowPickerOption(workflow.Source{
 		Name: "release", Scope: "local", Description: "Publish", Path: "/project/release.yaml", HasForm: true,
 	})
-	if want := "local • Publish • form • /project/release.yaml"; option.Description != want {
+	if want := "local • Publish • form"; option.Description != want {
 		t.Fatalf("description = %q, want %q", option.Description, want)
+	}
+	if option.Path != "/project/release.yaml" {
+		t.Fatalf("path = %q", option.Path)
 	}
 }
 

@@ -16,6 +16,7 @@ import (
 type Option struct {
 	Label          string
 	Description    string
+	Path           string
 	Value          any
 	Disabled       bool
 	DisabledReason string
