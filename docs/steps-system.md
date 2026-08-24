@@ -98,7 +98,7 @@ In GitHub Actions, the following resolves the PR associated with the event or ch
     operation: find
 ```
 
-The result includes `found`, `number`, `url`, `title`, `state`, `is_draft`, `head_branch`,
+The result includes `found`, `number`, `url`, `title`, `state`, `is_draft`, `head_branch`, `head_sha`,
 `base_branch`, and `repository`. A branch with no open pull request succeeds with `found: false`
 and empty metadata. If multiple open pull requests match a branch, the step fails as ambiguous.
 Authentication, repository, and other `gh` failures also fail the step. Use `require_tool` when a
@@ -115,6 +115,46 @@ workflow should report a missing `gh` executable before attempting the lookup:
   with:
     operation: find
 ```
+
+## `github_actions`
+
+Observe one GitHub Actions workflow run through the installed `gh` CLI. The step performs one
+non-blocking lookup; use the `loop` control when the run may still be queued or in progress.
+
+```yaml
+- id: pull_request
+  type: github_pr
+  with:
+    operation: find
+
+- id: ci
+  loop:
+    until: steps.poll.terminal
+    delay: 10s
+    timeout: 30m
+    steps:
+      - id: poll
+        type: github_actions
+        with:
+          workflow: ci.yml
+          pull_request: "{{ .steps.pull_request.number }}"
+
+- id: verify_ci
+  type: assert
+  with:
+    expr: steps.poll.success
+    message: GitHub Actions CI did not succeed
+```
+
+`repository` is optional. Wuko passes it to `gh` when configured, otherwise `gh` uses the current
+repository context. Set `run_id` to observe a known run directly. Otherwise configure `workflow`
+and either `pull_request` or `head_sha`; those selectors are mutually exclusive.
+
+The result includes `found`, `run_id`, `run_number`, `workflow`, `workflow_id`, `status`,
+`conclusion`, `terminal`, `success`, `event`, `head_sha`, `head_branch`, `url`, `attempt`,
+`created_at`, `started_at`, and `updated_at`. A run that has not been created yet returns
+`found: false` and `status: not_found`; completed failures are returned as observations with
+`success: false` so a following assertion can decide whether the Wuko workflow should fail.
 
 ## `require_tool`
 

@@ -80,7 +80,7 @@ func TestExplicitBranchAndRepositoryTakePrecedence(t *testing.T) {
 }
 
 func TestPullRequestEventRefUsesExactNumber(t *testing.T) {
-	executor := &recordingExecutor{steps: []recordedCall{{result: process.Result{Stdout: `{"number":42,"url":"https://github.com/acme/wuko/pull/42","title":"Fix CI","state":"OPEN","isDraft":false,"headRefName":"ci/fix","baseRefName":"main"}`}}}}
+	executor := &recordingExecutor{steps: []recordedCall{{result: process.Result{Stdout: `{"number":42,"url":"https://github.com/acme/wuko/pull/42","title":"Fix CI","state":"OPEN","isDraft":false,"headRefName":"ci/fix","headRefOid":"0123456789abcdef0123456789abcdef01234567","baseRefName":"main"}`}}}}
 	runner, err := New(map[string]any{"operation": "find"})
 	if err != nil {
 		t.Fatal(err)
@@ -94,7 +94,7 @@ func TestPullRequestEventRefUsesExactNumber(t *testing.T) {
 	if len(executor.calls) != 1 || executor.calls[0].Command != "gh" || !slices.Equal(executor.calls[0].Args, []string{"pr", "view", "42", "--json", pullRequestJSONFields, "--repo", "acme/wuko"}) {
 		t.Fatalf("calls = %#v", executor.calls)
 	}
-	if result.Outputs["number"] != 42 || result.Outputs["head_branch"] != "ci/fix" {
+	if result.Outputs["number"] != 42 || result.Outputs["head_branch"] != "ci/fix" || result.Outputs["head_sha"] != "0123456789abcdef0123456789abcdef01234567" {
 		t.Fatalf("outputs = %#v", result.Outputs)
 	}
 }

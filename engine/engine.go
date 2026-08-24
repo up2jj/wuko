@@ -175,6 +175,12 @@ func (e *Engine) validateSteps(ctx context.Context, definition *workflow.Definit
 			}
 			continue
 		}
+		if workflowStep.Loop != nil {
+			if err := e.validateLoop(ctx, definition, workflowStep, options, state); err != nil {
+				return fmt.Errorf("step %q: %w", workflowStep.ID, err)
+			}
+			continue
+		}
 		if workflowStep.Return != nil {
 			if err := e.validateReturn(workflowStep); err != nil {
 				return fmt.Errorf("return: %w", err)
@@ -532,6 +538,8 @@ func (e *Engine) executeSequence(ctx context.Context, definition *workflow.Defin
 		var outcome stepOutcome
 		if workflowStep.Batch != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil {
 			outcome = e.executeControl(ctx, definition, workflowStep, options, state, index, total)
+		} else if workflowStep.Loop != nil {
+			outcome = e.executeLoop(ctx, definition, workflowStep, options, state, index, total)
 		} else {
 			outcome = e.executeStep(ctx, definition, workflowStep, options, state, index, total)
 		}

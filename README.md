@@ -263,6 +263,7 @@ Each linked guide contains multiple examples for every step.
 | `git_branch_name` | Assert that a string is a valid Git branch name | [System steps](docs/steps-system.md#git_branch_name) |
 | `git_on_branch` | Assert the repository's current branch | [System steps](docs/steps-system.md#git_on_branch) |
 | `github_pr` | Find an open GitHub pull request from CI metadata or a Git branch | [System steps](docs/steps-system.md#github_pr) |
+| `github_actions` | Observe one GitHub Actions run through `gh` | [System steps](docs/steps-system.md#github_actions) |
 | `file` | Perform shell-independent filesystem operations | [System steps](docs/steps-system.md#file) |
 | `glob` | Discover regular files with portable patterns | [System steps](docs/steps-system.md#glob) |
 | `watch` | Wait for native filesystem events | [System steps](docs/steps-system.md#watch) |
@@ -288,6 +289,7 @@ Use controls to run independent work or repeat a block over runtime data.
 | `batch` | Process a runtime list in fixed-size chunks | [Workflow controls](docs/workflow-control.md#batch) |
 | `foreach` | Run a block once per item in a runtime list | [Workflow controls](docs/workflow-control.md#foreach) |
 | `matrix` | Run every combination of named dimensions | [Workflow controls](docs/workflow-control.md#matrix) |
+| `loop` | Repeat a sequential block until an expression is true | [Workflow controls](docs/workflow-control.md#loop) |
 | `timeout` | Bound how long a step or control may run | [Execution and composition](docs/execution.md#timeouts-and-retries) |
 | `retry` | Retry failed operations with backoff | [Execution and composition](docs/execution.md#timeouts-and-retries) |
 | `return` | Finish successfully early and publish explicit outputs | [Early successful return](docs/return.md) |

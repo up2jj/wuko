@@ -16,7 +16,7 @@ import (
 
 const (
 	operationFind         = "find"
-	pullRequestJSONFields = "number,url,title,state,isDraft,headRefName,baseRefName"
+	pullRequestJSONFields = "number,url,title,state,isDraft,headRefName,headRefOid,baseRefName"
 )
 
 type Config struct {
@@ -34,6 +34,7 @@ type pullRequest struct {
 	State       string `json:"state"`
 	IsDraft     bool   `json:"isDraft"`
 	HeadRefName string `json:"headRefName"`
+	HeadSHA     string `json:"headRefOid"`
 	BaseRefName string `json:"baseRefName"`
 }
 
@@ -210,6 +211,7 @@ func pullRequestOutputs(pull pullRequest, repository string) map[string]any {
 		"state":       pull.State,
 		"is_draft":    pull.IsDraft,
 		"head_branch": pull.HeadRefName,
+		"head_sha":    pull.HeadSHA,
 		"base_branch": pull.BaseRefName,
 		"repository":  repository,
 	}
@@ -224,6 +226,7 @@ func noPullRequestOutputs() map[string]any {
 		"state":       "",
 		"is_draft":    false,
 		"head_branch": "",
+		"head_sha":    "",
 		"base_branch": "",
 		"repository":  "",
 	}

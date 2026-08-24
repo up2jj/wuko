@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	controlpkg "github.com/up2jj/wuko/control"
 	"github.com/up2jj/wuko/diagnostic"
 	workflowschedule "github.com/up2jj/wuko/schedule"
 	"gopkg.in/yaml.v3"
@@ -162,8 +163,11 @@ func (workflowStep *Step) UnmarshalYAML(node *yaml.Node) error {
 
 // IsConditionalBlock reports whether the step is an anonymous multi-step conditional.
 func (workflowStep Step) IsConditionalBlock() bool {
-	return workflowStep.Steps != nil && !workflowStep.IsWorkingDirectoryBlock() && !workflowStep.IsExecutorBlock() && workflowStep.Return == nil
+	return workflowStep.Steps != nil && workflowStep.Loop == nil && !workflowStep.IsWorkingDirectoryBlock() && !workflowStep.IsExecutorBlock() && workflowStep.Return == nil
 }
+
+// IsLoop reports whether the step repeats its child sequence until a condition matches.
+func (workflowStep Step) IsLoop() bool { return workflowStep.Loop != nil }
 
 // IsWorkingDirectoryBlock reports whether the step scopes its children to a run directory.
 func (workflowStep Step) IsWorkingDirectoryBlock() bool {
@@ -721,6 +725,16 @@ func validateStepScope(steps []Step, allowActions bool, scope stepScope, inherit
 
 func collectScopeIDs(steps []Step, seen map[string]struct{}) error {
 	for i, workflowStep := range steps {
+		if workflowStep.IsLoop() {
+			if !identifierPattern.MatchString(workflowStep.ID) {
+				return fmt.Errorf("step %d has invalid id %q", i+1, workflowStep.ID)
+			}
+			if _, exists := seen[workflowStep.ID]; exists {
+				return fmt.Errorf("duplicate step id %q", workflowStep.ID)
+			}
+			seen[workflowStep.ID] = struct{}{}
+			continue
+		}
 		container := workflowStep.IsExecutorBlock() || workflowStep.IsWorkingDirectoryBlock() || workflowStep.IsWorktreeBlock() || workflowStep.IsConditionalBlock() || workflowStep.Concurrent != nil
 		if container {
 			if workflowStep.IsWorktreeBlock() {
@@ -810,7 +824,13 @@ func validateSteps(steps []Step, allowActions bool, scope stepScope, seen map[st
 			}
 			continue
 		}
-		if workflowStep.Batch != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil {
+		if workflowStep.Batch != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil || workflowStep.Loop != nil {
+			if workflowStep.Loop != nil {
+				if err := validateLoopEntry(workflowStep, scope, allowActions, seen); err != nil {
+					return fmt.Errorf("step %q: %w", workflowStep.ID, err)
+				}
+				continue
+			}
 			if err := validateControlEntry(workflowStep, scope, allowActions, seen); err != nil {
 				return fmt.Errorf("step %q: %w", workflowStep.ID, err)
 			}
@@ -958,6 +978,29 @@ func validateControlEntry(workflowStep Step, scope stepScope, allowActions bool,
 		childScope = scopeExecutorControl
 	}
 	return validateStepScope(children, allowActions, childScope, enclosing)
+}
+
+func validateLoopEntry(workflowStep Step, scope stepScope, allowActions bool, enclosing map[string]struct{}) error {
+	if workflowStep.ID == "" || !identifierPattern.MatchString(workflowStep.ID) {
+		return fmt.Errorf("loop requires a valid id")
+	}
+	if workflowStep.Type != "" || !workflowStep.Uses.Empty() || workflowStep.Require != nil || workflowStep.Worktree != nil || workflowStep.Executor != nil || workflowStep.Finally != nil || workflowStep.Defer != nil || workflowStep.IsWorkingDirectoryBlock() || workflowStep.IsConditionalBlock() || workflowStep.Concurrent != nil || workflowStep.Batch != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil || workflowStep.Return != nil || workflowStep.SHA256 != "" || workflowStep.Timeout != nil || workflowStep.Retry != nil || workflowStep.With != nil || workflowStep.If != "" {
+		return fmt.Errorf("loop cannot be combined with ordinary step fields")
+	}
+	if scope != scopeTop && scope != scopeExecutor {
+		return fmt.Errorf("nested loops are not supported")
+	}
+	if err := workflowStep.Loop.Validate(); err != nil {
+		return err
+	}
+	if err := controlpkg.ValidateExpression(string(workflowStep.Loop.Until)); err != nil {
+		return fmt.Errorf("loop until: %w", err)
+	}
+	childScope := scopeControl
+	if scope == scopeExecutor {
+		childScope = scopeExecutorControl
+	}
+	return validateStepScope(workflowStep.Loop.Steps, allowActions, childScope, enclosing)
 }
 
 func controlMaxConcurrency(workflowStep Step) int {

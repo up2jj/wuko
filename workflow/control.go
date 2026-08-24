@@ -189,11 +189,11 @@ type MatrixGroup struct {
 
 // LoopGroup repeats a child step block until an expression becomes true.
 type LoopGroup struct {
-	Until          Condition  `yaml:"until"`
-	Delay          LoopDelay  `yaml:"delay,omitempty"`
-	Steps          []Step     `yaml:"steps"`
-	MaxIterations  int        `yaml:"max_iterations,omitempty"`
-	Timeout        *Duration  `yaml:"timeout,omitempty"`
+	Until         Condition `yaml:"until"`
+	Delay         LoopDelay `yaml:"delay,omitempty"`
+	Steps         []Step    `yaml:"steps"`
+	MaxIterations int       `yaml:"max_iterations,omitempty"`
+	Timeout       *Duration `yaml:"timeout,omitempty"`
 }
 
 func (group *LoopGroup) UnmarshalYAML(node *yaml.Node) error {

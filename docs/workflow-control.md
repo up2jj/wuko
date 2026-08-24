@@ -1,12 +1,34 @@
 # Workflow controls
 
-Wuko has four controls for scheduling or repeating operations: `concurrent`, `batch`, `foreach`,
-and `matrix`.
+Wuko has five controls for scheduling or repeating operations: `concurrent`, `batch`, `foreach`,
+`matrix`, and `loop`.
 
 - Use `concurrent` for a fixed set of independent steps.
 - Use `batch` when each block should receive a fixed-size chunk of one runtime list.
 - Use `foreach` when one runtime list determines how many times a block runs.
 - Use `matrix` when every combination of several named dimensions must run.
+- Use `loop` when a sequential block should repeat until a runtime expression becomes true.
+
+## Loop
+
+`loop` repeats its child steps sequentially, evaluates `until` after each iteration, and supports
+an optional delay, timeout, and maximum iteration limit. Child outputs remain available in `steps`
+and the loop output contains `iterations`, `count`, and `last`.
+
+```yaml
+- id: wait_for_ci
+  loop:
+    until: steps.poll.terminal
+    delay: 10s
+    timeout: 30m
+    max_iterations: 180
+    steps:
+      - id: poll
+        type: github_actions
+        with:
+          workflow: ci.yml
+          head_sha: "{{ .vars.head_sha }}"
+```
 
 `batch`, `foreach`, and `matrix` are logical parent steps. Each iteration receives an isolated copy of
 the state that existed before the parent began and runs its child steps in order. The optional
