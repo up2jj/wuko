@@ -3,10 +3,34 @@ package workflow
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	controlpkg "github.com/up2jj/wuko/control"
 	"gopkg.in/yaml.v3"
 )
+
+// LoopDelay is either a positive literal duration or an Expr expression that returns
+// a positive Go duration string.
+type LoopDelay struct {
+	Literal    Duration
+	Expression string
+}
+
+func (delay *LoopDelay) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind != yaml.ScalarNode || node.Tag != "!!str" || strings.TrimSpace(node.Value) == "" {
+		return fmt.Errorf("loop delay must be a positive duration or expression string")
+	}
+	parsed, err := time.ParseDuration(node.Value)
+	if err == nil {
+		if parsed <= 0 {
+			return fmt.Errorf("loop delay must be greater than zero")
+		}
+		delay.Literal = Duration(parsed)
+		return nil
+	}
+	delay.Expression = node.Value
+	return nil
+}
 
 // BatchSize is either a positive literal chunk size or an expression evaluated at runtime.
 type BatchSize struct {
@@ -163,6 +187,39 @@ type MatrixGroup struct {
 	FailFast       bool       `yaml:"fail_fast"`
 }
 
+// LoopGroup repeats a child step block until an expression becomes true.
+type LoopGroup struct {
+	Until          Condition  `yaml:"until"`
+	Delay          LoopDelay  `yaml:"delay,omitempty"`
+	Steps          []Step     `yaml:"steps"`
+	MaxIterations  int        `yaml:"max_iterations,omitempty"`
+	Timeout        *Duration  `yaml:"timeout,omitempty"`
+}
+
+func (group *LoopGroup) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("loop must be an object")
+	}
+	if err := rejectUnknownFields(node, "loop", map[string]bool{
+		"until": true, "delay": true, "steps": true, "max_iterations": true, "timeout": true,
+	}); err != nil {
+		return err
+	}
+	if steps := mappingValue(node, "steps"); steps != nil && steps.Kind != yaml.SequenceNode {
+		return fmt.Errorf("loop steps must be a list")
+	}
+	type plain LoopGroup
+	decoded := plain{MaxIterations: controlpkg.DefaultMaxIterations}
+	if err := node.Decode(&decoded); err != nil {
+		return err
+	}
+	if decoded.MaxIterations == 0 && hasMappingField(node, "max_iterations") {
+		return fmt.Errorf("loop max_iterations must be between 1 and %d", controlpkg.MaxIterations)
+	}
+	*group = LoopGroup(decoded)
+	return nil
+}
+
 func (group *MatrixGroup) UnmarshalYAML(node *yaml.Node) error {
 	if node.Kind != yaml.MappingNode {
 		return fmt.Errorf("matrix must be an object")
@@ -270,4 +327,21 @@ func (group MatrixGroup) Validate() error {
 		return fmt.Errorf("matrix requires at least one axis")
 	}
 	return validateFanoutPolicy("matrix", len(group.Steps), group.MaxConcurrency, group.MaxIterations, group.Timeout)
+}
+
+// Validate checks the loop declaration and execution limits.
+func (group LoopGroup) Validate() error {
+	if strings.TrimSpace(string(group.Until)) == "" {
+		return fmt.Errorf("loop until must be a non-empty expression")
+	}
+	if len(group.Steps) == 0 {
+		return fmt.Errorf("loop must contain at least one step")
+	}
+	if group.MaxIterations < 1 || group.MaxIterations > controlpkg.MaxIterations {
+		return fmt.Errorf("loop max_iterations must be between 1 and %d", controlpkg.MaxIterations)
+	}
+	if group.Timeout != nil && group.Timeout.Value() <= 0 {
+		return fmt.Errorf("loop timeout must be greater than zero")
+	}
+	return nil
 }
