@@ -5,6 +5,72 @@
 System steps provide portable filesystem, network, cache, temporary-resource, and container
 operations. Relative runtime paths normally resolve from the directory where Wuko was invoked.
 
+## Git assertions
+
+Git assertions run the installed `git` executable in the workflow run directory. They are
+read-only, work inside executor blocks, and return no outputs on success. Remote-branch checks
+inspect local remote-tracking references; they do not fetch from a remote.
+
+## `git_clean`
+
+Assert that the working tree has no staged, modified, deleted, or normal untracked files. Ignored
+files are excluded.
+
+```yaml
+- id: clean
+  type: git_clean
+```
+
+## `git_branch`
+
+Assert whether a local branch exists. `operation` is currently required to be `assert`; it leaves
+room for future branch operations such as creation or switching. `branch` and `exists` are required.
+
+```yaml
+- id: no_release_branch
+  type: git_branch
+  with:
+    operation: assert
+    branch: release/v1
+    exists: false
+```
+
+## `git_remote_branch`
+
+Assert whether a remote-tracking branch exists locally. Omit `remote` to match any remote; provide
+it to restrict the check to one remote.
+
+```yaml
+- id: upstream_release
+  type: git_remote_branch
+  with:
+    branch: release/v1
+    remote: origin
+    exists: true
+```
+
+## `git_branch_name`
+
+Assert that a string is accepted by Git as a branch name.
+
+```yaml
+- id: valid_branch
+  type: git_branch_name
+  with:
+    name: "{{ .steps.fetch.branch }}"
+```
+
+## `git_on_branch`
+
+Assert that the repository is currently checked out on the requested branch. Detached HEAD fails.
+
+```yaml
+- id: on_main
+  type: git_on_branch
+  with:
+    branch: main
+```
+
 ## `require_tool`
 
 Require an executable before dependent work begins. The step runs the configured version command

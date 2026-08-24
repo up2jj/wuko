@@ -223,6 +223,11 @@ Each linked guide contains multiple examples for every step.
 | `key_value` | Persist JSON-compatible values between runs | [Data steps](docs/steps-data.md#key_value) |
 | `changed` | Detect changed files or structured inputs | [Data steps](docs/steps-data.md#changed) |
 | `require_tool` | Require an executable and optionally validate its version | [System steps](docs/steps-system.md#require_tool) |
+| `git_clean` | Assert that a Git working tree is clean | [System steps](docs/steps-system.md#git_clean) |
+| `git_branch` | Assert local branch existence with an extensible operation schema | [System steps](docs/steps-system.md#git_branch) |
+| `git_remote_branch` | Assert local remote-tracking branch existence | [System steps](docs/steps-system.md#git_remote_branch) |
+| `git_branch_name` | Assert that a string is a valid Git branch name | [System steps](docs/steps-system.md#git_branch_name) |
+| `git_on_branch` | Assert the repository's current branch | [System steps](docs/steps-system.md#git_on_branch) |
 | `file` | Perform shell-independent filesystem operations | [System steps](docs/steps-system.md#file) |
 | `glob` | Discover regular files with portable patterns | [System steps](docs/steps-system.md#glob) |
 | `watch` | Wait for native filesystem events | [System steps](docs/steps-system.md#watch) |

@@ -88,37 +88,33 @@ steps:
         task_id: "{{ .vars.task_id }}"
         api_base_url: https://api.clickup.com/api/v2
 
+  - id: validate_branch_name
+    type: git_branch_name
+    with:
+      name: "{{ .steps.fetch.branch }}"
+
+  - id: assert_clean
+    type: git_clean
+
+  - id: assert_local_branch_available
+    type: git_branch
+    with:
+      operation: assert
+      branch: "{{ .steps.fetch.branch }}"
+      exists: false
+
+  - id: assert_remote_branch_available
+    type: git_remote_branch
+    with:
+      branch: "{{ .steps.fetch.branch }}"
+      exists: false
+
   - id: branch
     type: shell
     with:
       script: |
         set -eu
         branch=$1
-
-        if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-          echo "not inside a Git working tree" >&2
-          exit 1
-        fi
-        if ! git check-ref-format --branch "$branch" >/dev/null 2>&1; then
-          echo "generated branch name is invalid: $branch" >&2
-          exit 1
-        fi
-
-        dirty=$(git status --porcelain --untracked-files=normal)
-        if [ -n "$dirty" ]; then
-          echo "working tree has uncommitted changes" >&2
-          exit 1
-        fi
-        if git show-ref --verify --quiet "refs/heads/$branch"; then
-          echo "local branch already exists: $branch" >&2
-          exit 1
-        fi
-        remote=$(git for-each-ref --format='%(refname)' "refs/remotes/*/$branch")
-        if [ -n "$remote" ]; then
-          echo "remote branch already exists: $branch" >&2
-          exit 1
-        fi
-
         git switch -c "$branch"
       args: ["{{ .steps.fetch.branch }}"]
 

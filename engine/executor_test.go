@@ -10,6 +10,7 @@ import (
 	"github.com/up2jj/wuko/executor"
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/step"
+	gitstep "github.com/up2jj/wuko/steps/git"
 	requiretoolstep "github.com/up2jj/wuko/steps/require_tool"
 	"github.com/up2jj/wuko/steps/shell"
 	"github.com/up2jj/wuko/workflow"
@@ -51,6 +52,9 @@ func executorTestEngine(t *testing.T, session *recordingExecutor) *Engine {
 	if err := requiretoolstep.Register(steps); err != nil {
 		t.Fatal(err)
 	}
+	if err := gitstep.Register(steps); err != nil {
+		t.Fatal(err)
+	}
 	executors := executor.NewRegistry()
 	if err := executors.Register("recording", func(map[string]any) (executor.Provider, error) {
 		return recordingProvider{session: session}, nil
@@ -79,6 +83,24 @@ func TestExecutorScopeSupportsRequireTool(t *testing.T) {
 	}
 	if state.Steps["tool"].(map[string]any)["path"] != "go" {
 		t.Fatalf("steps = %#v", state.Steps)
+	}
+}
+
+func TestExecutorScopeSupportsGitAssertions(t *testing.T) {
+	scoped := &recordingExecutor{}
+	definition := testDefinition(t, "git", workflow.Step{
+		Executor: &workflow.ExecutorScope{Type: "recording", With: map[string]any{}},
+		Steps: []workflow.Step{{ID: "branch", Type: "git_branch", With: map[string]any{
+			"operation": "assert", "branch": "main", "exists": true,
+		}}},
+	})
+	if _, err := executorTestEngine(t, scoped).Run(t.Context(), definition, Options{
+		RunDir: t.TempDir(), Stdout: io.Discard, Stderr: io.Discard,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(scoped.commands, ","); got != "git show-ref --verify --quiet refs/heads/main" {
+		t.Fatalf("scoped commands = %q", got)
 	}
 }
 

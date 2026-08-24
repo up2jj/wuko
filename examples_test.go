@@ -16,6 +16,7 @@ import (
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/steps/agent"
 	"github.com/up2jj/wuko/steps/choice"
+	gitstep "github.com/up2jj/wuko/steps/git"
 	inputstep "github.com/up2jj/wuko/steps/input"
 	luastep "github.com/up2jj/wuko/steps/lua"
 	"github.com/up2jj/wuko/steps/shell"
@@ -143,10 +144,11 @@ func TestClickUpTaskExampleCreatesSafeBranch(t *testing.T) {
 		name      string
 		branch    string
 		prepare   func(*testing.T, string)
+		wantStep  string
 		wantError string
 	}{
 		{name: "creates branch"},
-		{name: "rejects invalid branch", branch: "bad branch", wantError: "generated branch name is invalid"},
+		{name: "rejects invalid branch", branch: "bad branch", wantStep: "validate_branch_name", wantError: "not a valid Git branch name"},
 		{
 			name: "rejects dirty tree",
 			prepare: func(t *testing.T, dir string) {
@@ -154,21 +156,24 @@ func TestClickUpTaskExampleCreatesSafeBranch(t *testing.T) {
 					t.Fatal(err)
 				}
 			},
-			wantError: "working tree has uncommitted changes",
+			wantStep:  "assert_clean",
+			wantError: "uncommitted changes",
 		},
 		{
 			name: "rejects local branch",
 			prepare: func(t *testing.T, dir string) {
 				runGit(t, dir, "branch", branch)
 			},
-			wantError: "local branch already exists",
+			wantStep:  "assert_local_branch_available",
+			wantError: "already exists",
 		},
 		{
 			name: "rejects remote branch",
 			prepare: func(t *testing.T, dir string) {
 				runGit(t, dir, "update-ref", "refs/remotes/origin/"+branch, "HEAD")
 			},
-			wantError: "remote branch already exists",
+			wantStep:  "assert_remote_branch_available",
+			wantError: "already exists",
 		},
 	}
 
@@ -182,15 +187,28 @@ func TestClickUpTaskExampleCreatesSafeBranch(t *testing.T) {
 			if selectedBranch == "" {
 				selectedBranch = branch
 			}
+			for _, precondition := range []string{
+				"validate_branch_name", "assert_clean", "assert_local_branch_available", "assert_remote_branch_available",
+			} {
+				runner := clickUpGitRunner(t, precondition, selectedBranch)
+				_, err := runner.Run(t.Context(), step.Request{RunDir: dir, Env: map[string]string{"PATH": os.Getenv("PATH")}})
+				if tt.wantStep == precondition {
+					if err == nil || !strings.Contains(err.Error(), tt.wantError) {
+						t.Fatalf("%s error = %v, want %q", precondition, err, tt.wantError)
+					}
+					return
+				}
+				if err != nil {
+					t.Fatalf("%s error = %v", precondition, err)
+				}
+			}
 			runner := clickUpBranchRunner(t, selectedBranch)
 			result, err := runner.Run(t.Context(), step.Request{
 				RunDir: dir, Env: map[string]string{"PATH": os.Getenv("PATH")},
 				Stdout: io.Discard, Stderr: io.Discard,
 			})
 			if tt.wantError != "" {
-				if err == nil || !strings.Contains(fmt.Sprint(result.Outputs["stderr"]), tt.wantError) {
-					t.Fatalf("error = %v, stderr = %q", err, result.Outputs["stderr"])
-				}
+				t.Fatalf("expected precondition %q to fail, got branch error = %v and result = %#v", tt.wantStep, err, result)
 				return
 			}
 			if err != nil {
@@ -216,7 +234,7 @@ func clickUpExampleRegistry(t *testing.T) *step.Registry {
 	t.Helper()
 	registry := step.NewRegistry()
 	for _, register := range []func(*step.Registry) error{
-		inputstep.Register, choice.Register, luastep.Register, shell.Register, agent.Register,
+		inputstep.Register, choice.Register, gitstep.Register, luastep.Register, shell.Register, agent.Register,
 	} {
 		if err := register(registry); err != nil {
 			t.Fatal(err)
@@ -254,6 +272,37 @@ func clickUpBranchRunner(t *testing.T, branch string) step.Runner {
 	raw := maps.Clone(workflowStep.With)
 	raw["args"] = []any{branch}
 	runner, err := shell.New(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return runner
+}
+
+func clickUpGitRunner(t *testing.T, id, branch string) step.Runner {
+	t.Helper()
+	workflowStep := exampleStep(t, loadClickUpTaskExample(t), id)
+	raw := maps.Clone(workflowStep.With)
+	if id == "validate_branch_name" {
+		raw["name"] = branch
+	} else if id != "assert_clean" {
+		raw["branch"] = branch
+	}
+	var (
+		runner step.Runner
+		err    error
+	)
+	switch workflowStep.Type {
+	case "git_clean":
+		runner, err = gitstep.NewClean(raw)
+	case "git_branch":
+		runner, err = gitstep.NewBranch(raw)
+	case "git_remote_branch":
+		runner, err = gitstep.NewRemoteBranch(raw)
+	case "git_branch_name":
+		runner, err = gitstep.NewBranchName(raw)
+	default:
+		t.Fatalf("step %q has unexpected type %q", id, workflowStep.Type)
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
