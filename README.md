@@ -25,6 +25,18 @@ with typed data and files, call APIs, run scripts or containers, and start codin
 - **Visible execution** — get live progress, retry and polling details, run statistics, and
   redacted debug tracing.
 
+## See Wuko in action
+
+The workflow picker and an end-to-end interactive run are recorded from deterministic, offline
+fixtures:
+
+![Wuko workflow picker](docs/assets/workflow-picker.gif)
+
+![Wuko interactive workflow](docs/assets/interactive-workflow.gif)
+
+See [Screenshot and demo maintenance](docs/screenshots.md) for the VHS tapes, fixtures, and local
+regeneration commands.
+
 Wuko is not a GitHub Actions runtime. It is designed for local and interactive development
 automation; GitHub Actions is designed for repository-hosted CI/CD. A CI job may invoke Wuko, but
 the two workflow formats are separate.
@@ -343,6 +355,7 @@ Claude skills are installed under `~/.claude/skills/`; Codex skills are installe
 - [Variable imports](docs/variable-imports.md)
 - [Finally cleanup](docs/finally.md)
 - [Graceful shutdown](docs/graceful-shutdown.md)
+- [Screenshot and demo maintenance](docs/screenshots.md)
 
 ## Trust model
 

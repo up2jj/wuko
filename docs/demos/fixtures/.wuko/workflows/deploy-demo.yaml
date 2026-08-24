@@ -1,0 +1,14 @@
+version: 1
+name: deploy-demo
+description: Preview a safe deployment workflow
+
+steps:
+  - id: preview
+    type: set
+    with:
+      variable: status
+      value: '"preview"'
+
+  - return:
+      outputs:
+        status: vars.status

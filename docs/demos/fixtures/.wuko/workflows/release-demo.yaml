@@ -1,0 +1,59 @@
+version: 1
+name: release-demo
+description: Prepare and approve a local release
+
+depends_on:
+  preparation: prepare-demo
+
+steps:
+  - id: release_name
+    type: tui_input
+    with:
+      variable: release_name
+      message: Enter the release name
+      validation:
+        pattern: '^[a-z][a-z0-9-]+$'
+        message: Use lowercase letters, numbers, and hyphens
+
+  - id: environment
+    type: tui_choice
+    with:
+      variable: environment
+      message: Select the deployment environment
+      choices:
+        - label: Staging
+          description: Shared verification environment
+          value: staging
+          default: true
+        - label: Production
+          description: Customer-facing environment
+          value: production
+
+  - id: review
+    type: tui_review
+    with:
+      variable: approved
+      message: Review the release plan
+      format: diff
+      default: false
+      content: |
+        diff --git a/release-plan b/release-plan
+        --- a/release-plan
+        +++ b/release-plan
+        @@ release plan @@
+        - environment: pending
+        + environment: selected above
+        + release: approved after review
+
+  - id: publish
+    type: shell
+    with:
+      command: printf
+      args:
+        - 'Release %s approved for %s\n'
+        - '{{ .vars.release_name }}'
+        - '{{ .vars.environment }}'
+
+  - return:
+      outputs:
+        status: '"approved"'

@@ -28,6 +28,17 @@ jobs:
         run: |
           test "$RESULT" = "ready"
           test "$WUKO_OUTPUTS" = '{"result":"ready"}'
+      - name: install VHS
+        uses: charmbracelet/vhs-action@59641cdc7fadf3978db65eb8c6937ea2752f4ec3
+        with:
+          version: "0.11.0"
+      - name: validate VHS demos
+        run: vhs validate 'docs/demos/*.tape'
+      - name: verify VHS demo assets
+        run: |
+          test -s docs/assets/workflow-picker.gif
+          test -s docs/assets/interactive-workflow.gif
+          test -s docs/assets/workflow-tree.png
       - name: gofmt
         run: |
           test -z "$(gofmt -l .)" || { echo "Unformatted files:"; gofmt -l .; exit 1; }

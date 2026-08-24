@@ -38,6 +38,18 @@ hooks:
 run *args:
     go run . {{ args }}
 
+# Render the checked-in VHS demos. Requires vhs, ttyd, and ffmpeg.
+screenshots: build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for tape in docs/demos/*.tape; do
+        vhs "$tape"
+    done
+
+# Validate VHS tapes without rendering or modifying generated media.
+validate-screenshots:
+    vhs validate 'docs/demos/*.tape'
+
 # Validate the GoReleaser config.
 check:
     goreleaser check

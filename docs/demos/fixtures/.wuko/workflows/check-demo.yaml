@@ -1,0 +1,14 @@
+version: 1
+name: check-demo
+description: Run the local verification checks
+
+steps:
+  - id: checks
+    type: set
+    with:
+      variable: result
+      value: '"passed"'
+
+  - return:
+      outputs:
+        result: vars.result

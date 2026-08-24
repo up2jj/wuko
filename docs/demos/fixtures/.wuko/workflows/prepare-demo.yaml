@@ -1,0 +1,15 @@
+version: 1
+name: prepare-demo
+description: Prepare deterministic local release inputs
+invokable: false
+
+steps:
+  - id: prepare
+    type: set
+    with:
+      variable: prepared
+      value: '"true"'
+
+  - return:
+      outputs:
+        prepared: vars.prepared
