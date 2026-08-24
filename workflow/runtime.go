@@ -14,6 +14,13 @@ import (
 type LoadOptions struct {
 	Vars map[string]any
 	Env  map[string]string
+	// Target selects one declared workflow target before preparation. Empty selects a legacy
+	// workflow without targets and is rejected for workflows that declare targets.
+	Target string
+	// Lifecycle permits loading a targeted workflow for its workflow-level lifecycle hooks. The
+	// loader selects a deterministic target only to provide an ordinary definition for validation;
+	// install and uninstall steps themselves remain workflow-level.
+	Lifecycle bool
 	// BaseEnv overrides the current process environment when non-nil.
 	BaseEnv map[string]string
 	RunDir  string

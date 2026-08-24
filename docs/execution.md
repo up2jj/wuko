@@ -7,12 +7,13 @@ concurrency, scheduling, failure policies, file composition, and remote reuse.
 
 ## Choosing a composition mechanism
 
-Wuko offers three deliberately different ways to compose automation. Choose based on the boundary
+Wuko offers four deliberately different ways to compose automation. Choose based on the boundary
 you need, not merely where the YAML lives:
 
 | Mechanism | Use it when | Boundary and data flow |
 | --- | --- | --- |
 | `depends_on` | Another discovered workflow is a prerequisite | Runs the prerequisite first in its own workflow state; only declared typed workflow outputs cross through `.dependencies` |
+| `targets` | One logical workflow has named execution variants | Selects one target as the ordinary workflow root; targets share workflow identity and templates but use their selected steps and target overrides |
 | `require` | One workflow is too large for one file | Inserts the fragment's steps into the current workflow; steps share the same IDs, variables, environment, state, and execution flow |
 | `uses` | A step-sized capability should be reusable behind a stable interface | Invokes a composite action with declared inputs and outputs; internal steps and variables are isolated from the caller |
 
@@ -63,9 +64,79 @@ steps:
       args: ["{{ .steps.build.artifact }}"]
 ```
 
-As a quick rule: choose `depends_on` for orchestration between discovered workflows, `require` for
-file organization within one workflow, and `uses` for reusable encapsulated behavior. Do not use
-`require` to simulate an action interface, or wrap a simple file split in a separate dependency.
+As a quick rule: choose `depends_on` for orchestration between discovered workflows, `targets` for
+named variants of one workflow, `require` for file organization within one workflow, and `uses`
+for reusable encapsulated behavior. Do not use `require` to simulate an action interface, or wrap a
+simple file split in a separate dependency.
+
+## Workflow targets
+
+Targets divide one workflow file into named executable variants. The declaration is optional: a
+workflow without `targets` keeps the legacy `wuko run workflow` form. Once `targets` is declared,
+the target is required for direct execution:
+
+```yaml
+version: 1
+name: deploy
+description: Deploy the application
+vars:
+  app: web
+env:
+  LOG_LEVEL: info
+form:
+  fields:
+    - name: version
+      type: text
+targets:
+  production:
+    description: Deploy to production
+    vars:
+      environment: production
+    env:
+      REGION: eu-west-1
+    steps:
+      - id: deploy
+        type: shell
+        with: {script: ./deploy production}
+  staging:
+    steps:
+      - id: deploy
+        type: shell
+        with: {script: ./deploy staging}
+```
+
+Run a target with `wuko run deploy production`; `wuko run deploy` reports that a target is
+required. A target workflow cannot be used as a `depends_on` prerequisite, because its target is
+part of the direct invocation. A target may depend on an ordinary workflow, and its own
+`depends_on` and `outputs` replace the corresponding workflow-level maps.
+
+Target resolution happens in the workflow loader and produces one ordinary definition for the
+engine. The sharing rules are intentionally small:
+
+| Declaration | Target behavior |
+| --- | --- |
+| `name`, `version`, `invokable`, `templates` | Shared by every target |
+| `vars`, `env` | Inherited, then merged with target keys taking precedence |
+| `depends_on`, `outputs` | Replaced when declared by the target |
+| `steps`, `finally` | Supplied by the selected target |
+| `description`, `cron`, `timezone`, `form` | Inherited unless overridden by the target |
+| `install`, `uninstall` | Workflow-level lifecycle hooks; they are not target declarations |
+
+Target workflows use target-local `steps` and may not also declare top-level `steps` or
+`finally`. Target names must be valid workflow identifiers. Validation checks every declared
+target, including its steps, output contract, schedule, form, and action references, even when a
+different target is selected. Forms follow the same inheritance rule: `u` in the picker opens the
+selected target's form, and a target form replaces the shared form when present.
+
+Each target can declare its own `cron` and `timezone`. The selected target's schedule is the one
+used by `wuko run`; target schedules are not combined. Lifecycle hooks remain shared at the
+workflow level, including when a targeted workflow is installed or uninstalled.
+
+The bare picker shows one row for a legacy workflow and one row per declared target. Target rows
+show the workflow and target name together. Enter runs the selected row, `u` opens its form, and
+Shift+Enter prints the exact command, such as `wuko run deploy production`. Non-interactive picker
+output also emits one row per target. Shell completion offers target names after the workflow
+name.
 
 ## State and execution order
 

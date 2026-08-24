@@ -17,6 +17,12 @@ func annotateDefinitionLocations(data []byte, definition *Definition, source str
 	definition.Location = nodeLocation(root, source)
 	annotateSteps(definition.Steps, mappingValue(root, "steps"), source)
 	annotateSteps(definition.Finally, mappingValue(root, "finally"), source)
+	targets := mappingValue(root, "targets")
+	for name, target := range definition.Targets {
+		targetNode := mappingValue(targets, name)
+		annotateSteps(target.Steps, mappingValue(targetNode, "steps"), source)
+		annotateSteps(target.Finally, mappingValue(targetNode, "finally"), source)
+	}
 	annotateSteps(definition.Install, mappingValue(root, "install"), source)
 	annotateSteps(definition.Uninstall, mappingValue(root, "uninstall"), source)
 }
@@ -118,6 +124,10 @@ func remapDefinitionLocations(definition *Definition, materializedRoot, logicalS
 	definition.Location.Source = remapSource(definition.Location.Source, materializedRoot, logicalSource)
 	remapStepLocations(definition.Steps, materializedRoot, logicalSource)
 	remapStepLocations(definition.Finally, materializedRoot, logicalSource)
+	for _, target := range definition.Targets {
+		remapStepLocations(target.Steps, materializedRoot, logicalSource)
+		remapStepLocations(target.Finally, materializedRoot, logicalSource)
+	}
 	remapStepLocations(definition.Install, materializedRoot, logicalSource)
 	remapStepLocations(definition.Uninstall, materializedRoot, logicalSource)
 }

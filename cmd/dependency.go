@@ -29,10 +29,15 @@ func resolveDependencyPlan(ctx context.Context, root *workflow.Definition, loade
 		if !exists {
 			return nil, fmt.Errorf("workflow %q not found", name)
 		}
+		if source.Target != "" {
+			return nil, fmt.Errorf("workflow %q declares targets and cannot be used as a dependency", name)
+		}
 		if definition := loaded[source.Path]; definition != nil {
 			return definition, nil
 		}
-		definition, err := loader.Load(ctx, source.Path, options)
+		dependencyOptions := options
+		dependencyOptions.Target = ""
+		definition, err := loader.Load(ctx, source.Path, dependencyOptions)
 		if err != nil {
 			return nil, err
 		}

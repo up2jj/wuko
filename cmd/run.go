@@ -16,9 +16,9 @@ import (
 func newRunCmd(deps dependencies) *cobra.Command {
 	var config runWorkflowConfig
 	command := &cobra.Command{
-		Use:   "run [NAME|URL|GITHUB]",
+		Use:   "run [NAME|URL|GITHUB] [TARGET]",
 		Short: "Run a named or remotely located workflow",
-		Args:  cobra.MaximumNArgs(1),
+		Args:  cobra.MaximumNArgs(2),
 		RunE: func(command *cobra.Command, args []string) error {
 			return runWorkflow(command, deps, args, config)
 		},
@@ -45,6 +45,7 @@ type runWorkflowConfig struct {
 	dryRun        bool
 	once          bool
 	workflowFile  string
+	targetName    string
 }
 
 func runWorkflow(command *cobra.Command, deps dependencies, args []string, config runWorkflowConfig) (runErr error) {
@@ -62,7 +63,7 @@ func runWorkflow(command *cobra.Command, deps dependencies, args []string, confi
 		runErr = errors.Join(runErr, reporters.Finish(workflowName, runState, runErr, config.dryRun))
 	}()
 	diagnostic.Emit(reporters.Diagnostic, diagnostic.Event{Phase: diagnostic.PhaseInvocation, Status: diagnostic.StatusStarted, Message: "run workflow", Attributes: []diagnostic.Attribute{diagnostic.Attr("run_dir", cwd), diagnostic.Attr("variable_files", fmt.Sprint(len(config.variableFiles))), diagnostic.Attr("variables", fmt.Sprint(len(config.variables))), diagnostic.Attr("environment", fmt.Sprint(len(config.environment)))}})
-	if config.workflowFile != "" && len(args) > 0 {
+	if config.workflowFile != "" && len(args) > 1 {
 		return fmt.Errorf("workflow selector and --file cannot be used together")
 	}
 	if config.workflowFile == "" && len(args) == 0 {
@@ -87,8 +88,15 @@ func runWorkflow(command *cobra.Command, deps dependencies, args []string, confi
 			return fmt.Errorf("resolving workflow file %s: %w", config.workflowFile, err)
 		}
 		target.path = path
+		target.targetName = config.targetName
+		if len(args) == 1 {
+			target.targetName = args[0]
+		}
 	} else if workflow.IsRemoteLocator(args[0]) {
 		target = workflowRunTarget{locator: args[0], remote: true}
+		if len(args) == 2 {
+			target.targetName = args[1]
+		}
 	} else {
 		discoveryStarted := time.Now()
 		diagnostic.Emit(reporters.Diagnostic, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusStarted, Time: discoveryStarted, Message: args[0]})
@@ -99,6 +107,9 @@ func runWorkflow(command *cobra.Command, deps dependencies, args []string, confi
 		}
 		diagnostic.Emit(reporters.Diagnostic, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusSucceeded, Duration: time.Since(discoveryStarted), Location: diagnostic.Location{Source: source.Path}, Message: source.Name})
 		target.path = source.Path
+		if len(args) == 2 {
+			target.targetName = args[1]
+		}
 	}
 	loader := deps.loader
 	if loader == nil {
@@ -194,14 +205,20 @@ func releaseDependencyPlan(plans map[*workflow.Definition]*workflow.DependencyPl
 }
 
 type workflowRunTarget struct {
-	path    string
-	locator string
-	remote  bool
+	path       string
+	locator    string
+	remote     bool
+	targetName string
 }
 
 func (target workflowRunTarget) load(ctx context.Context, loader *workflow.Loader, options workflow.LoadOptions) (*workflow.Definition, func(), error) {
 	definition, cleanup, err := target.decode(ctx, loader, options)
 	if err != nil {
+		return nil, func() {}, err
+	}
+	definition, err = definition.SelectTarget(target.targetName)
+	if err != nil {
+		cleanup()
 		return nil, func() {}, err
 	}
 	if err := requireDirectlyInvokable(definition); err != nil {

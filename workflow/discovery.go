@@ -12,6 +12,7 @@ import (
 // Source identifies a discovered workflow and its precedence scope.
 type Source struct {
 	Name        string
+	Target      string
 	Path        string
 	Description string
 	Invokable   bool
@@ -77,23 +78,40 @@ func DiscoverAll(cwd, homeDir, configDir string) ([]Source, error) {
 			if err != nil {
 				return nil, err
 			}
-			sources = append(sources, Source{
-				Name: name, Path: path, Description: definition.Description,
-				Invokable: definition.IsInvokable(), DependsOn: maps.Clone(definition.DependsOn),
-				HasForm: definition.HasForm(), Scope: location.scope,
-			})
+			targetNames := definition.TargetNames()
+			if len(targetNames) == 0 {
+				targetNames = []string{""}
+			}
+			for _, targetName := range targetNames {
+				selected, err := definition.SelectTarget(targetName)
+				if err != nil {
+					return nil, fmt.Errorf("selecting workflow %q target %q: %w", name, targetName, err)
+				}
+				sources = append(sources, Source{
+					Name: name, Target: targetName, Path: path, Description: selected.Description,
+					Invokable: selected.IsInvokable(), DependsOn: maps.Clone(selected.DependsOn),
+					HasForm: selected.HasForm(), Scope: location.scope,
+				})
+			}
 		}
 	}
 
-	effective := make(map[string]struct{}, len(sources))
+	effective := make(map[string]string, len(sources))
 	for i := range sources {
-		if _, exists := effective[sources[i].Name]; exists {
+		path, exists := effective[sources[i].Name]
+		if !exists {
+			sources[i].Effective = true
+			effective[sources[i].Name] = sources[i].Path
 			continue
 		}
-		sources[i].Effective = true
-		effective[sources[i].Name] = struct{}{}
+		sources[i].Effective = path == sources[i].Path
 	}
-	slices.SortStableFunc(sources, func(a, b Source) int { return strings.Compare(a.Name, b.Name) })
+	slices.SortStableFunc(sources, func(a, b Source) int {
+		if comparison := strings.Compare(a.Name, b.Name); comparison != 0 {
+			return comparison
+		}
+		return strings.Compare(a.Target, b.Target)
+	})
 	return sources, nil
 }
 

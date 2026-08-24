@@ -25,15 +25,16 @@ type uiWorkflowConfig struct {
 	environment   []string
 	reporters     []string
 	workflowFile  string
+	targetName    string
 	noOpen        bool
 }
 
 func newUICmd(deps dependencies) *cobra.Command {
 	var config uiWorkflowConfig
 	command := &cobra.Command{
-		Use:   "ui [NAME|URL|GITHUB]",
+		Use:   "ui [NAME|URL|GITHUB] [TARGET]",
 		Short: "Run a workflow through its local browser form",
-		Args:  cobra.MaximumNArgs(1),
+		Args:  cobra.MaximumNArgs(2),
 		RunE: func(command *cobra.Command, args []string) error {
 			return runWorkflowUI(command, deps, args, config)
 		},
@@ -53,7 +54,7 @@ func runWorkflowUI(command *cobra.Command, deps dependencies, args []string, con
 	if err != nil {
 		return err
 	}
-	if config.workflowFile != "" && len(args) > 0 {
+	if config.workflowFile != "" && len(args) > 1 {
 		return fmt.Errorf("workflow selector and --file cannot be used together")
 	}
 	if config.workflowFile == "" && len(args) == 0 {
@@ -75,6 +76,9 @@ func runWorkflowUI(command *cobra.Command, deps dependencies, args []string, con
 	if err != nil {
 		return err
 	}
+	if config.workflowFile != "" && len(args) == 0 {
+		target.targetName = config.targetName
+	}
 	loader := deps.loader
 	if loader == nil {
 		loader = workflow.NewLoader(nil)
@@ -85,6 +89,10 @@ func runWorkflowUI(command *cobra.Command, deps dependencies, args []string, con
 		return err
 	}
 	defer cleanup()
+	definition, err = definition.SelectTarget(target.targetName)
+	if err != nil {
+		return err
+	}
 	if err := requireDirectlyInvokable(definition); err != nil {
 		return err
 	}
@@ -183,16 +191,28 @@ func resolveUIRunTarget(cwd, home, configDir string, args []string, filename str
 		if err != nil {
 			return workflowRunTarget{}, fmt.Errorf("resolving workflow file %s: %w", filename, err)
 		}
-		return workflowRunTarget{path: path}, nil
+		target := workflowRunTarget{path: path}
+		if len(args) == 1 {
+			target.targetName = args[0]
+		}
+		return target, nil
 	}
 	if workflow.IsRemoteLocator(args[0]) {
-		return workflowRunTarget{locator: args[0], remote: true}, nil
+		target := workflowRunTarget{locator: args[0], remote: true}
+		if len(args) == 2 {
+			target.targetName = args[1]
+		}
+		return target, nil
 	}
 	source, err := workflow.Find(cwd, home, configDir, args[0])
 	if err != nil {
 		return workflowRunTarget{}, err
 	}
-	return workflowRunTarget{path: source.Path}, nil
+	target := workflowRunTarget{path: source.Path}
+	if len(args) == 2 {
+		target.targetName = args[1]
+	}
+	return target, nil
 }
 
 func (target workflowRunTarget) decode(ctx context.Context, loader *workflow.Loader, options workflow.LoadOptions) (*workflow.Definition, func(), error) {

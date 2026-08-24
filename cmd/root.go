@@ -295,11 +295,11 @@ func runWorkflowPicker(command *cobra.Command, deps dependencies) error {
 		if !ok {
 			return fmt.Errorf("workflow selection did not contain a workflow")
 		}
-		selectedPath = workflowPickerPath(source.Path)
-		diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseSelection, Status: diagnostic.StatusSucceeded, Location: diagnostic.Location{Source: source.Path}, Message: source.Name})
+		selectedPath = workflowPickerSelectionKey(source)
+		diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseSelection, Status: diagnostic.StatusSucceeded, Location: diagnostic.Location{Source: source.Path}, Message: workflowDisplayName(source)})
 		switch selection.Intent {
 		case tui.SelectionPrimary:
-			runErr := runWorkflow(command, deps, nil, runWorkflowConfig{workflowFile: source.Path})
+			runErr := runWorkflow(command, deps, nil, runWorkflowConfig{workflowFile: source.Path, targetName: source.Target})
 			if runErr == nil {
 				pickerState.markRecent(source.Path)
 				if err := saveWorkflowPickerState(command.Context(), config, pickerState); err != nil {
@@ -312,7 +312,7 @@ func runWorkflowPicker(command *cobra.Command, deps dependencies) error {
 				fmt.Fprintf(command.OutOrStdout(), "Workflow %s does not declare a form.\n", source.Name)
 				continue
 			}
-			return runWorkflowUI(command, deps, nil, uiWorkflowConfig{workflowFile: source.Path})
+			return runWorkflowUI(command, deps, nil, uiWorkflowConfig{workflowFile: source.Path, targetName: source.Target})
 		case tui.SelectionEditor:
 			if err := deps.openEditor(command.Context(), command.InOrStdin(), command.OutOrStdout(), command.ErrOrStderr(), source.Path); err != nil {
 				fmt.Fprintf(command.ErrOrStderr(), "Warning: %v\n", err)
@@ -333,11 +333,15 @@ func runWorkflowPicker(command *cobra.Command, deps dependencies) error {
 				fmt.Fprintf(command.ErrOrStderr(), "Warning: cannot save workflow picker state: %v\n", err)
 			}
 		default:
+			target := ""
+			if source.Target != "" {
+				target = " " + shellQuote(source.Target)
+			}
 			if source.Effective {
-				fmt.Fprintf(command.OutOrStdout(), "wuko run %s\n", shellQuote(source.Name))
+				fmt.Fprintf(command.OutOrStdout(), "wuko run %s%s\n", shellQuote(source.Name), target)
 				return nil
 			}
-			fmt.Fprintf(command.OutOrStdout(), "wuko run --file %s\n", shellQuote(source.Path))
+			fmt.Fprintf(command.OutOrStdout(), "wuko run --file %s%s\n", shellQuote(source.Path), target)
 			return nil
 		}
 	}
@@ -358,6 +362,11 @@ func writeWorkflowSource(writer io.Writer, source workflow.Source) error {
 	}
 	if !source.Invokable {
 		if _, err := fmt.Fprint(writer, "\tnot directly invokable"); err != nil {
+			return err
+		}
+	}
+	if source.Target != "" {
+		if _, err := fmt.Fprintf(writer, "\ttarget %s", source.Target); err != nil {
 			return err
 		}
 	}

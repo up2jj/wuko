@@ -29,7 +29,8 @@ lookup by `NAME` uses the filename stem. The description shown by `wuko list` an
 from the YAML `description` field. Workflows with `depends_on` also show a sorted `depends on ...`
 summary; aliases that differ from their workflow name use `alias=workflow`. The optional
 `invokable` boolean defaults to `true`. Set it to `false` for a workflow that may run only as a
-`depends_on` prerequisite.
+`depends_on` prerequisite. A workflow may optionally declare named `targets`; each target is
+listed as a separate selectable source while retaining the same filename-stem workflow name.
 
 Within a directory, workflow names are sorted before loading. Declaring both `name.yaml` and
 `name.yml` in the same directory is an error.
@@ -70,36 +71,39 @@ home/.wuko/workflows/release.yaml      global, shadowed
 config/wuko/workflows/release.yaml     global, shadowed
 ```
 
-Results are sorted by workflow name after precedence has been applied. Sorting affects display
-order, not which definition wins.
+Results are sorted by workflow name and then target after precedence has been applied. Sorting
+affects display order, not which definition wins.
 
 ## Command behavior
 
-- `wuko run NAME` calls effective discovery and runs the selected source only when it is directly
-  invokable. The same check applies to `wuko run --file`, HTTPS, and `github:` selectors and to all
-  equivalent `wuko ui` selectors.
+- `wuko run NAME [TARGET]` calls effective discovery and runs the selected source only when it is
+  directly invokable. Target workflows require `TARGET`; legacy workflows retain `wuko run NAME`
+  and reject an extra target. The same check and target forwarding apply to `wuko run --file`,
+  HTTPS, and `github:` selectors and to all equivalent `wuko ui` selectors.
 - `wuko list` displays effective sources as tab-separated name, scope, description, and path. A
   workflow with prerequisites has an additional trailing `depends on ...` field; a workflow with
   `invokable: false` has a trailing `not directly invokable` field.
 - `wuko validate NAME` and `wuko tree NAME` use effective discovery; without a name, `validate`
   validates every effective workflow. Both inspection commands accept dependency-only workflows.
 - Bare `wuko` calls `DiscoverAll`. In an interactive terminal it shows effective and shadowed
-  directly invokable sources in the picker, including each workflow's direct prerequisites. Enter
-  runs the exact selected source, `u` opens its form, `e` opens its file in `$VISUAL` or `$EDITOR`,
+  directly invokable sources in the picker, including one row per target and each workflow's direct
+  prerequisites. Enter runs the exact selected source, `u` opens its selected target's form, `e` opens its file in `$VISUAL` or `$EDITOR`,
   `p` toggles a plain-text `[pinned]` marker, and `s` switches between name and recently-used
-  sorting. Shift+Enter prints `wuko run NAME` for an effective source or `wuko run --file PATH`
-  for a shadowed source so the printed command remains unambiguous. Picker state and the selected
-  sort preference are global; successful runs are remembered, and entries for workflows no longer
-  discovered as directly invokable are pruned.
+  sorting. Shift+Enter prints `wuko run NAME [TARGET]` for an effective source or `wuko run --file
+  PATH [TARGET]` for a shadowed source so the printed command remains unambiguous. Picker state
+  and the selected sort preference are global; successful runs are remembered, and entries for
+  workflows no longer discovered as directly invokable are pruned.
 - Bare `wuko` in a non-interactive context prints directly invokable discovered sources as
-  tab-separated rows, appending the dependency summary when present.
-- Shell completion returns effective workflow names. Run and UI completion omit dependency-only
-  workflows; validation and tree completion retain them.
+  tab-separated rows, appending the target name and dependency summary when present. Target rows
+  are emitted separately.
+- Shell completion returns effective workflow names and, after a targeted workflow name, its target
+  names. Run and UI completion omit dependency-only workflows; validation and tree completion
+  retain them.
 - `wuko install SOURCE` saves a standalone local, HTTPS, or `github:` workflow under the current
   directory’s `.wuko/workflows/`; `--global` selects `~/.wuko/workflows/`. The YAML `name` is used
   as the installed filename. `wuko uninstall NAME` uses the same local/global selection, asks for
   confirmation, and accepts `--yes` for non-interactive use.
-- `wuko run --file PATH` bypasses discovery. HTTP and `github:` locators also bypass local
+- `wuko run --file PATH [TARGET]` bypasses discovery. HTTP and `github:` locators also bypass local
   discovery and use the remote workflow loader, but none bypass `invokable: false`.
 
 ## Implementation

@@ -19,9 +19,9 @@ func newTreeCmd(deps dependencies) *cobra.Command {
 	var variables, variableFiles, environment []string
 	var workflowFile string
 	command := &cobra.Command{
-		Use:   "tree [NAME|URL|GITHUB]",
+		Use:   "tree [NAME|URL|GITHUB] [TARGET]",
 		Short: "Display a workflow as a tree",
-		Args:  cobra.MaximumNArgs(1),
+		Args:  cobra.MaximumNArgs(2),
 		RunE: func(command *cobra.Command, args []string) error {
 			cwd, home, config, err := directories(deps)
 			if err != nil {
@@ -29,7 +29,7 @@ func newTreeCmd(deps dependencies) *cobra.Command {
 			}
 			reporter := diagnosticsFor(command, deps, cwd)
 			diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseInvocation, Status: diagnostic.StatusStarted, Message: "render workflow tree", Attributes: []diagnostic.Attribute{diagnostic.Attr("run_dir", cwd)}})
-			if workflowFile != "" && len(args) > 0 {
+			if workflowFile != "" && len(args) > 1 {
 				return fmt.Errorf("workflow selector and --file cannot be used together")
 			}
 			if workflowFile == "" && len(args) == 0 {
@@ -53,6 +53,13 @@ func newTreeCmd(deps dependencies) *cobra.Command {
 				loader = workflow.NewLoader(nil)
 			}
 			options := workflow.LoadOptions{Vars: vars, Env: env, BaseEnv: baseEnv, RunDir: cwd, Diagnostics: reporter}
+			if workflowFile != "" {
+				if len(args) == 1 {
+					options.Target = args[0]
+				}
+			} else if len(args) == 2 {
+				options.Target = args[1]
+			}
 			var definition *workflow.Definition
 			if workflowFile != "" {
 				path, err := filepath.Abs(workflowFile)

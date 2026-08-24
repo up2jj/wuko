@@ -111,7 +111,7 @@ func installWorkflow(command *cobra.Command, deps dependencies, source string, c
 	}
 	defer os.Remove(stage)
 
-	stagedOptions := workflow.LoadOptions{Vars: vars, Env: env, BaseEnv: baseEnv, RunDir: workflowDir, Diagnostics: diagnosticsFor(command, deps, workflowDir)}
+	stagedOptions := workflow.LoadOptions{Vars: vars, Env: env, BaseEnv: baseEnv, RunDir: workflowDir, Diagnostics: diagnosticsFor(command, deps, workflowDir), Lifecycle: true}
 	definition, err := loader.Load(command.Context(), stage, stagedOptions)
 	if err != nil {
 		return fmt.Errorf("preparing workflow for installation: %w", err)
@@ -160,7 +160,7 @@ func uninstallWorkflow(command *cobra.Command, deps dependencies, name string, c
 	if loader == nil {
 		loader = workflow.NewLoader(nil)
 	}
-	loadOptions := workflow.LoadOptions{Vars: vars, Env: env, BaseEnv: baseEnv, RunDir: workflowDir, Diagnostics: diagnosticsFor(command, deps, workflowDir)}
+	loadOptions := workflow.LoadOptions{Vars: vars, Env: env, BaseEnv: baseEnv, RunDir: workflowDir, Diagnostics: diagnosticsFor(command, deps, workflowDir), Lifecycle: true}
 	definition, err := loader.Load(command.Context(), path, loadOptions)
 	if err != nil {
 		return fmt.Errorf("loading workflow %q: %w", name, err)
@@ -232,6 +232,14 @@ func validateStandaloneInstallSource(path string, definition *workflow.Definitio
 	if reference := localActionReference(definition.Finally); reference != "" {
 		return fmt.Errorf("installing local workflow %s: standalone workflows cannot use local action %q", path, reference)
 	}
+	for name, target := range definition.Targets {
+		if reference := localActionReference(target.Steps); reference != "" {
+			return fmt.Errorf("installing local workflow %s: target %q cannot use local action %q", path, name, reference)
+		}
+		if reference := localActionReference(target.Finally); reference != "" {
+			return fmt.Errorf("installing local workflow %s: target %q cannot use local action %q", path, name, reference)
+		}
+	}
 	if reference := localActionReference(definition.Install); reference != "" {
 		return fmt.Errorf("installing local workflow %s: standalone workflows cannot use local action %q", path, reference)
 	}
@@ -243,6 +251,14 @@ func validateStandaloneInstallSource(path string, definition *workflow.Definitio
 	}
 	if script := relativeShellScript(definition.Uninstall); script != "" {
 		return fmt.Errorf("installing local workflow %s: standalone workflows cannot use relative lifecycle script %q", path, script)
+	}
+	for name, target := range definition.Targets {
+		if script := relativeShellScript(target.Steps); script != "" {
+			return fmt.Errorf("installing local workflow %s: target %q cannot use relative shell script %q", path, name, script)
+		}
+		if script := relativeShellScript(target.Finally); script != "" {
+			return fmt.Errorf("installing local workflow %s: target %q cannot use relative shell script %q", path, name, script)
+		}
 	}
 	return nil
 }

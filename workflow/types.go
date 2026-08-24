@@ -43,6 +43,7 @@ type Definition struct {
 	Env         Environment                   `yaml:"env,omitempty"`
 	Steps       []Step                        `yaml:"steps"`
 	Finally     []Step                        `yaml:"finally,omitempty"`
+	Targets     map[string]TargetDefinition   `yaml:"targets,omitempty"`
 	Install     []Step                        `yaml:"install,omitempty"`
 	Uninstall   []Step                        `yaml:"uninstall,omitempty"`
 	Path        string                        `yaml:"-"`
@@ -600,6 +601,19 @@ func loadLocalWithDiagnostics(path string, reporter diagnostic.Reporter, sourceR
 		traceFinish(reporter, requireStarted, diagnostic.PhaseRequire, diagnostic.StatusFailed, definition.Location, definition.Name, "", "", "", err)
 		return nil, fmt.Errorf("loading workflow %s finally: %w", path, err)
 	}
+	for name, target := range definition.Targets {
+		target.Steps, err = expandRequiredSteps(target.Steps, abs, nil)
+		if err != nil {
+			traceFinish(reporter, requireStarted, diagnostic.PhaseRequire, diagnostic.StatusFailed, definition.Location, definition.Name, "", "", "", err)
+			return nil, fmt.Errorf("loading workflow %s target %s: %w", path, name, err)
+		}
+		target.Finally, err = expandRequiredSteps(target.Finally, abs, nil)
+		if err != nil {
+			traceFinish(reporter, requireStarted, diagnostic.PhaseRequire, diagnostic.StatusFailed, definition.Location, definition.Name, "", "", "", err)
+			return nil, fmt.Errorf("loading workflow %s target %s finally: %w", path, name, err)
+		}
+		definition.Targets[name] = target
+	}
 	definition.Install, err = expandRequiredSteps(definition.Install, abs, nil)
 	if err != nil {
 		traceFinish(reporter, requireStarted, diagnostic.PhaseRequire, diagnostic.StatusFailed, definition.Location, definition.Name, "", "", "", err)
@@ -613,6 +627,10 @@ func loadLocalWithDiagnostics(path string, reporter diagnostic.Reporter, sourceR
 	if sourceLabel != "" {
 		remapStepLocations(definition.Steps, sourceRoot, sourceLabel)
 		remapStepLocations(definition.Finally, sourceRoot, sourceLabel)
+		for _, target := range definition.Targets {
+			remapStepLocations(target.Steps, sourceRoot, sourceLabel)
+			remapStepLocations(target.Finally, sourceRoot, sourceLabel)
+		}
 		remapStepLocations(definition.Install, sourceRoot, sourceLabel)
 		remapStepLocations(definition.Uninstall, sourceRoot, sourceLabel)
 	}
@@ -644,6 +662,21 @@ func (definition *Definition) ValidateStructure() error {
 func validateDefinitionStructure(definition *Definition, allowActions bool) error {
 	if err := validateDefinitionHeader(definition); err != nil {
 		return err
+	}
+	if definition.HasTargets() {
+		for _, name := range definition.TargetNames() {
+			if !identifierPattern.MatchString(name) {
+				return fmt.Errorf("invalid target name %q", name)
+			}
+			selected, err := definition.SelectTarget(name)
+			if err != nil {
+				return err
+			}
+			if err := validateDefinitionStructure(selected, allowActions); err != nil {
+				return fmt.Errorf("target %q: %w", name, err)
+			}
+		}
+		return nil
 	}
 	if err := definition.ValidateOutputContract(); err != nil {
 		return err
@@ -1123,8 +1156,17 @@ func validateDefinitionHeader(definition *Definition) error {
 	if definition.Name == "" {
 		return fmt.Errorf("name is required")
 	}
-	if len(definition.Steps) == 0 {
+	if len(definition.Steps) == 0 && !definition.HasTargets() {
 		return fmt.Errorf("at least one step is required")
+	}
+	if definition.HasTargets() && (len(definition.Steps) > 0 || len(definition.Finally) > 0) {
+		return fmt.Errorf("steps and finally cannot be combined with targets")
+	}
+	if len(definition.Targets) == 0 && definition.Targets != nil {
+		return fmt.Errorf("targets must contain at least one target")
+	}
+	if definition.HasTargets() {
+		return nil
 	}
 	if definition.Cron == "" {
 		if definition.Timezone != "" {

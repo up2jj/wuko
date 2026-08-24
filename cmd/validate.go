@@ -14,9 +14,9 @@ import (
 func newValidateCmd(deps dependencies) *cobra.Command {
 	var variables, variableFiles, environment []string
 	command := &cobra.Command{
-		Use:   "validate [NAME]",
+		Use:   "validate [NAME] [TARGET]",
 		Short: "Validate one or all effective workflows",
-		Args:  cobra.MaximumNArgs(1),
+		Args:  cobra.MaximumNArgs(2),
 		RunE: func(command *cobra.Command, args []string) error {
 			cwd, home, config, err := directories(deps)
 			if err != nil {
@@ -39,7 +39,7 @@ func newValidateCmd(deps dependencies) *cobra.Command {
 			var sources []workflow.Source
 			discoveryStarted := time.Now()
 			diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusStarted, Time: discoveryStarted, Message: "discovering workflows"})
-			if len(args) == 1 {
+			if len(args) > 0 {
 				source, err := workflow.Find(cwd, home, config, args[0])
 				if err != nil {
 					diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusFailed, Duration: time.Since(discoveryStarted), Error: err})
@@ -59,11 +59,18 @@ func newValidateCmd(deps dependencies) *cobra.Command {
 				if loader == nil {
 					loader = workflow.NewLoader(nil)
 				}
-				definition, err := loader.Load(command.Context(), source.Path, workflow.LoadOptions{Vars: vars, Env: env, BaseEnv: baseEnv, RunDir: cwd, Diagnostics: reporter})
+				loadOptions := workflow.LoadOptions{Vars: vars, Env: env, BaseEnv: baseEnv, RunDir: cwd, Diagnostics: reporter}
+				if len(args) == 0 {
+					loadOptions.Target = source.Target
+				}
+				if len(args) == 2 {
+					loadOptions.Target = args[1]
+				}
+				definition, err := loader.Load(command.Context(), source.Path, loadOptions)
 				if err != nil {
 					return err
 				}
-				plan, err := resolveDependencyPlan(command.Context(), definition, loader, workflow.LoadOptions{Vars: vars, Env: env, BaseEnv: baseEnv, RunDir: cwd, Diagnostics: reporter}, cwd, home, config)
+				plan, err := resolveDependencyPlan(command.Context(), definition, loader, loadOptions, cwd, home, config)
 				if err != nil {
 					return err
 				}
@@ -78,7 +85,11 @@ func newValidateCmd(deps dependencies) *cobra.Command {
 				if err := validateDependencyPlan(command.Context(), plan, func() *engine.Engine { return workflowEngine(deps) }, optionsFor); err != nil {
 					return err
 				}
-				fmt.Fprintf(command.OutOrStdout(), "%s: valid\n", source.Name)
+				label := source.Name
+				if loadOptions.Target != "" {
+					label += " (" + loadOptions.Target + ")"
+				}
+				fmt.Fprintf(command.OutOrStdout(), "%s: valid\n", label)
 			}
 			return nil
 		},
@@ -91,7 +102,7 @@ func newValidateCmd(deps dependencies) *cobra.Command {
 }
 
 func workflowCompletion(deps dependencies, invokableOnly bool) cobra.CompletionFunc {
-	return func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
+	return func(_ *cobra.Command, args []string, _ string) ([]string, cobra.ShellCompDirective) {
 		cwd, home, config, err := directories(deps)
 		if err != nil {
 			return nil, cobra.ShellCompDirectiveError
@@ -100,11 +111,34 @@ func workflowCompletion(deps dependencies, invokableOnly bool) cobra.CompletionF
 		if err != nil {
 			return nil, cobra.ShellCompDirectiveError
 		}
+		if len(args) > 0 {
+			values := make([]string, 0)
+			seen := make(map[string]struct{})
+			for _, source := range sources {
+				if source.Name != args[0] || source.Target == "" {
+					continue
+				}
+				if invokableOnly && !source.Invokable {
+					continue
+				}
+				if _, exists := seen[source.Target]; exists {
+					continue
+				}
+				seen[source.Target] = struct{}{}
+				values = append(values, source.Target+"\t"+source.Description)
+			}
+			return values, cobra.ShellCompDirectiveNoFileComp
+		}
 		values := make([]string, 0, len(sources))
+		seen := make(map[string]struct{})
 		for _, source := range sources {
 			if invokableOnly && !source.Invokable {
 				continue
 			}
+			if _, exists := seen[source.Name]; exists {
+				continue
+			}
+			seen[source.Name] = struct{}{}
 			values = append(values, source.Name+"\t"+source.Description)
 		}
 		return values, cobra.ShellCompDirectiveNoFileComp

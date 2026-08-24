@@ -184,7 +184,7 @@ func workflowPickerOptions(sources []workflow.Source, state workflowPickerState,
 	options := make([]tui.Option, len(sources))
 	for index, source := range sources {
 		path := workflowPickerPath(source.Path)
-		options[index] = workflowPickerOptionWithState(source, state.isPinned(path), path == selectedPath)
+		options[index] = workflowPickerOptionWithState(source, state.isPinned(path), workflowPickerSelectionKey(source) == selectedPath)
 	}
 	return options
 }
@@ -195,6 +195,11 @@ func workflowPickerOptionWithState(source workflow.Source, pinned, selected bool
 		description = "(no description)"
 	}
 	parts := []string{source.Scope, description}
+	label := source.Name
+	if source.Target != "" {
+		label += " " + source.Target
+		parts = append(parts, "target: "+source.Target)
+	}
 	if source.HasForm {
 		parts = append(parts, "form")
 	}
@@ -204,7 +209,18 @@ func workflowPickerOptionWithState(source workflow.Source, pinned, selected bool
 	if pinned {
 		parts = append(parts, "[pinned]")
 	}
-	return tui.Option{Label: source.Name, Description: strings.Join(parts, " • "), Path: source.Path, Value: source, Default: selected}
+	return tui.Option{Label: label, Description: strings.Join(parts, " • "), Path: source.Path, Value: source, Default: selected}
+}
+
+func workflowPickerSelectionKey(source workflow.Source) string {
+	return workflowPickerPath(source.Path) + "\x00" + source.Target
+}
+
+func workflowDisplayName(source workflow.Source) string {
+	if source.Target == "" {
+		return source.Name
+	}
+	return source.Name + " " + source.Target
 }
 
 func normalizeWorkflowPaths(paths []string) []string {

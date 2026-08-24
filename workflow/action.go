@@ -226,6 +226,16 @@ func (loader *Loader) Load(ctx context.Context, filename string, options LoadOpt
 		traceFinish(options.Diagnostics, started, diagnostic.PhaseLoad, diagnostic.StatusFailed, diagnostic.Location{Source: displaySource}, "", "", "", "", nil)
 		return nil, err
 	}
+	targetName := options.Target
+	if options.Lifecycle && targetName == "" && definition.HasTargets() {
+		targetName = definition.TargetNames()[0]
+	}
+	selected, err := definition.SelectTarget(targetName)
+	if err != nil {
+		traceFinish(options.Diagnostics, started, diagnostic.PhaseLoad, diagnostic.StatusFailed, definition.Location, definition.Name, "", "", "", err)
+		return nil, err
+	}
+	definition = selected
 	if err := loader.Prepare(ctx, definition, options); err != nil {
 		traceFinish(options.Diagnostics, started, diagnostic.PhaseLoad, diagnostic.StatusFailed, definition.Location, definition.Name, "", "", "", nil)
 		return nil, err

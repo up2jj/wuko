@@ -88,6 +88,44 @@ func TestDiscoverIncludesWorkflowDependencies(t *testing.T) {
 	}
 }
 
+func TestDiscoverExpandsWorkflowTargets(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, ".wuko", "workflows")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data := `version: 1
+name: deploy
+description: shared
+targets:
+  production:
+    description: production
+    steps:
+      - id: run
+        type: shell
+        with: {script: true}
+  staging:
+    description: staging
+    steps:
+      - id: run
+        type: shell
+        with: {script: true}
+`
+	if err := os.WriteFile(filepath.Join(dir, "deploy.yaml"), []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sources, err := Discover(root, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sources) != 2 || sources[0].Target != "production" || sources[1].Target != "staging" {
+		t.Fatalf("sources = %#v", sources)
+	}
+	if sources[0].Description != "production" || sources[1].Description != "staging" {
+		t.Fatalf("target descriptions = %#v", sources)
+	}
+}
+
 func TestDiscoverIncludesDependencyOnlyWorkflowMetadata(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, ".wuko", "workflows")
