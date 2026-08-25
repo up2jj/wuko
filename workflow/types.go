@@ -8,6 +8,7 @@ import (
 	"math"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -1183,7 +1184,20 @@ func validateDefinitionHeader(definition *Definition) error {
 // ValidEnvironmentName reports whether name is a portable POSIX-style environment name.
 func ValidEnvironmentName(name string) bool { return environmentPattern.MatchString(name) }
 
-// ValidWorkflowName reports whether name can be resolved through workflow discovery.
+// ValidWorkflowName reports whether name can be used as a flat installed workflow filename.
 func ValidWorkflowName(name string) bool {
-	return name != "" && filepath.Base(name) == name && !strings.ContainsAny(name, `/\\`)
+	return ValidWorkflowSelector(name) && !strings.ContainsAny(name, `/\\`)
+}
+
+// ValidWorkflowSelector reports whether name can safely identify a recursively discovered workflow.
+func ValidWorkflowSelector(name string) bool {
+	if name == "" || strings.ContainsAny(name, "\\\x00") || filepath.IsAbs(name) || path.IsAbs(name) || path.Clean(name) != name {
+		return false
+	}
+	for _, component := range strings.Split(name, "/") {
+		if component == "" || component == "." || component == ".." {
+			return false
+		}
+	}
+	return true
 }

@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -43,37 +44,17 @@ func DiscoverAll(cwd, homeDir, configDir string) ([]Source, error) {
 	locations := discoveryLocations(cwd, homeDir, configDir)
 	var sources []Source
 	for _, location := range locations {
-		entries, err := os.ReadDir(location.dir)
+		files, err := discoverWorkflowFiles(location.dir)
 		if err != nil {
-			if os.IsNotExist(err) {
+			if errors.Is(err, os.ErrNotExist) {
 				continue
 			}
-			return nil, fmt.Errorf("reading workflow directory %s: %w", location.dir, err)
+			return nil, err
 		}
 
-		inDir := make(map[string]string)
-		for _, entry := range entries {
-			if entry.IsDir() {
-				continue
-			}
-			ext := strings.ToLower(filepath.Ext(entry.Name()))
-			if ext != ".yaml" && ext != ".yml" {
-				continue
-			}
-			name := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
-			if previous, ok := inDir[name]; ok {
-				return nil, fmt.Errorf("workflow %q is declared twice in %s (%s and %s)", name, location.dir, previous, entry.Name())
-			}
-			inDir[name] = entry.Name()
-		}
-
-		names := make([]string, 0, len(inDir))
-		for name := range inDir {
-			names = append(names, name)
-		}
-		slices.Sort(names)
-		for _, name := range names {
-			path := filepath.Join(location.dir, inDir[name])
+		for _, file := range files {
+			name := file.name
+			path := file.path
 			definition, err := loadLocal(path)
 			if err != nil {
 				return nil, err
@@ -115,9 +96,60 @@ func DiscoverAll(cwd, homeDir, configDir string) ([]Source, error) {
 	return sources, nil
 }
 
+type discoveredWorkflowFile struct {
+	name string
+	path string
+}
+
+func discoverWorkflowFiles(root string) ([]discoveredWorkflowFile, error) {
+	var files []discoveredWorkflowFile
+	var visit func(string, string) error
+	visit = func(directory, relativeDirectory string) error {
+		entries, err := os.ReadDir(directory)
+		if err != nil {
+			return fmt.Errorf("reading workflow directory %s: %w", directory, err)
+		}
+		inDir := make(map[string]string)
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			ext := strings.ToLower(filepath.Ext(entry.Name()))
+			if ext != ".yaml" && ext != ".yml" {
+				continue
+			}
+			name := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
+			if previous, ok := inDir[name]; ok {
+				return fmt.Errorf("workflow %q is declared twice in %s (%s and %s)", name, directory, previous, entry.Name())
+			}
+			inDir[name] = entry.Name()
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			relativePath := filepath.Join(relativeDirectory, entry.Name())
+			if err := visit(filepath.Join(directory, entry.Name()), relativePath); err != nil {
+				return err
+			}
+		}
+		for _, entryName := range inDir {
+			relativePath := filepath.Join(relativeDirectory, entryName)
+			name := strings.TrimSuffix(filepath.ToSlash(relativePath), filepath.Ext(relativePath))
+			files = append(files, discoveredWorkflowFile{name: name, path: filepath.Join(root, relativePath)})
+		}
+		return nil
+	}
+	if err := visit(root, ""); err != nil {
+		return nil, err
+	}
+	slices.SortStableFunc(files, func(a, b discoveredWorkflowFile) int { return strings.Compare(a.name, b.name) })
+	return files, nil
+}
+
 // Find returns the effective workflow matching name.
 func Find(cwd, homeDir, configDir, name string) (Source, error) {
-	if !ValidWorkflowName(name) {
+	if !ValidWorkflowSelector(name) {
 		return Source{}, fmt.Errorf("invalid workflow name %q", name)
 	}
 	sources, err := Discover(cwd, homeDir, configDir)

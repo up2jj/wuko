@@ -20,9 +20,11 @@ the directory inputs are visited only once.
 
 ## Files and names
 
-Each existing directory contributes files whose extension is `.yaml` or `.yml` (case-insensitive).
-Directories are skipped. The workflow selector is the filename stem, so `deploy.yaml` is run with
-`wuko run deploy`.
+Each existing directory contributes files whose extension is `.yaml` or `.yml` (case-insensitive),
+including nested directories. The workflow selector is the slash-separated relative filename stem,
+so `deploy.yaml` is run with `wuko run deploy` and `marketplace/release.yaml` with
+`wuko run marketplace/release`. This lets marketplace installs live in repository-named
+subdirectories without colliding with flat legacy workflows.
 
 The YAML `name` field is still required and validated, but it is metadata for the loaded workflow;
 lookup by `NAME` uses the filename stem. The description shown by `wuko list` and the picker comes
@@ -32,8 +34,9 @@ summary; aliases that differ from their workflow name use `alias=workflow`. The 
 `depends_on` prerequisite. A workflow may optionally declare named `targets`; each target is
 listed as a separate selectable source while retaining the same filename-stem workflow name.
 
-Within a directory, workflow names are sorted before loading. Declaring both `name.yaml` and
-`name.yml` in the same directory is an error.
+Within each directory, workflow names are sorted before loading. Declaring both `name.yaml` and
+`name.yml` in the same directory is an error. Selectors reject absolute paths and traversal
+components.
 
 ## What discovery loads
 
@@ -101,7 +104,13 @@ affects display order, not which definition wins.
   retain them.
 - `wuko install SOURCE` saves a standalone local, HTTPS, or `github:` workflow under the current
   directory’s `.wuko/workflows/`; `--global` selects `~/.wuko/workflows/`. The YAML `name` is used
-  as the installed filename. `wuko uninstall NAME` uses the same local/global selection, asks for
+  as the installed filename. An HTTPS repository URL with a root `manifest.json` is treated as a
+  marketplace: the searchable picker supports space to toggle, `ctrl+a`/`ctrl+x` for visible bulk
+  selection, and Enter to install. Selected marketplace workflows are stored below a
+  repository-named subdirectory, with a marker preventing different repositories from sharing it.
+  `wuko marketplace init` creates a version-1 manifest, while `wuko marketplace build` recursively
+  discovers `.wuko/workflows/` and atomically rebuilds it. `wuko uninstall NAME` accepts nested
+  selectors such as `marketplace/release`, uses the same local/global selection, asks for
   confirmation, and accepts `--yes` for non-interactive use.
 - `wuko run --file PATH [TARGET]` bypasses discovery. HTTP and `github:` locators also bypass local
   discovery and use the remote workflow loader, but none bypass `invokable: false`.

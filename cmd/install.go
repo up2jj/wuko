@@ -2,13 +2,18 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/up2jj/wuko/engine"
+	"github.com/up2jj/wuko/tui"
 	"github.com/up2jj/wuko/workflow"
 	"gopkg.in/yaml.v3"
 )
@@ -78,26 +83,159 @@ func installWorkflow(command *cobra.Command, deps dependencies, source string, c
 	if loader == nil {
 		loader = workflow.NewLoader(nil)
 	}
-	loadOptions := workflow.LoadOptions{Vars: vars, Env: env, BaseEnv: baseEnv, RunDir: cwd, Diagnostics: diagnosticsFor(command, deps, cwd)}
-	sourceDefinition, cleanup, err := decodeInstallSource(command.Context(), loader, source, loadOptions)
+	invocation := installInvocation{cwd: cwd, home: home, configDir: configDir, vars: vars, env: env, baseEnv: baseEnv, loader: loader}
+	if isHTTPSURL(source) {
+		manifest, manifestErr := loader.DiscoverMarketplace(command.Context(), source)
+		if manifestErr == nil {
+			return installMarketplace(command, deps, source, config, invocation, manifest)
+		}
+		if !errors.Is(manifestErr, workflow.ErrMarketplaceNotFound) {
+			return manifestErr
+		}
+	}
+	return installSingleWorkflow(command, deps, source, config, invocation, workflowStorageDir(cwd, home, config.global))
+}
+
+type installInvocation struct {
+	cwd       string
+	home      string
+	configDir string
+	vars      map[string]any
+	env       map[string]string
+	baseEnv   map[string]string
+	loader    *workflow.Loader
+}
+
+type preparedInstallSource struct {
+	definition *workflow.Definition
+	data       []byte
+	cleanup    func()
+}
+
+type preparedMarketplaceWorkflow struct {
+	path   string
+	source *preparedInstallSource
+}
+
+func installMarketplace(command *cobra.Command, deps dependencies, source string, config workflowLifecycleConfig, invocation installInvocation, manifest workflow.MarketplaceManifest) error {
+	if len(manifest.Workflows) == 0 {
+		return fmt.Errorf("marketplace %s contains no workflows", source)
+	}
+	if deps.isInteractive == nil || !deps.isInteractive(command.InOrStdin()) {
+		return fmt.Errorf("marketplace install requires an interactive terminal; rerun with a terminal to choose workflows")
+	}
+	options := make([]tui.Option, len(manifest.Workflows))
+	for index, item := range manifest.Workflows {
+		label := item.Name
+		if label == "" {
+			label = strings.TrimSuffix(path.Base(item.Path), path.Ext(item.Path))
+		}
+		options[index] = tui.Option{Label: label, Description: item.Description, Path: item.Path, Value: item}
+	}
+	selectMany := deps.selectMany
+	if selectMany == nil {
+		selectMany = tui.SelectMany
+	}
+	selected, err := selectMany(command.Context(), command.InOrStdin(), command.OutOrStdout(), "Marketplace workflows", options)
+	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			return nil
+		}
+		return fmt.Errorf("selecting marketplace workflows: %w", err)
+	}
+	selectedSet := make(map[int]struct{}, len(selected))
+	for _, index := range selected {
+		if index < 0 || index >= len(manifest.Workflows) {
+			return fmt.Errorf("marketplace picker returned invalid workflow index %d", index)
+		}
+		selectedSet[index] = struct{}{}
+	}
+	if len(selectedSet) == 0 {
+		return fmt.Errorf("select at least one marketplace workflow")
+	}
+	prepared := make([]preparedMarketplaceWorkflow, 0, len(selectedSet))
+	defer func() {
+		for _, item := range prepared {
+			item.source.cleanup()
+		}
+	}()
+	seenNames := make(map[string]string, len(selectedSet))
+	for index, item := range manifest.Workflows {
+		if _, selected := selectedSet[index]; !selected {
+			continue
+		}
+		workflowURL, err := workflow.ResolveMarketplaceWorkflow(source, item)
+		if err != nil {
+			return fmt.Errorf("resolving marketplace workflow %q: %w", item.Path, err)
+		}
+		preparedSource, err := prepareInstallSource(command, deps, invocation, workflowURL)
+		if err != nil {
+			return fmt.Errorf("preparing marketplace workflow %q: %w", item.Path, err)
+		}
+		if previous, exists := seenNames[preparedSource.definition.Name]; exists {
+			preparedSource.cleanup()
+			return fmt.Errorf("marketplace workflows %q and %q both define workflow name %q", previous, item.Path, preparedSource.definition.Name)
+		}
+		seenNames[preparedSource.definition.Name] = item.Path
+		prepared = append(prepared, preparedMarketplaceWorkflow{path: item.Path, source: preparedSource})
+	}
+	repositoryName, err := workflow.MarketplaceRepositoryName(source)
 	if err != nil {
 		return err
 	}
-	defer cleanup()
+	canonicalURL, err := workflow.MarketplaceURL(source)
+	if err != nil {
+		return err
+	}
+	root := workflowStorageDir(invocation.cwd, invocation.home, config.global)
+	repositoryDir, err := prepareMarketplaceDirectory(root, repositoryName, canonicalURL)
+	if err != nil {
+		return err
+	}
+	for _, item := range prepared {
+		if err := installPreparedWorkflow(command, deps, config, invocation, repositoryDir, item.source); err != nil {
+			return fmt.Errorf("installing marketplace workflow %q: %w", item.path, err)
+		}
+	}
+	return nil
+}
+
+func installSingleWorkflow(command *cobra.Command, deps dependencies, source string, config workflowLifecycleConfig, invocation installInvocation, workflowDir string) error {
+	prepared, err := prepareInstallSource(command, deps, invocation, source)
+	if err != nil {
+		return err
+	}
+	defer prepared.cleanup()
+	return installPreparedWorkflow(command, deps, config, invocation, workflowDir, prepared)
+}
+
+func prepareInstallSource(command *cobra.Command, deps dependencies, invocation installInvocation, source string) (*preparedInstallSource, error) {
+	loadOptions := workflow.LoadOptions{Vars: invocation.vars, Env: invocation.env, BaseEnv: invocation.baseEnv, RunDir: invocation.cwd, Diagnostics: diagnosticsFor(command, deps, invocation.cwd)}
+	sourceDefinition, cleanup, err := decodeInstallSource(command.Context(), invocation.loader, source, loadOptions)
+	if err != nil {
+		return nil, err
+	}
 	if !workflow.ValidWorkflowName(sourceDefinition.Name) {
-		return fmt.Errorf("workflow name %q cannot be used as an installed filename", sourceDefinition.Name)
+		cleanup()
+		return nil, fmt.Errorf("workflow name %q cannot be used as an installed filename", sourceDefinition.Name)
 	}
 	data, err := os.ReadFile(sourceDefinition.Path)
 	if err != nil {
-		return fmt.Errorf("reading workflow source %s: %w", sourceDefinition.Path, err)
+		cleanup()
+		return nil, fmt.Errorf("reading workflow source %s: %w", sourceDefinition.Path, err)
 	}
 	if !workflow.IsRemoteLocator(source) {
 		if err := validateStandaloneInstallSource(sourceDefinition.Path, sourceDefinition); err != nil {
-			return err
+			cleanup()
+			return nil, err
 		}
 	}
+	return &preparedInstallSource{definition: sourceDefinition, data: data, cleanup: cleanup}, nil
+}
 
-	workflowDir := workflowStorageDir(cwd, home, config.global)
+func installPreparedWorkflow(command *cobra.Command, deps dependencies, config workflowLifecycleConfig, invocation installInvocation, workflowDir string, prepared *preparedInstallSource) error {
+	sourceDefinition := prepared.definition
+	data := prepared.data
 	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
 		return fmt.Errorf("creating workflow directory %s: %w", workflowDir, err)
 	}
@@ -111,12 +249,12 @@ func installWorkflow(command *cobra.Command, deps dependencies, source string, c
 	}
 	defer os.Remove(stage)
 
-	stagedOptions := workflow.LoadOptions{Vars: vars, Env: env, BaseEnv: baseEnv, RunDir: workflowDir, Diagnostics: diagnosticsFor(command, deps, workflowDir), Lifecycle: true}
-	definition, err := loader.Load(command.Context(), stage, stagedOptions)
+	stagedOptions := workflow.LoadOptions{Vars: invocation.vars, Env: invocation.env, BaseEnv: invocation.baseEnv, RunDir: workflowDir, Diagnostics: diagnosticsFor(command, deps, workflowDir), Lifecycle: true}
+	definition, err := invocation.loader.Load(command.Context(), stage, stagedOptions)
 	if err != nil {
 		return fmt.Errorf("preparing workflow for installation: %w", err)
 	}
-	options := lifecycleEngineOptions(command, deps, definition, vars, env, baseEnv, workflowDir, configDir)
+	options := lifecycleEngineOptions(command, deps, definition, invocation.vars, invocation.env, invocation.baseEnv, workflowDir, invocation.configDir)
 	engineFor := workflowEngine(deps)
 	if err := engineFor.Validate(command.Context(), definition, options); err != nil {
 		return fmt.Errorf("validating workflow %q: %w", definition.Name, err)
@@ -127,12 +265,79 @@ func installWorkflow(command *cobra.Command, deps dependencies, source string, c
 	if err := replaceWorkflowFile(stage, target); err != nil {
 		return fmt.Errorf("installing workflow %q: %w", definition.Name, err)
 	}
-	fmt.Fprintf(command.OutOrStdout(), "installed %s in %s\n", definition.Name, target)
-	return nil
+	_, err = fmt.Fprintf(command.OutOrStdout(), "installed %s in %s\n", definition.Name, target)
+	return err
+}
+
+const marketplaceMarkerName = ".wuko-marketplace.json"
+
+type marketplaceInstallMarker struct {
+	Version int    `json:"version"`
+	URL     string `json:"url"`
+}
+
+func prepareMarketplaceDirectory(root, repositoryName, canonicalURL string) (string, error) {
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return "", fmt.Errorf("creating workflow directory %s: %w", root, err)
+	}
+	directory := filepath.Join(root, repositoryName)
+	info, err := os.Stat(directory)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return "", fmt.Errorf("checking marketplace directory %s: %w", directory, err)
+		}
+		if err := os.Mkdir(directory, 0o755); err != nil {
+			return "", fmt.Errorf("creating marketplace directory %s: %w", directory, err)
+		}
+		if err := writeMarketplaceMarker(directory, canonicalURL); err != nil {
+			return "", err
+		}
+		return directory, nil
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("marketplace repository path %s is not a directory", directory)
+	}
+	markerPath := filepath.Join(directory, marketplaceMarkerName)
+	markerData, markerErr := os.ReadFile(markerPath)
+	if markerErr == nil {
+		var marker marketplaceInstallMarker
+		decoder := json.NewDecoder(strings.NewReader(string(markerData)))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&marker); err != nil {
+			return "", fmt.Errorf("reading marketplace marker %s: %w", markerPath, err)
+		}
+		if marker.Version != workflow.MarketplaceManifestVersion || marker.URL != canonicalURL {
+			return "", fmt.Errorf("marketplace directory %s belongs to a different marketplace", directory)
+		}
+		return directory, nil
+	}
+	if !os.IsNotExist(markerErr) {
+		return "", fmt.Errorf("checking marketplace marker %s: %w", markerPath, markerErr)
+	}
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		return "", fmt.Errorf("reading marketplace directory %s: %w", directory, err)
+	}
+	if len(entries) != 0 {
+		return "", fmt.Errorf("marketplace directory %s exists without a matching marker; refusing to mix repositories", directory)
+	}
+	if err := writeMarketplaceMarker(directory, canonicalURL); err != nil {
+		return "", err
+	}
+	return directory, nil
+}
+
+func writeMarketplaceMarker(directory, canonicalURL string) error {
+	return writeJSONAtomically(filepath.Join(directory, marketplaceMarkerName), marketplaceInstallMarker{Version: workflow.MarketplaceManifestVersion, URL: canonicalURL})
+}
+
+func isHTTPSURL(source string) bool {
+	parsed, err := url.Parse(source)
+	return err == nil && parsed.Scheme == "https" && parsed.Host != ""
 }
 
 func uninstallWorkflow(command *cobra.Command, deps dependencies, name string, config workflowLifecycleConfig) error {
-	if !workflow.ValidWorkflowName(name) {
+	if !workflow.ValidWorkflowSelector(name) {
 		return fmt.Errorf("invalid workflow name %q", name)
 	}
 	cwd, home, configDir, err := directories(deps)

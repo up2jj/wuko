@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -40,6 +41,25 @@ func (item listOption) FilterValue() string {
 	return strings.Join([]string{item.Label, item.Option.Description, item.Option.Path}, " ")
 }
 
+type multiListOption struct {
+	Option
+	index    int
+	selected bool
+}
+
+func (item multiListOption) Title() string {
+	marker := "[ ] "
+	if item.selected {
+		marker = "[x] "
+	}
+	return marker + item.Label
+}
+
+func (item multiListOption) Description() string { return item.Option.Description }
+func (item multiListOption) FilterValue() string {
+	return strings.Join([]string{item.Label, item.Option.Description, item.Option.Path}, " ")
+}
+
 type selectionDelegate struct {
 	base list.DefaultDelegate
 }
@@ -57,15 +77,26 @@ func (delegate selectionDelegate) Update(message tea.Msg, model *list.Model) tea
 }
 
 func (delegate selectionDelegate) Render(writer io.Writer, model list.Model, index int, item list.Item) {
-	option, ok := item.(listOption)
-	if !ok || model.Width() <= 0 {
+	var option Option
+	var title string
+	switch item := item.(type) {
+	case listOption:
+		option = item.Option
+		title = item.Title()
+	case multiListOption:
+		option = item.Option
+		title = item.Title()
+	default:
+		return
+	}
+	if model.Width() <= 0 {
 		return
 	}
 
 	styles := &delegate.base.Styles
 	textWidth := model.Width() - styles.NormalTitle.GetPaddingLeft() - styles.NormalTitle.GetPaddingRight()
-	title := ansi.Truncate(option.Title(), textWidth, "…")
-	description := ansi.Truncate(option.Description(), textWidth, "…")
+	title = ansi.Truncate(title, textWidth, "…")
+	description := ansi.Truncate(option.Description, textWidth, "…")
 	if option.Path != "" {
 		description += "\n" + option.Path
 	}
@@ -168,6 +199,136 @@ func (m selectionModel) View() tea.View {
 		return tea.NewView("")
 	}
 	return tea.NewView(m.list.View())
+}
+
+type multiSelectionModel struct {
+	list      list.Model
+	options   []Option
+	selected  map[int]bool
+	title     string
+	done      bool
+	cancelled bool
+}
+
+func newMultiSelectionModel(title string, options []Option) multiSelectionModel {
+	items := make([]list.Item, len(options))
+	selected := make(map[int]bool, len(options))
+	for index, option := range options {
+		selected[index] = option.Default
+		items[index] = multiListOption{Option: option, index: index, selected: option.Default}
+	}
+	delegate := newSelectionDelegate()
+	workflowList := list.New(items, delegate, 80, 20)
+	workflowList.Title = multiSelectionTitle(title, selected)
+	toggle := key.NewBinding(key.WithKeys(" ", "space"), key.WithHelp("space", "toggle"))
+	selectAll := key.NewBinding(key.WithKeys("ctrl+a"), key.WithHelp("ctrl+a", "select visible"))
+	clear := key.NewBinding(key.WithKeys("ctrl+x"), key.WithHelp("ctrl+x", "clear visible"))
+	confirm := key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "install"))
+	cancel := key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "cancel"))
+	workflowList.AdditionalShortHelpKeys = func() []key.Binding {
+		return []key.Binding{toggle, selectAll, clear, confirm, cancel}
+	}
+	workflowList.AdditionalFullHelpKeys = func() []key.Binding {
+		return []key.Binding{toggle, selectAll, clear, confirm, cancel}
+	}
+	return multiSelectionModel{list: workflowList, options: options, selected: selected, title: title}
+}
+
+func multiSelectionTitle(title string, selected map[int]bool) string {
+	count := 0
+	for _, isSelected := range selected {
+		if isSelected {
+			count++
+		}
+	}
+	return fmt.Sprintf("%s (selected: %d)", title, count)
+}
+
+func (m *multiSelectionModel) updateItem(index int) tea.Cmd {
+	return m.list.SetItem(index, multiListOption{Option: m.options[index], index: index, selected: m.selected[index]})
+}
+
+func (m *multiSelectionModel) setVisible(selected bool) tea.Cmd {
+	var command tea.Cmd
+	for _, item := range m.list.VisibleItems() {
+		option, ok := item.(multiListOption)
+		if !ok || option.Disabled {
+			continue
+		}
+		m.selected[option.index] = selected
+		command = m.updateItem(option.index)
+	}
+	m.list.Title = multiSelectionTitle(m.title, m.selected)
+	return command
+}
+
+func (m multiSelectionModel) selectedIndexes() []int {
+	result := make([]int, 0, len(m.selected))
+	for index, selected := range m.selected {
+		if selected && !m.options[index].Disabled {
+			result = append(result, index)
+		}
+	}
+	slices.Sort(result)
+	return result
+}
+
+func (m multiSelectionModel) Init() tea.Cmd { return nil }
+
+func (m multiSelectionModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
+	if keyMessage, ok := message.(tea.KeyPressMsg); ok {
+		if keyMessage.String() == "ctrl+c" {
+			m.cancelled = true
+			return m, tea.Quit
+		}
+		if !m.list.SettingFilter() {
+			switch keyMessage.String() {
+			case " ", "space":
+				if option, ok := m.list.SelectedItem().(multiListOption); ok && !option.Disabled {
+					m.selected[option.index] = !m.selected[option.index]
+					command := m.updateItem(option.index)
+					m.list.Title = multiSelectionTitle(m.title, m.selected)
+					return m, command
+				}
+			case "ctrl+a":
+				return m, m.setVisible(true)
+			case "ctrl+x":
+				return m, m.setVisible(false)
+			case "enter":
+				if len(m.selectedIndexes()) == 0 {
+					m.list.Title = m.title + " — select at least one workflow"
+					return m, nil
+				}
+				m.done = true
+				return m, tea.Quit
+			}
+		}
+	}
+	var command tea.Cmd
+	m.list, command = m.list.Update(message)
+	return m, command
+}
+
+func (m multiSelectionModel) View() tea.View {
+	if m.done || m.cancelled {
+		return tea.NewView("")
+	}
+	return tea.NewView(m.list.View())
+}
+
+// SelectMany runs the same searchable list UI as the bare wuko picker and returns selected indexes.
+func SelectMany(ctx context.Context, input io.Reader, output io.Writer, title string, options []Option) ([]int, error) {
+	program := tea.NewProgram(newMultiSelectionModel(title, options),
+		tea.WithContext(ctx), tea.WithInput(input), tea.WithOutput(output), tea.WithoutSignalHandler())
+	final, err := program.Run()
+	if err != nil {
+		return nil, err
+	}
+	model := final.(multiSelectionModel)
+	if model.cancelled || !model.done {
+		return nil, context.Canceled
+	}
+	return model.selectedIndexes(), nil
 }
 
 // SelectWithIntent runs a filterable list and reports the selected action.

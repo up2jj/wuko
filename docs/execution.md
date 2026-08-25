@@ -691,12 +691,56 @@ Install a standalone workflow locally or globally:
 wuko install ./workflow.yaml
 wuko install https://example.com/workflows/release.yaml
 wuko install --global github:acme/workflows@main:release.yaml
+wuko install https://example.com/workflows
+wuko install --global https://example.com/workflows
 ```
 
 Without `--global`, the workflow is saved under `.wuko/workflows/` in the current directory.
 `--global` saves it under `~/.wuko/workflows/`, and the YAML `name` becomes the installed filename.
 HTTPS and GitHub archive payloads are rejected by `install` in schema version 1; use a standalone
 YAML manifest.
+
+### Workflow marketplaces
+
+An HTTPS source is first checked for `manifest.json` at its repository root. If present, it is a
+versioned marketplace and `wuko install SOURCE` opens the same searchable Bubble Tea picker as the
+bare `wuko` command. Space toggles the highlighted workflow, `ctrl+a` selects visible matches,
+`ctrl+x` clears visible matches, and Enter installs all selected entries in manifest order. A
+marketplace install must be interactive; direct workflow URLs retain their existing non-interactive
+behavior.
+
+Marketplace manifests currently use version 1:
+
+```json
+{
+  "version": 1,
+  "workflows": [
+    {
+      "name": "release",
+      "path": ".wuko/workflows/release.yaml",
+      "description": "Release the project"
+    }
+  ]
+}
+```
+
+Create and rebuild the manifest from a marketplace repository with:
+
+```sh
+wuko marketplace init
+wuko marketplace build
+```
+
+`build` recursively discovers standalone `.yaml` and `.yml` workflows below
+`.wuko/workflows/`, copies their YAML names and descriptions into the manifest, and atomically
+replaces the root `manifest.json`. It rejects duplicate installed names and workflows that depend
+on local companion files. A missing workflow directory produces an empty version-1 manifest.
+
+Selected workflows install beneath a repository-related directory such as
+`.wuko/workflows/workflows/release.yaml`; `--global` uses the analogous directory below
+`~/.wuko/workflows/`. A marker in that directory records the canonical marketplace URL. Wuko
+refuses to mix a different repository into an existing same-named directory. A partially successful
+multi-workflow install leaves earlier successful files in place and stops at the first failure.
 
 The optional `install` and `uninstall` fields contain normal Wuko step lists. Install steps run from
 the staged workflow directory before the new file is committed. Uninstall steps run from the

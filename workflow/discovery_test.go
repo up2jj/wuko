@@ -184,6 +184,26 @@ func TestDiscoverRejectsDuplicateExtensions(t *testing.T) {
 	}
 }
 
+func TestDiscoverRecursesIntoWorkflowDirectories(t *testing.T) {
+	root := t.TempDir()
+	directory := filepath.Join(root, ".wuko", "workflows")
+	if err := os.MkdirAll(filepath.Join(directory, "marketplace"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeWorkflow(t, filepath.Join(directory, "flat.yaml"), "flat")
+	writeWorkflow(t, filepath.Join(directory, "marketplace", "release.yaml"), "nested")
+	sources, err := Discover(root, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sources) != 2 || sources[0].Name != "flat" || sources[1].Name != "marketplace/release" {
+		t.Fatalf("sources = %#v", sources)
+	}
+	if source, err := Find(root, "", "", "marketplace/release"); err != nil || source.Path != filepath.Join(directory, "marketplace", "release.yaml") {
+		t.Fatalf("Find() = %#v, %v", source, err)
+	}
+}
+
 func TestLoadRejectsNonStringEnvironmentAndMultipleDocuments(t *testing.T) {
 	tests := map[string]string{
 		"numeric environment": "version: 1\nname: bad\nenv:\n  PORT: 123\nsteps:\n  - id: run\n    type: shell\n    with: {}\n",

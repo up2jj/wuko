@@ -119,6 +119,7 @@ type dependencies struct {
 	openURL       func(string) error
 	openEditor    func(context.Context, io.Reader, io.Writer, io.Writer, string) error
 	confirm       func(context.Context, io.Reader, io.Writer, string, bool) (bool, error)
+	selectMany    func(context.Context, io.Reader, io.Writer, string, []tui.Option) ([]int, error)
 	debug         *bool
 }
 
@@ -184,6 +185,7 @@ func NewRootCmd() *cobra.Command {
 		getenv:     os.Getenv,
 		openEditor: openWorkflowEditor(os.Getenv),
 		confirm:    tui.Confirm,
+		selectMany: tui.SelectMany,
 	})
 }
 
@@ -213,6 +215,9 @@ func newRootCmd(deps dependencies) *cobra.Command {
 	if deps.confirm == nil {
 		deps.confirm = tui.Confirm
 	}
+	if deps.selectMany == nil {
+		deps.selectMany = tui.SelectMany
+	}
 	debug := false
 	deps.debug = &debug
 	root := &cobra.Command{
@@ -230,7 +235,7 @@ func newRootCmd(deps dependencies) *cobra.Command {
 	root.SetOut(deps.stdout)
 	root.SetErr(deps.stderr)
 	root.PersistentFlags().BoolVar(&debug, "debug", false, "trace workflow loading, validation, and execution to stderr (may expose non-secret configuration)")
-	root.AddCommand(newRunCmd(deps), newUICmd(deps), newListCmd(deps), newTreeCmd(deps), newValidateCmd(deps), newAgentCmd(deps), newInstallCmd(deps), newUninstallCmd(deps), newCompletionCmd())
+	root.AddCommand(newRunCmd(deps), newUICmd(deps), newListCmd(deps), newTreeCmd(deps), newValidateCmd(deps), newAgentCmd(deps), newInstallCmd(deps), newUninstallCmd(deps), newMarketplaceCmd(deps), newCompletionCmd())
 	return root
 }
 

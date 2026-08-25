@@ -103,6 +103,8 @@ wuko ui check
 wuko run check --var package=./cmd/...
 wuko run check --dry-run
 wuko install https://example.com/workflows/release.yaml
+wuko install https://example.com/workflows
+wuko install --global https://example.com/workflows
 wuko install --global github:acme/workflows@main:release.yaml
 wuko uninstall release
 wuko uninstall --global --yes release
@@ -127,9 +129,12 @@ non-interactive behavior.
 
 `wuko install SOURCE` saves a standalone workflow under the current project’s `.wuko/workflows/`
 directory. Use `--global` to save it under `~/.wuko/workflows/` instead. `SOURCE` may be a local
-YAML file, an HTTPS URL, or a `github:` locator. Remote workflow archives are not installable in
-version 1. Install and uninstall also accept the `--var`, `--var-file`, and `--env` flags for
-lifecycle hooks.
+YAML file, an HTTPS URL, or a `github:` locator. An HTTPS repository URL is also checked for a
+versioned `manifest.json`; when found, Wuko opens the same searchable picker as bare `wuko` and
+allows one or more workflows to be installed. Marketplace workflows are stored under a
+repository-named subdirectory to avoid conflicts. Use `wuko marketplace init` to create an empty
+manifest and `wuko marketplace build` to discover `.wuko/workflows/` recursively and rebuild it.
+Install and uninstall also accept the `--var`, `--var-file`, and `--env` flags for lifecycle hooks.
 
 Workflows may declare optional installation lifecycle steps:
 
@@ -309,6 +314,7 @@ Use controls to run independent work or repeat a block over runtime data.
 | `finally` | Run workflow-level cleanup after the main phase | [Finally cleanup](docs/finally.md) |
 | `install` | Run steps before an installed workflow is committed | [Workflow installation](docs/execution.md#workflow-installation) |
 | `uninstall` | Run steps before an installed workflow is removed | [Workflow installation](docs/execution.md#workflow-installation) |
+| `marketplace init/build` | Create or rebuild a versioned workflow marketplace manifest | [Workflow installation](docs/execution.md#workflow-marketplaces) |
 | `cron` | Run a workflow on a schedule | [Execution and composition](docs/execution.md#scheduled-runs) |
 
 ## Workflow composition
