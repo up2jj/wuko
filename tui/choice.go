@@ -16,6 +16,7 @@ type Option struct {
 	Label          string
 	Description    string
 	Path           string
+	URL            string
 	Value          any
 	Disabled       bool
 	DisabledReason string

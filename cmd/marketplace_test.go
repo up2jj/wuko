@@ -183,8 +183,9 @@ install:
 	})}
 	registry := lifecycleTestRegistry(t)
 	var pickerCalls int
-	command := newRootCmd(dependencies{
-		stdin: bytes.NewReader(nil), stdout: &bytes.Buffer{}, stderr: &bytes.Buffer{},
+	var output bytes.Buffer
+	deps := dependencies{
+		stdin: bytes.NewReader(nil), stdout: &output, stderr: &bytes.Buffer{},
 		cwd: func() (string, error) { return root, nil }, homeDir: func() (string, error) { return home, nil },
 		configDir: func() (string, error) { return filepath.Join(home, "config"), nil }, registry: registry,
 		loader: workflow.NewLoader(client), isInteractive: func(io.Reader) bool { return false },
@@ -192,7 +193,8 @@ install:
 			pickerCalls++
 			return nil, nil
 		},
-	})
+	}
+	command := newRootCmd(deps)
 	command.SetArgs([]string{"install", "--package", "release", "https://example.test/repo"})
 	if err := command.ExecuteContext(t.Context()); err != nil {
 		t.Fatal(err)
@@ -220,6 +222,23 @@ install:
 	}
 	if marker.PackageVersion != "1.0.0" {
 		t.Fatalf("installed package version = %q", marker.PackageVersion)
+	}
+	if marker.Marketplace != "https://example.test/repo/" {
+		t.Fatalf("installed marketplace = %q", marker.Marketplace)
+	}
+	if err := os.WriteFile(filepath.Join(installed, "obsolete.txt"), []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := reinstallMarketplaceWorkflow(command, deps, workflow.Source{
+		Name: "release", PackageDir: installed, MarketplaceURL: "https://example.test/repo/",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(installed, "obsolete.txt")); !os.IsNotExist(err) {
+		t.Fatalf("reinstall preserved obsolete file: %v", err)
+	}
+	if !strings.Contains(output.String(), "reinstalled release") {
+		t.Fatalf("output = %q", output.String())
 	}
 }
 

@@ -114,9 +114,10 @@ wuko uninstall --global --yes release
 ```
 
 Bare `wuko` opens a searchable picker in a terminal and shows each workflow's direct prerequisites.
-Press Enter to run the selected workflow, `u` to open a declared browser form, `e` to open it in
-the configured editor, `p` to toggle its plain-text `[pinned]` marker, or `s` to switch between
-name and recently-used sorting. Shift+Enter prints its reproducible `wuko run` command. Picker
+Press Enter to run the selected workflow, `u` to open a declared browser form, `m` to open the
+marketplace it came from, `r` to reinstall it from that marketplace, `e` to open it in the
+configured editor, `p` to toggle its plain-text `[pinned]` marker, or `s` to switch between name
+and recently-used sorting. Shift+Enter prints its reproducible `wuko run` command. Picker
 pins, successful-run history, and the sort preference are stored globally, and unavailable
 workflows are pruned.
 `wuko run NAME` searches the nearest

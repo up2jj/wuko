@@ -280,6 +280,24 @@ func TestSelectionModelUUsesBrowserUIIntent(t *testing.T) {
 	}
 }
 
+func TestSelectionModelMUsesMarketplaceIntent(t *testing.T) {
+	model := newSelectionModel("Workflows", []Option{{Label: "release", URL: "https://example.test/marketplace/"}})
+	updated, command := model.Update(tea.KeyPressMsg{Code: 'm'})
+	model = updated.(selectionModel)
+	if command == nil || !model.done || model.selected.Label != "release" || model.intent != SelectionMarketplace {
+		t.Fatalf("selected = %#v, intent = %v, done = %v, command nil = %v", model.selected, model.intent, model.done, command == nil)
+	}
+}
+
+func TestSelectionModelRUsesReinstallIntent(t *testing.T) {
+	model := newSelectionModel("Workflows", []Option{{Label: "release", URL: "https://example.test/marketplace/"}})
+	updated, command := model.Update(tea.KeyPressMsg{Code: 'r'})
+	model = updated.(selectionModel)
+	if command == nil || !model.done || model.selected.Label != "release" || model.intent != SelectionReinstall {
+		t.Fatalf("selected = %#v, intent = %v, done = %v, command nil = %v", model.selected, model.intent, model.done, command == nil)
+	}
+}
+
 func TestSelectionModelSupportsPickerActions(t *testing.T) {
 	tests := []struct {
 		name   string

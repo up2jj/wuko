@@ -319,6 +319,21 @@ func runWorkflowPicker(command *cobra.Command, deps dependencies) error {
 				continue
 			}
 			return runWorkflowUI(command, deps, nil, uiWorkflowConfig{workflowFile: source.Path, targetName: source.Target})
+		case tui.SelectionMarketplace:
+			if source.MarketplaceURL == "" {
+				continue
+			}
+			openURL := deps.openURL
+			if openURL == nil {
+				openURL = openBrowser
+			}
+			if err := openURL(source.MarketplaceURL); err != nil {
+				fmt.Fprintf(command.ErrOrStderr(), "Warning: %v\n", err)
+			}
+		case tui.SelectionReinstall:
+			if err := reinstallMarketplaceWorkflow(command, deps, source); err != nil {
+				fmt.Fprintf(command.ErrOrStderr(), "Warning: %v\n", err)
+			}
 		case tui.SelectionEditor:
 			if err := deps.openEditor(command.Context(), command.InOrStdin(), command.OutOrStdout(), command.ErrOrStderr(), source.Path); err != nil {
 				fmt.Fprintf(command.ErrOrStderr(), "Warning: %v\n", err)

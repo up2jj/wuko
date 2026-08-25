@@ -93,7 +93,7 @@ affects display order, not which definition wins.
   directly invokable sources in the picker, including one row per target and each workflow's direct
   prerequisites. Enter runs the exact selected source, `u` opens its selected target's form, `e` opens its file in `$VISUAL` or `$EDITOR`,
   `p` toggles a plain-text `[pinned]` marker, and `s` switches between name and recently-used
-  sorting. Shift+Enter prints `wuko run NAME [TARGET]` for an effective source or `wuko run --file
+  sorting. Press `m` on a marketplace-installed workflow to open its marketplace URL, or `r` to reinstall it. Shift+Enter prints `wuko run NAME [TARGET]` for an effective source or `wuko run --file
   PATH [TARGET]` for a shadowed source so the printed command remains unambiguous. Picker state
   and the selected sort preference are global; successful runs are remembered, and entries for
   workflows no longer discovered as directly invokable are pruned.

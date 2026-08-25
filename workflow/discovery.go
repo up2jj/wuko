@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -16,6 +17,7 @@ type Source struct {
 	Target         string
 	Path           string
 	PackageDir     string
+	MarketplaceURL string
 	PackageVersion string
 	Description    string
 	Invokable      bool
@@ -149,6 +151,7 @@ func discoverDirectory(directory, scope string) ([]Source, error) {
 			}
 			sources = append(sources, Source{
 				Name: name, Target: targetName, Path: file.path, PackageDir: file.packageDir,
+				MarketplaceURL: file.marketplaceURL,
 				PackageVersion: selected.PackageVersion,
 				Description:    selected.Description, Invokable: selected.IsInvokable(),
 				DependsOn: maps.Clone(selected.DependsOn), HasForm: selected.HasForm(), Scope: scope,
@@ -175,19 +178,20 @@ func discoverDirectory(directory, scope string) ([]Source, error) {
 }
 
 type discoveredWorkflowFile struct {
-	name       string
-	path       string
-	packageDir string
+	name           string
+	path           string
+	packageDir     string
+	marketplaceURL string
 }
 
 func discoverWorkflowFiles(root string) ([]discoveredWorkflowFile, error) {
 	var files []discoveredWorkflowFile
 	var visit func(string, string) error
 	visit = func(directory, relativeDirectory string) error {
-		if packagePath, ok, err := installedPackageManifest(directory); err != nil {
+		if packagePath, marketplaceURL, ok, err := installedPackageManifest(directory); err != nil {
 			return err
 		} else if ok {
-			files = append(files, discoveredWorkflowFile{path: packagePath, packageDir: directory})
+			files = append(files, discoveredWorkflowFile{path: packagePath, packageDir: directory, marketplaceURL: marketplaceURL})
 			return nil
 		}
 		entries, err := os.ReadDir(directory)
@@ -232,23 +236,40 @@ func discoverWorkflowFiles(root string) ([]discoveredWorkflowFile, error) {
 	return files, nil
 }
 
-func installedPackageManifest(directory string) (string, bool, error) {
+func installedPackageManifest(directory string) (string, string, bool, error) {
 	marker := filepath.Join(directory, WorkflowPackageMarkerName)
 	info, err := os.Stat(marker)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return "", false, nil
+			return "", "", false, nil
 		}
-		return "", false, fmt.Errorf("checking workflow package marker %s: %w", marker, err)
+		return "", "", false, fmt.Errorf("checking workflow package marker %s: %w", marker, err)
 	}
 	if !info.Mode().IsRegular() {
-		return "", false, fmt.Errorf("workflow package marker %s is not a regular file", marker)
+		return "", "", false, fmt.Errorf("workflow package marker %s is not a regular file", marker)
 	}
 	path, err := WorkflowPackageManifestPath(directory)
 	if err != nil {
-		return "", false, err
+		return "", "", false, err
 	}
-	return path, true, nil
+	data, err := os.ReadFile(marker)
+	if err != nil {
+		return "", "", false, fmt.Errorf("reading workflow package marker %s: %w", marker, err)
+	}
+	var metadata struct {
+		Marketplace string `json:"marketplace"`
+	}
+	if err := json.Unmarshal(data, &metadata); err != nil {
+		return "", "", false, fmt.Errorf("decoding workflow package marker %s: %w", marker, err)
+	}
+	marketplaceURL := ""
+	if metadata.Marketplace != "" {
+		marketplaceURL, err = MarketplaceURL(metadata.Marketplace)
+		if err != nil {
+			return "", "", false, fmt.Errorf("workflow package marker %s has invalid marketplace URL: %w", marker, err)
+		}
+	}
+	return path, marketplaceURL, true, nil
 }
 
 // Find returns the effective workflow matching name.

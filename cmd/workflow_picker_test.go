@@ -107,6 +107,15 @@ func TestWorkflowPickerOptionShowsPackageVersion(t *testing.T) {
 	}
 }
 
+func TestWorkflowPickerOptionCarriesMarketplaceURL(t *testing.T) {
+	option := workflowPickerOption(workflow.Source{
+		Name: "release", Path: "/project/release/wuko.yaml", MarketplaceURL: "https://example.test/marketplace/",
+	})
+	if option.URL != "https://example.test/marketplace/" {
+		t.Fatalf("option URL = %q", option.URL)
+	}
+}
+
 func TestWorkflowPickerStateRejectsMalformedState(t *testing.T) {
 	configDir := t.TempDir()
 	path := filepath.Join(configDir, "wuko", "values", "picker.json")

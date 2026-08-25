@@ -24,6 +24,8 @@ type workflowLifecycleConfig struct {
 	global        bool
 	yes           bool
 	packages      []string
+	reinstall     bool
+	storageDir    string
 }
 
 func newInstallCmd(deps dependencies) *cobra.Command {
@@ -84,7 +86,7 @@ func installWorkflow(command *cobra.Command, deps dependencies, source string, c
 	if loader == nil {
 		loader = workflow.NewLoader(nil)
 	}
-	invocation := installInvocation{cwd: cwd, home: home, configDir: configDir, vars: vars, env: env, baseEnv: baseEnv, loader: loader}
+	invocation := installInvocation{cwd: cwd, home: home, configDir: configDir, storageDir: config.storageDir, vars: vars, env: env, baseEnv: baseEnv, loader: loader}
 	if isHTTPSURL(source) {
 		manifest, manifestErr := loader.DiscoverMarketplace(command.Context(), source)
 		if manifestErr == nil {
@@ -101,13 +103,14 @@ func installWorkflow(command *cobra.Command, deps dependencies, source string, c
 }
 
 type installInvocation struct {
-	cwd       string
-	home      string
-	configDir string
-	vars      map[string]any
-	env       map[string]string
-	baseEnv   map[string]string
-	loader    *workflow.Loader
+	cwd        string
+	home       string
+	configDir  string
+	storageDir string
+	vars       map[string]any
+	env        map[string]string
+	baseEnv    map[string]string
+	loader     *workflow.Loader
 }
 
 type preparedInstallSource struct {
@@ -165,7 +168,10 @@ func installMarketplace(command *cobra.Command, deps dependencies, source string
 	if err != nil {
 		return err
 	}
-	root := workflowStorageDir(invocation.cwd, invocation.home, config.global)
+	root := invocation.storageDir
+	if root == "" {
+		root = workflowStorageDir(invocation.cwd, invocation.home, config.global)
+	}
 	repositoryDir, err := prepareMarketplaceDirectory(root, repositoryName, canonicalURL)
 	if err != nil {
 		return err
@@ -312,8 +318,13 @@ func installPreparedMarketplacePackage(command *cobra.Command, deps dependencies
 		return fmt.Errorf("workflow name %q cannot be used as an installed package directory", name)
 	}
 	target := filepath.Join(repositoryDir, name)
-	if _, err := os.Stat(target); err == nil {
-		return fmt.Errorf("workflow package %q already exists as %s", name, target)
+	if info, err := os.Stat(target); err == nil {
+		if !config.reinstall {
+			return fmt.Errorf("workflow package %q already exists as %s", name, target)
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("workflow package %q exists as a non-directory %s", name, target)
+		}
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("checking workflow package %q: %w", name, err)
 	}
@@ -346,11 +357,57 @@ func installPreparedMarketplacePackage(command *cobra.Command, deps dependencies
 	if err := writeJSONAtomically(filepath.Join(stage, workflow.WorkflowPackageMarkerName), marker); err != nil {
 		return fmt.Errorf("writing workflow package marker: %w", err)
 	}
-	if err := os.Rename(stage, target); err != nil {
+	backup, err := replaceMarketplacePackage(stage, target, config.reinstall)
+	if err != nil {
 		return fmt.Errorf("committing workflow package %q: %w", name, err)
 	}
-	_, err = fmt.Fprintf(command.OutOrStdout(), "installed %s in %s\n", name, target)
+	if backup != "" {
+		defer os.RemoveAll(backup)
+	}
+	message := "installed"
+	if config.reinstall {
+		message = "reinstalled"
+	}
+	_, err = fmt.Fprintf(command.OutOrStdout(), "%s %s in %s\n", message, name, target)
 	return err
+}
+
+func replaceMarketplacePackage(stage, target string, replace bool) (string, error) {
+	if !replace {
+		if err := os.Rename(stage, target); err != nil {
+			return "", err
+		}
+		return "", nil
+	}
+	backup, err := os.MkdirTemp(filepath.Dir(target), "."+filepath.Base(target)+"-reinstall-backup-*")
+	if err != nil {
+		return "", fmt.Errorf("creating workflow package backup: %w", err)
+	}
+	if err := os.Remove(backup); err != nil {
+		return "", fmt.Errorf("preparing workflow package backup: %w", err)
+	}
+	if err := os.Rename(target, backup); err != nil {
+		return "", fmt.Errorf("backing up workflow package: %w", err)
+	}
+	if err := os.Rename(stage, target); err != nil {
+		if restoreErr := os.Rename(backup, target); restoreErr != nil {
+			return "", errors.Join(err, fmt.Errorf("restoring workflow package: %w", restoreErr))
+		}
+		return "", err
+	}
+	return backup, nil
+}
+
+func reinstallMarketplaceWorkflow(command *cobra.Command, deps dependencies, source workflow.Source) error {
+	if source.MarketplaceURL == "" || source.PackageDir == "" {
+		return fmt.Errorf("workflow %q is not an installed marketplace package", source.Name)
+	}
+	config := workflowLifecycleConfig{
+		packages:   []string{source.Name},
+		reinstall:  true,
+		storageDir: filepath.Dir(filepath.Dir(source.PackageDir)),
+	}
+	return installWorkflow(command, deps, source.MarketplaceURL, config)
 }
 
 func marketplacePackageDescription(item workflow.MarketplacePackage) string {

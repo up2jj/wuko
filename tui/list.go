@@ -20,6 +20,8 @@ const (
 	SelectionPrimary SelectionIntent = iota
 	SelectionAlternate
 	SelectionUI
+	SelectionMarketplace
+	SelectionReinstall
 	SelectionEditor
 	SelectionTogglePin
 	SelectionToggleSort
@@ -154,15 +156,21 @@ func newSelectionModel(title string, options []Option) selectionModel {
 	run := key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "run"))
 	printCommand := key.NewBinding(key.WithKeys("shift+enter"), key.WithHelp("shift+enter", "print command"))
 	openUI := key.NewBinding(key.WithKeys("u"), key.WithHelp("u", "open UI"))
+	openMarketplace := key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "open marketplace"))
+	reinstall := key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "reinstall"))
 	openEditor := key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit"))
 	togglePin := key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "pin"))
 	toggleSort := key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "sort"))
 	cancel := key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "cancel"))
 	workflowList.AdditionalShortHelpKeys = func() []key.Binding {
-		return []key.Binding{run, openUI, printCommand, openEditor, togglePin, toggleSort, cancel}
+		bindings := []key.Binding{run, openUI, printCommand}
+		if slices.ContainsFunc(options, func(option Option) bool { return option.URL != "" }) {
+			bindings = append(bindings, openMarketplace, reinstall)
+		}
+		return append(bindings, openEditor, togglePin, toggleSort, cancel)
 	}
 	workflowList.AdditionalFullHelpKeys = func() []key.Binding {
-		return []key.Binding{run, openUI, printCommand, openEditor, togglePin, toggleSort, cancel}
+		return workflowList.AdditionalShortHelpKeys()
 	}
 	return selectionModel{list: workflowList}
 }
@@ -176,15 +184,25 @@ func (m selectionModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		switch key.String() {
-		case "enter", "shift+enter", "u", "e", "p", "s":
+		case "enter", "shift+enter", "u", "m", "r", "e", "p", "s":
 			if !m.list.SettingFilter() {
 				item, ok := m.list.SelectedItem().(listOption)
 				if ok {
+					if key.String() == "m" && item.Option.URL == "" {
+						return m, nil
+					}
+					if key.String() == "r" && item.Option.URL == "" {
+						return m, nil
+					}
 					m.selected = item.Option
 					if key.String() == "shift+enter" {
 						m.intent = SelectionAlternate
 					} else if key.String() == "u" {
 						m.intent = SelectionUI
+					} else if key.String() == "m" {
+						m.intent = SelectionMarketplace
+					} else if key.String() == "r" {
+						m.intent = SelectionReinstall
 					} else if key.String() == "e" {
 						m.intent = SelectionEditor
 					} else if key.String() == "p" {

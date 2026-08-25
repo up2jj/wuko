@@ -759,9 +759,11 @@ package version is copied into the manifest, shown in the picker, and checked ag
 
 Selected packages install beneath a repository-related directory such as
 `.wuko/workflows/wuko-marketplace/release/`; `--global` uses the analogous directory below
-`~/.wuko/workflows/`. The complete package tree, including JSON sidecars, is preserved. A marker
-records the package metadata, and Wuko refuses to mix a different repository into an existing
-same-named marketplace directory. A partially successful multi-package install leaves earlier
+`~/.wuko/workflows/`. The complete package tree, including JSON sidecars, is preserved. A package
+marker records the package metadata and marketplace URL; press `m` in the workflow picker to open
+that marketplace or `r` to reinstall the package from it. Reinstallation verifies and stages the
+new package before atomically replacing the existing package. Wuko refuses to mix a different
+repository into an existing same-named marketplace directory. A partially successful multi-package install leaves earlier
 successful packages in place and stops at the first failure.
 
 The optional `install` and `uninstall` fields contain normal Wuko step lists. Install steps run from

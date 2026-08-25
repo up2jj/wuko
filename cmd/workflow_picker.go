@@ -212,7 +212,7 @@ func workflowPickerOptionWithState(source workflow.Source, pinned, selected bool
 	if pinned {
 		parts = append(parts, "[pinned]")
 	}
-	return tui.Option{Label: label, Description: strings.Join(parts, " • "), Path: source.Path, Value: source, Default: selected}
+	return tui.Option{Label: label, Description: strings.Join(parts, " • "), Path: source.Path, URL: source.MarketplaceURL, Value: source, Default: selected}
 }
 
 func workflowPickerSelectionKey(source workflow.Source) string {
