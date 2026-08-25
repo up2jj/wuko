@@ -29,7 +29,7 @@ jobs:
           test "$RESULT" = "ready"
           test "$WUKO_OUTPUTS" = '{"result":"ready"}'
       - name: install VHS
-        uses: charmbracelet/vhs-action@59641cdc7fadf3978db65eb8c6937ea2752f4ec3
+        uses: charmbracelet/vhs-action@f6d7db07a432fcd3b06772628d36a57f96d95dcf
         with:
           version: "0.11.0"
       - name: validate VHS demos
