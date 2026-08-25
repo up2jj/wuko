@@ -22,6 +22,9 @@ with typed data and files, call APIs, run scripts or containers, and start codin
   Codex.
 - **Reusable definitions** — split steps across files, compose local actions, and consume public
   remote workflows or pinned remote actions.
+- **Workflow marketplaces** — publish versioned collections of standalone workflows and let users
+  browse and install one or more workflows interactively. See
+  [Workflow marketplaces](docs/execution.md#workflow-marketplaces).
 - **Visible execution** — get live progress, retry and polling details, run statistics, and
   redacted debug tracing.
 
