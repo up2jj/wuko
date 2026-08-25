@@ -287,6 +287,9 @@ func collectTemplateDependencyReferences(node parse.Node, references *[]dependen
 	}
 	switch typed := node.(type) {
 	case *parse.ListNode:
+		if typed == nil {
+			return
+		}
 		for _, child := range typed.Nodes {
 			collectTemplateDependencyReferences(child, references)
 		}

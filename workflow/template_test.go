@@ -50,6 +50,24 @@ func TestRendererExposesHelpersToNamedAndInlineTemplates(t *testing.T) {
 	}
 }
 
+func TestRendererValidatesNamedTemplateWithOptionalBranches(t *testing.T) {
+	const resultsTable = `Repository | Status
+-----------|-------
+{{ range .steps.release_drifts.results -}}
+{{ .repository }} | {{ if .changed }}changed{{ else }}no changes{{ end }}
+{{ end -}}`
+
+	renderer, err := NewRenderer(map[string]TemplateDefinition{
+		"results_table": {Inline: resultsTable},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := renderer.Validate(`{{ template "results_table" . }}`); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+}
+
 func TestRendererHelpersPreserveStrictMissingKeys(t *testing.T) {
 	renderer, err := NewRenderer(nil)
 	if err != nil {

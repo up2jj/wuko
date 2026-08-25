@@ -182,6 +182,25 @@ func TestResolveDependencyPlanChecksOnlySemanticDependencyReferences(t *testing.
 	}
 }
 
+func TestResolveDependencyPlanFindsReferencesInsideOptionalTemplateBranches(t *testing.T) {
+	producer := dependencyDefinition("producer", "/producer.yaml")
+	consumer := dependencyDefinition("consumer", "/consumer.yaml")
+	consumer.DependsOn = map[string]string{"build": "producer"}
+	consumer.Steps = []Step{{
+		ID: "render", Type: "shell",
+		With: map[string]any{
+			"template": `{{ range .items }}{{ if .changed }}{{ .dependencies.build.missing }}{{ else }}ok{{ end }}{{ end }}`,
+		},
+	}}
+
+	_, err := ResolveDependencyPlan(t.Context(), consumer, func(context.Context, string) (*Definition, error) {
+		return producer, nil
+	})
+	if err == nil || !strings.Contains(err.Error(), `does not declare output "missing"`) {
+		t.Fatalf("dependency reference error = %v", err)
+	}
+}
+
 func TestLoaderRejectsDependencyOutputsInLoadTimeFields(t *testing.T) {
 	tests := []struct {
 		name string
