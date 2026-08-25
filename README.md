@@ -132,12 +132,19 @@ non-interactive behavior.
 
 `wuko install SOURCE` saves a standalone workflow under the current project’s `.wuko/workflows/`
 directory. Use `--global` to save it under `~/.wuko/workflows/` instead. `SOURCE` may be a local
-YAML file, an HTTPS URL, or a `github:` locator. An HTTPS repository URL is also checked for a
-versioned `manifest.json`; when found, Wuko opens the same searchable picker as bare `wuko` and
-allows one or more workflows to be installed. Marketplace workflows are stored under a
-repository-named subdirectory to avoid conflicts. Use `wuko marketplace init` to create an empty
-manifest and `wuko marketplace build` to discover `.wuko/workflows/` recursively and rebuild it.
+YAML file, an HTTPS URL, or a `github:` locator. An HTTPS repository URL, including a normal
+GitHub repository URL, is also checked for a versioned `manifest.json`; when found, Wuko opens the
+same searchable picker as bare `wuko` and allows one or more workflows to be installed. Marketplace
+workflows are stored under a repository-named subdirectory to avoid conflicts. Use
+`wuko marketplace init` to create an empty manifest and `wuko marketplace build` to discover
+`.wuko/workflows/` recursively and rebuild it.
 Install and uninstall also accept the `--var`, `--var-file`, and `--env` flags for lifecycle hooks.
+
+For example, install a marketplace directly from a GitHub repository page:
+
+```sh
+wuko install --global https://github.com/up2jj/wuko-marketplace
+```
 
 Workflows may declare optional installation lifecycle steps:
 

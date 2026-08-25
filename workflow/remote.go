@@ -45,14 +45,20 @@ func (loader *Loader) DecodeRemote(ctx context.Context, locator string, options 
 	if err != nil {
 		return nil, func() {}, fmt.Errorf("materializing workflow %s: %w", description, err)
 	}
+	transferred := false
+	defer func() {
+		if !transferred {
+			cleanup()
+		}
+	}()
 	options.sourceRoot = filepath.Dir(path)
 	options.sourceLabel = description
 	definition, err := loader.Decode(path, options)
 	if err != nil {
-		cleanup()
 		return nil, func() {}, err
 	}
 	remapDefinitionLocations(definition, filepath.Dir(path), description)
+	transferred = true
 	return definition, cleanup, nil
 }
 
@@ -67,23 +73,28 @@ func (loader *Loader) LoadRemote(ctx context.Context, locator string, options Lo
 		traceFinish(options.Diagnostics, started, diagnostic.PhaseLoad, diagnostic.StatusFailed, location, "", "", "", "", nil)
 		return nil, func() {}, err
 	}
+	transferred := false
+	defer func() {
+		if !transferred {
+			cleanup()
+		}
+	}()
 	targetName := options.Target
 	if options.Lifecycle && targetName == "" && definition.HasTargets() {
 		targetName = definition.TargetNames()[0]
 	}
 	selected, err := definition.SelectTarget(targetName)
 	if err != nil {
-		cleanup()
 		traceFinish(options.Diagnostics, started, diagnostic.PhaseLoad, diagnostic.StatusFailed, definition.Location, definition.Name, "", "", "", err)
 		return nil, func() {}, err
 	}
 	definition = selected
 	if err := loader.Prepare(ctx, definition, options); err != nil {
-		cleanup()
 		traceFinish(options.Diagnostics, started, diagnostic.PhaseLoad, diagnostic.StatusFailed, definition.Location, definition.Name, "", "", "", nil)
 		return nil, func() {}, err
 	}
 	traceFinish(options.Diagnostics, started, diagnostic.PhaseLoad, diagnostic.StatusSucceeded, definition.Location, definition.Name, "", "", "", nil, countAttr("steps", len(definition.Steps)))
+	transferred = true
 	return definition, cleanup, nil
 }
 

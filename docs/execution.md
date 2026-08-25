@@ -709,6 +709,10 @@ bare `wuko` command. Space toggles the highlighted workflow, `ctrl+a` selects vi
 marketplace install must be interactive; direct workflow URLs retain their existing non-interactive
 behavior.
 
+Normal GitHub repository URLs are also accepted. Wuko resolves a repository-root URL such as
+`https://github.com/up2jj/wuko-marketplace` against the repository's default branch, so users do
+not need to construct a `raw.githubusercontent.com` URL manually.
+
 Marketplace manifests currently use version 1:
 
 ```json

@@ -34,7 +34,7 @@ type MarketplaceWorkflow struct {
 // DiscoverMarketplace fetches and validates the versioned manifest at baseURL.
 // ErrMarketplaceNotFound means callers may fall back to direct workflow loading.
 func (loader *Loader) DiscoverMarketplace(ctx context.Context, baseURL string) (MarketplaceManifest, error) {
-	base, err := marketplaceBaseURL(baseURL)
+	base, err := marketplaceContentBaseURL(baseURL)
 	if err != nil {
 		return MarketplaceManifest{}, err
 	}
@@ -101,7 +101,7 @@ func ValidateMarketplaceManifest(manifest MarketplaceManifest) error {
 
 // ResolveMarketplaceWorkflow resolves an entry path against an HTTPS marketplace base URL.
 func ResolveMarketplaceWorkflow(baseURL string, item MarketplaceWorkflow) (string, error) {
-	base, err := marketplaceBaseURL(baseURL)
+	base, err := marketplaceContentBaseURL(baseURL)
 	if err != nil {
 		return "", err
 	}
@@ -179,6 +179,31 @@ func marketplaceBaseURL(raw string) (*url.URL, error) {
 	parsed.Path = strings.TrimRight(parsed.Path, "/") + "/"
 	parsed.RawPath = ""
 	return parsed, nil
+}
+
+func marketplaceContentBaseURL(raw string) (*url.URL, error) {
+	base, err := marketplaceBaseURL(raw)
+	if err != nil {
+		return nil, err
+	}
+	if !strings.EqualFold(base.Hostname(), "github.com") || base.Port() != "" {
+		return base, nil
+	}
+
+	segments := strings.Split(strings.Trim(base.Path, "/"), "/")
+	if len(segments) != 2 {
+		return base, nil
+	}
+	owner, repository := segments[0], strings.TrimSuffix(segments[1], ".git")
+	if !validGitHubPart(owner) || !validGitHubPart(repository) {
+		return base, nil
+	}
+
+	return &url.URL{
+		Scheme: "https",
+		Host:   "raw.githubusercontent.com",
+		Path:   "/" + owner + "/" + repository + "/HEAD/",
+	}, nil
 }
 
 func validateMarketplacePath(value string) (string, error) {

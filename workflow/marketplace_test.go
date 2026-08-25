@@ -32,6 +32,27 @@ func TestDiscoverMarketplaceValidatesVersionedManifest(t *testing.T) {
 	}
 }
 
+func TestDiscoverMarketplaceNormalizesGitHubRepositoryURL(t *testing.T) {
+	manifest := `{"version":1,"workflows":[{"name":"release","path":".wuko/workflows/release.yaml"}]}`
+	loader := NewLoader(testHTTPClient(func(request *http.Request) (*http.Response, error) {
+		if request.URL.String() != "https://raw.githubusercontent.com/acme/workflows/HEAD/manifest.json" {
+			return nil, fmt.Errorf("unexpected URL %s", request.URL)
+		}
+		return testResponse(http.StatusOK, []byte(manifest)), nil
+	}))
+	got, err := loader.DiscoverMarketplace(t.Context(), "https://github.com/acme/workflows/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Workflows) != 1 || got.Workflows[0].Name != "release" {
+		t.Fatalf("manifest = %#v", got)
+	}
+	resolved, err := ResolveMarketplaceWorkflow("https://github.com/acme/workflows", got.Workflows[0])
+	if err != nil || resolved != "https://raw.githubusercontent.com/acme/workflows/HEAD/.wuko/workflows/release.yaml" {
+		t.Fatalf("resolved = %q, err = %v", resolved, err)
+	}
+}
+
 func TestDiscoverMarketplaceFallsBackWhenManifestIsMissing(t *testing.T) {
 	loader := NewLoader(testHTTPClient(func(*http.Request) (*http.Response, error) {
 		return testResponse(http.StatusNotFound, nil), nil

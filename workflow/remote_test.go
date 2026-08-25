@@ -93,6 +93,7 @@ func TestLoadRemoteReportsPreparationFailureAsLoadFailure(t *testing.T) {
 		}
 		return testResponse(http.StatusNotFound, nil), nil
 	})
+	before := remoteWorkflowTempDirs(t)
 	var events []diagnostic.Event
 	_, _, err := NewLoader(client).LoadRemote(t.Context(), "https://example.test/workflow.yaml", LoadOptions{
 		Diagnostics: func(event diagnostic.Event) { events = append(events, event) },
@@ -109,6 +110,19 @@ func TestLoadRemoteReportsPreparationFailureAsLoadFailure(t *testing.T) {
 	if got, want := fmt.Sprint(statuses), fmt.Sprint([]diagnostic.Status{diagnostic.StatusStarted, diagnostic.StatusFailed}); got != want {
 		t.Fatalf("load statuses = %s, want %s", got, want)
 	}
+	assertNoNewRemoteWorkflowTempDirs(t, before)
+}
+
+func TestDecodeRemoteRemovesMaterializedWorkflowOnDecodeFailure(t *testing.T) {
+	client := testHTTPClient(func(*http.Request) (*http.Response, error) {
+		return testResponse(http.StatusOK, []byte("version: [")), nil
+	})
+	before := remoteWorkflowTempDirs(t)
+	_, _, err := NewLoader(client).DecodeRemote(t.Context(), "https://example.test/workflow.yaml", LoadOptions{})
+	if err == nil {
+		t.Fatal("DecodeRemote() error = nil")
+	}
+	assertNoNewRemoteWorkflowTempDirs(t, before)
 }
 
 func TestLoadRemoteArchivesWorkflowAndCompanionFiles(t *testing.T) {
@@ -303,5 +317,27 @@ func TestLoadRemoteRejectsInsecureURLAndReportsGitHubFailure(t *testing.T) {
 	}
 	if _, _, err := loader.LoadRemote(t.Context(), "github:acme/missing", LoadOptions{}); err == nil || !strings.Contains(err.Error(), "404 Not Found") {
 		t.Fatalf("GitHub failure = %v", err)
+	}
+}
+
+func remoteWorkflowTempDirs(t *testing.T) map[string]struct{} {
+	t.Helper()
+	paths, err := filepath.Glob(filepath.Join(os.TempDir(), "wuko-workflow-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := make(map[string]struct{}, len(paths))
+	for _, path := range paths {
+		result[path] = struct{}{}
+	}
+	return result
+}
+
+func assertNoNewRemoteWorkflowTempDirs(t *testing.T, before map[string]struct{}) {
+	t.Helper()
+	for path := range remoteWorkflowTempDirs(t) {
+		if _, existed := before[path]; !existed {
+			t.Errorf("remote workflow temporary directory remains: %s", path)
+		}
 	}
 }
