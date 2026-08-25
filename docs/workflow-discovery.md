@@ -20,11 +20,12 @@ the directory inputs are visited only once.
 
 ## Files and names
 
-Each existing directory contributes files whose extension is `.yaml` or `.yml` (case-insensitive),
-including nested directories. The workflow selector is the slash-separated relative filename stem,
-so `deploy.yaml` is run with `wuko run deploy` and `marketplace/release.yaml` with
-`wuko run marketplace/release`. This lets marketplace installs live in repository-named
-subdirectories without colliding with flat legacy workflows.
+Each ordinary directory contributes files whose extension is `.yaml` or `.yml` (case-insensitive),
+including nested directories. An installed package directory containing `.wuko-package.json` is
+different: its root `wuko.yaml` is discovered as one workflow, and the YAML `name` is the selector.
+Package sidecars and nested implementation files are not discovered separately. A standalone
+`deploy.yaml` is run with `wuko run deploy`; an installed package named `release` is run with
+`wuko run release`.
 
 The YAML `name` field is still required and validated, but it is metadata for the loaded workflow;
 lookup by `NAME` uses the filename stem. The description shown by `wuko list` and the picker comes
@@ -105,13 +106,14 @@ affects display order, not which definition wins.
 - `wuko install SOURCE` saves a standalone local, HTTPS, or `github:` workflow under the current
   directory’s `.wuko/workflows/`; `--global` selects `~/.wuko/workflows/`. The YAML `name` is used
   as the installed filename. An HTTPS repository URL with a root `manifest.json` is treated as a
-  marketplace: the searchable picker supports space to toggle, `ctrl+a`/`ctrl+x` for visible bulk
-  selection, and Enter to install. Selected marketplace workflows are stored below a
-  repository-named subdirectory, with a marker preventing different repositories from sharing it.
-  `wuko marketplace init` creates a version-1 manifest, while `wuko marketplace build` recursively
-  discovers `.wuko/workflows/` and atomically rebuilds it. `wuko uninstall NAME` accepts nested
-  selectors such as `marketplace/release`, uses the same local/global selection, asks for
-  confirmation, and accepts `--yes` for non-interactive use.
+  version-1 package marketplace: the searchable picker supports space to toggle, `ctrl+a`/`ctrl+x`
+  for visible bulk selection, and Enter to install. Repeatable `--package NAME` flags bypass the
+  picker and install in manifest order; names are validated before any package is written.
+  Selected marketplace packages are stored below a repository-named subdirectory, with a marker
+  preventing different repositories from sharing it. `wuko marketplace init` creates a version-1
+  manifest, while `wuko marketplace build` discovers package directories and incrementally rebuilds
+  deterministic archives. `wuko uninstall NAME` removes a complete installed package directory,
+  runs its uninstall hook first, and accepts `--yes` for non-interactive use.
 - `wuko run --file PATH [TARGET]` bypasses discovery. HTTP and `github:` locators also bypass local
   discovery and use the remote workflow loader, but none bypass `invokable: false`.
 

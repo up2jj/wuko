@@ -62,6 +62,61 @@ func (loader *Loader) DecodeRemote(ctx context.Context, locator string, options 
 	return definition, cleanup, nil
 }
 
+// LoadMarketplacePackage downloads, verifies, materializes, and decodes one marketplace
+// package without preparing its composite actions. The returned directory contains the complete
+// package tree and must be released with cleanup after it has been copied or otherwise consumed.
+func (loader *Loader) LoadMarketplacePackage(ctx context.Context, baseURL string, item MarketplacePackage, options LoadOptions) (*Definition, string, func(), error) {
+	if !ValidWorkflowName(item.Name) {
+		return nil, "", func() {}, fmt.Errorf("marketplace package name %q is invalid", item.Name)
+	}
+	if item.Format != "tar.gz" {
+		return nil, "", func() {}, fmt.Errorf("marketplace package %q has unsupported format %q", item.Name, item.Format)
+	}
+	if item.Entry != defaultRemoteWorkflowFile {
+		return nil, "", func() {}, fmt.Errorf("marketplace package %q must use entry %q", item.Name, defaultRemoteWorkflowFile)
+	}
+	packageURL, err := ResolveMarketplacePackage(baseURL, item)
+	if err != nil {
+		return nil, "", func() {}, err
+	}
+	remoteURL, err := url.Parse(packageURL)
+	if err != nil {
+		return nil, "", func() {}, fmt.Errorf("parsing marketplace package URL: %w", err)
+	}
+	payload, _, err := loader.fetchWithHeadersStatus(ctx, remoteURL, nil, "marketplace package")
+	if err != nil {
+		return nil, "", func() {}, err
+	}
+	if err := verifyChecksum(payload, item.SHA256); err != nil {
+		return nil, "", func() {}, fmt.Errorf("verifying marketplace package %q: %w", item.Name, err)
+	}
+	workflowPath, cleanup, err := materializeRemoteWorkflowPackage(payload, packageURL)
+	if err != nil {
+		return nil, "", func() {}, fmt.Errorf("materializing marketplace package %q: %w", item.Name, err)
+	}
+	transferred := false
+	defer func() {
+		if !transferred {
+			cleanup()
+		}
+	}()
+	options.sourceRoot = filepath.Dir(workflowPath)
+	options.sourceLabel = packageURL
+	definition, err := loader.Decode(workflowPath, options)
+	if err != nil {
+		return nil, "", func() {}, err
+	}
+	if definition.Name != item.Name {
+		return nil, "", func() {}, fmt.Errorf("marketplace package %q declares workflow name %q", item.Name, definition.Name)
+	}
+	if definition.PackageVersion != item.PackageVersion {
+		return nil, "", func() {}, fmt.Errorf("marketplace package %q declares package_version %q, manifest has %q", item.Name, definition.PackageVersion, item.PackageVersion)
+	}
+	remapDefinitionLocations(definition, filepath.Dir(workflowPath), packageURL)
+	transferred = true
+	return definition, filepath.Dir(workflowPath), cleanup, nil
+}
+
 // LoadRemote fetches and loads a workflow from an HTTPS URL or a public GitHub locator.
 // The returned cleanup function removes the temporary materialization directory and must be
 // called after the workflow has finished executing.
@@ -211,6 +266,28 @@ func materializeRemoteWorkflow(payload []byte, description string, rejectArchive
 	if rejectArchives && archive {
 		return "", nil, fmt.Errorf("workflow archives are not supported for installation")
 	}
+	if files == nil {
+		files = map[string]ActionFile{defaultRemoteWorkflowFile: {Data: manifest, Mode: 0o644}}
+	}
+
+	return materializeWorkflowFiles(manifest, files, description)
+}
+
+func materializeRemoteWorkflowPackage(payload []byte, description string) (string, func(), error) {
+	if len(payload) < 2 || payload[0] != 0x1f || payload[1] != 0x8b {
+		return "", nil, fmt.Errorf("marketplace package must be a tar.gz archive")
+	}
+	manifest, files, archive, err := decodeRemoteWorkflowPayload(payload)
+	if err != nil {
+		return "", nil, fmt.Errorf("decoding workflow package %s: %w", description, err)
+	}
+	if !archive {
+		return "", nil, fmt.Errorf("marketplace package must be a tar.gz archive")
+	}
+	return materializeWorkflowFiles(manifest, files, description)
+}
+
+func materializeWorkflowFiles(manifest []byte, files map[string]ActionFile, description string) (string, func(), error) {
 	if files == nil {
 		files = map[string]ActionFile{defaultRemoteWorkflowFile: {Data: manifest, Mode: 0o644}}
 	}

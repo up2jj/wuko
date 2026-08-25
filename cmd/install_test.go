@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/steps/shell"
+	"github.com/up2jj/wuko/workflow"
 )
 
 func lifecycleTestRegistry(t *testing.T) *step.Registry {
@@ -272,5 +273,54 @@ func TestUninstallGlobalDoesNotRemoveShadowingLocalWorkflow(t *testing.T) {
 	}
 	if _, err := os.Stat(localPath); err != nil {
 		t.Fatalf("shadowing local workflow was removed: %v", err)
+	}
+}
+
+func TestUninstallInstalledPackageRunsHookAndRemovesSidecars(t *testing.T) {
+	root, home := t.TempDir(), t.TempDir()
+	packageDir := filepath.Join(root, ".wuko", "workflows", "marketplace", "release")
+	if err := os.MkdirAll(packageDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	definition := `version: 1
+name: release
+steps:
+  - id: run
+    type: shell
+    with: {command: true}
+uninstall:
+  - id: cleanup
+    type: shell
+    with:
+      script: pwd > ../uninstall-dir
+`
+	if err := os.WriteFile(filepath.Join(packageDir, "wuko.yaml"), []byte(definition), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(packageDir, "defaults.json"), []byte(`{"target":"staging"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(packageDir, workflow.WorkflowPackageMarkerName), []byte(`{"version":1,"name":"release"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	wantRunDir, err := filepath.EvalSymlinks(packageDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	command := lifecycleTestCommand(root, home, lifecycleTestRegistry(t), false, nil)
+	command.SetArgs([]string{"uninstall", "--yes", "release"})
+	if err := command.ExecuteContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(packageDir); !os.IsNotExist(err) {
+		t.Fatalf("installed package directory remains: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(root, ".wuko", "workflows", "marketplace", "uninstall-dir"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(data)) != wantRunDir {
+		t.Fatalf("uninstall hook directory = %q, want %q", strings.TrimSpace(string(data)), wantRunDir)
 	}
 }

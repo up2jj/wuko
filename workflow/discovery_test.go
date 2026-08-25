@@ -204,6 +204,30 @@ func TestDiscoverRecursesIntoWorkflowDirectories(t *testing.T) {
 	}
 }
 
+func TestDiscoverTreatsInstalledPackagesAsSingleWorkflowUnits(t *testing.T) {
+	root := t.TempDir()
+	directory := filepath.Join(root, ".wuko", "workflows", "marketplace", "release")
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "wuko.yaml"), []byte("version: 1\nname: packaged\nsteps:\n  - id: run\n    type: shell\n    with: {command: true}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, WorkflowPackageMarkerName), []byte(`{"version":1,"name":"packaged"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sources, err := Discover(root, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sources) != 1 || sources[0].Name != "packaged" || sources[0].PackageDir != directory || sources[0].Path != filepath.Join(directory, "wuko.yaml") {
+		t.Fatalf("sources = %#v", sources)
+	}
+	if source, err := Find(root, "", "", "packaged"); err != nil || source.PackageDir != directory {
+		t.Fatalf("Find() = %#v, %v", source, err)
+	}
+}
+
 func TestLoadRejectsNonStringEnvironmentAndMultipleDocuments(t *testing.T) {
 	tests := map[string]string{
 		"numeric environment": "version: 1\nname: bad\nenv:\n  PORT: 123\nsteps:\n  - id: run\n    type: shell\n    with: {}\n",

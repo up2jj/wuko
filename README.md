@@ -22,8 +22,8 @@ with typed data and files, call APIs, run scripts or containers, and start codin
   Codex.
 - **Reusable definitions** — split steps across files, compose local actions, and consume public
   remote workflows or pinned remote actions.
-- **Workflow marketplaces** — publish versioned collections of standalone workflows and let users
-  browse and install one or more workflows interactively. See
+- **Workflow marketplaces** — publish self-contained workflow packages with sidecars and let users
+  browse and install one or more packages interactively. See
   [Workflow marketplaces](docs/execution.md#workflow-marketplaces).
 - **Visible execution** — get live progress, retry and polling details, run statistics, and
   redacted debug tracing.
@@ -133,11 +133,19 @@ non-interactive behavior.
 `wuko install SOURCE` saves a standalone workflow under the current project’s `.wuko/workflows/`
 directory. Use `--global` to save it under `~/.wuko/workflows/` instead. `SOURCE` may be a local
 YAML file, an HTTPS URL, or a `github:` locator. An HTTPS repository URL, including a normal
-GitHub repository URL, is also checked for a versioned `manifest.json`; when found, Wuko opens the
-same searchable picker as bare `wuko` and allows one or more workflows to be installed. Marketplace
-workflows are stored under a repository-named subdirectory to avoid conflicts. Use
-`wuko marketplace init` to create an empty manifest and `wuko marketplace build` to discover
-`.wuko/workflows/` recursively and rebuild it.
+GitHub repository URL, is also checked for a version-1 package marketplace manifest. When found,
+Wuko opens a picker unless packages are selected explicitly with repeatable `--package` flags:
+
+```sh
+wuko install https://github.com/acme/wuko-marketplace
+wuko install --global --package release --package lint https://github.com/acme/wuko-marketplace
+```
+
+Marketplace packages are stored under a repository-named subdirectory and preserve their complete
+package tree, including JSON sidecars and local scripts. Use `wuko marketplace init` to create an
+empty manifest and `wuko marketplace build` to build only new or changed package archives from
+`.wuko/workflows/<package>/`. Set `package_version` in the package root `wuko.yaml` to publish a
+package release version; the picker displays it separately from the workflow schema `version`.
 Install and uninstall also accept the `--var`, `--var-file`, and `--env` flags for lifecycle hooks.
 
 For example, install a marketplace directly from a GitHub repository page:
@@ -160,11 +168,10 @@ uninstall:
     with: {script: echo cleanup}
 ```
 
-Install hooks run before the staged workflow is committed. Uninstall hooks run after confirmation
-and before the workflow is removed. `wuko uninstall` asks for confirmation; use `--yes` for
-non-interactive use. Installed sources must be standalone manifests; local required step files,
-file-backed templates, local actions, and relative lifecycle scripts are rejected. Without
-`--global`, uninstall targets the current project’s workflow copy.
+Install hooks run from the staged package root before the package is committed. Uninstall hooks run
+after confirmation and before the complete package directory is removed. `wuko uninstall` asks for
+confirmation; use `--yes` for non-interactive use. Without `--global`, uninstall targets the
+current project’s workflow copy.
 
 ## GitHub Actions
 

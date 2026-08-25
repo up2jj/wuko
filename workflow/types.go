@@ -29,12 +29,14 @@ var (
 
 // Definition is a fully loaded workflow document.
 type Definition struct {
-	Version     int                       `yaml:"version"`
-	Name        string                    `yaml:"name"`
-	Description string                    `yaml:"description,omitempty"`
-	Invokable   *bool                     `yaml:"invokable,omitempty"`
-	DependsOn   map[string]string         `yaml:"depends_on,omitempty"`
-	Outputs     map[string]WorkflowOutput `yaml:"outputs,omitempty"`
+	Version int `yaml:"version"`
+	// PackageVersion is publisher metadata and is independent of the workflow schema Version.
+	PackageVersion string                    `yaml:"package_version,omitempty"`
+	Name           string                    `yaml:"name"`
+	Description    string                    `yaml:"description,omitempty"`
+	Invokable      *bool                     `yaml:"invokable,omitempty"`
+	DependsOn      map[string]string         `yaml:"depends_on,omitempty"`
+	Outputs        map[string]WorkflowOutput `yaml:"outputs,omitempty"`
 	// Form is intentionally opaque to core workflow execution. The optional browser UI decodes it.
 	Form        yaml.Node                     `yaml:"form,omitempty"`
 	Cron        string                        `yaml:"cron,omitempty"`
@@ -1153,6 +1155,9 @@ func (workflowStep Step) ValidateExecutionPolicy() error {
 func validateDefinitionHeader(definition *Definition) error {
 	if definition.Version != 1 {
 		return fmt.Errorf("unsupported version %d (want 1)", definition.Version)
+	}
+	if strings.TrimSpace(definition.PackageVersion) != definition.PackageVersion {
+		return fmt.Errorf("package_version must not have leading or trailing whitespace")
 	}
 	if definition.Name == "" {
 		return fmt.Errorf("name is required")

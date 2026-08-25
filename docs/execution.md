@@ -695,34 +695,47 @@ wuko install https://example.com/workflows
 wuko install --global https://example.com/workflows
 ```
 
-Without `--global`, the workflow is saved under `.wuko/workflows/` in the current directory.
-`--global` saves it under `~/.wuko/workflows/`, and the YAML `name` becomes the installed filename.
-HTTPS and GitHub archive payloads are rejected by `install` in schema version 1; use a standalone
-YAML manifest.
+Without `--global`, standalone workflows are saved under `.wuko/workflows/` in the current
+directory. `--global` saves them under `~/.wuko/workflows/`.
 
 ### Workflow marketplaces
 
 An HTTPS source is first checked for `manifest.json` at its repository root. If present, it is a
-versioned marketplace and `wuko install SOURCE` opens the same searchable Bubble Tea picker as the
-bare `wuko` command. Space toggles the highlighted workflow, `ctrl+a` selects visible matches,
-`ctrl+x` clears visible matches, and Enter installs all selected entries in manifest order. A
-marketplace install must be interactive; direct workflow URLs retain their existing non-interactive
-behavior.
+version-1 archive marketplace and `wuko install SOURCE` opens a searchable Bubble Tea picker.
+Space toggles the highlighted package, `ctrl+a` selects visible matches, `ctrl+x` clears visible
+matches, and Enter installs selected packages in manifest order.
+
+Scripts and CI can bypass the picker with repeatable `--package` flags:
+
+```sh
+wuko install --package release https://example.com/wuko-marketplace
+wuko install --global --package release --package lint https://github.com/acme/wuko-marketplace
+```
+
+Package names are validated before any archive is downloaded or installed. A non-interactive
+marketplace install without `--package` fails with a usage hint. Direct workflow URLs retain their
+existing behavior.
 
 Normal GitHub repository URLs are also accepted. Wuko resolves a repository-root URL such as
 `https://github.com/up2jj/wuko-marketplace` against the repository's default branch, so users do
 not need to construct a `raw.githubusercontent.com` URL manually.
 
-Marketplace manifests currently use version 1:
+Marketplace manifests use version 1 and list package archives:
 
 ```json
 {
   "version": 1,
-  "workflows": [
+  "packages": [
     {
       "name": "release",
-      "path": ".wuko/workflows/release.yaml",
-      "description": "Release the project"
+      "package_version": "1.4.0",
+      "source": ".wuko/workflows/release",
+      "path": "packages/release.tar.gz",
+      "format": "tar.gz",
+      "entry": "wuko.yaml",
+      "description": "Release the project",
+      "source_sha256": "...",
+      "sha256": "..."
     }
   ]
 }
@@ -735,20 +748,25 @@ wuko marketplace init
 wuko marketplace build
 ```
 
-`build` recursively discovers standalone `.yaml` and `.yml` workflows below
-`.wuko/workflows/`, copies their YAML names and descriptions into the manifest, and atomically
-replaces the root `manifest.json`. It rejects duplicate installed names and workflows that depend
-on local companion files. A missing workflow directory produces an empty version-1 manifest.
+`build` discovers package directories containing a root `wuko.yaml` or `wuko.yml` below
+`.wuko/workflows/`. Every regular file in the package directory is included in a deterministic
+`tar.gz` archive. The package source digest and archive digest are recorded in the manifest.
+Only new or changed packages are rebuilt; unchanged archives and manifest files are left untouched.
+Stale generated archives are removed only when they still match their recorded digest. Symlinks,
+unsafe paths, duplicate files, oversized packages, and packages without a root manifest are rejected.
+The root workflow may declare `package_version` separately from its workflow schema `version`; the
+package version is copied into the manifest, shown in the picker, and checked against the archive.
 
-Selected workflows install beneath a repository-related directory such as
-`.wuko/workflows/workflows/release.yaml`; `--global` uses the analogous directory below
-`~/.wuko/workflows/`. A marker in that directory records the canonical marketplace URL. Wuko
-refuses to mix a different repository into an existing same-named directory. A partially successful
-multi-workflow install leaves earlier successful files in place and stops at the first failure.
+Selected packages install beneath a repository-related directory such as
+`.wuko/workflows/wuko-marketplace/release/`; `--global` uses the analogous directory below
+`~/.wuko/workflows/`. The complete package tree, including JSON sidecars, is preserved. A marker
+records the package metadata, and Wuko refuses to mix a different repository into an existing
+same-named marketplace directory. A partially successful multi-package install leaves earlier
+successful packages in place and stops at the first failure.
 
 The optional `install` and `uninstall` fields contain normal Wuko step lists. Install steps run from
-the staged workflow directory before the new file is committed. Uninstall steps run from the
-installed workflow directory after confirmation and before removal:
+the staged package root before the package directory is committed. Uninstall steps run from the
+installed package directory after confirmation and before removal:
 
 ```yaml
 install:
@@ -764,10 +782,8 @@ uninstall:
 
 Lifecycle hooks receive workflow values and the command’s `--var`, `--var-file`, and `--env`
 overrides. `wuko uninstall NAME` asks for confirmation. Pass `--yes` for non-interactive use;
-without `--global`, it removes the current project’s copy, while `--global` removes the home-global
-copy. Installed sources must be standalone manifests: local required step files, file-backed
-templates, local actions, and relative lifecycle scripts are rejected. Hook failures leave the
-workflow file in place.
+without `--global`, it removes the current project’s package, while `--global` removes the
+home-global package. Hook failures leave the installed package in place.
 
 ## Composite actions
 

@@ -151,6 +151,38 @@ func TestLoadRemoteArchivesWorkflowAndCompanionFiles(t *testing.T) {
 	}
 }
 
+func TestLoadMarketplacePackageRejectsPackageVersionMismatch(t *testing.T) {
+	sourceDir := t.TempDir()
+	workflowData := []byte("version: 1\npackage_version: 1.0.0\nname: release\nsteps:\n  - id: run\n    type: shell\n    with: {command: true}\n")
+	if err := os.WriteFile(filepath.Join(sourceDir, "wuko.yaml"), workflowData, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	archivePath := filepath.Join(t.TempDir(), "release.tar.gz")
+	_, archiveDigest, err := BuildWorkflowPackage(sourceDir, archivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	archiveData, err := os.ReadFile(archivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := testHTTPClient(func(request *http.Request) (*http.Response, error) {
+		if request.URL.String() != "https://example.test/repo/packages/release.tar.gz" {
+			return nil, fmt.Errorf("unexpected URL %s", request.URL)
+		}
+		return testResponse(http.StatusOK, archiveData), nil
+	})
+	item := MarketplacePackage{
+		Name: "release", PackageVersion: "2.0.0", Source: ".wuko/workflows/release", Path: "packages/release.tar.gz",
+		Format: "tar.gz", Entry: "wuko.yaml", SourceSHA256: strings.Repeat("a", 64), SHA256: archiveDigest,
+	}
+	_, _, cleanup, err := NewLoader(client).LoadMarketplacePackage(t.Context(), "https://example.test/repo", item, LoadOptions{})
+	cleanup()
+	if err == nil || !strings.Contains(err.Error(), "package_version") {
+		t.Fatalf("error = %v, want package version mismatch", err)
+	}
+}
+
 func TestLoadRemoteArchiveResolvesTemplateFiles(t *testing.T) {
 	workflowData := []byte(`version: 1
 name: remote-templates

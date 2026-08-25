@@ -18,17 +18,24 @@ const MarketplaceManifestVersion = 1
 // ErrMarketplaceNotFound indicates that an HTTPS source does not expose a marketplace manifest.
 var ErrMarketplaceNotFound = errors.New("marketplace manifest not found")
 
-// MarketplaceManifest lists workflows published by a marketplace.
+// MarketplaceManifest lists workflow packages published by a marketplace.
 type MarketplaceManifest struct {
-	Version   int                   `json:"version"`
-	Workflows []MarketplaceWorkflow `json:"workflows"`
+	Version  int                  `json:"version"`
+	Packages []MarketplacePackage `json:"packages"`
 }
 
-// MarketplaceWorkflow identifies a workflow relative to a marketplace root.
-type MarketplaceWorkflow struct {
-	Name        string `json:"name,omitempty"`
-	Path        string `json:"path"`
-	Description string `json:"description,omitempty"`
+// MarketplacePackage identifies an archived workflow package relative to a marketplace root.
+// PackageVersion is publisher metadata and is independent of the workflow schema version.
+type MarketplacePackage struct {
+	Name           string `json:"name"`
+	PackageVersion string `json:"package_version,omitempty"`
+	Source         string `json:"source"`
+	Path           string `json:"path"`
+	Format         string `json:"format"`
+	Entry          string `json:"entry"`
+	Description    string `json:"description,omitempty"`
+	SourceSHA256   string `json:"source_sha256"`
+	SHA256         string `json:"sha256"`
 }
 
 // DiscoverMarketplace fetches and validates the versioned manifest at baseURL.
@@ -71,36 +78,57 @@ func (loader *Loader) DiscoverMarketplace(ctx context.Context, baseURL string) (
 	return manifest, nil
 }
 
-// ValidateMarketplaceManifest validates the version and all workflow paths.
+// ValidateMarketplaceManifest validates the version and all package metadata.
 func ValidateMarketplaceManifest(manifest MarketplaceManifest) error {
 	if manifest.Version != MarketplaceManifestVersion {
 		return fmt.Errorf("unsupported version %d (want %d)", manifest.Version, MarketplaceManifestVersion)
 	}
-	seenPaths := make(map[string]struct{}, len(manifest.Workflows))
-	seenNames := make(map[string]struct{}, len(manifest.Workflows))
-	for index, item := range manifest.Workflows {
-		if _, err := validateMarketplacePath(item.Path); err != nil {
-			return fmt.Errorf("workflow %d: %w", index+1, err)
+	seenSources := make(map[string]struct{}, len(manifest.Packages))
+	seenPaths := make(map[string]struct{}, len(manifest.Packages))
+	seenNames := make(map[string]struct{}, len(manifest.Packages))
+	for index, item := range manifest.Packages {
+		if !ValidWorkflowName(item.Name) {
+			return fmt.Errorf("package %d: invalid name %q", index+1, item.Name)
 		}
+		if strings.TrimSpace(item.PackageVersion) != item.PackageVersion {
+			return fmt.Errorf("package %d: package_version must not have leading or trailing whitespace", index+1)
+		}
+		if _, err := validateMarketplacePath(item.Source); err != nil {
+			return fmt.Errorf("package %d source: %w", index+1, err)
+		}
+		if item.Format != "tar.gz" {
+			return fmt.Errorf("package %d: unsupported format %q (want tar.gz)", index+1, item.Format)
+		}
+		if item.Entry != defaultRemoteWorkflowFile {
+			return fmt.Errorf("package %d: entry must be %q", index+1, defaultRemoteWorkflowFile)
+		}
+		if !sha256Pattern.MatchString(item.SourceSHA256) {
+			return fmt.Errorf("package %d: source_sha256 must be a 64-character hexadecimal digest", index+1)
+		}
+		if !sha256Pattern.MatchString(item.SHA256) {
+			return fmt.Errorf("package %d: sha256 must be a 64-character hexadecimal digest", index+1)
+		}
+		if _, err := validateMarketplacePath(item.Path); err != nil {
+			return fmt.Errorf("package %d path: %w", index+1, err)
+		}
+		if _, exists := seenSources[item.Source]; exists {
+			return fmt.Errorf("package source %q is duplicated", item.Source)
+		}
+		seenSources[item.Source] = struct{}{}
 		if _, exists := seenPaths[item.Path]; exists {
-			return fmt.Errorf("workflow path %q is duplicated", item.Path)
+			return fmt.Errorf("package path %q is duplicated", item.Path)
 		}
 		seenPaths[item.Path] = struct{}{}
-		if item.Name != "" {
-			if !ValidWorkflowName(item.Name) {
-				return fmt.Errorf("workflow %d: invalid name %q", index+1, item.Name)
-			}
-			if _, exists := seenNames[item.Name]; exists {
-				return fmt.Errorf("workflow name %q is duplicated", item.Name)
-			}
-			seenNames[item.Name] = struct{}{}
+		if _, exists := seenNames[item.Name]; exists {
+			return fmt.Errorf("package name %q is duplicated", item.Name)
 		}
+		seenNames[item.Name] = struct{}{}
 	}
 	return nil
 }
 
-// ResolveMarketplaceWorkflow resolves an entry path against an HTTPS marketplace base URL.
-func ResolveMarketplaceWorkflow(baseURL string, item MarketplaceWorkflow) (string, error) {
+// ResolveMarketplacePackage resolves an archive path against an HTTPS marketplace base URL.
+func ResolveMarketplacePackage(baseURL string, item MarketplacePackage) (string, error) {
 	base, err := marketplaceContentBaseURL(baseURL)
 	if err != nil {
 		return "", err
@@ -110,11 +138,11 @@ func ResolveMarketplaceWorkflow(baseURL string, item MarketplaceWorkflow) (strin
 	}
 	entry, err := url.Parse(item.Path)
 	if err != nil {
-		return "", fmt.Errorf("parsing marketplace workflow path %q: %w", item.Path, err)
+		return "", fmt.Errorf("parsing marketplace package path %q: %w", item.Path, err)
 	}
 	resolved := base.ResolveReference(entry)
 	if resolved.Scheme != "https" || resolved.Host != base.Host {
-		return "", fmt.Errorf("marketplace workflow path %q resolves outside the marketplace", item.Path)
+		return "", fmt.Errorf("marketplace package path %q resolves outside the marketplace", item.Path)
 	}
 	resolved.RawQuery = base.RawQuery
 	resolved.ForceQuery = base.ForceQuery

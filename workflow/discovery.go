@@ -15,6 +15,7 @@ type Source struct {
 	Name        string
 	Target      string
 	Path        string
+	PackageDir  string
 	Description string
 	Invokable   bool
 	DependsOn   map[string]string
@@ -44,37 +45,14 @@ func DiscoverAll(cwd, homeDir, configDir string) ([]Source, error) {
 	locations := discoveryLocations(cwd, homeDir, configDir)
 	var sources []Source
 	for _, location := range locations {
-		files, err := discoverWorkflowFiles(location.dir)
+		locationSources, err := discoverDirectory(location.dir, location.scope)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				continue
 			}
 			return nil, err
 		}
-
-		for _, file := range files {
-			name := file.name
-			path := file.path
-			definition, err := loadLocal(path)
-			if err != nil {
-				return nil, err
-			}
-			targetNames := definition.TargetNames()
-			if len(targetNames) == 0 {
-				targetNames = []string{""}
-			}
-			for _, targetName := range targetNames {
-				selected, err := definition.SelectTarget(targetName)
-				if err != nil {
-					return nil, fmt.Errorf("selecting workflow %q target %q: %w", name, targetName, err)
-				}
-				sources = append(sources, Source{
-					Name: name, Target: targetName, Path: path, Description: selected.Description,
-					Invokable: selected.IsInvokable(), DependsOn: maps.Clone(selected.DependsOn),
-					HasForm: selected.HasForm(), Scope: location.scope,
-				})
-			}
-		}
+		sources = append(sources, locationSources...)
 	}
 
 	effective := make(map[string]string, len(sources))
@@ -96,15 +74,98 @@ func DiscoverAll(cwd, homeDir, configDir string) ([]Source, error) {
 	return sources, nil
 }
 
+// DiscoverDirectory returns workflows rooted directly below directory. It is used by lifecycle
+// commands that need to search one storage scope without traversing other precedence scopes.
+func DiscoverDirectory(directory, scope string) ([]Source, error) {
+	return discoverDirectory(directory, scope)
+}
+
+// FindInDirectory returns a workflow from one storage directory, including installed packages.
+func FindInDirectory(directory, name string) (Source, error) {
+	if !ValidWorkflowSelector(name) {
+		return Source{}, fmt.Errorf("invalid workflow name %q", name)
+	}
+	sources, err := DiscoverDirectory(directory, "local")
+	if err != nil {
+		return Source{}, err
+	}
+	for _, source := range sources {
+		if source.Name == name && source.Effective {
+			return source, nil
+		}
+	}
+	return Source{}, fmt.Errorf("workflow %q not found in %s", name, directory)
+}
+
+func discoverDirectory(directory, scope string) ([]Source, error) {
+	files, err := discoverWorkflowFiles(directory)
+	if err != nil {
+		return nil, err
+	}
+	var sources []Source
+	for _, file := range files {
+		name := file.name
+		definition, err := loadLocal(file.path)
+		if err != nil {
+			return nil, err
+		}
+		if file.packageDir != "" {
+			if !ValidWorkflowName(definition.Name) {
+				return nil, fmt.Errorf("installed package %s has invalid workflow name %q", file.packageDir, definition.Name)
+			}
+			name = definition.Name
+		}
+		targetNames := definition.TargetNames()
+		if len(targetNames) == 0 {
+			targetNames = []string{""}
+		}
+		for _, targetName := range targetNames {
+			selected, err := definition.SelectTarget(targetName)
+			if err != nil {
+				return nil, fmt.Errorf("selecting workflow %q target %q: %w", name, targetName, err)
+			}
+			sources = append(sources, Source{
+				Name: name, Target: targetName, Path: file.path, PackageDir: file.packageDir,
+				Description: selected.Description, Invokable: selected.IsInvokable(),
+				DependsOn: maps.Clone(selected.DependsOn), HasForm: selected.HasForm(), Scope: scope,
+			})
+		}
+	}
+	effective := make(map[string]string, len(sources))
+	for i := range sources {
+		path, exists := effective[sources[i].Name]
+		if !exists {
+			sources[i].Effective = true
+			effective[sources[i].Name] = sources[i].Path
+			continue
+		}
+		sources[i].Effective = path == sources[i].Path
+	}
+	slices.SortStableFunc(sources, func(a, b Source) int {
+		if comparison := strings.Compare(a.Name, b.Name); comparison != 0 {
+			return comparison
+		}
+		return strings.Compare(a.Target, b.Target)
+	})
+	return sources, nil
+}
+
 type discoveredWorkflowFile struct {
-	name string
-	path string
+	name       string
+	path       string
+	packageDir string
 }
 
 func discoverWorkflowFiles(root string) ([]discoveredWorkflowFile, error) {
 	var files []discoveredWorkflowFile
 	var visit func(string, string) error
 	visit = func(directory, relativeDirectory string) error {
+		if packagePath, ok, err := installedPackageManifest(directory); err != nil {
+			return err
+		} else if ok {
+			files = append(files, discoveredWorkflowFile{path: packagePath, packageDir: directory})
+			return nil
+		}
 		entries, err := os.ReadDir(directory)
 		if err != nil {
 			return fmt.Errorf("reading workflow directory %s: %w", directory, err)
@@ -145,6 +206,25 @@ func discoverWorkflowFiles(root string) ([]discoveredWorkflowFile, error) {
 	}
 	slices.SortStableFunc(files, func(a, b discoveredWorkflowFile) int { return strings.Compare(a.name, b.name) })
 	return files, nil
+}
+
+func installedPackageManifest(directory string) (string, bool, error) {
+	marker := filepath.Join(directory, WorkflowPackageMarkerName)
+	info, err := os.Stat(marker)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", false, nil
+		}
+		return "", false, fmt.Errorf("checking workflow package marker %s: %w", marker, err)
+	}
+	if !info.Mode().IsRegular() {
+		return "", false, fmt.Errorf("workflow package marker %s is not a regular file", marker)
+	}
+	path, err := WorkflowPackageManifestPath(directory)
+	if err != nil {
+		return "", false, err
+	}
+	return path, true, nil
 }
 
 // Find returns the effective workflow matching name.
