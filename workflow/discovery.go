@@ -12,16 +12,17 @@ import (
 
 // Source identifies a discovered workflow and its precedence scope.
 type Source struct {
-	Name        string
-	Target      string
-	Path        string
-	PackageDir  string
-	Description string
-	Invokable   bool
-	DependsOn   map[string]string
-	HasForm     bool
-	Scope       string
-	Effective   bool
+	Name           string
+	Target         string
+	Path           string
+	PackageDir     string
+	PackageVersion string
+	Description    string
+	Invokable      bool
+	DependsOn      map[string]string
+	HasForm        bool
+	Scope          string
+	Effective      bool
 }
 
 // Discover finds effective workflows in project, home, and platform configuration directories.
@@ -54,6 +55,28 @@ func DiscoverAll(cwd, homeDir, configDir string) ([]Source, error) {
 		}
 		sources = append(sources, locationSources...)
 	}
+
+	// A working directory inside a workflow root can cause the same file to be
+	// discovered through both the current-directory walk and a parent/home
+	// workflow root. Keep the first occurrence because discovery order encodes
+	// precedence, while avoiding duplicate picker entries for the same source.
+	unique := make([]Source, 0, len(sources))
+	seen := make(map[struct {
+		path   string
+		target string
+	}]struct{}, len(sources))
+	for _, source := range sources {
+		key := struct {
+			path   string
+			target string
+		}{path: filepath.Clean(source.Path), target: source.Target}
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		unique = append(unique, source)
+	}
+	sources = unique
 
 	effective := make(map[string]string, len(sources))
 	for i := range sources {
@@ -126,7 +149,8 @@ func discoverDirectory(directory, scope string) ([]Source, error) {
 			}
 			sources = append(sources, Source{
 				Name: name, Target: targetName, Path: file.path, PackageDir: file.packageDir,
-				Description: selected.Description, Invokable: selected.IsInvokable(),
+				PackageVersion: selected.PackageVersion,
+				Description:    selected.Description, Invokable: selected.IsInvokable(),
 				DependsOn: maps.Clone(selected.DependsOn), HasForm: selected.HasForm(), Scope: scope,
 			})
 		}

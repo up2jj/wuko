@@ -75,7 +75,7 @@ func TestDiscoverIncludesWorkflowDependencies(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	data := "version: 1\nname: release\ndepends_on: {build: build-artifacts}\nsteps:\n  - return: {outputs: {}}\n"
+	data := "version: 1\npackage_version: 1.4.0\nname: release\ndepends_on: {build: build-artifacts}\nsteps:\n  - return: {outputs: {}}\n"
 	if err := os.WriteFile(filepath.Join(dir, "release.yaml"), []byte(data), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ func TestDiscoverIncludesWorkflowDependencies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(sources) != 1 || sources[0].DependsOn["build"] != "build-artifacts" {
+	if len(sources) != 1 || sources[0].DependsOn["build"] != "build-artifacts" || sources[0].PackageVersion != "1.4.0" {
 		t.Fatalf("sources = %#v", sources)
 	}
 }
@@ -95,6 +95,7 @@ func TestDiscoverExpandsWorkflowTargets(t *testing.T) {
 		t.Fatal(err)
 	}
 	data := `version: 1
+package_version: 1.4.0
 name: deploy
 description: shared
 targets:
@@ -123,6 +124,9 @@ targets:
 	}
 	if sources[0].Description != "production" || sources[1].Description != "staging" {
 		t.Fatalf("target descriptions = %#v", sources)
+	}
+	if sources[0].PackageVersion != "1.4.0" || sources[1].PackageVersion != "1.4.0" {
+		t.Fatalf("target package versions = %#v", sources)
 	}
 }
 
@@ -225,6 +229,30 @@ func TestDiscoverTreatsInstalledPackagesAsSingleWorkflowUnits(t *testing.T) {
 	}
 	if source, err := Find(root, "", "", "packaged"); err != nil || source.PackageDir != directory {
 		t.Fatalf("Find() = %#v, %v", source, err)
+	}
+}
+
+func TestDiscoverDeduplicatesWorkflowRootsOverlappingWorkingDirectory(t *testing.T) {
+	base := t.TempDir()
+	home := filepath.Join(base, "home")
+	workflowRoot := filepath.Join(home, ".wuko", "workflows")
+	packageDir := filepath.Join(workflowRoot, ".wuko", "workflows", "marketplace", "release")
+	if err := os.MkdirAll(packageDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(packageDir, "wuko.yaml"), []byte("version: 1\nname: packaged\nsteps:\n  - id: run\n    type: shell\n    with: {command: true}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(packageDir, WorkflowPackageMarkerName), []byte(`{"version":1,"name":"packaged"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	sources, err := Discover(workflowRoot, home, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sources) != 1 || sources[0].Name != "packaged" || sources[0].Path != filepath.Join(packageDir, "wuko.yaml") {
+		t.Fatalf("sources = %#v", sources)
 	}
 }
 

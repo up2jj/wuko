@@ -97,6 +97,16 @@ func TestWorkflowPickerOptionShowsPlainTextPin(t *testing.T) {
 	}
 }
 
+func TestWorkflowPickerOptionShowsPackageVersion(t *testing.T) {
+	option := workflowPickerOption(workflow.Source{
+		Name: "release", Scope: "local", Description: "Publish", PackageVersion: "1.4.0",
+		Path: "/project/release.yaml",
+	})
+	if want := "local • Publish • package 1.4.0"; option.Description != want {
+		t.Fatalf("description = %q, want %q", option.Description, want)
+	}
+}
+
 func TestWorkflowPickerStateRejectsMalformedState(t *testing.T) {
 	configDir := t.TempDir()
 	path := filepath.Join(configDir, "wuko", "values", "picker.json")

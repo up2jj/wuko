@@ -195,6 +195,9 @@ func workflowPickerOptionWithState(source workflow.Source, pinned, selected bool
 		description = "(no description)"
 	}
 	parts := []string{source.Scope, description}
+	if source.PackageVersion != "" {
+		parts = append(parts, "package "+source.PackageVersion)
+	}
 	label := source.Name
 	if source.Target != "" {
 		label += " " + source.Target
