@@ -2,7 +2,6 @@ package tui
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"strings"
 
@@ -14,6 +13,7 @@ type textModel struct {
 	input     textinput.Model
 	message   string
 	required  bool
+	width     int
 	done      bool
 	cancelled bool
 	err       string
@@ -21,16 +21,24 @@ type textModel struct {
 
 func newTextModel(message, value string, required bool, echoMode textinput.EchoMode, validate textinput.ValidateFunc) textModel {
 	input := textinput.New()
+	styleInteractiveTextInput(&input)
+	input.Prompt = "> "
+	input.SetWidth(78)
 	input.EchoMode = echoMode
 	input.Validate = validate
 	input.SetValue(value)
 	input.Focus()
-	return textModel{input: input, message: message, required: required}
+	return textModel{input: input, message: message, required: required, width: 80}
 }
 
 func (m textModel) Init() tea.Cmd { return textinput.Blink }
 
 func (m textModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
+	if size, ok := message.(tea.WindowSizeMsg); ok {
+		m.width = max(size.Width, 1)
+		m.input.SetWidth(max(m.width-2, 1))
+		return m, nil
+	}
 	if key, ok := message.(tea.KeyPressMsg); ok {
 		if isCancelKey(key) {
 			m.cancelled = true
@@ -68,11 +76,22 @@ func (m textModel) View() tea.View {
 	if m.done || m.cancelled {
 		return tea.NewView("")
 	}
-	view := fmt.Sprintf("%s\n%s\n", m.message, m.input.View())
+	var view strings.Builder
+	view.WriteString(interactiveStyles.message.Render(m.message))
+	view.WriteByte('\n')
+	view.WriteString(m.input.View())
+	view.WriteByte('\n')
 	if m.err != "" {
-		view += m.err + "\n"
+		view.WriteString(interactiveStyles.error.Render(m.err))
+		view.WriteByte('\n')
 	}
-	return tea.NewView(view + "enter confirm • " + cancelHelp + "\n")
+	view.WriteString(renderHelpText(m.help()))
+	view.WriteByte('\n')
+	return tea.NewView(view.String())
+}
+
+func (m textModel) help() string {
+	return wrapHelp([]string{"enter confirm", cancelHelp}, m.width)
 }
 
 // Text runs an interactive Bubble Tea text prompt with an editable initial value.

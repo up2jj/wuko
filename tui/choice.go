@@ -9,7 +9,6 @@ import (
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/sahilm/fuzzy"
 )
 
@@ -31,26 +30,6 @@ type ChoicePickerConfig struct {
 	Required    bool
 	MinSelected *int
 	MaxSelected *int
-}
-
-var choiceStyles = struct {
-	message     lipgloss.Style
-	status      lipgloss.Style
-	cursor      lipgloss.Style
-	selected    lipgloss.Style
-	description lipgloss.Style
-	disabled    lipgloss.Style
-	error       lipgloss.Style
-	help        lipgloss.Style
-}{
-	message:     lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("205")),
-	status:      lipgloss.NewStyle().Foreground(lipgloss.Color("214")),
-	cursor:      lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("81")),
-	selected:    lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("205")),
-	description: lipgloss.NewStyle().Foreground(lipgloss.Color("243")),
-	disabled:    lipgloss.NewStyle().Foreground(lipgloss.Color("240")),
-	error:       lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("196")),
-	help:        lipgloss.NewStyle().Foreground(lipgloss.Color("246")),
 }
 
 type choiceItem struct {
@@ -93,6 +72,7 @@ func newChoiceModel(config ChoicePickerConfig) choiceModel {
 	filter := textinput.New()
 	filter.Prompt = "/"
 	filter.Placeholder = "filter"
+	styleInteractiveTextInput(&filter)
 	filter.SetWidth(40)
 	model := choiceModel{
 		config: config, items: items, selected: make(map[int]bool), filter: filter,
@@ -295,7 +275,7 @@ func (m choiceModel) View() tea.View {
 		return tea.NewView("")
 	}
 	var view strings.Builder
-	view.WriteString(choiceStyles.message.Render(m.config.Message))
+	view.WriteString(interactiveStyles.message.Render(m.config.Message))
 	if m.config.Multiple {
 		status := fmt.Sprintf(" • selected: %d", len(m.order))
 		if minimum := m.minimum(); minimum > 0 || m.config.MinSelected != nil {
@@ -304,53 +284,53 @@ func (m choiceModel) View() tea.View {
 		if maximum := m.maximum(); maximum != nil {
 			status += fmt.Sprintf(" • max: %d", *maximum)
 		}
-		view.WriteString(choiceStyles.status.Render(status))
+		view.WriteString(interactiveStyles.status.Render(status))
 	}
 	view.WriteByte('\n')
 	if m.filtering || m.filter.Value() != "" {
-		view.WriteString("Filter: " + m.filter.View() + "\n")
+		view.WriteString(renderFilter(m.filter) + "\n")
 	}
 
 	start, end := m.visibleRange()
 	if len(m.visible) == 0 {
-		view.WriteString(choiceStyles.disabled.Render("  (no matching choices)") + "\n")
+		view.WriteString(interactiveStyles.disabled.Render("  (no matching choices)") + "\n")
 	}
 	for index := start; index < end; index++ {
 		item := m.visible[index]
 		cursor := " "
 		if index == m.cursor {
-			cursor = choiceStyles.cursor.Render(">")
+			cursor = interactiveStyles.cursor.Render(">")
 		}
 		mark := " "
 		if m.config.Multiple {
 			mark = "[ ]"
 			if m.selected[item.index] {
-				mark = choiceStyles.selected.Render("[x]")
+				mark = interactiveStyles.selected.Render("[x]")
 			}
 		}
 		label := item.label
 		if item.disabled {
-			label = choiceStyles.disabled.Render(label)
+			label = interactiveStyles.disabled.Render(label)
 		} else if index == m.cursor {
-			label = choiceStyles.selected.Render(label)
+			label = interactiveStyles.selected.Render(label)
 		}
 		fmt.Fprintf(&view, "%s %s %s", cursor, mark, label)
 		if item.description != "" {
-			fmt.Fprintf(&view, " %s %s", choiceStyles.description.Render("—"), choiceStyles.description.Render(item.description))
+			fmt.Fprintf(&view, " %s %s", interactiveStyles.description.Render("—"), interactiveStyles.description.Render(item.description))
 		}
 		if item.disabled {
 			separator := "—"
 			if item.description != "" {
 				separator = "•"
 			}
-			fmt.Fprintf(&view, " %s %s", choiceStyles.disabled.Render(separator), choiceStyles.disabled.Render("disabled: "+item.reason))
+			fmt.Fprintf(&view, " %s %s", interactiveStyles.disabled.Render(separator), interactiveStyles.disabled.Render("disabled: "+item.reason))
 		}
 		view.WriteByte('\n')
 	}
 	if m.err != "" {
-		view.WriteString(choiceStyles.error.Render(m.err) + "\n")
+		view.WriteString(interactiveStyles.error.Render(m.err) + "\n")
 	}
-	view.WriteString(choiceStyles.help.Render(strings.TrimSuffix(m.help(), "\n")))
+	view.WriteString(renderHelpText(m.help()))
 	view.WriteByte('\n')
 	return tea.NewView(view.String())
 }

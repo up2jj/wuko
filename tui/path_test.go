@@ -41,8 +41,8 @@ func TestPathPickerStylesSelectedEntriesAndEntryKinds(t *testing.T) {
 	view := model.View().Content
 
 	for _, styled := range []string{
-		pathStyles.message.Render("Select"),
-		pathStyles.selected.Render("a.go"),
+		interactiveStyles.message.Render("Select"),
+		interactiveStyles.selected.Render("a.go"),
 		pathStyles.directory.Render("nested/"),
 	} {
 		if !strings.Contains(view, styled) {

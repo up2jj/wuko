@@ -67,6 +67,13 @@ type selectionDelegate struct {
 func newSelectionDelegate() selectionDelegate {
 	base := list.NewDefaultDelegate()
 	base.SetHeight(3)
+	base.Styles.NormalTitle = interactiveStyles.content
+	base.Styles.NormalDesc = interactiveStyles.description
+	base.Styles.SelectedTitle = interactiveStyles.selected
+	base.Styles.SelectedDesc = interactiveStyles.description
+	base.Styles.DimmedTitle = interactiveStyles.disabled
+	base.Styles.DimmedDesc = interactiveStyles.disabled
+	base.Styles.FilterMatch = interactiveStyles.selected.Underline(true)
 	return selectionDelegate{base: base}
 }
 
@@ -94,16 +101,20 @@ func (delegate selectionDelegate) Render(writer io.Writer, model list.Model, ind
 	}
 
 	styles := &delegate.base.Styles
-	textWidth := model.Width() - styles.NormalTitle.GetPaddingLeft() - styles.NormalTitle.GetPaddingRight()
+	prefix := "  "
+	selected := index == model.Index() && model.FilterState() != list.Filtering
+	if selected && !option.Disabled {
+		prefix = interactiveStyles.cursor.Render("> ")
+	}
+	textWidth := max(model.Width()-ansi.StringWidth(prefix), 1)
 	title = ansi.Truncate(title, textWidth, "…")
 	description := ansi.Truncate(option.Description, textWidth, "…")
 	if option.Path != "" {
 		description += "\n" + option.Path
 	}
 
-	selected := index == model.Index()
 	emptyFilter := model.FilterState() == list.Filtering && model.FilterValue() == ""
-	if emptyFilter {
+	if option.Disabled || emptyFilter {
 		title = styles.DimmedTitle.Render(title)
 		description = styles.DimmedDesc.Render(description)
 	} else if selected && model.FilterState() != list.Filtering {
@@ -113,7 +124,8 @@ func (delegate selectionDelegate) Render(writer io.Writer, model list.Model, ind
 		title = styles.NormalTitle.Render(title)
 		description = styles.NormalDesc.Render(description)
 	}
-	fmt.Fprintf(writer, "%s\n%s", title, description) //nolint:errcheck
+	descriptionPrefix := strings.Repeat(" ", ansi.StringWidth(prefix))
+	fmt.Fprintf(writer, "%s%s\n%s%s", prefix, title, descriptionPrefix, description) //nolint:errcheck
 }
 
 type selectionModel struct {
@@ -131,6 +143,7 @@ func newSelectionModel(title string, options []Option) selectionModel {
 	}
 	delegate := newSelectionDelegate()
 	workflowList := list.New(items, delegate, 80, 20)
+	styleSelectionList(&workflowList)
 	workflowList.Title = title
 	for index, option := range options {
 		if option.Default {
@@ -219,6 +232,7 @@ func newMultiSelectionModel(title string, options []Option) multiSelectionModel 
 	}
 	delegate := newSelectionDelegate()
 	workflowList := list.New(items, delegate, 80, 20)
+	styleSelectionList(&workflowList)
 	workflowList.Title = multiSelectionTitle(title, selected)
 	toggle := key.NewBinding(key.WithKeys(" ", "space"), key.WithHelp("space", "toggle"))
 	selectAll := key.NewBinding(key.WithKeys("ctrl+a"), key.WithHelp("ctrl+a", "select visible"))

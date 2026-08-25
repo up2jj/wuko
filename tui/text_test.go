@@ -21,6 +21,27 @@ func TestTextModelStartsWithEditableValue(t *testing.T) {
 	if !strings.Contains(view, "from an earlier step") {
 		t.Fatalf("view = %q, want prepopulated value", view)
 	}
+	for _, styled := range []string{
+		interactiveStyles.message.Render("Enter the release name"),
+		model.input.Styles().Focused.Prompt.Render("> "),
+		renderHelpText("enter confirm • ctrl+c cancel"),
+	} {
+		if !strings.Contains(view, styled) {
+			t.Fatalf("view = %q, want styled content %q", view, styled)
+		}
+	}
+}
+
+func TestTextModelResizesInputWithTerminal(t *testing.T) {
+	model := newTextModel("Name", "value", true, textinput.EchoNormal, nil)
+	updated, command := model.Update(tea.WindowSizeMsg{Width: 12, Height: 10})
+	model = updated.(textModel)
+	if command != nil || model.width != 12 {
+		t.Fatalf("width = %d, command nil = %v", model.width, command == nil)
+	}
+	if got := model.input.View(); !strings.Contains(got, "> ") {
+		t.Fatalf("input view = %q, want prompt", got)
+	}
 }
 
 func TestPasswordModelMasksValue(t *testing.T) {
@@ -48,6 +69,9 @@ func TestTextModelShowsValidationErrorAndStaysOpen(t *testing.T) {
 	}
 	if !strings.Contains(model.View().Content, errTooShort.Error()) {
 		t.Fatalf("view = %q, want validation error", model.View().Content)
+	}
+	if !strings.Contains(model.View().Content, interactiveStyles.error.Render(errTooShort.Error())) {
+		t.Fatalf("view = %q, want styled validation error", model.View().Content)
 	}
 }
 

@@ -17,32 +17,18 @@ const (
 	reviewDiff  = "diff"
 )
 
-var reviewStyles = struct {
-	message  lipgloss.Style
-	label    lipgloss.Style
-	value    lipgloss.Style
-	status   lipgloss.Style
+var reviewDiffStyles = struct {
 	content  lipgloss.Style
 	addition lipgloss.Style
 	removal  lipgloss.Style
 	hunk     lipgloss.Style
 	metadata lipgloss.Style
-	selected lipgloss.Style
-	button   lipgloss.Style
-	help     lipgloss.Style
 }{
-	message:  lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("205")),
-	label:    lipgloss.NewStyle().Foreground(lipgloss.Color("245")),
-	value:    lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("81")),
-	status:   lipgloss.NewStyle().Foreground(lipgloss.Color("214")),
-	content:  lipgloss.NewStyle().Foreground(lipgloss.Color("252")),
+	content:  interactiveStyles.content,
 	addition: lipgloss.NewStyle().Foreground(lipgloss.Color("81")),
 	removal:  lipgloss.NewStyle().Foreground(lipgloss.Color("196")),
 	hunk:     lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("205")),
 	metadata: lipgloss.NewStyle().Foreground(lipgloss.Color("214")),
-	selected: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("205")),
-	button:   lipgloss.NewStyle().Foreground(lipgloss.Color("240")),
-	help:     lipgloss.NewStyle().Foreground(lipgloss.Color("246")),
 }
 
 // ReviewConfig configures a scrollable plain-text or unified-diff review.
@@ -137,12 +123,12 @@ func (m reviewModel) View() tea.View {
 		return tea.NewView("")
 	}
 	var view strings.Builder
-	view.WriteString(reviewStyles.message.Render(m.config.Message) + "\n")
-	view.WriteString(reviewStyles.label.Render("Format: "))
-	view.WriteString(reviewStyles.value.Render(m.config.Format))
-	view.WriteString(reviewStyles.status.Render(fmt.Sprintf(" • lines: %d • showing: %d-%d", len(m.lines), m.firstVisible(), m.lastVisible())))
+	view.WriteString(interactiveStyles.message.Render(m.config.Message) + "\n")
+	view.WriteString(interactiveStyles.label.Render("Format: "))
+	view.WriteString(interactiveStyles.value.Render(m.config.Format))
+	view.WriteString(interactiveStyles.status.Render(fmt.Sprintf(" • lines: %d • showing: %d-%d", len(m.lines), m.firstVisible(), m.lastVisible())))
 	if m.config.Format == reviewDiff && m.horizontal > 0 {
-		view.WriteString(reviewStyles.status.Render(fmt.Sprintf(" • column: %d", m.horizontal+1)))
+		view.WriteString(interactiveStyles.status.Render(fmt.Sprintf(" • column: %d", m.horizontal+1)))
 	}
 	view.WriteByte('\n')
 
@@ -159,15 +145,15 @@ func (m reviewModel) View() tea.View {
 		view.WriteByte('\n')
 	}
 
-	reject := reviewStyles.button.Render("[ Reject ]")
-	approve := reviewStyles.button.Render("[ Approve ]")
+	reject := interactiveStyles.button.Render("[ Reject ]")
+	approve := interactiveStyles.button.Render("[ Approve ]")
 	if m.approved {
-		approve = reviewStyles.selected.Render("[ Approve ]")
+		approve = interactiveStyles.selected.Render("[ Approve ]")
 	} else {
-		reject = reviewStyles.selected.Render("[ Reject ]")
+		reject = interactiveStyles.selected.Render("[ Reject ]")
 	}
 	view.WriteString(reject + "  " + approve + "\n")
-	view.WriteString(reviewStyles.help.Render(strings.TrimSuffix(m.help(), "\n")))
+	view.WriteString(renderHelpText(m.help()))
 	view.WriteByte('\n')
 	return tea.NewView(view.String())
 }
@@ -190,19 +176,19 @@ func (m *reviewModel) layout() {
 
 func (m reviewModel) styleLine(line string) string {
 	if m.config.Format != reviewDiff {
-		return reviewStyles.content.Render(line)
+		return interactiveStyles.content.Render(line)
 	}
 	switch {
 	case strings.HasPrefix(line, "@@"):
-		return reviewStyles.hunk.Render(line)
+		return reviewDiffStyles.hunk.Render(line)
 	case strings.HasPrefix(line, "diff "), strings.HasPrefix(line, "index "), strings.HasPrefix(line, "--- "), strings.HasPrefix(line, "+++ "):
-		return reviewStyles.metadata.Render(line)
+		return reviewDiffStyles.metadata.Render(line)
 	case strings.HasPrefix(line, "+"):
-		return reviewStyles.addition.Render(line)
+		return reviewDiffStyles.addition.Render(line)
 	case strings.HasPrefix(line, "-"):
-		return reviewStyles.removal.Render(line)
+		return reviewDiffStyles.removal.Render(line)
 	default:
-		return reviewStyles.content.Render(line)
+		return reviewDiffStyles.content.Render(line)
 	}
 }
 

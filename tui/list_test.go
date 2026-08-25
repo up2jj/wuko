@@ -21,6 +21,20 @@ func TestMultiSelectionModelTogglesAndConfirmsInManifestOrder(t *testing.T) {
 	}
 }
 
+func TestSelectionModelUsesSharedPickerStyles(t *testing.T) {
+	model := newSelectionModel("Workflows", []Option{{Label: "build", Description: "local"}})
+	view := model.View().Content
+	for _, styled := range []string{
+		interactiveStyles.message.Render("Workflows"),
+		interactiveStyles.selected.Render("build"),
+		interactiveStyles.description.Render("local"),
+	} {
+		if !strings.Contains(view, styled) {
+			t.Fatalf("view = %q, want styled content %q", view, styled)
+		}
+	}
+}
+
 func TestMultiSelectionModelBulkActionsRespectFilterAndPickerStyle(t *testing.T) {
 	model := newMultiSelectionModel("Marketplace", []Option{{Label: "A", Description: "visible"}, {Label: "B", Description: "hidden"}, {Label: "C", Description: "visible"}})
 	model.list.SetFilterText("visible")

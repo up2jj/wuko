@@ -15,12 +15,12 @@ func TestReviewDiffStylesAndSafeDefault(t *testing.T) {
 	})
 	view := model.View().Content
 	for _, styled := range []string{
-		reviewStyles.message.Render("Review"),
-		reviewStyles.metadata.Render("--- a/a"),
-		reviewStyles.hunk.Render("@@ -1 +1 @@"),
-		reviewStyles.removal.Render("-old"),
-		reviewStyles.addition.Render("+new"),
-		reviewStyles.selected.Render("[ Reject ]"),
+		interactiveStyles.message.Render("Review"),
+		reviewDiffStyles.metadata.Render("--- a/a"),
+		reviewDiffStyles.hunk.Render("@@ -1 +1 @@"),
+		reviewDiffStyles.removal.Render("-old"),
+		reviewDiffStyles.addition.Render("+new"),
+		interactiveStyles.selected.Render("[ Reject ]"),
 	} {
 		if !strings.Contains(view, styled) {
 			t.Fatalf("view = %q, want %q", view, styled)
@@ -67,7 +67,7 @@ func TestReviewScrollPanResizeAndHelp(t *testing.T) {
 	}
 	updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 	model = updated.(reviewModel)
-	styled := reviewStyles.addition.Render(model.lines[0])
+	styled := reviewDiffStyles.addition.Render(model.lines[0])
 	visible := ansi.Cut(styled, model.horizontal, model.horizontal+model.contentWidth())
 	if !strings.Contains(model.View().Content, visible) {
 		t.Fatalf("view did not preserve addition style after panning: %q", model.View().Content)

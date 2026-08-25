@@ -58,6 +58,16 @@ func TestChoiceModelFiltersDescriptions(t *testing.T) {
 			t.Fatalf("view = %q, want %q", view, want)
 		}
 	}
+	for _, styled := range []string{
+		interactiveStyles.message.Render("Pick"),
+		interactiveStyles.selected.Render("B"),
+		interactiveStyles.description.Render("secondary"),
+		renderHelpText(model.help()),
+	} {
+		if !strings.Contains(view, styled) {
+			t.Fatalf("view = %q, want styled content %q", view, styled)
+		}
+	}
 }
 
 func TestChoiceModelPaginatesAndWrapsHelp(t *testing.T) {
