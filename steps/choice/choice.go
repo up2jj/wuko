@@ -15,6 +15,7 @@ type Config struct {
 	Variable         string         `yaml:"variable"`
 	Message          string         `yaml:"message"`
 	Multiple         bool           `yaml:"multiple,omitempty"`
+	SelectAll        bool           `yaml:"select_all,omitempty"`
 	Required         *bool          `yaml:"required,omitempty"`
 	MinSelected      *int           `yaml:"min_selected,omitempty"`
 	MaxSelected      *int           `yaml:"max_selected,omitempty"`
@@ -87,6 +88,7 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 	}
 	indexes, err := tui.Choose(ctx, request.Stdin, request.Stdout, tui.ChoicePickerConfig{
 		Message: r.config.Message, Options: options, Multiple: r.config.Multiple, Required: r.required(),
+		SelectAll:   r.config.SelectAll,
 		MinSelected: r.config.MinSelected, MaxSelected: r.config.MaxSelected,
 	})
 	if err != nil {
@@ -291,6 +293,9 @@ func (r *Runner) validateOptions(options []tui.Option) error {
 	if r.minimum() > enabled {
 		return fmt.Errorf("minimum selected %d exceeds %d enabled choices", r.minimum(), enabled)
 	}
+	if r.config.SelectAll && r.config.MaxSelected != nil && enabled > *r.config.MaxSelected {
+		return fmt.Errorf("select all would select %d choices, exceeding maximum selected %d", enabled, *r.config.MaxSelected)
+	}
 	if r.config.MaxSelected != nil && defaults > *r.config.MaxSelected {
 		return fmt.Errorf("%d default choices exceed maximum selected %d", defaults, *r.config.MaxSelected)
 	}
@@ -298,6 +303,9 @@ func (r *Runner) validateOptions(options []tui.Option) error {
 }
 
 func validateBounds(config Config) error {
+	if config.SelectAll && !config.Multiple {
+		return fmt.Errorf("select_all requires multiple: true")
+	}
 	if (config.MinSelected != nil || config.MaxSelected != nil) && !config.Multiple {
 		return fmt.Errorf("min_selected and max_selected require multiple: true")
 	}

@@ -24,8 +24,10 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
   Choice descriptions and `description_field` make large static or dynamic lists searchable.
   Mark unavailable static choices with `disabled` plus a non-empty `reason`, or map dynamic object
   metadata with `disabled_field` and `reason_field`; use `default` or `default_field` only to
-  initialize interactive selection. Multiple choices preserve selection order and may use
-  `min_selected` and `max_selected`; explicit bounds supersede `required`. Optional single choices
+  initialize interactive selection. Use `select_all: true` in multiple mode to initialize every
+  enabled choice as selected; it is incompatible with a `max_selected` smaller than the enabled
+  choice count. Multiple choices preserve selection order and may use `min_selected` and
+  `max_selected`; explicit bounds supersede `required`. Optional single choices
   expose `selected` to distinguish no selection from a selected null value.
   Keep path patterns relative to the picker root and supply prompt variables explicitly in
   non-interactive runs.

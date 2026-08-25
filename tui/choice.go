@@ -27,6 +27,7 @@ type ChoicePickerConfig struct {
 	Message     string
 	Options     []Option
 	Multiple    bool
+	SelectAll   bool
 	Required    bool
 	MinSelected *int
 	MaxSelected *int
@@ -79,10 +80,17 @@ func newChoiceModel(config ChoicePickerConfig) choiceModel {
 		width: 80, height: 24,
 	}
 	for index, option := range config.Options {
+		if config.Multiple && config.SelectAll && !option.Disabled {
+			model.selected[index] = true
+			model.order = append(model.order, index)
+		}
 		if !option.Default {
 			continue
 		}
 		if config.Multiple {
+			if model.selected[index] {
+				continue
+			}
 			model.selected[index] = true
 			model.order = append(model.order, index)
 			continue
@@ -386,6 +394,9 @@ func (m choiceModel) minimum() int {
 func (m choiceModel) maximum() *int { return m.config.MaxSelected }
 
 func validateChoicePickerConfig(config ChoicePickerConfig) error {
+	if config.SelectAll && !config.Multiple {
+		return fmt.Errorf("select all requires multiple choice mode")
+	}
 	if (config.MinSelected != nil || config.MaxSelected != nil) && !config.Multiple {
 		return fmt.Errorf("selection bounds require multiple choice mode")
 	}
@@ -422,6 +433,9 @@ func validateChoicePickerConfig(config ChoicePickerConfig) error {
 	model := choiceModel{config: config}
 	if model.minimum() > enabled {
 		return fmt.Errorf("minimum selected %d exceeds %d enabled choices", model.minimum(), enabled)
+	}
+	if config.SelectAll && config.MaxSelected != nil && enabled > *config.MaxSelected {
+		return fmt.Errorf("select all would select %d choices, exceeding maximum selected %d", enabled, *config.MaxSelected)
 	}
 	if maximum := model.maximum(); maximum != nil && defaults > *maximum {
 		return fmt.Errorf("%d default choices exceed maximum selected %d", defaults, *maximum)

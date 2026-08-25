@@ -118,6 +118,23 @@ func TestChoiceModelUsesDefaultsAndShowsBounds(t *testing.T) {
 	}
 }
 
+func TestChoiceModelSelectsAllEnabledOptionsByDefault(t *testing.T) {
+	model := newChoiceModel(ChoicePickerConfig{
+		Message: "Pick", Multiple: true, SelectAll: true,
+		Options: []Option{
+			{Label: "A"},
+			{Label: "Unavailable", Disabled: true, DisabledReason: "not ready"},
+			{Label: "C"},
+		},
+	})
+	if !slices.Equal(model.order, []int{0, 2}) {
+		t.Fatalf("select-all order = %#v", model.order)
+	}
+	if model.selected[1] {
+		t.Fatal("disabled option was selected")
+	}
+}
+
 func TestChoiceModelShowsAndBlocksDisabledChoice(t *testing.T) {
 	model := newChoiceModel(ChoicePickerConfig{
 		Message: "Pick", Required: true,
@@ -202,11 +219,13 @@ func TestChoicePickerConfigValidation(t *testing.T) {
 		{name: "bounds in single mode", config: ChoicePickerConfig{MinSelected: &zero}},
 		{name: "negative minimum", config: ChoicePickerConfig{Multiple: true, MinSelected: &negative}},
 		{name: "inverted bounds", config: ChoicePickerConfig{Multiple: true, MinSelected: &one, MaxSelected: &zero}},
+		{name: "select all in single mode", config: ChoicePickerConfig{SelectAll: true}},
 		{name: "disabled without reason", config: ChoicePickerConfig{Options: []Option{{Disabled: true}}}},
 		{name: "disabled default", config: ChoicePickerConfig{Options: []Option{{Disabled: true, DisabledReason: "no", Default: true}}}},
 		{name: "multiple single defaults", config: ChoicePickerConfig{Options: []Option{{Default: true}, {Default: true}}}},
 		{name: "minimum exceeds enabled", config: ChoicePickerConfig{Multiple: true, MinSelected: &one, Options: []Option{{Disabled: true, DisabledReason: "no"}}}},
 		{name: "defaults exceed maximum", config: ChoicePickerConfig{Multiple: true, MaxSelected: &zero, Options: []Option{{Default: true}}}},
+		{name: "select all exceeds maximum", config: ChoicePickerConfig{Multiple: true, SelectAll: true, MaxSelected: &zero, Options: []Option{{}, {}}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

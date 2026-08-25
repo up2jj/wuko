@@ -331,6 +331,62 @@ func TestChoiceDefaultsAreInteractiveOnly(t *testing.T) {
 	}
 }
 
+func TestChoiceSelectAllIsInteractiveOnly(t *testing.T) {
+	runner, err := New(map[string]any{
+		"variable": "items", "message": "Items", "multiple": true, "required": false, "select_all": true,
+		"choices": []any{
+			map[string]any{"label": "A", "value": "a"},
+			map[string]any{"label": "B", "value": "b"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{"items": []any{"b"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if values := result.Outputs["values"].([]any); len(values) != 1 || values[0] != "b" {
+		t.Fatalf("pre-supplied values = %#v", values)
+	}
+
+	result, err = runner.Run(t.Context(), step.Request{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Outputs["count"] != 0 || len(result.Outputs["values"].([]any)) != 0 {
+		t.Fatalf("non-interactive values = %#v", result.Outputs)
+	}
+}
+
+func TestChoiceSelectAllRequiresMultiple(t *testing.T) {
+	_, err := New(map[string]any{
+		"variable": "item", "message": "Item", "select_all": true,
+		"choices": []any{map[string]any{"label": "A", "value": "a"}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "select_all requires multiple") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestChoiceSelectAllRejectsSmallMaximum(t *testing.T) {
+	runner, err := New(map[string]any{
+		"variable": "items", "message": "Items", "multiple": true, "select_all": true, "max_selected": 1,
+		"choices": []any{
+			map[string]any{"label": "A", "value": "a"},
+			map[string]any{"label": "B", "value": "b"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runner.Run(t.Context(), step.Request{})
+	if err == nil || !strings.Contains(err.Error(), "select all would select 2 choices") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestChoiceExplicitBoundsSupersedeRequired(t *testing.T) {
 	runner, err := New(map[string]any{
 		"variable": "items", "message": "Items", "multiple": true, "max_selected": 0,

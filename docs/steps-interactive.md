@@ -119,6 +119,7 @@ Select multiple objects from an earlier step:
     variable: project_ids
     message: Select projects
     multiple: true
+    select_all: true
     min_selected: 2
     max_selected: 4
     from: steps.fetch.value.projects
@@ -145,6 +146,12 @@ Static choices require `label` and scalar `value`; `description`, `disabled`, `r
 `default` are optional. Every disabled choice requires a non-empty reason and cannot be a default.
 In single mode, at most one choice may be the default; the picker initially focuses it. In multiple
 mode, all defaults start selected in source order.
+
+Set `select_all: true` to start multiple-choice prompts with every enabled choice selected in
+source order. Disabled choices are excluded. This option is valid only with `multiple: true`; when
+`max_selected` is set, it must be at least the number of enabled choices. Like per-choice defaults,
+select-all initialization applies only to interactive runs and does not override pre-supplied values
+or populate missing values in non-interactive runs.
 
 A scalar dynamic item is both its label and value and does not carry choice metadata. Object lists
 use `label_field` and `value_field`, which may be dotted paths. `description_field` displays
