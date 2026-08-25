@@ -116,6 +116,29 @@ workflow should report a missing `gh` executable before attempting the lookup:
     operation: find
 ```
 
+## `github_release`
+
+Check whether a GitHub repository's default branch has commits after its latest stable release.
+The step uses the installed `gh` CLI and performs only read-only lookups. `operation:
+check_drift` is required; the repository must use the `owner/repository` form.
+
+```yaml
+- id: release_status
+  type: github_release
+  with:
+    operation: check_drift
+    repository: acme/project
+```
+
+The step resolves the repository's default branch, reads GitHub's latest stable release, and
+compares `release_tag...default_branch`. A repository without a stable release succeeds with
+`status: no_release`; authentication, repository, `gh`, and API failures fail the step. Use
+`require_tool` before the step when a workflow wants to report a missing `gh` executable early.
+
+Outputs include `repository`, `found`, `status`, `has_changes`, `release_tag`, `release_url`,
+`published_at`, `branch`, `ahead_by`, `behind_by`, `total_commits`, and `compare_url`. `status` is
+`changed` when `ahead_by` is greater than zero, otherwise it is `current` when a release exists.
+
 ## `github_actions`
 
 Observe one GitHub Actions workflow run through the installed `gh` CLI. The step performs one
