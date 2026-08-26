@@ -83,7 +83,10 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
   or a conditional/working-directory block; do not place it inside concurrent, foreach, matrix, or
   finally. Composite-action return keys must exactly match the declared action outputs.
 - Use shell for external programs, Lua for multi-operation scripting, Docker for isolated
-  containers, and agent for coding-agent execution.
+  containers, and agent for coding-agent execution. For large machine-readable shell output, set
+  `stdout: capture` and consume `steps.<id>.stdout` instead of redirecting through a temporary file;
+  leave stderr omitted or set it to `inherit` so failures remain visible. Apply `capture_limit` when
+  the producer may return unbounded data. The same options are available to `wuko.exec.run`.
 
 ## Important behavior
 

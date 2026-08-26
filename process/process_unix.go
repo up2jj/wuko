@@ -41,6 +41,8 @@ type Options struct {
 	// CaptureLimit bounds each captured output stream. Zero means unlimited. Output written to
 	// Stdout and Stderr is unaffected.
 	CaptureLimit int64
+	StdoutPolicy OutputPolicy
+	StderrPolicy OutputPolicy
 }
 
 type Result struct {
@@ -78,6 +80,9 @@ func (LocalExecutor) Run(ctx context.Context, options Options) (Result, error) {
 	if options.Command == "" {
 		return Result{}, fmt.Errorf("command is required")
 	}
+	if !options.StdoutPolicy.Valid() || !options.StderrPolicy.Valid() {
+		return Result{}, fmt.Errorf("invalid output policy")
+	}
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
 	}
@@ -97,8 +102,8 @@ func (LocalExecutor) Run(ctx context.Context, options Options) (Result, error) {
 
 	stdout := newCaptureBuffer(options.CaptureLimit)
 	stderr := newCaptureBuffer(options.CaptureLimit)
-	command.Stdout = io.MultiWriter(writerOrDiscard(options.Stdout), &stdout)
-	command.Stderr = io.MultiWriter(writerOrDiscard(options.Stderr), &stderr)
+	command.Stdout = outputWriter(options.StdoutPolicy, options.Stdout, &stdout)
+	command.Stderr = outputWriter(options.StderrPolicy, options.Stderr, &stderr)
 	if err := command.Start(); err != nil {
 		if options.User != "" {
 			return Result{}, fmt.Errorf("starting %s as user %q: %w", options.Command, options.User, err)
@@ -205,7 +210,7 @@ func runTTY(ctx context.Context, options Options, credential *syscall.Credential
 	stdout := newCaptureBuffer(options.CaptureLimit)
 	outputDone := make(chan error, 1)
 	go func() {
-		_, copyErr := io.Copy(io.MultiWriter(writerOrDiscard(options.Stdout), &stdout), ptmx)
+		_, copyErr := io.Copy(outputWriter(options.StdoutPolicy, options.Stdout, &stdout), ptmx)
 		outputDone <- copyErr
 	}()
 	inputDone := make(chan error, 1)
@@ -381,7 +386,7 @@ func processGroupAlive(processID int) bool {
 }
 
 type captureBuffer struct {
-	bytes.Buffer
+	buffer    bytes.Buffer
 	limit     int64
 	truncated bool
 }
@@ -391,19 +396,21 @@ func newCaptureBuffer(limit int64) captureBuffer { return captureBuffer{limit: l
 func (buffer *captureBuffer) Write(data []byte) (int, error) {
 	length := len(data)
 	if buffer.limit <= 0 {
-		_, _ = buffer.Buffer.Write(data)
+		_, _ = buffer.buffer.Write(data)
 		return length, nil
 	}
-	remaining := buffer.limit - int64(buffer.Buffer.Len())
+	remaining := buffer.limit - int64(buffer.buffer.Len())
 	if remaining > 0 {
 		write := min(int64(len(data)), remaining)
-		_, _ = buffer.Buffer.Write(data[:write])
+		_, _ = buffer.buffer.Write(data[:write])
 	}
 	if int64(length) > remaining {
 		buffer.truncated = true
 	}
 	return length, nil
 }
+
+func (buffer *captureBuffer) String() string { return buffer.buffer.String() }
 
 func environment(values map[string]string) []string {
 	keys := make([]string, 0, len(values))
@@ -423,6 +430,19 @@ func writerOrDiscard(writer io.Writer) io.Writer {
 		return io.Discard
 	}
 	return writer
+}
+
+func outputWriter(policy OutputPolicy, stream io.Writer, capture io.Writer) io.Writer {
+	switch {
+	case policy.Streams() && policy.Captures():
+		return io.MultiWriter(writerOrDiscard(stream), capture)
+	case policy.Streams():
+		return writerOrDiscard(stream)
+	case policy.Captures():
+		return capture
+	default:
+		return io.Discard
+	}
 }
 
 func StringInput(value string) io.Reader {

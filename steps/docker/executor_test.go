@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"path/filepath"
@@ -65,6 +66,40 @@ func TestDockerExecutorRejectsTTYBeforeStartingSession(t *testing.T) {
 	}
 	if session.containerID != "" || client.created.Config != nil {
 		t.Fatalf("TTY rejection started session: id=%q config=%#v", session.containerID, client.created.Config)
+	}
+}
+
+func TestDockerExecutorHonorsOutputPolicies(t *testing.T) {
+	tests := []struct {
+		name          string
+		policy        process.OutputPolicy
+		wantCapture   string
+		wantStream    string
+		wantTruncated bool
+	}{
+		{name: "tee", policy: process.OutputTee, wantCapture: "bui", wantStream: "built", wantTruncated: true},
+		{name: "inherit", policy: process.OutputInherit, wantStream: "built"},
+		{name: "capture", policy: process.OutputCapture, wantCapture: "bui", wantTruncated: true},
+		{name: "discard", policy: process.OutputDiscard},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			client := &fakeClient{output: multiplexedOutput("built", "built")}
+			session := &dockerExecutorSession{client: client, containerID: "container-id"}
+			var stdout, stderr bytes.Buffer
+			result, err := session.Run(t.Context(), process.Options{
+				Command: "generate", Stdout: &stdout, Stderr: &stderr, CaptureLimit: 3,
+				StdoutPolicy: test.policy, StderrPolicy: test.policy,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Stdout != test.wantCapture || result.Stderr != test.wantCapture ||
+				stdout.String() != test.wantStream || stderr.String() != test.wantStream ||
+				result.StdoutTruncated != test.wantTruncated || result.StderrTruncated != test.wantTruncated {
+				t.Fatalf("result = %#v, stdout = %q, stderr = %q", result, stdout.String(), stderr.String())
+			}
+		})
 	}
 }
 

@@ -1,6 +1,7 @@
 package lua
 
 import (
+	"bytes"
 	"io"
 	"net/http"
 	"os"
@@ -349,5 +350,62 @@ wuko.output("host", {status = response.status, text = text, size = info.size, co
 	}
 	if _, err := os.Stat(filepath.Join(runDir, "data", "renamed.txt")); !os.IsNotExist(err) {
 		t.Fatalf("renamed file should have been removed, stat error = %v", err)
+	}
+}
+
+func TestLuaExecRunOutputPoliciesAndCaptureLimit(t *testing.T) {
+	runner, err := New(map[string]any{"source": `
+local result = wuko.exec.run({
+  command = "sh",
+  args = {"-c", "printf 12345; printf abcde >&2"},
+  stdout = "capture",
+  stderr = "inherit",
+  capture_limit = "3B"
+})
+wuko.output("command", result)
+`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	result, err := runner.Run(t.Context(), step.Request{
+		StepID: "lua", WorkflowName: "test", RunDir: t.TempDir(), Env: map[string]string{}, Stdout: &stdout, Stderr: &stderr,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := result.Outputs["command"].(map[string]any)
+	if command["stdout"] != "123" || command["stderr"] != "" || command["stdout_truncated"] != true || command["stderr_truncated"] != false {
+		t.Fatalf("command output = %#v", command)
+	}
+	if stdout.String() != "" || stderr.String() != "abcde" {
+		t.Fatalf("streamed stdout = %q, stderr = %q", stdout.String(), stderr.String())
+	}
+}
+
+func TestLuaExecRunValidatesOutputConfiguration(t *testing.T) {
+	tests := []struct {
+		name   string
+		option string
+		value  string
+		want   string
+	}{
+		{name: "stdout", option: "stdout", value: "quiet", want: "exec.run stdout must be"},
+		{name: "stderr", option: "stderr", value: "quiet", want: "exec.run stderr must be"},
+		{name: "capture limit", option: "capture_limit", value: "0B", want: "exec.run capture_limit must be a positive"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			runner, err := New(map[string]any{"source": `wuko.exec.run({command = "true", ` + test.option + ` = "` + test.value + `"})`})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = runner.Run(t.Context(), step.Request{
+				StepID: "lua", WorkflowName: "test", RunDir: t.TempDir(), Env: map[string]string{}, Stdout: io.Discard, Stderr: io.Discard,
+			})
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("Run() error = %v, want %q", err, test.want)
+			}
+		})
 	}
 }

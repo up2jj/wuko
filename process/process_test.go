@@ -171,6 +171,46 @@ func TestRunBoundsCapturedOutput(t *testing.T) {
 	}
 }
 
+func TestRunHonorsOutputPolicies(t *testing.T) {
+	tests := []struct {
+		name          string
+		policy        OutputPolicy
+		wantCapture   string
+		wantStream    string
+		wantTruncated bool
+	}{
+		{name: "tee", policy: OutputTee, wantCapture: "123", wantStream: "12345", wantTruncated: true},
+		{name: "inherit", policy: OutputInherit, wantStream: "12345"},
+		{name: "capture", policy: OutputCapture, wantCapture: "123", wantTruncated: true},
+		{name: "discard", policy: OutputDiscard},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			result, err := Run(t.Context(), Options{
+				Command: "sh", Args: []string{"-c", "printf 12345; printf 12345 >&2"}, Env: map[string]string{},
+				Stdout: &stdout, Stderr: &stderr, CaptureLimit: 3,
+				StdoutPolicy: test.policy, StderrPolicy: test.policy,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Stdout != test.wantCapture || result.Stderr != test.wantCapture ||
+				stdout.String() != test.wantStream || stderr.String() != test.wantStream ||
+				result.StdoutTruncated != test.wantTruncated || result.StderrTruncated != test.wantTruncated {
+				t.Fatalf("result = %#v, stdout = %q, stderr = %q", result, stdout.String(), stderr.String())
+			}
+		})
+	}
+}
+
+func TestRunRejectsInvalidOutputPolicy(t *testing.T) {
+	_, err := Run(t.Context(), Options{Command: "true", StdoutPolicy: OutputPolicy(255)})
+	if err == nil || !strings.Contains(err.Error(), "invalid output policy") {
+		t.Fatalf("Run() error = %v", err)
+	}
+}
+
 func TestRunTTYStreamsInputMergesOutputAndRestoresTerminal(t *testing.T) {
 	terminal, input := testTerminal(t, 24, 80)
 	before, err := term.GetState(int(terminal.Fd()))

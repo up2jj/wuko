@@ -55,6 +55,60 @@ func TestNewRejectsTTYWithConfiguredStdin(t *testing.T) {
 	}
 }
 
+func TestNewValidatesOutputConfiguration(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  map[string]any
+		want string
+	}{
+		{name: "stdout", raw: map[string]any{"command": "true", "stdout": "quiet"}, want: "stdout must be"},
+		{name: "stderr", raw: map[string]any{"command": "true", "stderr": "quiet"}, want: "stderr must be"},
+		{name: "capture limit", raw: map[string]any{"command": "true", "capture_limit": "0B"}, want: "capture_limit must be a positive"},
+		{name: "tty stdout", raw: map[string]any{"command": "true", "tty": true, "stdout": "inherit"}, want: "tty cannot be combined"},
+		{name: "tty stderr", raw: map[string]any{"command": "true", "tty": true, "stderr": "discard"}, want: "tty cannot be combined"},
+		{name: "tty limit", raw: map[string]any{"command": "true", "tty": true, "capture_limit": "1MiB"}, want: "tty cannot be combined"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := New(test.raw)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("New() error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestNewAcceptsTemplatedOutputConfiguration(t *testing.T) {
+	_, err := New(map[string]any{
+		"command": "true", "stdout": "{{ .vars.stdout }}", "stderr": "{{ .vars.stderr }}", "capture_limit": "{{ .vars.limit }}",
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+}
+
+func TestShellPassesOutputConfigurationToExecutor(t *testing.T) {
+	executor := &recordingExecutor{result: process.Result{Stdout: "1234", StdoutTruncated: true}}
+	runner, err := New(map[string]any{
+		"command": "generate", "stdout": "capture", "capture_limit": "4B",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runner.Run(t.Context(), step.Request{
+		RunDir: t.TempDir(), Env: map[string]string{}, Stdout: io.Discard, Stderr: io.Discard, Executor: executor,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if executor.options.StdoutPolicy != process.OutputCapture || executor.options.StderrPolicy != process.OutputTee || executor.options.CaptureLimit != 4 {
+		t.Fatalf("process options = %#v", executor.options)
+	}
+	if result.Outputs["stdout"] != "1234" || result.Outputs["stdout_truncated"] != true || result.Outputs["stderr_truncated"] != false {
+		t.Fatalf("outputs = %#v", result.Outputs)
+	}
+}
+
 func TestShellTTYRequiresInteractiveRequest(t *testing.T) {
 	runner, err := New(map[string]any{"command": "sh", "tty": true})
 	if err != nil {

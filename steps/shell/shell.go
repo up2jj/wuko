@@ -24,9 +24,17 @@ type Config struct {
 	User             string               `yaml:"user,omitempty"`
 	Stdin            string               `yaml:"stdin,omitempty"`
 	TTY              bool                 `yaml:"tty,omitempty"`
+	Stdout           string               `yaml:"stdout,omitempty"`
+	Stderr           string               `yaml:"stderr,omitempty"`
+	CaptureLimit     string               `yaml:"capture_limit,omitempty"`
 }
 
-type Runner struct{ config Config }
+type Runner struct {
+	config       Config
+	stdoutPolicy process.OutputPolicy
+	stderrPolicy process.OutputPolicy
+	captureLimit int64
+}
 
 func (*Runner) ExecutorAware() {}
 
@@ -46,12 +54,30 @@ func New(raw map[string]any) (step.Runner, error) {
 	if config.TTY && config.Stdin != "" {
 		return nil, fmt.Errorf("tty and stdin cannot be combined")
 	}
+	if config.TTY && (config.Stdout != "" || config.Stderr != "" || config.CaptureLimit != "") {
+		return nil, fmt.Errorf("tty cannot be combined with stdout, stderr, or capture_limit")
+	}
 	for key := range config.Env {
 		if !workflow.ValidEnvironmentName(key) {
 			return nil, fmt.Errorf("invalid environment name %q", key)
 		}
 	}
-	return &Runner{config: config}, nil
+	stdoutPolicy, err := configuredOutputPolicy("stdout", config.Stdout)
+	if err != nil {
+		return nil, err
+	}
+	stderrPolicy, err := configuredOutputPolicy("stderr", config.Stderr)
+	if err != nil {
+		return nil, err
+	}
+	captureLimit := int64(0)
+	if config.CaptureLimit != "" && !templated(config.CaptureLimit) {
+		captureLimit, err = process.ParseCaptureLimit(config.CaptureLimit)
+		if err != nil {
+			return nil, fmt.Errorf("capture_limit %w", err)
+		}
+	}
+	return &Runner{config: config, stdoutPolicy: stdoutPolicy, stderrPolicy: stderrPolicy, captureLimit: captureLimit}, nil
 }
 
 func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, error) {
@@ -73,7 +99,7 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 		executor = process.LocalExecutor{}
 	}
 	stdin := process.StringInput(r.config.Stdin)
-	captureLimit := int64(0)
+	captureLimit := r.captureLimit
 	if r.config.TTY {
 		stdin = request.Stdin
 		captureLimit = ttyCaptureLimit
@@ -81,6 +107,7 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 	result, err := executor.Run(ctx, process.Options{
 		Command: command, Args: args, Dir: dir, Env: environment, User: r.config.User,
 		Stdin: stdin, Stdout: request.Stdout, Stderr: request.Stderr, TTY: r.config.TTY, CaptureLimit: captureLimit,
+		StdoutPolicy: r.stdoutPolicy, StderrPolicy: r.stderrPolicy,
 	})
 	outputs := map[string]any{
 		"stdout": result.Stdout, "stderr": result.Stderr, "exit_code": result.ExitCode,
@@ -91,6 +118,19 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 	}
 	return step.Result{Outputs: outputs}, nil
 }
+
+func configuredOutputPolicy(field, value string) (process.OutputPolicy, error) {
+	if templated(value) {
+		return process.OutputTee, nil
+	}
+	policy, err := process.ParseOutputPolicy(value)
+	if err != nil {
+		return process.OutputTee, fmt.Errorf("%s %w", field, err)
+	}
+	return policy, nil
+}
+
+func templated(value string) bool { return strings.Contains(value, "{{") }
 
 func (r *Runner) command() (string, []string) {
 	if r.config.Command != "" {

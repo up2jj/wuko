@@ -44,6 +44,43 @@ native process credentials; Wuko does not invoke `sudo` or rewrite `HOME` and `U
 outputs `stdout_truncated` and `stderr_truncated` report whether capture reached its configured
 bound.
 
+Control forwarding and capture independently for each process stream with `stdout` and `stderr`:
+
+| Policy | Display live | Return in the output |
+| --- | --- | --- |
+| `inherit` | Yes | No; the output string is empty |
+| `capture` | No | Yes |
+| `tee` | Yes | Yes |
+| `discard` | No | No; the output string is empty |
+
+Both policies default independently to `tee`, preserving the standard behavior. For example,
+capture a large JSON document without printing it while leaving diagnostics and failures visible:
+
+```yaml
+- id: deployments
+  type: shell
+  with:
+    command: kubectl
+    args: [get, deployments, --all-namespaces, -o, json]
+    stdout: capture
+    stderr: inherit
+```
+
+An omitted `stderr` also defaults to `tee`, so `stdout: capture` alone still displays and captures
+stderr. Use `capture_limit` to bound each captured stream independently:
+
+```yaml
+with:
+  command: generate-manifest
+  stdout: capture
+  capture_limit: 16MiB
+```
+
+Sizes are positive integers followed by `B`, `KiB`, `MiB`, `GiB`, or `TiB`. When a stream exceeds
+the limit, Wuko retains its leading bytes without adding a marker, continues draining the process,
+and sets its `stdout_truncated` or `stderr_truncated` output to `true`. Streaming continues beyond
+the capture limit for `tee`. Without `capture_limit`, non-TTY capture is unlimited.
+
 Set `tty: true` for a local command that needs an interactive terminal, such as a shell, SSH
 session, REPL, or terminal UI:
 
@@ -63,7 +100,9 @@ more output was streamed. This keeps memory bounded for long-running interactive
 
 TTY mode requires an interactive, file-backed terminal and is unavailable in browser runs,
 concurrent execution, and executor blocks. It cannot be combined with non-empty `stdin`. Terminal
-state is restored when the command succeeds, fails, times out, or is canceled.
+state is restored when the command succeeds, fails, times out, or is canceled. `stdout`, `stderr`,
+and `capture_limit` cannot be set with `tty: true`; TTY output remains a live merged stream with its
+existing 1 MiB capture.
 
 ## `agent`
 
@@ -142,6 +181,23 @@ wuko.fs.write("response.json", response.body)
 local result = wuko.exec.run({command = "git", args = {"status", "--short"}})
 wuko.output("clean", result.stdout == "")
 ```
+
+`wuko.exec.run` accepts the same `stdout`, `stderr`, and `capture_limit` options as a shell step:
+
+```lua
+local result = wuko.exec.run({
+  command = "kubectl",
+  args = {"get", "deployments", "--all-namespaces", "-o", "json"},
+  stdout = "capture",
+  stderr = "inherit",
+  capture_limit = "16MiB"
+})
+local deployments = wuko.json.decode(result.stdout)
+```
+
+The result contains `stdout`, `stderr`, `exit_code`, `error`, `stdout_truncated`, and
+`stderr_truncated`. The policies and per-stream truncation behavior match `shell`; omitted policies
+default independently to `tee`.
 
 The trusted `wuko` API exposes `args`, variables, outputs, environment, JSON, shared helpers,
 key-value stores, HTTP, filesystem operations, and direct command execution. Outputs may be nil,

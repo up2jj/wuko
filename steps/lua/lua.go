@@ -558,14 +558,32 @@ func (r *runtime) execRun(state *glua.LState) int {
 	if !filepath.IsAbs(dir) {
 		dir = filepath.Join(r.request.RunDir, dir)
 	}
+	stdoutPolicy, err := process.ParseOutputPolicy(tableString(options, "stdout", ""))
+	if err != nil {
+		state.RaiseError("exec.run stdout %v", err)
+		return 0
+	}
+	stderrPolicy, err := process.ParseOutputPolicy(tableString(options, "stderr", ""))
+	if err != nil {
+		state.RaiseError("exec.run stderr %v", err)
+		return 0
+	}
+	captureLimit, err := process.ParseCaptureLimit(tableString(options, "capture_limit", ""))
+	if err != nil {
+		state.RaiseError("exec.run capture_limit %v", err)
+		return 0
+	}
 	result, runErr := process.Run(state.Context(), process.Options{
 		Command: command, Args: args, Dir: dir, Env: environment,
 		Stdin: strings.NewReader(tableString(options, "stdin", "")), Stdout: r.request.Stdout, Stderr: r.request.Stderr,
+		CaptureLimit: captureLimit, StdoutPolicy: stdoutPolicy, StderrPolicy: stderrPolicy,
 	})
 	table := state.NewTable()
 	table.RawSetString("stdout", glua.LString(result.Stdout))
 	table.RawSetString("stderr", glua.LString(result.Stderr))
 	table.RawSetString("exit_code", glua.LNumber(result.ExitCode))
+	table.RawSetString("stdout_truncated", glua.LBool(result.StdoutTruncated))
+	table.RawSetString("stderr_truncated", glua.LBool(result.StderrTruncated))
 	if runErr != nil {
 		table.RawSetString("error", glua.LString(runErr.Error()))
 	} else {

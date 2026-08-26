@@ -281,6 +281,9 @@ func (session *dockerExecutorSession) Run(ctx context.Context, options process.O
 	if options.TTY {
 		return process.Result{}, fmt.Errorf("tty is not supported by the Docker executor")
 	}
+	if !options.StdoutPolicy.Valid() || !options.StderrPolicy.Valid() {
+		return process.Result{}, fmt.Errorf("invalid output policy")
+	}
 	session.mu.Lock()
 	defer session.mu.Unlock()
 	if options.Command == "" {
@@ -317,7 +320,11 @@ func (session *dockerExecutorSession) Run(ctx context.Context, options process.O
 	stderr := newExecutorCapture(options.CaptureLimit)
 	copyDone := make(chan error, 1)
 	go func() {
-		_, copyErr := stdcopy.StdCopy(io.MultiWriter(writerOrDiscard(options.Stdout), stdout), io.MultiWriter(writerOrDiscard(options.Stderr), stderr), attached.Reader)
+		_, copyErr := stdcopy.StdCopy(
+			executorOutputWriter(options.StdoutPolicy, options.Stdout, stdout),
+			executorOutputWriter(options.StderrPolicy, options.Stderr, stderr),
+			attached.Reader,
+		)
 		copyDone <- copyErr
 	}()
 	inputDone := make(chan error, 1)
@@ -452,6 +459,19 @@ type executorCapture struct {
 }
 
 func newExecutorCapture(limit int64) *executorCapture { return &executorCapture{limit: limit} }
+
+func executorOutputWriter(policy process.OutputPolicy, stream io.Writer, capture io.Writer) io.Writer {
+	switch {
+	case policy.Streams() && policy.Captures():
+		return io.MultiWriter(writerOrDiscard(stream), capture)
+	case policy.Streams():
+		return writerOrDiscard(stream)
+	case policy.Captures():
+		return capture
+	default:
+		return io.Discard
+	}
+}
 
 func (capture *executorCapture) Write(data []byte) (int, error) {
 	if capture.limit <= 0 {
