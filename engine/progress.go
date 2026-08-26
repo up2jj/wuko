@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"sync"
@@ -157,16 +158,19 @@ type runRuntime struct {
 	reportMu sync.Mutex
 	// cleanupMu guards cleanups, which branches append to concurrently.
 	cleanupMu sync.Mutex
-	cleanups  []func() error
+	cleanups  []func(context.Context) error
 }
 
-func (runtime *runRuntime) registerCleanup(cleanup func() error) {
+func (runtime *runRuntime) registerCleanup(cleanup func(context.Context) error) {
 	runtime.cleanupMu.Lock()
 	defer runtime.cleanupMu.Unlock()
 	runtime.cleanups = append(runtime.cleanups, cleanup)
 }
 
-func (runtime *runRuntime) runCleanups() []error {
+// runCleanups runs registered cleanups in reverse completion order. ctx should be
+// detached from the run's cancellation so managed resources are still released after
+// Ctrl-C; see step.Cleaner for why it carries no overall deadline.
+func (runtime *runRuntime) runCleanups(ctx context.Context) []error {
 	runtime.cleanupMu.Lock()
 	cleanups := runtime.cleanups
 	runtime.cleanups = nil
@@ -174,7 +178,7 @@ func (runtime *runRuntime) runCleanups() []error {
 
 	var cleanupErrors []error
 	for index := len(cleanups) - 1; index >= 0; index-- {
-		if err := cleanups[index](); err != nil {
+		if err := cleanups[index](ctx); err != nil {
 			cleanupErrors = append(cleanupErrors, err)
 		}
 	}

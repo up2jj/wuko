@@ -455,7 +455,7 @@ func resourceLabels(request step.Request, configured map[string]string, managed 
 	return labels, nil
 }
 
-func (r *managedRunner) Cleanup(result step.Result) (cleanupErr error) {
+func (r *managedRunner) Cleanup(ctx context.Context, result step.Result) (cleanupErr error) {
 	resourceType, _ := result.Outputs["resource_type"].(string)
 	identifier, _ := result.Outputs["id"].(string)
 	if resourceType == "volume" {
@@ -475,7 +475,11 @@ func (r *managedRunner) Cleanup(result step.Result) (cleanupErr error) {
 			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("closing Docker cleanup client: %w", closeErr))
 		}
 	}()
-	ctx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
+	// Bound this resource's removal, deriving from the caller's context so the run's
+	// values carry through. detachedCleanupContext also strips cancellation, which the
+	// engine has already done; applying it again is harmless and keeps every managed
+	// Docker cleanup on one helper.
+	ctx, cancel := detachedCleanupContext(ctx)
 	defer cancel()
 	switch resourceType {
 	case "network":

@@ -335,9 +335,10 @@ func (e *Engine) Run(ctx context.Context, definition *workflow.Definition, optio
 
 	mainErr = e.executeSequence(ctx, definition, definition.Steps, options, state, &stats, 1, total)
 	state.returning = false
-	cleanupErrors := e.executeCleanupScope(context.WithoutCancel(ctx), definition, options.defers, definition.Finally, options, state, &stats, mainErr, stats.Steps, mainTotal+1, total)
+	cleanupCtx := context.WithoutCancel(ctx)
+	cleanupErrors := e.executeCleanupScope(cleanupCtx, definition, options.defers, definition.Finally, options, state, &stats, mainErr, stats.Steps, mainTotal+1, total)
 	if rootRun {
-		cleanupErrors = append(cleanupErrors, options.runtime.runCleanups()...)
+		cleanupErrors = append(cleanupErrors, options.runtime.runCleanups(cleanupCtx)...)
 	}
 	runErr = errors.Join(append([]error{mainErr}, cleanupErrors...)...)
 	if runErr != nil {
@@ -785,8 +786,8 @@ func managedExecutor(options Options, stepID string, runner step.Runner) stepExe
 			Outputs:   cloneMap(result.Outputs),
 			Variables: cloneMap(result.Variables),
 		}
-		options.runtime.registerCleanup(func() error {
-			if err := cleaner.Cleanup(cleanupResult); err != nil {
+		options.runtime.registerCleanup(func(cleanupCtx context.Context) error {
+			if err := cleaner.Cleanup(cleanupCtx, cleanupResult); err != nil {
 				return fmt.Errorf("cleaning managed resources for step %q: %w", stepID, err)
 			}
 			return nil

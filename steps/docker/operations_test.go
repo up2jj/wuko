@@ -415,7 +415,7 @@ func TestManagedResourcesCreateAndCleanup(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Run() error = %v", err)
 			}
-			if err := managed.Cleanup(result); err != nil {
+			if err := managed.Cleanup(t.Context(), result); err != nil {
 				t.Fatalf("Cleanup() error = %v", err)
 			}
 			if got := test.wantRemove(client); got == "" {
@@ -478,7 +478,7 @@ func TestManagedResourcesRejectCollisionsAndIgnoreMissingCleanup(t *testing.T) {
 		t.Fatalf("Run() error = %v", err)
 	}
 	client.networkRemoveErr = errdefs.ErrNotFound
-	if err := managed.Cleanup(result); err != nil {
+	if err := managed.Cleanup(t.Context(), result); err != nil {
 		t.Fatalf("Cleanup() error = %v", err)
 	}
 }
@@ -499,7 +499,7 @@ func TestManagedResourceCloseErrorStillRegistersUsableResult(t *testing.T) {
 		t.Fatalf("Run() error = %v", err)
 	}
 	client.closeErr = nil
-	if err := managed.Cleanup(result); err != nil {
+	if err := managed.Cleanup(t.Context(), result); err != nil {
 		t.Fatalf("Cleanup() error = %v", err)
 	}
 }
@@ -554,7 +554,7 @@ func TestVolumeCreationAndCleanupRejectChangedOwnership(t *testing.T) {
 		t.Fatalf("second Run() error = %v", err)
 	}
 	client.volume.Volume.Labels[ownershipLabel] = "replacement"
-	if err := managed.Cleanup(result); err == nil || !strings.Contains(err.Error(), "ownership label changed") {
+	if err := managed.Cleanup(t.Context(), result); err == nil || !strings.Contains(err.Error(), "ownership label changed") {
 		t.Fatalf("Cleanup() error = %v", err)
 	}
 	if client.removedVolume != "" {

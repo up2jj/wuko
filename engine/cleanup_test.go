@@ -295,7 +295,7 @@ func (runner *managedTestRunner) Run(context.Context, step.Request) (step.Result
 	return step.Result{Outputs: map[string]any{"label": runner.label}}, nil
 }
 
-func (runner *managedTestRunner) Cleanup(result step.Result) error {
+func (runner *managedTestRunner) Cleanup(_ context.Context, result step.Result) error {
 	label, _ := result.Outputs["label"].(string)
 	runner.mu.Lock()
 	*runner.cleaned = append(*runner.cleaned, label)
@@ -325,7 +325,7 @@ func (runner *retryCleanupRunner) Run(_ context.Context, request step.Request) (
 	return step.Result{Outputs: map[string]any{"attempt": request.Attempt}}, nil
 }
 
-func (runner *retryCleanupRunner) Cleanup(result step.Result) error {
+func (runner *retryCleanupRunner) Cleanup(_ context.Context, result step.Result) error {
 	runner.cleaned = append(runner.cleaned, result.Outputs["attempt"].(int))
 	return nil
 }
@@ -337,7 +337,7 @@ func (runner *pollCleanupRunner) Run(context.Context, step.Request) (step.Result
 	return step.Result{Outputs: map[string]any{"poll": runner.polls}}, nil
 }
 
-func (runner *pollCleanupRunner) Cleanup(result step.Result) error {
+func (runner *pollCleanupRunner) Cleanup(_ context.Context, result step.Result) error {
 	runner.mu.Lock()
 	defer runner.mu.Unlock()
 	runner.cleaned = append(runner.cleaned, result.Outputs["poll"].(int))
@@ -347,3 +347,87 @@ func (runner *pollCleanupRunner) Cleanup(result step.Result) error {
 var _ step.Cleaner = (*managedTestRunner)(nil)
 var _ step.Cleaner = (*pollCleanupRunner)(nil)
 var _ step.Cleaner = (*retryCleanupRunner)(nil)
+
+// TestManagedCleanupContextSurvivesRunCancellation pins the contract documented on
+// step.Cleaner: the context handed to Cleanup carries the run's values but is
+// detached from its cancellation, so managed resources are still released after
+// Ctrl-C. Before Cleanup took a context, implementations had to invent
+// context.Background() themselves and the engine could not express this.
+func TestManagedCleanupContextSurvivesRunCancellation(t *testing.T) {
+	type ctxKey struct{}
+
+	started := make(chan struct{})
+	var observed struct {
+		mu     sync.Mutex
+		err    error
+		value  any
+		called bool
+	}
+
+	registry := newTestRegistry(t, map[string]step.Builder{
+		"managed": func(map[string]any) (step.Runner, error) {
+			return &contextCleanupRunner{observe: func(cleanupCtx context.Context) {
+				observed.mu.Lock()
+				defer observed.mu.Unlock()
+				observed.called = true
+				observed.err = cleanupCtx.Err()
+				observed.value = cleanupCtx.Value(ctxKey{})
+			}}, nil
+		},
+		"block": func(map[string]any) (step.Runner, error) {
+			return runnerFunc(func(ctx context.Context, _ step.Request) (step.Result, error) {
+				close(started)
+				<-ctx.Done()
+				return step.Result{}, ctx.Err()
+			}), nil
+		},
+	})
+
+	definition := testDefinition(t, "cancel-cleanup",
+		workflow.Step{ID: "resource", Type: "managed", With: map[string]any{}},
+		workflow.Step{ID: "waiter", Type: "block", With: map[string]any{}},
+	)
+
+	ctx, cancel := context.WithCancel(context.WithValue(t.Context(), ctxKey{}, "carried"))
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = New(registry).Run(ctx, definition, Options{})
+	}()
+
+	<-started
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(15 * time.Second):
+		t.Fatal("Run() did not return after cancellation")
+	}
+
+	observed.mu.Lock()
+	defer observed.mu.Unlock()
+	if !observed.called {
+		t.Fatal("Cleanup was not called after the run was canceled")
+	}
+	if observed.err != nil {
+		t.Errorf("cleanup context Err() = %v, want nil (cleanup must not inherit cancellation)", observed.err)
+	}
+	if observed.value != "carried" {
+		t.Errorf("cleanup context value = %v, want %q (cleanup must carry run values)", observed.value, "carried")
+	}
+}
+
+type contextCleanupRunner struct {
+	observe func(context.Context)
+}
+
+func (*contextCleanupRunner) Run(context.Context, step.Request) (step.Result, error) {
+	return step.Result{Outputs: map[string]any{}}, nil
+}
+
+func (runner *contextCleanupRunner) Cleanup(ctx context.Context, _ step.Result) error {
+	runner.observe(ctx)
+	return nil
+}
+
+var _ step.Cleaner = (*contextCleanupRunner)(nil)

@@ -86,7 +86,7 @@ func (runner *Runner) Run(ctx context.Context, _ step.Request) (step.Result, err
 
 	if err := ctx.Err(); err != nil {
 		result := step.Result{Outputs: map[string]any{"path": path, "kind": runner.config.Kind}}
-		if cleanupErr := runner.Cleanup(result); cleanupErr != nil {
+		if cleanupErr := runner.Cleanup(ctx, result); cleanupErr != nil {
 			return step.Result{}, errors.Join(err, fmt.Errorf("rolling back temporary resource: %w", cleanupErr))
 		}
 		return step.Result{}, err
@@ -94,7 +94,7 @@ func (runner *Runner) Run(ctx context.Context, _ step.Request) (step.Result, err
 	return step.Result{Outputs: map[string]any{"path": path, "kind": runner.config.Kind}}, nil
 }
 
-func (runner *Runner) Cleanup(result step.Result) error {
+func (runner *Runner) Cleanup(_ context.Context, result step.Result) error {
 	path, ok := result.Outputs["path"].(string)
 	if !ok || path == "" {
 		return fmt.Errorf("temporary result path is missing")

@@ -58,8 +58,13 @@ type Runner interface {
 // Cleanup is called once for each successful Run, in reverse completion order, after the root
 // workflow and its finally steps finish. Implementations must derive the resource to remove from
 // result rather than mutable runner state because one runner may produce multiple results.
+//
+// The context is detached from the run's cancellation -- cleanup still runs after Ctrl-C -- but
+// carries its values, so implementations must not treat it as cancellable and must not substitute
+// context.Background(). It has no deadline of its own: bound the work per resource, because a
+// shared budget across an unknown number of resources would starve the last ones into leaking.
 type Cleaner interface {
-	Cleanup(Result) error
+	Cleanup(context.Context, Result) error
 }
 
 // Validator performs request-dependent validation without executing the step.

@@ -69,7 +69,7 @@ func TestTempCreatesAndCleansManagedResources(t *testing.T) {
 			if result.Outputs["kind"] != test.kind {
 				t.Fatalf("outputs = %#v", result.Outputs)
 			}
-			if err := runner.Cleanup(result); err != nil {
+			if err := runner.Cleanup(t.Context(), result); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
@@ -80,7 +80,7 @@ func TestTempCreatesAndCleansManagedResources(t *testing.T) {
 					t.Fatalf("managed FIFO directory remains: %v", err)
 				}
 			}
-			if err := runner.Cleanup(result); err != nil {
+			if err := runner.Cleanup(t.Context(), result); err != nil {
 				t.Fatalf("repeated cleanup failed: %v", err)
 			}
 		})
@@ -95,7 +95,7 @@ func TestTempUsesDefaultPattern(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			t.Cleanup(func() { _ = runner.Cleanup(result) })
+			t.Cleanup(func() { _ = runner.Cleanup(context.Background(), result) })
 			if base := filepath.Base(result.Outputs["path"].(string)); !strings.HasPrefix(base, "wuko-") {
 				t.Fatalf("temporary name = %q", base)
 			}
@@ -160,7 +160,7 @@ func TestTempFileCleanupRefusesReplacementDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(path) })
-	if err := runner.Cleanup(result); err == nil || !strings.Contains(err.Error(), "removing temporary file") {
+	if err := runner.Cleanup(t.Context(), result); err == nil || !strings.Contains(err.Error(), "removing temporary file") {
 		t.Fatalf("cleanup error = %v", err)
 	}
 	if info, err := os.Stat(path); err != nil || !info.IsDir() {
@@ -208,7 +208,7 @@ func TestTempFIFOCleanupRefusesReplacement(t *testing.T) {
 			}
 			test.replace(t, path)
 
-			if err := runner.Cleanup(result); err == nil || !strings.Contains(err.Error(), "path is no longer a FIFO") {
+			if err := runner.Cleanup(t.Context(), result); err == nil || !strings.Contains(err.Error(), "path is no longer a FIFO") {
 				t.Fatalf("cleanup error = %v", err)
 			}
 			if _, err := os.Lstat(path); err != nil {
@@ -229,7 +229,7 @@ func TestTempFIFOCleanupRemovesEmptyDirectoryWhenPipeIsMissing(t *testing.T) {
 	if err := os.Remove(path); err != nil {
 		t.Fatal(err)
 	}
-	if err := runner.Cleanup(result); err != nil {
+	if err := runner.Cleanup(t.Context(), result); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Lstat(root); !errors.Is(err, os.ErrNotExist) {
@@ -259,7 +259,7 @@ func TestTempCleanupRejectsMalformedResult(t *testing.T) {
 		{Outputs: map[string]any{"path": "/tmp/example", "kind": "socket"}},
 		{Outputs: map[string]any{"path": "/tmp/example", "kind": kindFIFO}},
 	} {
-		if err := runner.Cleanup(result); err == nil {
+		if err := runner.Cleanup(t.Context(), result); err == nil {
 			t.Fatalf("Cleanup(%#v) succeeded", result)
 		}
 	}
