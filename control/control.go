@@ -12,7 +12,6 @@ import (
 
 	"github.com/expr-lang/expr"
 	wukoexpr "github.com/up2jj/wuko/expression"
-	"golang.org/x/sync/errgroup"
 )
 
 const (
@@ -319,37 +318,13 @@ func Run[T any](ctx context.Context, iterations []Iteration, policy Policy, obse
 		return err
 	}
 
-	// policy.Validate above guarantees MaxConcurrency is in [1,100]; SetLimit(0) would
-	// make group.Go block forever.
-	//
-	// SetLimit may unblock one admission after cancellation as an active task exits.
-	// runOne checks the context before recording the iteration as started.
-	if policy.FailFast {
-		group, groupCtx := errgroup.WithContext(runCtx)
-		group.SetLimit(policy.MaxConcurrency)
-		for _, iteration := range iterations {
-			if groupCtx.Err() != nil {
-				break
-			}
-			group.Go(func() error {
-				return runOne(groupCtx, iteration)
-			})
-		}
-		_ = group.Wait()
-	} else {
-		var group errgroup.Group
-		group.SetLimit(policy.MaxConcurrency)
-		for _, iteration := range iterations {
-			if runCtx.Err() != nil {
-				break
-			}
-			group.Go(func() error {
-				_ = runOne(runCtx, iteration)
-				return nil
-			})
-		}
-		_ = group.Wait()
-	}
+	// policy.Validate above guarantees MaxConcurrency is in [1,100]. runOne re-checks
+	// the iteration context before recording the iteration as started; see FanOut for
+	// why admission alone does not imply that.
+	FanOut(runCtx, len(iterations), policy.MaxConcurrency, policy.FailFast,
+		func(iterationCtx context.Context, index int) error {
+			return runOne(iterationCtx, iterations[index])
+		})
 
 	if err := ctx.Err(); err != nil {
 		return outcomes, err

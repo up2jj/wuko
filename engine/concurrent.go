@@ -8,9 +8,9 @@ import (
 	"slices"
 	"time"
 
+	controlpkg "github.com/up2jj/wuko/control"
 	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/workflow"
-	"golang.org/x/sync/errgroup"
 )
 
 type concurrentBranchOutcome struct {
@@ -50,44 +50,15 @@ func (e *Engine) runConcurrent(ctx context.Context, definition *workflow.Definit
 
 	// MaxConcurrency is guaranteed to be in [1,100] here: Engine.Run validates every
 	// definition through ValidateStructure, which reaches ConcurrentGroup.Validate
-	// (workflow/types.go). SetLimit(0) would make group.Go block forever, so any new
-	// path into runConcurrent must keep that validation in front of it.
+	// (workflow/types.go).
 	//
-	// SetLimit may unblock one admission after cancellation as an active branch exits.
-	// Each task checks its context before recording or executing that branch.
-	if concurrent.FailFast {
-		group, runCtx := errgroup.WithContext(groupCtx)
-		group.SetLimit(concurrent.MaxConcurrency)
-		for i, workflowStep := range concurrent.Steps {
-			if runCtx.Err() != nil {
-				break
-			}
-			group.Go(func() error {
-				if runCtx.Err() != nil {
-					return nil
-				}
-				outcomes[i] = e.executeConcurrentBranch(runCtx, definition, workflowStep, childOptions, snapshot, indexes[i], total)
-				return outcomes[i].err
-			})
-		}
-		_ = group.Wait()
-	} else {
-		var group errgroup.Group
-		group.SetLimit(concurrent.MaxConcurrency)
-		for i, workflowStep := range concurrent.Steps {
-			if groupCtx.Err() != nil {
-				break
-			}
-			group.Go(func() error {
-				if groupCtx.Err() != nil {
-					return nil
-				}
-				outcomes[i] = e.executeConcurrentBranch(groupCtx, definition, workflowStep, childOptions, snapshot, indexes[i], total)
-				return nil
-			})
-		}
-		_ = group.Wait()
-	}
+	// executeConcurrentBranch re-checks the branch context before recording the branch
+	// as started; see control.FanOut for why admission alone does not imply that.
+	controlpkg.FanOut(groupCtx, len(concurrent.Steps), concurrent.MaxConcurrency, concurrent.FailFast,
+		func(branchCtx context.Context, i int) error {
+			outcomes[i] = e.executeConcurrentBranch(branchCtx, definition, concurrent.Steps[i], childOptions, snapshot, indexes[i], total)
+			return outcomes[i].err
+		})
 
 	groupErr := concurrentExecutionError(ctx, groupCtx, concurrent, outcomes)
 	if groupErr == nil {
