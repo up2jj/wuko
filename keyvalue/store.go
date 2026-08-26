@@ -13,8 +13,8 @@ import (
 	"reflect"
 	"regexp"
 	"slices"
-	"syscall"
-	"time"
+
+	"github.com/up2jj/wuko/internal/filelock"
 )
 
 var namePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
@@ -196,50 +196,16 @@ func (s *Store) withLock(ctx context.Context, operation func() error) (resultErr
 	if err := os.Chmod(filepath.Dir(s.path), 0o700); err != nil {
 		return fmt.Errorf("setting store directory permissions: %w", err)
 	}
-	lock, err := os.OpenFile(s.lockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	lock, err := filelock.Acquire(ctx, s.lockPath)
 	if err != nil {
-		return fmt.Errorf("opening store lock: %w", err)
-	}
-	if err := lock.Chmod(0o600); err != nil {
-		_ = lock.Close()
-		return fmt.Errorf("setting store lock permissions: %w", err)
+		return fmt.Errorf("store %s: %w", s.path, err)
 	}
 	defer func() {
-		if err := lock.Close(); resultErr == nil && err != nil {
-			resultErr = fmt.Errorf("closing store lock: %w", err)
-		}
-	}()
-	if err := acquire(ctx, lock); err != nil {
-		return err
-	}
-	defer func() {
-		if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_UN); resultErr == nil && err != nil {
-			resultErr = fmt.Errorf("unlocking store: %w", err)
+		if err := lock.Release(); resultErr == nil && err != nil {
+			resultErr = fmt.Errorf("store %s: %w", s.path, err)
 		}
 	}()
 	return operation()
-}
-
-func acquire(ctx context.Context, file *os.File) error {
-	for {
-		if err := ctx.Err(); err != nil {
-			return fmt.Errorf("locking store: %w", err)
-		}
-		err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
-		if err == nil {
-			return nil
-		}
-		if !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EAGAIN) {
-			return fmt.Errorf("locking store: %w", err)
-		}
-		timer := time.NewTimer(10 * time.Millisecond)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return fmt.Errorf("locking store: %w", ctx.Err())
-		case <-timer.C:
-		}
-	}
 }
 
 func (s *Store) read() (map[string]any, error) {

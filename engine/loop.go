@@ -115,13 +115,15 @@ func (e *Engine) executeLoop(ctx context.Context, definition *workflow.Definitio
 			return outcome
 		}
 		if delay > 0 {
+			// No drain on the cancellation path. Since Go 1.23 timer channels are
+			// unbuffered: Stop reports false only once the value has been received,
+			// which is exactly when a drain would block forever. Reaching here means
+			// the value was not received, so there is nothing to drain and an
+			// unreferenced timer is collected.
 			timer := time.NewTimer(delay)
 			select {
 			case <-timer.C:
 			case <-loopCtx.Done():
-				if !timer.Stop() {
-					<-timer.C
-				}
 				err := loopCtx.Err()
 				finish(statusFromError(err), err, nested)
 				reportLoopFinished(options, definition, workflowStep, group, started, iterations, err)

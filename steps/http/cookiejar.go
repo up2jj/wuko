@@ -15,8 +15,9 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
+
+	"github.com/up2jj/wuko/internal/filelock"
 )
 
 const httpOnlyPrefix = "#HttpOnly_"
@@ -42,68 +43,31 @@ func openPersistentJar(ctx context.Context, path string) (_ stdhttp.CookieJar, c
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, nil, fmt.Errorf("creating cookie jar directory: %w", err)
 	}
-	lock, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	lock, err := filelock.Acquire(ctx, path+".lock")
 	if err != nil {
-		return nil, nil, fmt.Errorf("opening cookie jar lock: %w", err)
+		return nil, nil, fmt.Errorf("cookie jar %s: %w", path, err)
 	}
-	if err := lock.Chmod(0o600); err != nil {
-		_ = lock.Close()
-		return nil, nil, fmt.Errorf("setting cookie jar lock permissions: %w", err)
-	}
-	if err := acquireJarLock(ctx, lock); err != nil {
-		_ = lock.Close()
-		return nil, nil, err
-	}
-	locked := true
 	defer func() {
-		if resultErr == nil {
-			return
+		if resultErr != nil {
+			_ = lock.Release()
 		}
-		if locked {
-			_ = syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
-		}
-		_ = lock.Close()
 	}()
 
 	jar, err := newPersistentJar(path)
 	if err != nil {
 		return nil, nil, err
 	}
-	close = func() (closeErr error) {
-		defer func() {
-			if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_UN); closeErr == nil && err != nil {
-				closeErr = fmt.Errorf("unlocking cookie jar: %w", err)
-			}
-			locked = false
-			if err := lock.Close(); closeErr == nil && err != nil {
-				closeErr = fmt.Errorf("closing cookie jar lock: %w", err)
-			}
-		}()
-		return jar.write(path)
+	// The lock is held for the life of the jar so a concurrent run cannot interleave
+	// with the read-modify-write that close performs. Release is idempotent, so the
+	// deferred error path above stays correct once close has run.
+	close = func() error {
+		writeErr := jar.write(path)
+		if releaseErr := lock.Release(); writeErr == nil && releaseErr != nil {
+			return fmt.Errorf("cookie jar %s: %w", path, releaseErr)
+		}
+		return writeErr
 	}
 	return jar, close, nil
-}
-
-func acquireJarLock(ctx context.Context, file *os.File) error {
-	for {
-		if err := ctx.Err(); err != nil {
-			return fmt.Errorf("locking cookie jar: %w", err)
-		}
-		err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
-		if err == nil {
-			return nil
-		}
-		if !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EAGAIN) {
-			return fmt.Errorf("locking cookie jar: %w", err)
-		}
-		timer := time.NewTimer(10 * time.Millisecond)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return fmt.Errorf("locking cookie jar: %w", ctx.Err())
-		case <-timer.C:
-		}
-	}
 }
 
 func newPersistentJar(path string) (*persistentJar, error) {

@@ -64,6 +64,13 @@ type Options struct {
 	insideExecutor         bool
 }
 
+// State carries one workflow's mutable values and is deliberately unsynchronized.
+// Parallel execution never shares it: runConcurrent and executeControl hand every
+// branch a deep clone (see cloneState and workflow.Clone) and merge the results back
+// on one goroutine after the group has joined. The validation rules that keep this
+// true -- no nested concurrent groups, no conditional blocks inside a concurrent
+// group, fan-out inside an executor block pinned to max_concurrency 1 -- live in
+// validateSteps in workflow/types.go.
 type State struct {
 	Inputs map[string]any
 	Vars   map[string]any

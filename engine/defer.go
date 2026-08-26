@@ -39,6 +39,11 @@ type deferredGroup struct {
 	active  bool
 }
 
+// deferStack is shared by every step in a scope and carries no lock. That is sound
+// only because defer: is rejected inside concurrent groups and fan-out controls
+// (validateSteps in workflow/types.go, scopeConcurrent and scopeControl), so register
+// is never reached from more than one goroutine. Relaxing that validation rule
+// without adding synchronization here would introduce a data race.
 type deferStack struct {
 	groups  []*deferredGroup
 	byOwner map[string]*deferredGroup
