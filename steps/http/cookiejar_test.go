@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/up2jj/wuko/step"
@@ -104,6 +105,48 @@ func TestPersistentJarLoadsDeletesAndWritesDeterministically(t *testing.T) {
 	lines := strings.Split(strings.TrimSpace(text), "\n")
 	if len(lines) != 4 || strings.Compare(lines[2], lines[3]) >= 0 {
 		t.Fatalf("cookie lines are not sorted: %#v", lines)
+	}
+}
+
+func TestPersistentJarSupportsConcurrentUse(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cookies.txt")
+	jar, closeJar, err := openPersistentJar(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, _ := url.Parse("https://example.test/")
+	const workers = 32
+	const updates = 25
+	start := make(chan struct{})
+	var group sync.WaitGroup
+	for worker := range workers {
+		group.Go(func() {
+			<-start
+			name := fmt.Sprintf("cookie%d", worker)
+			for update := range updates {
+				jar.SetCookies(target, []*http.Cookie{{Name: name, Value: fmt.Sprint(update), Path: "/"}})
+				_ = jar.Cookies(target)
+			}
+		})
+	}
+	close(start)
+	group.Wait()
+	if err := closeJar(); err != nil {
+		t.Fatal(err)
+	}
+
+	reloaded, closeReloaded, err := openPersistentJar(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for worker := range workers {
+		name := fmt.Sprintf("cookie%d", worker)
+		if got := cookieValue(reloaded.Cookies(target), name); got != fmt.Sprint(updates-1) {
+			t.Errorf("%s = %q, want %d", name, got, updates-1)
+		}
+	}
+	if err := closeReloaded(); err != nil {
+		t.Fatal(err)
 	}
 }
 
