@@ -345,6 +345,8 @@ type fakeClient struct {
 	removedOptions          client.ContainerRemoveOptions
 	execOptions             client.ExecCreateOptions
 	execCreates             int
+	execStreamBlocks        bool
+	execPeer                net.Conn
 }
 
 func (f *fakeClient) ImageInspect(_ context.Context, _ string, options ...client.ImageInspectOption) (client.ImageInspectResult, error) {
@@ -446,6 +448,14 @@ func (f *fakeClient) ExecCreate(_ context.Context, _ string, options client.Exec
 }
 
 func (f *fakeClient) ExecAttach(context.Context, string, client.ExecAttachOptions) (client.ExecAttachResult, error) {
+	if f.execStreamBlocks {
+		// Model a real hijacked stream: reads and writes both block on the same
+		// connection and only unblock when the caller closes it. The peer is kept
+		// open so nothing completes on its own.
+		local, peer := net.Pipe()
+		f.execPeer = peer
+		return client.ExecAttachResult{HijackedResponse: client.HijackedResponse{Conn: local, Reader: bufio.NewReader(local)}}, nil
+	}
 	connA, connB := net.Pipe()
 	_ = connB.Close()
 	return client.ExecAttachResult{HijackedResponse: client.HijackedResponse{Conn: connA, Reader: bufio.NewReader(bytes.NewReader(f.output))}}, nil

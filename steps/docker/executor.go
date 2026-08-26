@@ -351,7 +351,12 @@ func (session *dockerExecutorSession) Run(ctx context.Context, options process.O
 		cleanupCtx, cancel := detachedCleanupContext(ctx)
 		removeErr := session.removeLocked(cleanupCtx)
 		cancel()
+		// Join both stream pumps before returning: attached.Close above unblocks
+		// them, and options.Stdin must not still be read after Run returns.
 		<-copyDone
+		if options.Stdin != nil {
+			<-inputDone
+		}
 		result := executorResult(stdout, stderr, -1)
 		return result, errors.Join(ctx.Err(), removeErr)
 	}

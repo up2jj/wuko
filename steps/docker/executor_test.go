@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -217,5 +219,77 @@ func TestDockerExecutorRejectsUnmappedHostWorkingDirectory(t *testing.T) {
 	}
 	if got, err := session.translatePath("/opt/project"); err != nil || got != "/opt/project" {
 		t.Fatalf("container path = %q, %v", got, err)
+	}
+}
+
+// blockingStdin blocks in Read until release is closed, and reports whether a
+// Read is in flight. It stands in for any reader the caller still owns.
+type blockingStdin struct {
+	release chan struct{}
+	entered chan struct{}
+	once    sync.Once
+	reading atomic.Bool
+}
+
+func (r *blockingStdin) Read([]byte) (int, error) {
+	r.reading.Store(true)
+	defer r.reading.Store(false)
+	r.once.Do(func() { close(r.entered) })
+	<-r.release
+	return 0, io.EOF
+}
+
+func TestDockerExecutorCancellationWaitsForStdinPump(t *testing.T) {
+	client := &fakeClient{execStreamBlocks: true}
+	providerValue, err := NewExecutor(map[string]any{"image": "golang:1.26"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := providerValue.(*ExecutorProvider)
+	provider.newClient = func() (dockerClient, error) { return client, nil }
+	session, err := provider.Open(t.Context(), executor.Request{WorkflowName: "cancel", RunDir: t.TempDir(), Stdout: io.Discard, Stderr: io.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stdin := &blockingStdin{release: make(chan struct{}), entered: make(chan struct{})}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if _, runErr := session.Run(ctx, process.Options{
+			Command: "go", Stdin: stdin, Stdout: io.Discard, Stderr: io.Discard,
+		}); !errors.Is(runErr, context.Canceled) {
+			t.Errorf("Run() error = %v, want context.Canceled", runErr)
+		}
+	}()
+
+	select {
+	case <-stdin.entered:
+	case <-time.After(10 * time.Second):
+		t.Fatal("stdin pump never started")
+	}
+	cancel()
+
+	// Run must not return while the pump is still inside options.Stdin.Read.
+	select {
+	case <-done:
+		t.Fatal("Run() returned while the stdin pump was still reading options.Stdin")
+	case <-time.After(100 * time.Millisecond):
+	}
+	if !stdin.reading.Load() {
+		t.Fatal("stdin pump stopped reading on its own; the test no longer proves the join")
+	}
+
+	close(stdin.release)
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Run() did not return after the stdin pump finished")
+	}
+	if stdin.reading.Load() {
+		t.Error("options.Stdin still being read after Run() returned")
 	}
 }
