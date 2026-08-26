@@ -27,6 +27,7 @@ import (
 	changedstep "github.com/up2jj/wuko/steps/changed"
 	"github.com/up2jj/wuko/steps/choice"
 	"github.com/up2jj/wuko/steps/confirm"
+	decodestep "github.com/up2jj/wuko/steps/decode"
 	devenvstep "github.com/up2jj/wuko/steps/devenv"
 	dockerstep "github.com/up2jj/wuko/steps/docker"
 	extractstep "github.com/up2jj/wuko/steps/extract"
@@ -163,7 +164,7 @@ func NewRootCmd() *cobra.Command {
 	executors := executor.NewRegistry()
 	for _, register := range []func(*step.Registry) error{
 		inputstep.Register, passwordstep.Register, choice.Register, pathstep.Register, review.Register,
-		confirm.Register, assertstep.Register, setstep.Register, importvarsstep.Register, jsonpathstep.Register, extractstep.Register, semverstep.Register, httpstep.Register, filestep.Register, tempstep.Register, globstep.Register, watchstep.Register, cachestep.Register, changedstep.Register, requiretoolstep.Register,
+		confirm.Register, assertstep.Register, setstep.Register, importvarsstep.Register, decodestep.Register, jsonpathstep.Register, extractstep.Register, semverstep.Register, httpstep.Register, filestep.Register, tempstep.Register, globstep.Register, watchstep.Register, cachestep.Register, changedstep.Register, requiretoolstep.Register,
 		dockerstep.Register, gitstep.Register, githubprstep.Register, githubactionsstep.Register, githubreleasestep.Register, keyvaluestep.Register, luastep.Register, logwaitstep.Register, shell.Register, agentstep.Register, devenvstep.RegisterTask,
 	} {
 		if err := register(registry); err != nil {

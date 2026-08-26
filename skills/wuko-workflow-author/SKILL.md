@@ -1,6 +1,6 @@
 ---
 name: wuko-workflow-author
-description: Create or update Wuko version-1 YAML workflows, including cron schedules, templates, conditions, early returns, finally cleanup, foreach and matrix controls, required files, composite actions, waits, polling, retries, concurrency, interactive prompts and path selection, typed and imported variables, JSONPath selection, semantic versions, HTTP, files, managed temporary resources, glob discovery, native filesystem watches, persistent change detectors, content-addressed directory caches, Lua, shell, Docker, and agent steps. Use when designing workflow files, extending existing workflows, or reviewing workflow structure before execution.
+description: Create or update Wuko version-1 YAML workflows, including cron schedules, templates, conditions, early returns, finally cleanup, foreach and matrix controls, required files, composite actions, waits, polling, retries, concurrency, interactive prompts and path selection, typed and imported variables, structured decoding, JSONPath selection, semantic versions, HTTP, files, managed temporary resources, glob discovery, native filesystem watches, persistent change detectors, content-addressed directory caches, Lua, shell, Docker, and agent steps. Use when designing workflow files, extending existing workflows, or reviewing workflow structure before execution.
 ---
 
 # Wuko Workflow Author
@@ -35,6 +35,10 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
   needs imperative logic.
 - Use `import_vars` for runtime JSON or TOML variable files. Keep its ordered `files` paths
   relative to the owning workflow or action, and remember imported keys normalize to lowercase.
+- Use `decode` to turn bounded JSON, YAML, TOML, or line-oriented string/file content into a typed
+  `.steps.<id>.value`. Use exactly one dotted `from` reference or `path`, set `max_bytes` above its
+  `1MiB` default only when the input is intentionally larger, and use `trim` or `omit_empty` only
+  with `format: lines`.
 - Use `jsonpath` for RFC 9535 selection from a typed `vars` or `steps` value. Use `result: all`
   for a nodelist and `result: one` only when exactly one match is required; read normalized match
   locations from `paths`. Use Lua when the selected data also needs transformation or mutation.

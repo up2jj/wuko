@@ -286,6 +286,7 @@ Each linked guide contains multiple examples for every step.
 | `set` | Assign a literal or expression result | [Data steps](docs/steps-data.md#set) |
 | `assert` | Stop unless an expression is true | [Data steps](docs/steps-data.md#assert) |
 | `import_vars` | Load JSON or TOML into workflow state | [Data steps](docs/steps-data.md#import_vars) |
+| `decode` | Convert JSON, YAML, TOML, or lines into a typed value | [Data steps](docs/steps-data.md#decode) |
 | `jsonpath` | Select values with RFC 9535 JSONPath | [Data steps](docs/steps-data.md#jsonpath) |
 | `extract` | Extract typed fields from text | [Text extraction](docs/extract.md) |
 | `semver` | Parse, compare, constrain, or increment versions | [Data steps](docs/steps-data.md#semver) |

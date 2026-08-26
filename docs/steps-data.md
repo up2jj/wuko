@@ -80,6 +80,58 @@ Relative paths resolve from the owning workflow or action. A successful import e
 atomic. See [Variable imports](variable-imports.md) for file shape, precedence, nesting, and remote
 archive behavior.
 
+## `decode`
+
+Decode JSON, YAML, TOML, or text lines into a typed value. Exactly one of `from` or `path` is
+required. `from` is a dotted `vars` or `steps` path that must resolve to a string:
+
+```yaml
+- id: deployment_data
+  type: decode
+  with:
+    format: json
+    from: steps.deployments.stdout
+
+- id: deployment_names
+  type: jsonpath
+  with:
+    from: steps.deployment_data.value
+    query: $.items[*].metadata.name
+    result: all
+```
+
+Use `path` for file content. Relative paths resolve from the active run directory and therefore
+follow `working_directory` scopes:
+
+```yaml
+- id: configuration
+  type: decode
+  with:
+    format: yaml
+    path: generated/config.yaml
+    max_bytes: 2MiB
+```
+
+The default `max_bytes` is `1MiB`. Inputs larger than the limit fail before parsing. JSON and YAML
+may contain any single structured value; multiple JSON values or YAML documents are rejected. TOML
+returns its root table. All structured results are normalized to JSON-compatible Wuko values.
+
+For command output with one item per line, use `lines`. CRLF and LF endings are normalized, a final
+line terminator does not add an empty item, and the optional filters apply in order:
+
+```yaml
+- id: contexts
+  type: decode
+  with:
+    format: lines
+    from: steps.kubectl_contexts.stdout
+    trim: true
+    omit_empty: true
+```
+
+The decoded result is available as `.steps.<id>.value`. `trim` and `omit_empty` are valid only for
+`lines`; `decode` does not infer the format from a filename or create workflow variables.
+
 ## `jsonpath`
 
 Select data from a typed value with an [RFC 9535](https://www.rfc-editor.org/rfc/rfc9535.html)
