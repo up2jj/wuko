@@ -89,24 +89,28 @@ func TestFanOutDoesNotRunTasksAdmittedAfterCancellation(t *testing.T) {
 	const count = 40
 
 	var executed atomic.Int32
+	secondStarted := make(chan struct{})
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	FanOut(ctx, count, 2, false, func(taskCtx context.Context, index int) error {
-		// A task that observes a live context here has genuinely been admitted to run.
-		if taskCtx.Err() != nil {
-			t.Errorf("index %d ran with an already-canceled context", index)
-			return nil
-		}
 		executed.Add(1)
-		if index == 0 {
+		switch index {
+		case 0:
+			// Keep both slots occupied until the second task has started, then cancel
+			// before either slot is released. SetLimit may admit one more task when
+			// these return, but FanOut must not invoke run for it.
+			<-secondStarted
 			cancel()
+		case 1:
+			close(secondStarted)
+			<-taskCtx.Done()
 		}
 		return nil
 	})
 
-	if got := executed.Load(); got >= count {
-		t.Errorf("executed = %d, want fewer than %d: cancellation did not stop admission", got, count)
+	if got := executed.Load(); got != 2 {
+		t.Errorf("executed = %d, want 2: task admitted after cancellation ran", got)
 	}
 }
 
