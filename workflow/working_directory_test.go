@@ -7,6 +7,7 @@ import (
 )
 
 func TestLoadWorkingDirectoryBlock(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "workflow.yaml")
 	writeTestFile(t, path, `version: 1
 name: scoped
@@ -34,6 +35,7 @@ steps:
 }
 
 func TestWorkingDirectoryBlockValidation(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		body string
@@ -59,6 +61,7 @@ func TestWorkingDirectoryBlockValidation(t *testing.T) {
 }
 
 func TestWorkingDirectoryBlockPreservesInheritedNestingRules(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "workflow.yaml")
 	writeTestFile(t, path, `version: 1
 name: invalid
@@ -77,6 +80,7 @@ steps:
 }
 
 func TestWorkingDirectoryBlockExpandsRequiredStepsAndPreservesLocations(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	fragment := filepath.Join(dir, "fragment.yaml")
 	writeTestFile(t, fragment, `- working_directory: backend

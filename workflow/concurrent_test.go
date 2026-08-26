@@ -8,6 +8,7 @@ import (
 )
 
 func TestLoadConcurrentGroupDefaultsAndPolicies(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "workflow.yaml")
 	writeTestFile(t, path, `version: 1
 name: checks
@@ -39,6 +40,7 @@ steps:
 }
 
 func TestLoadConcurrentGroupDefaultsFailFast(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "workflow.yaml")
 	writeTestFile(t, path, `version: 1
 name: checks
@@ -58,6 +60,7 @@ steps:
 }
 
 func TestLoadRejectsInvalidConcurrentGroups(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		body string
@@ -87,6 +90,7 @@ func TestLoadRejectsInvalidConcurrentGroups(t *testing.T) {
 }
 
 func TestConcurrentGroupExpandsRequiredStepsAndSharesIDNamespace(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeTestFile(t, filepath.Join(dir, "children.yaml"), `
 - id: lint

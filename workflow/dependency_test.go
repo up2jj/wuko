@@ -10,6 +10,7 @@ import (
 )
 
 func TestLoadWorkflowDependenciesAndTypedOutputs(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "release.yaml")
 	data := `version: 1
 name: release
@@ -38,6 +39,7 @@ steps:
 }
 
 func TestWorkflowDependencyAndOutputValidation(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		depends map[string]string
@@ -62,6 +64,7 @@ func TestWorkflowDependencyAndOutputValidation(t *testing.T) {
 }
 
 func TestResolveDependencyPlanOrdersChainsAndDeduplicatesDiamonds(t *testing.T) {
+	t.Parallel()
 	base := dependencyDefinition("base", "/base.yaml")
 	left := dependencyDefinition("left", "/left.yaml")
 	left.DependsOn = map[string]string{"base": "base"}
@@ -90,6 +93,7 @@ func TestResolveDependencyPlanOrdersChainsAndDeduplicatesDiamonds(t *testing.T) 
 }
 
 func TestResolveDependencyPlanRejectsCyclesAndUnknownOutputs(t *testing.T) {
+	t.Parallel()
 	a := dependencyDefinition("a", "/a.yaml")
 	b := dependencyDefinition("b", "/b.yaml")
 	a.DependsOn = map[string]string{"b": "b"}
@@ -112,6 +116,7 @@ func TestResolveDependencyPlanRejectsCyclesAndUnknownOutputs(t *testing.T) {
 }
 
 func TestResolveDependencyPlanValidatesChoiceExpressions(t *testing.T) {
+	t.Parallel()
 	producer := dependencyDefinition("producer", "/producer.yaml")
 	producer.Outputs = map[string]WorkflowOutput{
 		"items": {Type: "array", Value: `[]`},
@@ -145,6 +150,7 @@ func TestResolveDependencyPlanValidatesChoiceExpressions(t *testing.T) {
 }
 
 func TestResolveDependencyPlanChecksOnlySemanticDependencyReferences(t *testing.T) {
+	t.Parallel()
 	producer := dependencyDefinition("producer", "/producer.yaml")
 	consumer := dependencyDefinition("consumer", "/consumer.yaml")
 	consumer.DependsOn = map[string]string{"build": "producer"}
@@ -216,6 +222,7 @@ func TestResolveDependencyPlanChecksOnlySemanticDependencyReferences(t *testing.
 }
 
 func TestResolveDependencyPlanChecksShellArgvExpressionReferences(t *testing.T) {
+	t.Parallel()
 	producer := dependencyDefinition("producer", "/producer.yaml")
 	producer.Outputs = map[string]WorkflowOutput{"argv": {Type: "array", Value: `list("tool")`}}
 	consumer := dependencyDefinition("consumer", "/consumer.yaml")
@@ -238,6 +245,7 @@ func TestResolveDependencyPlanChecksShellArgvExpressionReferences(t *testing.T) 
 }
 
 func TestResolveDependencyPlanFindsReferencesInsideOptionalTemplateBranches(t *testing.T) {
+	t.Parallel()
 	producer := dependencyDefinition("producer", "/producer.yaml")
 	consumer := dependencyDefinition("consumer", "/consumer.yaml")
 	consumer.DependsOn = map[string]string{"build": "producer"}
@@ -257,6 +265,7 @@ func TestResolveDependencyPlanFindsReferencesInsideOptionalTemplateBranches(t *t
 }
 
 func TestLoaderRejectsDependencyOutputsInLoadTimeFields(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		body string
@@ -282,6 +291,7 @@ func TestLoaderRejectsDependencyOutputsInLoadTimeFields(t *testing.T) {
 }
 
 func TestLoaderAcceptsLiteralDependencyTextInLoadTimeFields(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "workflow.yaml")
 	data := `version: 1
 name: root

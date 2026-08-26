@@ -8,6 +8,7 @@ import (
 )
 
 func TestLoadAttachedDeferTracksLocation(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "workflow.yaml")
 	data := []byte(`version: 1
 name: attached-defer
@@ -37,6 +38,7 @@ steps:
 }
 
 func TestLoadExpandsRequiredStepsInsideDefer(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	fragmentPath := filepath.Join(dir, "cleanup.yaml")
 	if err := os.WriteFile(fragmentPath, []byte("steps:\n  - id: remove\n    type: shell\n    with: {command: remove}\n"), 0o600); err != nil {
@@ -58,6 +60,7 @@ func TestLoadExpandsRequiredStepsInsideDefer(t *testing.T) {
 }
 
 func TestAttachedDeferValidation(t *testing.T) {
+	t.Parallel()
 	step := func(id string) Step { return Step{ID: id, Type: "shell"} }
 	tests := []struct {
 		name  string
@@ -91,6 +94,7 @@ func TestAttachedDeferValidation(t *testing.T) {
 }
 
 func TestDecodeRejectsNonListDefer(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "workflow.yaml")
 	if err := os.WriteFile(path, []byte("version: 1\nname: invalid\nsteps:\n  - id: run\n    type: shell\n    defer: {id: cleanup, type: shell}\n"), 0o600); err != nil {
 		t.Fatal(err)

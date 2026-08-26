@@ -7,6 +7,7 @@ import (
 )
 
 func TestLoadReturnControl(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "workflow.yaml")
 	writeTestFile(t, path, `version: 1
 name: cached
@@ -28,6 +29,7 @@ steps:
 }
 
 func TestReturnSchemaValidation(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		body string
@@ -60,6 +62,7 @@ func TestReturnSchemaValidation(t *testing.T) {
 }
 
 func TestReturnCanComeFromRequiredSequentialFragment(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeTestFile(t, filepath.Join(dir, "finish.yaml"), "- return: {outputs: {result: '\"done\"'}}\n")
 	path := filepath.Join(dir, "workflow.yaml")
@@ -81,6 +84,7 @@ steps:
 }
 
 func TestActionReturnOutputsMustMatchDeclaration(t *testing.T) {
+	t.Parallel()
 	action := &Action{
 		Outputs: map[string]ActionOutput{"result": {Value: `"fallback"`}},
 		Steps:   []Step{{Return: &ReturnControl{Outputs: map[string]string{"other": `"value"`}}}},

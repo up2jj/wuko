@@ -8,6 +8,7 @@ import (
 )
 
 func TestLoadConditionalBlockAndSingleStepCondition(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "workflow.yaml")
 	writeTestFile(t, path, `version: 1
 name: conditional
@@ -32,6 +33,7 @@ steps:
 }
 
 func TestConditionalBlockValidation(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		body string
@@ -58,6 +60,7 @@ func TestConditionalBlockValidation(t *testing.T) {
 }
 
 func TestConditionalBlocksFollowInheritedControlNestingRules(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "workflow.yaml")
 	writeTestFile(t, path, `version: 1
 name: controls
@@ -99,6 +102,7 @@ steps:
 }
 
 func TestConditionalBlockExpandsRequiredStepsResolvesActionsAndPreservesLocations(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	fragment := filepath.Join(dir, "fragment.yaml")
 	writeTestFile(t, filepath.Join(dir, "local.yaml"), "- {id: local, type: shell}\n")

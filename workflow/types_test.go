@@ -10,6 +10,7 @@ import (
 )
 
 func TestConditionUnmarshalYAML(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		yaml    string
@@ -47,6 +48,7 @@ func TestConditionUnmarshalYAML(t *testing.T) {
 }
 
 func TestDefinitionScheduleValidation(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		cron      string
@@ -82,6 +84,7 @@ func TestDefinitionScheduleValidation(t *testing.T) {
 }
 
 func TestDefinitionInvokableDefaultsAndValidation(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		field     string
@@ -118,6 +121,7 @@ func TestDefinitionInvokableDefaultsAndValidation(t *testing.T) {
 }
 
 func TestDefinitionLifecycleHooksLoadAndValidate(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "workflow.yaml")
 	data := `version: 1
 name: lifecycle
@@ -150,6 +154,7 @@ uninstall:
 }
 
 func TestDefinitionLifecycleHookRejectsInvalidStep(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "workflow.yaml")
 	data := `version: 1
 name: lifecycle
@@ -170,6 +175,7 @@ install:
 }
 
 func TestDefinitionLifecycleHooksExpandRequiredSteps(t *testing.T) {
+	t.Parallel()
 	directory := t.TempDir()
 	fragment := filepath.Join(directory, "install.yaml")
 	if err := os.WriteFile(fragment, []byte("- id: setup\n  type: shell\n  with: {command: true}\n"), 0o644); err != nil {

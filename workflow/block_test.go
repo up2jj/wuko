@@ -6,6 +6,7 @@ import (
 )
 
 func TestValidateBlock(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		step Step
@@ -36,6 +37,7 @@ func TestValidateBlock(t *testing.T) {
 }
 
 func TestDefinitionValidateStructure(t *testing.T) {
+	t.Parallel()
 	zeroTimeout := Duration(0)
 	step := func(id string) Step { return Step{ID: id, Type: "shell"} }
 	tests := []struct {
@@ -90,6 +92,7 @@ func TestDefinitionValidateStructure(t *testing.T) {
 }
 
 func TestValidateStructureDoesNotParseTemplates(t *testing.T) {
+	t.Parallel()
 	definition := &Definition{
 		Version: 1,
 		Name:    "templates",

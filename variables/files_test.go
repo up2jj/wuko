@@ -10,6 +10,7 @@ import (
 )
 
 func TestLoadFilesMergesLeftToRightAndNormalizesKeys(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeTestFile(t, root, "defaults.JSON", `{
   "Name": "json",
@@ -40,6 +41,7 @@ new = "value"
 }
 
 func TestLoadFilesPreservesNullAndEmptyObjects(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeTestFile(t, root, "values.json", `{
   "Optional": null,
@@ -65,6 +67,7 @@ func TestLoadFilesPreservesNullAndEmptyObjects(t *testing.T) {
 }
 
 func TestLoadFilesRejectsInvalidInput(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeTestFile(t, root, "malformed.json", `{"name":`)
 	writeTestFile(t, root, "array.json", `["value"]`)
@@ -94,6 +97,7 @@ func TestLoadFilesRejectsInvalidInput(t *testing.T) {
 }
 
 func TestLoadFilesHonorsCancellation(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	values, err := LoadFiles(ctx, t.TempDir(), []string{"missing.json"})
@@ -103,6 +107,7 @@ func TestLoadFilesHonorsCancellation(t *testing.T) {
 }
 
 func TestValidatePathDefersTemplatedExtension(t *testing.T) {
+	t.Parallel()
 	if err := ValidatePath(`{{ .vars.file }}`); err != nil {
 		t.Fatal(err)
 	}

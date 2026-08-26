@@ -10,6 +10,7 @@ import (
 )
 
 func TestResolveDynamicChoicesAndSubmitTypedValue(t *testing.T) {
+	t.Parallel()
 	node := decodeFormNode(t, `
 title: Select a pod
 fields:
@@ -46,6 +47,7 @@ fields:
 }
 
 func TestSecretKeepsExistingValueWithoutRenderingItAsSubmission(t *testing.T) {
+	t.Parallel()
 	node := decodeFormNode(t, `
 title: Credentials
 fields:
@@ -70,6 +72,7 @@ fields:
 }
 
 func TestRejectsStepChoiceSource(t *testing.T) {
+	t.Parallel()
 	node := decodeFormNode(t, `
 title: Invalid
 fields:
@@ -84,6 +87,7 @@ fields:
 }
 
 func TestArrayChoiceSubmissionPreservesTypedOrder(t *testing.T) {
+	t.Parallel()
 	node := decodeFormNode(t, `
 title: Targets
 fields:
@@ -109,6 +113,7 @@ fields:
 }
 
 func TestSubmitRejectsTrailingJSONValues(t *testing.T) {
+	t.Parallel()
 	fields := []ResolvedField{
 		{Field: Field{Variable: "count", Type: TypeNumber}},
 		{Field: Field{Variable: "items", Type: TypeArray}},

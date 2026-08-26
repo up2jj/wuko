@@ -8,6 +8,7 @@ import (
 )
 
 func TestLoadForeachAndMatrixControls(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "workflow.yaml")
 	writeTestFile(t, path, `version: 1
 name: fanout
@@ -49,6 +50,7 @@ steps:
 }
 
 func TestLoadBatchControls(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "workflow.yaml")
 	writeTestFile(t, path, `version: 1
 name: batch
@@ -87,6 +89,7 @@ steps:
 }
 
 func TestControlValidationAndScopedIDs(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		body string
@@ -124,6 +127,7 @@ func TestControlValidationAndScopedIDs(t *testing.T) {
 }
 
 func TestControlsExpandRequiredStepsAndAllowLocalIDReuse(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeTestFile(t, filepath.Join(dir, "child.yaml"), "- {id: run, type: shell}\n")
 	path := filepath.Join(dir, "workflow.yaml")

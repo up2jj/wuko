@@ -6,6 +6,7 @@ import (
 )
 
 func TestSlugify(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		value   string
@@ -36,6 +37,7 @@ func TestSlugify(t *testing.T) {
 }
 
 func TestSlugifyRejectsInvalidOptionsAndEmptyResults(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		value   string
@@ -61,6 +63,7 @@ func TestSlugifyRejectsInvalidOptionsAndEmptyResults(t *testing.T) {
 }
 
 func TestSlugifyTemplateAndExprParity(t *testing.T) {
+	t.Parallel()
 	gotTemplate, err := renderTemplate(`{{ "Feature / Payment API" | slugify (dict "mode" "git") }}`)
 	if err != nil {
 		t.Fatal(err)
@@ -75,6 +78,7 @@ func TestSlugifyTemplateAndExprParity(t *testing.T) {
 }
 
 func TestSlugifyTemplateArgumentErrors(t *testing.T) {
+	t.Parallel()
 	for _, source := range []string{
 		`{{ slugify 42 }}`,
 		`{{ "value" | slugify (dict "separator" "--") }}`,

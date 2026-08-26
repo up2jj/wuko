@@ -8,6 +8,7 @@ import (
 )
 
 func TestLoadExecutionPolicy(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "workflow.yaml")
 	writeTestFile(t, path, `version: 1
@@ -44,6 +45,7 @@ steps:
 }
 
 func TestRetryPolicyDefaults(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "workflow.yaml")
 	writeTestFile(t, path, "version: 1\nname: defaults\nsteps:\n  - id: run\n    type: shell\n    retry: {}\n    with: {command: run}\n")
@@ -58,6 +60,7 @@ func TestRetryPolicyDefaults(t *testing.T) {
 }
 
 func TestHTTPRetryPolicyMethodsAndStatusRanges(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "workflow.yaml")
 	writeTestFile(t, path, `version: 1
@@ -90,6 +93,7 @@ steps:
 }
 
 func TestLoadRejectsInvalidExecutionPolicy(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		fields string
@@ -121,6 +125,7 @@ func TestLoadRejectsInvalidExecutionPolicy(t *testing.T) {
 }
 
 func TestLoadRejectsInvalidHTTPRetryPolicy(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		policy string

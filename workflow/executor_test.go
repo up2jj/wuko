@@ -7,6 +7,7 @@ import (
 )
 
 func TestLoadExecutorBlockWithFinally(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "workflow.yaml")
 	writeTestFile(t, path, `version: 1
 name: mixed
@@ -34,6 +35,7 @@ steps:
 }
 
 func TestExecutorBlockSchemaRestrictions(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		body string

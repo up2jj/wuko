@@ -7,6 +7,7 @@ import (
 )
 
 func TestLoadExpandsFinallyRequirementsAndTracksLocations(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	workflowPath := filepath.Join(dir, "workflow.yaml")
 	fragmentPath := filepath.Join(dir, "cleanup.yaml")
@@ -35,6 +36,7 @@ finally:
 }
 
 func TestLoadRejectsDuplicateIDsAcrossStepsAndFinally(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "workflow.yaml")
 	writeTestFile(t, path, `version: 1
@@ -53,6 +55,7 @@ finally:
 }
 
 func TestDecodeActionAcceptsFinallyAndTracksLocation(t *testing.T) {
+	t.Parallel()
 	action, err := decodeActionPayload([]byte(`version: 1
 name: action
 steps:

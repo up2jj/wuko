@@ -9,6 +9,7 @@ import (
 )
 
 func TestDiscoverMarketplaceValidatesPackageManifest(t *testing.T) {
+	t.Parallel()
 	manifest := fmt.Sprintf(`{"version":1,"packages":[{"name":"release","package_version":"1.0.0","source":".wuko/workflows/release","path":"packages/release.tar.gz","format":"tar.gz","entry":"wuko.yaml","description":"Ship it","source_sha256":"%s","sha256":"%s"}]}`, strings.Repeat("a", 64), strings.Repeat("b", 64))
 	loader := NewLoader(testHTTPClient(func(request *http.Request) (*http.Response, error) {
 		if request.URL.String() != "https://example.test/repo/manifest.json" {
@@ -34,6 +35,7 @@ func TestDiscoverMarketplaceValidatesPackageManifest(t *testing.T) {
 }
 
 func TestDiscoverMarketplaceNormalizesGitHubRepositoryURL(t *testing.T) {
+	t.Parallel()
 	item := validMarketplacePackage("release", "packages/release.tar.gz")
 	manifest := fmt.Sprintf(`{"version":1,"packages":[{"name":"%s","source":"%s","path":"%s","format":"%s","entry":"%s","source_sha256":"%s","sha256":"%s"}]}`, item.Name, item.Source, item.Path, item.Format, item.Entry, item.SourceSHA256, item.SHA256)
 	loader := NewLoader(testHTTPClient(func(request *http.Request) (*http.Response, error) {
@@ -56,6 +58,7 @@ func TestDiscoverMarketplaceNormalizesGitHubRepositoryURL(t *testing.T) {
 }
 
 func TestDiscoverMarketplaceFallsBackWhenManifestIsMissing(t *testing.T) {
+	t.Parallel()
 	loader := NewLoader(testHTTPClient(func(*http.Request) (*http.Response, error) {
 		return testResponse(http.StatusNotFound, nil), nil
 	}))
@@ -66,6 +69,7 @@ func TestDiscoverMarketplaceFallsBackWhenManifestIsMissing(t *testing.T) {
 }
 
 func TestValidateMarketplaceManifestRejectsInvalidPackages(t *testing.T) {
+	t.Parallel()
 	valid := validMarketplacePackage("release", "packages/release.tar.gz")
 	tests := []MarketplaceManifest{
 		{Version: 2},
@@ -82,6 +86,7 @@ func TestValidateMarketplaceManifestRejectsInvalidPackages(t *testing.T) {
 }
 
 func TestMarketplaceRepositoryName(t *testing.T) {
+	t.Parallel()
 	tests := map[string]string{
 		"https://example.test/acme/release.git": "release",
 		"https://example.test/acme/release/":    "release",

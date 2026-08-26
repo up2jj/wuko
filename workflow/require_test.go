@@ -8,6 +8,7 @@ import (
 )
 
 func TestLoadExpandsRequiredStepFilesInPlace(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeTestFile(t, filepath.Join(dir, "workflow.yaml"), `version: 1
 name: split
@@ -51,6 +52,7 @@ steps:
 }
 
 func TestLoadReplacesNestedRequiredSequenceWithExpandedSteps(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeTestFile(t, filepath.Join(dir, "workflow.yaml"), `version: 1
 name: nested-expansion
@@ -78,6 +80,7 @@ steps:
 }
 
 func TestLoadValidatesExpandedRequiredStepsTogether(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeTestFile(t, filepath.Join(dir, "workflow.yaml"), `version: 1
 name: duplicate
@@ -96,6 +99,7 @@ steps:
 }
 
 func TestLoadRejectsRequiredStepCycle(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeTestFile(t, filepath.Join(dir, "workflow.yaml"), "version: 1\nname: cycle\nsteps:\n  - require: first.yaml\n")
 	writeTestFile(t, filepath.Join(dir, "first.yaml"), "- require: nested/second.yaml\n")
@@ -108,6 +112,7 @@ func TestLoadRejectsRequiredStepCycle(t *testing.T) {
 }
 
 func TestLoadRejectsInvalidRequiredStepFiles(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		entry    string

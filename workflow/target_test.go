@@ -8,6 +8,7 @@ import (
 )
 
 func TestLoadSelectsTargetAndAppliesOverrides(t *testing.T) {
+	t.Parallel()
 	directory := t.TempDir()
 	path := filepath.Join(directory, "deploy.yaml")
 	data := `version: 1
@@ -74,6 +75,7 @@ targets:
 }
 
 func TestTargetSelectionRequiresDeclaredTarget(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		data string
@@ -136,6 +138,7 @@ steps:
 }
 
 func TestTargetWorkflowRejectsLegacyStepsAndInvalidNames(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		data string

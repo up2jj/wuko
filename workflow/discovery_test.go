@@ -7,6 +7,7 @@ import (
 )
 
 func TestDiscoverPrecedence(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	project := filepath.Join(root, "project")
 	nested := filepath.Join(project, "nested")
@@ -32,6 +33,7 @@ func TestDiscoverPrecedence(t *testing.T) {
 }
 
 func TestDiscoverAllIncludesScopesAndEffectivePrecedence(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	project := filepath.Join(root, "project")
 	nested := filepath.Join(project, "nested")
@@ -70,6 +72,7 @@ func TestDiscoverAllIncludesScopesAndEffectivePrecedence(t *testing.T) {
 }
 
 func TestDiscoverIncludesWorkflowDependencies(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	dir := filepath.Join(root, ".wuko", "workflows")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -89,6 +92,7 @@ func TestDiscoverIncludesWorkflowDependencies(t *testing.T) {
 }
 
 func TestDiscoverExpandsWorkflowTargets(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	dir := filepath.Join(root, ".wuko", "workflows")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -131,6 +135,7 @@ targets:
 }
 
 func TestDiscoverIncludesDependencyOnlyWorkflowMetadata(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	dir := filepath.Join(root, ".wuko", "workflows")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -150,6 +155,7 @@ func TestDiscoverIncludesDependencyOnlyWorkflowMetadata(t *testing.T) {
 }
 
 func TestDependencyOnlyWorkflowPreservesEffectivePrecedence(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	project := filepath.Join(root, "project")
 	home := filepath.Join(root, "home")
@@ -176,6 +182,7 @@ func TestDependencyOnlyWorkflowPreservesEffectivePrecedence(t *testing.T) {
 }
 
 func TestDiscoverRejectsDuplicateExtensions(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	dir := filepath.Join(root, ".wuko", "workflows")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -189,6 +196,7 @@ func TestDiscoverRejectsDuplicateExtensions(t *testing.T) {
 }
 
 func TestDiscoverRecursesIntoWorkflowDirectories(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	directory := filepath.Join(root, ".wuko", "workflows")
 	if err := os.MkdirAll(filepath.Join(directory, "marketplace"), 0o755); err != nil {
@@ -209,6 +217,7 @@ func TestDiscoverRecursesIntoWorkflowDirectories(t *testing.T) {
 }
 
 func TestDiscoverTreatsInstalledPackagesAsSingleWorkflowUnits(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	directory := filepath.Join(root, ".wuko", "workflows", "marketplace", "release")
 	if err := os.MkdirAll(directory, 0o755); err != nil {
@@ -233,6 +242,7 @@ func TestDiscoverTreatsInstalledPackagesAsSingleWorkflowUnits(t *testing.T) {
 }
 
 func TestDiscoverIncludesInstalledMarketplaceURL(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	directory := filepath.Join(root, ".wuko", "workflows", "marketplace", "release")
 	if err := os.MkdirAll(directory, 0o755); err != nil {
@@ -255,6 +265,7 @@ func TestDiscoverIncludesInstalledMarketplaceURL(t *testing.T) {
 }
 
 func TestDiscoverDeduplicatesWorkflowRootsOverlappingWorkingDirectory(t *testing.T) {
+	t.Parallel()
 	base := t.TempDir()
 	home := filepath.Join(base, "home")
 	workflowRoot := filepath.Join(home, ".wuko", "workflows")
@@ -279,6 +290,7 @@ func TestDiscoverDeduplicatesWorkflowRootsOverlappingWorkingDirectory(t *testing
 }
 
 func TestLoadRejectsNonStringEnvironmentAndMultipleDocuments(t *testing.T) {
+	t.Parallel()
 	tests := map[string]string{
 		"numeric environment": "version: 1\nname: bad\nenv:\n  PORT: 123\nsteps:\n  - id: run\n    type: shell\n    with: {}\n",
 		"multiple documents":  "version: 1\nname: bad\nsteps:\n  - id: run\n    type: shell\n    with: {}\n---\nextra: true\n",

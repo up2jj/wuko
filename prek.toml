@@ -46,8 +46,8 @@ hooks = [
   },
   {
     id = "go-test",
-    name = "go test",
-    entry = "go test ./...",
+    name = "go test (race)",
+    entry = "go test -race ./...",
     language = "system",
     types = ["go"],
     pass_filenames = false,

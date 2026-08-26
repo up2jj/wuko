@@ -7,6 +7,7 @@ import (
 )
 
 func TestLoadWorktreeBlock(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "workflow.yaml")
 	writeTestFile(t, path, `version: 1
 name: worktree
@@ -37,6 +38,7 @@ steps:
 }
 
 func TestWorktreeBlockValidation(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		body string
@@ -62,6 +64,7 @@ func TestWorktreeBlockValidation(t *testing.T) {
 }
 
 func TestWorktreeChildSequences(t *testing.T) {
+	t.Parallel()
 	step := Step{ID: "child", Type: "shell"}
 	block := Step{ID: "changes", Worktree: &WorktreeGroup{Revision: "HEAD", Path: "auto", Steps: []Step{step}}}
 	children := block.ChildSequences()

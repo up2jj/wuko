@@ -3,6 +3,7 @@ package workflow
 import "testing"
 
 func TestStepChildSequences(t *testing.T) {
+	t.Parallel()
 	step := func(id string) Step { return Step{ID: id, Type: "shell"} }
 	tests := []struct {
 		name string
@@ -46,6 +47,7 @@ func TestStepChildSequences(t *testing.T) {
 }
 
 func TestTransformChildSequencesReplacesDifferentLengthSlices(t *testing.T) {
+	t.Parallel()
 	workflowStep := Step{Executor: &ExecutorScope{Type: "docker"}, Steps: []Step{{ID: "body"}}, Finally: []Step{{ID: "cleanup"}}}
 	err := workflowStep.transformChildSequences(func(role ChildRole, steps []Step) ([]Step, error) {
 		if role == ChildFinally {

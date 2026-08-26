@@ -6,6 +6,7 @@ import (
 )
 
 func TestRedactedJSONRemovesSensitiveAndEnvironmentValues(t *testing.T) {
+	t.Parallel()
 	type environment map[string]string
 	value := map[string]any{
 		"command": "deploy", "args": []any{"--target", "prod"}, "api_key": "secret-api-key",
@@ -33,6 +34,7 @@ func TestRedactedJSONRemovesSensitiveAndEnvironmentValues(t *testing.T) {
 }
 
 func TestRedactedJSONTruncatesAtUTF8Boundary(t *testing.T) {
+	t.Parallel()
 	got := RedactedJSON(map[string]any{"source": strings.Repeat("ą", ConfigLimit)})
 	if len(got) > ConfigLimit || !strings.HasSuffix(got, truncatedMark) {
 		t.Fatalf("RedactedJSON() length = %d, value suffix = %q", len(got), got[max(0, len(got)-20):])

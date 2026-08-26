@@ -9,6 +9,7 @@ import (
 )
 
 func TestRequiredStepsPreserveSourceLocations(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	fragment := filepath.Join(dir, "steps.yaml")
 	if err := os.WriteFile(fragment, []byte(`steps:
@@ -44,6 +45,7 @@ steps:
 }
 
 func TestRemapDefinitionLocationsUsesLogicalRemoteSources(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	definition := &Definition{
 		Location: location(filepath.Join(root, "wuko.yaml"), 1),
@@ -59,6 +61,7 @@ func TestRemapDefinitionLocationsUsesLogicalRemoteSources(t *testing.T) {
 }
 
 func TestSchemaDiagnosticUsesFailingStepLocation(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "workflow.yaml")
 	if err := os.WriteFile(path, []byte("version: 1\nname: invalid\nsteps:\n  - id: broken\n    with: {}\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -80,6 +83,7 @@ func TestSchemaDiagnosticUsesFailingStepLocation(t *testing.T) {
 }
 
 func TestSchemaDiagnosticUsesDeferredStepLocation(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "workflow.yaml")
 	if err := os.WriteFile(path, []byte(`version: 1
 name: invalid

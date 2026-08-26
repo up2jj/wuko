@@ -11,6 +11,7 @@ import (
 )
 
 func TestRendererExecutesInlineAndNestedTemplates(t *testing.T) {
+	t.Parallel()
 	renderer, err := NewRenderer(map[string]TemplateDefinition{
 		"image":   {Inline: "{{ .vars.registry }}/app:{{ .vars.version }}"},
 		"message": {Inline: `Deploying {{ template "image" . }}`},
@@ -30,6 +31,7 @@ func TestRendererExecutesInlineAndNestedTemplates(t *testing.T) {
 }
 
 func TestRendererExposesHelpersToNamedAndInlineTemplates(t *testing.T) {
+	t.Parallel()
 	renderer, err := NewRenderer(map[string]TemplateDefinition{
 		"labels": {Inline: `{{ .vars.labels | keys | join "," }}`},
 	})
@@ -51,6 +53,7 @@ func TestRendererExposesHelpersToNamedAndInlineTemplates(t *testing.T) {
 }
 
 func TestRendererValidatesNamedTemplateWithOptionalBranches(t *testing.T) {
+	t.Parallel()
 	const resultsTable = `Repository | Status
 -----------|-------
 {{ range .steps.release_drifts.results -}}
@@ -69,6 +72,7 @@ func TestRendererValidatesNamedTemplateWithOptionalBranches(t *testing.T) {
 }
 
 func TestRendererHelpersPreserveStrictMissingKeys(t *testing.T) {
+	t.Parallel()
 	renderer, err := NewRenderer(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -87,6 +91,7 @@ func TestRendererHelpersPreserveStrictMissingKeys(t *testing.T) {
 }
 
 func TestRendererRejectsUnknownFunctionDuringValidation(t *testing.T) {
+	t.Parallel()
 	renderer, err := NewRenderer(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -98,6 +103,7 @@ func TestRendererRejectsUnknownFunctionDuringValidation(t *testing.T) {
 }
 
 func TestRendererRejectsInvalidDefinitionsAndReferences(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		definitions map[string]TemplateDefinition
@@ -120,6 +126,7 @@ func TestRendererRejectsInvalidDefinitionsAndReferences(t *testing.T) {
 }
 
 func TestRendererValidatesInlineTemplateReferences(t *testing.T) {
+	t.Parallel()
 	renderer, err := NewRenderer(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -131,6 +138,7 @@ func TestRendererValidatesInlineTemplateReferences(t *testing.T) {
 }
 
 func TestRendererRejectsDefinitionsInRenderedValues(t *testing.T) {
+	t.Parallel()
 	renderer, err := NewRenderer(map[string]TemplateDefinition{
 		"declared": {Inline: "original"},
 	})
@@ -159,6 +167,7 @@ func TestRendererRejectsDefinitionsInRenderedValues(t *testing.T) {
 }
 
 func TestLoadResolvesFileBackedTemplate(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	if err := os.Mkdir(filepath.Join(dir, "templates"), 0o755); err != nil {
 		t.Fatal(err)
@@ -190,6 +199,7 @@ steps:
 }
 
 func TestPrepareValuesRendersNamedTemplate(t *testing.T) {
+	t.Parallel()
 	definition := &Definition{
 		Version: 1, Name: "environment", Vars: map[string]any{"stage": "production"},
 		Templates: map[string]TemplateDefinition{"environment": {Inline: `{{ .vars.stage }}-west`}},
@@ -206,6 +216,7 @@ func TestPrepareValuesRendersNamedTemplate(t *testing.T) {
 }
 
 func TestLoadRejectsInvalidTemplateFiles(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		file string
@@ -231,6 +242,7 @@ func TestLoadRejectsInvalidTemplateFiles(t *testing.T) {
 }
 
 func TestLoadRejectsOversizedTemplateFile(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "large.tmpl"), bytes.Repeat([]byte("x"), maxTemplateSize+1), 0o644); err != nil {
 		t.Fatal(err)
@@ -247,6 +259,7 @@ func TestLoadRejectsOversizedTemplateFile(t *testing.T) {
 }
 
 func TestTemplateDefinitionUnmarshalRejectsAmbiguousObjects(t *testing.T) {
+	t.Parallel()
 	for _, source := range []string{
 		"template: {file: one.tmpl, extra: true}\n",
 		"template: {file: ''}\n",

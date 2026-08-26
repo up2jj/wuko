@@ -11,6 +11,7 @@ import (
 )
 
 func TestBuildWorkflowPackageEnforcesRemotePackageLimits(t *testing.T) {
+	t.Parallel()
 	t.Run("entry count", func(t *testing.T) {
 		directory := t.TempDir()
 		writePackageTestManifest(t, directory, "version: 1\nname: crowded\nsteps: []\n")

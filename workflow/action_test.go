@@ -34,6 +34,7 @@ steps:
 `
 
 func TestLoaderResolvesAndCachesHTTPSActions(t *testing.T) {
+	t.Parallel()
 	var requests atomic.Int32
 	client := testHTTPClient(func(request *http.Request) (*http.Response, error) {
 		requests.Add(1)
@@ -83,6 +84,7 @@ steps:
 }
 
 func TestLoaderResolvesAndCachesLocalActionFileAndDirectory(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	actionDir := filepath.Join(dir, "actions", "build")
 	writeTestFile(t, filepath.Join(actionDir, "action.yaml"), `version: 1
@@ -140,6 +142,7 @@ steps:
 }
 
 func TestLoaderResolvesLocalActionRelativeToRequiredFragment(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeTestFile(t, filepath.Join(dir, "workflow.yaml"), "version: 1\nname: caller\nsteps:\n  - require: fragments/build.yaml\n")
 	writeTestFile(t, filepath.Join(dir, "fragments", "build.yaml"), "- id: build\n  uses: ./actions/build\n  with: {target: linux}\n")
@@ -159,6 +162,7 @@ func TestLoaderResolvesLocalActionRelativeToRequiredFragment(t *testing.T) {
 }
 
 func TestLoaderRejectsInvalidLocalActionSources(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		uses  func(string) string
@@ -220,6 +224,7 @@ func TestLoaderRejectsInvalidLocalActionSources(t *testing.T) {
 }
 
 func TestLoaderRendersActionSourceWithNamedTemplate(t *testing.T) {
+	t.Parallel()
 	client := testHTTPClient(func(request *http.Request) (*http.Response, error) {
 		if request.URL.Path != "/v2/build" {
 			t.Fatalf("path = %q", request.URL.Path)
@@ -241,6 +246,7 @@ steps:
 }
 
 func TestLoaderResolvesActionInsideConcurrentGroup(t *testing.T) {
+	t.Parallel()
 	client := testHTTPClient(func(*http.Request) (*http.Response, error) {
 		return testResponse(http.StatusOK, []byte(validAction)), nil
 	})
@@ -267,6 +273,7 @@ steps:
 }
 
 func TestLoaderResolvesStaticActionsInsideFanoutControls(t *testing.T) {
+	t.Parallel()
 	client := testHTTPClient(func(*http.Request) (*http.Response, error) {
 		return testResponse(http.StatusOK, []byte(validAction)), nil
 	})
@@ -323,6 +330,7 @@ steps:
 }
 
 func TestLoaderRejectsChecksumAndNestedAction(t *testing.T) {
+	t.Parallel()
 	client := testHTTPClient(func(*http.Request) (*http.Response, error) {
 		return testResponse(http.StatusOK, []byte(validAction)), nil
 	})
@@ -347,6 +355,7 @@ func TestLoaderRejectsChecksumAndNestedAction(t *testing.T) {
 }
 
 func TestLoaderSupportsZIPAndTarGzipPackages(t *testing.T) {
+	t.Parallel()
 	files := map[string]archiveTestFile{
 		"action.yml":        {data: []byte(validAction), mode: 0o644},
 		"scripts/build.lua": {data: []byte(`wuko.output("ok", true)`), mode: 0o755},
@@ -378,6 +387,7 @@ func TestLoaderSupportsZIPAndTarGzipPackages(t *testing.T) {
 }
 
 func TestLoaderResolvesTemplateFileFromActionPackage(t *testing.T) {
+	t.Parallel()
 	manifest := `version: 1
 name: templated-action
 templates:
@@ -405,6 +415,7 @@ steps:
 }
 
 func TestLoaderRejectsTemplateFileInStandaloneAction(t *testing.T) {
+	t.Parallel()
 	manifest := `version: 1
 name: standalone
 templates:
@@ -425,6 +436,7 @@ steps:
 }
 
 func TestLoaderRunsAndCachesCommandActionSource(t *testing.T) {
+	t.Parallel()
 	workflowDir := t.TempDir()
 	counter := filepath.Join(workflowDir, "command-ran")
 	workflowPath := filepath.Join(workflowDir, "workflow.yaml")
@@ -486,6 +498,7 @@ steps:
 }
 
 func TestLoaderRunsCommandActionSourceFromScopedWorkingDirectory(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	project := filepath.Join(root, "project")
 	if err := os.Mkdir(project, 0o755); err != nil {
@@ -526,6 +539,7 @@ steps:
 }
 
 func TestLoaderRejectsCommandActionSourceWithRuntimeWorkingDirectory(t *testing.T) {
+	t.Parallel()
 	workflowPath := writeActionWorkflow(t, `version: 1
 name: dynamic-command-source
 steps:
@@ -545,6 +559,7 @@ steps:
 }
 
 func TestLoaderAcceptsArchiveFromCommandSource(t *testing.T) {
+	t.Parallel()
 	payload := makeZIP(t, map[string]archiveTestFile{"action.yml": {data: []byte(validAction), mode: 0o644}})
 	archivePath := filepath.Join(t.TempDir(), "action.zip")
 	if err := os.WriteFile(archivePath, payload, 0o644); err != nil {
@@ -561,6 +576,7 @@ func TestLoaderAcceptsArchiveFromCommandSource(t *testing.T) {
 }
 
 func TestLoaderReportsCommandFailureWithoutArguments(t *testing.T) {
+	t.Parallel()
 	workflowPath := writeActionWorkflow(t, `version: 1
 name: command-failure
 steps:
@@ -579,6 +595,7 @@ steps:
 }
 
 func TestLoaderRejectsUnsafeArchive(t *testing.T) {
+	t.Parallel()
 	payload := makeZIP(t, map[string]archiveTestFile{
 		"action.yml": {data: []byte(validAction), mode: 0o644},
 		"../escape":  {data: []byte("bad"), mode: 0o644},
@@ -592,6 +609,7 @@ func TestLoaderRejectsUnsafeArchive(t *testing.T) {
 }
 
 func TestLoaderEnforcesRemotePolicyAndManifestLimits(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		uses       string
@@ -649,6 +667,7 @@ func TestLoaderEnforcesRemotePolicyAndManifestLimits(t *testing.T) {
 }
 
 func TestLoaderHonorsCancellationAndRejectsInsecureRedirects(t *testing.T) {
+	t.Parallel()
 	client := testHTTPClient(func(request *http.Request) (*http.Response, error) {
 		<-request.Context().Done()
 		return nil, request.Context().Err()
@@ -679,6 +698,7 @@ func TestLoaderHonorsCancellationAndRejectsInsecureRedirects(t *testing.T) {
 }
 
 func TestLoaderRejectsAmbiguousArchiveManifest(t *testing.T) {
+	t.Parallel()
 	payload := makeZIP(t, map[string]archiveTestFile{
 		"action.yml":  {data: []byte(validAction), mode: 0o644},
 		"action.yaml": {data: []byte(validAction), mode: 0o644},
@@ -692,6 +712,7 @@ func TestLoaderRejectsAmbiguousArchiveManifest(t *testing.T) {
 }
 
 func TestDiscoverDoesNotFetchRemoteActions(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	dir := filepath.Join(root, ".wuko", "workflows")
 	if err := os.MkdirAll(dir, 0o755); err != nil {

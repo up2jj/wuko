@@ -12,6 +12,7 @@ import (
 )
 
 func TestGitHubWorkflowURL(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		locator string
 		wantURL string
@@ -35,6 +36,7 @@ func TestGitHubWorkflowURL(t *testing.T) {
 }
 
 func TestGitHubWorkflowURLRejectsMalformedLocators(t *testing.T) {
+	t.Parallel()
 	for _, locator := range []string{
 		"github:", "github:owner", "github:owner/repo:", "github:owner/repo@",
 		"github:owner/repo:../workflow.yaml", "github:owner/repo:/workflow.yaml",
@@ -49,6 +51,7 @@ func TestGitHubWorkflowURLRejectsMalformedLocators(t *testing.T) {
 }
 
 func TestLoadRemoteYAMLAndCleansUp(t *testing.T) {
+	t.Parallel()
 	workflowData := []byte("version: 1\nname: remote\nsteps:\n  - id: run\n    type: shell\n    with: {command: true}\n")
 	client := testHTTPClient(func(request *http.Request) (*http.Response, error) {
 		if request.URL.String() != "https://example.test/workflow.yaml?token=secret" {
@@ -86,6 +89,8 @@ func TestLoadRemoteYAMLAndCleansUp(t *testing.T) {
 }
 
 func TestLoadRemoteReportsPreparationFailureAsLoadFailure(t *testing.T) {
+	// Not parallel: this test snapshots the process-global os.TempDir()/wuko-workflow-*
+	// namespace, so a concurrently-materializing test would look like a leak.
 	workflowData := []byte("version: 1\nname: remote\nsteps:\n  - id: action\n    uses: https://actions.example.test/missing\n")
 	client := testHTTPClient(func(request *http.Request) (*http.Response, error) {
 		if request.URL.Host == "example.test" {
@@ -114,6 +119,8 @@ func TestLoadRemoteReportsPreparationFailureAsLoadFailure(t *testing.T) {
 }
 
 func TestDecodeRemoteRemovesMaterializedWorkflowOnDecodeFailure(t *testing.T) {
+	// Not parallel: this test snapshots the process-global os.TempDir()/wuko-workflow-*
+	// namespace, so a concurrently-materializing test would look like a leak.
 	client := testHTTPClient(func(*http.Request) (*http.Response, error) {
 		return testResponse(http.StatusOK, []byte("version: [")), nil
 	})
@@ -126,6 +133,7 @@ func TestDecodeRemoteRemovesMaterializedWorkflowOnDecodeFailure(t *testing.T) {
 }
 
 func TestLoadRemoteArchivesWorkflowAndCompanionFiles(t *testing.T) {
+	t.Parallel()
 	workflowData := []byte("version: 1\nname: remote\nsteps:\n  - id: run\n    type: lua\n    with:\n      file: companion.lua\n")
 	for name, payload := range map[string][]byte{
 		"zip": makeZIP(t, map[string]archiveTestFile{
@@ -152,6 +160,7 @@ func TestLoadRemoteArchivesWorkflowAndCompanionFiles(t *testing.T) {
 }
 
 func TestLoadMarketplacePackageRejectsPackageVersionMismatch(t *testing.T) {
+	t.Parallel()
 	sourceDir := t.TempDir()
 	workflowData := []byte("version: 1\npackage_version: 1.0.0\nname: release\nsteps:\n  - id: run\n    type: shell\n    with: {command: true}\n")
 	if err := os.WriteFile(filepath.Join(sourceDir, "wuko.yaml"), workflowData, 0o644); err != nil {
@@ -184,6 +193,7 @@ func TestLoadMarketplacePackageRejectsPackageVersionMismatch(t *testing.T) {
 }
 
 func TestLoadRemoteArchiveResolvesTemplateFiles(t *testing.T) {
+	t.Parallel()
 	workflowData := []byte(`version: 1
 name: remote-templates
 templates:
@@ -212,6 +222,7 @@ steps:
 }
 
 func TestLoadRemoteRejectsTemplateFileOutsidePackage(t *testing.T) {
+	t.Parallel()
 	payload := makeZIP(t, map[string]archiveTestFile{
 		"wuko.yaml": {
 			data: []byte("version: 1\nname: remote\ntemplates:\n  escape:\n    file: ../escape.tmpl\nsteps:\n  - id: run\n    type: shell\n"),
@@ -226,6 +237,7 @@ func TestLoadRemoteRejectsTemplateFileOutsidePackage(t *testing.T) {
 }
 
 func TestLoadRemoteArchiveExpandsRequiredStepFiles(t *testing.T) {
+	t.Parallel()
 	payload := makeZIP(t, map[string]archiveTestFile{
 		"wuko.yaml": {
 			data: []byte("version: 1\nname: remote-split\nsteps:\n  - require: steps/build.yaml\n"),
@@ -251,6 +263,7 @@ func TestLoadRemoteArchiveExpandsRequiredStepFiles(t *testing.T) {
 }
 
 func TestLoadRemoteRejectsArchivesWhenRequested(t *testing.T) {
+	t.Parallel()
 	payload := makeZIP(t, map[string]archiveTestFile{
 		"wuko.yaml": {data: []byte("version: 1\nname: remote\nsteps:\n  - id: run\n    type: shell\n"), mode: 0o644},
 	})
@@ -262,6 +275,7 @@ func TestLoadRemoteRejectsArchivesWhenRequested(t *testing.T) {
 }
 
 func TestLoadRemoteArchiveResolvesLocalActionFromRequiredFragment(t *testing.T) {
+	t.Parallel()
 	payload := makeZIP(t, map[string]archiveTestFile{
 		"wuko.yaml": {
 			data: []byte("version: 1\nname: remote\nsteps:\n  - require: fragments/build.yaml\n"),
@@ -291,6 +305,7 @@ func TestLoadRemoteArchiveResolvesLocalActionFromRequiredFragment(t *testing.T) 
 }
 
 func TestLoadRemoteRejectsInvalidWorkflowArchives(t *testing.T) {
+	t.Parallel()
 	tests := map[string][]byte{
 		"missing manifest": makeZIP(t, map[string]archiveTestFile{
 			"workflow.yaml": {data: []byte("bad"), mode: 0o644},
@@ -317,6 +332,7 @@ func TestLoadRemoteRejectsInvalidWorkflowArchives(t *testing.T) {
 }
 
 func TestLoadRemoteGitHubUsesContentsAPIAndRawHeader(t *testing.T) {
+	t.Parallel()
 	workflowData := []byte("version: 1\nname: github\nsteps:\n  - id: run\n    type: shell\n    with: {command: true}\n")
 	client := testHTTPClient(func(request *http.Request) (*http.Response, error) {
 		if request.URL.EscapedPath() != "/repos/acme/workflows/contents/ci/release%20file.yaml" {
@@ -341,6 +357,7 @@ func TestLoadRemoteGitHubUsesContentsAPIAndRawHeader(t *testing.T) {
 }
 
 func TestLoadRemoteRejectsInsecureURLAndReportsGitHubFailure(t *testing.T) {
+	t.Parallel()
 	loader := NewLoader(testHTTPClient(func(*http.Request) (*http.Response, error) {
 		return testResponse(http.StatusNotFound, nil), nil
 	}))

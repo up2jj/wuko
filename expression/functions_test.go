@@ -9,6 +9,7 @@ import (
 )
 
 func TestEmptyUsesGoTemplateTruthRules(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		value any
@@ -37,6 +38,7 @@ func TestEmptyUsesGoTemplateTruthRules(t *testing.T) {
 }
 
 func TestCollectionHelpersAreStrictAndDeterministic(t *testing.T) {
+	t.Parallel()
 	dictionary, err := dict("b", 2, "a", 1)
 	if err != nil {
 		t.Fatal(err)
@@ -68,6 +70,7 @@ func TestCollectionHelpersAreStrictAndDeterministic(t *testing.T) {
 }
 
 func TestExprTypedCollectionHelpers(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		source string
@@ -122,6 +125,7 @@ func TestExprTypedCollectionHelpers(t *testing.T) {
 }
 
 func TestExprTypedCollectionHelpersAcceptTypedListsWithoutMutation(t *testing.T) {
+	t.Parallel()
 	items := []int{1, 2, 3}
 	got, err := Eval(`chunk(items, 2)`, map[string]any{"items": items})
 	if err != nil {
@@ -158,6 +162,7 @@ func TestExprTypedCollectionHelpersAcceptTypedListsWithoutMutation(t *testing.T)
 }
 
 func TestExprTypedCollectionHelperErrors(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		source string
 		want   string
@@ -183,6 +188,7 @@ func TestExprTypedCollectionHelperErrors(t *testing.T) {
 }
 
 func TestExprOnlyCollectionHelpersAreNotTemplateFunctions(t *testing.T) {
+	t.Parallel()
 	functions := TemplateFuncs()
 	for _, name := range []string{"indexBy", "chunk"} {
 		if _, exists := functions[name]; exists {
@@ -192,6 +198,7 @@ func TestExprOnlyCollectionHelpersAreNotTemplateFunctions(t *testing.T) {
 }
 
 func TestSerializationHelpers(t *testing.T) {
+	t.Parallel()
 	value := map[string]any{"b": 2, "a": 1}
 	pretty, err := toJSON(value)
 	if err != nil {
@@ -220,6 +227,7 @@ func TestSerializationHelpers(t *testing.T) {
 }
 
 func TestTemplateAndExprHelpers(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		template   string
@@ -264,6 +272,7 @@ func TestTemplateAndExprHelpers(t *testing.T) {
 }
 
 func TestLanguageSpecificContainsSyntax(t *testing.T) {
+	t.Parallel()
 	gotTemplate, err := renderTemplate(`{{ "workflow" | contains "flow" }}`)
 	if err != nil {
 		t.Fatal(err)
@@ -278,6 +287,7 @@ func TestLanguageSpecificContainsSyntax(t *testing.T) {
 }
 
 func TestRequiredAndIndentErrorsStopEvaluation(t *testing.T) {
+	t.Parallel()
 	for _, source := range []string{
 		`required("", "value is required")`,
 		`indent("value", -1)`,
@@ -313,6 +323,7 @@ func renderTemplate(source string) (string, error) {
 }
 
 func TestRequiredErrorIncludesMessage(t *testing.T) {
+	t.Parallel()
 	_, err := Eval(`required("", "application is required")`, map[string]any{})
 	if err == nil || !strings.Contains(err.Error(), "application is required") {
 		t.Fatalf("error = %v", err)
