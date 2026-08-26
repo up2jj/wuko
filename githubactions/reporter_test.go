@@ -11,6 +11,7 @@ import (
 
 	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/engine"
+	reporterpkg "github.com/up2jj/wuko/reporter"
 )
 
 func TestNewRequiresGitHubFiles(t *testing.T) {
@@ -46,7 +47,11 @@ func TestReporterAnnotatesDiagnosticsOnceAndWritesSummary(t *testing.T) {
 		Kind: engine.WorkflowFinished, Status: engine.StatusFailed, WorkflowName: "check", Duration: 1500 * time.Millisecond,
 		Stats: engine.RunStats{Total: 2, Succeeded: 1, Failed: 1},
 	})
-	if err := reporter.Finish("check", nil, errors.New("bad value"), false); err != nil {
+	if err := reporter.Finish(t.Context(), reporterpkg.Outcome{
+		WorkflowName: "check", Status: engine.StatusFailed,
+		Stats: engine.RunStats{Duration: 1500 * time.Millisecond, Total: 2, Succeeded: 1, Failed: 1},
+		Err:   errors.New("bad value"),
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -76,12 +81,12 @@ func TestReporterAnnotatesDiagnosticsOnceAndWritesSummary(t *testing.T) {
 func TestReporterExportsNamedAndAggregateOutputs(t *testing.T) {
 	root := t.TempDir()
 	reporter, output, _, _ := newTestReporter(t, root)
-	state := &engine.State{Outputs: map[string]any{
+	outcome := reporterpkg.Outcome{WorkflowName: "check", Status: engine.StatusSucceeded, Outputs: map[string]any{
 		"artifact": "first\nWUKO_EOF\nlast",
 		"count":    3,
 		"metadata": map[string]any{"ok": true},
 	}}
-	if err := reporter.Finish("check", state, nil, false); err != nil {
+	if err := reporter.Finish(t.Context(), outcome); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(output)
@@ -103,10 +108,10 @@ func TestReporterExportsNamedAndAggregateOutputs(t *testing.T) {
 
 func TestReporterRejectsReservedAggregateOutputWithoutWriting(t *testing.T) {
 	reporter, output, _, _ := newTestReporter(t, t.TempDir())
-	err := reporter.Finish("check", &engine.State{Outputs: map[string]any{
+	err := reporter.Finish(t.Context(), reporterpkg.Outcome{WorkflowName: "check", Status: engine.StatusSucceeded, Outputs: map[string]any{
 		"artifact":     "dist/app.tar.gz",
 		"wuko_outputs": "workflow value",
-	}}, nil, false)
+	}})
 	if err == nil || !strings.Contains(err.Error(), `workflow output "wuko_outputs" is reserved`) {
 		t.Fatalf("Finish() error = %v, want reserved output error", err)
 	}
@@ -138,7 +143,7 @@ func TestReporterOmitsOutsideWorkspaceLocation(t *testing.T) {
 		Location: diagnostic.Location{Source: filepath.Join(filepath.Dir(root), "outside.yaml"), Line: 2},
 		Error:    errors.New("broken"),
 	})
-	if err := reporter.Finish("", nil, errors.New("broken"), false); err != nil {
+	if err := reporter.Finish(t.Context(), reporterpkg.Outcome{Status: engine.StatusFailed, Err: errors.New("broken")}); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(commands.String(), "file=") {
@@ -148,8 +153,11 @@ func TestReporterOmitsOutsideWorkspaceLocation(t *testing.T) {
 
 func TestReporterDryRunWritesSummaryWithoutOutputs(t *testing.T) {
 	reporter, output, summary, _ := newTestReporter(t, t.TempDir())
-	state := &engine.State{Outputs: map[string]any{"result": "hidden"}}
-	if err := reporter.Finish("check", state, nil, true); err != nil {
+	outcome := reporterpkg.Outcome{
+		WorkflowName: "check", Status: engine.StatusSucceeded,
+		Outputs: map[string]any{"result": "hidden"}, DryRun: true,
+	}
+	if err := reporter.Finish(t.Context(), outcome); err != nil {
 		t.Fatal(err)
 	}
 	outputData, err := os.ReadFile(output)

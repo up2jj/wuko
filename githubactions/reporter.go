@@ -2,6 +2,7 @@
 package githubactions
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/engine"
+	reporterpkg "github.com/up2jj/wuko/reporter"
 )
 
 const aggregateOutput = "wuko_outputs"
@@ -38,7 +40,6 @@ type Reporter struct {
 	annotations map[string]struct{}
 	annotated   bool
 	commandErr  error
-	finished    *engine.ProgressEvent
 }
 
 // New validates the GitHub environment files before workflow execution begins.
@@ -79,16 +80,8 @@ func New(options Options) (*Reporter, error) {
 	}, nil
 }
 
-// Progress records the terminal workflow event used to build the job summary.
-func (reporter *Reporter) Progress(event engine.ProgressEvent) {
-	if event.Kind != engine.WorkflowFinished || event.Depth != 0 {
-		return
-	}
-	reporter.mu.Lock()
-	defer reporter.mu.Unlock()
-	copy := event
-	reporter.finished = &copy
-}
+// Progress receives execution progress. GitHub reporting currently uses the final Outcome instead.
+func (*Reporter) Progress(engine.ProgressEvent) {}
 
 // Diagnostic emits one deduplicated GitHub error annotation for a failed diagnostic.
 func (reporter *Reporter) Diagnostic(event diagnostic.Event) {
@@ -101,22 +94,22 @@ func (reporter *Reporter) Diagnostic(event diagnostic.Event) {
 }
 
 // Finish writes the final annotation, workflow outputs, and job summary.
-func (reporter *Reporter) Finish(workflowName string, state *engine.State, runErr error, dryRun bool) error {
+func (reporter *Reporter) Finish(_ context.Context, outcome reporterpkg.Outcome) error {
 	reporter.mu.Lock()
 	defer reporter.mu.Unlock()
 
-	if runErr != nil && !reporter.annotated {
-		reporter.writeCommand("::error title=Wuko::" + escapeData(singleLine(runErr.Error())) + "\n")
+	if outcome.Err != nil && !reporter.annotated {
+		reporter.writeCommand("::error title=Wuko::" + escapeData(singleLine(outcome.Err.Error())) + "\n")
 		reporter.annotated = true
 	}
 
 	var finishErrors []error
-	if state != nil && runErr == nil && !dryRun {
-		if err := reporter.writeOutputs(state.Outputs); err != nil {
+	if outcome.Outputs != nil && outcome.Err == nil && !outcome.DryRun {
+		if err := reporter.writeOutputs(outcome.Outputs); err != nil {
 			finishErrors = append(finishErrors, err)
 		}
 	}
-	if err := reporter.writeSummary(workflowName, state, runErr, dryRun); err != nil {
+	if err := reporter.writeSummary(outcome); err != nil {
 		finishErrors = append(finishErrors, err)
 	}
 	if reporter.commandErr != nil {
@@ -225,32 +218,23 @@ func (reporter *Reporter) writeOutputs(outputs map[string]any) error {
 	return nil
 }
 
-func (reporter *Reporter) writeSummary(workflowName string, state *engine.State, runErr error, dryRun bool) error {
-	status := "succeeded"
-	if dryRun {
+func (reporter *Reporter) writeSummary(outcome reporterpkg.Outcome) error {
+	status := string(outcome.Status)
+	if outcome.DryRun {
 		status = "validated"
-	} else if reporter.finished != nil {
-		status = string(reporter.finished.Status)
-	} else if runErr != nil {
+	} else if status == "" && outcome.Err != nil {
 		status = "failed"
+	} else if status == "" {
+		status = "succeeded"
 	}
 
-	stats := engine.RunStats{}
-	duration := time.Duration(0)
-	if reporter.finished != nil {
-		stats = reporter.finished.Stats
-		duration = reporter.finished.Duration
-	} else if state != nil {
-		stats = state.Stats
-		duration = state.Stats.Duration
-	}
-	name := markdownCell(workflowName)
+	name := markdownCell(outcome.WorkflowName)
 	if name == "" {
 		name = "workflow"
 	}
 	summary := fmt.Sprintf(
 		"### Wuko: `%s`\n\n| Status | Duration | Steps | Succeeded | Failed | Skipped |\n| --- | ---: | ---: | ---: | ---: | ---: |\n| %s | %s | %d | %d | %d | %d |\n\n",
-		name, status, formatDuration(duration), stats.Total, stats.Succeeded, stats.Failed, stats.Skipped,
+		name, status, formatDuration(outcome.Stats.Duration), outcome.Stats.Total, outcome.Stats.Succeeded, outcome.Stats.Failed, outcome.Stats.Skipped,
 	)
 	file, err := os.OpenFile(reporter.summaryPath, os.O_WRONLY|os.O_APPEND, 0)
 	if err != nil {

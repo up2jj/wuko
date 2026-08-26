@@ -630,9 +630,20 @@ complete typed map is available as JSON under `wuko_outputs`. Output values are 
 failed or dry runs. The name `wuko_outputs` is reserved by the GitHub reporter; rename a workflow
 return value with that name before enabling the reporter.
 
-Reporters affect presentation and integration only. They do not change interactivity, scheduling,
-or exit status; pair the GitHub reporter with `--once` when GitHub owns the schedule. GitHub
-environment variables do not enable the reporter implicitly.
+Reporters do not change workflow execution, interactivity, or scheduling. A reporter initialization
+or finalization failure does fail the Wuko command, while leaving the recorded workflow outcome
+unchanged. Pair the GitHub reporter with `--once` when GitHub owns the schedule. GitHub environment
+variables do not enable the reporter implicitly.
+
+Go integrations can implement the public `reporter.Reporter` interface. Progress and diagnostic
+events are delivered synchronously and in order, followed by a safe final outcome containing only
+the workflow name, status, statistics, declared outputs, error, and dry-run state. Reporters never
+receive the workflow's full engine state, environment, inputs, variables, or intermediate values.
+
+Reporter events do not yet include correlation identifiers. A future event-model revision will
+distinguish the reporting invocation, workflow runs and their parents, individual step executions,
+attempts, and the shared event sequence. The existing step operation ID is an idempotency key and
+will not be reused as reporter correlation identity.
 
 ## Splitting a workflow across files
 

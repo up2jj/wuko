@@ -28,11 +28,8 @@ func newRunCmd(deps dependencies) *cobra.Command {
 	command.Flags().StringArrayVar(&config.environment, "env", nil, "override an environment variable (KEY=value; repeatable)")
 	command.Flags().BoolVar(&config.dryRun, "dry-run", false, "validate and print steps without running them")
 	command.Flags().BoolVar(&config.once, "once", false, "run immediately once, ignoring a declared cron schedule")
-	command.Flags().StringArrayVar(&config.reporters, "reporter", nil, "enable a run reporter (plain or github; repeatable; defaults to plain)")
+	addReporterFlag(command, &config.reporters)
 	command.Flags().StringVar(&config.workflowFile, "file", "", "run a workflow from a file path")
-	_ = command.RegisterFlagCompletionFunc("reporter", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
-		return []string{"plain", "github"}, cobra.ShellCompDirectiveNoFileComp
-	})
 	command.ValidArgsFunction = workflowCompletion(deps, true)
 	return command
 }
@@ -60,7 +57,7 @@ func runWorkflow(command *cobra.Command, deps dependencies, args []string, confi
 	var workflowName string
 	var runState *engine.State
 	defer func() {
-		runErr = errors.Join(runErr, reporters.Finish(workflowName, runState, runErr, config.dryRun))
+		runErr = errors.Join(runErr, reporters.complete(command.Context(), workflowName, runState, runErr, config.dryRun))
 	}()
 	diagnostic.Emit(reporters.Diagnostic, diagnostic.Event{Phase: diagnostic.PhaseInvocation, Status: diagnostic.StatusStarted, Message: "run workflow", Attributes: []diagnostic.Attribute{diagnostic.Attr("run_dir", cwd), diagnostic.Attr("variable_files", fmt.Sprint(len(config.variableFiles))), diagnostic.Attr("variables", fmt.Sprint(len(config.variables))), diagnostic.Attr("environment", fmt.Sprint(len(config.environment)))}})
 	if config.workflowFile != "" && len(args) > 1 {

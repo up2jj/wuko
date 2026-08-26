@@ -15,6 +15,7 @@ import (
 	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/engine"
 	"github.com/up2jj/wuko/form"
+	reporterpkg "github.com/up2jj/wuko/reporter"
 	"github.com/up2jj/wuko/webui"
 	"github.com/up2jj/wuko/workflow"
 )
@@ -42,7 +43,7 @@ func newUICmd(deps dependencies) *cobra.Command {
 	command.Flags().StringArrayVar(&config.variables, "var", nil, "set a workflow variable (key=value; repeatable)")
 	command.Flags().StringArrayVar(&config.variableFiles, "var-file", nil, "import workflow variables from a JSON or TOML file (repeatable)")
 	command.Flags().StringArrayVar(&config.environment, "env", nil, "override an environment variable (KEY=value; repeatable)")
-	command.Flags().StringArrayVar(&config.reporters, "reporter", nil, "enable a run reporter (plain or github; repeatable; defaults to plain)")
+	addReporterFlag(command, &config.reporters)
 	command.Flags().StringVar(&config.workflowFile, "file", "", "run a workflow form from a file path")
 	command.Flags().BoolVar(&config.noOpen, "no-open", false, "print the local URL without opening a browser")
 	command.ValidArgsFunction = workflowCompletion(deps, true)
@@ -113,7 +114,7 @@ func runWorkflowUI(command *cobra.Command, deps dependencies, args []string, con
 	}
 	finishReporters := finishReportersOnce(reporters)
 	defer func() {
-		if finishErr, called := finishReporters(definition.Name, nil, runErr, false); called {
+		if finishErr, called := finishReporters(command.Context(), definition.Name, nil, runErr, false); called {
 			runErr = errors.Join(runErr, finishErr)
 		}
 	}()
@@ -138,7 +139,7 @@ func runWorkflowUI(command *cobra.Command, deps dependencies, args []string, con
 			return result
 		}
 		browser := browserReporter{stage: "workflow", emit: emit}
-		activeReporters := append(append(fanoutReporter(nil), reporters...), browser)
+		activeReporters := reporterpkg.Group{reporters, browser}
 		remoteDefinitions := map[string]bool{definition.Path: target.remote}
 		optionsFor := func(item *workflow.Definition, dependencies map[string]map[string]any) engine.Options {
 			localValueDir := ""
@@ -153,7 +154,7 @@ func runWorkflowUI(command *cobra.Command, deps dependencies, args []string, con
 			}
 		}
 		state, engineErr := executeDependencyPlan(ctx, plan, func() *engine.Engine { return workflowEngine(deps) }, optionsFor)
-		finishErr, _ := finishReporters(definition.Name, state, engineErr, false)
+		finishErr, _ := finishReporters(ctx, definition.Name, state, engineErr, false)
 		result.Err = errors.Join(engineErr, finishErr)
 		result.Duration = time.Since(started)
 		if state != nil {
@@ -172,14 +173,14 @@ func runWorkflowUI(command *cobra.Command, deps dependencies, args []string, con
 	})
 }
 
-func finishReportersOnce(reporters fanoutReporter) func(string, *engine.State, error, bool) (error, bool) {
+func finishReportersOnce(reporters *runReporters) func(context.Context, string, *engine.State, error, bool) (error, bool) {
 	var once sync.Once
 	var finishErr error
-	return func(workflowName string, state *engine.State, runErr error, dryRun bool) (error, bool) {
+	return func(ctx context.Context, workflowName string, state *engine.State, runErr error, dryRun bool) (error, bool) {
 		called := false
 		once.Do(func() {
 			called = true
-			finishErr = reporters.Finish(workflowName, state, runErr, dryRun)
+			finishErr = reporters.complete(ctx, workflowName, state, runErr, dryRun)
 		})
 		return finishErr, called
 	}
@@ -223,7 +224,7 @@ func (target workflowRunTarget) decode(ctx context.Context, loader *workflow.Loa
 	return definition, func() {}, err
 }
 
-func formLoadFunc(command *cobra.Command, deps dependencies, loader *workflow.Loader, owner *workflow.Definition, declaration *form.Definition, options workflow.LoadOptions, reporters fanoutReporter, cwd, configDir string, remote bool) webui.LoadFunc {
+func formLoadFunc(command *cobra.Command, deps dependencies, loader *workflow.Loader, owner *workflow.Definition, declaration *form.Definition, options workflow.LoadOptions, reporters *runReporters, cwd, configDir string, remote bool) webui.LoadFunc {
 	if declaration.Load == nil {
 		return nil
 	}
@@ -240,7 +241,7 @@ func formLoadFunc(command *cobra.Command, deps dependencies, loader *workflow.Lo
 			return nil, err
 		}
 		browser := browserReporter{stage: "form", emit: emit}
-		activeReporters := append(append(fanoutReporter(nil), reporters...), browser)
+		activeReporters := reporterpkg.Group{reporters, browser}
 		localValueDir := ""
 		if !remote {
 			localValueDir = filepath.Join(definition.Dir, ".wuko", "values")
@@ -271,8 +272,10 @@ func (reporter browserReporter) Progress(event engine.ProgressEvent) {
 	})
 }
 
-func (browserReporter) Diagnostic(event diagnostic.Event)               {}
-func (browserReporter) Finish(string, *engine.State, error, bool) error { return nil }
+func (browserReporter) Diagnostic(diagnostic.Event) {}
+func (browserReporter) Finish(context.Context, reporterpkg.Outcome) error {
+	return nil
+}
 
 func webSummary(stats engine.RunStats) webui.Summary {
 	return webui.Summary{

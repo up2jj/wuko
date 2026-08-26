@@ -1,44 +1,103 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"strings"
+	"sync"
 
 	"github.com/spf13/cobra"
 	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/engine"
 	"github.com/up2jj/wuko/githubactions"
+	reporterpkg "github.com/up2jj/wuko/reporter"
 	"github.com/up2jj/wuko/tui"
+	"github.com/up2jj/wuko/workflow"
 )
 
-type runReporter interface {
-	Progress(engine.ProgressEvent)
-	Diagnostic(diagnostic.Event)
-	Finish(string, *engine.State, error, bool) error
+type runReporterFactory func(*cobra.Command, dependencies, string) (reporterpkg.Reporter, error)
+
+type runReporterDefinition struct {
+	name string
+	new  runReporterFactory
 }
 
-type fanoutReporter []runReporter
-
-func (reporters fanoutReporter) Progress(event engine.ProgressEvent) {
-	for _, reporter := range reporters {
-		reporter.Progress(event)
-	}
-}
-
-func (reporters fanoutReporter) Diagnostic(event diagnostic.Event) {
-	for _, reporter := range reporters {
-		reporter.Diagnostic(event)
-	}
-}
-
-func (reporters fanoutReporter) Finish(workflowName string, state *engine.State, runErr error, dryRun bool) error {
-	errorsByReporter := make([]error, 0, len(reporters))
-	for _, reporter := range reporters {
-		if err := reporter.Finish(workflowName, state, runErr, dryRun); err != nil {
-			errorsByReporter = append(errorsByReporter, err)
+var runReporterCatalog = []runReporterDefinition{
+	{name: "plain", new: func(command *cobra.Command, deps dependencies, runDir string) (reporterpkg.Reporter, error) {
+		return newPlainReporter(command, deps, runDir), nil
+	}},
+	{name: "github", new: func(command *cobra.Command, deps dependencies, runDir string) (reporterpkg.Reporter, error) {
+		workspace := deps.getenv("GITHUB_WORKSPACE")
+		if workspace == "" {
+			workspace = runDir
 		}
+		return githubactions.New(githubactions.Options{
+			OutputPath: deps.getenv("GITHUB_OUTPUT"), SummaryPath: deps.getenv("GITHUB_STEP_SUMMARY"),
+			Workspace: workspace, Commands: command.ErrOrStderr(),
+		})
+	}},
+}
+
+// runReporters adapts command completion into the safe public reporter outcome. It records the
+// latest root workflow event because Engine.Run returns no State after an execution failure.
+type runReporters struct {
+	group reporterpkg.Group
+
+	mu       sync.Mutex
+	finished *engine.ProgressEvent
+}
+
+func (reporters *runReporters) Progress(event engine.ProgressEvent) {
+	if event.Kind == engine.WorkflowFinished && event.Depth == 0 {
+		reporters.mu.Lock()
+		copy := event
+		reporters.finished = &copy
+		reporters.mu.Unlock()
 	}
-	return errors.Join(errorsByReporter...)
+	reporters.group.Progress(event)
+}
+
+func (reporters *runReporters) Diagnostic(event diagnostic.Event) {
+	reporters.group.Diagnostic(event)
+}
+
+func (reporters *runReporters) Finish(ctx context.Context, outcome reporterpkg.Outcome) error {
+	return reporters.group.Finish(ctx, outcome)
+}
+
+func (reporters *runReporters) complete(ctx context.Context, workflowName string, state *engine.State, runErr error, dryRun bool) error {
+	outcome := reporterpkg.Outcome{
+		WorkflowName: workflowName,
+		Status:       outcomeStatus(runErr),
+		Err:          runErr,
+		DryRun:       dryRun,
+	}
+	if state != nil {
+		outcome.Stats = state.Stats
+		outcome.Outputs = workflow.CloneMap(state.Outputs)
+	}
+	reporters.mu.Lock()
+	finished := reporters.finished
+	reporters.mu.Unlock()
+	if finished != nil {
+		outcome.Status = finished.Status
+		outcome.Stats = finished.Stats
+	}
+	return reporters.Finish(context.WithoutCancel(ctx), outcome)
+}
+
+func outcomeStatus(runErr error) engine.ExecutionStatus {
+	switch {
+	case runErr == nil:
+		return engine.StatusSucceeded
+	case errors.Is(runErr, context.Canceled):
+		return engine.StatusCanceled
+	case errors.Is(runErr, context.DeadlineExceeded):
+		return engine.StatusTimedOut
+	default:
+		return engine.StatusFailed
+	}
 }
 
 type plainReporter struct {
@@ -61,42 +120,59 @@ func (reporter *plainReporter) Diagnostic(event diagnostic.Event) {
 	diagnostic.Emit(reporter.diagnostics, event)
 }
 
-func (*plainReporter) Finish(string, *engine.State, error, bool) error { return nil }
+func (*plainReporter) Finish(context.Context, reporterpkg.Outcome) error { return nil }
 
-func newRunReporters(command *cobra.Command, deps dependencies, runDir string, names []string) (fanoutReporter, error) {
+func addReporterFlag(command *cobra.Command, target *[]string) {
+	names := runReporterNames()
+	command.Flags().StringArrayVar(target, "reporter", nil, fmt.Sprintf(
+		"enable a run reporter (%s; repeatable; defaults to plain)", strings.Join(names, " or "),
+	))
+	_ = command.RegisterFlagCompletionFunc("reporter", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
+		return names, cobra.ShellCompDirectiveNoFileComp
+	})
+}
+
+func runReporterNames() []string {
+	names := make([]string, len(runReporterCatalog))
+	for index, definition := range runReporterCatalog {
+		names[index] = definition.name
+	}
+	return names
+}
+
+func newRunReporters(command *cobra.Command, deps dependencies, runDir string, names []string) (*runReporters, error) {
 	if len(names) == 0 {
 		names = []string{"plain"}
 	}
-	reporters := make(fanoutReporter, 0, len(names))
+	group := make(reporterpkg.Group, 0, len(names))
 	seen := make(map[string]struct{}, len(names))
 	for _, name := range names {
 		if _, exists := seen[name]; exists {
 			continue
 		}
 		seen[name] = struct{}{}
-		switch name {
-		case "plain":
-			reporters = append(reporters, newPlainReporter(command, deps, runDir))
-		case "github":
-			workspace := deps.getenv("GITHUB_WORKSPACE")
-			if workspace == "" {
-				workspace = runDir
-			}
-			reporter, err := githubactions.New(githubactions.Options{
-				OutputPath: deps.getenv("GITHUB_OUTPUT"), SummaryPath: deps.getenv("GITHUB_STEP_SUMMARY"),
-				Workspace: workspace, Commands: command.ErrOrStderr(),
-			})
-			if err != nil {
-				return nil, err
-			}
-			reporters = append(reporters, reporter)
-		default:
-			return nil, fmt.Errorf("unknown reporter %q; expected plain or github", name)
+		factory, found := runReporterFactoryFor(name)
+		if !found {
+			return nil, fmt.Errorf("unknown reporter %q; expected %s", name, strings.Join(runReporterNames(), " or "))
 		}
+		created, err := factory(command, deps, runDir)
+		if err != nil {
+			return nil, err
+		}
+		group = append(group, created)
 	}
-	return reporters, nil
+	return &runReporters{group: group}, nil
 }
 
-var _ runReporter = (*plainReporter)(nil)
-var _ runReporter = (*githubactions.Reporter)(nil)
-var _ runReporter = fanoutReporter(nil)
+func runReporterFactoryFor(name string) (runReporterFactory, bool) {
+	for _, definition := range runReporterCatalog {
+		if definition.name == name {
+			return definition.new, true
+		}
+	}
+	return nil, false
+}
+
+var _ reporterpkg.Reporter = (*plainReporter)(nil)
+var _ reporterpkg.Reporter = (*githubactions.Reporter)(nil)
+var _ reporterpkg.Reporter = (*runReporters)(nil)
