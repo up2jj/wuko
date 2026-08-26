@@ -52,9 +52,11 @@ type Result struct {
 }
 
 // LoadFunc produces form-only data before fields are displayed.
+// It must return when its context is canceled.
 type LoadFunc func(context.Context, func(Progress)) (map[string]any, error)
 
 // RunFunc executes the main workflow after a valid submission.
+// It must return when its context is canceled.
 type RunFunc func(context.Context, map[string]any, func(Progress)) Result
 
 // Options configures process-owned UI capabilities.
@@ -89,6 +91,8 @@ type session struct {
 	delivered  chan struct{}
 	complete   sync.Once
 	deliver    sync.Once
+	workers    sync.WaitGroup
+	stopping   bool
 	run        RunFunc
 	ctx        context.Context
 }
@@ -113,10 +117,12 @@ func Run(ctx context.Context, definition *form.Definition, vars map[string]any, 
 	if load != nil {
 		initialPhase = phaseLoading
 	}
+	runCtx, cancelRun := context.WithCancel(ctx)
+	defer cancelRun()
 	s := &session{
 		definition: definition, vars: maps.Clone(vars), phase: initialPhase, csrf: csrf,
 		host: listener.Addr().String(), changed: make(chan struct{}), completed: make(chan struct{}), delivered: make(chan struct{}),
-		run: execute, ctx: ctx,
+		run: execute, ctx: runCtx,
 	}
 	if load == nil {
 		fields, err := definition.Resolve(vars, nil)
@@ -139,12 +145,13 @@ func Run(ctx context.Context, definition *form.Definition, vars map[string]any, 
 		WriteTimeout:      0,
 		IdleTimeout:       60 * time.Second,
 	}
-	serverErr := make(chan error, 1)
+	serverDone := make(chan error, 1)
 	go func() {
 		err := server.Serve(listener)
-		if !errors.Is(err, http.ErrServerClosed) {
-			serverErr <- err
+		if errors.Is(err, http.ErrServerClosed) {
+			err = nil
 		}
+		serverDone <- err
 	}()
 
 	uiURL := "http://" + listener.Addr().String() + prefix + "/"
@@ -158,8 +165,8 @@ func Run(ctx context.Context, definition *form.Definition, vars map[string]any, 
 	}
 
 	if load != nil {
-		go func() {
-			data, err := load(ctx, s.publish)
+		s.workers.Go(func() {
+			data, err := load(runCtx, s.publish)
 			s.mu.Lock()
 			defer s.mu.Unlock()
 			if err != nil {
@@ -178,15 +185,19 @@ func Run(ctx context.Context, definition *form.Definition, vars map[string]any, 
 			s.fields = fields
 			s.phase = phaseReady
 			s.notifyLocked()
-		}()
+		})
 	}
 
 	var runErr error
+	serverExited := false
 	select {
 	case <-ctx.Done():
 		runErr = ctx.Err()
-	case err := <-serverErr:
-		runErr = fmt.Errorf("serving workflow UI: %w", err)
+	case err := <-serverDone:
+		serverExited = true
+		if err != nil {
+			runErr = fmt.Errorf("serving workflow UI: %w", err)
+		}
 	case <-s.completed:
 		select {
 		case <-ctx.Done():
@@ -200,9 +211,23 @@ func Run(ctx context.Context, definition *form.Definition, vars map[string]any, 
 		}
 		s.mu.Unlock()
 	}
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	s.mu.Lock()
+	s.stopping = true
+	s.mu.Unlock()
+	cancelRun()
+	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
-	return errors.Join(runErr, server.Shutdown(shutdownCtx))
+	shutdownErr := server.Shutdown(shutdownCtx)
+	if shutdownErr != nil {
+		shutdownErr = errors.Join(shutdownErr, server.Close())
+	}
+	if !serverExited {
+		if err := <-serverDone; err != nil {
+			runErr = errors.Join(runErr, fmt.Errorf("serving workflow UI: %w", err))
+		}
+	}
+	s.workers.Wait()
+	return errors.Join(runErr, shutdownErr)
 }
 
 func (s *session) publish(event Progress) {
@@ -261,7 +286,7 @@ func (s *session) submit(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	s.mu.Lock()
-	if s.phase != phaseReady || request.PostForm.Get("csrf") != s.csrf {
+	if s.stopping || s.phase != phaseReady || request.PostForm.Get("csrf") != s.csrf {
 		s.mu.Unlock()
 		http.Error(response, "invalid or expired submission", http.StatusForbidden)
 		return
@@ -280,9 +305,8 @@ func (s *session) submit(response http.ResponseWriter, request *http.Request) {
 	s.fieldErrs = nil
 	s.progress = nil
 	s.notifyLocked()
-	s.mu.Unlock()
 
-	go func() {
+	s.workers.Go(func() {
 		result := s.run(s.ctx, values, s.publish)
 		if result.Status == "" {
 			if result.Err == nil {
@@ -296,7 +320,8 @@ func (s *session) submit(response http.ResponseWriter, request *http.Request) {
 		s.phase = phaseDone
 		s.completeLocked()
 		s.mu.Unlock()
-	}()
+	})
+	s.mu.Unlock()
 	http.Redirect(response, request, "./", http.StatusSeeOther)
 }
 
