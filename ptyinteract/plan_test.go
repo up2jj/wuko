@@ -15,7 +15,6 @@ func TestCompileValidatesSpecs(t *testing.T) {
 		specs []Spec
 		want  string
 	}{
-		{name: "empty", want: "at least one"},
 		{name: "empty expect", specs: []Spec{{HasExpect: true}}, want: "expect must not be empty"},
 		{name: "invalid expect", specs: []Spec{{HasExpect: true, Expect: "[", Send: "x"}}, want: "compiling expect"},
 		{name: "send timeout", specs: []Spec{{Send: "x", TimeoutSet: true, Timeout: time.Second}}, want: "timeout requires expect"},
@@ -28,6 +27,19 @@ func TestCompileValidatesSpecs(t *testing.T) {
 				t.Fatalf("Compile() error = %v, want %q", err, test.want)
 			}
 		})
+	}
+}
+
+func TestCompileAndRunEmptyPlan(t *testing.T) {
+	plan, err := Compile(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan == nil || plan.Len() != 0 {
+		t.Fatalf("plan = %#v, want non-nil empty plan", plan)
+	}
+	if err := plan.Run(t.Context(), Stream{}, nil, nil); err != nil {
+		t.Fatal(err)
 	}
 }
 

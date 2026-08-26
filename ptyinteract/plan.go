@@ -40,9 +40,6 @@ type Plan struct {
 
 // Compile validates and compiles an interaction sequence.
 func Compile(specs []Spec) (*Plan, error) {
-	if len(specs) == 0 {
-		return nil, fmt.Errorf("interactions must contain at least one interaction")
-	}
 	compiled := make([]interaction, len(specs))
 	for i, spec := range specs {
 		item := interaction{send: []byte(spec.Send), sensitive: spec.Sensitive}

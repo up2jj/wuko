@@ -167,13 +167,41 @@ hand the live PTY to the user without an external `expect` executable:
 
 | Field | Required | Default | Meaning |
 | --- | --- | --- | --- |
-| `interactions` | No | — | Non-empty ordered list of PTY writes and prompt responses. Requires `tty: true`. |
+| `interactions` | No | — | Ordered list of PTY writes and prompt responses, or an object containing `expr`. Requires `tty: true`. |
 | `interactions[].send` | Yes | — | Text to write. An empty string is valid. Normal Wuko templates are rendered first. |
 | `interactions[].expect` | No | — | Go regular expression matched against raw merged PTY output. Without it, `send` is immediate. |
 | `interactions[].newline` | No | `false` | Append carriage return (`\r`) after `send`, equivalent to pressing Enter. |
 | `interactions[].timeout` | No | `30s` | Positive bound for this `expect`. It is invalid without `expect`. |
 | `interactions[].sensitive` | No | `false` | Redact `send` from diagnostics and suppress PTY echo while injecting it. |
 | `interact` | No | `false` | Hand the PTY to the user immediately after the complete scripted sequence. |
+
+The expression form evaluates a typed interaction list at runtime:
+
+```yaml
+with:
+  command: connect-console
+  tty: true
+  interactions:
+    expr: >-
+      steps.console_injection.value
+      ? [{
+          "expect": steps.select_service.item.console_prompt,
+          "send": steps.select_service.item.console_input,
+          "newline": true
+        }]
+      : []
+  interact: true
+```
+
+`interactions.expr` can use `inputs`, `vars`, `env`, `steps`, `dependencies`, active `batch`,
+`foreach`, `matrix`, and `finally` bindings, plus `workflow` and `run`. It must return a list or
+array of interaction objects. Each returned object follows the same field and validation rules as
+a static interaction; expression-produced strings are used directly and are not rendered as Go
+templates afterward.
+
+Static and expression-backed lists may be empty. With `interact: true`, an empty list hands the
+PTY to the user immediately. Without `interact`, it runs headlessly without scripted input. Omitting
+`interactions` entirely preserves the existing immediate handoff behavior of plain `tty: true`.
 
 Every entry requires `send`, but `expect` is optional. Consecutive send-only entries are written
 immediately in declaration order, so startup input does not need an artificial prompt:

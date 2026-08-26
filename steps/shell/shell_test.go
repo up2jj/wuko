@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/process"
+	"github.com/up2jj/wuko/ptyinteract"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -196,8 +197,13 @@ func TestNewValidatesInteractionConfiguration(t *testing.T) {
 		want string
 	}{
 		{name: "requires tty", raw: map[string]any{"command": "sh", "interactions": []any{map[string]any{"send": "x"}}}, want: "interactions require tty"},
-		{name: "empty", raw: map[string]any{"command": "sh", "tty": true, "interactions": []any{}}, want: "at least one"},
 		{name: "interact alone", raw: map[string]any{"command": "sh", "tty": true, "interact": true}, want: "interact requires interactions"},
+		{name: "null", raw: map[string]any{"command": "sh", "tty": true, "interactions": nil}, want: "list or an object"},
+		{name: "scalar", raw: map[string]any{"command": "sh", "tty": true, "interactions": "steps.value"}, want: "list or an object"},
+		{name: "blank expression", raw: map[string]any{"command": "sh", "tty": true, "interactions": map[string]any{"expr": "  "}}, want: "non-empty string"},
+		{name: "non-string expression", raw: map[string]any{"command": "sh", "tty": true, "interactions": map[string]any{"expr": 42}}, want: "expr must be a string"},
+		{name: "unknown expression field", raw: map[string]any{"command": "sh", "tty": true, "interactions": map[string]any{"expr": "[]", "fallback": []any{}}}, want: "exactly the expr field"},
+		{name: "invalid expression", raw: map[string]any{"command": "sh", "tty": true, "interactions": map[string]any{"expr": "steps."}}, want: "compiling interactions expr"},
 		{name: "missing send", raw: map[string]any{"command": "sh", "tty": true, "interactions": []any{map[string]any{"expect": "ready"}}}, want: "send is required"},
 		{name: "non-string send", raw: map[string]any{"command": "sh", "tty": true, "interactions": []any{map[string]any{"send": 42}}}, want: "send must be a string"},
 		{name: "unknown field", raw: map[string]any{"command": "sh", "tty": true, "interactions": []any{map[string]any{"send": "x", "delay": "1s"}}}, want: "field delay not found"},
@@ -285,6 +291,7 @@ func TestNormalizeTerminalColor(t *testing.T) {
 
 func TestNewAcceptsImmediatePromptAndTemplatedInteractions(t *testing.T) {
 	for _, interactions := range []any{
+		[]any{},
 		[]any{map[string]any{"send": "first", "newline": true}, map[string]any{"send": "second"}},
 		[]any{map[string]any{"expect": "ready>", "send": "go", "timeout": "1s", "sensitive": true}},
 		[]any{map[string]any{"expect": "{{ .vars.prompt }}", "send": "{{ .steps.answer.value }}", "timeout": "{{ .vars.timeout }}"}},
@@ -292,6 +299,126 @@ func TestNewAcceptsImmediatePromptAndTemplatedInteractions(t *testing.T) {
 		if _, err := New(map[string]any{"command": "sh", "tty": true, "interactions": interactions}); err != nil {
 			t.Fatalf("New() error = %v", err)
 		}
+	}
+}
+
+func TestShellEvaluatesDynamicInteractionsWithRuntimeRoots(t *testing.T) {
+	executor := &interactionPlanExecutor{output: "prompt>"}
+	runner, err := New(map[string]any{
+		"command": "sh", "tty": true,
+		"interactions": map[string]any{"expr": `[{"expect": inputs.prompt, "send": vars.prefix + env.SUFFIX + steps.seed.value + dependencies.build.artifact + batch.name + foreach.item + matrix.os + finally.status + workflow.name + workflow.dir + run.dir, "newline": true, "timeout": "1s", "sensitive": true}]`},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := step.Request{
+		WorkflowName: "release", WorkflowDir: "/workflow", RunDir: "/run",
+		Inputs: map[string]any{"prompt": "prompt>"}, Vars: map[string]any{"prefix": "value:"}, Env: map[string]string{"SUFFIX": "env:"},
+		Steps: map[string]any{"seed": map[string]any{"value": "step:"}}, Dependencies: map[string]map[string]any{"build": {"artifact": "dependency:"}},
+		Bindings: map[string]any{
+			"batch": map[string]any{"name": "batch:"}, "foreach": map[string]any{"item": "foreach:"},
+			"matrix": map[string]any{"os": "linux:"}, "finally": map[string]any{"status": "done:"},
+		},
+		Executor: executor,
+	}
+	if _, err := runner.Run(t.Context(), request); err != nil {
+		t.Fatal(err)
+	}
+	want := "value:env:step:dependency:batch:foreach:linux:done:release/workflow/run\r"
+	if len(executor.writes) != 1 || executor.writes[0].value != want || !executor.writes[0].sensitive {
+		t.Fatalf("writes = %#v, want sensitive %q", executor.writes, want)
+	}
+}
+
+func TestShellReevaluatesDynamicInteractionsForEveryRun(t *testing.T) {
+	executor := &interactionPlanExecutor{}
+	runner, err := New(map[string]any{
+		"command": "sh", "tty": true,
+		"interactions": map[string]any{"expr": `[{"send": vars.value}]`},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range []string{"first", "second"} {
+		_, err := runner.Run(t.Context(), step.Request{
+			RunDir: t.TempDir(), Env: map[string]string{}, Vars: map[string]any{"value": value}, Executor: executor,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(executor.writes) != 2 || executor.writes[0].value != "first" || executor.writes[1].value != "second" {
+		t.Fatalf("writes = %#v", executor.writes)
+	}
+}
+
+func TestShellValidatesDynamicInteractionResults(t *testing.T) {
+	tests := []struct {
+		name string
+		expr string
+		want string
+	}{
+		{name: "non-list", expr: `42`, want: "returned int, want a list"},
+		{name: "non-object item", expr: `[42]`, want: "interaction must be an object"},
+		{name: "missing send", expr: `[{"expect": "ready"}]`, want: "send is required"},
+		{name: "invalid field type", expr: `[{"send": "go", "newline": "yes"}]`, want: "newline must be a boolean"},
+		{name: "unknown field", expr: `[{"send": "go", "delay": "1s"}]`, want: "field delay not found"},
+		{name: "invalid regex", expr: `[{"expect": "[", "send": "go"}]`, want: "compiling expect"},
+		{name: "evaluation", expr: `steps.missing.value`, want: "evaluating interactions expr"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			runner, err := New(map[string]any{"command": "sh", "tty": true, "interactions": map[string]any{"expr": test.expr}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = runner.Run(t.Context(), step.Request{RunDir: t.TempDir(), Env: map[string]string{}, Executor: &recordingExecutor{}})
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("Run() error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestShellEmptyInteractionsHonorInteract(t *testing.T) {
+	tests := []struct {
+		name         string
+		interactions any
+		interact     bool
+	}{
+		{name: "static headless", interactions: []any{}},
+		{name: "dynamic headless", interactions: map[string]any{"expr": "[]"}},
+		{name: "static handoff", interactions: []any{}, interact: true},
+		{name: "dynamic handoff", interactions: map[string]any{"expr": "[]"}, interact: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			executor := &recordingExecutor{}
+			runner, err := New(map[string]any{
+				"command": "sh", "tty": true, "interactions": test.interactions, "interact": test.interact,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			terminalInput := strings.NewReader("terminal")
+			request := step.Request{RunDir: t.TempDir(), Env: map[string]string{}, Executor: executor}
+			if test.interact {
+				request.Interactive = true
+				request.Stdin = terminalInput
+			}
+			if _, err := runner.Run(t.Context(), request); err != nil {
+				t.Fatal(err)
+			}
+			if executor.options.Interactions == nil || executor.options.Interactions.Len() != 0 || executor.options.Interact != test.interact {
+				t.Fatalf("process options = %#v", executor.options)
+			}
+			if test.interact && executor.options.Stdin != terminalInput {
+				t.Fatalf("handoff stdin = %#v, want terminal input", executor.options.Stdin)
+			}
+			if !test.interact && executor.options.Stdin != nil {
+				t.Fatalf("headless stdin = %#v, want nil", executor.options.Stdin)
+			}
+		})
 	}
 }
 
@@ -563,6 +690,36 @@ type recordingExecutor struct {
 	options process.Options
 	result  process.Result
 	err     error
+}
+
+type interactionWrite struct {
+	value     string
+	sensitive bool
+}
+
+type interactionPlanExecutor struct {
+	output string
+	writes []interactionWrite
+}
+
+func (executor *interactionPlanExecutor) Run(ctx context.Context, options process.Options) (process.Result, error) {
+	output := make(chan []byte, 1)
+	output <- []byte(executor.output)
+	close(output)
+	err := options.Interactions.Run(ctx, ptyinteract.Stream{Output: output}, nil, interactionPlanSink{executor: executor})
+	return process.Result{}, err
+}
+
+type interactionPlanSink struct{ executor *interactionPlanExecutor }
+
+func (sink interactionPlanSink) Write(data []byte) (int, error) {
+	sink.executor.writes = append(sink.executor.writes, interactionWrite{value: string(data)})
+	return len(data), nil
+}
+
+func (sink interactionPlanSink) WriteSensitive(data []byte) error {
+	sink.executor.writes = append(sink.executor.writes, interactionWrite{value: string(data), sensitive: true})
+	return nil
 }
 
 func (executor *recordingExecutor) Run(_ context.Context, options process.Options) (process.Result, error) {

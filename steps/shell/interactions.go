@@ -2,11 +2,40 @@ package shell
 
 import (
 	"fmt"
+	"reflect"
+	"strings"
 	"time"
 
 	"github.com/up2jj/wuko/ptyinteract"
 	"gopkg.in/yaml.v3"
 )
+
+type interactionsConfig struct {
+	Static []interactionConfig
+	Expr   string
+}
+
+func (config *interactionsConfig) UnmarshalYAML(node *yaml.Node) error {
+	switch node.Kind {
+	case yaml.SequenceNode:
+		return node.Decode(&config.Static)
+	case yaml.MappingNode:
+		if len(node.Content) != 2 || node.Content[0].Value != "expr" {
+			return fmt.Errorf("interactions expression must contain exactly the expr field")
+		}
+		value := node.Content[1]
+		if value.Kind != yaml.ScalarNode || value.Tag != "!!str" {
+			return fmt.Errorf("interactions expr must be a string")
+		}
+		config.Expr = value.Value
+		if strings.TrimSpace(config.Expr) == "" {
+			return fmt.Errorf("interactions expr must be a non-empty string")
+		}
+		return nil
+	default:
+		return fmt.Errorf("interactions must be a list or an object containing expr")
+	}
+}
 
 type interactionConfig struct {
 	Expect    *string `yaml:"expect,omitempty"`
@@ -91,4 +120,20 @@ func compileInteractions(configs []interactionConfig) (*ptyinteract.Plan, error)
 		return nil, nil
 	}
 	return plan, nil
+}
+
+func decodeInteractionExpressionResult(value any) ([]interactionConfig, error) {
+	list := reflect.ValueOf(value)
+	if !list.IsValid() || (list.Kind() != reflect.Array && list.Kind() != reflect.Slice) {
+		return nil, fmt.Errorf("interactions expr returned %T, want a list", value)
+	}
+	data, err := yaml.Marshal(value)
+	if err != nil {
+		return nil, fmt.Errorf("encoding interactions expr result: %w", err)
+	}
+	var configs []interactionConfig
+	if err := yaml.Unmarshal(data, &configs); err != nil {
+		return nil, fmt.Errorf("decoding interactions expr result: %w", err)
+	}
+	return configs, nil
 }

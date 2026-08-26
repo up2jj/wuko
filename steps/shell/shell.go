@@ -34,7 +34,7 @@ type Config struct {
 	User             string               `yaml:"user,omitempty"`
 	Stdin            string               `yaml:"stdin,omitempty"`
 	TTY              bool                 `yaml:"tty,omitempty"`
-	Interactions     []interactionConfig  `yaml:"interactions,omitempty"`
+	Interactions     interactionsConfig   `yaml:"interactions,omitempty"`
 	Interact         bool                 `yaml:"interact,omitempty"`
 	Terminal         *terminalConfig      `yaml:"terminal,omitempty"`
 	Stdout           string               `yaml:"stdout,omitempty"`
@@ -90,6 +90,7 @@ type Runner struct {
 	stderrPolicy    process.OutputPolicy
 	captureLimit    int64
 	argvProgram     *vm.Program
+	interactionExpr *vm.Program
 	interactions    *ptyinteract.Plan
 	hasInteractions bool
 }
@@ -131,11 +132,11 @@ func New(raw map[string]any) (step.Runner, error) {
 	_, hasInteractions := raw["interactions"]
 	_, hasInteract := raw["interact"]
 	if hasInteractions {
+		if raw["interactions"] == nil {
+			return nil, fmt.Errorf("interactions must be a list or an object containing expr")
+		}
 		if !config.TTY {
 			return nil, fmt.Errorf("interactions require tty")
-		}
-		if len(config.Interactions) == 0 {
-			return nil, fmt.Errorf("interactions must contain at least one interaction")
 		}
 	} else if hasInteract {
 		return nil, fmt.Errorf("interact requires interactions")
@@ -185,15 +186,21 @@ func New(raw map[string]any) (step.Runner, error) {
 		}
 	}
 	var interactions *ptyinteract.Plan
-	if hasInteractions {
-		interactions, err = compileInteractions(config.Interactions)
+	var interactionExpr *vm.Program
+	if config.Interactions.Expr != "" {
+		interactionExpr, err = wukoexpr.Compile(config.Interactions.Expr, expr.Env(expressionEnvironment{}))
+		if err != nil {
+			return nil, fmt.Errorf("compiling interactions expr: %w", err)
+		}
+	} else if hasInteractions {
+		interactions, err = compileInteractions(config.Interactions.Static)
 		if err != nil {
 			return nil, err
 		}
 	}
 	return &Runner{
 		config: config, stdoutPolicy: stdoutPolicy, stderrPolicy: stderrPolicy, captureLimit: captureLimit,
-		argvProgram: argvProgram, interactions: interactions, hasInteractions: hasInteractions,
+		argvProgram: argvProgram, interactionExpr: interactionExpr, interactions: interactions, hasInteractions: hasInteractions,
 	}, nil
 }
 
@@ -202,8 +209,9 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 	if handoff && (!request.Interactive || request.Stdin == nil) {
 		return step.Result{}, fmt.Errorf("tty requires an interactive terminal")
 	}
-	if r.hasInteractions && r.interactions == nil {
-		return step.Result{}, fmt.Errorf("interactions contain unresolved templates")
+	interactions, err := r.interactionPlan(request)
+	if err != nil {
+		return step.Result{}, err
 	}
 	command, args, err := r.command(request)
 	if err != nil {
@@ -235,7 +243,7 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 	result, err := executor.Run(ctx, process.Options{
 		Command: command, Args: args, Dir: dir, Env: environment, User: r.config.User,
 		Stdin: stdin, Stdout: request.Stdout, Stderr: request.Stderr, TTY: r.config.TTY,
-		Interactions: r.interactions, Interact: r.config.Interact, CaptureLimit: captureLimit,
+		Interactions: interactions, Interact: r.config.Interact, CaptureLimit: captureLimit,
 		Terminal:     terminalAppearance(r.config.Terminal),
 		StdoutPolicy: r.stdoutPolicy, StderrPolicy: r.stderrPolicy,
 	})
@@ -287,19 +295,7 @@ func templated(value string) bool { return strings.Contains(value, "{{") }
 
 func (r *Runner) command(request step.Request) (string, []string, error) {
 	if r.argvProgram != nil {
-		value, err := expr.Run(r.argvProgram, expressionEnvironment{
-			Inputs:       request.Inputs,
-			Vars:         request.Vars,
-			Env:          request.Env,
-			Steps:        request.Steps,
-			Dependencies: request.Dependencies,
-			Batch:        bindingRoot(request.Bindings, "batch"),
-			Foreach:      bindingRoot(request.Bindings, "foreach"),
-			Matrix:       bindingRoot(request.Bindings, "matrix"),
-			Finally:      bindingRoot(request.Bindings, "finally"),
-			Workflow:     workflowValue{Name: request.WorkflowName, Dir: request.WorkflowDir},
-			Run:          runValue{Dir: request.RunDir},
-		})
+		value, err := expr.Run(r.argvProgram, expressionEnvironmentFor(request))
 		if err != nil {
 			return "", nil, fmt.Errorf("evaluating argv expr: %w", err)
 		}
@@ -319,6 +315,44 @@ func (r *Runner) command(request step.Request) (string, []string, error) {
 	args := []string{"-c", r.config.Script, "wuko"}
 	args = append(args, r.config.Args...)
 	return shell, args, nil
+}
+
+func (r *Runner) interactionPlan(request step.Request) (*ptyinteract.Plan, error) {
+	if r.interactionExpr == nil {
+		if r.hasInteractions && r.interactions == nil {
+			return nil, fmt.Errorf("interactions contain unresolved templates")
+		}
+		return r.interactions, nil
+	}
+	value, err := expr.Run(r.interactionExpr, expressionEnvironmentFor(request))
+	if err != nil {
+		return nil, fmt.Errorf("evaluating interactions expr: %w", err)
+	}
+	configs, err := decodeInteractionExpressionResult(value)
+	if err != nil {
+		return nil, err
+	}
+	plan, err := compileInteractions(configs)
+	if err != nil {
+		return nil, fmt.Errorf("interactions expr result: %w", err)
+	}
+	return plan, nil
+}
+
+func expressionEnvironmentFor(request step.Request) expressionEnvironment {
+	return expressionEnvironment{
+		Inputs:       request.Inputs,
+		Vars:         request.Vars,
+		Env:          request.Env,
+		Steps:        request.Steps,
+		Dependencies: request.Dependencies,
+		Batch:        bindingRoot(request.Bindings, "batch"),
+		Foreach:      bindingRoot(request.Bindings, "foreach"),
+		Matrix:       bindingRoot(request.Bindings, "matrix"),
+		Finally:      bindingRoot(request.Bindings, "finally"),
+		Workflow:     workflowValue{Name: request.WorkflowName, Dir: request.WorkflowDir},
+		Run:          runValue{Dir: request.RunDir},
+	}
 }
 
 func argvStrings(value any) ([]string, error) {

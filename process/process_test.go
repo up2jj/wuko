@@ -439,6 +439,45 @@ printf 'got=%s:%s\n' "$scripted" "$user"
 	}
 }
 
+func TestRunTTYHandsOffImmediatelyWithEmptyInteractionPlan(t *testing.T) {
+	terminal, input := testTerminal(t, 24, 80)
+	plan, err := ptyinteract.Compile(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := &readyOutput{ready: make(chan struct{})}
+	done := make(chan struct {
+		result Result
+		err    error
+	}, 1)
+	go func() {
+		result, runErr := Run(t.Context(), Options{
+			Command: "sh", Args: []string{"-c", "printf 'ready:'; IFS= read -r value; printf 'got=%s\\n' \"$value\""},
+			Env: testEnvironment(), Stdin: terminal, Stdout: output, TTY: true,
+			Interactions: plan, Interact: true, CaptureLimit: 1 << 20,
+		})
+		done <- struct {
+			result Result
+			err    error
+		}{result, runErr}
+	}()
+	select {
+	case <-output.ready:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for immediate user handoff")
+	}
+	if _, err := input.WriteString("manual\n"); err != nil {
+		t.Fatal(err)
+	}
+	completed := <-done
+	if completed.err != nil {
+		t.Fatal(completed.err)
+	}
+	if !strings.Contains(completed.result.Stdout, "got=manual") {
+		t.Fatalf("TTY output = %q", completed.result.Stdout)
+	}
+}
+
 func TestRunTTYFailsWhenExpectationIsNotMet(t *testing.T) {
 	plan, err := ptyinteract.Compile([]ptyinteract.Spec{{
 		HasExpect: true, Expect: "missing>", Send: "never", TimeoutSet: true, Timeout: 20 * time.Millisecond,
