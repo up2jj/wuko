@@ -103,6 +103,11 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
   than failure, set a complete `allowed_exit_codes` list and branch on `steps.<id>.exit_code`; keep
   Lua for probes that require multiple operations or structured interpretation. The output policy
   and capture-limit options are also available to `wuko.exec.run`.
+- For a PTY command that needs scripted input, use `shell.with.interactions`: omit `expect` for
+  immediate ordered writes and set it to a Go regex for prompt-driven sends. Use normal Wuko
+  templates in `send`, set `newline: true` to press Enter, mark credential sends `sensitive: true`,
+  and set `interact: true` only when the user should take control after the final send. Keep prompt
+  regexes bounded and account for raw ANSI and carriage-return bytes when the target styles output.
 
 ## Important behavior
 

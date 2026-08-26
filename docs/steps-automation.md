@@ -141,11 +141,108 @@ command's lifetime, and follows terminal resizes. The combined terminal stream i
 and the first 1 MiB is captured as `stdout`; `stderr` is empty and `stdout_truncated` is true when
 more output was streamed. This keeps memory bounded for long-running interactive commands.
 
-TTY mode requires an interactive, file-backed terminal and is unavailable in browser runs,
-concurrent execution, and executor blocks. It cannot be combined with non-empty `stdin`. Terminal
-state is restored when the command succeeds, fails, times out, or is canceled. `stdout`, `stderr`,
-and `capture_limit` cannot be set with `tty: true`; TTY output remains a live merged stream with its
-existing 1 MiB capture.
+TTY mode cannot be combined with non-empty `stdin`. Terminal state is restored when the command
+succeeds, fails, times out, or is canceled. `stdout`, `stderr`, and `capture_limit` cannot be set
+with `tty: true`; TTY output remains a live merged stream with its existing 1 MiB capture.
+
+### Scripted PTY interactions
+
+Use `interactions` to write initial input, wait for prompts, inject dynamic values, and optionally
+hand the live PTY to the user without an external `expect` executable:
+
+```yaml
+- id: jump
+  type: shell
+  with:
+    tty: true
+    argv:
+      expr: steps.jump_argv.value
+    interactions:
+      - expect: 'iex[^\r\n]*>'
+        send: Recruitee.Environment.current_env()
+        newline: true
+        timeout: 30s
+    interact: true
+```
+
+| Field | Required | Default | Meaning |
+| --- | --- | --- | --- |
+| `interactions` | No | — | Non-empty ordered list of PTY writes and prompt responses. Requires `tty: true`. |
+| `interactions[].send` | Yes | — | Text to write. An empty string is valid. Normal Wuko templates are rendered first. |
+| `interactions[].expect` | No | — | Go regular expression matched against raw merged PTY output. Without it, `send` is immediate. |
+| `interactions[].newline` | No | `false` | Append carriage return (`\r`) after `send`, equivalent to pressing Enter. |
+| `interactions[].timeout` | No | `30s` | Positive bound for this `expect`. It is invalid without `expect`. |
+| `interactions[].sensitive` | No | `false` | Redact `send` from diagnostics and suppress PTY echo while injecting it. |
+| `interact` | No | `false` | Hand the PTY to the user immediately after the complete scripted sequence. |
+
+Every entry requires `send`, but `expect` is optional. Consecutive send-only entries are written
+immediately in declaration order, so startup input does not need an artificial prompt:
+
+```yaml
+with:
+  command: setup-console
+  tty: true
+  interactions:
+    - {send: select-project, newline: true}
+    - {send: enable-feature, newline: true}
+```
+
+Immediate and prompt-driven entries may be mixed for login flows. Dynamic sends can use all normal
+template roots, including `.inputs`, `.vars`, `.env`, `.steps`, `.dependencies`, active control
+bindings, `.workflow`, and `.run`:
+
+```yaml
+with:
+  command: ssh
+  args: [gateway.example]
+  tty: true
+  interactions:
+    - expect: 'Login:'
+      send: "{{ .vars.username }}"
+      newline: true
+    - expect: 'Password:'
+      send: "{{ .env.LOGIN_PASSWORD }}"
+      newline: true
+      sensitive: true
+    - expect: 'workspace>'
+      send: "use {{ .steps.workspace.value }} {{ .dependencies.build.artifact }}"
+      newline: true
+  interact: true
+```
+
+`send` uses template rendering, not the Expr language used by `argv.expr`. A sensitive send is
+absent from debug configuration and Wuko suppresses the PTY line discipline's echo for that write.
+A child program that independently prints the value can still expose it and must handle its own
+output safely.
+
+Expectations match the raw PTY byte stream. ANSI escapes and carriage returns are not removed, so
+patterns should account for them when the target renders styled prompts. A match consumes through
+the matched bytes; any bytes after it remain available to the next expectation. Wuko retains at
+most 1 MiB of unmatched output for the active expectation.
+
+When `interact: true`, workflow input is withheld during scripting. User control begins immediately
+after the final send, including its optional carriage return, has been written. Without `interact`,
+the command continues headlessly after scripting. Headless scripted PTYs use a 24×80 size and can
+run without a file-backed workflow terminal, including non-interactive and browser-driven runs.
+Plain `tty: true` without `interactions` preserves immediate handoff and still requires an
+interactive file-backed terminal. Docker executor sessions reject TTY mode; local process wrappers
+such as devenv may forward it.
+
+If an expectation is not found, its send and every later interaction are skipped. The step fails
+when that interaction's timeout expires, terminates the child process group, and does not hand the
+PTY to the user. If the child exits first, failure is immediate. Interaction failures are
+operational errors: `allowed_exit_codes` cannot accept them, while a step retry starts the entire
+sequence again with fresh state. Step cancellation and outer deadlines take precedence.
+
+| Symptom | Result |
+| --- | --- |
+| Regex never matches | Fail at that interaction's timeout; do not send or hand off. |
+| Child exits before a match | Fail immediately with the interaction index and regex. |
+| Rendered regex is invalid | Fail while building the rendered shell runner. |
+| More than 1 MiB arrives before a match | Fail with an unmatched-output overflow. |
+| `timeout` is used without `expect` | Reject the workflow configuration. |
+| `interact: true` has no interactive terminal | Fail before starting the command. |
+| Executor cannot create a PTY | Reject TTY execution in that executor. |
 
 ## `agent`
 

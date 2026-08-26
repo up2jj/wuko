@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/creack/pty"
+	"github.com/up2jj/wuko/ptyinteract"
 	"golang.org/x/term"
 )
 
@@ -211,6 +212,17 @@ func TestRunRejectsInvalidOutputPolicy(t *testing.T) {
 	}
 }
 
+func TestRunRejectsInteractionsWithoutTTY(t *testing.T) {
+	plan, err := ptyinteract.Compile([]ptyinteract.Spec{{Send: "input"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = Run(t.Context(), Options{Command: "true", Interactions: plan})
+	if err == nil || !strings.Contains(err.Error(), "interactions require TTY") {
+		t.Fatalf("Run() error = %v", err)
+	}
+}
+
 func TestRunTTYStreamsInputMergesOutputAndRestoresTerminal(t *testing.T) {
 	terminal, input := testTerminal(t, 24, 80)
 	before, err := term.GetState(int(terminal.Fd()))
@@ -304,6 +316,212 @@ func TestRunTTYRejectsNonTerminalInput(t *testing.T) {
 	_, err := Run(t.Context(), Options{Command: "sh", Env: map[string]string{}, Stdin: strings.NewReader("input"), TTY: true})
 	if err == nil || !strings.Contains(err.Error(), "file-backed terminal stdin") {
 		t.Fatalf("Run() error = %v", err)
+	}
+}
+
+func TestRunTTYExecutesHeadlessInteractions(t *testing.T) {
+	plan, err := ptyinteract.Compile([]ptyinteract.Spec{
+		{Send: "alpha", Newline: true},
+		{HasExpect: true, Expect: "second:", Send: "beta", Newline: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var streamed bytes.Buffer
+	result, err := Run(t.Context(), Options{
+		Command: "sh", Args: []string{"-c", `
+test -t 0 && test -t 1 && test -t 2 || exit 9
+stty size
+printf 'first:'
+IFS= read -r first
+printf 'second:'
+IFS= read -r second
+printf 'got=%s:%s\n' "$first" "$second"
+`},
+		Env: testEnvironment(), Stdout: &streamed, TTY: true, Interactions: plan, CaptureLimit: 1 << 20,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"24 80", "got=alpha:beta"} {
+		if !strings.Contains(result.Stdout, want) || !strings.Contains(streamed.String(), want) {
+			t.Fatalf("TTY output = %q, want %q", result.Stdout, want)
+		}
+	}
+}
+
+func TestRunTTYSensitiveInteractionSuppressesEcho(t *testing.T) {
+	const secret = "never-show-this"
+	plan, err := ptyinteract.Compile([]ptyinteract.Spec{{
+		HasExpect: true, Expect: "Password:", Send: secret, Newline: true, Sensitive: true,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var streamed bytes.Buffer
+	result, err := Run(t.Context(), Options{
+		Command: "sh", Args: []string{"-c", "printf 'Password:'; IFS= read -r value; test \"$value\" = '" + secret + "'; printf '\\nok\\n'"},
+		Env: testEnvironment(), Stdout: &streamed, TTY: true, Interactions: plan, CaptureLimit: 1 << 20,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(result.Stdout, secret) || strings.Contains(streamed.String(), secret) {
+		t.Fatalf("sensitive send was echoed: captured = %q, streamed = %q", result.Stdout, streamed.String())
+	}
+	if !strings.Contains(result.Stdout, "ok") {
+		t.Fatalf("TTY output = %q", result.Stdout)
+	}
+}
+
+func TestRunTTYHandsOffAfterFinalInteraction(t *testing.T) {
+	terminal, input := testTerminal(t, 24, 80)
+	before, err := term.GetState(int(terminal.Fd()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := ptyinteract.Compile([]ptyinteract.Spec{{HasExpect: true, Expect: "script:", Send: "automatic", Newline: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := &readyOutput{ready: make(chan struct{})}
+	done := make(chan struct {
+		result Result
+		err    error
+	}, 1)
+	go func() {
+		result, runErr := Run(t.Context(), Options{
+			Command: "sh", Args: []string{"-c", `
+printf 'script:'
+IFS= read -r scripted
+printf 'ready:'
+IFS= read -r user
+printf 'got=%s:%s\n' "$scripted" "$user"
+`},
+			Env: testEnvironment(), Stdin: terminal, Stdout: output, TTY: true,
+			Interactions: plan, Interact: true, CaptureLimit: 1 << 20,
+		})
+		done <- struct {
+			result Result
+			err    error
+		}{result, runErr}
+	}()
+	select {
+	case <-output.ready:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for user handoff")
+	}
+	if _, err := input.WriteString("manual\n"); err != nil {
+		t.Fatal(err)
+	}
+	completed := <-done
+	if completed.err != nil {
+		t.Fatal(completed.err)
+	}
+	if !strings.Contains(completed.result.Stdout, "got=automatic:manual") {
+		t.Fatalf("TTY output = %q", completed.result.Stdout)
+	}
+	after, err := term.GetState(int(terminal.Fd()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(before, after) {
+		t.Fatal("terminal state was not restored after interaction handoff")
+	}
+}
+
+func TestRunTTYFailsWhenExpectationIsNotMet(t *testing.T) {
+	plan, err := ptyinteract.Compile([]ptyinteract.Spec{{
+		HasExpect: true, Expect: "missing>", Send: "never", TimeoutSet: true, Timeout: 20 * time.Millisecond,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := Run(t.Context(), Options{
+		Command: "sh", Args: []string{"-c", "printf 'other>'; sleep 30"},
+		Env: testEnvironment(), Stdout: io.Discard, TTY: true, Interactions: plan, CaptureLimit: 1 << 20,
+	})
+	var interactionErr *ptyinteract.Error
+	if !errors.As(err, &interactionErr) || interactionErr.Kind != ptyinteract.FailureTimeout {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if !strings.Contains(result.Stdout, "other>") {
+		t.Fatalf("TTY output = %q", result.Stdout)
+	}
+}
+
+func TestRunTTYPreservesExitCodeWhenProcessExitsBeforeInteraction(t *testing.T) {
+	plan, err := ptyinteract.Compile([]ptyinteract.Spec{{HasExpect: true, Expect: "missing>", Send: "never"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := Run(t.Context(), Options{
+		Command: "sh", Args: []string{"-c", "exit 7"},
+		Env: testEnvironment(), Stdout: io.Discard, TTY: true, Interactions: plan, CaptureLimit: 1 << 20,
+	})
+	var interactionErr *ptyinteract.Error
+	if !errors.As(err, &interactionErr) || interactionErr.Kind != ptyinteract.FailureExited {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 7 {
+		t.Fatalf("Run() exit code = %d, want 7", result.ExitCode)
+	}
+}
+
+func TestInteractionOutputBufferQueuesWithoutBlockingPTYReader(t *testing.T) {
+	stop := make(chan struct{})
+	buffer := newInteractionOutputBuffer(stop, ptyinteract.MaxUnmatchedBytes)
+	producerDone := make(chan struct{})
+	go func() {
+		for i := range 256 {
+			buffer.Add([]byte{byte(i)})
+		}
+		buffer.Close()
+		close(producerDone)
+	}()
+	select {
+	case <-producerDone:
+	case <-time.After(5 * time.Second):
+		close(stop)
+		t.Fatal("interaction output producer blocked without a matcher consumer")
+	}
+	var got []byte
+	for data := range buffer.Stream().Output {
+		got = append(got, data...)
+	}
+	if len(got) != 256 {
+		t.Fatalf("observed bytes = %d, want 256", len(got))
+	}
+	for i, value := range got {
+		if value != byte(i) {
+			t.Fatalf("byte %d = %d, want %d", i, value, byte(i))
+		}
+	}
+}
+
+func TestInteractionOutputBufferReportsOverflowWithoutBlockingPTYReader(t *testing.T) {
+	stop := make(chan struct{})
+	buffer := newInteractionOutputBuffer(stop, 4)
+	producerDone := make(chan struct{})
+	go func() {
+		buffer.Add([]byte("123"))
+		buffer.Add([]byte("45"))
+		close(producerDone)
+	}()
+	select {
+	case <-producerDone:
+	case <-time.After(5 * time.Second):
+		close(stop)
+		t.Fatal("interaction output producer blocked on overflow")
+	}
+	select {
+	case <-buffer.Stream().Overflow:
+	case <-time.After(5 * time.Second):
+		close(stop)
+		t.Fatal("interaction output overflow was not reported")
+	}
+	close(stop)
+	for range buffer.Stream().Output {
 	}
 }
 

@@ -47,8 +47,10 @@ func redact(value any, redactValues bool) any {
 	switch typed := value.(type) {
 	case map[string]any:
 		result := make(map[string]any, len(typed))
+		interactionSensitive, _ := typed["sensitive"].(bool)
 		for key, item := range typed {
-			sensitive := redactValues || sensitiveKey(key) || strings.EqualFold(key, "env") || strings.EqualFold(key, "environment")
+			sensitive := redactValues || sensitiveKey(key) || strings.EqualFold(key, "env") || strings.EqualFold(key, "environment") ||
+				(interactionSensitive && strings.EqualFold(key, "send"))
 			if sensitive && !isContainer(item) {
 				result[key] = Redacted
 				continue

@@ -14,14 +14,18 @@ func TestRedactedJSONRemovesSensitiveAndEnvironmentValues(t *testing.T) {
 		"auth":    map[string]any{"basic": map[string]any{"username": "alice", "password": "auth-secret"}},
 		"cookies": map[string]any{"values": map[string]any{"session": "cookie-secret"}, "jar": "secret-jar.txt"},
 		"proxy":   map[string]any{"url": "http://proxy-user:proxy-secret@proxy.example/path?token=hidden"},
+		"interactions": []any{
+			map[string]any{"expect": "Password:", "send": "interaction-secret", "sensitive": true},
+			map[string]any{"send": "visible-input", "sensitive": false},
+		},
 	}
 	got := RedactedJSON(value)
-	for _, secret := range []string{"secret-api-key", "secret-token", "also-secret", "Bearer secret", "?token=secret", "?token=embedded", "auth-secret", "cookie-secret", "secret-jar.txt", "proxy-user", "proxy-secret", "?token=hidden"} {
+	for _, secret := range []string{"secret-api-key", "secret-token", "also-secret", "Bearer secret", "?token=secret", "?token=embedded", "auth-secret", "cookie-secret", "secret-jar.txt", "proxy-user", "proxy-secret", "?token=hidden", "interaction-secret"} {
 		if strings.Contains(got, secret) {
 			t.Fatalf("RedactedJSON() exposed %q in %s", secret, got)
 		}
 	}
-	for _, want := range []string{`"command":"deploy"`, `"args":["--target","prod"]`, `"api_key":"<redacted>"`, `"VISIBLE":"<redacted>"`, `"url":"https://example.test/build#part"`} {
+	for _, want := range []string{`"command":"deploy"`, `"args":["--target","prod"]`, `"api_key":"<redacted>"`, `"VISIBLE":"<redacted>"`, `"url":"https://example.test/build#part"`, `"send":"visible-input"`} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("RedactedJSON() = %s, want %s", got, want)
 		}

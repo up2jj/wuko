@@ -189,6 +189,86 @@ func TestNewRejectsTTYWithConfiguredStdin(t *testing.T) {
 	}
 }
 
+func TestNewValidatesInteractionConfiguration(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  map[string]any
+		want string
+	}{
+		{name: "requires tty", raw: map[string]any{"command": "sh", "interactions": []any{map[string]any{"send": "x"}}}, want: "interactions require tty"},
+		{name: "empty", raw: map[string]any{"command": "sh", "tty": true, "interactions": []any{}}, want: "at least one"},
+		{name: "interact alone", raw: map[string]any{"command": "sh", "tty": true, "interact": true}, want: "interact requires interactions"},
+		{name: "missing send", raw: map[string]any{"command": "sh", "tty": true, "interactions": []any{map[string]any{"expect": "ready"}}}, want: "send is required"},
+		{name: "non-string send", raw: map[string]any{"command": "sh", "tty": true, "interactions": []any{map[string]any{"send": 42}}}, want: "send must be a string"},
+		{name: "unknown field", raw: map[string]any{"command": "sh", "tty": true, "interactions": []any{map[string]any{"send": "x", "delay": "1s"}}}, want: "field delay not found"},
+		{name: "empty expect", raw: map[string]any{"command": "sh", "tty": true, "interactions": []any{map[string]any{"expect": "", "send": "x"}}}, want: "expect must not be empty"},
+		{name: "invalid expect", raw: map[string]any{"command": "sh", "tty": true, "interactions": []any{map[string]any{"expect": "[", "send": "x"}}}, want: "compiling expect"},
+		{name: "timeout without expect", raw: map[string]any{"command": "sh", "tty": true, "interactions": []any{map[string]any{"send": "x", "timeout": "1s"}}}, want: "timeout requires expect"},
+		{name: "invalid timeout", raw: map[string]any{"command": "sh", "tty": true, "interactions": []any{map[string]any{"expect": "ready", "send": "x", "timeout": "soon"}}}, want: "invalid timeout"},
+		{name: "zero timeout", raw: map[string]any{"command": "sh", "tty": true, "interactions": []any{map[string]any{"expect": "ready", "send": "x", "timeout": "0s"}}}, want: "timeout must be positive"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := New(test.raw)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("New() error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestNewAcceptsImmediatePromptAndTemplatedInteractions(t *testing.T) {
+	for _, interactions := range []any{
+		[]any{map[string]any{"send": "first", "newline": true}, map[string]any{"send": "second"}},
+		[]any{map[string]any{"expect": "ready>", "send": "go", "timeout": "1s", "sensitive": true}},
+		[]any{map[string]any{"expect": "{{ .vars.prompt }}", "send": "{{ .steps.answer.value }}", "timeout": "{{ .vars.timeout }}"}},
+	} {
+		if _, err := New(map[string]any{"command": "sh", "tty": true, "interactions": interactions}); err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+	}
+}
+
+func TestShellHeadlessInteractionsDelegateWithoutTerminalInput(t *testing.T) {
+	executor := &recordingExecutor{}
+	runner, err := New(map[string]any{
+		"command": "sh", "tty": true,
+		"interactions": []any{map[string]any{"send": "first", "newline": true}, map[string]any{"expect": "ready", "send": "second"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runner.Run(t.Context(), step.Request{RunDir: t.TempDir(), Env: map[string]string{}, Executor: executor}); err != nil {
+		t.Fatal(err)
+	}
+	if !executor.options.TTY || executor.options.Interactions == nil || executor.options.Interactions.Len() != 2 || executor.options.Interact || executor.options.Stdin != nil {
+		t.Fatalf("process options = %#v", executor.options)
+	}
+}
+
+func TestShellInteractionHandoffRequiresInteractiveTerminal(t *testing.T) {
+	runner, err := New(map[string]any{
+		"command": "sh", "tty": true, "interactions": []any{map[string]any{"send": "first"}}, "interact": true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runner.Run(t.Context(), step.Request{RunDir: t.TempDir(), Env: map[string]string{}}); err == nil || !strings.Contains(err.Error(), "interactive terminal") {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	executor := &recordingExecutor{}
+	terminalInput := strings.NewReader("terminal")
+	if _, err := runner.Run(t.Context(), step.Request{
+		RunDir: t.TempDir(), Env: map[string]string{}, Interactive: true, Stdin: terminalInput, Executor: executor,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !executor.options.Interact || executor.options.Stdin != terminalInput {
+		t.Fatalf("process options = %#v", executor.options)
+	}
+}
+
 func TestNewValidatesOutputConfiguration(t *testing.T) {
 	tests := []struct {
 		name string

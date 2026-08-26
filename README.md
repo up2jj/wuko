@@ -7,8 +7,8 @@ with typed data and files, call APIs, run scripts or containers, and start codin
 ## Features
 
 - **Local-first workflows** — keep readable automation beside the code it changes.
-- **Interactive runs** — collect text, passwords, choices, filesystem paths, and confirmations in
-  the terminal.
+- **Interactive runs** — collect text, passwords, choices, filesystem paths, and confirmations, or
+  script PTY prompts before handing a live terminal to the user.
 - **Local browser forms** — collect typed variables, load dynamic choices, follow live progress,
   and render explicit workflow results without changing standard runs.
 - **Typed workflow state** — use variables, step outputs, JSON/TOML imports, JSONPath, semantic
@@ -309,7 +309,7 @@ Each linked guide contains multiple examples for every step.
 | `cache` | Restore and save directory caches | [System steps](docs/steps-system.md#cache) |
 | `http` | Make structured HTTP API calls | [System steps](docs/steps-system.md#http) |
 | `docker` | Run containers and manage Docker files and resources | [System steps](docs/steps-system.md#docker) |
-| `shell` | Run argv commands or inline shell | [Automation steps](docs/steps-automation.md#shell) |
+| `shell` | Run argv commands, inline shell, or scripted PTY interactions | [Automation steps](docs/steps-automation.md#shell) |
 | `agent` | Start an external coding agent with a prompt | [Automation steps](docs/steps-automation.md#agent) |
 | `lua` | Run typed in-process automation | [Automation steps](docs/steps-automation.md#lua) |
 | `wait` | Delay or poll another step | [Automation steps](docs/steps-automation.md#wait) |

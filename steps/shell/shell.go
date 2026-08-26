@@ -15,6 +15,7 @@ import (
 	"github.com/expr-lang/expr/vm"
 	wukoexpr "github.com/up2jj/wuko/expression"
 	"github.com/up2jj/wuko/process"
+	"github.com/up2jj/wuko/ptyinteract"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
 	"gopkg.in/yaml.v3"
@@ -33,6 +34,8 @@ type Config struct {
 	User             string               `yaml:"user,omitempty"`
 	Stdin            string               `yaml:"stdin,omitempty"`
 	TTY              bool                 `yaml:"tty,omitempty"`
+	Interactions     []interactionConfig  `yaml:"interactions,omitempty"`
+	Interact         bool                 `yaml:"interact,omitempty"`
 	Stdout           string               `yaml:"stdout,omitempty"`
 	Stderr           string               `yaml:"stderr,omitempty"`
 	CaptureLimit     string               `yaml:"capture_limit,omitempty"`
@@ -81,11 +84,13 @@ type runValue struct {
 }
 
 type Runner struct {
-	config       Config
-	stdoutPolicy process.OutputPolicy
-	stderrPolicy process.OutputPolicy
-	captureLimit int64
-	argvProgram  *vm.Program
+	config          Config
+	stdoutPolicy    process.OutputPolicy
+	stderrPolicy    process.OutputPolicy
+	captureLimit    int64
+	argvProgram     *vm.Program
+	interactions    *ptyinteract.Plan
+	hasInteractions bool
 }
 
 func (*Runner) ExecutorAware() {}
@@ -121,6 +126,21 @@ func New(raw map[string]any) (step.Runner, error) {
 	}
 	if config.TTY && (config.Stdout != "" || config.Stderr != "" || config.CaptureLimit != "") {
 		return nil, fmt.Errorf("tty cannot be combined with stdout, stderr, or capture_limit")
+	}
+	_, hasInteractions := raw["interactions"]
+	_, hasInteract := raw["interact"]
+	if hasInteractions {
+		if !config.TTY {
+			return nil, fmt.Errorf("interactions require tty")
+		}
+		if len(config.Interactions) == 0 {
+			return nil, fmt.Errorf("interactions must contain at least one interaction")
+		}
+	} else if hasInteract {
+		return nil, fmt.Errorf("interact requires interactions")
+	}
+	if config.Interact && !config.TTY {
+		return nil, fmt.Errorf("interact requires tty")
 	}
 	if _, configured := raw["allowed_exit_codes"]; !configured {
 		config.AllowedExitCodes = []int{0}
@@ -159,12 +179,26 @@ func New(raw map[string]any) (step.Runner, error) {
 			return nil, fmt.Errorf("compiling argv expr: %w", err)
 		}
 	}
-	return &Runner{config: config, stdoutPolicy: stdoutPolicy, stderrPolicy: stderrPolicy, captureLimit: captureLimit, argvProgram: argvProgram}, nil
+	var interactions *ptyinteract.Plan
+	if hasInteractions {
+		interactions, err = compileInteractions(config.Interactions)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return &Runner{
+		config: config, stdoutPolicy: stdoutPolicy, stderrPolicy: stderrPolicy, captureLimit: captureLimit,
+		argvProgram: argvProgram, interactions: interactions, hasInteractions: hasInteractions,
+	}, nil
 }
 
 func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, error) {
-	if r.config.TTY && (!request.Interactive || request.Stdin == nil) {
+	handoff := r.config.TTY && (!r.hasInteractions || r.config.Interact)
+	if handoff && (!request.Interactive || request.Stdin == nil) {
 		return step.Result{}, fmt.Errorf("tty requires an interactive terminal")
+	}
+	if r.hasInteractions && r.interactions == nil {
+		return step.Result{}, fmt.Errorf("interactions contain unresolved templates")
 	}
 	command, args, err := r.command(request)
 	if err != nil {
@@ -186,12 +220,17 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 	stdin := process.StringInput(r.config.Stdin)
 	captureLimit := r.captureLimit
 	if r.config.TTY {
-		stdin = request.Stdin
+		if handoff {
+			stdin = request.Stdin
+		} else {
+			stdin = nil
+		}
 		captureLimit = ttyCaptureLimit
 	}
 	result, err := executor.Run(ctx, process.Options{
 		Command: command, Args: args, Dir: dir, Env: environment, User: r.config.User,
-		Stdin: stdin, Stdout: request.Stdout, Stderr: request.Stderr, TTY: r.config.TTY, CaptureLimit: captureLimit,
+		Stdin: stdin, Stdout: request.Stdout, Stderr: request.Stderr, TTY: r.config.TTY,
+		Interactions: r.interactions, Interact: r.config.Interact, CaptureLimit: captureLimit,
 		StdoutPolicy: r.stdoutPolicy, StderrPolicy: r.stderrPolicy,
 	})
 	outputs := map[string]any{
