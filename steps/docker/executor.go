@@ -239,8 +239,13 @@ func (session *dockerExecutorSession) startLocked(ctx context.Context) error {
 		return fmt.Errorf("creating Docker executor container: %w", err)
 	}
 	if _, err := session.client.ContainerStart(ctx, created.ID, client.ContainerStartOptions{}); err != nil {
-		_, _ = session.client.ContainerRemove(context.WithoutCancel(ctx), created.ID, client.ContainerRemoveOptions{Force: true, RemoveVolumes: true})
-		return fmt.Errorf("starting Docker executor container: %w", err)
+		cleanupCtx, cancel := detachedCleanupContext(ctx)
+		defer cancel()
+		_, removeErr := session.client.ContainerRemove(cleanupCtx, created.ID, client.ContainerRemoveOptions{Force: true, RemoveVolumes: true})
+		if removeErr != nil {
+			removeErr = fmt.Errorf("removing Docker executor container after start failure: %w", removeErr)
+		}
+		return errors.Join(fmt.Errorf("starting Docker executor container: %w", err), removeErr)
 	}
 	session.containerID = created.ID
 	session.mappings = mappings
@@ -343,7 +348,7 @@ func (session *dockerExecutorSession) Run(ctx context.Context, options process.O
 	case copyErr = <-copyDone:
 	case <-ctx.Done():
 		attached.Close()
-		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
+		cleanupCtx, cancel := detachedCleanupContext(ctx)
 		removeErr := session.removeLocked(cleanupCtx)
 		cancel()
 		<-copyDone

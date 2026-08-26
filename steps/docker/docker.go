@@ -40,6 +40,10 @@ const (
 	ownershipLabel     = "com.up2jj.wuko.ownership"
 )
 
+func detachedCleanupContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
+}
+
 // Config describes one Docker operation.
 type Config struct {
 	Operation        string               `yaml:"operation,omitempty"`
@@ -231,7 +235,7 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (result step.Res
 	containerID := created.ID
 	started := false
 	defer func() {
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
+		cleanupCtx, cancel := detachedCleanupContext(ctx)
 		defer cancel()
 		var cleanupErrs []error
 		if started && ctx.Err() != nil {

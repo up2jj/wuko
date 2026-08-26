@@ -2,12 +2,14 @@ package docker
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/moby/moby/api/types/mount"
 
@@ -159,6 +161,44 @@ func TestDockerExecutorRetainsContainerAfterFailedRemoval(t *testing.T) {
 	}
 	if session.containerID != "" || session.mappings != nil || len(client.removedIDs) != 2 {
 		t.Fatalf("successful retry state: id=%q mappings=%#v removals=%#v", session.containerID, session.mappings, client.removedIDs)
+	}
+}
+
+func TestDockerExecutorFailedStartUsesBoundedDetachedCleanup(t *testing.T) {
+	startErr := errors.New("start failed")
+	removeErr := errors.New("remove failed")
+	client := &fakeClient{startErr: startErr, removeErr: removeErr}
+	session := &dockerExecutorSession{
+		config: ExecutorConfig{
+			Image:     "alpine",
+			Pull:      "never",
+			Workspace: &WorkspaceConfig{Enabled: false},
+		},
+		client: client,
+	}
+	parent := context.WithValue(t.Context(), cleanupContextKey{}, "retained")
+	ctx, cancel := context.WithCancel(parent)
+	cancel()
+	startedAt := time.Now()
+
+	err := session.startLocked(ctx)
+	if !errors.Is(err, startErr) || !errors.Is(err, removeErr) {
+		t.Fatalf("startLocked() error = %v, want joined start and removal errors", err)
+	}
+	if !client.removed || !client.removedOptions.Force || !client.removedOptions.RemoveVolumes {
+		t.Fatalf("cleanup removed=%v options=%#v", client.removed, client.removedOptions)
+	}
+	if client.removeCtxErr != nil {
+		t.Fatalf("cleanup context error = %v, want nil", client.removeCtxErr)
+	}
+	if client.removeCtxValue != "retained" {
+		t.Fatalf("cleanup context value = %v, want retained", client.removeCtxValue)
+	}
+	if !client.removeCtxHasDeadline {
+		t.Fatal("cleanup context has no deadline")
+	}
+	if client.removeCtxDeadline.Before(startedAt) || client.removeCtxDeadline.After(startedAt.Add(cleanupTimeout+time.Second)) {
+		t.Fatalf("cleanup deadline = %v, want within %v of %v", client.removeCtxDeadline, cleanupTimeout, startedAt)
 	}
 }
 

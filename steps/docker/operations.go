@@ -334,7 +334,7 @@ func (r *Runner) createNetwork(ctx context.Context, request step.Request, docker
 		return step.Result{}, fmt.Errorf("creating Docker network %q: %w", r.config.Name, err)
 	}
 	if err := ctx.Err(); err != nil {
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
+		cleanupCtx, cancel := detachedCleanupContext(ctx)
 		defer cancel()
 		_, cleanupErr := dockerClient.NetworkRemove(cleanupCtx, created.ID, client.NetworkRemoveOptions{})
 		return step.Result{}, errors.Join(err, cleanupErr)
@@ -366,7 +366,7 @@ func (r *Runner) createVolume(ctx context.Context, request step.Request, dockerC
 		return step.Result{}, fmt.Errorf("Docker volume %q does not have the expected Wuko ownership label", r.config.Name)
 	}
 	if err := ctx.Err(); err != nil {
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
+		cleanupCtx, cancel := detachedCleanupContext(ctx)
 		defer cancel()
 		_, cleanupErr := dockerClient.VolumeRemove(cleanupCtx, volume.Name, client.VolumeRemoveOptions{})
 		return step.Result{}, errors.Join(err, cleanupErr)

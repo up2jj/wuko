@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/containerd/errdefs"
 	"github.com/moby/moby/api/types/container"
@@ -312,13 +313,20 @@ func TestEnsureImageInspectsRequestedPlatform(t *testing.T) {
 	}
 }
 
+type cleanupContextKey struct{}
+
 type fakeClient struct {
 	created                 client.ContainerCreateOptions
 	output                  []byte
 	exitCode                int64
 	waitBlocks              bool
 	containers              []container.Summary
+	startErr                error
 	removeErr               error
+	removeCtxErr            error
+	removeCtxValue          any
+	removeCtxDeadline       time.Time
+	removeCtxHasDeadline    bool
 	imageInspectErr         error
 	imageInspectOptionCount int
 	pullResponse            *fakePullResponse
@@ -428,7 +436,7 @@ func (f *fakeClient) ContainerAttach(_ context.Context, _ string, options client
 
 func (f *fakeClient) ContainerStart(context.Context, string, client.ContainerStartOptions) (client.ContainerStartResult, error) {
 	f.started = true
-	return client.ContainerStartResult{}, nil
+	return client.ContainerStartResult{}, f.startErr
 }
 
 func (f *fakeClient) ExecCreate(_ context.Context, _ string, options client.ExecCreateOptions) (client.ExecCreateResult, error) {
@@ -501,7 +509,10 @@ func (f *fakeClient) ContainerStop(context.Context, string, client.ContainerStop
 	return client.ContainerStopResult{}, nil
 }
 
-func (f *fakeClient) ContainerRemove(_ context.Context, id string, options client.ContainerRemoveOptions) (client.ContainerRemoveResult, error) {
+func (f *fakeClient) ContainerRemove(ctx context.Context, id string, options client.ContainerRemoveOptions) (client.ContainerRemoveResult, error) {
+	f.removeCtxErr = ctx.Err()
+	f.removeCtxValue = ctx.Value(cleanupContextKey{})
+	f.removeCtxDeadline, f.removeCtxHasDeadline = ctx.Deadline()
 	return f.removeContainer(id, options)
 }
 
