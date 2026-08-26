@@ -30,7 +30,10 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
   may reference earlier resolved properties such as `disabled` from `reason_expr`. Use
   `select_all: true` in multiple mode to initialize every
   enabled choice as selected; it is incompatible with a `max_selected` smaller than the enabled
-  choice count. Multiple choices preserve selection order and may use `min_selected` and
+  choice count. Use `auto_select_single: true` in single-select mode when an interactive dynamic
+  selector should bypass the picker if exactly one enabled choice remains; non-interactive runs do
+  not infer a value and retain their normal required or optional behavior. Multiple choices preserve
+  selection order and may use `min_selected` and
   `max_selected`; explicit bounds supersede `required`. Optional single choices
   expose `selected` to distinguish no selection from a selected null value. Dynamic object choices
   retain the selected source object in `item`, or ordered source objects in `items` for multiple

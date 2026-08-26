@@ -159,6 +159,18 @@ Use scalar dynamic values without field mappings:
     from: vars.available_regions
 ```
 
+Skip a redundant single-choice prompt when only one enabled mode is available:
+
+```yaml
+- id: access_mode
+  type: tui_choice
+  with:
+    variable: access_mode
+    message: Select an access mode
+    from: steps.resolve.modes
+    auto_select_single: true
+```
+
 Static choices require `label` and scalar `value`; `description`, `disabled`, `reason`, and
 `default` are optional. Every disabled choice requires a non-empty reason and cannot be a default.
 In single mode, at most one choice may be the default; the picker initially focuses it. In multiple
@@ -169,6 +181,13 @@ source order. Disabled choices are excluded. This option is valid only with `mul
 `max_selected` is set, it must be at least the number of enabled choices. Like per-choice defaults,
 select-all initialization applies only to interactive runs and does not override pre-supplied values
 or populate missing values in non-interactive runs.
+
+Set `auto_select_single: true` in single-select mode to select the sole enabled choice without
+opening the picker. Disabled choices do not count. The option applies only to interactive runs:
+pre-supplied values still undergo normal validation, and non-interactive runs still require an
+explicit variable unless the choice is optional. Zero or multiple enabled choices retain the
+normal required, optional, and picker behavior. `auto_select_single` cannot be combined with
+`multiple: true`.
 
 A scalar dynamic item is both its label and value and does not carry choice metadata. Object lists
 use `label_field` and `value_field`, which may be dotted paths. `description_field` displays

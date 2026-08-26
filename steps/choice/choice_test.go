@@ -1,12 +1,15 @@
 package choice
 
 import (
+	"bytes"
+	"context"
 	"io"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/up2jj/wuko/step"
+	"github.com/up2jj/wuko/tui"
 )
 
 func TestDynamicMultiplePreSupplied(t *testing.T) {
@@ -133,6 +136,221 @@ func TestOptionalChoiceCanSelectNothing(t *testing.T) {
 	}
 	if _, exists := result.Outputs["items"]; exists {
 		t.Fatalf("static choices unexpectedly exposed items: %#v", result.Outputs)
+	}
+}
+
+func TestChoiceAutoSelectsSingleEnabledStaticChoice(t *testing.T) {
+	runner, err := New(map[string]any{
+		"variable": "mode", "message": "Mode", "auto_select_single": true,
+		"choices": []any{
+			map[string]any{"label": "Console", "value": "console", "disabled": true, "reason": "unavailable"},
+			map[string]any{"label": "Shell", "value": "shell"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	result, err := runner.Run(t.Context(), step.Request{
+		Interactive: true, Stdin: strings.NewReader(""), Stdout: &output,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if output.Len() != 0 {
+		t.Fatalf("picker output = %q", output.String())
+	}
+	if result.Outputs["value"] != "shell" || result.Outputs["label"] != "Shell" || result.Outputs["selected"] != true {
+		t.Fatalf("outputs = %#v", result.Outputs)
+	}
+	if result.Variables["mode"] != "shell" {
+		t.Fatalf("variables = %#v", result.Variables)
+	}
+}
+
+func TestChoiceAutoSelectsSingleEnabledDynamicObject(t *testing.T) {
+	runner, err := New(map[string]any{
+		"variable": "mode", "message": "Mode", "auto_select_single": true,
+		"from": "steps.resolve.modes", "disabled_field": "disabled", "reason_field": "reason",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runner.Run(t.Context(), step.Request{
+		Interactive: true,
+		Steps: map[string]any{"resolve": map[string]any{"modes": []any{
+			map[string]any{"label": "Console", "value": "console", "disabled": true, "reason": "unavailable"},
+			map[string]any{"label": "Shell", "value": "shell", "disabled": false, "command": "/bin/sh"},
+		}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Outputs["value"] != "shell" {
+		t.Fatalf("outputs = %#v", result.Outputs)
+	}
+	item := result.Outputs["item"].(map[string]any)
+	if item["command"] != "/bin/sh" {
+		t.Fatalf("item = %#v", item)
+	}
+}
+
+func TestChoiceAutoSelectSinglePreservesNonInteractiveBehavior(t *testing.T) {
+	tests := []struct {
+		name     string
+		required bool
+		wantErr  string
+	}{
+		{name: "required", required: true, wantErr: "required when stdin is non-interactive"},
+		{name: "optional", required: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runner, err := New(map[string]any{
+				"variable": "mode", "message": "Mode", "required": tt.required, "auto_select_single": true,
+				"choices": []any{map[string]any{"label": "Shell", "value": "shell"}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := runner.Run(t.Context(), step.Request{})
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("error = %v, want %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Outputs["selected"] != false || result.Outputs["value"] != nil {
+				t.Fatalf("outputs = %#v", result.Outputs)
+			}
+		})
+	}
+}
+
+func TestChoiceAutoSelectSinglePreservesZeroChoiceSemantics(t *testing.T) {
+	optional, err := New(map[string]any{
+		"variable": "mode", "message": "Mode", "required": false, "auto_select_single": true,
+		"from": "steps.resolve.modes",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := optional.Run(t.Context(), step.Request{
+		Steps: map[string]any{"resolve": map[string]any{"modes": []any{}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Outputs["selected"] != false || result.Outputs["value"] != nil {
+		t.Fatalf("outputs = %#v", result.Outputs)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err = optional.Run(ctx, step.Request{
+		Interactive: true,
+		Steps:       map[string]any{"resolve": map[string]any{"modes": []any{}}},
+		Stdout:      io.Discard,
+	})
+	if err == nil || !strings.Contains(err.Error(), "choosing:") || !strings.Contains(err.Error(), "context canceled") {
+		t.Fatalf("interactive optional error = %v", err)
+	}
+
+	required, err := New(map[string]any{
+		"variable": "mode", "message": "Mode", "auto_select_single": true,
+		"from": "steps.resolve.modes",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = required.Run(t.Context(), step.Request{
+		Interactive: true,
+		Steps:       map[string]any{"resolve": map[string]any{"modes": []any{}}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "minimum selected 1 exceeds 0 enabled choices") {
+		t.Fatalf("interactive required error = %v", err)
+	}
+}
+
+func TestChoiceAutoSelectSinglePromptsForMultipleEnabledChoices(t *testing.T) {
+	runner, err := New(map[string]any{
+		"variable": "mode", "message": "Mode", "auto_select_single": true,
+		"choices": []any{
+			map[string]any{"label": "Shell", "value": "shell"},
+			map[string]any{"label": "Console", "value": "console"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err = runner.Run(ctx, step.Request{Interactive: true, Stdout: io.Discard})
+	if err == nil || !strings.Contains(err.Error(), "choosing:") || !strings.Contains(err.Error(), "context canceled") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestChoiceAutoSelectSinglePreservesPreSuppliedValidation(t *testing.T) {
+	runner, err := New(map[string]any{
+		"variable": "mode", "message": "Mode", "auto_select_single": true,
+		"choices": []any{
+			map[string]any{"label": "Console", "value": "console", "disabled": true, "reason": "unavailable"},
+			map[string]any{"label": "Shell", "value": "shell"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := runner.Run(t.Context(), step.Request{Interactive: true, Vars: map[string]any{"mode": "shell"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Outputs["value"] != "shell" {
+		t.Fatalf("outputs = %#v", result.Outputs)
+	}
+
+	for _, tt := range []struct {
+		name  string
+		value any
+		want  string
+	}{
+		{name: "unavailable", value: "unknown", want: "not an available choice"},
+		{name: "disabled", value: "console", want: "disabled choice"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := runner.Run(t.Context(), step.Request{Interactive: true, Vars: map[string]any{"mode": tt.value}})
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestSoleEnabledIndex(t *testing.T) {
+	tests := []struct {
+		name    string
+		options []resolvedChoice
+		want    int
+	}{
+		{name: "none", want: -1},
+		{name: "disabled only", options: []resolvedChoice{{Option: tui.Option{Disabled: true}}}, want: -1},
+		{name: "one", options: []resolvedChoice{{}}, want: 0},
+		{name: "one among disabled", options: []resolvedChoice{
+			{Option: tui.Option{Disabled: true}}, {}, {Option: tui.Option{Disabled: true}},
+		}, want: 1},
+		{name: "multiple", options: []resolvedChoice{{}, {}}, want: -1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := soleEnabledIndex(tt.options); got != tt.want {
+				t.Fatalf("soleEnabledIndex() = %d, want %d", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -521,6 +739,11 @@ func TestChoiceConfigurationValidation(t *testing.T) {
 		{
 			name: "inverted bounds",
 			raw: map[string]any{"variable": "item", "message": "Item", "multiple": true, "min_selected": 2, "max_selected": 1,
+				"choices": []any{map[string]any{"label": "A", "value": "a"}}},
+		},
+		{
+			name: "auto select single requires single mode",
+			raw: map[string]any{"variable": "item", "message": "Item", "multiple": true, "auto_select_single": true,
 				"choices": []any{map[string]any{"label": "A", "value": "a"}}},
 		},
 	}
