@@ -3,8 +3,10 @@ package shell
 import (
 	"context"
 	"io"
+	"math"
 	"os"
 	"os/user"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -45,6 +47,137 @@ func TestNewRejectsBlankScript(t *testing.T) {
 func TestNewAcceptsTemplatedScript(t *testing.T) {
 	if _, err := New(map[string]any{"script": "{{ .vars.script }}"}); err != nil {
 		t.Fatalf("New() error = %v", err)
+	}
+}
+
+func TestNewValidatesArgvConfiguration(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  map[string]any
+		want string
+	}{
+		{name: "static list", raw: map[string]any{"argv": []any{"echo"}}, want: "argv must be an object"},
+		{name: "null", raw: map[string]any{"argv": nil}, want: "argv must be an object"},
+		{name: "blank expression", raw: map[string]any{"argv": map[string]any{"expr": "  "}}, want: "argv expr must be a non-empty string"},
+		{name: "non-string expression", raw: map[string]any{"argv": map[string]any{"expr": 42}}, want: "argv expr must be a string"},
+		{name: "unknown expression field", raw: map[string]any{"argv": map[string]any{"expr": "steps.resolve.argv", "fallback": []any{"false"}}}, want: "exactly the expr field"},
+		{name: "invalid expression", raw: map[string]any{"argv": map[string]any{"expr": "steps."}}, want: "compiling argv expr"},
+		{name: "command", raw: map[string]any{"argv": map[string]any{"expr": "steps.resolve.argv"}, "command": "echo"}, want: "cannot be combined with command"},
+		{name: "script", raw: map[string]any{"argv": map[string]any{"expr": "steps.resolve.argv"}, "script": "echo"}, want: "cannot be combined with script"},
+		{name: "shell", raw: map[string]any{"argv": map[string]any{"expr": "steps.resolve.argv"}, "shell": "/bin/bash"}, want: "cannot be combined with shell"},
+		{name: "args", raw: map[string]any{"argv": map[string]any{"expr": "steps.resolve.argv"}, "args": []any{}}, want: "cannot be combined with args"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := New(test.raw)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("New() error = %v, want %q", err, test.want)
+			}
+		})
+	}
+
+	for _, raw := range []map[string]any{
+		{"command": "echo", "args": []any{"hello"}},
+		{"script": "echo hello"},
+		{"argv": map[string]any{"expr": "steps.resolve.argv"}},
+	} {
+		if _, err := New(raw); err != nil {
+			t.Fatalf("New(%#v) error = %v", raw, err)
+		}
+	}
+}
+
+func TestShellEvaluatesTypedArgvWithoutParsing(t *testing.T) {
+	executor := &recordingExecutor{}
+	runner, err := New(map[string]any{"argv": map[string]any{"expr": "steps.resolve.argv"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"/app/bin/recruitee", "with spaces", `a"quote`, "*.go", "$HOME", "", "x; rm -rf ignored"}
+	values := make([]any, len(want))
+	for i, value := range want {
+		values[i] = value
+	}
+	_, err = runner.Run(t.Context(), step.Request{
+		RunDir: t.TempDir(), Env: map[string]string{}, Steps: map[string]any{"resolve": map[string]any{"argv": values}},
+		Stdout: io.Discard, Stderr: io.Discard, Executor: executor,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := append([]string{executor.options.Command}, executor.options.Args...)
+	if !slices.Equal(got, want) {
+		t.Fatalf("argv = %#v, want %#v", got, want)
+	}
+}
+
+func TestShellArgvExpressionUsesRuntimeRoots(t *testing.T) {
+	executor := &recordingExecutor{}
+	runner, err := New(map[string]any{"argv": map[string]any{
+		"expr": "list(inputs.command, vars.arg, env.MODE, dependencies.build.artifact, batch.name, foreach.item, matrix.os, finally.status, workflow.name, workflow.dir, run.dir)",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := step.Request{
+		WorkflowName: "release", WorkflowDir: "/workflow", RunDir: "/run",
+		Inputs: map[string]any{"command": "tool"}, Vars: map[string]any{"arg": "value"}, Env: map[string]string{"MODE": "test"},
+		Dependencies: map[string]map[string]any{"build": {"artifact": "app"}},
+		Bindings: map[string]any{
+			"batch": map[string]any{"name": "batch"}, "foreach": map[string]any{"item": "item"},
+			"matrix": map[string]any{"os": "linux"}, "finally": map[string]any{"status": "succeeded"},
+		},
+		Stdout: io.Discard, Stderr: io.Discard, Executor: executor,
+	}
+	if _, err := runner.Run(t.Context(), request); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"tool", "value", "test", "app", "batch", "item", "linux", "succeeded", "release", "/workflow", "/run"}
+	got := append([]string{executor.options.Command}, executor.options.Args...)
+	if !slices.Equal(got, want) {
+		t.Fatalf("argv = %#v, want %#v", got, want)
+	}
+}
+
+func TestArgvStringsConvertsScalars(t *testing.T) {
+	got, err := argvStrings([]any{"tool", true, int8(-2), uint16(3), float32(1.25), float64(2.5)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"tool", "true", "-2", "3", "1.25", "2.5"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("argvStrings() = %#v, want %#v", got, want)
+	}
+}
+
+func TestShellRejectsInvalidArgvResults(t *testing.T) {
+	tests := []struct {
+		name  string
+		value any
+		want  string
+	}{
+		{name: "not list", value: "echo", want: "want a list"},
+		{name: "empty", value: []any{}, want: "empty list"},
+		{name: "empty executable", value: []any{""}, want: "empty executable"},
+		{name: "null", value: []any{"tool", nil}, want: "null is not"},
+		{name: "object", value: []any{"tool", map[string]any{"value": "arg"}}, want: "map is not"},
+		{name: "nested list", value: []any{"tool", []any{"arg"}}, want: "slice is not"},
+		{name: "non-finite", value: []any{"tool", math.Inf(1)}, want: "non-finite"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			runner, err := New(map[string]any{"argv": map[string]any{"expr": "steps.resolve.argv"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = runner.Run(t.Context(), step.Request{
+				RunDir: t.TempDir(), Env: map[string]string{}, Steps: map[string]any{"resolve": map[string]any{"argv": test.value}},
+				Stdout: io.Discard, Stderr: io.Discard, Executor: &recordingExecutor{},
+			})
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("Run() error = %v, want %q", err, test.want)
+			}
+		})
 	}
 }
 

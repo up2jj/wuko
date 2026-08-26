@@ -70,10 +70,11 @@ func TestOpenActivatesConfiguredProfilesOutsideDevenv(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer session.Close(t.Context())
-	if _, err := session.Run(t.Context(), process.Options{Command: "go", Args: []string{"test"}}); err != nil {
+	commandArgs := []string{"test", "with spaces", `a"quote`, "*.go", "$HOME", "", "x; echo ignored"}
+	if _, err := session.Run(t.Context(), process.Options{Command: "go", Args: commandArgs}); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"--profile", "backend", "--profile", "testing", "shell", "--", "go", "test"}
+	want := append([]string{"--profile", "backend", "--profile", "testing", "shell", "--", "go"}, commandArgs...)
 	if command.options.Command != "devenv" || !slices.Equal(command.options.Args, want) {
 		t.Fatalf("devenv command = %s %v", command.options.Command, command.options.Args)
 	}

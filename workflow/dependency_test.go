@@ -182,6 +182,28 @@ func TestResolveDependencyPlanChecksOnlySemanticDependencyReferences(t *testing.
 	}
 }
 
+func TestResolveDependencyPlanChecksShellArgvExpressionReferences(t *testing.T) {
+	producer := dependencyDefinition("producer", "/producer.yaml")
+	producer.Outputs = map[string]WorkflowOutput{"argv": {Type: "array", Value: `list("tool")`}}
+	consumer := dependencyDefinition("consumer", "/consumer.yaml")
+	consumer.DependsOn = map[string]string{"build": "producer"}
+	consumer.Steps = []Step{{
+		ID: "run", Type: "shell",
+		With: map[string]any{"argv": map[string]any{"expr": "dependencies.build.argv"}},
+	}}
+	resolve := func(context.Context, string) (*Definition, error) { return producer, nil }
+
+	if _, err := ResolveDependencyPlan(t.Context(), consumer, resolve); err != nil {
+		t.Fatalf("valid argv dependency reference rejected: %v", err)
+	}
+
+	consumer.Steps[0].With = map[string]any{"argv": map[string]any{"expr": "dependencies.build.missing"}}
+	_, err := ResolveDependencyPlan(t.Context(), consumer, resolve)
+	if err == nil || !strings.Contains(err.Error(), `does not declare output "missing"`) {
+		t.Fatalf("argv dependency reference error = %v", err)
+	}
+}
+
 func TestResolveDependencyPlanFindsReferencesInsideOptionalTemplateBranches(t *testing.T) {
 	producer := dependencyDefinition("producer", "/producer.yaml")
 	consumer := dependencyDefinition("consumer", "/consumer.yaml")

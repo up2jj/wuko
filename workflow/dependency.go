@@ -174,6 +174,12 @@ func stepDependencyReferences(steps []Step) []dependencyOutputReference {
 			if expression, ok := workflowStep.With["expr"].(string); ok {
 				references = append(references, expressionDependencyReferences(expression)...)
 			}
+		case "shell":
+			if argv, ok := workflowStep.With["argv"].(map[string]any); ok {
+				if expression, ok := argv["expr"].(string); ok {
+					references = append(references, expressionDependencyReferences(expression)...)
+				}
+			}
 		case "wait":
 			if expression, ok := workflowStep.With["until"].(string); ok {
 				references = append(references, expressionDependencyReferences(expression)...)

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -30,8 +31,9 @@ func TestDockerExecutorSharesWorkspaceAndRunsCommands(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	args := []string{"build", "with spaces", `a"quote`, "*.go", "$HOME", "", "x; echo ignored"}
 	result, err := session.Run(t.Context(), process.Options{
-		Command: "go", Args: []string{"build", "./..."}, Dir: filepath.Join(runDir, "backend"),
+		Command: "go", Args: args, Dir: filepath.Join(runDir, "backend"),
 		Env: map[string]string{"BASE": "workflow", "STEP": "build"}, Stdout: io.Discard, Stderr: io.Discard,
 	})
 	if err != nil {
@@ -46,7 +48,7 @@ func TestDockerExecutorSharesWorkspaceAndRunsCommands(t *testing.T) {
 	if len(client.created.HostConfig.Mounts) != 2 || client.created.HostConfig.Mounts[0].Type != mount.TypeBind || client.created.HostConfig.Mounts[0].Source != runDir || client.created.HostConfig.Mounts[0].Target != defaultExecutorWorkspace {
 		t.Fatalf("mounts = %#v", client.created.HostConfig.Mounts)
 	}
-	if client.execOptions.WorkingDir != "/workspace/backend" || strings.Join(client.execOptions.Cmd, " ") != "go build ./..." {
+	if client.execOptions.WorkingDir != "/workspace/backend" || !slices.Equal(client.execOptions.Cmd, append([]string{"go"}, args...)) {
 		t.Fatalf("exec options = %#v", client.execOptions)
 	}
 	if err := session.Close(t.Context()); err != nil {

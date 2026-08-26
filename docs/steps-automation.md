@@ -19,6 +19,29 @@ Direct execution avoids implicit shell parsing:
     args: [status, --short]
 ```
 
+When a previous step returns a complete argument vector, evaluate it without converting the list
+to template text:
+
+```yaml
+- id: console
+  type: shell
+  with:
+    argv:
+      expr: steps.resolve.argv
+    tty: true
+```
+
+`argv` contains exactly one `expr` field and cannot be combined with `command`, `script`, `shell`,
+or `args`. The expression is compiled during validation and evaluated immediately before the
+process starts. It must return a non-empty array or slice whose first item is a non-empty
+executable. Strings remain unchanged; booleans and finite numbers are converted to their standard
+base-10 text. Nulls, objects, nested lists, and other values are rejected.
+
+The evaluated vector is passed directly to the process API. Spaces, quotes, glob characters, empty
+arguments, and shell metacharacters therefore remain ordinary argument data. This behavior is the
+same locally and for shell steps inside Docker or devenv executor scopes. It does not change the
+separate `docker` step's run-operation schema.
+
 Use `script` when shell syntax is intentional. Values in `args` become `$1`, `$2`, and so on:
 
 ```yaml
