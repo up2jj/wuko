@@ -92,7 +92,10 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
   containers, and agent for coding-agent execution. For large machine-readable shell output, set
   `stdout: capture` and consume `steps.<id>.stdout` instead of redirecting through a temporary file;
   leave stderr omitted or set it to `inherit` so failures remain visible. Apply `capture_limit` when
-  the producer may return unbounded data. The same options are available to `wuko.exec.run`.
+  the producer may return unbounded data. For a command probe whose non-zero status is data rather
+  than failure, set a complete `allowed_exit_codes` list and branch on `steps.<id>.exit_code`; keep
+  Lua for probes that require multiple operations or structured interpretation. The output policy
+  and capture-limit options are also available to `wuko.exec.run`.
 
 ## Important behavior
 

@@ -67,6 +67,26 @@ native process credentials; Wuko does not invoke `sudo` or rewrite `HOME` and `U
 outputs `stdout_truncated` and `stderr_truncated` report whether capture reached its configured
 bound.
 
+By default, only exit code 0 succeeds. Set `allowed_exit_codes` to a non-empty list of codes from
+0 through 255 when a command uses non-zero statuses as useful observations. The configured list
+replaces the default, so include every accepted code explicitly:
+
+```yaml
+- id: authorization
+  type: shell
+  with:
+    command: kubectl
+    args: [auth, can-i, get, deployments]
+    allowed_exit_codes: [0, 1]
+    stdout: capture
+    stderr: capture
+```
+
+An allowed exit commits the usual `exit_code`, `stdout`, `stderr`, `stdout_truncated`, and
+`stderr_truncated` outputs for later conditions. Command startup, executor, stream, timeout, and
+cancellation errors still fail the step. A disallowed exit retains normal failure and retry
+behavior, while an allowed exit completes without retrying.
+
 Control forwarding and capture independently for each process stream with `stdout` and `stderr`:
 
 | Policy | Display live | Return in the output |

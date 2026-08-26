@@ -7,6 +7,7 @@ import (
 	"math"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -35,6 +36,7 @@ type Config struct {
 	Stdout           string               `yaml:"stdout,omitempty"`
 	Stderr           string               `yaml:"stderr,omitempty"`
 	CaptureLimit     string               `yaml:"capture_limit,omitempty"`
+	AllowedExitCodes []int                `yaml:"allowed_exit_codes,omitempty"`
 }
 
 type ArgvExpression struct {
@@ -120,6 +122,16 @@ func New(raw map[string]any) (step.Runner, error) {
 	if config.TTY && (config.Stdout != "" || config.Stderr != "" || config.CaptureLimit != "") {
 		return nil, fmt.Errorf("tty cannot be combined with stdout, stderr, or capture_limit")
 	}
+	if _, configured := raw["allowed_exit_codes"]; !configured {
+		config.AllowedExitCodes = []int{0}
+	} else if len(config.AllowedExitCodes) == 0 {
+		return nil, fmt.Errorf("allowed_exit_codes must contain at least one exit code")
+	}
+	for _, code := range config.AllowedExitCodes {
+		if code < 0 || code > 255 {
+			return nil, fmt.Errorf("allowed_exit_codes must contain only exit codes from 0 through 255")
+		}
+	}
 	for key := range config.Env {
 		if !workflow.ValidEnvironmentName(key) {
 			return nil, fmt.Errorf("invalid environment name %q", key)
@@ -187,9 +199,32 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 		"stdout_truncated": result.StdoutTruncated, "stderr_truncated": result.StderrTruncated,
 	}
 	if err != nil {
+		exitErr, isExitError := soleProcessExitError(err)
+		if isExitError && exitErr.Code == result.ExitCode && slices.Contains(r.config.AllowedExitCodes, result.ExitCode) {
+			return step.Result{Outputs: outputs}, nil
+		}
 		return step.Result{Outputs: outputs}, err
 	}
+	if !slices.Contains(r.config.AllowedExitCodes, result.ExitCode) {
+		return step.Result{Outputs: outputs}, &process.ExitError{Command: command, Code: result.ExitCode}
+	}
 	return step.Result{Outputs: outputs}, nil
+}
+
+func soleProcessExitError(err error) (*process.ExitError, bool) {
+	if exitErr, ok := err.(*process.ExitError); ok {
+		return exitErr, true
+	}
+	if wrapped, ok := err.(interface{ Unwrap() error }); ok {
+		return soleProcessExitError(wrapped.Unwrap())
+	}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		causes := joined.Unwrap()
+		if len(causes) == 1 {
+			return soleProcessExitError(causes[0])
+		}
+	}
+	return nil, false
 }
 
 func configuredOutputPolicy(field, value string) (process.OutputPolicy, error) {

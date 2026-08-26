@@ -86,6 +86,31 @@ func TestExecutorScopeSupportsRequireTool(t *testing.T) {
 	}
 }
 
+func TestExecutorScopeCommitsAllowedShellExitForLaterCondition(t *testing.T) {
+	scoped := &recordingExecutor{fail: "probe"}
+	definition := testDefinition(t, "probe", workflow.Step{
+		Executor: &workflow.ExecutorScope{Type: "recording", With: map[string]any{}},
+		Steps: []workflow.Step{
+			{ID: "probe", Type: "shell", With: map[string]any{
+				"command": "probe", "allowed_exit_codes": []any{0, 7},
+			}},
+			{ID: "fallback", Type: "shell", If: "steps.probe.exit_code == 7", With: map[string]any{"command": "fallback"}},
+		},
+	})
+	state, err := executorTestEngine(t, scoped).Run(t.Context(), definition, Options{
+		RunDir: t.TempDir(), Stdout: io.Discard, Stderr: io.Discard,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(scoped.commands, ","); got != "probe ,fallback " {
+		t.Fatalf("scoped commands = %q", got)
+	}
+	if state.Steps["probe"].(map[string]any)["exit_code"] != 7 {
+		t.Fatalf("steps = %#v", state.Steps)
+	}
+}
+
 func TestExecutorScopeSupportsGitAssertions(t *testing.T) {
 	scoped := &recordingExecutor{}
 	definition := testDefinition(t, "git", workflow.Step{
