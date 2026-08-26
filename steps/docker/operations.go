@@ -148,7 +148,7 @@ func dockerHealthResult(reference string, inspected client.ContainerInspectResul
 	outputs := map[string]any{
 		"container": reference, "id": inspected.Container.ID,
 		"container_status": "", "health_status": string(container.NoHealthcheck),
-		"failing_streak": 0, "health_checks": []map[string]any{},
+		"failing_streak": 0, "health_checks": []any{},
 	}
 	state := inspected.Container.State
 	if state == nil {
@@ -160,7 +160,9 @@ func dockerHealthResult(reference string, inspected client.ContainerInspectResul
 	}
 	outputs["health_status"] = string(state.Health.Status)
 	outputs["failing_streak"] = state.Health.FailingStreak
-	checks := make([]map[string]any, 0, len(state.Health.Log))
+	// []any, not []map[string]any: step outputs are cloned per concurrent branch and
+	// only the YAML/JSON shapes are copied cheaply. See step.Result.
+	checks := make([]any, 0, len(state.Health.Log))
 	for _, check := range state.Health.Log {
 		if check == nil {
 			continue

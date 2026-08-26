@@ -104,12 +104,16 @@ func TestHealthWaitReturnsHealthySnapshot(t *testing.T) {
 	if result.Outputs["container"] != "api" || result.Outputs["id"] != "container-id" || result.Outputs["container_status"] != "running" || result.Outputs["health_status"] != "healthy" {
 		t.Fatalf("outputs = %#v", result.Outputs)
 	}
-	checks, ok := result.Outputs["health_checks"].([]map[string]any)
+	checks, ok := result.Outputs["health_checks"].([]any)
 	if !ok || len(checks) != 1 {
 		t.Fatalf("health_checks = %#v", result.Outputs["health_checks"])
 	}
-	if checks[0]["started_at"] != started.Format(time.RFC3339Nano) || checks[0]["finished_at"] != finished.Format(time.RFC3339Nano) || checks[0]["exit_code"] != 0 || checks[0]["output"] != "ready\n" {
+	first, ok := checks[0].(map[string]any)
+	if !ok {
 		t.Fatalf("health check = %#v", checks[0])
+	}
+	if first["started_at"] != started.Format(time.RFC3339Nano) || first["finished_at"] != finished.Format(time.RFC3339Nano) || first["exit_code"] != 0 || first["output"] != "ready\n" {
+		t.Fatalf("health check = %#v", first)
 	}
 }
 

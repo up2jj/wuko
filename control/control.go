@@ -363,16 +363,6 @@ func asSlice(value any) ([]any, bool) {
 	return values, true
 }
 
-func cloneMap(source map[string]any) map[string]any {
-	result, _ := cloneMapContext(context.Background(), source)
-	return result
-}
-
-func clone(value any) any {
-	result, _ := cloneContext(context.Background(), value)
-	return result
-}
-
 func cloneMapContext(ctx context.Context, source map[string]any) (map[string]any, error) {
 	result := make(map[string]any, len(source))
 	for key, value := range source {

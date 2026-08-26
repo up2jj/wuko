@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"reflect"
 	"slices"
 	"strings"
 
@@ -140,9 +141,22 @@ func CloneMap(source map[string]any) map[string]any {
 	return result
 }
 
-// Clone returns a recursive clone of JSON/YAML-style maps and arrays.
+// Clone deep-copies a value so the copy shares no mutable state with the original.
+// The engine's branch isolation depends on this: a concurrent group hands each branch
+// a cloned State, and anything left aliased would be reachable from two branches at
+// once. map[string]any, []any, and scalars -- the shapes loaded YAML and step outputs
+// use -- take a fast path; any other slice or map is copied reflectively rather than
+// silently aliased.
+//
+// Values are assumed acyclic, as loaded YAML and JSON are. Pointers and arrays are
+// returned as-is; nothing in the tree produces them, and guarding that here would cost
+// more than it protects.
 func Clone(value any) any {
 	switch typed := value.(type) {
+	case nil:
+		return nil
+	case bool, string, int, int64, float64:
+		return value
 	case map[string]any:
 		return CloneMap(typed)
 	case []any:
@@ -151,9 +165,49 @@ func Clone(value any) any {
 			result[i] = Clone(item)
 		}
 		return result
+	}
+	return cloneReflect(value)
+}
+
+// cloneReflect copies slices and maps whose types the fast path above does not name.
+// Everything else -- scalars of other widths, structs, funcs, channels -- is returned
+// unchanged, which is safe for the immutable ones and no worse than before otherwise.
+func cloneReflect(value any) any {
+	source := reflect.ValueOf(value)
+	switch source.Kind() {
+	case reflect.Slice:
+		if source.IsNil() {
+			return value
+		}
+		result := reflect.MakeSlice(source.Type(), source.Len(), source.Len())
+		for i := range source.Len() {
+			setCloned(result.Index(i), source.Index(i))
+		}
+		return result.Interface()
+	case reflect.Map:
+		if source.IsNil() {
+			return value
+		}
+		result := reflect.MakeMapWithSize(source.Type(), source.Len())
+		// Keys are comparable and so cannot themselves hold a mutable slice or map.
+		for iter := source.MapRange(); iter.Next(); {
+			element := reflect.New(source.Type().Elem()).Elem()
+			setCloned(element, iter.Value())
+			result.SetMapIndex(iter.Key(), element)
+		}
+		return result.Interface()
 	default:
 		return value
 	}
+}
+
+func setCloned(target, source reflect.Value) {
+	cloned := Clone(source.Interface())
+	if cloned == nil {
+		target.SetZero()
+		return
+	}
+	target.Set(reflect.ValueOf(cloned))
 }
 
 func hostEnvironment() map[string]string {

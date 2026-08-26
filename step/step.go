@@ -43,6 +43,13 @@ type Request struct {
 	PreviousAttempt *Result
 }
 
+// Result carries a step's outputs and the workflow variables it writes. Both are cloned
+// before they reach workflow state, so a step may keep using the values it returned.
+//
+// Prefer the YAML/JSON shapes -- map[string]any, []any, and scalars -- for everything
+// nested inside. Templates and expressions are written against those, and they are the
+// shapes the cloner copies without reflection. A []map[string]any still works, but
+// convert it: every other step does, and it keeps the hot path free of reflect.
 type Result struct {
 	Outputs   map[string]any
 	Variables map[string]any

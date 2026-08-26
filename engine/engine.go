@@ -1149,12 +1149,10 @@ func resolveActionInputs(action *workflow.Action, bindings map[string]any, rende
 	return values, nil
 }
 
+// cloneMap and cloneAny defer to workflow so branch isolation has exactly one
+// definition; see workflow.Clone for what "cloned" guarantees.
 func cloneMap(source map[string]any) map[string]any {
-	result := make(map[string]any, len(source))
-	for key, value := range source {
-		result[key] = cloneAny(value)
-	}
-	return result
+	return workflow.CloneMap(source)
 }
 
 func cloneDependencies(source map[string]map[string]any) map[string]map[string]any {
@@ -1162,16 +1160,5 @@ func cloneDependencies(source map[string]map[string]any) map[string]map[string]a
 }
 
 func cloneAny(value any) any {
-	switch typed := value.(type) {
-	case map[string]any:
-		return cloneMap(typed)
-	case []any:
-		result := make([]any, len(typed))
-		for i, item := range typed {
-			result[i] = cloneAny(item)
-		}
-		return result
-	default:
-		return value
-	}
+	return workflow.Clone(value)
 }
