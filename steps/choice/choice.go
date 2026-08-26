@@ -7,6 +7,9 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/expr-lang/expr"
+	"github.com/expr-lang/expr/vm"
+	wukoexpr "github.com/up2jj/wuko/expression"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/tui"
 	"github.com/up2jj/wuko/workflow"
@@ -23,11 +26,17 @@ type Config struct {
 	Choices          []ChoiceConfig `yaml:"choices,omitempty"`
 	From             string         `yaml:"from,omitempty"`
 	LabelField       string         `yaml:"label_field,omitempty"`
+	LabelExpr        string         `yaml:"label_expr,omitempty"`
 	ValueField       string         `yaml:"value_field,omitempty"`
+	ValueExpr        string         `yaml:"value_expr,omitempty"`
 	DescriptionField string         `yaml:"description_field,omitempty"`
+	DescriptionExpr  string         `yaml:"description_expr,omitempty"`
 	DisabledField    string         `yaml:"disabled_field,omitempty"`
+	DisabledExpr     string         `yaml:"disabled_expr,omitempty"`
 	ReasonField      string         `yaml:"reason_field,omitempty"`
+	ReasonExpr       string         `yaml:"reason_expr,omitempty"`
 	DefaultField     string         `yaml:"default_field,omitempty"`
+	DefaultExpr      string         `yaml:"default_expr,omitempty"`
 }
 
 type ChoiceConfig struct {
@@ -45,7 +54,72 @@ type resolvedChoice struct {
 	hasItem bool
 }
 
-type Runner struct{ config Config }
+type expressionRoots struct {
+	Inputs       map[string]any            `expr:"inputs"`
+	Vars         map[string]any            `expr:"vars"`
+	Env          map[string]string         `expr:"env"`
+	Steps        map[string]any            `expr:"steps"`
+	Dependencies map[string]map[string]any `expr:"dependencies"`
+	Batch        map[string]any            `expr:"batch"`
+	Foreach      map[string]any            `expr:"foreach"`
+	Matrix       map[string]any            `expr:"matrix"`
+	Finally      map[string]any            `expr:"finally"`
+	Workflow     workflowValue             `expr:"workflow"`
+	Run          runValue                  `expr:"run"`
+}
+
+type workflowValue struct {
+	Name string `expr:"name"`
+	Dir  string `expr:"dir"`
+}
+
+type runValue struct {
+	Dir string `expr:"dir"`
+}
+
+type itemExpressionEnvironment struct {
+	expressionRoots
+	Item any `expr:"item"`
+}
+
+type labelExpressionEnvironment struct {
+	itemExpressionEnvironment
+	Label string `expr:"label"`
+}
+
+type valueExpressionEnvironment struct {
+	labelExpressionEnvironment
+	Value any `expr:"value"`
+}
+
+type descriptionExpressionEnvironment struct {
+	valueExpressionEnvironment
+	Description string `expr:"description"`
+}
+
+type disabledExpressionEnvironment struct {
+	descriptionExpressionEnvironment
+	Disabled bool `expr:"disabled"`
+}
+
+type reasonExpressionEnvironment struct {
+	disabledExpressionEnvironment
+	Reason string `expr:"reason"`
+}
+
+type expressionPrograms struct {
+	label       *vm.Program
+	value       *vm.Program
+	description *vm.Program
+	disabled    *vm.Program
+	reason      *vm.Program
+	defaultItem *vm.Program
+}
+
+type Runner struct {
+	config   Config
+	programs expressionPrograms
+}
 
 func Register(registry *step.Registry) error { return registry.Register("tui_choice", New) }
 
@@ -63,13 +137,57 @@ func New(raw map[string]any) (step.Runner, error) {
 	if err := validateBounds(config); err != nil {
 		return nil, err
 	}
-	if config.LabelField == "" {
+	programs, err := compileExpressions(raw, config)
+	if err != nil {
+		return nil, err
+	}
+	if config.LabelField == "" && config.LabelExpr == "" {
 		config.LabelField = "label"
 	}
-	if config.ValueField == "" {
+	if config.ValueField == "" && config.ValueExpr == "" {
 		config.ValueField = "value"
 	}
-	return &Runner{config: config}, nil
+	return &Runner{config: config, programs: programs}, nil
+}
+
+func compileExpressions(raw map[string]any, config Config) (expressionPrograms, error) {
+	type declaration struct {
+		name        string
+		field       string
+		expression  string
+		environment any
+		target      **vm.Program
+	}
+	var programs expressionPrograms
+	declarations := []declaration{
+		{name: "label", field: config.LabelField, expression: config.LabelExpr, environment: itemExpressionEnvironment{}, target: &programs.label},
+		{name: "value", field: config.ValueField, expression: config.ValueExpr, environment: labelExpressionEnvironment{}, target: &programs.value},
+		{name: "description", field: config.DescriptionField, expression: config.DescriptionExpr, environment: valueExpressionEnvironment{}, target: &programs.description},
+		{name: "disabled", field: config.DisabledField, expression: config.DisabledExpr, environment: descriptionExpressionEnvironment{}, target: &programs.disabled},
+		{name: "reason", field: config.ReasonField, expression: config.ReasonExpr, environment: disabledExpressionEnvironment{}, target: &programs.reason},
+		{name: "default", field: config.DefaultField, expression: config.DefaultExpr, environment: reasonExpressionEnvironment{}, target: &programs.defaultItem},
+	}
+	for _, declaration := range declarations {
+		key := declaration.name + "_expr"
+		if _, exists := raw[key]; !exists {
+			continue
+		}
+		if strings.TrimSpace(declaration.expression) == "" {
+			return expressionPrograms{}, fmt.Errorf("%s must be a non-empty expression", key)
+		}
+		if config.From == "" {
+			return expressionPrograms{}, fmt.Errorf("%s requires from", key)
+		}
+		if declaration.field != "" {
+			return expressionPrograms{}, fmt.Errorf("%s_field and %s are mutually exclusive", declaration.name, key)
+		}
+		program, err := wukoexpr.Compile(declaration.expression, expr.Env(declaration.environment))
+		if err != nil {
+			return expressionPrograms{}, fmt.Errorf("compiling %s: %w", key, err)
+		}
+		*declaration.target = program
+	}
+	return programs, nil
 }
 
 func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, error) {
@@ -135,61 +253,185 @@ func (r *Runner) options(request step.Request) ([]resolvedChoice, error) {
 	}
 	options := make([]resolvedChoice, 0, len(items))
 	for i, item := range items {
-		if scalar(item) {
-			options = append(options, resolvedChoice{Option: tui.Option{Label: fmt.Sprint(item), Value: item}})
-			continue
-		}
-		label, err := step.LookupValue(item, r.config.LabelField)
+		option, err := r.resolveDynamicChoice(request, item, i+1)
 		if err != nil {
-			return nil, fmt.Errorf("choice source item %d label: %w", i+1, err)
-		}
-		value, err := step.LookupValue(item, r.config.ValueField)
-		if err != nil {
-			return nil, fmt.Errorf("choice source item %d value: %w", i+1, err)
-		}
-		if !scalar(value) {
-			return nil, fmt.Errorf("choice source item %d value must be a scalar", i+1)
-		}
-		description := ""
-		if r.config.DescriptionField != "" {
-			resolved, err := step.LookupValue(item, r.config.DescriptionField)
-			if err != nil {
-				return nil, fmt.Errorf("choice source item %d description: %w", i+1, err)
-			}
-			description = fmt.Sprint(resolved)
-		}
-		disabled, err := boolField(item, r.config.DisabledField)
-		if err != nil {
-			return nil, fmt.Errorf("choice source item %d disabled: %w", i+1, err)
-		}
-		defaultChoice, err := boolField(item, r.config.DefaultField)
-		if err != nil {
-			return nil, fmt.Errorf("choice source item %d default: %w", i+1, err)
-		}
-		reason := ""
-		if disabled {
-			if r.config.ReasonField == "" {
-				return nil, fmt.Errorf("choice source item %d is disabled without a reason field", i+1)
-			}
-			resolved, err := step.LookupValue(item, r.config.ReasonField)
-			if err != nil {
-				return nil, fmt.Errorf("choice source item %d reason: %w", i+1, err)
-			}
-			var ok bool
-			reason, ok = resolved.(string)
-			if !ok || strings.TrimSpace(reason) == "" {
-				return nil, fmt.Errorf("choice source item %d reason must be a non-empty string", i+1)
-			}
+			return nil, err
 		}
 		options = append(options, resolvedChoice{
-			Option: tui.Option{
-				Label: fmt.Sprint(label), Description: description, Value: value,
-				Disabled: disabled, DisabledReason: reason, Default: defaultChoice,
-			},
-			item: workflow.Clone(item), hasItem: true,
+			Option: option,
+			item:   workflow.Clone(item), hasItem: !scalar(item),
 		})
 	}
 	return options, nil
+}
+
+func (r *Runner) resolveDynamicChoice(request step.Request, item any, index int) (tui.Option, error) {
+	itemEnvironment := itemExpressionEnvironment{expressionRoots: expressionRootsFor(request), Item: item}
+
+	label := fmt.Sprint(item)
+	if !scalar(item) {
+		resolved, err := step.LookupValue(item, r.config.LabelField)
+		if err != nil {
+			return tui.Option{}, fmt.Errorf("choice source item %d label: %w", index, err)
+		}
+		label = fmt.Sprint(resolved)
+	}
+	if r.programs.label != nil {
+		resolved, err := runExpression(r.programs.label, itemEnvironment, index, "label")
+		if err != nil {
+			return tui.Option{}, err
+		}
+		label = fmt.Sprint(resolved)
+	}
+
+	labelEnvironment := labelExpressionEnvironment{itemExpressionEnvironment: itemEnvironment, Label: label}
+	value := item
+	if !scalar(item) {
+		resolved, err := step.LookupValue(item, r.config.ValueField)
+		if err != nil {
+			return tui.Option{}, fmt.Errorf("choice source item %d value: %w", index, err)
+		}
+		value = resolved
+	}
+	if r.programs.value != nil {
+		resolved, err := runExpression(r.programs.value, labelEnvironment, index, "value")
+		if err != nil {
+			return tui.Option{}, err
+		}
+		value = resolved
+	}
+	if !scalar(value) {
+		return tui.Option{}, fmt.Errorf("choice source item %d value must be a scalar", index)
+	}
+
+	valueEnvironment := valueExpressionEnvironment{labelExpressionEnvironment: labelEnvironment, Value: value}
+	description := ""
+	if !scalar(item) && r.config.DescriptionField != "" {
+		resolved, err := step.LookupValue(item, r.config.DescriptionField)
+		if err != nil {
+			return tui.Option{}, fmt.Errorf("choice source item %d description: %w", index, err)
+		}
+		description = fmt.Sprint(resolved)
+	}
+	if r.programs.description != nil {
+		resolved, err := runExpression(r.programs.description, valueEnvironment, index, "description")
+		if err != nil {
+			return tui.Option{}, err
+		}
+		description = fmt.Sprint(resolved)
+	}
+
+	descriptionEnvironment := descriptionExpressionEnvironment{valueExpressionEnvironment: valueEnvironment, Description: description}
+	disabled := false
+	if !scalar(item) {
+		var err error
+		disabled, err = boolField(item, r.config.DisabledField)
+		if err != nil {
+			return tui.Option{}, fmt.Errorf("choice source item %d disabled: %w", index, err)
+		}
+	}
+	if r.programs.disabled != nil {
+		resolved, err := runBoolExpression(r.programs.disabled, descriptionEnvironment, index, "disabled")
+		if err != nil {
+			return tui.Option{}, err
+		}
+		disabled = resolved
+	}
+
+	disabledEnvironment := disabledExpressionEnvironment{descriptionExpressionEnvironment: descriptionEnvironment, Disabled: disabled}
+	reason := ""
+	if disabled {
+		if r.config.ReasonField == "" && r.programs.reason == nil {
+			return tui.Option{}, fmt.Errorf("choice source item %d is disabled without a reason field or expression", index)
+		}
+		var resolved any
+		var err error
+		if r.programs.reason != nil {
+			resolved, err = runExpression(r.programs.reason, disabledEnvironment, index, "reason")
+		} else {
+			resolved, err = step.LookupValue(item, r.config.ReasonField)
+			if err != nil {
+				err = fmt.Errorf("choice source item %d reason: %w", index, err)
+			}
+		}
+		if err != nil {
+			return tui.Option{}, err
+		}
+		var ok bool
+		reason, ok = resolved.(string)
+		if !ok || strings.TrimSpace(reason) == "" {
+			return tui.Option{}, fmt.Errorf("choice source item %d reason must be a non-empty string", index)
+		}
+	}
+
+	reasonEnvironment := reasonExpressionEnvironment{disabledExpressionEnvironment: disabledEnvironment, Reason: reason}
+	defaultChoice := false
+	if !scalar(item) {
+		var err error
+		defaultChoice, err = boolField(item, r.config.DefaultField)
+		if err != nil {
+			return tui.Option{}, fmt.Errorf("choice source item %d default: %w", index, err)
+		}
+	}
+	if r.programs.defaultItem != nil {
+		resolved, err := runBoolExpression(r.programs.defaultItem, reasonEnvironment, index, "default")
+		if err != nil {
+			return tui.Option{}, err
+		}
+		defaultChoice = resolved
+	}
+
+	return tui.Option{
+		Label: label, Description: description, Value: value,
+		Disabled: disabled, DisabledReason: reason, Default: defaultChoice,
+	}, nil
+}
+
+func expressionRootsFor(request step.Request) expressionRoots {
+	return expressionRoots{
+		Inputs:       request.Inputs,
+		Vars:         request.Vars,
+		Env:          request.Env,
+		Steps:        request.Steps,
+		Dependencies: request.Dependencies,
+		Batch:        bindingRoot(request.Bindings, "batch"),
+		Foreach:      bindingRoot(request.Bindings, "foreach"),
+		Matrix:       bindingRoot(request.Bindings, "matrix"),
+		Finally:      bindingRoot(request.Bindings, "finally"),
+		Workflow: workflowValue{
+			Name: request.WorkflowName,
+			Dir:  request.WorkflowDir,
+		},
+		Run: runValue{Dir: request.RunDir},
+	}
+}
+
+func bindingRoot(bindings map[string]any, name string) map[string]any {
+	value, _ := bindings[name].(map[string]any)
+	if value == nil {
+		return map[string]any{}
+	}
+	return value
+}
+
+func runExpression(program *vm.Program, environment any, index int, property string) (any, error) {
+	value, err := expr.Run(program, environment)
+	if err != nil {
+		return nil, fmt.Errorf("choice source item %d %s expression: %w", index, property, err)
+	}
+	return value, nil
+}
+
+func runBoolExpression(program *vm.Program, environment any, index int, property string) (bool, error) {
+	value, err := runExpression(program, environment, index, property)
+	if err != nil {
+		return false, err
+	}
+	result, ok := value.(bool)
+	if !ok {
+		return false, fmt.Errorf("choice source item %d %s expression must return a boolean, got %T", index, property, value)
+	}
+	return result, nil
 }
 
 func (r *Runner) preSupplied(value any, options []resolvedChoice) (step.Result, error) {

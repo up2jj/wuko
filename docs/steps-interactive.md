@@ -131,6 +131,23 @@ Select multiple objects from an earlier step:
     default_field: selection.default
 ```
 
+Compute choice fields from each source item when a direct field mapping is not enough:
+
+```yaml
+- id: environment
+  type: tui_choice
+  with:
+    variable: environment
+    message: Select an environment
+    from: vars.environments
+    label_expr: item.label
+    value_expr: item.name
+    description_expr: '"kubectl context: " + item.context'
+    disabled_expr: '!(item.context in vars.available_contexts)'
+    reason_expr: 'disabled ? "Context is not configured" : ""'
+    default_expr: 'item.name == vars.preferred_environment'
+```
+
 Use scalar dynamic values without field mappings:
 
 ```yaml
@@ -159,6 +176,20 @@ additional searchable text. `disabled_field` and `default_field` must resolve to
 `disabled_field` is true, `reason_field` must resolve to a non-empty string. Disabled choices remain
 visible and focusable, show their reason inline, and cannot be selected. Labels, descriptions, and
 disabled reasons are all searchable.
+
+Dynamic sources may use `label_expr`, `value_expr`, `description_expr`, `disabled_expr`,
+`reason_expr`, and `default_expr` instead of the corresponding `*_field`. A field and expression
+for the same property are mutually exclusive, and expressions are not available for static
+`choices`. Expressions work with scalar and object items and receive the raw source value as
+`item`, plus `inputs`, `vars`, `env`, `steps`, `dependencies`, `batch`, `foreach`, `matrix`,
+`finally`, `workflow`, and `run`. Wuko evaluates them in label, value, description, disabled,
+reason, then default order; each expression may reference properties resolved earlier in that
+order. `reason_expr` runs only for a disabled item.
+
+Computed labels and descriptions are converted to strings. Computed values must be scalar,
+`disabled_expr` and `default_expr` must return booleans, and a disabled choice still requires a
+non-empty string reason. Expressions change only the displayed and selected choice properties;
+`item` and `items` outputs retain clones of the original source objects.
 
 The picker supports arrow keys or `j`/`k`, Home, End, Page Up, and Page Down. `/` filters labels
 and metadata. In multiple mode, Space toggles values and Enter confirms them in selection order.

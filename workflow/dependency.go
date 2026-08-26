@@ -174,6 +174,12 @@ func stepDependencyReferences(steps []Step) []dependencyOutputReference {
 			if expression, ok := workflowStep.With["expr"].(string); ok {
 				references = append(references, expressionDependencyReferences(expression)...)
 			}
+		case "tui_choice":
+			for _, name := range []string{"label_expr", "value_expr", "description_expr", "disabled_expr", "reason_expr", "default_expr"} {
+				if expression, ok := workflowStep.With[name].(string); ok {
+					references = append(references, expressionDependencyReferences(expression)...)
+				}
+			}
 		case "shell":
 			if argv, ok := workflowStep.With["argv"].(map[string]any); ok {
 				if expression, ok := argv["expr"].(string); ok {

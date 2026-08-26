@@ -111,6 +111,39 @@ func TestResolveDependencyPlanRejectsCyclesAndUnknownOutputs(t *testing.T) {
 	}
 }
 
+func TestResolveDependencyPlanValidatesChoiceExpressions(t *testing.T) {
+	producer := dependencyDefinition("producer", "/producer.yaml")
+	producer.Outputs = map[string]WorkflowOutput{
+		"items": {Type: "array", Value: `[]`},
+	}
+	consumer := dependencyDefinition("consumer", "/consumer.yaml")
+	consumer.DependsOn = map[string]string{"source": "producer"}
+	consumer.Steps = []Step{{
+		ID: "choice", Type: "tui_choice",
+		With: map[string]any{
+			"variable": "item", "message": "Item", "from": "vars.items",
+			"label_expr": `string(item)`, "value_expr": `dependencies.source.items[0]`,
+		},
+	}}
+	load := func(context.Context, string) (*Definition, error) { return producer, nil }
+	if _, err := ResolveDependencyPlan(t.Context(), consumer, load); err != nil {
+		t.Fatalf("valid choice dependency expression rejected: %v", err)
+	}
+
+	consumer.Steps[0].With["reason_expr"] = `dependencies.source.missing`
+	_, err := ResolveDependencyPlan(t.Context(), consumer, load)
+	if err == nil || !strings.Contains(err.Error(), `does not declare output "missing"`) {
+		t.Fatalf("output error = %v", err)
+	}
+
+	delete(consumer.Steps[0].With, "reason_expr")
+	consumer.Steps[0].With["default_expr"] = `dependencies.unknown.items != nil`
+	_, err = ResolveDependencyPlan(t.Context(), consumer, load)
+	if err == nil || !strings.Contains(err.Error(), `unknown alias "unknown"`) {
+		t.Fatalf("alias error = %v", err)
+	}
+}
+
 func TestResolveDependencyPlanChecksOnlySemanticDependencyReferences(t *testing.T) {
 	producer := dependencyDefinition("producer", "/producer.yaml")
 	consumer := dependencyDefinition("consumer", "/consumer.yaml")

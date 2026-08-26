@@ -266,6 +266,189 @@ func TestDynamicChoiceMetadata(t *testing.T) {
 	}
 }
 
+func TestDynamicChoiceExpressionsUseOrderedEnvironment(t *testing.T) {
+	source := map[string]any{"name": "dev", "label": "Development", "context": "dev-cluster"}
+	runnerValue, err := New(map[string]any{
+		"variable": "environment", "message": "Environment", "from": "steps.fetch.items",
+		"label_expr":       `item.label + ":" + workflow.name`,
+		"value_expr":       `item.name + ":" + label`,
+		"description_expr": `inputs.prefix + env.SUFFIX + steps.fetch.marker + dependencies.base.marker + foreach.marker + run.dir + ":" + value`,
+		"disabled_expr":    `!(item.context in vars.available_contexts)`,
+		"reason_expr":      `disabled ? "Context is not configured" : ""`,
+		"default_expr":     `!disabled && reason == "" && item.name == vars.preferred_environment`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := runnerValue.(*Runner)
+	options, err := runner.options(step.Request{
+		WorkflowName: "jump", RunDir: "/run",
+		Inputs: map[string]any{"prefix": "input:"},
+		Vars: map[string]any{
+			"available_contexts":    []any{"dev-cluster"},
+			"preferred_environment": "dev",
+		},
+		Env: map[string]string{"SUFFIX": "env:"},
+		Steps: map[string]any{"fetch": map[string]any{
+			"items": []any{source}, "marker": "step:",
+		}},
+		Dependencies: map[string]map[string]any{"base": {"marker": "dependency:"}},
+		Bindings:     map[string]any{"foreach": map[string]any{"marker": "foreach:"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(options) != 1 {
+		t.Fatalf("options = %#v", options)
+	}
+	option := options[0]
+	if option.Label != "Development:jump" || option.Value != "dev:Development:jump" || option.Disabled || !option.Default {
+		t.Fatalf("option = %#v", option)
+	}
+	wantDescription := "input:env:step:dependency:foreach:/run:dev:Development:jump"
+	if option.Description != wantDescription {
+		t.Fatalf("description = %q, want %q", option.Description, wantDescription)
+	}
+	item := option.item.(map[string]any)
+	if !reflect.DeepEqual(item, source) {
+		t.Fatalf("item = %#v, want %#v", item, source)
+	}
+	item["name"] = "changed"
+	if source["name"] != "dev" {
+		t.Fatalf("source was mutated through retained item: %#v", source)
+	}
+}
+
+func TestDynamicChoiceExpressionsSupportScalarItems(t *testing.T) {
+	runnerValue, err := New(map[string]any{
+		"variable": "number", "message": "Number", "from": "vars.numbers",
+		"label_expr": `"item-" + string(item)`, "value_expr": `item * 10`,
+		"description_expr": `label + ":" + string(value)`,
+		"disabled_expr":    `value == 10`,
+		"reason_expr":      `disabled ? "Unavailable" : ""`,
+		"default_expr":     `!disabled && reason == "" && value == 20`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	options, err := runnerValue.(*Runner).options(step.Request{Vars: map[string]any{"numbers": []any{1, 2}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(options) != 2 || options[0].Label != "item-1" || options[0].Value != 10 || !options[0].Disabled || options[0].DisabledReason != "Unavailable" {
+		t.Fatalf("first option = %#v", options)
+	}
+	if options[1].Description != "item-2:20" || !options[1].Default || options[1].hasItem {
+		t.Fatalf("second option = %#v", options[1])
+	}
+}
+
+func TestDynamicChoiceSkipsReasonExpressionForEnabledItem(t *testing.T) {
+	runnerValue, err := New(map[string]any{
+		"variable": "item", "message": "Item", "from": "vars.items",
+		"disabled_expr": `false`, "reason_expr": `item.missing.value`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	options, err := runnerValue.(*Runner).options(step.Request{Vars: map[string]any{"items": []any{"available"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(options) != 1 || options[0].Disabled || options[0].DisabledReason != "" {
+		t.Fatalf("options = %#v", options)
+	}
+}
+
+func TestDynamicChoiceExpressionConfigurationValidation(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  map[string]any
+		want string
+	}{
+		{name: "empty", raw: map[string]any{"label_expr": "  "}, want: "non-empty expression"},
+		{name: "static", raw: map[string]any{
+			"label_expr": "item", "from": "", "choices": []any{map[string]any{"label": "A", "value": "a"}},
+		}, want: "requires from"},
+		{name: "field conflict", raw: map[string]any{"label_field": "name", "label_expr": "item.name"}, want: "mutually exclusive"},
+		{name: "forward reference", raw: map[string]any{"label_expr": "value"}, want: "unknown name value"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			raw := map[string]any{"variable": "item", "message": "Item", "from": "vars.items"}
+			for key, value := range tt.raw {
+				raw[key] = value
+			}
+			_, err := New(raw)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestDynamicChoiceExpressionResultValidation(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  map[string]any
+		want string
+	}{
+		{name: "evaluation error", raw: map[string]any{"label_expr": `item.missing.value`}, want: "item 1 label expression"},
+		{name: "non scalar value", raw: map[string]any{"value_expr": `[item.name]`}, want: "value must be a scalar"},
+		{name: "disabled is not boolean", raw: map[string]any{"disabled_expr": `"yes"`}, want: "disabled expression must return a boolean"},
+		{name: "reason is not string", raw: map[string]any{"disabled_expr": `true`, "reason_expr": `42`}, want: "reason must be a non-empty string"},
+		{name: "default is not boolean", raw: map[string]any{"default_expr": `1`}, want: "default expression must return a boolean"},
+		{name: "disabled default", raw: map[string]any{
+			"disabled_expr": `true`, "reason_expr": `"Unavailable"`, "default_expr": `true`,
+		}, want: "both disabled and default"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			raw := map[string]any{
+				"variable": "item", "message": "Item", "from": "vars.items",
+			}
+			for key, value := range tt.raw {
+				raw[key] = value
+			}
+			runner, err := New(raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = runner.Run(t.Context(), step.Request{
+				Vars: map[string]any{
+					"items": []any{
+						map[string]any{"name": "a", "label": "A", "value": "a"},
+						map[string]any{"name": "b", "label": "B", "value": "b"},
+					},
+					"item": "a",
+				},
+			})
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestDynamicChoiceRejectsDuplicateComputedValues(t *testing.T) {
+	runner, err := New(map[string]any{
+		"variable": "item", "message": "Item", "from": "vars.items",
+		"label_field": "name", "value_expr": `"same"`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runner.Run(t.Context(), step.Request{
+		Vars: map[string]any{
+			"items": []any{map[string]any{"name": "A"}, map[string]any{"name": "B"}},
+			"item":  "same",
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), `duplicate choice value "same"`) {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestDynamicChoiceMetadataValidation(t *testing.T) {
 	tests := []struct {
 		name string
