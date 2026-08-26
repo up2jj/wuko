@@ -637,13 +637,20 @@ variables do not enable the reporter implicitly.
 
 Go integrations can implement the public `reporter.Reporter` interface. Progress and diagnostic
 events are delivered synchronously and in order, followed by a safe final outcome containing only
-the workflow name, status, statistics, declared outputs, error, and dry-run state. Reporters never
-receive the workflow's full engine state, environment, inputs, variables, or intermediate values.
+the workflow name, status, statistics, declared outputs, error, dry-run state, and correlation
+identity. Reporters never receive the workflow's full engine state, environment, inputs, variables,
+or intermediate values.
 
-Reporter events do not yet include correlation identifiers. A future event-model revision will
-distinguish the reporting invocation, workflow runs and their parents, individual step executions,
-attempts, and the shared event sequence. The existing step operation ID is an idempotency key and
-will not be reused as reporter correlation identity.
+Use `reporter.Session` when wiring reporters outside the CLI. It supplies one opaque invocation ID
+and a shared sequence across progress and diagnostic events. Every `Engine.Run` attempt has a run
+ID, including validation failures and dry runs, and every concrete step occurrence has a step-run
+ID. Composite action runs point to both their parent run and the exact calling step. Retries retain
+the step-run ID and use the existing attempt number as attempt identity; loop and fan-out
+occurrences receive distinct step-run IDs. Treat ID encodings as opaque.
+
+The existing step operation ID remains separate: it is an idempotency key that may be user-defined,
+shared by retries, and repeated across workflow runs. It is never reused as reporter correlation
+identity. Correlation IDs are not added to workflow templates, step environments, or GitHub output.
 
 ## Splitting a workflow across files
 

@@ -71,7 +71,7 @@ func (e *Engine) executeControl(ctx context.Context, definition *workflow.Defini
 	outcome := stepOutcome{started: true}
 	finish := func(status ExecutionStatus, err error, iterations []IterationStats, nested RunStats) {
 		outcome.stats = StepStats{
-			ID: workflowStep.ID, Type: kind, Index: index, Status: status,
+			StepRunID: options.stepRunID, ID: workflowStep.ID, Type: kind, Index: index, Status: status,
 			StartedAt: startedAt, Duration: time.Since(startedAt), Error: err, Iterations: iterations,
 		}
 		outcome.nested = &nested

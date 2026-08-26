@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/expr-lang/expr"
+	"github.com/up2jj/wuko/correlation"
 	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/executor"
 	wukoexpr "github.com/up2jj/wuko/expression"
@@ -30,8 +31,11 @@ func WithExecutors(registry *executor.Registry) Option {
 }
 
 type Options struct {
-	Vars map[string]any
-	Env  map[string]string
+	// InvocationID correlates this run with its surrounding reporting session. When empty, the
+	// run remains valid and reporters may supply an invocation identity at delivery time.
+	InvocationID correlation.InvocationID
+	Vars         map[string]any
+	Env          map[string]string
 	// Dependencies contains outputs from direct prerequisite workflows keyed by alias.
 	Dependencies map[string]map[string]any
 	// BaseEnv overrides the current process environment when non-nil.
@@ -56,6 +60,10 @@ type Options struct {
 	Diagnostics            diagnostic.Reporter
 	inputs                 map[string]any
 	operationPrefix        string
+	runID                  correlation.RunID
+	parentRunID            correlation.RunID
+	parentStepRunID        correlation.StepRunID
+	stepRunID              correlation.StepRunID
 	depth                  int
 	runtime                *runRuntime
 	defers                 *deferStack
@@ -289,6 +297,8 @@ func (e *Engine) validateSteps(ctx context.Context, definition *workflow.Definit
 func (e *Engine) Run(ctx context.Context, definition *workflow.Definition, options Options) (runState *State, runErr error) {
 	rootRun := options.runtime == nil
 	options = prepareRunOptions(options)
+	options.runID = correlation.NewRunID()
+	options.stepRunID = ""
 	if options.renderer == nil {
 		options.renderer, runErr = workflow.NewRenderer(definition.Templates)
 		if runErr != nil {
@@ -300,6 +310,7 @@ func (e *Engine) Run(ctx context.Context, definition *workflow.Definition, optio
 		trace(options, diagnostic.Event{Phase: diagnostic.PhaseValues, Status: diagnostic.StatusFailed, WorkflowName: definition.Name, Location: definition.Location, Error: err})
 		return nil, err
 	}
+	state.Stats = runStatsIdentity(options)
 	if err := e.Validate(ctx, definition, options); err != nil {
 		return nil, err
 	}
@@ -318,7 +329,10 @@ func (e *Engine) Run(ctx context.Context, definition *workflow.Definition, optio
 	startedAt := time.Now()
 	mainTotal := leafStepCount(definition.Steps) + nestedDeferScopeStepCount(definition.Steps)
 	total := mainTotal + options.defers.stepCount() + leafStepCount(definition.Finally)
-	stats := RunStats{StartedAt: startedAt, Total: total, Steps: make([]StepStats, 0, total)}
+	stats := runStatsIdentity(options)
+	stats.StartedAt = startedAt
+	stats.Total = total
+	stats.Steps = make([]StepStats, 0, total)
 	report(options, ProgressEvent{
 		Kind: WorkflowStarted, Status: StatusRunning, Time: startedAt,
 		WorkflowName: definition.Name, Depth: options.depth, Total: total,
@@ -456,6 +470,7 @@ func finallyErrorRecord(status ExecutionStatus, stepID, stepType string, err err
 }
 
 func (e *Engine) executeSequence(ctx context.Context, definition *workflow.Definition, steps []workflow.Step, options Options, state *State, stats *RunStats, firstIndex, total int) error {
+	options.stepRunID = ""
 	index := firstIndex
 	for position, workflowStep := range steps {
 		if workflowStep.IsExecutorBlock() {
@@ -481,7 +496,8 @@ func (e *Engine) executeSequence(ctx context.Context, definition *workflow.Defin
 			continue
 		}
 		if workflowStep.IsWorktreeBlock() {
-			outcome := e.executeWorktreeBlock(ctx, definition, workflowStep, options, state, index, total)
+			stepOptions := withStepRun(options)
+			outcome := e.executeWorktreeBlock(ctx, definition, workflowStep, stepOptions, state, index, total)
 			if outcome.started {
 				recordStep(stats, outcome.stats)
 				if outcome.nested != nil {
@@ -493,9 +509,9 @@ func (e *Engine) executeSequence(ctx context.Context, definition *workflow.Defin
 				return outcome.err
 			}
 			commitStarted := time.Now()
-			traceStep(options, definition, workflowStep, diagnostic.PhaseCommit, diagnostic.StatusStarted, time.Time{}, "committing worktree result", nil)
+			traceStep(stepOptions, definition, workflowStep, diagnostic.PhaseCommit, diagnostic.StatusStarted, time.Time{}, "committing worktree result", nil)
 			commitStepResult(state, workflowStep.ID, outcome.result)
-			traceStep(options, definition, workflowStep, diagnostic.PhaseCommit, diagnostic.StatusSucceeded, commitStarted, "", nil,
+			traceStep(stepOptions, definition, workflowStep, diagnostic.PhaseCommit, diagnostic.StatusSucceeded, commitStarted, "", nil,
 				diagnostic.Attr("outputs", fmt.Sprint(len(outcome.result.Outputs))))
 			if state.returning {
 				recordSkippedSteps(definition, steps[position+1:], options, stats, index, total)
@@ -547,13 +563,14 @@ func (e *Engine) executeSequence(ctx context.Context, definition *workflow.Defin
 			}
 			continue
 		}
+		stepOptions := withStepRun(options)
 		var outcome stepOutcome
 		if workflowStep.Batch != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil {
-			outcome = e.executeControl(ctx, definition, workflowStep, options, state, index, total)
+			outcome = e.executeControl(ctx, definition, workflowStep, stepOptions, state, index, total)
 		} else if workflowStep.Loop != nil {
-			outcome = e.executeLoop(ctx, definition, workflowStep, options, state, index, total)
+			outcome = e.executeLoop(ctx, definition, workflowStep, stepOptions, state, index, total)
 		} else {
-			outcome = e.executeStep(ctx, definition, workflowStep, options, state, index, total)
+			outcome = e.executeStep(ctx, definition, workflowStep, stepOptions, state, index, total)
 		}
 		if outcome.started {
 			recordStep(stats, outcome.stats)
@@ -569,12 +586,12 @@ func (e *Engine) executeSequence(ctx context.Context, definition *workflow.Defin
 			continue
 		}
 		commitStarted := time.Now()
-		traceStep(options, definition, workflowStep, diagnostic.PhaseCommit, diagnostic.StatusStarted, time.Time{}, "committing step result", nil)
+		traceStep(stepOptions, definition, workflowStep, diagnostic.PhaseCommit, diagnostic.StatusStarted, time.Time{}, "committing step result", nil)
 		commitStepResult(state, workflowStep.ID, outcome.result)
-		traceStep(options, definition, workflowStep, diagnostic.PhaseCommit, diagnostic.StatusSucceeded, commitStarted, "", nil,
+		traceStep(stepOptions, definition, workflowStep, diagnostic.PhaseCommit, diagnostic.StatusSucceeded, commitStarted, "", nil,
 			diagnostic.Attr("outputs", fmt.Sprint(len(outcome.result.Outputs))), diagnostic.Attr("variables", fmt.Sprint(len(outcome.result.Variables))))
 		if len(workflowStep.Defer) > 0 {
-			options.defers.register(workflowStep.ID, options)
+			options.defers.register(workflowStep.ID, stepOptions)
 		}
 	}
 	return nil
@@ -609,6 +626,7 @@ func evaluateConditionalBlock(definition *workflow.Definition, workflowStep work
 }
 
 func recordSkippedSteps(definition *workflow.Definition, steps []workflow.Step, options Options, stats *RunStats, firstIndex, total int) {
+	options.stepRunID = ""
 	index := firstIndex
 	for _, workflowStep := range steps {
 		if workflowStep.IsExecutorBlock() {
@@ -634,11 +652,12 @@ func recordSkippedSteps(definition *workflow.Definition, steps []workflow.Step, 
 			continue
 		}
 		started := time.Now()
+		stepOptions := withStepRun(options)
 		stepStats := StepStats{
-			ID: workflowStep.ID, Type: skippedStepKind(workflowStep), Index: index,
+			StepRunID: stepOptions.stepRunID, ID: workflowStep.ID, Type: skippedStepKind(workflowStep), Index: index,
 			Status: StatusSkipped, StartedAt: started,
 		}
-		reportStepFinished(options, definition.Name, workflowStep.ID, stepStats.Type, index, total, stepStats)
+		reportStepFinished(stepOptions, definition.Name, workflowStep.ID, stepStats.Type, index, total, stepStats)
 		recordStep(stats, stepStats)
 		index++
 	}
@@ -676,7 +695,7 @@ func (e *Engine) executeStep(ctx context.Context, definition *workflow.Definitio
 	metrics := waitMetrics{}
 	finishStep := func(status ExecutionStatus, stepErr error, attempts []AttemptStats, retryWait time.Duration) {
 		outcome.stats = StepStats{
-			ID: workflowStep.ID, Type: kind, Index: index, Status: status,
+			StepRunID: options.stepRunID, ID: workflowStep.ID, Type: kind, Index: index, Status: status,
 			StartedAt: stepStartedAt, Duration: time.Since(stepStartedAt),
 			RetryWait: retryWait, Polls: metrics.polls, PollWait: metrics.pollWait,
 			Attempts: attempts, Error: stepErr,
@@ -943,6 +962,18 @@ func statusFromError(err error) ExecutionStatus {
 	return StatusFailed
 }
 
+func withStepRun(options Options) Options {
+	options.stepRunID = correlation.NewStepRunID()
+	return options
+}
+
+func runStatsIdentity(options Options) RunStats {
+	return RunStats{
+		InvocationID: options.InvocationID, RunID: options.runID,
+		ParentRunID: options.parentRunID, ParentStepRunID: options.parentStepRunID,
+	}
+}
+
 func initialState(definition *workflow.Definition, options Options) (*State, error) {
 	vars, environment, err := workflow.PrepareValues(definition, workflow.LoadOptions{Vars: options.Vars, Env: options.Env, BaseEnv: options.BaseEnv, RunDir: options.RunDir})
 	if err != nil {
@@ -993,10 +1024,12 @@ func (e *Engine) validateAction(ctx context.Context, definition *workflow.Defini
 	inputs := actionValidationInputs(workflowStep.Action)
 	inner := &workflow.Definition{Version: 1, Name: workflowStep.Action.Name, Templates: workflowStep.Action.Templates, Dir: dir, Steps: workflowStep.Action.Steps, Finally: workflowStep.Action.Finally, Vars: map[string]any{}, Env: workflow.Environment{}, Location: workflowStep.Action.Location}
 	return e.Validate(ctx, inner, Options{
-		inputs: inputs, BaseEnv: state.Env, RunDir: options.RunDir,
+		InvocationID: options.InvocationID,
+		inputs:       inputs, BaseEnv: state.Env, RunDir: options.RunDir,
 		LocalValueDir: options.LocalValueDir, GlobalValueDir: options.GlobalValueDir,
 		Stdin: options.Stdin, Stdout: options.Stdout, Stderr: options.Stderr, Interactive: options.Interactive,
-		Diagnostics: options.Diagnostics, depth: options.depth + 1, runtime: options.runtime,
+		Diagnostics: options.Diagnostics, runID: options.runID, parentRunID: options.parentRunID,
+		parentStepRunID: options.parentStepRunID, depth: options.depth + 1, runtime: options.runtime,
 	})
 }
 
@@ -1015,12 +1048,14 @@ func (e *Engine) prepareActionExecutor(definition *workflow.Definition, workflow
 	inner := &workflow.Definition{Version: 1, Name: workflowStep.Action.Name, Templates: workflowStep.Action.Templates, Dir: dir, Steps: workflowStep.Action.Steps, Finally: workflowStep.Action.Finally, Vars: map[string]any{}, Env: workflow.Environment{}, Location: workflowStep.Action.Location}
 	execute := func(ctx context.Context, request step.Request) (step.Result, error) {
 		innerState, err := e.Run(ctx, inner, Options{
-			inputs: inputs, BaseEnv: state.Env, RunDir: options.RunDir,
+			InvocationID: options.InvocationID,
+			inputs:       inputs, BaseEnv: state.Env, RunDir: options.RunDir,
 			LocalValueDir: options.LocalValueDir, GlobalValueDir: options.GlobalValueDir,
 			Stdin: options.Stdin, Stdout: options.Stdout, Stderr: options.Stderr,
 			Interactive: options.Interactive, Progress: options.Progress,
 			Diagnostics:     options.Diagnostics,
-			operationPrefix: request.OperationID, depth: options.depth + 1, runtime: options.runtime,
+			operationPrefix: request.OperationID, parentRunID: options.runID,
+			parentStepRunID: options.stepRunID, depth: options.depth + 1, runtime: options.runtime,
 		})
 		if err != nil {
 			return step.Result{}, err

@@ -85,7 +85,7 @@ func (e *Engine) executeWorktreeBlock(ctx context.Context, definition *workflow.
 		status := statusFromError(outcome.err)
 		iteration := IterationStats{Index: 0, Status: status, StartedAt: bodyStats.StartedAt, Duration: bodyStats.Duration, Error: outcome.err, Steps: bodyStats.Steps}
 		outcome.stats = StepStats{
-			ID: block.ID, Type: "worktree", Index: index, Status: status,
+			StepRunID: options.stepRunID, ID: block.ID, Type: "worktree", Index: index, Status: status,
 			StartedAt: startedAt, Duration: time.Since(startedAt), Error: outcome.err,
 			Iterations: []IterationStats{iteration},
 		}

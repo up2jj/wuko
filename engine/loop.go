@@ -27,7 +27,7 @@ func (e *Engine) executeLoop(ctx context.Context, definition *workflow.Definitio
 	outcome := stepOutcome{started: true}
 	finish := func(status ExecutionStatus, err error, nested RunStats) {
 		outcome.stats = StepStats{
-			ID: workflowStep.ID, Type: "loop", Index: index, Status: status,
+			StepRunID: options.stepRunID, ID: workflowStep.ID, Type: "loop", Index: index, Status: status,
 			StartedAt: startedAt, Duration: time.Since(startedAt), Error: err,
 		}
 		outcome.nested = &nested

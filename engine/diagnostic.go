@@ -18,6 +18,11 @@ func trace(options Options, event diagnostic.Event) {
 	if event.Time.IsZero() {
 		event.Time = time.Now()
 	}
+	event.InvocationID = options.InvocationID
+	event.RunID = options.runID
+	event.ParentRunID = options.parentRunID
+	event.ParentStepRunID = options.parentStepRunID
+	event.StepRunID = options.stepRunID
 	if options.runtime != nil {
 		options.runtime.reportMu.Lock()
 		defer options.runtime.reportMu.Unlock()

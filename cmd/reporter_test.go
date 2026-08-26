@@ -11,8 +11,13 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/up2jj/wuko/correlation"
+	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/engine"
 	reporterpkg "github.com/up2jj/wuko/reporter"
+	"github.com/up2jj/wuko/step"
+	"github.com/up2jj/wuko/webui"
+	"github.com/up2jj/wuko/workflow"
 )
 
 func TestFinishReportersOnceFinalizesOnlyFirstOutcome(t *testing.T) {
@@ -47,7 +52,8 @@ func TestRunReportersCompleteBuildsSafeOutcome(t *testing.T) {
 	}}}
 	reporters.Progress(engine.ProgressEvent{
 		Kind: engine.WorkflowFinished, Depth: 0, Status: engine.StatusTimedOut,
-		Stats: engine.RunStats{Total: 4, Failed: 1, Duration: 3 * time.Second},
+		RunID: "terminal-run", ParentRunID: "parent-run", ParentStepRunID: "parent-step",
+		Stats: engine.RunStats{RunID: "terminal-run", Total: 4, Failed: 1, Duration: 3 * time.Second},
 	})
 	state := &engine.State{
 		Stats:   engine.RunStats{Total: 2, Succeeded: 2},
@@ -68,6 +74,9 @@ func TestRunReportersCompleteBuildsSafeOutcome(t *testing.T) {
 	if got.WorkflowName != "check" || got.Status != engine.StatusTimedOut || !errors.Is(got.Err, runErr) {
 		t.Fatalf("outcome = %#v, want named timed-out outcome", got)
 	}
+	if got.InvocationID == "" || got.RunID != "terminal-run" || got.ParentRunID != "parent-run" || got.ParentStepRunID != "parent-step" {
+		t.Fatalf("outcome identity = %#v", got)
+	}
 	if got.Stats.Total != 4 || got.Stats.Duration != 3*time.Second {
 		t.Fatalf("stats = %#v, want terminal event stats", got.Stats)
 	}
@@ -85,7 +94,7 @@ func TestRunReportersCompleteFallsBackToStateForDryRun(t *testing.T) {
 		},
 	}}}
 	state := &engine.State{
-		Stats:   engine.RunStats{Total: 3, Succeeded: 3},
+		Stats:   engine.RunStats{InvocationID: "invocation", RunID: "dry-run", Total: 3, Succeeded: 3},
 		Outputs: map[string]any{"artifact": "placeholder"},
 	}
 	if err := reporters.complete(t.Context(), "check", state, nil, true); err != nil {
@@ -93,6 +102,69 @@ func TestRunReportersCompleteFallsBackToStateForDryRun(t *testing.T) {
 	}
 	if got.Status != engine.StatusSucceeded || !got.DryRun || got.Stats.Total != 3 {
 		t.Fatalf("outcome = %#v, want successful dry-run state", got)
+	}
+	if got.InvocationID == "" || got.RunID != "dry-run" {
+		t.Fatalf("dry-run outcome identity = %#v", got)
+	}
+}
+
+func TestRunReportersSequenceSpansRunsAndStreams(t *testing.T) {
+	var progress []engine.ProgressEvent
+	var diagnostics []diagnostic.Event
+	reporters := &runReporters{group: reporterpkg.Group{reporterpkg.Funcs{
+		ProgressFunc:   func(event engine.ProgressEvent) { progress = append(progress, event) },
+		DiagnosticFunc: func(event diagnostic.Event) { diagnostics = append(diagnostics, event) },
+	}}}
+	invocationID := reporters.InvocationID()
+	reporters.Diagnostic(diagnostic.Event{Message: "preparing"})
+	registry := step.NewRegistry()
+	if err := registry.Register("ok", func(map[string]any) (step.Runner, error) {
+		return correlationTestRunner{}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	definition := &workflow.Definition{Version: 1, Name: "scheduled", Dir: t.TempDir(), Steps: []workflow.Step{{ID: "run", Type: "ok", With: map[string]any{}}}}
+	options := engine.Options{InvocationID: invocationID, Progress: reporters.Progress, Diagnostics: reporters.Diagnostic}
+	for range 2 {
+		if _, err := engine.New(registry).Run(t.Context(), definition, options); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var starts []engine.ProgressEvent
+	for _, event := range progress {
+		if event.Kind == engine.WorkflowStarted {
+			starts = append(starts, event)
+		}
+	}
+	if len(starts) != 2 || len(diagnostics) == 0 {
+		t.Fatalf("events = %d starts, %d diagnostics", len(starts), len(diagnostics))
+	}
+	if diagnostics[0].InvocationID != invocationID || diagnostics[0].Sequence != 1 ||
+		starts[0].InvocationID != invocationID || starts[1].InvocationID != invocationID ||
+		starts[0].Sequence <= 1 || starts[1].Sequence <= starts[0].Sequence {
+		t.Fatalf("correlated events = %#v / %#v", diagnostics, starts)
+	}
+	if starts[0].RunID == "" || starts[0].RunID == starts[1].RunID {
+		t.Fatalf("repeated run IDs = %q, %q", starts[0].RunID, starts[1].RunID)
+	}
+}
+
+type correlationTestRunner struct{}
+
+func (correlationTestRunner) Run(context.Context, step.Request) (step.Result, error) {
+	return step.Result{}, nil
+}
+
+func TestBrowserReporterProjectsCorrelation(t *testing.T) {
+	var got webui.Progress
+	reporter := browserReporter{stage: "workflow", emit: func(event webui.Progress) { got = event }}
+	reporter.Progress(engine.ProgressEvent{
+		InvocationID: "invocation", RunID: "run", ParentRunID: "parent",
+		ParentStepRunID: "parent-step", StepRunID: "step", Sequence: 7,
+	})
+	if got.InvocationID != correlation.InvocationID("invocation") || got.RunID != "run" || got.ParentRunID != "parent" ||
+		got.ParentStepRunID != "parent-step" || got.StepRunID != "step" || got.Sequence != 7 {
+		t.Fatalf("browser progress = %#v", got)
 	}
 }
 

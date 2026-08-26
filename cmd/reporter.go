@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/spf13/cobra"
+	"github.com/up2jj/wuko/correlation"
 	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/engine"
 	"github.com/up2jj/wuko/githubactions"
@@ -42,28 +43,81 @@ var runReporterCatalog = []runReporterDefinition{
 // runReporters adapts command completion into the safe public reporter outcome. It records the
 // latest root workflow event because Engine.Run returns no State after an execution failure.
 type runReporters struct {
-	group reporterpkg.Group
+	group   reporterpkg.Group
+	session *reporterpkg.Session
 
 	mu       sync.Mutex
 	finished *engine.ProgressEvent
+	latest   runIdentity
+}
+
+type runIdentity struct {
+	runID           correlation.RunID
+	parentRunID     correlation.RunID
+	parentStepRunID correlation.StepRunID
 }
 
 func (reporters *runReporters) Progress(event engine.ProgressEvent) {
+	reporters.captureProgress(event)
+	reporters.activeSession().Progress(event)
+}
+
+func (reporters *runReporters) captureProgress(event engine.ProgressEvent) {
+	if event.Depth == 0 && event.RunID != "" {
+		reporters.mu.Lock()
+		reporters.latest = identityFromProgress(event)
+		reporters.mu.Unlock()
+	}
 	if event.Kind == engine.WorkflowFinished && event.Depth == 0 {
 		reporters.mu.Lock()
 		copy := event
 		reporters.finished = &copy
 		reporters.mu.Unlock()
 	}
-	reporters.group.Progress(event)
 }
 
 func (reporters *runReporters) Diagnostic(event diagnostic.Event) {
-	reporters.group.Diagnostic(event)
+	reporters.captureDiagnostic(event)
+	reporters.activeSession().Diagnostic(event)
+}
+
+func (reporters *runReporters) captureDiagnostic(event diagnostic.Event) {
+	if event.Depth == 0 && event.RunID != "" {
+		reporters.mu.Lock()
+		reporters.latest = identityFromDiagnostic(event)
+		reporters.mu.Unlock()
+	}
 }
 
 func (reporters *runReporters) Finish(ctx context.Context, outcome reporterpkg.Outcome) error {
-	return reporters.group.Finish(ctx, outcome)
+	return reporters.activeSession().Finish(ctx, outcome)
+}
+
+func (reporters *runReporters) InvocationID() correlation.InvocationID {
+	return reporters.activeSession().InvocationID()
+}
+
+func (reporters *runReporters) With(additional ...reporterpkg.Reporter) reporterpkg.Reporter {
+	view := reporters.activeSession().With(additional...)
+	return reporterpkg.Funcs{
+		ProgressFunc: func(event engine.ProgressEvent) {
+			reporters.captureProgress(event)
+			view.Progress(event)
+		},
+		DiagnosticFunc: func(event diagnostic.Event) {
+			reporters.captureDiagnostic(event)
+			view.Diagnostic(event)
+		},
+	}
+}
+
+func (reporters *runReporters) activeSession() *reporterpkg.Session {
+	reporters.mu.Lock()
+	defer reporters.mu.Unlock()
+	if reporters.session == nil {
+		reporters.session = reporterpkg.NewSession("", reporters.group...)
+	}
+	return reporters.session
 }
 
 func (reporters *runReporters) complete(ctx context.Context, workflowName string, state *engine.State, runErr error, dryRun bool) error {
@@ -76,15 +130,42 @@ func (reporters *runReporters) complete(ctx context.Context, workflowName string
 	if state != nil {
 		outcome.Stats = state.Stats
 		outcome.Outputs = workflow.CloneMap(state.Outputs)
+		applyStatsIdentity(&outcome, state.Stats)
 	}
 	reporters.mu.Lock()
 	finished := reporters.finished
+	latest := reporters.latest
 	reporters.mu.Unlock()
 	if finished != nil {
 		outcome.Status = finished.Status
 		outcome.Stats = finished.Stats
+		applyProgressIdentity(&outcome, *finished)
+	} else if outcome.RunID == "" {
+		applyRunIdentity(&outcome, latest)
 	}
 	return reporters.Finish(context.WithoutCancel(ctx), outcome)
+}
+
+func identityFromProgress(event engine.ProgressEvent) runIdentity {
+	return runIdentity{runID: event.RunID, parentRunID: event.ParentRunID, parentStepRunID: event.ParentStepRunID}
+}
+
+func identityFromDiagnostic(event diagnostic.Event) runIdentity {
+	return runIdentity{runID: event.RunID, parentRunID: event.ParentRunID, parentStepRunID: event.ParentStepRunID}
+}
+
+func applyProgressIdentity(outcome *reporterpkg.Outcome, event engine.ProgressEvent) {
+	applyRunIdentity(outcome, identityFromProgress(event))
+}
+
+func applyStatsIdentity(outcome *reporterpkg.Outcome, stats engine.RunStats) {
+	applyRunIdentity(outcome, runIdentity{runID: stats.RunID, parentRunID: stats.ParentRunID, parentStepRunID: stats.ParentStepRunID})
+}
+
+func applyRunIdentity(outcome *reporterpkg.Outcome, identity runIdentity) {
+	outcome.RunID = identity.runID
+	outcome.ParentRunID = identity.parentRunID
+	outcome.ParentStepRunID = identity.parentStepRunID
 }
 
 func outcomeStatus(runErr error) engine.ExecutionStatus {
@@ -161,7 +242,7 @@ func newRunReporters(command *cobra.Command, deps dependencies, runDir string, n
 		}
 		group = append(group, created)
 	}
-	return &runReporters{group: group}, nil
+	return &runReporters{group: group, session: reporterpkg.NewSession("", group...)}, nil
 }
 
 func runReporterFactoryFor(name string) (runReporterFactory, bool) {

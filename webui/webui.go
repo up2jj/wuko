@@ -19,20 +19,27 @@ import (
 	"sync"
 	"time"
 
+	"github.com/up2jj/wuko/correlation"
 	"github.com/up2jj/wuko/form"
 )
 
 // Progress is the browser-safe projection of one execution event.
 type Progress struct {
-	Stage    string `json:"stage"`
-	Kind     string `json:"kind"`
-	Status   string `json:"status"`
-	StepID   string `json:"step_id,omitempty"`
-	StepType string `json:"step_type,omitempty"`
-	Index    int    `json:"index,omitempty"`
-	Total    int    `json:"total,omitempty"`
-	Attempt  int    `json:"attempt,omitempty"`
-	Duration string `json:"duration,omitempty"`
+	InvocationID    correlation.InvocationID `json:"invocation_id,omitempty"`
+	RunID           correlation.RunID        `json:"run_id,omitempty"`
+	ParentRunID     correlation.RunID        `json:"parent_run_id,omitempty"`
+	ParentStepRunID correlation.StepRunID    `json:"parent_step_run_id,omitempty"`
+	StepRunID       correlation.StepRunID    `json:"step_run_id,omitempty"`
+	Sequence        correlation.Sequence     `json:"sequence,omitempty"`
+	Stage           string                   `json:"stage"`
+	Kind            string                   `json:"kind"`
+	Status          string                   `json:"status"`
+	StepID          string                   `json:"step_id,omitempty"`
+	StepType        string                   `json:"step_type,omitempty"`
+	Index           int                      `json:"index,omitempty"`
+	Total           int                      `json:"total,omitempty"`
+	Attempt         int                      `json:"attempt,omitempty"`
+	Duration        string                   `json:"duration,omitempty"`
 }
 
 // Summary is the deliberately small result surface exposed to browser templates.

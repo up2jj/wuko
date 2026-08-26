@@ -5,9 +5,10 @@ import (
 	"fmt"
 	"io"
 	"sync"
-
-	"github.com/up2jj/wuko/process"
 	"time"
+
+	"github.com/up2jj/wuko/correlation"
+	"github.com/up2jj/wuko/process"
 )
 
 // ProgressKind identifies one point in the execution lifecycle.
@@ -55,6 +56,7 @@ type AttemptStats struct {
 
 // StepStats records the terminal outcome, retries, and polling activity of one workflow step.
 type StepStats struct {
+	StepRunID  correlation.StepRunID
 	ID         string
 	Type       string
 	Index      int
@@ -81,58 +83,73 @@ type IterationStats struct {
 
 // RunStats summarizes one workflow execution. Composite actions have their own nested summary.
 type RunStats struct {
-	StartedAt  time.Time
-	FinishedAt time.Time
-	Duration   time.Duration
-	Total      int
-	Succeeded  int
-	Failed     int
-	Skipped    int
-	Canceled   int
-	TimedOut   int
-	Attempts   int
-	Retries    int
-	RetryWait  time.Duration
-	Polls      int
-	PollWait   time.Duration
-	Steps      []StepStats
+	InvocationID    correlation.InvocationID
+	RunID           correlation.RunID
+	ParentRunID     correlation.RunID
+	ParentStepRunID correlation.StepRunID
+	StartedAt       time.Time
+	FinishedAt      time.Time
+	Duration        time.Duration
+	Total           int
+	Succeeded       int
+	Failed          int
+	Skipped         int
+	Canceled        int
+	TimedOut        int
+	Attempts        int
+	Retries         int
+	RetryWait       time.Duration
+	Polls           int
+	PollWait        time.Duration
+	Steps           []StepStats
 }
 
 // ProgressEvent is delivered synchronously and serialized as execution changes state. Depth is
 // zero for the selected workflow and increases inside concurrent groups and composite actions.
 type ProgressEvent struct {
-	Kind           ProgressKind
-	Status         ExecutionStatus
-	Time           time.Time
-	WorkflowName   string
-	Depth          int
-	StepID         string
-	StepType       string
-	Index          int
-	Total          int
-	Attempt        int
-	MaxAttempts    int
-	GroupSize      int
-	Started        int
-	Succeeded      int
-	ControlKind    string
-	Iteration      int
-	Iterations     int
-	MaxConcurrency int
-	FailFast       bool
-	Timeout        time.Duration
-	Duration       time.Duration
-	RetryDelay     time.Duration
-	Poll           int
-	PollDelay      time.Duration
-	Matched        bool
-	Polls          int
-	PollWait       time.Duration
-	Error          error
-	Stats          RunStats
+	InvocationID    correlation.InvocationID
+	RunID           correlation.RunID
+	ParentRunID     correlation.RunID
+	ParentStepRunID correlation.StepRunID
+	StepRunID       correlation.StepRunID
+	Sequence        correlation.Sequence
+	Kind            ProgressKind
+	Status          ExecutionStatus
+	Time            time.Time
+	WorkflowName    string
+	Depth           int
+	StepID          string
+	StepType        string
+	Index           int
+	Total           int
+	Attempt         int
+	MaxAttempts     int
+	GroupSize       int
+	Started         int
+	Succeeded       int
+	ControlKind     string
+	Iteration       int
+	Iterations      int
+	MaxConcurrency  int
+	FailFast        bool
+	Timeout         time.Duration
+	Duration        time.Duration
+	RetryDelay      time.Duration
+	Poll            int
+	PollDelay       time.Duration
+	Matched         bool
+	Polls           int
+	PollWait        time.Duration
+	Error           error
+	Stats           RunStats
 }
 
 func report(options Options, event ProgressEvent) {
+	event.InvocationID = options.InvocationID
+	event.RunID = options.runID
+	event.ParentRunID = options.parentRunID
+	event.ParentStepRunID = options.parentStepRunID
+	event.StepRunID = options.stepRunID
 	if options.Progress != nil {
 		if options.runtime != nil {
 			options.runtime.reportMu.Lock()

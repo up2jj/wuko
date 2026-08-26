@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 
+	"github.com/up2jj/wuko/correlation"
 	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/engine"
 )
@@ -75,6 +77,91 @@ func TestFuncsZeroValueIsNoOp(t *testing.T) {
 	if err := reporter.Finish(t.Context(), Outcome{}); err != nil {
 		t.Fatalf("Finish() error = %v, want nil", err)
 	}
+}
+
+func TestSessionStampsMixedEventsAndOutcome(t *testing.T) {
+	invocationID := correlation.InvocationID("external")
+	var progress engine.ProgressEvent
+	var diagnosticEvent diagnostic.Event
+	var outcome Outcome
+	session := NewSession(invocationID, Funcs{
+		ProgressFunc:   func(event engine.ProgressEvent) { progress = event },
+		DiagnosticFunc: func(event diagnostic.Event) { diagnosticEvent = event },
+		FinishFunc: func(_ context.Context, reported Outcome) error {
+			outcome = reported
+			return nil
+		},
+	})
+
+	session.Progress(engine.ProgressEvent{RunID: correlation.RunID("run")})
+	session.Diagnostic(diagnostic.Event{RunID: correlation.RunID("run")})
+	if err := session.Finish(t.Context(), Outcome{RunID: correlation.RunID("run")}); err != nil {
+		t.Fatalf("Finish() error = %v", err)
+	}
+	if progress.InvocationID != invocationID || progress.Sequence != 1 || progress.RunID != "run" {
+		t.Fatalf("progress = %#v", progress)
+	}
+	if diagnosticEvent.InvocationID != invocationID || diagnosticEvent.Sequence != 2 || diagnosticEvent.RunID != "run" {
+		t.Fatalf("diagnostic = %#v", diagnosticEvent)
+	}
+	if outcome.InvocationID != invocationID || outcome.RunID != "run" {
+		t.Fatalf("outcome = %#v", outcome)
+	}
+}
+
+func TestSessionZeroValueAndConcurrentDelivery(t *testing.T) {
+	const total = 32
+	sequences := make([]correlation.Sequence, 0, total)
+	var sequencesMu sync.Mutex
+	var session Session
+	session.reporters = Group{Funcs{ProgressFunc: func(event engine.ProgressEvent) {
+		sequencesMu.Lock()
+		sequences = append(sequences, event.Sequence)
+		sequencesMu.Unlock()
+	}}}
+
+	var wait sync.WaitGroup
+	for range total {
+		wait.Go(func() { session.Progress(engine.ProgressEvent{}) })
+	}
+	wait.Wait()
+	if session.InvocationID() == "" {
+		t.Fatal("zero-value session did not generate an invocation ID")
+	}
+	if len(sequences) != total {
+		t.Fatalf("delivered %d events, want %d", len(sequences), total)
+	}
+	for index, sequence := range sequences {
+		if want := correlation.Sequence(index + 1); sequence != want {
+			t.Fatalf("sequence[%d] = %d, want %d", index, sequence, want)
+		}
+	}
+}
+
+func TestSessionWithSharesStampingAndPreservesFanoutOrder(t *testing.T) {
+	var events []string
+	base := Funcs{ProgressFunc: func(event engine.ProgressEvent) {
+		events = append(events, "base:"+string(rune('0'+event.Sequence)))
+	}}
+	extra := Funcs{ProgressFunc: func(event engine.ProgressEvent) {
+		events = append(events, "extra:"+string(rune('0'+event.Sequence)))
+	}}
+	session := NewSession("invocation", base)
+	session.Progress(engine.ProgressEvent{})
+	session.With(extra).Progress(engine.ProgressEvent{})
+	if got, want := strings.Join(events, ","), "base:1,base:2,extra:2"; got != want {
+		t.Fatalf("events = %q, want %q", got, want)
+	}
+}
+
+func TestSessionReporterCanReadInvocationID(t *testing.T) {
+	var session *Session
+	session = NewSession("invocation", Funcs{ProgressFunc: func(engine.ProgressEvent) {
+		if got := session.InvocationID(); got != "invocation" {
+			t.Errorf("InvocationID() = %q", got)
+		}
+	}})
+	session.Progress(engine.ProgressEvent{})
 }
 
 func recordingReporter(name string, events *[]string, finishErr error) Reporter {

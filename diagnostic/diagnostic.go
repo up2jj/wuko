@@ -5,6 +5,8 @@ import (
 	"errors"
 	"slices"
 	"time"
+
+	"github.com/up2jj/wuko/correlation"
 )
 
 // Phase identifies one operation in the workflow lifecycle.
@@ -81,18 +83,24 @@ func ErrorAttributes(err error) []Attribute {
 
 // Event is one synchronous diagnostic record.
 type Event struct {
-	Phase        Phase
-	Status       Status
-	Time         time.Time
-	Duration     time.Duration
-	Depth        int
-	WorkflowName string
-	StepID       string
-	StepType     string
-	Location     Location
-	Message      string
-	Attributes   []Attribute
-	Error        error
+	InvocationID    correlation.InvocationID
+	RunID           correlation.RunID
+	ParentRunID     correlation.RunID
+	ParentStepRunID correlation.StepRunID
+	StepRunID       correlation.StepRunID
+	Sequence        correlation.Sequence
+	Phase           Phase
+	Status          Status
+	Time            time.Time
+	Duration        time.Duration
+	Depth           int
+	WorkflowName    string
+	StepID          string
+	StepType        string
+	Location        Location
+	Message         string
+	Attributes      []Attribute
+	Error           error
 }
 
 // Reporter receives diagnostic events synchronously. Callers that retain events must copy them.

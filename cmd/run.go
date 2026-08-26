@@ -136,7 +136,8 @@ func runWorkflow(command *cobra.Command, deps dependencies, args []string, confi
 			fmt.Fprintf(command.OutOrStdout(), "Workflow %s (%s)\n", definition.Name, definition.Path)
 		}
 		return engine.Options{
-			Vars: vars, Env: env, BaseEnv: baseEnv, RunDir: cwd, Stdin: command.InOrStdin(),
+			InvocationID: reporters.InvocationID(),
+			Vars:         vars, Env: env, BaseEnv: baseEnv, RunDir: cwd, Stdin: command.InOrStdin(),
 			Dependencies:  dependencies,
 			LocalValueDir: localValueDir, GlobalValueDir: filepath.Join(configDir, "wuko", "values"),
 			Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(),

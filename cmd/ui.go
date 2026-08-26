@@ -55,6 +55,17 @@ func runWorkflowUI(command *cobra.Command, deps dependencies, args []string, con
 	if err != nil {
 		return err
 	}
+	reporters, err := newRunReporters(command, deps, cwd, config.reporters)
+	if err != nil {
+		return err
+	}
+	finishReporters := finishReportersOnce(reporters)
+	var workflowName string
+	defer func() {
+		if finishErr, called := finishReporters(command.Context(), workflowName, nil, runErr, false); called {
+			runErr = errors.Join(runErr, finishErr)
+		}
+	}()
 	if config.workflowFile != "" && len(args) > 1 {
 		return fmt.Errorf("workflow selector and --file cannot be used together")
 	}
@@ -84,7 +95,7 @@ func runWorkflowUI(command *cobra.Command, deps dependencies, args []string, con
 	if loader == nil {
 		loader = workflow.NewLoader(nil)
 	}
-	loadOptions := workflow.LoadOptions{Vars: vars, Env: env, BaseEnv: baseEnv, RunDir: cwd, Diagnostics: diagnosticsFor(command, deps, cwd)}
+	loadOptions := workflow.LoadOptions{Vars: vars, Env: env, BaseEnv: baseEnv, RunDir: cwd, Diagnostics: reporters.Diagnostic}
 	definition, cleanup, err := target.decode(command.Context(), loader, loadOptions)
 	if err != nil {
 		return err
@@ -94,6 +105,7 @@ func runWorkflowUI(command *cobra.Command, deps dependencies, args []string, con
 	if err != nil {
 		return err
 	}
+	workflowName = definition.Name
 	if err := requireDirectlyInvokable(definition); err != nil {
 		return err
 	}
@@ -108,17 +120,6 @@ func runWorkflowUI(command *cobra.Command, deps dependencies, args []string, con
 	if err != nil {
 		return fmt.Errorf("workflow %q: %w", definition.Name, err)
 	}
-	reporters, err := newRunReporters(command, deps, cwd, config.reporters)
-	if err != nil {
-		return err
-	}
-	finishReporters := finishReportersOnce(reporters)
-	defer func() {
-		if finishErr, called := finishReporters(command.Context(), definition.Name, nil, runErr, false); called {
-			runErr = errors.Join(runErr, finishErr)
-		}
-	}()
-
 	load := formLoadFunc(command, deps, loader, definition, formDefinition, loadOptions, reporters, cwd, configDir, target.remote)
 	execute := func(ctx context.Context, submitted map[string]any, emit func(webui.Progress)) webui.Result {
 		activeVars := maps.Clone(vars)
@@ -139,7 +140,7 @@ func runWorkflowUI(command *cobra.Command, deps dependencies, args []string, con
 			return result
 		}
 		browser := browserReporter{stage: "workflow", emit: emit}
-		activeReporters := reporterpkg.Group{reporters, browser}
+		activeReporters := reporters.With(browser)
 		remoteDefinitions := map[string]bool{definition.Path: target.remote}
 		optionsFor := func(item *workflow.Definition, dependencies map[string]map[string]any) engine.Options {
 			localValueDir := ""
@@ -147,7 +148,8 @@ func runWorkflowUI(command *cobra.Command, deps dependencies, args []string, con
 				localValueDir = filepath.Join(item.Dir, ".wuko", "values")
 			}
 			return engine.Options{
-				Vars: activeVars, Env: env, BaseEnv: baseEnv, Dependencies: dependencies, RunDir: cwd,
+				InvocationID: reporters.InvocationID(),
+				Vars:         activeVars, Env: env, BaseEnv: baseEnv, Dependencies: dependencies, RunDir: cwd,
 				Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(),
 				Interactive: false, Progress: activeReporters.Progress, Diagnostics: activeReporters.Diagnostic,
 				LocalValueDir: localValueDir, GlobalValueDir: filepath.Join(configDir, "wuko", "values"),
@@ -241,13 +243,14 @@ func formLoadFunc(command *cobra.Command, deps dependencies, loader *workflow.Lo
 			return nil, err
 		}
 		browser := browserReporter{stage: "form", emit: emit}
-		activeReporters := reporterpkg.Group{reporters, browser}
+		activeReporters := reporters.With(browser)
 		localValueDir := ""
 		if !remote {
 			localValueDir = filepath.Join(definition.Dir, ".wuko", "values")
 		}
 		state, err := workflowEngine(deps).Run(ctx, definition, engine.Options{
-			Vars: options.Vars, Env: options.Env, BaseEnv: options.BaseEnv, RunDir: cwd,
+			InvocationID: reporters.InvocationID(),
+			Vars:         options.Vars, Env: options.Env, BaseEnv: options.BaseEnv, RunDir: cwd,
 			Stdin: command.InOrStdin(), Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(),
 			Interactive: false, Progress: activeReporters.Progress, Diagnostics: activeReporters.Diagnostic,
 			LocalValueDir: localValueDir, GlobalValueDir: filepath.Join(configDir, "wuko", "values"),
@@ -266,6 +269,8 @@ type browserReporter struct {
 
 func (reporter browserReporter) Progress(event engine.ProgressEvent) {
 	reporter.emit(webui.Progress{
+		InvocationID: event.InvocationID, RunID: event.RunID, ParentRunID: event.ParentRunID,
+		ParentStepRunID: event.ParentStepRunID, StepRunID: event.StepRunID, Sequence: event.Sequence,
 		Stage: reporter.stage, Kind: string(event.Kind), Status: string(event.Status), StepID: event.StepID,
 		StepType: event.StepType, Index: event.Index, Total: event.Total, Attempt: event.Attempt,
 		Duration: event.Duration.String(),
