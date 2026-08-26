@@ -51,6 +51,7 @@ import (
 	semverstep "github.com/up2jj/wuko/steps/semver"
 	setstep "github.com/up2jj/wuko/steps/set"
 	"github.com/up2jj/wuko/steps/shell"
+	tablestep "github.com/up2jj/wuko/steps/table"
 	tempstep "github.com/up2jj/wuko/steps/temp"
 	watchstep "github.com/up2jj/wuko/steps/watch"
 	"github.com/up2jj/wuko/tui"
@@ -163,7 +164,7 @@ func NewRootCmd() *cobra.Command {
 	registry := step.NewRegistry()
 	executors := executor.NewRegistry()
 	for _, register := range []func(*step.Registry) error{
-		inputstep.Register, passwordstep.Register, choice.Register, pathstep.Register, review.Register,
+		inputstep.Register, passwordstep.Register, choice.Register, pathstep.Register, review.Register, tablestep.Register,
 		confirm.Register, assertstep.Register, setstep.Register, importvarsstep.Register, decodestep.Register, jsonpathstep.Register, extractstep.Register, semverstep.Register, httpstep.Register, filestep.Register, tempstep.Register, globstep.Register, watchstep.Register, cachestep.Register, changedstep.Register, requiretoolstep.Register,
 		dockerstep.Register, gitstep.Register, githubprstep.Register, githubactionsstep.Register, githubreleasestep.Register, keyvaluestep.Register, luastep.Register, logwaitstep.Register, shell.Register, agentstep.Register, devenvstep.RegisterTask,
 	} {

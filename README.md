@@ -282,6 +282,7 @@ Each linked guide contains multiple examples for every step.
 | `tui_choice` | Select bounded static/dynamic values with defaults or select-all | [Interactive steps](docs/steps-interactive.md#tui_choice) |
 | `tui_path` | Select one or many files/directories | [Interactive steps](docs/steps-interactive.md#tui_path) |
 | `tui_review` | Review plain text or a colored unified diff | [Interactive steps](docs/steps-interactive.md#tui_review) |
+| `tui_table` | Browse object-backed data in a paginated table | [Interactive steps](docs/steps-interactive.md#tui_table) |
 | `tui_confirm` | Collect a boolean decision | [Interactive steps](docs/steps-interactive.md#tui_confirm) |
 | `set` | Assign a literal or expression result | [Data steps](docs/steps-data.md#set) |
 | `assert` | Stop unless an expression is true | [Data steps](docs/steps-data.md#assert) |

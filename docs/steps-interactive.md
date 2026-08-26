@@ -2,11 +2,12 @@
 
 [Back to the available steps](../README.md#available-steps)
 
-Interactive steps write their result to `.steps.<id>` and to the variable named by
+Interactive input steps write their result to `.steps.<id>` and to the variable named by
 `with.variable`. Single-value steps expose `value`; multiple choice and path selections expose
 `values`. A value supplied with `--var` skips the prompt. Non-interactive runs, and interactive
 steps inside concurrent groups, require a supplied value unless an optional `tui_choice` resolves
-to no selection.
+to no selection. The display-only `tui_table` step does not publish a value and prints a static
+table when input is non-interactive.
 
 ## `tui_input`
 
@@ -327,6 +328,39 @@ pan a diff horizontally. Shortcut help wraps on narrow terminals.
 Reject is selected by default and returns `false` without failing the workflow. Set `default: true`
 to focus Approve initially. A supplied variable must be a boolean and skips the review; a missing
 variable fails a non-interactive run.
+
+## `tui_table`
+
+Browse a list of objects in a responsive, paginated table without selecting or changing the data.
+
+```yaml
+- id: releases
+  type: tui_table
+  with:
+    message: Available releases
+    from: steps.fetch.value.releases
+    columns:
+      - {header: Version, field: version, width: 16}
+      - {header: Channel, field: metadata.channel}
+      - {header: Published, field: published_at}
+```
+
+`from` must point to a list under `vars` or `steps`. Every list item must be an object, and each
+column maps its `header` to a required, optionally dotted `field`. `width` is an optional positive
+preferred width. Columns without it size themselves from their header and values; when the table
+is wider than the terminal, columns shrink and long cells end with an ellipsis.
+
+Strings, numbers, and booleans render directly, `null` renders as an empty cell, and nested objects
+or lists render as compact JSON. ANSI escapes and control characters are removed so values cannot
+disturb the terminal layout.
+
+Use arrows or `j`/`k` to move by one row, Page Up and Page Down to move by a page, Home and End to
+jump to the bounds, and Enter to continue. Ctrl+C cancels. The status line reports the visible row
+range and current page. Page size follows the terminal height and updates when it is resized.
+
+The step is display-only and publishes no outputs or variables. With non-interactive input it
+prints the message, headers, and every row once, without pagination controls. Rows are never
+silently truncated or capped.
 
 ## `tui_confirm`
 
