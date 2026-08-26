@@ -319,6 +319,9 @@ func Run[T any](ctx context.Context, iterations []Iteration, policy Policy, obse
 		return err
 	}
 
+	// policy.Validate above guarantees MaxConcurrency is in [1,100]; SetLimit(0) would
+	// make group.Go block forever.
+	//
 	// SetLimit may unblock one admission after cancellation as an active task exits.
 	// runOne checks the context before recording the iteration as started.
 	if policy.FailFast {

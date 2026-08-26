@@ -134,8 +134,8 @@ type ProgressEvent struct {
 func report(options Options, event ProgressEvent) {
 	if options.Progress != nil {
 		if options.runtime != nil {
-			options.runtime.mu.Lock()
-			defer options.runtime.mu.Unlock()
+			options.runtime.reportMu.Lock()
+			defer options.runtime.reportMu.Unlock()
 		}
 		options.Progress(event)
 		return
@@ -143,22 +143,34 @@ func report(options Options, event ProgressEvent) {
 	reportLegacy(options, event)
 }
 
+// runRuntime holds the state one root run shares across concurrent branches.
+// Its three locks are deliberately separate: a single lock covering both the
+// output writers and the reporting callbacks would deadlock any callback that
+// writes to Options.Stdout or Options.Stderr, because those writers take the
+// very same lock and sync.Mutex is not reentrant.
 type runRuntime struct {
-	mu       sync.Mutex
-	cleanups []func() error
+	// writeMu serializes writes to the wrapped Stdout and Stderr so parallel
+	// branches interleave at Write granularity rather than tearing.
+	writeMu sync.Mutex
+	// reportMu serializes the Progress and Diagnostics callbacks. One lock covers
+	// both so progress and trace events stay mutually ordered.
+	reportMu sync.Mutex
+	// cleanupMu guards cleanups, which branches append to concurrently.
+	cleanupMu sync.Mutex
+	cleanups  []func() error
 }
 
 func (runtime *runRuntime) registerCleanup(cleanup func() error) {
-	runtime.mu.Lock()
-	defer runtime.mu.Unlock()
+	runtime.cleanupMu.Lock()
+	defer runtime.cleanupMu.Unlock()
 	runtime.cleanups = append(runtime.cleanups, cleanup)
 }
 
 func (runtime *runRuntime) runCleanups() []error {
-	runtime.mu.Lock()
+	runtime.cleanupMu.Lock()
 	cleanups := runtime.cleanups
 	runtime.cleanups = nil
-	runtime.mu.Unlock()
+	runtime.cleanupMu.Unlock()
 
 	var cleanupErrors []error
 	for index := len(cleanups) - 1; index >= 0; index-- {
@@ -216,8 +228,8 @@ func prepareRunOptions(options Options) Options {
 	}
 	runtime := &runRuntime{}
 	options.runtime = runtime
-	options.Stdout = synchronizeWriter(&runtime.mu, options.Stdout)
-	options.Stderr = synchronizeWriter(&runtime.mu, options.Stderr)
+	options.Stdout = synchronizeWriter(&runtime.writeMu, options.Stdout)
+	options.Stderr = synchronizeWriter(&runtime.writeMu, options.Stderr)
 	return options
 }
 

@@ -19,8 +19,8 @@ func trace(options Options, event diagnostic.Event) {
 		event.Time = time.Now()
 	}
 	if options.runtime != nil {
-		options.runtime.mu.Lock()
-		defer options.runtime.mu.Unlock()
+		options.runtime.reportMu.Lock()
+		defer options.runtime.reportMu.Unlock()
 	}
 	options.Diagnostics(event)
 }

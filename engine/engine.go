@@ -47,8 +47,12 @@ type Options struct {
 	DryRun         bool
 	Executor       process.Executor
 	// Progress receives structured workflow, step, attempt, retry, poll, and timing events.
+	// Calls are serialized against each other and against Diagnostics, so the callback
+	// needs no locking of its own. It must not block indefinitely: every later event
+	// queues behind it, though branch output no longer does.
 	Progress func(ProgressEvent)
 	// Diagnostics receives opt-in loading, validation, and execution phase events.
+	// It is serialized on the same terms as Progress.
 	Diagnostics            diagnostic.Reporter
 	inputs                 map[string]any
 	operationPrefix        string

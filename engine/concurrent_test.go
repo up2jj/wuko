@@ -313,3 +313,111 @@ func TestConcurrentGroupDryRunShowsChildrenAndPolicies(t *testing.T) {
 		t.Fatalf("output = %q, want %q", output.String(), want)
 	}
 }
+
+// TestSlowProgressCallbackDoesNotBlockBranchOutput guards the separation of
+// runRuntime.writeMu from runRuntime.reportMu. report holds the reporting lock
+// across the callback; while that was the same lock the wrapped Stdout and
+// Stderr use, a slow reporter stalled every concurrent branch trying to write.
+// tui.Progress does terminal I/O inside that callback, so this is the real cost
+// of the shared lock.
+func TestSlowProgressCallbackDoesNotBlockBranchOutput(t *testing.T) {
+	writerParked := make(chan struct{})
+	blocking := make(chan struct{})
+	release := make(chan struct{})
+	wrote := make(chan struct{})
+
+	registry := newTestRegistry(t, map[string]step.Builder{"branch": func(map[string]any) (step.Runner, error) {
+		return runnerFunc(func(ctx context.Context, request step.Request) (step.Result, error) {
+			switch request.StepID {
+			case "writer":
+				// Park inside the runner, past every report call this branch makes,
+				// so the reporter can be held without stalling this goroutine there.
+				close(writerParked)
+				select {
+				case <-blocking:
+				case <-ctx.Done():
+					return step.Result{}, ctx.Err()
+				}
+				fmt.Fprintln(request.Stdout, "writer produced output")
+				close(wrote)
+			case "blocker":
+				select {
+				case <-writerParked:
+				case <-ctx.Done():
+					return step.Result{}, ctx.Err()
+				}
+			}
+			return step.Result{Outputs: map[string]any{"id": request.StepID}}, nil
+		}), nil
+	}})
+
+	definition := concurrentDefinition(t, &workflow.ConcurrentGroup{
+		Steps: []workflow.Step{
+			{ID: "writer", Type: "branch", With: map[string]any{}},
+			{ID: "blocker", Type: "branch", With: map[string]any{}},
+		},
+		MaxConcurrency: 2, FailFast: true,
+	})
+
+	var output lockedBuffer
+	var parked sync.Once
+	done := make(chan error, 1)
+	go func() {
+		_, err := New(registry).Run(t.Context(), definition, Options{
+			Stdout: &output, Stderr: io.Discard,
+			Progress: func(event ProgressEvent) {
+				// StepFinished for "blocker" only fires once its runner has returned,
+				// which it does only after "writer" is parked inside its own runner.
+				if event.Kind != StepFinished || event.StepID != "blocker" {
+					return
+				}
+				parked.Do(func() {
+					close(blocking)
+					<-release
+				})
+			},
+		})
+		done <- err
+	}()
+
+	select {
+	case <-wrote:
+	case <-time.After(15 * time.Second):
+		close(release)
+		<-done
+		t.Fatal("branch output blocked behind a parked Progress callback")
+	}
+	close(release)
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Run() error = %v", err)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("Run() did not finish")
+	}
+	if !strings.Contains(output.String(), "writer produced output") {
+		t.Errorf("output missing writer line; got:\n%s", output.String())
+	}
+}
+
+// lockedBuffer is the assertion target, not the thing under test: the engine
+// already serializes writes, but the test reads the buffer from another
+// goroutine once Run returns.
+type lockedBuffer struct {
+	mu     sync.Mutex
+	buffer strings.Builder
+}
+
+func (b *lockedBuffer) Write(data []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buffer.Write(data)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buffer.String()
+}

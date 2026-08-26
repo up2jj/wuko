@@ -48,6 +48,11 @@ func (e *Engine) runConcurrent(ctx context.Context, definition *workflow.Definit
 	childOptions.Stdin = nil
 	childOptions.depth++
 
+	// MaxConcurrency is guaranteed to be in [1,100] here: Engine.Run validates every
+	// definition through ValidateStructure, which reaches ConcurrentGroup.Validate
+	// (workflow/types.go). SetLimit(0) would make group.Go block forever, so any new
+	// path into runConcurrent must keep that validation in front of it.
+	//
 	// SetLimit may unblock one admission after cancellation as an active branch exits.
 	// Each task checks its context before recording or executing that branch.
 	if concurrent.FailFast {
