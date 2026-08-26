@@ -186,13 +186,17 @@ func stepDependencyReferences(steps []Step) []dependencyOutputReference {
 					references = append(references, expressionDependencyReferences(expression)...)
 				}
 			}
+		case "lua":
+			if args, ok := workflowStep.With["args"].(map[string]any); ok {
+				references = append(references, typedBindingDependencyReferences(args)...)
+			}
 		case "wait":
 			if expression, ok := workflowStep.With["until"].(string); ok {
 				references = append(references, expressionDependencyReferences(expression)...)
 			}
 		}
 		if workflowStep.Action != nil {
-			references = append(references, actionBindingDependencyReferences(workflowStep.With)...)
+			references = append(references, typedBindingDependencyReferences(workflowStep.With)...)
 		}
 		for _, child := range workflowStep.ChildSequences() {
 			references = append(references, stepDependencyReferences(child.Steps)...)
@@ -201,7 +205,7 @@ func stepDependencyReferences(steps []Step) []dependencyOutputReference {
 	return references
 }
 
-func actionBindingDependencyReferences(bindings map[string]any) []dependencyOutputReference {
+func typedBindingDependencyReferences(bindings map[string]any) []dependencyOutputReference {
 	var references []dependencyOutputReference
 	for _, value := range bindings {
 		mapping, ok := value.(map[string]any)

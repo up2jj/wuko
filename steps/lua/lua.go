@@ -14,6 +14,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/expr-lang/expr"
+	"github.com/expr-lang/expr/vm"
+	wukoexpr "github.com/up2jj/wuko/expression"
 	storepkg "github.com/up2jj/wuko/keyvalue"
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/step"
@@ -29,8 +32,32 @@ type Config struct {
 }
 
 type Runner struct {
-	config Config
-	doHTTP func(*http.Request, time.Duration) (*http.Response, error)
+	config      Config
+	argPrograms map[string]*vm.Program
+	doHTTP      func(*http.Request, time.Duration) (*http.Response, error)
+}
+
+type expressionEnvironment struct {
+	Inputs       map[string]any            `expr:"inputs"`
+	Vars         map[string]any            `expr:"vars"`
+	Env          map[string]string         `expr:"env"`
+	Steps        map[string]any            `expr:"steps"`
+	Dependencies map[string]map[string]any `expr:"dependencies"`
+	Batch        map[string]any            `expr:"batch"`
+	Foreach      map[string]any            `expr:"foreach"`
+	Matrix       map[string]any            `expr:"matrix"`
+	Finally      map[string]any            `expr:"finally"`
+	Workflow     workflowValue             `expr:"workflow"`
+	Run          runValue                  `expr:"run"`
+}
+
+type workflowValue struct {
+	Name string `expr:"name"`
+	Dir  string `expr:"dir"`
+}
+
+type runValue struct {
+	Dir string `expr:"dir"`
 }
 
 type runtime struct {
@@ -56,9 +83,37 @@ func New(raw map[string]any) (step.Runner, error) {
 			return nil, fmt.Errorf("invalid environment name %q", key)
 		}
 	}
-	return &Runner{config: config, doHTTP: func(request *http.Request, timeout time.Duration) (*http.Response, error) {
+	argPrograms, err := compileArgExpressions(config.Args)
+	if err != nil {
+		return nil, err
+	}
+	return &Runner{config: config, argPrograms: argPrograms, doHTTP: func(request *http.Request, timeout time.Duration) (*http.Response, error) {
 		return (&http.Client{Timeout: timeout}).Do(request)
 	}}, nil
+}
+
+func compileArgExpressions(args map[string]any) (map[string]*vm.Program, error) {
+	programs := make(map[string]*vm.Program)
+	for name, value := range args {
+		binding, ok := value.(map[string]any)
+		if !ok || len(binding) != 1 {
+			continue
+		}
+		source, exists := binding["expr"]
+		if !exists {
+			continue
+		}
+		text, ok := source.(string)
+		if !ok || strings.TrimSpace(text) == "" {
+			return nil, fmt.Errorf("argument %q expr must be a non-empty string", name)
+		}
+		program, err := wukoexpr.Compile(text, expr.Env(expressionEnvironment{}))
+		if err != nil {
+			return nil, fmt.Errorf("compiling argument %q expr: %w", name, err)
+		}
+		programs[name] = program
+	}
+	return programs, nil
 }
 
 func (r *Runner) Validate(_ context.Context, request step.Request) error {
@@ -82,7 +137,11 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 	request.Env = maps.Clone(request.Env)
 	maps.Copy(request.Env, r.config.Env)
 	request.Env = step.ApplyAttemptEnvironment(request.Env, request)
-	runtime := &runtime{request: request, args: r.config.Args, outputs: make(map[string]any), variables: make(map[string]any), doHTTP: r.doHTTP}
+	args, err := r.resolveArgs(ctx, request)
+	if err != nil {
+		return step.Result{}, err
+	}
+	runtime := &runtime{request: request, args: args, outputs: make(map[string]any), variables: make(map[string]any), doHTTP: r.doHTTP}
 	state := newState()
 	defer state.Close()
 	state.SetContext(ctx)
@@ -100,6 +159,41 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 		return step.Result{}, fmt.Errorf("running Lua %s: %w", name, err)
 	}
 	return step.Result{Outputs: runtime.outputs, Variables: runtime.variables}, nil
+}
+
+func (r *Runner) resolveArgs(ctx context.Context, request step.Request) (map[string]any, error) {
+	args := maps.Clone(r.config.Args)
+	for name, program := range r.argPrograms {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		value, err := expr.Run(program, expressionEnvironment{
+			Inputs:       request.Inputs,
+			Vars:         request.Vars,
+			Env:          request.Env,
+			Steps:        request.Steps,
+			Dependencies: request.Dependencies,
+			Batch:        bindingRoot(request.Bindings, "batch"),
+			Foreach:      bindingRoot(request.Bindings, "foreach"),
+			Matrix:       bindingRoot(request.Bindings, "matrix"),
+			Finally:      bindingRoot(request.Bindings, "finally"),
+			Workflow:     workflowValue{Name: request.WorkflowName, Dir: request.WorkflowDir},
+			Run:          runValue{Dir: request.RunDir},
+		})
+		if err != nil {
+			return nil, fmt.Errorf("evaluating argument %q expr: %w", name, err)
+		}
+		args[name] = value
+	}
+	return args, nil
+}
+
+func bindingRoot(bindings map[string]any, name string) map[string]any {
+	value, _ := bindings[name].(map[string]any)
+	if value == nil {
+		return map[string]any{}
+	}
+	return value
 }
 
 func (r *Runner) source(request step.Request) (string, string, error) {
@@ -134,6 +228,19 @@ func (r *runtime) module(state *glua.LState) (*glua.LTable, error) {
 		return nil, fmt.Errorf("converting Lua arguments: %w", err)
 	}
 	module.RawSetString("args", args)
+	for name, value := range map[string]any{
+		"inputs":       r.request.Inputs,
+		"steps":        r.request.Steps,
+		"dependencies": r.request.Dependencies,
+		"workflow":     map[string]any{"name": r.request.WorkflowName, "dir": r.request.WorkflowDir},
+		"run":          map[string]any{"dir": r.request.RunDir},
+	} {
+		converted, err := toLua(state, value)
+		if err != nil {
+			return nil, fmt.Errorf("converting %s root: %w", name, err)
+		}
+		module.RawSetString(name, converted)
+	}
 	for _, name := range []string{"batch", "foreach", "matrix", "finally"} {
 		binding, exists := r.request.Bindings[name]
 		if !exists {

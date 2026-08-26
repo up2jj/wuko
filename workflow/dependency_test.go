@@ -244,6 +244,32 @@ func TestResolveDependencyPlanChecksShellArgvExpressionReferences(t *testing.T) 
 	}
 }
 
+func TestResolveDependencyPlanChecksLuaArgumentExpressionReferences(t *testing.T) {
+	t.Parallel()
+	producer := dependencyDefinition("producer", "/producer.yaml")
+	producer.Outputs = map[string]WorkflowOutput{"inventory": {Type: "array", Value: `list("api")`}}
+	consumer := dependencyDefinition("consumer", "/consumer.yaml")
+	consumer.DependsOn = map[string]string{"build": "producer"}
+	consumer.Steps = []Step{{
+		ID: "inspect", Type: "lua",
+		With: map[string]any{
+			"source": "return",
+			"args":   map[string]any{"inventory": map[string]any{"expr": "dependencies.build.inventory"}},
+		},
+	}}
+	resolve := func(context.Context, string) (*Definition, error) { return producer, nil }
+
+	if _, err := ResolveDependencyPlan(t.Context(), consumer, resolve); err != nil {
+		t.Fatalf("valid Lua argument dependency reference rejected: %v", err)
+	}
+
+	consumer.Steps[0].With["args"] = map[string]any{"inventory": map[string]any{"expr": "dependencies.build.missing"}}
+	_, err := ResolveDependencyPlan(t.Context(), consumer, resolve)
+	if err == nil || !strings.Contains(err.Error(), `does not declare output "missing"`) {
+		t.Fatalf("Lua argument dependency reference error = %v", err)
+	}
+}
+
 func TestResolveDependencyPlanFindsReferencesInsideOptionalTemplateBranches(t *testing.T) {
 	t.Parallel()
 	producer := dependencyDefinition("producer", "/producer.yaml")

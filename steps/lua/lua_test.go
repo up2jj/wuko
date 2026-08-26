@@ -63,6 +63,98 @@ func TestLuaControlBindings(t *testing.T) {
 	}
 }
 
+func TestLuaArgumentExpressionsUseRuntimeRootsAndPreserveTypes(t *testing.T) {
+	runner, err := New(map[string]any{
+		"source": `wuko.output("args", wuko.args)`,
+		"args": map[string]any{
+			"inventory": map[string]any{"expr": "steps.decode.value"},
+			"summary":   map[string]any{"expr": `inputs.prefix + ":" + dependencies.build.artifact + ":" + batch.name + ":" + foreach.item + ":" + matrix.os + ":" + finally.status + ":" + workflow.name + ":" + workflow.dir + ":" + run.dir`},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := step.Request{
+		WorkflowName: "release", WorkflowDir: "/workflow", RunDir: "/run",
+		Inputs:       map[string]any{"prefix": "deploy"},
+		Steps:        map[string]any{"decode": map[string]any{"value": []any{map[string]any{"name": "api", "replicas": 2}}}},
+		Dependencies: map[string]map[string]any{"build": {"artifact": "app"}},
+		Bindings: map[string]any{
+			"batch": map[string]any{"name": "batch"}, "foreach": map[string]any{"item": "item"},
+			"matrix": map[string]any{"os": "linux"}, "finally": map[string]any{"status": "succeeded"},
+		},
+	}
+	result, err := runner.Run(t.Context(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := result.Outputs["args"].(map[string]any)
+	wantInventory := []any{map[string]any{"name": "api", "replicas": float64(2)}}
+	if !reflect.DeepEqual(args["inventory"], wantInventory) {
+		t.Fatalf("inventory = %#v, want %#v", args["inventory"], wantInventory)
+	}
+	wantSummary := "deploy:app:batch:item:linux:succeeded:release:/workflow:/run"
+	if args["summary"] != wantSummary {
+		t.Fatalf("summary = %#v, want %q", args["summary"], wantSummary)
+	}
+}
+
+func TestLuaExposesRuntimeRoots(t *testing.T) {
+	runner, err := New(map[string]any{"source": `
+wuko.steps.decode.value[1].name = "changed"
+wuko.output("roots", {
+  input = wuko.inputs.target,
+  step = wuko.steps.decode.value[1].name,
+  dependency = wuko.dependencies.build.artifact,
+  workflow_name = wuko.workflow.name,
+  workflow_dir = wuko.workflow.dir,
+  run_dir = wuko.run.dir,
+})
+`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	steps := map[string]any{"decode": map[string]any{"value": []any{map[string]any{"name": "api"}}}}
+	result, err := runner.Run(t.Context(), step.Request{
+		WorkflowName: "release", WorkflowDir: "/workflow", RunDir: "/run",
+		Inputs: map[string]any{"target": "prod"}, Steps: steps,
+		Dependencies: map[string]map[string]any{"build": {"artifact": "app.tar.gz"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{
+		"input": "prod", "step": "changed", "dependency": "app.tar.gz",
+		"workflow_name": "release", "workflow_dir": "/workflow", "run_dir": "/run",
+	}
+	if got := result.Outputs["roots"]; !reflect.DeepEqual(got, want) {
+		t.Fatalf("roots = %#v, want %#v", got, want)
+	}
+	if got := steps["decode"].(map[string]any)["value"].([]any)[0].(map[string]any)["name"]; got != "api" {
+		t.Fatalf("Lua mutation changed request steps to %q", got)
+	}
+}
+
+func TestLuaRejectsInvalidArgumentExpressions(t *testing.T) {
+	tests := []struct {
+		name string
+		expr any
+		want string
+	}{
+		{name: "non-string", expr: 42, want: "must be a non-empty string"},
+		{name: "blank", expr: "  ", want: "must be a non-empty string"},
+		{name: "invalid", expr: "steps.", want: "compiling argument"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := New(map[string]any{"source": "return", "args": map[string]any{"value": map[string]any{"expr": test.expr}}})
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("New() error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
 func TestLuaHelpers(t *testing.T) {
 	runner, err := New(map[string]any{
 		"source": `

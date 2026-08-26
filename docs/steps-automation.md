@@ -345,6 +345,25 @@ Produce typed outputs and variables inline:
       title: "{{ .vars.task_name }}"
 ```
 
+Use an `expr` binding when an argument must keep its runtime type instead of being rendered to a
+string:
+
+```yaml
+- id: inspect
+  type: lua
+  with:
+    source: |
+      for _, deployment in ipairs(wuko.args.inventory) do
+        print(deployment.metadata.name)
+      end
+    args:
+      inventory:
+        expr: steps.decode_deployments.value
+```
+
+Argument expressions use the normal `inputs`, `vars`, `env`, `steps`, `dependencies`, `batch`,
+`foreach`, `matrix`, `finally`, `workflow`, and `run` Expr roots.
+
 Use the host API for richer automation:
 
 ```lua
@@ -372,9 +391,10 @@ The result contains `stdout`, `stderr`, `exit_code`, `error`, `stdout_truncated`
 default independently to `tee`.
 
 The trusted `wuko` API exposes `args`, variables, outputs, environment, JSON, shared helpers,
-key-value stores, HTTP, filesystem operations, and direct command execution. Outputs may be nil,
-booleans, strings, numbers, arrays, or string-keyed objects; cyclic and mixed-key tables are
-rejected.
+key-value stores, HTTP, filesystem operations, and direct command execution. It also exposes
+snapshot tables for `wuko.inputs`, `wuko.steps`, `wuko.dependencies`, `wuko.workflow`, and
+`wuko.run`. Changing these Lua tables does not change workflow state. Outputs may be nil, booleans,
+strings, numbers, arrays, or string-keyed objects; cyclic and mixed-key tables are rejected.
 
 ## `wait`
 
