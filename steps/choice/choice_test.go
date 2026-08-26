@@ -2,6 +2,7 @@ package choice
 
 import (
 	"io"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -19,8 +20,8 @@ func TestDynamicMultiplePreSupplied(t *testing.T) {
 	result, err := runner.Run(t.Context(), step.Request{
 		Vars: map[string]any{"projects": []any{"frontend", "backend"}},
 		Steps: map[string]any{"fetch": map[string]any{"projects": []any{
-			map[string]any{"name": "Backend", "id": "backend"},
-			map[string]any{"name": "Frontend", "id": "frontend"},
+			map[string]any{"name": "Backend", "id": "backend", "namespace": "services"},
+			map[string]any{"name": "Frontend", "id": "frontend", "namespace": "web"},
 		}}}, Stdout: io.Discard, Stderr: io.Discard,
 	})
 	if err != nil {
@@ -29,6 +30,66 @@ func TestDynamicMultiplePreSupplied(t *testing.T) {
 	values := result.Outputs["values"].([]any)
 	if len(values) != 2 || values[0] != "frontend" || values[1] != "backend" || result.Outputs["count"] != 2 {
 		t.Fatalf("values = %#v", values)
+	}
+	items := result.Outputs["items"].([]any)
+	if len(items) != 2 || items[0].(map[string]any)["namespace"] != "web" || items[1].(map[string]any)["namespace"] != "services" {
+		t.Fatalf("items = %#v", items)
+	}
+}
+
+func TestDynamicObjectSelectionPreservesClonedItem(t *testing.T) {
+	source := map[string]any{
+		"label": "API", "value": "default/api", "namespace": "default",
+		"commands": map[string]any{"shell": "/bin/bash"},
+	}
+	runnerValue, err := New(map[string]any{
+		"variable": "service", "message": "Service", "from": "steps.fetch.services",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := runnerValue.(*Runner)
+	options, err := runner.options(step.Request{Steps: map[string]any{"fetch": map[string]any{
+		"services": []any{source},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := runner.selected([]int{0}, options)
+	if result.Outputs["value"] != "default/api" || result.Outputs["label"] != "API" {
+		t.Fatalf("outputs = %#v", result.Outputs)
+	}
+	item := result.Outputs["item"].(map[string]any)
+	if !reflect.DeepEqual(item, source) {
+		t.Fatalf("item = %#v, want %#v", item, source)
+	}
+	item["commands"].(map[string]any)["shell"] = "/bin/sh"
+	if source["commands"].(map[string]any)["shell"] != "/bin/bash" {
+		t.Fatalf("source was mutated through retained item: %#v", source)
+	}
+}
+
+func TestDynamicMixedSelectionAlignsItemsWithValues(t *testing.T) {
+	runner, err := New(map[string]any{
+		"variable": "services", "message": "Services", "multiple": true,
+		"from": "steps.fetch.services",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runner.Run(t.Context(), step.Request{
+		Vars: map[string]any{"services": []any{"manual", "default/api"}},
+		Steps: map[string]any{"fetch": map[string]any{"services": []any{
+			"manual",
+			map[string]any{"label": "API", "value": "default/api", "namespace": "default"},
+		}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := result.Outputs["items"].([]any)
+	if len(items) != 2 || items[0] != nil || items[1].(map[string]any)["namespace"] != "default" {
+		t.Fatalf("items = %#v", items)
 	}
 }
 
@@ -49,6 +110,9 @@ func TestOptionalChoiceCanSelectNothing(t *testing.T) {
 	if result.Outputs["selected"] != false || result.Outputs["value"] != nil || result.Outputs["label"] != "" {
 		t.Fatalf("outputs = %#v", result.Outputs)
 	}
+	if _, exists := result.Outputs["item"]; exists {
+		t.Fatalf("scalar source unexpectedly exposed item: %#v", result.Outputs)
+	}
 	if value, exists := result.Variables["item"]; !exists || value != nil {
 		t.Fatalf("variables = %#v", result.Variables)
 	}
@@ -66,6 +130,47 @@ func TestOptionalChoiceCanSelectNothing(t *testing.T) {
 	}
 	if result.Outputs["count"] != 0 || len(result.Outputs["values"].([]any)) != 0 {
 		t.Fatalf("outputs = %#v", result.Outputs)
+	}
+	if _, exists := result.Outputs["items"]; exists {
+		t.Fatalf("static choices unexpectedly exposed items: %#v", result.Outputs)
+	}
+}
+
+func TestOptionalObjectChoicesExposeEmptyItemOutputs(t *testing.T) {
+	source := []any{map[string]any{"label": "One", "value": "one"}}
+	tests := []struct {
+		name     string
+		multiple bool
+	}{
+		{name: "single"},
+		{name: "multiple", multiple: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runner, err := New(map[string]any{
+				"variable": "selection", "message": "Selection", "required": false,
+				"multiple": tt.multiple, "from": "steps.fetch.items",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := runner.Run(t.Context(), step.Request{Steps: map[string]any{
+				"fetch": map[string]any{"items": source},
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tt.multiple {
+				items, exists := result.Outputs["items"].([]any)
+				if !exists || len(items) != 0 {
+					t.Fatalf("items = %#v", result.Outputs["items"])
+				}
+				return
+			}
+			if item, exists := result.Outputs["item"]; !exists || item != nil {
+				t.Fatalf("item = %#v, exists = %v", item, exists)
+			}
+		})
 	}
 }
 
@@ -116,6 +221,26 @@ func TestChoiceRejectsDuplicateValues(t *testing.T) {
 	}
 	if _, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{"item": "same"}}); err == nil {
 		t.Fatal("expected duplicate value error")
+	}
+}
+
+func TestDynamicChoiceRejectsDuplicateMappedValues(t *testing.T) {
+	runner, err := New(map[string]any{
+		"variable": "item", "message": "Item", "from": "steps.fetch.items",
+		"label_field": "name", "value_field": "id",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runner.Run(t.Context(), step.Request{
+		Vars: map[string]any{"item": "same"},
+		Steps: map[string]any{"fetch": map[string]any{"items": []any{
+			map[string]any{"name": "A", "id": "same"},
+			map[string]any{"name": "B", "id": "same"},
+		}}},
+	})
+	if err == nil || !strings.Contains(err.Error(), `duplicate choice value "same"`) {
+		t.Fatalf("error = %v", err)
 	}
 }
 

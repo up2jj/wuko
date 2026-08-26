@@ -9,6 +9,7 @@ import (
 
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/tui"
+	"github.com/up2jj/wuko/workflow"
 )
 
 type Config struct {
@@ -36,6 +37,12 @@ type ChoiceConfig struct {
 	Disabled    bool   `yaml:"disabled,omitempty"`
 	Reason      string `yaml:"reason,omitempty"`
 	Default     bool   `yaml:"default,omitempty"`
+}
+
+type resolvedChoice struct {
+	tui.Option
+	item    any
+	hasItem bool
 }
 
 type Runner struct{ config Config }
@@ -87,7 +94,7 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 		return step.Result{}, fmt.Errorf("variable %q is required when stdin is non-interactive; supply it with --var", r.config.Variable)
 	}
 	indexes, err := tui.Choose(ctx, request.Stdin, request.Stdout, tui.ChoicePickerConfig{
-		Message: r.config.Message, Options: options, Multiple: r.config.Multiple, Required: r.required(),
+		Message: r.config.Message, Options: tuiOptions(options), Multiple: r.config.Multiple, Required: r.required(),
 		SelectAll:   r.config.SelectAll,
 		MinSelected: r.config.MinSelected, MaxSelected: r.config.MaxSelected,
 	})
@@ -97,9 +104,9 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 	return r.selected(indexes, options), nil
 }
 
-func (r *Runner) options(request step.Request) ([]tui.Option, error) {
+func (r *Runner) options(request step.Request) ([]resolvedChoice, error) {
 	if len(r.config.Choices) > 0 {
-		options := make([]tui.Option, len(r.config.Choices))
+		options := make([]resolvedChoice, len(r.config.Choices))
 		for i, choice := range r.config.Choices {
 			if choice.Label == "" {
 				return nil, fmt.Errorf("choice %d has an empty label", i+1)
@@ -110,10 +117,10 @@ func (r *Runner) options(request step.Request) ([]tui.Option, error) {
 			if choice.Disabled && strings.TrimSpace(choice.Reason) == "" {
 				return nil, fmt.Errorf("choice %d is disabled without a reason", i+1)
 			}
-			options[i] = tui.Option{
+			options[i] = resolvedChoice{Option: tui.Option{
 				Label: choice.Label, Description: choice.Description, Value: choice.Value,
 				Disabled: choice.Disabled, DisabledReason: choice.Reason, Default: choice.Default,
-			}
+			}}
 		}
 		return options, nil
 	}
@@ -126,10 +133,10 @@ func (r *Runner) options(request step.Request) ([]tui.Option, error) {
 	if !ok {
 		return nil, fmt.Errorf("choice source %q is not a list", r.config.From)
 	}
-	options := make([]tui.Option, 0, len(items))
+	options := make([]resolvedChoice, 0, len(items))
 	for i, item := range items {
 		if scalar(item) {
-			options = append(options, tui.Option{Label: fmt.Sprint(item), Value: item})
+			options = append(options, resolvedChoice{Option: tui.Option{Label: fmt.Sprint(item), Value: item}})
 			continue
 		}
 		label, err := step.LookupValue(item, r.config.LabelField)
@@ -174,15 +181,18 @@ func (r *Runner) options(request step.Request) ([]tui.Option, error) {
 				return nil, fmt.Errorf("choice source item %d reason must be a non-empty string", i+1)
 			}
 		}
-		options = append(options, tui.Option{
-			Label: fmt.Sprint(label), Description: description, Value: value,
-			Disabled: disabled, DisabledReason: reason, Default: defaultChoice,
+		options = append(options, resolvedChoice{
+			Option: tui.Option{
+				Label: fmt.Sprint(label), Description: description, Value: value,
+				Disabled: disabled, DisabledReason: reason, Default: defaultChoice,
+			},
+			item: workflow.Clone(item), hasItem: true,
 		})
 	}
 	return options, nil
 }
 
-func (r *Runner) preSupplied(value any, options []tui.Option) (step.Result, error) {
+func (r *Runner) preSupplied(value any, options []resolvedChoice) (step.Result, error) {
 	if !r.config.Multiple {
 		index := optionIndex(options, value)
 		if index < 0 {
@@ -225,28 +235,53 @@ func (r *Runner) preSupplied(value any, options []tui.Option) (step.Result, erro
 	return r.selected(indexes, options), nil
 }
 
-func (r *Runner) selected(indexes []int, options []tui.Option) step.Result {
+func (r *Runner) selected(indexes []int, options []resolvedChoice) step.Result {
+	objectBacked := hasObjectItems(options)
 	if !r.config.Multiple {
 		if len(indexes) == 0 {
+			outputs := map[string]any{"value": nil, "label": "", "selected": false}
+			if objectBacked {
+				outputs["item"] = nil
+			}
 			return step.Result{
-				Outputs:   map[string]any{"value": nil, "label": "", "selected": false},
+				Outputs:   outputs,
 				Variables: map[string]any{r.config.Variable: nil},
 			}
 		}
 		option := options[indexes[0]]
+		outputs := map[string]any{"value": option.Value, "label": option.Label, "selected": true}
+		if objectBacked {
+			outputs["item"] = nil
+			if option.hasItem {
+				outputs["item"] = workflow.Clone(option.item)
+			}
+		}
 		return step.Result{
-			Outputs:   map[string]any{"value": option.Value, "label": option.Label, "selected": true},
+			Outputs:   outputs,
 			Variables: map[string]any{r.config.Variable: option.Value},
 		}
 	}
 	values := make([]any, 0, len(indexes))
 	labels := make([]any, 0, len(indexes))
+	items := make([]any, 0, len(indexes))
 	for _, index := range indexes {
-		values = append(values, options[index].Value)
-		labels = append(labels, options[index].Label)
+		option := options[index]
+		values = append(values, option.Value)
+		labels = append(labels, option.Label)
+		if objectBacked {
+			var item any
+			if option.hasItem {
+				item = workflow.Clone(option.item)
+			}
+			items = append(items, item)
+		}
+	}
+	outputs := map[string]any{"values": values, "labels": labels, "count": len(values)}
+	if objectBacked {
+		outputs["items"] = items
 	}
 	return step.Result{
-		Outputs:   map[string]any{"values": values, "labels": labels, "count": len(values)},
+		Outputs:   outputs,
 		Variables: map[string]any{r.config.Variable: values},
 	}
 }
@@ -272,7 +307,7 @@ func (r *Runner) minimum() int {
 	return 0
 }
 
-func (r *Runner) validateOptions(options []tui.Option) error {
+func (r *Runner) validateOptions(options []resolvedChoice) error {
 	enabled := 0
 	defaults := 0
 	for index, option := range options {
@@ -336,7 +371,7 @@ func boolField(item any, path string) (bool, error) {
 	return result, nil
 }
 
-func ensureUnique(options []tui.Option) error {
+func ensureUnique(options []resolvedChoice) error {
 	seen := make(map[string]struct{}, len(options))
 	for _, option := range options {
 		encoded, err := json.Marshal(option.Value)
@@ -352,7 +387,7 @@ func ensureUnique(options []tui.Option) error {
 	return nil
 }
 
-func optionIndex(options []tui.Option, value any) int {
+func optionIndex(options []resolvedChoice, value any) int {
 	encoded, err := json.Marshal(value)
 	if err != nil {
 		return -1
@@ -364,6 +399,23 @@ func optionIndex(options []tui.Option, value any) int {
 		}
 	}
 	return -1
+}
+
+func tuiOptions(options []resolvedChoice) []tui.Option {
+	result := make([]tui.Option, len(options))
+	for i, option := range options {
+		result[i] = option.Option
+	}
+	return result
+}
+
+func hasObjectItems(options []resolvedChoice) bool {
+	for _, option := range options {
+		if option.hasItem {
+			return true
+		}
+	}
+	return false
 }
 
 func scalar(value any) bool {

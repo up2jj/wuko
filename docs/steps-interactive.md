@@ -172,6 +172,13 @@ explicit `(none)` entry produces `selected: false`, `value: null`, and an empty 
 `null` choice remains distinguishable because it produces `selected: true`. Multiple selection
 exposes `.steps.<id>.values`, `.steps.<id>.labels`, and `.steps.<id>.count`.
 
+When a dynamic source contains objects, single selection also exposes the complete selected source
+object as `.steps.<id>.item`; multiple selection exposes `.steps.<id>.items` in the same order and
+with the same length as `.steps.<id>.values`. Mixed scalar and object sources use `null` item
+placeholders for selected scalars. An optional empty object-backed selection produces `item: null`
+or `items: []`. Static choices and entirely scalar dynamic sources do not expose these fields. The
+configured variable continues to contain only the mapped scalar value or values.
+
 `min_selected` and `max_selected` are non-negative integers available only in multiple mode. When
 either is present, these explicit bounds supersede `required`: an omitted minimum is 0 and an
 omitted maximum is unlimited. The minimum cannot exceed the maximum or the number of enabled
@@ -179,10 +186,12 @@ choices. Defaults may start below the minimum so the user can add choices, but c
 maximum. `max_selected: 0` is valid when the effective minimum is zero.
 
 Pre-supplied values skip the picker but still reject disabled choices and enforce the bounds after
-duplicate values are removed. Defaults only initialize an interactive picker; they never supply a
-missing value in a non-interactive run. Without explicit bounds, optional empty choice sets and
-empty selections succeed with empty lists, and an optional missing non-interactive value resolves
-directly to no selection.
+duplicate values are removed. For object-backed sources, each supplied scalar is matched against
+`value_field` and the corresponding source object is retained in `item` or `items`. Choice values
+must be unique, including mapped values from dynamic objects, so this match is unambiguous. Defaults
+only initialize an interactive picker; they never supply a missing value in a non-interactive run.
+Without explicit bounds, optional empty choice sets and empty selections succeed with empty lists,
+and an optional missing non-interactive value resolves directly to no selection.
 
 ## `tui_path`
 

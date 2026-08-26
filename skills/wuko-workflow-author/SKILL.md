@@ -28,7 +28,9 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
   enabled choice as selected; it is incompatible with a `max_selected` smaller than the enabled
   choice count. Multiple choices preserve selection order and may use `min_selected` and
   `max_selected`; explicit bounds supersede `required`. Optional single choices
-  expose `selected` to distinguish no selection from a selected null value.
+  expose `selected` to distinguish no selection from a selected null value. Dynamic object choices
+  retain the selected source object in `item`, or ordered source objects in `items` for multiple
+  selection, while the configured variable continues to contain only mapped scalar values.
   Keep path patterns relative to the picker root and supply prompt variables explicitly in
   non-interactive runs.
 - Use `set` for JSON-compatible literals and Expr-based values; use Lua only when transformation
