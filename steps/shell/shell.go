@@ -36,6 +36,7 @@ type Config struct {
 	TTY              bool                 `yaml:"tty,omitempty"`
 	Interactions     []interactionConfig  `yaml:"interactions,omitempty"`
 	Interact         bool                 `yaml:"interact,omitempty"`
+	Terminal         *terminalConfig      `yaml:"terminal,omitempty"`
 	Stdout           string               `yaml:"stdout,omitempty"`
 	Stderr           string               `yaml:"stderr,omitempty"`
 	CaptureLimit     string               `yaml:"capture_limit,omitempty"`
@@ -142,6 +143,10 @@ func New(raw map[string]any) (step.Runner, error) {
 	if config.Interact && !config.TTY {
 		return nil, fmt.Errorf("interact requires tty")
 	}
+	handoff := config.TTY && (!hasInteractions || config.Interact)
+	if err := validateTerminalConfig(config.Terminal, config.TTY, handoff); err != nil {
+		return nil, err
+	}
 	if _, configured := raw["allowed_exit_codes"]; !configured {
 		config.AllowedExitCodes = []int{0}
 	} else if len(config.AllowedExitCodes) == 0 {
@@ -231,6 +236,7 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 		Command: command, Args: args, Dir: dir, Env: environment, User: r.config.User,
 		Stdin: stdin, Stdout: request.Stdout, Stderr: request.Stderr, TTY: r.config.TTY,
 		Interactions: r.interactions, Interact: r.config.Interact, CaptureLimit: captureLimit,
+		Terminal:     terminalAppearance(r.config.Terminal),
 		StdoutPolicy: r.stdoutPolicy, StderrPolicy: r.stderrPolicy,
 	})
 	outputs := map[string]any{

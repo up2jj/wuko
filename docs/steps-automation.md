@@ -228,6 +228,38 @@ Plain `tty: true` without `interactions` preserves immediate handoff and still r
 interactive file-backed terminal. Docker executor sessions reject TTY mode; local process wrappers
 such as devenv may forward it.
 
+### Live-console appearance
+
+An interactive shell can identify the console by changing the outer terminal's colors and title
+for the duration of the user handoff:
+
+```yaml
+- id: production_console
+  type: shell
+  with:
+    command: ssh
+    args: [production.example.com]
+    tty: true
+    terminal:
+      background: "rgb(30, 30, 46)"
+      foreground: white
+      title: Production console
+```
+
+`terminal` accepts optional `background`, `foreground`, and `title` fields, and at least one must
+be set. Colors accept `#RGB`, `#RRGGBB`, and decimal `rgb(r, g, b)` values from 0 through 255.
+Names are case-insensitive and include `black`, `silver`, `gray`/`grey`, `white`, `maroon`, `red`,
+`purple`, `fuchsia`/`magenta`, `green`, `lime`, `olive`, `yellow`, `navy`, `blue`, `teal`,
+`aqua`/`cyan`, and `orange`. Normal Wuko templates are rendered before validation, so appearance
+can depend on workflow values. Titles cannot contain terminal control characters.
+
+The appearance is applied immediately before Wuko hands input to the child PTY. With scripted
+interactions, this is after the last interaction succeeds and requires `interact: true`. When the
+child exits, fails, or is canceled, Wuko resets configured colors to the terminal defaults and
+restores the saved window title. Appearance control uses xterm-compatible OSC and CSI sequences;
+terminals that do not support them may ignore them. Styling is best effort and never changes the
+workflow result. Redirected or non-terminal output is left untouched.
+
 If an expectation is not found, its send and every later interaction are skipped. The step fails
 when that interaction's timeout expires, terminates the child process group, and does not hand the
 PTY to the user. If the child exits first, failure is immediate. Interaction failures are

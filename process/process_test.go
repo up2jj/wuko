@@ -384,7 +384,10 @@ func TestRunTTYHandsOffAfterFinalInteraction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	output := &readyOutput{ready: make(chan struct{})}
+	output := &terminalReadyOutput{
+		readyOutput: &readyOutput{ready: make(chan struct{})},
+		terminal:    terminal,
+	}
 	done := make(chan struct {
 		result Result
 		err    error
@@ -400,6 +403,7 @@ printf 'got=%s:%s\n' "$scripted" "$user"
 `},
 			Env: testEnvironment(), Stdin: terminal, Stdout: output, TTY: true,
 			Interactions: plan, Interact: true, CaptureLimit: 1 << 20,
+			Terminal: &TerminalAppearance{Background: "#1e1e2e", Foreground: "#CDD6F4", Title: "Production console"},
 		})
 		done <- struct {
 			result Result
@@ -420,6 +424,11 @@ printf 'got=%s:%s\n' "$scripted" "$user"
 	}
 	if !strings.Contains(completed.result.Stdout, "got=automatic:manual") {
 		t.Fatalf("TTY output = %q", completed.result.Stdout)
+	}
+	appearance := "\x1b[22;2t\x1b]2;Production console\x1b\\\x1b]10;rgb:CD/D6/F4\x1b\\\x1b]11;rgb:1e/1e/2e\x1b\\"
+	restore := "\x1b]111\x1b\\\x1b]110\x1b\\\x1b[23;2t"
+	if rendered := output.String(); !strings.Contains(rendered, appearance) || !strings.Contains(rendered, restore) || strings.Index(rendered, appearance) > strings.Index(rendered, restore) {
+		t.Fatalf("terminal output = %q, want applied and restored appearance", rendered)
 	}
 	after, err := term.GetState(int(terminal.Fd()))
 	if err != nil {
@@ -532,12 +541,16 @@ func TestRunTTYCancellationRestoresTerminal(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(t.Context())
-	output := &readyOutput{ready: make(chan struct{})}
+	output := &terminalReadyOutput{
+		readyOutput: &readyOutput{ready: make(chan struct{})},
+		terminal:    terminal,
+	}
 	done := make(chan error, 1)
 	go func() {
 		_, runErr := Run(ctx, Options{
 			Command: "sh", Args: []string{"-c", "printf 'ready:'; sleep 30"},
 			Env: testEnvironment(), Stdin: terminal, Stdout: output, TTY: true,
+			Terminal: &TerminalAppearance{Background: "#112233"},
 		})
 		done <- runErr
 	}()
@@ -562,6 +575,9 @@ func TestRunTTYCancellationRestoresTerminal(t *testing.T) {
 	}
 	if !reflect.DeepEqual(before, after) {
 		t.Fatal("terminal state was not restored after cancellation")
+	}
+	if rendered := output.String(); !strings.Contains(rendered, "\x1b]11;rgb:11/22/33\x1b\\") || !strings.Contains(rendered, "\x1b]111\x1b\\") {
+		t.Fatalf("terminal output = %q, want background apply and restore", rendered)
 	}
 	if _, err := input.WriteString("unused"); err != nil {
 		t.Fatalf("outer terminal was closed: %v", err)
@@ -594,6 +610,13 @@ type readyOutput struct {
 	once  sync.Once
 	ready chan struct{}
 }
+
+type terminalReadyOutput struct {
+	*readyOutput
+	terminal *os.File
+}
+
+func (output *terminalReadyOutput) Fd() uintptr { return output.terminal.Fd() }
 
 func (output *readyOutput) Write(data []byte) (int, error) {
 	output.mu.Lock()

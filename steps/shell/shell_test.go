@@ -217,6 +217,72 @@ func TestNewValidatesInteractionConfiguration(t *testing.T) {
 	}
 }
 
+func TestNewValidatesTerminalConfiguration(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  map[string]any
+		want string
+	}{
+		{name: "requires tty", raw: map[string]any{"command": "sh", "terminal": map[string]any{"title": "console"}}, want: "terminal requires tty"},
+		{name: "requires handoff", raw: map[string]any{"command": "sh", "tty": true, "interactions": []any{map[string]any{"send": "x"}}, "terminal": map[string]any{"title": "console"}}, want: "terminal requires user handoff"},
+		{name: "empty", raw: map[string]any{"command": "sh", "tty": true, "terminal": map[string]any{}}, want: "must configure"},
+		{name: "invalid hex", raw: map[string]any{"command": "sh", "tty": true, "terminal": map[string]any{"background": "#12345g"}}, want: "background must be"},
+		{name: "unknown color", raw: map[string]any{"command": "sh", "tty": true, "terminal": map[string]any{"foreground": "rebeccapurple"}}, want: "foreground must be"},
+		{name: "rgb out of range", raw: map[string]any{"command": "sh", "tty": true, "terminal": map[string]any{"background": "rgb(0, 256, 0)"}}, want: "background must be"},
+		{name: "control in title", raw: map[string]any{"command": "sh", "tty": true, "terminal": map[string]any{"title": "unsafe\x1b]2;title"}}, want: "title must not contain control"},
+		{name: "unknown field", raw: map[string]any{"command": "sh", "tty": true, "terminal": map[string]any{"palette": "dark"}}, want: "field palette not found"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := New(test.raw)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("New() error = %v, want %q", err, test.want)
+			}
+		})
+	}
+
+	for _, terminal := range []any{
+		map[string]any{"background": "#1e1e2e", "foreground": "#CDD6F4", "title": "Production console"},
+		map[string]any{"background": "#123", "foreground": "white"},
+		map[string]any{"background": "rgb(30, 30, 46)", "foreground": "RGB(205,214,244)"},
+		map[string]any{"background": "{{ .vars.background }}", "title": "{{ .workflow.name }}"},
+	} {
+		if _, err := New(map[string]any{"command": "sh", "tty": true, "terminal": terminal}); err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+	}
+}
+
+func TestNormalizeTerminalColor(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+		ok    bool
+	}{
+		{input: "#abc", want: "#aabbcc", ok: true},
+		{input: " #AbC ", want: "#aabbcc", ok: true},
+		{input: "#CDD6F4", want: "#cdd6f4", ok: true},
+		{input: "rgb(30, 30, 46)", want: "#1e1e2e", ok: true},
+		{input: "RGB(205,214,244)", want: "#cdd6f4", ok: true},
+		{input: "Navy", want: "#000080", ok: true},
+		{input: "cyan", want: "#00ffff", ok: true},
+		{input: "rgb(0, 0, 256)"},
+		{input: "rgb(0, -1, 0)"},
+		{input: "rgb(0%, 0%, 0%)"},
+		{input: "rgba(0, 0, 0, 1)"},
+		{input: "#abcd"},
+		{input: "rebeccapurple"},
+	}
+	for _, test := range tests {
+		t.Run(test.input, func(t *testing.T) {
+			got, ok := normalizeTerminalColor(test.input)
+			if got != test.want || ok != test.ok {
+				t.Fatalf("normalizeTerminalColor(%q) = %q, %v; want %q, %v", test.input, got, ok, test.want, test.ok)
+			}
+		})
+	}
+}
+
 func TestNewAcceptsImmediatePromptAndTemplatedInteractions(t *testing.T) {
 	for _, interactions := range []any{
 		[]any{map[string]any{"send": "first", "newline": true}, map[string]any{"send": "second"}},
@@ -424,7 +490,10 @@ func TestShellTTYRequiresInteractiveRequest(t *testing.T) {
 func TestShellTTYSuppliesTerminalAndBoundedCapture(t *testing.T) {
 	executor := &recordingExecutor{result: process.Result{Stdout: "transcript", StdoutTruncated: true}}
 	terminalInput := strings.NewReader("terminal")
-	runner, err := New(map[string]any{"command": "sh", "tty": true})
+	runner, err := New(map[string]any{
+		"command": "sh", "tty": true,
+		"terminal": map[string]any{"background": "rgb(30, 30, 46)", "foreground": "white", "title": "Console"},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -437,6 +506,10 @@ func TestShellTTYSuppliesTerminalAndBoundedCapture(t *testing.T) {
 	}
 	if !executor.options.TTY || executor.options.Stdin != terminalInput || executor.options.CaptureLimit != ttyCaptureLimit {
 		t.Fatalf("process options = %#v", executor.options)
+	}
+	wantTerminal := process.TerminalAppearance{Background: "#1e1e2e", Foreground: "#ffffff", Title: "Console"}
+	if executor.options.Terminal == nil || *executor.options.Terminal != wantTerminal {
+		t.Fatalf("terminal appearance = %#v, want %#v", executor.options.Terminal, wantTerminal)
 	}
 	if result.Outputs["stdout"] != "transcript" || result.Outputs["stderr"] != "" || result.Outputs["stdout_truncated"] != true || result.Outputs["stderr_truncated"] != false {
 		t.Fatalf("outputs = %#v", result.Outputs)

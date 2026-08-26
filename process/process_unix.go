@@ -44,6 +44,8 @@ type Options struct {
 	// Interact hands the PTY to Stdin after Interactions complete. TTY without Interactions
 	// preserves legacy behavior and always hands off immediately.
 	Interact bool
+	// Terminal customizes the outer terminal while the user controls the child PTY.
+	Terminal *TerminalAppearance
 	// CaptureLimit bounds each captured output stream. Zero means unlimited. Output written to
 	// Stdout and Stderr is unaffected.
 	CaptureLimit int64
@@ -211,6 +213,7 @@ func runTTY(ctx context.Context, options Options, credential *syscall.Credential
 	var input cancelreader.CancelReader
 	var inputDone chan error
 	var terminalState *term.State
+	var restoreAppearance func()
 	startHandoff := func() error {
 		var startErr error
 		input, startErr = cancelreader.NewReader(terminal)
@@ -223,6 +226,7 @@ func runTTY(ctx context.Context, options Options, credential *syscall.Credential
 			input = nil
 			return fmt.Errorf("enabling raw terminal mode: %w", startErr)
 		}
+		restoreAppearance = applyTerminalAppearance(options.Stdout, options.Terminal)
 		inputDone = make(chan error, 1)
 		go func() {
 			_, copyErr := io.Copy(ptmx, input)
@@ -246,6 +250,10 @@ func runTTY(ctx context.Context, options Options, credential *syscall.Credential
 			if restoreErr := term.Restore(int(terminal.Fd()), terminalState); restoreErr != nil {
 				stopErr = errors.Join(stopErr, fmt.Errorf("restoring terminal mode: %w", restoreErr))
 			}
+		}
+		if restoreAppearance != nil {
+			restoreAppearance()
+			restoreAppearance = nil
 		}
 		return stopErr
 	}
