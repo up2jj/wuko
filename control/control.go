@@ -319,49 +319,29 @@ func Run[T any](ctx context.Context, iterations []Iteration, policy Policy, obse
 		return err
 	}
 
+	// SetLimit may unblock one admission after cancellation as an active task exits.
+	// runOne checks the context before recording the iteration as started.
 	if policy.FailFast {
-		groupCtx, cancelGroup := context.WithCancel(runCtx)
-		defer cancelGroup()
-		var group errgroup.Group
-		slots := make(chan struct{}, min(policy.MaxConcurrency, max(1, len(iterations))))
-	failFastLoop:
+		group, groupCtx := errgroup.WithContext(runCtx)
+		group.SetLimit(policy.MaxConcurrency)
 		for _, iteration := range iterations {
-			select {
-			case slots <- struct{}{}:
-				if groupCtx.Err() != nil {
-					<-slots
-					break failFastLoop
-				}
-			case <-groupCtx.Done():
-				break failFastLoop
+			if groupCtx.Err() != nil {
+				break
 			}
 			group.Go(func() error {
-				err := runOne(groupCtx, iteration)
-				if err != nil {
-					cancelGroup()
-				}
-				<-slots
-				return err
+				return runOne(groupCtx, iteration)
 			})
 		}
 		_ = group.Wait()
 	} else {
 		var group errgroup.Group
-		slots := make(chan struct{}, min(policy.MaxConcurrency, max(1, len(iterations))))
-	collectLoop:
+		group.SetLimit(policy.MaxConcurrency)
 		for _, iteration := range iterations {
-			select {
-			case slots <- struct{}{}:
-				if runCtx.Err() != nil {
-					<-slots
-					break collectLoop
-				}
-			case <-runCtx.Done():
-				break collectLoop
+			if runCtx.Err() != nil {
+				break
 			}
 			group.Go(func() error {
 				_ = runOne(runCtx, iteration)
-				<-slots
 				return nil
 			})
 		}

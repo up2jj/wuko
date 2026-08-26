@@ -219,3 +219,37 @@ func TestRunFailFastDoesNotStartQueuedIteration(t *testing.T) {
 		t.Fatalf("queued iteration started after fail-fast cancellation: %#v", outcomes[1])
 	}
 }
+
+func TestRunCancellationDoesNotStartQueuedIteration(t *testing.T) {
+	iterations, err := Foreach([]int{0, 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	started := make(chan struct{}, 1)
+	var runs atomic.Int32
+	type runResult struct {
+		outcomes []Outcome[int]
+		err      error
+	}
+	done := make(chan runResult, 1)
+	go func() {
+		outcomes, err := Run(ctx, iterations, Policy{MaxConcurrency: 1, FailFast: false}, nil, func(ctx context.Context, iteration Iteration) (int, error) {
+			runs.Add(1)
+			started <- struct{}{}
+			<-ctx.Done()
+			return iteration.Index, ctx.Err()
+		})
+		done <- runResult{outcomes: outcomes, err: err}
+	}()
+
+	<-started
+	cancel()
+	result := <-done
+	if !errors.Is(result.err, context.Canceled) {
+		t.Fatalf("Run() error = %v, want context.Canceled", result.err)
+	}
+	if runs.Load() != 1 || result.outcomes[1].Started {
+		t.Fatalf("runs = %d, queued outcome = %#v", runs.Load(), result.outcomes[1])
+	}
+}

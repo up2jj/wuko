@@ -48,22 +48,16 @@ func (e *Engine) runConcurrent(ctx context.Context, definition *workflow.Definit
 	childOptions.Stdin = nil
 	childOptions.depth++
 
+	// SetLimit may unblock one admission after cancellation as an active branch exits.
+	// Each task checks its context before recording or executing that branch.
 	if concurrent.FailFast {
 		group, runCtx := errgroup.WithContext(groupCtx)
-		slots := make(chan struct{}, min(concurrent.MaxConcurrency, len(concurrent.Steps)))
-	failFastLoop:
+		group.SetLimit(concurrent.MaxConcurrency)
 		for i, workflowStep := range concurrent.Steps {
-			select {
-			case slots <- struct{}{}:
-				if runCtx.Err() != nil {
-					<-slots
-					break failFastLoop
-				}
-			case <-runCtx.Done():
-				break failFastLoop
+			if runCtx.Err() != nil {
+				break
 			}
 			group.Go(func() error {
-				defer func() { <-slots }()
 				if runCtx.Err() != nil {
 					return nil
 				}
@@ -74,20 +68,12 @@ func (e *Engine) runConcurrent(ctx context.Context, definition *workflow.Definit
 		_ = group.Wait()
 	} else {
 		var group errgroup.Group
-		slots := make(chan struct{}, min(concurrent.MaxConcurrency, len(concurrent.Steps)))
-	collectLoop:
+		group.SetLimit(concurrent.MaxConcurrency)
 		for i, workflowStep := range concurrent.Steps {
-			select {
-			case slots <- struct{}{}:
-				if groupCtx.Err() != nil {
-					<-slots
-					break collectLoop
-				}
-			case <-groupCtx.Done():
-				break collectLoop
+			if groupCtx.Err() != nil {
+				break
 			}
 			group.Go(func() error {
-				defer func() { <-slots }()
 				if groupCtx.Err() != nil {
 					return nil
 				}
