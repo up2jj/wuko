@@ -185,6 +185,29 @@ func TestDryRunPrintsUnexpandedControls(t *testing.T) {
 	}
 }
 
+func TestCancelOnDryRunShowsMonitorsAndBody(t *testing.T) {
+	registry := newTestRegistry(t, map[string]step.Builder{
+		"monitor": func(map[string]any) (step.Runner, error) { return countingRunner{}, nil },
+		"body":    func(map[string]any) (step.Runner, error) { return countingRunner{}, nil },
+	})
+	definition := cancelOnDefinition(t,
+		[]workflow.Step{
+			{ID: "ready", Type: "monitor", With: map[string]any{}},
+			{ID: "service_checks", Concurrent: &workflow.ConcurrentGroup{MaxConcurrency: 2, Steps: []workflow.Step{{ID: "check_one", Type: "monitor", With: map[string]any{}}, {ID: "check_two", Type: "monitor", With: map[string]any{}}}}},
+		},
+		[]workflow.Step{{ID: "deploy", Type: "body", With: map[string]any{}}},
+		`{"winner": cancel_on.winner.monitor}`,
+	)
+	var output bytes.Buffer
+	if _, err := New(registry).Run(t.Context(), definition, Options{DryRun: true, Stdout: &output, Stderr: io.Discard}); err != nil {
+		t.Fatal(err)
+	}
+	want := "1. deployment_watch (cancel_on; collect {\"winner\": cancel_on.winner.monitor})\n   monitors:\n      1.1 ready (monitor)\n      1.2 service_checks (concurrent [max 2, wait for all])\n         1.2.1 check_one (monitor)\n         1.2.2 check_two (monitor)\n   steps:\n      1.1 deploy (body)\n"
+	if output.String() != want {
+		t.Fatalf("output = %q, want %q", output.String(), want)
+	}
+}
+
 func TestDryRunPrintsUnexpandedBatch(t *testing.T) {
 	registry := newTestRegistry(t, map[string]step.Builder{"capture": func(map[string]any) (step.Runner, error) { return countingRunner{}, nil }})
 	definition := testDefinition(t, "batch-dry-run", workflow.Step{ID: "groups", Batch: &workflow.BatchGroup{

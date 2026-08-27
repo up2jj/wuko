@@ -229,6 +229,27 @@ func TestWriteWorkflowTreeShowsAttachedDefer(t *testing.T) {
 	}
 }
 
+func TestWorkflowTreeDisplaysCancelOnParticipants(t *testing.T) {
+	definition := &workflow.Definition{Version: 1, Name: "deploy", Steps: []workflow.Step{{
+		ID: "deployment_watch", CancelOn: &workflow.CancelOnGroup{
+			Monitors: []workflow.Step{
+				{ID: "ready", Type: "wait"},
+				{ID: "service_checks", Concurrent: &workflow.ConcurrentGroup{MaxConcurrency: 2, Steps: []workflow.Step{{ID: "api", Type: "http"}, {ID: "worker", Type: "http"}}}},
+			},
+			Steps:   []workflow.Step{{ID: "deploy", Type: "shell"}},
+			Collect: `cancel_on.winner.monitor`,
+		},
+	}}}
+	var output bytes.Buffer
+	if err := writeWorkflowTree(&output, definition); err != nil {
+		t.Fatal(err)
+	}
+	want := "deploy\n└── deployment_watch (cancel_on collect cancel_on.winner.monitor)\n    ├── monitors\n    │   ├── ready (wait)\n    │   └── service_checks (concurrent [max 2, wait for all])\n    │       ├── api (http)\n    │       └── worker (http)\n    └── steps\n        └── deploy (shell)\n"
+	if output.String() != want {
+		t.Fatalf("tree output = %q, want %q", output.String(), want)
+	}
+}
+
 func TestWorkflowTreeDisplaysConcurrentGroup(t *testing.T) {
 	timeout := workflow.Duration(5 * time.Minute)
 	definition := &workflow.Definition{Name: "checks", Steps: []workflow.Step{{Concurrent: &workflow.ConcurrentGroup{

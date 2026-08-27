@@ -71,6 +71,11 @@ func annotateSteps(steps []Step, sequence *yaml.Node, source string) {
 			annotateSteps(steps[i].Steps, mappingValue(node, "steps"), source)
 			annotateSteps(steps[i].Finally, mappingValue(node, "finally"), source)
 		}
+		if steps[i].IsCancelOn() {
+			group := mappingValue(node, "cancel_on")
+			annotateSteps(steps[i].CancelOn.Monitors, mappingValue(group, "monitors"), source)
+			annotateSteps(steps[i].CancelOn.Steps, mappingValue(group, "steps"), source)
+		}
 		annotateSteps(steps[i].Defer, mappingValue(node, "defer"), source)
 		if steps[i].IsWorkingDirectoryBlock() {
 			annotateSteps(steps[i].Steps, mappingValue(node, "steps"), source)

@@ -1,13 +1,244 @@
 # Workflow controls
 
-Wuko has five controls for scheduling or repeating operations: `concurrent`, `batch`, `foreach`,
-`matrix`, and `loop`.
+Wuko has six controls for scheduling, repeating, or monitoring operations: `concurrent`, `batch`,
+`foreach`, `matrix`, `loop`, and `cancel_on`.
 
 - Use `concurrent` for a fixed set of independent steps.
 - Use `batch` when each block should receive a fixed-size chunk of one runtime list.
 - Use `foreach` when one runtime list determines how many times a block runs.
 - Use `matrix` when every combination of several named dimensions must run.
 - Use `loop` when a sequential block should repeat until a runtime expression becomes true.
+- Use `cancel_on` when a sequential body should stop as soon as one named monitor finishes.
+
+## Cancel on
+
+`cancel_on` is one named logical step. It starts its sequential body and every monitor concurrently
+from isolated copies of the state that existed before the control. The first participant that
+finishes wins, except that a monitor whose steps were all skipped never triggers. A body whose steps
+were all skipped still ends the race. Wuko cancels and joins the other participants, then records the
+complete outcome under `steps.<cancel_on-id>` instead of merging child state into the workflow.
+
+```yaml
+version: 1
+name: monitored-deployment
+steps:
+  - id: deployment_watch
+    cancel_on:
+      monitors:
+        - id: deployment_finished
+          type: wait
+          timeout: 30m
+          with:
+            interval: 5s
+            step:
+              type: http
+              with:
+                url: https://example.com/status
+            until: result.status == 200
+
+      steps:
+        - id: prepare
+          type: lua
+          with:
+            source: |
+              wuko.set_var("artifact", "dist/app.tar")
+
+        - id: deploy
+          type: shell
+          with:
+            command: ./deploy
+```
+
+The parent ID and every monitor ID are required and must be valid and unique. A control must contain
+at least one monitor and one body step. Multiple monitors are ordinary declarations in the
+`monitors` list; all of them race the body and one another. A monitor may be a concrete step, action,
+conditional or working-directory block, worktree, executor, `concurrent`, `batch`, `foreach`,
+`matrix`, or `loop`. The monitor ID also labels declarations such as `concurrent` that are normally
+anonymous. Conditions, retries, timeouts, templates, and owned cleanup retain their ordinary
+behavior. Monitor branches have no shared interactive standard input.
+
+Nested `cancel_on`, `return`, `require`, and declared `defer` are rejected anywhere inside the
+control. The control races its own participants, so it is rejected inside an executor block, where
+every branch would share the one open session. Elsewhere its participants keep the restrictions of
+the scope the control sits in: a `cancel_on` inside a `concurrent` group or a `foreach` body may
+contain only what that scope already allows. Child outputs and variables are isolated: they do not become top-level `.steps` or `.vars`
+entries. Read them through the parent output instead.
+
+### Outcome shape
+
+If the body wins after both body steps succeed, the output has this shape. This example assumes the
+shell step captured its standard output.
+
+```yaml
+steps.deployment_watch:
+  ok: true
+  triggered: false
+  status: succeeded
+  error: null
+  winner:
+    monitor: ""
+    kind: body
+  steps:
+    prepare:
+      status: succeeded
+      error: null
+      outputs: {}
+    deploy:
+      status: succeeded
+      error: null
+      outputs:
+        stdout: "deployed\n"
+        exit_code: 0
+  vars:
+    artifact: dist/app.tar
+  monitors:
+    deployment_finished:
+      kind: wait
+      status: canceled
+      error: null
+      outputs: null
+      steps: {}
+      vars: {}
+  result: null
+```
+
+If `deployment_finished` wins after `prepare` commits but while `deploy` is running, the body keeps
+the completed variable and step record. The canceled step has a null error because cancellation was
+caused by winner selection, and only successful declarations publish non-null outputs.
+
+```yaml
+steps.deployment_watch:
+  ok: true
+  triggered: true
+  status: succeeded
+  error: null
+  winner:
+    monitor: deployment_finished
+    kind: wait
+  steps:
+    prepare:
+      status: succeeded
+      error: null
+      outputs: {}
+    deploy:
+      status: canceled
+      error: null
+      outputs: null
+  vars:
+    artifact: dist/app.tar
+  monitors:
+    deployment_finished:
+      kind: wait
+      status: succeeded
+      error: null
+      outputs:
+        status: 200
+        headers: {}
+        body: "ready\n"
+      steps: {}
+      vars: {}
+  result: null
+```
+
+If the monitor wins before `prepare` starts, every known unstarted body declaration is recorded as
+`skipped`; no body variable exists.
+
+```yaml
+steps.deployment_watch:
+  ok: true
+  triggered: true
+  status: succeeded
+  error: null
+  winner:
+    monitor: deployment_finished
+    kind: wait
+  steps:
+    prepare:
+      status: skipped
+      error: null
+      outputs: null
+    deploy:
+      status: skipped
+      error: null
+      outputs: null
+  vars: {}
+  monitors:
+    deployment_finished:
+      kind: wait
+      status: succeeded
+      error: null
+      outputs:
+        status: 200
+        headers: {}
+        body: "ready\n"
+      steps: {}
+      vars: {}
+  result: null
+```
+
+`winner.monitor` is empty when the body wins and is the required monitor ID otherwise.
+`winner.kind` is `body` or the winning monitor's executable kind, such as `wait`, `foreach`, or
+`concurrent`. `triggered` is equivalent to `winner.monitor != ""`. The top-level `ok`, `status`, and
+`error` describe the winner, not every participant. Body declarations are under `steps`, body
+variables are under `vars`, and monitor records are keyed by ID under `monitors`. Each step record
+has `status`, nullable `error`, and nullable `outputs`; statuses are `succeeded`, `failed`,
+`timed_out`, `canceled`, or `skipped`.
+
+Read the recorded outcome with ordinary conditions and templates:
+
+```yaml
+if: steps.deployment_watch.status == "succeeded"
+```
+
+```yaml
+if: steps.deployment_watch.steps.deploy.status == "succeeded"
+```
+
+```yaml
+if: steps.deployment_watch.monitors.deployment_finished.status == "succeeded"
+```
+
+```yaml
+"{{ .steps.deployment_watch.vars.artifact }}"
+```
+
+A body or monitor failure and a participant timeout still win the race. They are captured as
+`ok: false`, `status: failed` or `timed_out`, and a non-null `error`; the `cancel_on` parent itself
+completes successfully so later steps can inspect that outcome. Parent cancellation, validation
+errors, internal engine errors, and collection errors fail the parent normally.
+
+### Collection
+
+Add `collect` when a later step needs a smaller typed summary:
+
+```yaml
+- id: deployment_watch
+  cancel_on:
+    monitors:
+      - id: deployment_finished
+        type: wait
+        with: {duration: 5s}
+    steps:
+      - id: prepare
+        type: lua
+        with:
+          source: |
+            wuko.set_var("artifact", "dist/app.tar")
+      - id: deploy
+        type: shell
+        with: {command: ./deploy}
+    collect: |
+      {
+        "deployed": steps.deploy.status == "succeeded",
+        "artifact": vars.artifact,
+        "monitor": cancel_on.winner.monitor
+      }
+```
+
+Collection runs once after every participant stops. Its Expr environment exposes the namespaced
+`steps`, `vars`, `monitors`, and `cancel_on` outcome roots plus ordinary workflow roots. The typed
+value is stored at `steps.deployment_watch.result`. Without `collect`, `result` is always null; the
+full body and monitor records remain available either way.
 
 ## Loop
 

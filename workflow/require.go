@@ -38,6 +38,14 @@ func expandRequiredSteps(steps []Step, source string, stack []string) ([]Step, e
 func expandRequiredStepsInSource(steps []Step, source string, stack []string) ([]Step, error) {
 	expanded := make([]Step, 0, len(steps))
 	for i, workflowStep := range steps {
+		if workflowStep.IsCancelOn() {
+			if err := cancelOnContainsForbidden(workflowStep.CancelOn.Monitors); err != nil {
+				return nil, fmt.Errorf("cancel_on monitors at step %d in %s: %w", i+1, source, err)
+			}
+			if err := cancelOnContainsForbidden(workflowStep.CancelOn.Steps); err != nil {
+				return nil, fmt.Errorf("cancel_on body at step %d in %s: %w", i+1, source, err)
+			}
+		}
 		if len(workflowStep.childSequenceRefs()) > 0 {
 			err := workflowStep.transformChildSequences(func(role ChildRole, children []Step) ([]Step, error) {
 				expandedChildren, err := expandRequiredStepsInSource(children, source, stack)
@@ -95,6 +103,10 @@ func requiredChildContext(workflowStep Step, role ChildRole) string {
 		return "worktree block"
 	case workflowStep.IsConditionalBlock():
 		return "conditional block"
+	case workflowStep.IsCancelOn() && role == ChildMonitors:
+		return "cancel_on monitors"
+	case workflowStep.IsCancelOn():
+		return "cancel_on body"
 	case workflowStep.Concurrent != nil:
 		return "concurrent group"
 	case workflowStep.Batch != nil:

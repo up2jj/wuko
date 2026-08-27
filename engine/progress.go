@@ -71,7 +71,7 @@ type StepStats struct {
 	Iterations []IterationStats
 }
 
-// IterationStats records one batch, foreach, or matrix iteration without retaining its binding values.
+// IterationStats records one control iteration or participant without retaining its binding values.
 type IterationStats struct {
 	Index     int
 	Status    ExecutionStatus

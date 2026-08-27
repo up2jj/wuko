@@ -118,6 +118,7 @@ type Step struct {
 	Foreach          *ForeachGroup       `yaml:"foreach,omitempty"`
 	Matrix           *MatrixGroup        `yaml:"matrix,omitempty"`
 	Loop             *LoopGroup          `yaml:"loop,omitempty"`
+	CancelOn         *CancelOnGroup      `yaml:"cancel_on,omitempty"`
 	Return           *ReturnControl      `yaml:"return,omitempty"`
 	SHA256           string              `yaml:"sha256,omitempty"`
 	If               Condition           `yaml:"if,omitempty"`
@@ -136,7 +137,7 @@ func (workflowStep *Step) UnmarshalYAML(node *yaml.Node) error {
 	}
 	if err := rejectUnknownFields(node, "step", map[string]bool{
 		"id": true, "type": true, "uses": true, "require": true, "working_directory": true, "worktree": true, "executor": true, "steps": true, "finally": true, "defer": true, "concurrent": true,
-		"batch": true, "foreach": true, "matrix": true, "loop": true, "return": true, "sha256": true, "if": true, "timeout": true,
+		"batch": true, "foreach": true, "matrix": true, "loop": true, "cancel_on": true, "return": true, "sha256": true, "if": true, "timeout": true,
 		"retry": true, "with": true,
 	}); err != nil {
 		return err
@@ -167,8 +168,11 @@ func (workflowStep *Step) UnmarshalYAML(node *yaml.Node) error {
 
 // IsConditionalBlock reports whether the step is an anonymous multi-step conditional.
 func (workflowStep Step) IsConditionalBlock() bool {
-	return workflowStep.Steps != nil && workflowStep.Loop == nil && !workflowStep.IsWorkingDirectoryBlock() && !workflowStep.IsExecutorBlock() && workflowStep.Return == nil
+	return workflowStep.Steps != nil && workflowStep.Loop == nil && workflowStep.CancelOn == nil && !workflowStep.IsWorkingDirectoryBlock() && !workflowStep.IsExecutorBlock() && workflowStep.Return == nil
 }
+
+// IsCancelOn reports whether the step is a named monitored control.
+func (workflowStep Step) IsCancelOn() bool { return workflowStep.CancelOn != nil }
 
 // IsLoop reports whether the step repeats its child sequence until a condition matches.
 func (workflowStep Step) IsLoop() bool { return workflowStep.Loop != nil }
@@ -761,6 +765,36 @@ func validateStepScope(steps []Step, allowActions bool, scope stepScope, inherit
 
 func collectScopeIDs(steps []Step, seen map[string]struct{}) error {
 	for i, workflowStep := range steps {
+		if workflowStep.IsCancelOn() {
+			if !identifierPattern.MatchString(workflowStep.ID) {
+				return fmt.Errorf("step %d has invalid id %q", i+1, workflowStep.ID)
+			}
+			if _, exists := seen[workflowStep.ID]; exists {
+				return fmt.Errorf("duplicate step id %q", workflowStep.ID)
+			}
+			seen[workflowStep.ID] = struct{}{}
+			for monitorIndex, monitor := range workflowStep.CancelOn.Monitors {
+				if !identifierPattern.MatchString(monitor.ID) {
+					return fmt.Errorf("step %q cancel_on monitor %d has invalid id %q", workflowStep.ID, monitorIndex+1, monitor.ID)
+				}
+				if _, exists := seen[monitor.ID]; exists {
+					return fmt.Errorf("duplicate step id %q", monitor.ID)
+				}
+				seen[monitor.ID] = struct{}{}
+				declaration := cancelOnMonitorDeclaration(monitor)
+				if declaration.ID == "" {
+					for _, child := range declaration.ChildSequences() {
+						if err := collectScopeIDs(child.Steps, seen); err != nil {
+							return fmt.Errorf("step %q cancel_on monitor %q: %w", workflowStep.ID, monitor.ID, err)
+						}
+					}
+				}
+			}
+			if err := collectScopeIDs(workflowStep.CancelOn.Steps, seen); err != nil {
+				return fmt.Errorf("step %q cancel_on body: %w", workflowStep.ID, err)
+			}
+			continue
+		}
 		if workflowStep.IsLoop() {
 			if !identifierPattern.MatchString(workflowStep.ID) {
 				return fmt.Errorf("step %d has invalid id %q", i+1, workflowStep.ID)
@@ -821,6 +855,12 @@ func collectScopeIDs(steps []Step, seen map[string]struct{}) error {
 
 func validateSteps(steps []Step, allowActions bool, scope stepScope, seen map[string]struct{}) error {
 	for i, workflowStep := range steps {
+		if workflowStep.IsCancelOn() {
+			if err := validateCancelOnEntry(workflowStep, scope, allowActions, seen); err != nil {
+				return fmt.Errorf("step %q: %w", workflowStep.ID, err)
+			}
+			continue
+		}
 		if workflowStep.IsExecutorBlock() {
 			if err := validateExecutorBlock(workflowStep, scope, allowActions, seen); err != nil {
 				return fmt.Errorf("step %d: %w", i+1, err)
@@ -912,6 +952,41 @@ func validateSteps(steps []Step, allowActions bool, scope stepScope, seen map[st
 			workflowStep.With = make(map[string]any)
 			steps[i] = workflowStep
 		}
+	}
+	return nil
+}
+
+func validateCancelOnEntry(workflowStep Step, scope stepScope, allowActions bool, seen map[string]struct{}) error {
+	if workflowStep.Type != "" || !workflowStep.Uses.Empty() || workflowStep.Require != nil || workflowStep.Worktree != nil || workflowStep.Executor != nil || workflowStep.Finally != nil || workflowStep.Defer != nil || workflowStep.IsWorkingDirectoryBlock() || workflowStep.Concurrent != nil || workflowStep.Batch != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil || workflowStep.Loop != nil || workflowStep.Return != nil || workflowStep.SHA256 != "" || workflowStep.Timeout != nil || workflowStep.Retry != nil || workflowStep.With != nil || workflowStep.Steps != nil {
+		return fmt.Errorf("cancel_on cannot be combined with other step fields")
+	}
+	if workflowStep.ID == "" || !identifierPattern.MatchString(workflowStep.ID) {
+		return fmt.Errorf("cancel_on requires a valid id")
+	}
+	// Participants race concurrently against the enclosing scope's own steps, which an
+	// executor block cannot serve: every branch would share the one open session.
+	if executorStepScope(scope) {
+		return fmt.Errorf("cancel_on controls are not supported inside executor blocks")
+	}
+	if err := workflowStep.CancelOn.Validate(); err != nil {
+		return err
+	}
+	if err := cancelOnContainsForbidden(workflowStep.CancelOn.Monitors); err != nil {
+		return fmt.Errorf("monitors: %w", err)
+	}
+	if err := cancelOnContainsForbidden(workflowStep.CancelOn.Steps); err != nil {
+		return fmt.Errorf("body: %w", err)
+	}
+	// Each participant is its own sequential scope, but it may not reach past the nesting
+	// the control itself sits in: children keep the enclosing scope's restrictions.
+	for _, monitor := range workflowStep.CancelOn.Monitors {
+		declaration := cancelOnMonitorDeclaration(monitor)
+		if err := validateSteps([]Step{declaration}, allowActions, scope, seen); err != nil {
+			return fmt.Errorf("monitor %q: %w", monitor.ID, err)
+		}
+	}
+	if err := validateSteps(workflowStep.CancelOn.Steps, allowActions, scope, seen); err != nil {
+		return fmt.Errorf("body: %w", err)
 	}
 	return nil
 }

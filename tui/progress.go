@@ -71,7 +71,11 @@ func (progress *Progress) Report(event engine.ProgressEvent) {
 		}
 		fmt.Fprintln(progress.writer, line)
 	case engine.ControlStarted:
-		parts := []string{count(event.Iterations, "iteration"), fmt.Sprintf("max %d concurrent", event.MaxConcurrency)}
+		item := "iteration"
+		if event.ControlKind == "cancel_on" {
+			item = "participant"
+		}
+		parts := []string{count(event.Iterations, item), fmt.Sprintf("max %d concurrent", event.MaxConcurrency)}
 		if event.Timeout > 0 {
 			parts = append(parts, "timeout "+formatDuration(event.Timeout))
 		}
@@ -84,7 +88,11 @@ func (progress *Progress) Report(event engine.ProgressEvent) {
 	case engine.ControlFinished:
 		line := fmt.Sprintf("%s%s %s %s %s after %s", indent, progress.statusMarker(event.Status), controlLabel(event.ControlKind), event.StepID, statusLabel(event.Status), formatDuration(event.Duration))
 		if event.Status != engine.StatusSucceeded {
-			line += " · " + workSummary(event.Started, event.Succeeded, event.Iterations, "iteration")
+			item := "iteration"
+			if event.ControlKind == "cancel_on" {
+				item = "participant"
+			}
+			line += " · " + workSummary(event.Started, event.Succeeded, event.Iterations, item)
 		}
 		if event.Error != nil {
 			line += ": " + singleLine(event.Error.Error())
@@ -272,6 +280,9 @@ func singleLine(value string) string {
 }
 
 func controlLabel(kind string) string {
+	if kind == "cancel_on" {
+		return "Cancel on"
+	}
 	if kind == "" {
 		return "Control"
 	}

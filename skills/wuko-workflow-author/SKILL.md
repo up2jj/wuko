@@ -1,6 +1,6 @@
 ---
 name: wuko-workflow-author
-description: Create or update Wuko version-1 YAML workflows, including cron schedules, templates, conditions, early returns, finally cleanup, foreach and matrix controls, required files, composite actions, waits, polling, retries, concurrency, interactive prompts and path selection, typed and imported variables, structured decoding, JSONPath selection, semantic versions, HTTP, files, managed temporary resources, glob discovery, native filesystem watches, persistent change detectors, content-addressed directory caches, Lua, shell, Docker, and agent steps. Use when designing workflow files, extending existing workflows, or reviewing workflow structure before execution.
+description: Create or update Wuko version-1 YAML workflows, including cron schedules, templates, conditions, early returns, finally cleanup, cancel-on monitors, foreach and matrix controls, required files, composite actions, waits, polling, retries, concurrency, interactive prompts and path selection, typed and imported variables, structured decoding, JSONPath selection, semantic versions, HTTP, files, managed temporary resources, glob discovery, native filesystem watches, persistent change detectors, content-addressed directory caches, Lua, shell, Docker, and agent steps. Use when designing workflow files, extending existing workflows, or reviewing workflow structure before execution.
 ---
 
 # Wuko Workflow Author
@@ -149,6 +149,19 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
   commits only the final result, and can still repeat external effects with at-least-once semantics.
 - Give repeated external operations an explicit stable `operation_id` when the receiving service can use it for idempotency.
 - Remember that concurrent children share a pre-group state snapshot, cannot consume sibling outputs, and cannot safely compete for interactive input.
+- Use a named `cancel_on` control when a sequential body should race one or more named monitors.
+  Every participant starts from the pre-control state, monitor IDs are required, and the first
+  terminal participant wins; a monitor whose steps all skipped never triggers, while a skipped body
+  still ends the race. Inspect the captured result through
+  `.steps.<id>.status`, `.steps.<id>.winner`, `.steps.<id>.steps`, `.steps.<id>.vars`, and
+  `.steps.<id>.monitors`; body variables never escape to the outer `.vars`. Canceled or unstarted
+  declarations have null outputs. Use the optional `collect` Expr only for a smaller typed summary;
+  it receives `steps`, `vars`, `monitors`, and `cancel_on`. A participant failure or timeout is data
+  on the successful logical parent, while parent cancellation and collection failure still fail.
+  Do not nest `cancel_on`, `return`, `require`, or declared `defer` inside it, do not place it
+  inside an executor block, and do not rely on interactive stdin in monitor branches. Its
+  participants keep the restrictions of the scope the control sits in. Consult `docs/workflow-control.md` for the full output
+  contract and examples.
 - A `working_directory` block transparently scopes `.run.dir` and every child step request without
   changing the process-wide directory. Its target must already exist. Relative and nested paths
   resolve from the enclosing `.run.dir`; the prior scope is restored when the block ends. Compose

@@ -10,6 +10,8 @@ const (
 	ChildFinally
 	// ChildDefer is cleanup attached to an ordinary step.
 	ChildDefer
+	// ChildMonitors is the set of branches racing a cancel_on body.
+	ChildMonitors
 )
 
 // ChildSequence is a read-only structural view of one nested step sequence. Callers may inspect
@@ -74,6 +76,11 @@ func (workflowStep *Step) childSequenceRefs() []childSequenceRef {
 		return deferred([]childSequenceRef{{role: ChildSteps, steps: &workflowStep.Matrix.Steps}})
 	case workflowStep.Loop != nil:
 		return deferred([]childSequenceRef{{role: ChildSteps, steps: &workflowStep.Loop.Steps}})
+	case workflowStep.CancelOn != nil:
+		return []childSequenceRef{
+			{role: ChildMonitors, steps: &workflowStep.CancelOn.Monitors},
+			{role: ChildSteps, steps: &workflowStep.CancelOn.Steps},
+		}
 	default:
 		return deferred(nil)
 	}

@@ -126,6 +126,24 @@ func TestProgressRendersControlLifecycle(t *testing.T) {
 	}
 }
 
+func TestProgressRendersCancelOnLifecycle(t *testing.T) {
+	var output bytes.Buffer
+	progress := NewProgress(&output, false)
+	progress.Report(engine.ProgressEvent{
+		Kind: engine.ControlStarted, ControlKind: "cancel_on", StepID: "deployment_watch",
+		Iterations: 3, MaxConcurrency: 3,
+	})
+	progress.Report(engine.ProgressEvent{
+		Kind: engine.ControlFinished, ControlKind: "cancel_on", StepID: "deployment_watch",
+		Status: engine.StatusFailed, Duration: 2 * time.Second, Iterations: 3,
+		Started: 3, Succeeded: 1, Error: errors.New("collection failed"),
+	})
+	want := "↻ Cancel on deployment_watch · 3 participants · max 3 concurrent · wait for all\n✗ Cancel on deployment_watch failed after 2s · 3/3 participants started · 1 succeeded: collection failed\n"
+	if output.String() != want {
+		t.Fatalf("output = %q, want %q", output.String(), want)
+	}
+}
+
 func TestProgressRendersPollLifecycleAndSummary(t *testing.T) {
 	var output bytes.Buffer
 	progress := NewProgress(&output, false)

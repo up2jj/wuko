@@ -73,12 +73,10 @@ type Options struct {
 }
 
 // State carries one workflow's mutable values and is deliberately unsynchronized.
-// Parallel execution never shares it: runConcurrent and executeControl hand every
-// branch a deep clone (see cloneState and workflow.Clone) and merge the results back
-// on one goroutine after the group has joined. The validation rules that keep this
-// true -- no nested concurrent groups, no conditional blocks inside a concurrent
-// group, fan-out inside an executor block pinned to max_concurrency 1 -- live in
-// validateSteps in workflow/types.go.
+// Parallel execution never shares it: runConcurrent, executeControl, and executeCancelOn
+// hand every branch a deep clone (see cloneState and workflow.Clone) and publish or merge
+// results only after the group has joined. The validation rules that keep this true live
+// in validateSteps in workflow/types.go.
 type State struct {
 	Inputs map[string]any
 	Vars   map[string]any
@@ -145,6 +143,12 @@ func (e *Engine) Validate(ctx context.Context, definition *workflow.Definition, 
 
 func (e *Engine) validateSteps(ctx context.Context, definition *workflow.Definition, steps []workflow.Step, options Options, state *State) error {
 	for _, workflowStep := range steps {
+		if workflowStep.IsCancelOn() {
+			if err := e.validateCancelOn(ctx, definition, workflowStep, options, state); err != nil {
+				return fmt.Errorf("step %q: %w", workflowStep.ID, err)
+			}
+			continue
+		}
 		if workflowStep.IsExecutorBlock() {
 			if err := e.validateExecutorBlock(ctx, definition, workflowStep, options, state); err != nil {
 				return err
@@ -565,7 +569,9 @@ func (e *Engine) executeSequence(ctx context.Context, definition *workflow.Defin
 		}
 		stepOptions := withStepRun(options)
 		var outcome stepOutcome
-		if workflowStep.Batch != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil {
+		if workflowStep.IsCancelOn() {
+			outcome = e.executeCancelOn(ctx, definition, workflowStep, stepOptions, state, index, total)
+		} else if workflowStep.Batch != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil {
 			outcome = e.executeControl(ctx, definition, workflowStep, stepOptions, state, index, total)
 		} else if workflowStep.Loop != nil {
 			outcome = e.executeLoop(ctx, definition, workflowStep, stepOptions, state, index, total)
@@ -895,6 +901,9 @@ func bindingRoot(bindings map[string]any, name string) map[string]any {
 }
 
 func executionKind(workflowStep workflow.Step) string {
+	if workflowStep.IsCancelOn() {
+		return "cancel_on"
+	}
 	if workflowStep.IsWorktreeBlock() {
 		return "worktree"
 	}

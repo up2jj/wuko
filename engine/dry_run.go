@@ -15,8 +15,34 @@ func writeDryRun(writer io.Writer, steps []workflow.Step, indent string, parent 
 	for i, workflowStep := range steps {
 		path := append(append([]int(nil), parent...), i+1)
 		index := dryRunIndex(path)
+		if workflowStep.IsCancelOn() {
+			collect := ""
+			if workflowStep.CancelOn.Collect != "" {
+				collect = "; collect " + workflowStep.CancelOn.Collect
+			}
+			if _, err := fmt.Fprintf(writer, "%s%s %s (cancel_on%s)%s\n", indent, index, workflowStep.ID, collect, dryRunCondition(workflowStep)); err != nil {
+				return err
+			}
+			if _, err := fmt.Fprintln(writer, indent+"   monitors:"); err != nil {
+				return err
+			}
+			if err := writeDryRun(writer, workflowStep.CancelOn.Monitors, indent+"      ", path); err != nil {
+				return err
+			}
+			if _, err := fmt.Fprintln(writer, indent+"   steps:"); err != nil {
+				return err
+			}
+			if err := writeDryRun(writer, workflowStep.CancelOn.Steps, indent+"      ", path); err != nil {
+				return err
+			}
+			continue
+		}
 		if workflowStep.IsExecutorBlock() {
-			if _, err := fmt.Fprintf(writer, "%s%s executor: %s\n", indent, index, workflowStep.Executor.Type); err != nil {
+			label := fmt.Sprintf("executor: %s", workflowStep.Executor.Type)
+			if workflowStep.ID != "" {
+				label = fmt.Sprintf("%s (executor: %s)", workflowStep.ID, workflowStep.Executor.Type)
+			}
+			if _, err := fmt.Fprintf(writer, "%s%s %s\n", indent, index, label); err != nil {
 				return err
 			}
 			if err := writeDryRun(writer, workflowStep.Steps, indent+"   ", path); err != nil {
@@ -33,7 +59,11 @@ func writeDryRun(writer io.Writer, steps []workflow.Step, indent string, parent 
 			continue
 		}
 		if workflowStep.IsWorkingDirectoryBlock() {
-			if _, err := fmt.Fprintf(writer, "%s%s working_directory: %s\n", indent, index, workflowStep.WorkingDirectory); err != nil {
+			label := "working_directory: " + workflowStep.WorkingDirectory
+			if workflowStep.ID != "" {
+				label = fmt.Sprintf("%s (working_directory: %s)", workflowStep.ID, workflowStep.WorkingDirectory)
+			}
+			if _, err := fmt.Fprintf(writer, "%s%s %s\n", indent, index, label); err != nil {
 				return err
 			}
 			if err := writeDryRun(writer, workflowStep.Steps, indent+"   ", path); err != nil {
@@ -55,7 +85,11 @@ func writeDryRun(writer io.Writer, steps []workflow.Step, indent string, parent 
 			continue
 		}
 		if workflowStep.IsConditionalBlock() {
-			if _, err := fmt.Fprintf(writer, "%s%s if: %s\n", indent, index, workflowStep.If); err != nil {
+			label := "if: " + string(workflowStep.If)
+			if workflowStep.ID != "" {
+				label = fmt.Sprintf("%s (if: %s)", workflowStep.ID, workflowStep.If)
+			}
+			if _, err := fmt.Fprintf(writer, "%s%s %s\n", indent, index, label); err != nil {
 				return err
 			}
 			if err := writeDryRun(writer, workflowStep.Steps, indent+"   ", path); err != nil {
@@ -64,7 +98,11 @@ func writeDryRun(writer io.Writer, steps []workflow.Step, indent string, parent 
 			continue
 		}
 		if workflowStep.Concurrent != nil {
-			if _, err := fmt.Fprintf(writer, "%s%s concurrent%s\n", indent, index, concurrentPolicySuffix(workflowStep.Concurrent)); err != nil {
+			label := "concurrent" + concurrentPolicySuffix(workflowStep.Concurrent)
+			if workflowStep.ID != "" {
+				label = workflowStep.ID + " (concurrent" + concurrentPolicySuffix(workflowStep.Concurrent) + ")"
+			}
+			if _, err := fmt.Fprintf(writer, "%s%s %s\n", indent, index, label); err != nil {
 				return err
 			}
 			if err := writeDryRun(writer, workflowStep.Concurrent.Steps, indent+"   ", path); err != nil {
