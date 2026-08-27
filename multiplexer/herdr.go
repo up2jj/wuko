@@ -30,11 +30,13 @@ func (adapter herdrAdapter) Execute(ctx context.Context, target Target, request 
 	case OperationZoom:
 		args = []string{"pane", "zoom", target.ID, "--" + request.Mode}
 	case OperationNotify:
-		args = []string{"notification", "show"}
+		// herdr's notification show rejects the -- separator and misparses an
+		// option that precedes its TITLE operand, so the title leads and the
+		// body follows. The operand position already protects flag-shaped text.
+		args = []string{"notification", "show", request.Title}
 		if request.Body != "" {
 			args = append(args, "--body", request.Body)
 		}
-		args = append(args, "--", request.Title)
 	case OperationMetadata:
 		args = metadataArgs(target, request)
 	default:

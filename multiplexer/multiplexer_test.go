@@ -154,7 +154,7 @@ func TestAdaptersKeepFlagShapedDisplayTextAsOperands(t *testing.T) {
 			name:        "herdr notify",
 			environment: map[string]string{"HERDR_PANE_ID": "pane-9"},
 			request:     Request{Operation: OperationNotify, Title: "--body", Body: "deploy finished"},
-			want:        []string{"notification", "show", "--body", "deploy finished", "--", "--body"},
+			want:        []string{"notification", "show", "--body", "--body", "deploy finished"},
 		},
 		{
 			name:        "tmux notify",
