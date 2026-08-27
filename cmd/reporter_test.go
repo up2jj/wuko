@@ -51,12 +51,15 @@ func TestRunReportersCompleteBuildsSafeOutcome(t *testing.T) {
 		},
 	}}}
 	reporters.Progress(engine.ProgressEvent{
-		Kind: engine.WorkflowFinished, Depth: 0, Status: engine.StatusTimedOut,
+		Kind: engine.WorkflowFinished, Depth: 0, Status: engine.StatusTimedOut, WorkflowName: "check",
 		RunID: "terminal-run", ParentRunID: "parent-run", ParentStepRunID: "parent-step",
 		Stats: engine.RunStats{RunID: "terminal-run", Total: 4, Failed: 1, Duration: 3 * time.Second},
 	})
 	state := &engine.State{
-		Stats:   engine.RunStats{Total: 2, Succeeded: 2},
+		Stats: engine.RunStats{
+			RunID: "terminal-run", ParentRunID: "parent-run", ParentStepRunID: "parent-step",
+			Total: 4, Failed: 1, Duration: 3 * time.Second,
+		},
 		Outputs: map[string]any{"nested": map[string]any{"value": "original"}},
 		Env:     map[string]string{"SECRET": "hidden"}, Vars: map[string]any{"private": true},
 	}
@@ -82,6 +85,79 @@ func TestRunReportersCompleteBuildsSafeOutcome(t *testing.T) {
 	}
 	if value := got.Outputs["nested"].(map[string]any)["value"]; value != "original" {
 		t.Fatalf("cloned output = %q, want original", value)
+	}
+}
+
+func TestRunReportersCompleteFallsBackToTerminalEventWithoutState(t *testing.T) {
+	var got reporterpkg.Outcome
+	reporters := &runReporters{group: reporterpkg.Group{reporterpkg.Funcs{
+		FinishFunc: func(_ context.Context, outcome reporterpkg.Outcome) error {
+			got = outcome
+			return nil
+		},
+	}}}
+	reporters.Progress(engine.ProgressEvent{
+		Kind: engine.WorkflowFinished, Depth: 0, Status: engine.StatusFailed, WorkflowName: "check",
+		RunID: "check-run", ParentRunID: "parent-run", ParentStepRunID: "parent-step",
+		Stats: engine.RunStats{RunID: "check-run", Total: 4, Failed: 1, Duration: 3 * time.Second},
+	})
+	if err := reporters.complete(t.Context(), "check", nil, errors.New("step failed"), false); err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != engine.StatusFailed || got.Stats.Total != 4 || got.Stats.Failed != 1 {
+		t.Fatalf("outcome = %#v, want terminal event stats for the failed run", got)
+	}
+	if got.RunID != "check-run" || got.ParentRunID != "parent-run" || got.ParentStepRunID != "parent-step" {
+		t.Fatalf("outcome identity = %#v, want terminal event identity", got)
+	}
+}
+
+func TestRunReportersCompleteIgnoresTerminalEventFromAnotherWorkflow(t *testing.T) {
+	var got reporterpkg.Outcome
+	reporters := &runReporters{group: reporterpkg.Group{reporterpkg.Funcs{
+		FinishFunc: func(_ context.Context, outcome reporterpkg.Outcome) error {
+			got = outcome
+			return nil
+		},
+	}}}
+	reporters.Progress(engine.ProgressEvent{
+		Kind: engine.WorkflowFinished, Depth: 0, Status: engine.StatusSucceeded, WorkflowName: "dependency",
+		RunID: "dependency-run",
+		Stats: engine.RunStats{RunID: "dependency-run", Total: 3, Succeeded: 3},
+	})
+	runErr := errors.New("workflow \"check\": validation failed")
+	if err := reporters.complete(t.Context(), "check", nil, runErr, false); err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != engine.StatusFailed {
+		t.Fatalf("status = %q, want the failure the run actually returned", got.Status)
+	}
+	if got.Stats.Total != 0 || got.Stats.Succeeded != 0 {
+		t.Fatalf("stats = %#v, want no stats borrowed from the dependency run", got.Stats)
+	}
+}
+
+func TestRunReportersCompleteIgnoresStaleSuccessBeforeLaterFailure(t *testing.T) {
+	var got reporterpkg.Outcome
+	reporters := &runReporters{group: reporterpkg.Group{reporterpkg.Funcs{
+		FinishFunc: func(_ context.Context, outcome reporterpkg.Outcome) error {
+			got = outcome
+			return nil
+		},
+	}}}
+	reporters.Progress(engine.ProgressEvent{
+		Kind: engine.WorkflowFinished, Depth: 0, Status: engine.StatusSucceeded, WorkflowName: "check",
+		RunID: "first-run",
+		Stats: engine.RunStats{RunID: "first-run", Total: 3, Succeeded: 3},
+	})
+	if err := reporters.complete(t.Context(), "check", nil, errors.New("reload failed"), false); err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != engine.StatusFailed {
+		t.Fatalf("status = %q, want the failure the run actually returned", got.Status)
+	}
+	if got.Stats.Succeeded != 0 {
+		t.Fatalf("stats = %#v, want no stats borrowed from the earlier successful run", got.Stats)
 	}
 }
 
@@ -229,6 +305,14 @@ func TestNewRunReportersDefaultsToPlainAndComposesExplicitReporters(t *testing.T
 	if _, ok := composed.group[0].(*plainReporter); !ok {
 		t.Fatalf("first reporter = %T, want *plainReporter", composed.group[0])
 	}
+
+	multiplexerOnly, err := newRunReporters(command, deps, t.TempDir(), []string{"multiplexer"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(multiplexerOnly.group) != 1 {
+		t.Fatalf("multiplexer reporters = %d, want one", len(multiplexerOnly.group))
+	}
 }
 
 func TestNewRunReportersRejectsUnknownReporter(t *testing.T) {
@@ -236,13 +320,13 @@ func TestNewRunReportersRejectsUnknownReporter(t *testing.T) {
 	command.SetErr(new(bytes.Buffer))
 	debug := false
 	_, err := newRunReporters(command, dependencies{debug: &debug, getenv: func(string) string { return "" }}, t.TempDir(), []string{"otel"})
-	if err == nil || !strings.Contains(err.Error(), `unknown reporter "otel"; expected plain or github`) {
+	if err == nil || !strings.Contains(err.Error(), `unknown reporter "otel"; expected plain or github or multiplexer`) {
 		t.Fatalf("error = %v, want catalog-derived unknown reporter error", err)
 	}
 }
 
 func TestRunReporterNamesFollowCatalogOrder(t *testing.T) {
-	if got := strings.Join(runReporterNames(), ","); got != "plain,github" {
-		t.Fatalf("reporter names = %q, want plain,github", got)
+	if got := strings.Join(runReporterNames(), ","); got != "plain,github,multiplexer" {
+		t.Fatalf("reporter names = %q, want plain,github,multiplexer", got)
 	}
 }

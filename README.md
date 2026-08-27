@@ -177,9 +177,9 @@ current project’s workflow copy.
 ## GitHub Actions
 
 Wuko can report a run through GitHub Actions without changing the workflow format. Reporters are
-explicit and repeatable: `plain` keeps the normal progress log, while `github` adds error
-annotations, a job summary, and step outputs. GitHub supplies the output and summary files to every
-run step.
+explicit and repeatable: `plain` keeps the normal progress log, `github` adds error annotations, a
+job summary, and step outputs, and `multiplexer` animates the current tmux, cmux, or Herdr title.
+GitHub supplies the output and summary files to every run step.
 
 ```yaml
 - name: Run Wuko checks
@@ -294,6 +294,7 @@ Each linked guide contains multiple examples for every step.
 | `key_value` | Persist JSON-compatible values between runs | [Data steps](docs/steps-data.md#key_value) |
 | `changed` | Detect changed files or structured inputs | [Data steps](docs/steps-data.md#changed) |
 | `require_tool` | Require an executable and optionally validate its version | [System steps](docs/steps-system.md#require_tool) |
+| `multiplexer` | Label and annotate the current tmux, cmux, or Herdr context | [System steps](docs/steps-system.md#multiplexer) |
 | `git_clean` | Assert that a Git working tree is clean | [System steps](docs/steps-system.md#git_clean) |
 | `git_branch` | Assert local branch existence with an extensible operation schema | [System steps](docs/steps-system.md#git_branch) |
 | `git_remote_branch` | Assert local remote-tracking branch existence | [System steps](docs/steps-system.md#git_remote_branch) |

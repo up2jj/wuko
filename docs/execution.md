@@ -622,6 +622,20 @@ more reporters explicitly by repeating `--reporter`; events are delivered in dec
 wuko run check --reporter plain --reporter github
 ```
 
+Use the opt-in `multiplexer` reporter to animate root workflow progress in the detected tmux,
+cmux, or Herdr title while retaining the ordinary terminal log:
+
+```sh
+wuko run check --reporter plain --reporter multiplexer
+```
+
+It renders a compact title such as `⠋ check · 3/8 · test`, including retry, poll, and control
+activity. Animation requires a detected multiplexer and an interactive stderr; otherwise the
+reporter is a no-op. It stops on every completion path and leaves a final `✓`, `✗`, `■`, or `⏱`
+title. Dry runs leave `◇ NAME · dry run`. Title writes are sanitized, capped at 80 characters,
+and best effort, so display failures never change the workflow result. While enabled, this
+reporter owns the title: a `multiplexer` title step may be replaced by its next frame.
+
 The `github` reporter requires the `GITHUB_OUTPUT` and `GITHUB_STEP_SUMMARY` files provided to a
 GitHub Actions run step. It emits error annotations for located workflow diagnostics, appends a
 run-statistics summary, and exports successful workflow return values. String values are preserved;
@@ -632,8 +646,9 @@ return value with that name before enabling the reporter.
 
 Reporters do not change workflow execution, interactivity, or scheduling. A reporter initialization
 or finalization failure does fail the Wuko command, while leaving the recorded workflow outcome
-unchanged. Pair the GitHub reporter with `--once` when GitHub owns the schedule. GitHub environment
-variables do not enable the reporter implicitly.
+unchanged; multiplexer title writes are deliberately best effort. Pair the GitHub reporter with
+`--once` when GitHub owns the schedule. GitHub and multiplexer environment variables do not enable
+reporters implicitly.
 
 Go integrations can implement the public `reporter.Reporter` interface. Progress and diagnostic
 events are delivered synchronously and in order, followed by a safe final outcome containing only

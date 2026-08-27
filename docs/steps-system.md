@@ -201,6 +201,62 @@ accepted. Outputs include `path`, plus normalized `version` when a constraint wa
 local host, `path` is resolved through `PATH`; inside an executor it is the configured tool name or
 path.
 
+## `multiplexer`
+
+Control the terminal context hosting Wuko. The step detects tmux, Herdr, then cmux in that order;
+set `provider` to `tmux`, `herdr`, or `cmux` only when a nested environment should target a
+specific outer integration. When the selected integration is absent the step succeeds with
+`active: false`, `changed: false`, and empty `provider` and `target` outputs.
+
+Set a persistent pane or tab label:
+
+```yaml
+- id: label
+  type: multiplexer
+  with:
+    operation: title
+    title: "Deploy {{ .vars.environment }}"
+```
+
+Use `operation: clear_title` to clear the explicit label. Changes are not restored when the
+workflow finishes; sequential changes are last-write-wins. To require an active multiplexer,
+assert the step output:
+
+```yaml
+- id: require_multiplexer
+  type: assert
+  with:
+    expr: steps.label.active
+    message: This workflow must run inside tmux, cmux, or Herdr
+```
+
+Portable operations are:
+
+| Operation | Fields | Behavior |
+| --- | --- | --- |
+| `title` | `title` | Set the current context label |
+| `clear_title` | none | Clear the current context label |
+| `zoom` | `mode: on`, `off`, or `toggle` | Set current-pane zoom where supported |
+| `notify` | `title`, optional `body` | Show a native notification or tmux message |
+
+Provider-specific operations are rejected when the detected provider or installed CLI does not
+advertise them:
+
+| Provider | Operations and fields |
+| --- | --- |
+| cmux | `status` (`key`, `value`, optional `icon`, `color`, `priority`), `clear_status` (`key`), `progress` (`progress` from 0 to 1, optional `label`), `clear_progress`, `log` (`message`, optional `level` and `source`), `clear_log` |
+| Herdr | `metadata` with optional `source`, `title`, `display_agent`, `state_labels`, `tokens`, `clear_title`, `clear_display_agent`, `clear_state_labels`, `clear_tokens`, and `ttl_ms` |
+
+Herdr metadata sources default to `wuko.<workflow>.<step>`. State-label keys are `idle`, `working`,
+`blocked`, `done`, or `unknown`; `ttl_ms` may be at most 86400000. cmux compatibility depends on
+the commands advertised by the installed release: older releases label the current tab, while the
+noun-first CLI labels the current pane. Older cmux releases without pane zoom or sidebar commands
+return an explicit unsupported-operation error.
+
+All successful active operations output `active`, `provider`, `operation`, `target`, and `changed`.
+The step controls the local host terminal and is not available inside executor blocks. Display
+text rejects terminal control characters. Raw provider commands remain available through `shell`.
+
 ## `file`
 
 Perform strict, shell-independent filesystem operations.

@@ -38,6 +38,9 @@ var runReporterCatalog = []runReporterDefinition{
 			Workspace: workspace, Commands: command.ErrOrStderr(),
 		})
 	}},
+	{name: "multiplexer", new: func(command *cobra.Command, deps dependencies, _ string) (reporterpkg.Reporter, error) {
+		return newMultiplexerProgressReporter(command.ErrOrStderr(), deps.getenv), nil
+	}},
 }
 
 // runReporters adapts command completion into the safe public reporter outcome. It records the
@@ -136,14 +139,25 @@ func (reporters *runReporters) complete(ctx context.Context, workflowName string
 	finished := reporters.finished
 	latest := reporters.latest
 	reporters.mu.Unlock()
-	if finished != nil {
-		outcome.Status = finished.Status
+	switch {
+	case adoptableFinish(finished, workflowName, outcome.Status, state):
 		outcome.Stats = finished.Stats
 		applyProgressIdentity(&outcome, *finished)
-	} else if outcome.RunID == "" {
+	case outcome.RunID == "":
 		applyRunIdentity(&outcome, latest)
 	}
 	return reporters.Finish(context.WithoutCancel(ctx), outcome)
+}
+
+// adoptableFinish reports whether the recorded root workflow event describes the run being
+// completed. The same reporters observe every root workflow of an invocation - dependencies,
+// form loads and earlier scheduled iterations - so an event left over from one of those must not
+// stand in for a run that produced no state of its own.
+func adoptableFinish(finished *engine.ProgressEvent, workflowName string, status engine.ExecutionStatus, state *engine.State) bool {
+	if finished == nil || state != nil {
+		return false
+	}
+	return finished.WorkflowName == workflowName && finished.Status == status
 }
 
 func identityFromProgress(event engine.ProgressEvent) runIdentity {
