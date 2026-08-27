@@ -7,7 +7,7 @@ env:
 
 steps:
   - id: task_name
-    type: prompt
+    type: tui_input
     with:
       variable: task_name
       message: Task name
@@ -20,7 +20,7 @@ steps:
         name: "{{ .vars.task_name }}"
 
   - id: project
-    type: choice
+    type: tui_choice
     with:
       variable: project_id
       message: Select a project
@@ -29,7 +29,7 @@ steps:
       value_field: id
 
   - id: reviewers
-    type: choice
+    type: tui_choice
     with:
       variable: reviewers
       message: Select reviewers

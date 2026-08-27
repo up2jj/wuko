@@ -40,6 +40,28 @@ func TestClickUpTaskExampleValidates(t *testing.T) {
 	}
 }
 
+func TestStartTaskExampleValidates(t *testing.T) {
+	t.Setenv("WUKO_DEMO_TOKEN", "demo")
+	path := filepath.Join("examples", ".wuko", "workflows", "start-task.yaml")
+	definition, err := workflow.NewLoader(nil).Load(t.Context(), path, workflow.LoadOptions{RunDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	registry := step.NewRegistry()
+	for _, register := range []func(*step.Registry) error{
+		inputstep.Register, choice.Register, luastep.Register, shell.Register, agent.Register,
+	} {
+		if err := register(registry); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := engine.New(registry).Validate(t.Context(), definition, engine.Options{RunDir: t.TempDir()}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestClickUpTaskExampleFetchesAndWritesMarkdown(t *testing.T) {
 	tests := []struct {
 		name        string
