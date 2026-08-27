@@ -22,10 +22,10 @@ func (cmuxAdapter) Detect(environment map[string]string) (Target, bool) {
 	return Target{Provider: ProviderCmux, ID: id, Workspace: workspace}, true
 }
 
-func (adapter cmuxAdapter) Execute(ctx context.Context, target Target, request Request, environment map[string]string) error {
+func (adapter cmuxAdapter) Execute(ctx context.Context, target Target, request Request, environment map[string]string) (Outcome, error) {
 	help, err := adapter.help(ctx, environment)
 	if err != nil {
-		return err
+		return Outcome{}, err
 	}
 	nounFirst := strings.Contains(help, "pane <selector>")
 	var args []string
@@ -35,7 +35,13 @@ func (adapter cmuxAdapter) Execute(ctx context.Context, target Target, request R
 		if request.Operation == OperationClearTitle {
 			title = ""
 		}
-		if nounFirst {
+		// cmux labels a tab through rename-tab and a pane through the
+		// noun-first pane command, so tab scope needs rename-tab even on a
+		// release that also has pane rename.
+		if request.Scope == ScopeTab && !commandAdvertised(help, "rename-tab") {
+			return Outcome{}, &UnsupportedError{Provider: ProviderCmux, Operation: request.Operation, Detail: "installed CLI has no rename-tab command"}
+		}
+		if nounFirst && request.Scope != ScopeTab {
 			args = []string{"pane", "current", "rename", "--name", title}
 		} else if commandAdvertised(help, "rename-tab") {
 			args = []string{"rename-tab"}
@@ -46,11 +52,11 @@ func (adapter cmuxAdapter) Execute(ctx context.Context, target Target, request R
 			}
 			args = append(args, "--title", title)
 		} else {
-			return &UnsupportedError{Provider: ProviderCmux, Operation: request.Operation, Detail: "installed CLI has no pane or tab rename command"}
+			return Outcome{}, &UnsupportedError{Provider: ProviderCmux, Operation: request.Operation, Detail: "installed CLI has no pane or tab rename command"}
 		}
 	case OperationZoom:
 		if !nounFirst {
-			return &UnsupportedError{Provider: ProviderCmux, Operation: request.Operation, Detail: "installed CLI has no pane zoom command"}
+			return Outcome{}, &UnsupportedError{Provider: ProviderCmux, Operation: request.Operation, Detail: "installed CLI has no pane zoom command"}
 		}
 		args = []string{"pane", "current", "zoom", "--mode", request.Mode}
 	case OperationNotify:
@@ -59,14 +65,14 @@ func (adapter cmuxAdapter) Execute(ctx context.Context, target Target, request R
 		} else if commandAdvertised(help, "notify") {
 			args = []string{"notify", "--title", request.Title}
 		} else {
-			return &UnsupportedError{Provider: ProviderCmux, Operation: request.Operation}
+			return Outcome{}, &UnsupportedError{Provider: ProviderCmux, Operation: request.Operation}
 		}
 		if request.Body != "" {
 			args = append(args, "--body", request.Body)
 		}
 	case OperationStatus:
 		if !commandAdvertised(help, "set-status") {
-			return &UnsupportedError{Provider: ProviderCmux, Operation: request.Operation, Detail: "installed CLI does not advertise sidebar status commands"}
+			return Outcome{}, &UnsupportedError{Provider: ProviderCmux, Operation: request.Operation, Detail: "installed CLI does not advertise sidebar status commands"}
 		}
 		args = []string{"set-status"}
 		if request.Icon != "" {
@@ -81,12 +87,12 @@ func (adapter cmuxAdapter) Execute(ctx context.Context, target Target, request R
 		args = append(args, "--", request.Key, request.Value)
 	case OperationClearStatus:
 		if !commandAdvertised(help, "clear-status") {
-			return &UnsupportedError{Provider: ProviderCmux, Operation: request.Operation}
+			return Outcome{}, &UnsupportedError{Provider: ProviderCmux, Operation: request.Operation}
 		}
 		args = []string{"clear-status", "--", request.Key}
 	case OperationProgress:
 		if !commandAdvertised(help, "set-progress") {
-			return &UnsupportedError{Provider: ProviderCmux, Operation: request.Operation}
+			return Outcome{}, &UnsupportedError{Provider: ProviderCmux, Operation: request.Operation}
 		}
 		args = []string{"set-progress", strconv.FormatFloat(request.Progress, 'f', -1, 64)}
 		if request.Label != "" {
@@ -94,12 +100,12 @@ func (adapter cmuxAdapter) Execute(ctx context.Context, target Target, request R
 		}
 	case OperationClearProgress:
 		if !commandAdvertised(help, "clear-progress") {
-			return &UnsupportedError{Provider: ProviderCmux, Operation: request.Operation}
+			return Outcome{}, &UnsupportedError{Provider: ProviderCmux, Operation: request.Operation}
 		}
 		args = []string{"clear-progress"}
 	case OperationLog:
 		if !commandAdvertised(help, "log") {
-			return &UnsupportedError{Provider: ProviderCmux, Operation: request.Operation}
+			return Outcome{}, &UnsupportedError{Provider: ProviderCmux, Operation: request.Operation}
 		}
 		args = []string{"log", "--level", request.Level}
 		if request.Source != "" {
@@ -108,14 +114,17 @@ func (adapter cmuxAdapter) Execute(ctx context.Context, target Target, request R
 		args = append(args, "--", request.Message)
 	case OperationClearLog:
 		if !commandAdvertised(help, "clear-log") {
-			return &UnsupportedError{Provider: ProviderCmux, Operation: request.Operation}
+			return Outcome{}, &UnsupportedError{Provider: ProviderCmux, Operation: request.Operation}
 		}
 		args = []string{"clear-log"}
 	default:
-		return &UnsupportedError{Provider: ProviderCmux, Operation: request.Operation}
+		return Outcome{}, &UnsupportedError{Provider: ProviderCmux, Operation: request.Operation}
+	}
+	if request.Scope == ScopeTab && request.Operation != OperationTitle && request.Operation != OperationClearTitle {
+		return Outcome{}, &UnsupportedError{Provider: ProviderCmux, Operation: request.Operation, Detail: "cmux supports only title and clear_title for tab scope"}
 	}
 	_, err = runCommand(ctx, adapter.executor, environment, "cmux", args...)
-	return err
+	return Outcome{}, err
 }
 
 func (adapter cmuxAdapter) help(ctx context.Context, environment map[string]string) (string, error) {

@@ -230,6 +230,49 @@ assert the step output:
     message: This workflow must run inside tmux, cmux, or Herdr
 ```
 
+### Tab scope
+
+`title` and `clear_title` accept `scope`, which is `pane` by default. Set `scope: tab` to label
+the tab or window containing the current pane instead:
+
+```yaml
+- id: tab
+  type: multiplexer
+  with:
+    operation: title
+    scope: tab
+    title: "Deploy {{ .vars.environment }}"
+```
+
+Tab scope resolves the tab from the detected pane. herdr reads it from `HERDR_TAB_ID` when that
+is set and otherwise asks `herdr pane get`; tmux uses the window owning `TMUX_PANE`; cmux uses
+`rename-tab` and reports an unsupported operation when the installed release does not advertise
+it. Only `title` and `clear_title` accept tab scope - `zoom`, `notify`, and the provider-specific
+operations remain pane or surface operations.
+
+Every title operation outputs `previous_title`, the label the target carried beforehand. herdr
+has no tab equivalent of `pane rename --clear`, so restoring a tab means setting the previous
+value back rather than clearing it:
+
+```yaml
+- id: tab
+  type: multiplexer
+  with: {operation: title, scope: tab, title: "Deploy production"}
+
+finally:
+  - id: restore_tab
+    type: multiplexer
+    if: steps.tab.active
+    with:
+      operation: title
+      scope: tab
+      title: "{{ .steps.tab.previous_title }}"
+```
+
+`previous_title` is empty when the target had no label or the provider cannot report one, and
+`scope` is echoed back on the step output. For tmux, `clear_title` with `scope: tab` restores
+tmux's own `automatic-rename` rather than blanking the window name.
+
 Portable operations are:
 
 | Operation | Fields | Behavior |
@@ -253,7 +296,8 @@ the commands advertised by the installed release: older releases label the curre
 noun-first CLI labels the current pane. Older cmux releases without pane zoom or sidebar commands
 return an explicit unsupported-operation error.
 
-All successful active operations output `active`, `provider`, `operation`, `target`, and `changed`.
+All successful active operations output `active`, `provider`, `operation`, `scope`, `target`,
+`changed`, and `previous_title`.
 The step controls the local host terminal and is not available inside executor blocks. Display
 text rejects terminal control characters. Raw provider commands remain available through `shell`.
 

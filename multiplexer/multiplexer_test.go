@@ -147,14 +147,14 @@ func TestAdaptersKeepFlagShapedDisplayTextAsOperands(t *testing.T) {
 		{
 			name:        "herdr title",
 			environment: map[string]string{"HERDR_PANE_ID": "pane-9"},
-			request:     Request{Operation: OperationTitle, Title: "--clear"},
-			want:        []string{"pane", "rename", "pane-9", "--", "--clear"},
+			request:     Request{Operation: OperationTitle, Title: "-x rebuild"},
+			want:        []string{"pane", "rename", "pane-9", "-x rebuild"},
 		},
 		{
 			name:        "herdr notify",
 			environment: map[string]string{"HERDR_PANE_ID": "pane-9"},
-			request:     Request{Operation: OperationNotify, Title: "--body", Body: "deploy finished"},
-			want:        []string{"notification", "show", "--body", "--body", "deploy finished"},
+			request:     Request{Operation: OperationNotify, Title: "-p deploy", Body: "deploy finished"},
+			want:        []string{"notification", "show", "-p deploy", "--body", "deploy finished"},
 		},
 		{
 			name:        "tmux notify",
@@ -191,6 +191,34 @@ func TestAdaptersKeepFlagShapedDisplayTextAsOperands(t *testing.T) {
 	}
 }
 
+func TestHerdrRejectsDisplayTextCollidingWithItsOwnFlags(t *testing.T) {
+	// herdr ignores the -- separator, so text matching a subcommand flag would
+	// silently run a different operation: "--clear" would erase the label
+	// instead of setting it.
+	tests := []struct {
+		name    string
+		request Request
+	}{
+		{name: "title", request: Request{Operation: OperationTitle, Title: "--clear"}},
+		{name: "notify", request: Request{Operation: OperationNotify, Title: "--body", Body: "text"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			executor := &fakeExecutor{}
+			_, err := New(executor).Execute(t.Context(), map[string]string{"HERDR_PANE_ID": "pane-9"}, test.request)
+			if err == nil {
+				t.Fatal("expected an error")
+			}
+			if !strings.Contains(err.Error(), "collides with a herdr option") {
+				t.Fatalf("error = %v", err)
+			}
+			if len(executor.calls) != 0 {
+				t.Fatalf("herdr was invoked: %v", executor.calls)
+			}
+		})
+	}
+}
+
 func TestCommandFailureIncludesCapturedDetail(t *testing.T) {
 	environment := map[string]string{"TMUX": "socket", "TMUX_PANE": "%1"}
 	executor := &fakeExecutor{results: []process.Result{{Stderr: "server unavailable\n"}}, errors: []error{errors.New("exit 1")}}
@@ -210,4 +238,129 @@ func callsEqual(left, right []commandCall) bool {
 		}
 	}
 	return true
+}
+
+func TestTabScopeLabelsTheTabAndReportsThePreviousLabel(t *testing.T) {
+	cmuxHelp := process.Result{Stdout: "Commands:\n  rename-tab <title>\n  notify --title <text>\n"}
+	tests := []struct {
+		name         string
+		environment  map[string]string
+		results      []process.Result
+		request      Request
+		wantCalls    [][]string
+		wantPrevious string
+	}{
+		{
+			name:        "herdr resolves the tab from the pane and captures its label",
+			environment: map[string]string{"HERDR_PANE_ID": "w3:p1"},
+			results: []process.Result{
+				{Stdout: `{"result":{"pane":{"pane_id":"w3:p1","tab_id":"w3:t1"},"type":"pane_info"}}`},
+				{Stdout: `{"result":{"tab":{"tab_id":"w3:t1","label":"1"},"type":"tab_info"}}`},
+				{},
+			},
+			request: Request{Operation: OperationTitle, Scope: ScopeTab, Title: "Deploy staging"},
+			wantCalls: [][]string{
+				{"pane", "get", "w3:p1"},
+				{"tab", "get", "w3:t1"},
+				{"tab", "rename", "w3:t1", "Deploy staging"},
+			},
+			wantPrevious: "1",
+		},
+		{
+			name:        "herdr takes the tab id from the environment when it is present",
+			environment: map[string]string{"HERDR_PANE_ID": "w3:p1", "HERDR_TAB_ID": "w3:t9"},
+			results: []process.Result{
+				{Stdout: `{"result":{"tab":{"tab_id":"w3:t9"},"type":"tab_info"}}`},
+				{},
+			},
+			request: Request{Operation: OperationClearTitle, Scope: ScopeTab},
+			wantCalls: [][]string{
+				{"tab", "get", "w3:t9"},
+				{"tab", "rename", "w3:t9", ""},
+			},
+		},
+		{
+			name:        "tmux renames the window and restores automatic naming",
+			environment: map[string]string{"TMUX": "socket", "TMUX_PANE": "%7"},
+			results:     []process.Result{{Stdout: "shell\n"}, {}},
+			request:     Request{Operation: OperationTitle, Scope: ScopeTab, Title: "build"},
+			wantCalls: [][]string{
+				{"display-message", "-p", "-t", "%7", "#W"},
+				{"rename-window", "-t", "%7", "--", "build"},
+			},
+			wantPrevious: "shell",
+		},
+		{
+			name:        "tmux clear restores automatic-rename",
+			environment: map[string]string{"TMUX": "socket", "TMUX_PANE": "%7"},
+			results:     []process.Result{{Stdout: "build\n"}, {}},
+			request:     Request{Operation: OperationClearTitle, Scope: ScopeTab},
+			wantCalls: [][]string{
+				{"display-message", "-p", "-t", "%7", "#W"},
+				{"set-window-option", "-t", "%7", "automatic-rename", "on"},
+			},
+			wantPrevious: "build",
+		},
+		{
+			name:        "cmux uses rename-tab even though this release has no pane rename",
+			environment: map[string]string{"CMUX_SURFACE_ID": "surface:4"},
+			results:     []process.Result{cmuxHelp, {}},
+			request:     Request{Operation: OperationTitle, Scope: ScopeTab, Title: "build"},
+			wantCalls: [][]string{
+				{"--help"},
+				{"rename-tab", "--surface", "surface:4", "--title", "build"},
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			executor := &fakeExecutor{results: test.results}
+			result, err := New(executor).Execute(t.Context(), test.environment, test.request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Scope != ScopeTab {
+				t.Fatalf("scope = %q", result.Scope)
+			}
+			if result.PreviousTitle != test.wantPrevious {
+				t.Fatalf("previous title = %q, want %q", result.PreviousTitle, test.wantPrevious)
+			}
+			if len(executor.calls) != len(test.wantCalls) {
+				t.Fatalf("calls = %v", executor.calls)
+			}
+			for index, want := range test.wantCalls {
+				if !slices.Equal(executor.calls[index].args, want) {
+					t.Fatalf("call %d args = %v, want %v", index, executor.calls[index].args, want)
+				}
+			}
+		})
+	}
+}
+
+func TestTabScopeRejectsOperationsThatOnlyApplyToPanes(t *testing.T) {
+	executor := &fakeExecutor{}
+	_, err := New(executor).Execute(t.Context(), map[string]string{"HERDR_PANE_ID": "w3:p1"},
+		Request{Operation: OperationZoom, Scope: ScopeTab, Mode: "on"})
+	var unsupported *UnsupportedError
+	if !errors.As(err, &unsupported) || unsupported.Operation != OperationZoom {
+		t.Fatalf("error = %v", err)
+	}
+	if len(executor.calls) != 0 {
+		t.Fatalf("herdr was invoked: %v", executor.calls)
+	}
+}
+
+func TestScopeDefaultsToPane(t *testing.T) {
+	executor := &fakeExecutor{}
+	result, err := New(executor).Execute(t.Context(), map[string]string{"HERDR_PANE_ID": "w3:p1"},
+		Request{Operation: OperationTitle, Title: "build"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Scope != ScopePane {
+		t.Fatalf("scope = %q", result.Scope)
+	}
+	if len(executor.calls) != 1 || !slices.Equal(executor.calls[0].args, []string{"pane", "rename", "w3:p1", "build"}) {
+		t.Fatalf("calls = %v", executor.calls)
+	}
 }

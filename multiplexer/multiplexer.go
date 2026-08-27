@@ -20,6 +20,16 @@ const (
 	ProviderCmux  Provider = "cmux"
 )
 
+// Scope selects which part of the hosting terminal an operation addresses.
+// Panes are the default because every provider can label one; tab support is
+// gated on what the detected provider advertises.
+type Scope string
+
+const (
+	ScopePane Scope = "pane"
+	ScopeTab  Scope = "tab"
+)
+
 type Operation string
 
 const (
@@ -45,6 +55,7 @@ type Target struct {
 type Request struct {
 	Provider  Provider
 	Operation Operation
+	Scope     Scope
 	Title     string
 	Mode      string
 	Body      string
@@ -73,8 +84,19 @@ type Result struct {
 	Active    bool
 	Provider  Provider
 	Operation Operation
+	Scope     Scope
 	Target    string
 	Changed   bool
+	// PreviousTitle is the label the target carried before a title operation
+	// replaced it, so a later step can put it back. It is empty when the target
+	// had no label or the provider cannot report one.
+	PreviousTitle string
+}
+
+// Outcome carries the provider-specific detail an adapter observed while
+// running one request.
+type Outcome struct {
+	PreviousTitle string
 }
 
 type UnsupportedError struct {
@@ -98,7 +120,7 @@ type commandExecutor interface {
 type Adapter interface {
 	Provider() Provider
 	Detect(map[string]string) (Target, bool)
-	Execute(context.Context, Target, Request, map[string]string) error
+	Execute(context.Context, Target, Request, map[string]string) (Outcome, error)
 }
 
 type Controller struct {
@@ -126,6 +148,19 @@ func ParseProvider(value string) (Provider, error) {
 		return provider, nil
 	default:
 		return "", fmt.Errorf("provider must be auto, tmux, herdr, or cmux")
+	}
+}
+
+func ParseScope(value string) (Scope, error) {
+	scope := Scope(value)
+	if scope == "" {
+		return ScopePane, nil
+	}
+	switch scope {
+	case ScopePane, ScopeTab:
+		return scope, nil
+	default:
+		return "", fmt.Errorf("scope must be pane or tab")
 	}
 }
 
@@ -161,8 +196,11 @@ func (controller *Controller) Detect(environment map[string]string, requested Pr
 }
 
 func (controller *Controller) Execute(ctx context.Context, environment map[string]string, request Request) (Result, error) {
+	if request.Scope == "" {
+		request.Scope = ScopePane
+	}
 	target, active := controller.Detect(environment, request.Provider)
-	result := Result{Operation: request.Operation}
+	result := Result{Operation: request.Operation, Scope: request.Scope}
 	if !active {
 		return result, nil
 	}
@@ -173,9 +211,11 @@ func (controller *Controller) Execute(ctx context.Context, environment map[strin
 		if candidate.Provider() != target.Provider {
 			continue
 		}
-		if err := candidate.Execute(ctx, target, request, environment); err != nil {
+		outcome, err := candidate.Execute(ctx, target, request, environment)
+		if err != nil {
 			return result, err
 		}
+		result.PreviousTitle = outcome.PreviousTitle
 		result.Changed = true
 		return result, nil
 	}

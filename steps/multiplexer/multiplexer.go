@@ -13,6 +13,7 @@ import (
 )
 
 type Config struct {
+	Scope     string  `yaml:"scope,omitempty"`
 	Provider  string  `yaml:"provider,omitempty"`
 	Operation string  `yaml:"operation"`
 	Title     string  `yaml:"title,omitempty"`
@@ -86,12 +87,16 @@ func (runner *Runner) Run(ctx context.Context, request step.Request) (step.Resul
 	if err != nil {
 		return step.Result{}, err
 	}
+	scope, err := mux.ParseScope(runner.config.Scope)
+	if err != nil {
+		return step.Result{}, err
+	}
 	source := runner.config.Source
 	if operation == mux.OperationMetadata && source == "" {
 		source = metadataSource(request.WorkflowName, request.StepID)
 	}
 	result, err := runner.controller.Execute(ctx, request.Env, mux.Request{
-		Provider: provider, Operation: operation, Title: runner.config.Title, Mode: runner.config.Mode,
+		Provider: provider, Operation: operation, Scope: scope, Title: runner.config.Title, Mode: runner.config.Mode,
 		Body: runner.config.Body, Key: runner.config.Key, Value: runner.config.Value,
 		Icon: runner.config.Icon, Color: runner.config.Color, Priority: runner.config.Priority,
 		Progress: runner.config.Progress, Label: runner.config.Label, Level: runner.config.Level,
@@ -106,6 +111,7 @@ func (runner *Runner) Run(ctx context.Context, request step.Request) (step.Resul
 	}
 	return step.Result{Outputs: map[string]any{
 		"active": result.Active, "provider": string(result.Provider), "operation": string(result.Operation),
+		"scope": string(result.Scope), "previous_title": result.PreviousTitle,
 		"target": result.Target, "changed": result.Changed,
 	}}, nil
 }
@@ -120,11 +126,19 @@ func (runner *Runner) validate() error {
 	if _, err := mux.ParseProvider(runner.config.Provider); err != nil {
 		return err
 	}
+	if !templated(runner.config.Scope) {
+		if _, err := mux.ParseScope(runner.config.Scope); err != nil {
+			return err
+		}
+	}
 	operation, err := mux.ParseOperation(runner.config.Operation)
 	if err != nil {
 		return err
 	}
 	allowed := map[string]bool{"provider": true, "operation": true}
+	if operation == mux.OperationTitle || operation == mux.OperationClearTitle {
+		allowed["scope"] = true
+	}
 	require := func(field string) error {
 		if !runner.present[field] {
 			return fmt.Errorf("%s is required for %s", field, operation)
