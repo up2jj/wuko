@@ -1,14 +1,141 @@
 # Workflow controls
 
-Wuko has six controls for scheduling, repeating, or monitoring operations: `concurrent`, `batch`,
-`foreach`, `matrix`, `loop`, and `cancel_on`.
+Wuko has seven controls for scheduling, repeating, recovering, or monitoring operations:
+`concurrent`, `batch`, `foreach`, `matrix`, `loop`, `try`/`catch`, and `cancel_on`.
 
 - Use `concurrent` for a fixed set of independent steps.
 - Use `batch` when each block should receive a fixed-size chunk of one runtime list.
 - Use `foreach` when one runtime list determines how many times a block runs.
 - Use `matrix` when every combination of several named dimensions must run.
 - Use `loop` when a sequential block should repeat until a runtime expression becomes true.
+- Use `try`/`catch` when a failed sequential operation needs an explicit recovery path.
 - Use `cancel_on` when a sequential body should stop as soon as one named monitor finishes.
+
+## Try and catch
+
+`try`/`catch` is an ordinary named control step. Both blocks are required and each contains a
+non-empty `steps` list. The parent `id` is also required: it gives the complete, stable result one
+path under `steps.<id>` instead of exposing child IDs at the outer workflow level.
+
+```yaml
+version: 1
+name: recover-deployment
+steps:
+  - id: deployment
+    try:
+      steps:
+        - id: deploy
+          type: shell
+          with: {script: ./deploy.sh}
+    catch:
+      steps:
+        - id: rollback
+          type: shell
+          with: {script: ./rollback.sh}
+        - id: report
+          type: http
+          with:
+            url: https://example.com/deployment-failures
+            body: '{{ .error.step }}: {{ .error.message }}'
+
+  - id: notify_success
+    type: http
+    if: steps.deployment.recovered == false
+    with: {url: https://example.com/deployments}
+```
+
+The `try` steps run sequentially. If all of them succeed, `catch` is recorded as skipped and
+ordinary execution continues. If a try child fails or reaches its own timeout, Wuko stops the rest
+of `try`, makes the structured `error` root available only while `catch` runs, and executes every
+top-level catch entry. A failed or timed-out catch entry does not prevent later catch entries from
+running. If at least one catch entry runs and every entry that ran succeeds, the failure is
+recovered and ordinary execution continues; otherwise the parent fails after all catch entries have
+been attempted. A catch whose entries are all skipped by their own `if:` recovers nothing: the
+`catch` phase is recorded as skipped and the original failure stands.
+
+`error` contains `status`, `message`, `step`, `type`, and an ordered `errors` list. Each list entry
+contains the same four fields. Prefer `status`, `step`, and `type` in conditions; `message` is
+informational and may change. Templates and the typed expression environments of steps such as
+`assert`, `set`, `shell`, and Lua expose the same root. A `wait` step's `until` expression retains
+its existing local `error` meaning for the most recent poll.
+
+Parent cancellation and an expired parent deadline bypass `catch`; they are not recoverable
+failures. Registered defers owned by successful try or catch children still run on a detached
+cleanup context. These control-local defers run after catch, before the parent result is published.
+Cleanup is best effort, and any cleanup failure fails the parent. Nested `try`/`catch` and `return`
+are rejected inside the control. `try`/`catch` is also rejected inside `cancel_on`; a `cancel_on`
+may appear inside `try` or `catch`, subject to its own restrictions. Other children keep the
+restrictions of the enclosing scope.
+
+### Try/catch outcome
+
+On an ordinary success, the stable parent result is:
+
+```yaml
+steps.deployment:
+  ok: true
+  recovered: false
+  status: succeeded
+  error: null
+  try:
+    status: succeeded
+    error: null
+    steps:
+      deploy:
+        status: succeeded
+        error: null
+        outputs: {stdout: "deployed\n", exit_code: 0}
+    vars: {}
+  catch:
+    status: skipped
+    error: null
+    steps:
+      rollback: {status: skipped, error: null, outputs: null}
+      report: {status: skipped, error: null, outputs: null}
+    vars: {}
+  cleanup: {status: skipped, error: null, steps: {}, vars: {}}
+  vars: {}
+```
+
+After `deploy` fails and both recovery entries succeed, the parent still succeeds, with the
+original failure retained under `try.error`:
+
+```yaml
+steps.deployment:
+  ok: true
+  recovered: true
+  status: succeeded
+  error: null
+  try:
+    status: failed
+    error:
+      status: failed
+      message: 'workflow "recover-deployment" step "deploy" (shell): attempt 1/1 failed: exit status 1'
+      step: deploy
+      type: shell
+      errors:
+        - {status: failed, message: 'attempt 1/1 failed: exit status 1', step: deploy, type: shell}
+    steps:
+      deploy: {status: failed, error: 'attempt 1/1 failed: exit status 1', outputs: null}
+    vars: {}
+  catch:
+    status: succeeded
+    error: null
+    steps:
+      rollback: {status: succeeded, error: null, outputs: {}}
+      report: {status: succeeded, error: null, outputs: {status: 200}}
+    vars: {}
+  cleanup: {status: skipped, error: null, steps: {}, vars: {}}
+  vars: {}
+```
+
+Successful child variable writes are committed atomically with the parent and are also copied into
+the phase-local and final `vars` records. Child outputs are read through paths such as
+`steps.deployment.try.steps.deploy.outputs` and
+`steps.deployment.catch.steps.rollback.outputs`. If catch or local cleanup fails, the parent result
+and its variable writes are not published at all; the workflow fails normally. A failure captured
+as data by `cancel_on` does not trigger catch because the `cancel_on` parent succeeded—follow it
+with an `assert` when that recorded outcome should become a recoverable failure.
 
 ## Cancel on
 

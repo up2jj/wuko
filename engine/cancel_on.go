@@ -19,10 +19,16 @@ type cancelOnParticipant struct {
 	err         error
 	skipped     bool
 	kind        string
+	label       string
 }
 
 func (e *Engine) validateCancelOn(ctx context.Context, definition *workflow.Definition, workflowStep workflow.Step, options Options, state *State) error {
 	group := workflowStep.CancelOn
+	if workflowStep.If != "" {
+		if _, err := compileCondition(workflowStep.If); err != nil {
+			return fmt.Errorf("if: %w", err)
+		}
+	}
 	if group.Collect != "" {
 		if err := controlpkg.ValidateExpression(group.Collect); err != nil {
 			return fmt.Errorf("cancel_on collect: %w", err)
@@ -92,11 +98,11 @@ func (e *Engine) executeCancelOn(ctx context.Context, definition *workflow.Defin
 	})
 
 	participants := make([]cancelOnParticipant, participantCount)
-	participants[0] = cancelOnParticipant{declaration: group.Steps, kind: "body"}
+	participants[0] = cancelOnParticipant{declaration: group.Steps, kind: "body", label: "body"}
 	for monitorIndex := range group.Monitors {
 		declaration := group.MonitorDeclaration(monitorIndex)
 		participants[monitorIndex+1] = cancelOnParticipant{
-			declaration: []workflow.Step{declaration}, kind: cancelOnDeclarationKind(declaration),
+			declaration: []workflow.Step{declaration}, kind: cancelOnDeclarationKind(declaration), label: group.Monitors[monitorIndex].ID,
 		}
 	}
 
@@ -116,7 +122,7 @@ func (e *Engine) executeCancelOn(ctx context.Context, definition *workflow.Defin
 		participant.err = e.executeSequence(participantCtx, definition, participant.declaration, branchOptions, participant.state, &participant.stats, 1, bodyTotal)
 		participant.stats.FinishedAt = time.Now()
 		participant.stats.Duration = participant.stats.FinishedAt.Sub(participant.stats.StartedAt)
-		participant.skipped = cancelOnStatsSkipped(participant.stats)
+		participant.skipped = allStepsSkipped(participant.stats)
 		// The body always ends the race: once it finishes there is nothing left to guard,
 		// even when every one of its steps was skipped. A skipped monitor never triggered.
 		return participantIndex == 0 || !participant.skipped
@@ -168,7 +174,7 @@ func cancelOnOutputs(group *workflow.CancelOnGroup, participants []cancelOnParti
 			"kind": participant.kind, "status": string(cancelOnParticipantStatus(participant)),
 			"error": cancelOnParticipantError(participant.err, lostRace), "outputs": nil,
 			"steps": cancelOnMonitorStepRecords(participant.declaration[0], participant.state, participant.stats, lostRace),
-			"vars":  cancelOnWrittenVars(participant.state),
+			"vars":  controlWrittenVars(participant.state),
 		}
 		if participant.state != nil {
 			if value, exists := participant.state.Steps[monitor.ID]; exists && cancelOnParticipantStatus(participant) == StatusSucceeded {
@@ -182,8 +188,8 @@ func cancelOnOutputs(group *workflow.CancelOnGroup, participants []cancelOnParti
 		"ok": winnerStatus == StatusSucceeded, "triggered": winner > 0,
 		"status": string(winnerStatus), "error": cancelOnErrorValue(participants[winner].err),
 		"winner": map[string]any{"monitor": winnerMonitor, "kind": participants[winner].kind},
-		"steps":  cancelOnStepRecords(group.Steps, body.state, body.stats, winner != 0),
-		"vars":   cancelOnWrittenVars(body.state), "monitors": monitorRecords, "result": nil,
+		"steps":  controlStepRecords(group.Steps, body.state, body.stats, winner != 0),
+		"vars":   controlWrittenVars(body.state), "monitors": monitorRecords, "result": nil,
 	}
 }
 
@@ -194,72 +200,11 @@ func cancelOnMonitorStepRecords(declaration workflow.Step, state *State, stats R
 	}
 	records := make(map[string]any)
 	for _, child := range children {
-		for id, record := range cancelOnStepRecords(child.Steps, state, stats, lostRace) {
+		for id, record := range controlStepRecords(child.Steps, state, stats, lostRace) {
 			records[id] = record
 		}
 	}
 	return records
-}
-
-func cancelOnStepRecords(declarations []workflow.Step, state *State, stats RunStats, lostRace bool) map[string]any {
-	records := make(map[string]any)
-	byID := make(map[string]StepStats, len(stats.Steps))
-	for _, item := range stats.Steps {
-		byID[item.ID] = item
-	}
-	var visit func([]workflow.Step)
-	visit = func(steps []workflow.Step) {
-		for _, declaration := range steps {
-			if children, transparent := transparentChildSequences(declaration); transparent {
-				for _, child := range children {
-					visit(child.Steps)
-				}
-				continue
-			}
-			if declaration.ID == "" || declaration.Return != nil {
-				continue
-			}
-			item, exists := byID[declaration.ID]
-			status := StatusSkipped
-			var itemErr error
-			if exists {
-				status = item.Status
-				itemErr = item.Error
-			}
-			record := map[string]any{"status": string(status), "error": cancelOnParticipantError(itemErr, lostRace), "outputs": nil}
-			if status == StatusSucceeded && state != nil {
-				if value, exists := state.Steps[declaration.ID]; exists {
-					record["outputs"] = cloneAny(value)
-				}
-			}
-			records[declaration.ID] = record
-		}
-	}
-	visit(declarations)
-	return records
-}
-
-func cancelOnWrittenVars(state *State) map[string]any {
-	result := make(map[string]any)
-	if state == nil {
-		return result
-	}
-	for name := range state.writtenVars {
-		result[name] = cloneAny(state.Vars[name])
-	}
-	return result
-}
-
-func cancelOnStatsSkipped(stats RunStats) bool {
-	if len(stats.Steps) == 0 {
-		return false
-	}
-	for _, item := range stats.Steps {
-		if item.Status != StatusSkipped {
-			return false
-		}
-	}
-	return true
 }
 
 func cancelOnParticipantStatus(participant cancelOnParticipant) ExecutionStatus {
@@ -335,7 +280,7 @@ func cancelOnParticipantStats(participants []cancelOnParticipant) []IterationSta
 	result := make([]IterationStats, 0, len(participants))
 	for index, participant := range participants {
 		result = append(result, IterationStats{
-			Index: index, Status: cancelOnParticipantStatus(participant), StartedAt: participant.stats.StartedAt,
+			Index: index, Label: participant.label, Status: cancelOnParticipantStatus(participant), StartedAt: participant.stats.StartedAt,
 			Duration: participant.stats.Duration, Error: participant.err, Steps: participant.stats.Steps,
 		})
 	}

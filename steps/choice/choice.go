@@ -65,6 +65,7 @@ type expressionRoots struct {
 	Foreach      map[string]any            `expr:"foreach"`
 	Matrix       map[string]any            `expr:"matrix"`
 	Finally      map[string]any            `expr:"finally"`
+	Error        map[string]any            `expr:"error"`
 	Workflow     workflowValue             `expr:"workflow"`
 	Run          runValue                  `expr:"run"`
 }
@@ -404,6 +405,7 @@ func expressionRootsFor(request step.Request) expressionRoots {
 		Foreach:      bindingRoot(request.Bindings, "foreach"),
 		Matrix:       bindingRoot(request.Bindings, "matrix"),
 		Finally:      bindingRoot(request.Bindings, "finally"),
+		Error:        bindingRoot(request.Bindings, "error"),
 		Workflow: workflowValue{
 			Name: request.WorkflowName,
 			Dir:  request.WorkflowDir,

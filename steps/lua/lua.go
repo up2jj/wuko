@@ -47,6 +47,7 @@ type expressionEnvironment struct {
 	Foreach      map[string]any            `expr:"foreach"`
 	Matrix       map[string]any            `expr:"matrix"`
 	Finally      map[string]any            `expr:"finally"`
+	Error        map[string]any            `expr:"error"`
 	Workflow     workflowValue             `expr:"workflow"`
 	Run          runValue                  `expr:"run"`
 }
@@ -177,6 +178,7 @@ func (r *Runner) resolveArgs(ctx context.Context, request step.Request) (map[str
 			Foreach:      bindingRoot(request.Bindings, "foreach"),
 			Matrix:       bindingRoot(request.Bindings, "matrix"),
 			Finally:      bindingRoot(request.Bindings, "finally"),
+			Error:        bindingRoot(request.Bindings, "error"),
 			Workflow:     workflowValue{Name: request.WorkflowName, Dir: request.WorkflowDir},
 			Run:          runValue{Dir: request.RunDir},
 		})
@@ -241,7 +243,7 @@ func (r *runtime) module(state *glua.LState) (*glua.LTable, error) {
 		}
 		module.RawSetString(name, converted)
 	}
-	for _, name := range []string{"batch", "foreach", "matrix", "finally"} {
+	for _, name := range []string{"batch", "foreach", "matrix", "finally", "error"} {
 		binding, exists := r.request.Bindings[name]
 		if !exists {
 			continue

@@ -144,6 +144,22 @@ func TestProgressRendersCancelOnLifecycle(t *testing.T) {
 	}
 }
 
+func TestProgressRendersTryCatchLifecycle(t *testing.T) {
+	var output bytes.Buffer
+	progress := NewProgress(&output, false)
+	progress.Report(engine.ProgressEvent{
+		Kind: engine.ControlStarted, ControlKind: "try", StepID: "deployment", Iterations: 3, MaxConcurrency: 1,
+	})
+	progress.Report(engine.ProgressEvent{
+		Kind: engine.ControlFinished, ControlKind: "try", StepID: "deployment", Status: engine.StatusFailed,
+		Duration: 2 * time.Second, Iterations: 3, Started: 3, Succeeded: 1, Error: errors.New("rollback failed"),
+	})
+	want := "↻ Try deployment · 3 phases\n✗ Try deployment failed after 2s · 3/3 phases started · 1 succeeded: rollback failed\n"
+	if output.String() != want {
+		t.Fatalf("output = %q, want %q", output.String(), want)
+	}
+}
+
 func TestProgressRendersPollLifecycleAndSummary(t *testing.T) {
 	var output bytes.Buffer
 	progress := NewProgress(&output, false)

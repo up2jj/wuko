@@ -19,6 +19,7 @@ type conditionEnvironment struct {
 	Foreach      map[string]any            `expr:"foreach"`
 	Matrix       map[string]any            `expr:"matrix"`
 	Finally      map[string]any            `expr:"finally"`
+	Error        map[string]any            `expr:"error"`
 	Workflow     conditionWorkflow         `expr:"workflow"`
 	Run          conditionRun              `expr:"run"`
 }
@@ -74,6 +75,7 @@ func makeConditionEnvironment(definition *workflow.Definition, runDir string, st
 		Foreach:      bindingRoot(state.Bindings, "foreach"),
 		Matrix:       bindingRoot(state.Bindings, "matrix"),
 		Finally:      bindingRoot(state.Bindings, "finally"),
+		Error:        bindingRoot(state.Bindings, "error"),
 		Workflow: conditionWorkflow{
 			Name: definition.Name,
 			Dir:  definition.Dir,

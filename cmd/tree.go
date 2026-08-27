@@ -209,6 +209,24 @@ func writeTreeStepsWithFollowing(writer io.Writer, steps []workflow.Step, prefix
 			branch = "└── "
 			childPrefix = prefix + "    "
 		}
+		if workflowStep.IsTryCatch() {
+			if _, err := fmt.Fprintf(writer, "%s%s%s (try)%s\n", prefix, branch, workflowStep.ID, treeCondition(workflowStep)); err != nil {
+				return err
+			}
+			if _, err := fmt.Fprintf(writer, "%s├── try\n", childPrefix); err != nil {
+				return err
+			}
+			if err := writeTreeSteps(writer, workflowStep.Try.Steps, childPrefix+"│   "); err != nil {
+				return err
+			}
+			if _, err := fmt.Fprintf(writer, "%s└── catch\n", childPrefix); err != nil {
+				return err
+			}
+			if err := writeTreeSteps(writer, workflowStep.Catch.Steps, childPrefix+"    "); err != nil {
+				return err
+			}
+			continue
+		}
 		if workflowStep.IsCancelOn() {
 			collect := ""
 			if workflowStep.CancelOn.Collect != "" {

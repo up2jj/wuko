@@ -12,6 +12,10 @@ const (
 	ChildDefer
 	// ChildMonitors is the set of branches racing a cancel_on body.
 	ChildMonitors
+	// ChildTry is the primary branch of a try/catch control.
+	ChildTry
+	// ChildCatch is the rescue branch of a try/catch control.
+	ChildCatch
 )
 
 // ChildSequence is a read-only structural view of one nested step sequence. Callers may inspect
@@ -57,6 +61,15 @@ func (workflowStep *Step) childSequenceRefs() []childSequenceRef {
 		return children
 	}
 	switch {
+	case workflowStep.IsTryCatch():
+		children := make([]childSequenceRef, 0, 2)
+		if workflowStep.Try != nil {
+			children = append(children, childSequenceRef{role: ChildTry, steps: &workflowStep.Try.Steps})
+		}
+		if workflowStep.Catch != nil {
+			children = append(children, childSequenceRef{role: ChildCatch, steps: &workflowStep.Catch.Steps})
+		}
+		return children
 	case workflowStep.IsExecutorBlock():
 		return deferred([]childSequenceRef{
 			{role: ChildSteps, steps: &workflowStep.Steps},

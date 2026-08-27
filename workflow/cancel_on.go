@@ -83,6 +83,8 @@ func cancelOnContainsForbidden(steps []Step) error {
 		switch {
 		case step.CancelOn != nil:
 			return fmt.Errorf("nested cancel_on controls are not supported")
+		case step.IsTryCatch():
+			return fmt.Errorf("try/catch is not supported inside cancel_on")
 		case step.Return != nil:
 			return fmt.Errorf("return is not supported inside cancel_on")
 		case step.Require != nil:

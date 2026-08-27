@@ -86,7 +86,7 @@ type State struct {
 	Outputs map[string]any
 	// Dependencies contains immutable outputs from direct prerequisite workflows.
 	Dependencies map[string]map[string]any
-	// Bindings contains lifecycle and iteration-local roots such as batch, finally, foreach, and matrix.
+	// Bindings contains lifecycle and iteration-local roots such as batch, error, finally, foreach, and matrix.
 	Bindings    map[string]any
 	Stats       RunStats
 	writtenVars map[string]struct{}
@@ -143,6 +143,12 @@ func (e *Engine) Validate(ctx context.Context, definition *workflow.Definition, 
 
 func (e *Engine) validateSteps(ctx context.Context, definition *workflow.Definition, steps []workflow.Step, options Options, state *State) error {
 	for _, workflowStep := range steps {
+		if workflowStep.IsTryCatch() {
+			if err := e.validateTryCatch(ctx, definition, workflowStep, options, state); err != nil {
+				return fmt.Errorf("step %q: %w", workflowStep.ID, err)
+			}
+			continue
+		}
 		if workflowStep.IsCancelOn() {
 			if err := e.validateCancelOn(ctx, definition, workflowStep, options, state); err != nil {
 				return fmt.Errorf("step %q: %w", workflowStep.ID, err)
@@ -569,7 +575,9 @@ func (e *Engine) executeSequence(ctx context.Context, definition *workflow.Defin
 		}
 		stepOptions := withStepRun(options)
 		var outcome stepOutcome
-		if workflowStep.IsCancelOn() {
+		if workflowStep.IsTryCatch() {
+			outcome = e.executeTryCatch(ctx, definition, workflowStep, stepOptions, state, index, total)
+		} else if workflowStep.IsCancelOn() {
 			outcome = e.executeCancelOn(ctx, definition, workflowStep, stepOptions, state, index, total)
 		} else if workflowStep.Batch != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil {
 			outcome = e.executeControl(ctx, definition, workflowStep, stepOptions, state, index, total)
@@ -901,6 +909,9 @@ func bindingRoot(bindings map[string]any, name string) map[string]any {
 }
 
 func executionKind(workflowStep workflow.Step) string {
+	if workflowStep.IsTryCatch() {
+		return "try"
+	}
 	if workflowStep.IsCancelOn() {
 		return "cancel_on"
 	}

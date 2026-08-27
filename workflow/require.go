@@ -103,6 +103,10 @@ func requiredChildContext(workflowStep Step, role ChildRole) string {
 		return "worktree block"
 	case workflowStep.IsConditionalBlock():
 		return "conditional block"
+	case workflowStep.IsTryCatch() && role == ChildTry:
+		return "try block"
+	case workflowStep.IsTryCatch() && role == ChildCatch:
+		return "catch block"
 	case workflowStep.IsCancelOn() && role == ChildMonitors:
 		return "cancel_on monitors"
 	case workflowStep.IsCancelOn():

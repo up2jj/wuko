@@ -15,6 +15,24 @@ func writeDryRun(writer io.Writer, steps []workflow.Step, indent string, parent 
 	for i, workflowStep := range steps {
 		path := append(append([]int(nil), parent...), i+1)
 		index := dryRunIndex(path)
+		if workflowStep.IsTryCatch() {
+			if _, err := fmt.Fprintf(writer, "%s%s %s (try)%s\n", indent, index, workflowStep.ID, dryRunCondition(workflowStep)); err != nil {
+				return err
+			}
+			if _, err := fmt.Fprintln(writer, indent+"   try:"); err != nil {
+				return err
+			}
+			if err := writeDryRun(writer, workflowStep.Try.Steps, indent+"      ", path); err != nil {
+				return err
+			}
+			if _, err := fmt.Fprintln(writer, indent+"   catch:"); err != nil {
+				return err
+			}
+			if err := writeDryRun(writer, workflowStep.Catch.Steps, indent+"      ", path); err != nil {
+				return err
+			}
+			continue
+		}
 		if workflowStep.IsCancelOn() {
 			collect := ""
 			if workflowStep.CancelOn.Collect != "" {

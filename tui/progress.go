@@ -74,15 +74,22 @@ func (progress *Progress) Report(event engine.ProgressEvent) {
 		item := "iteration"
 		if event.ControlKind == "cancel_on" {
 			item = "participant"
+		} else if event.ControlKind == "try" {
+			item = "phase"
 		}
-		parts := []string{count(event.Iterations, item), fmt.Sprintf("max %d concurrent", event.MaxConcurrency)}
+		parts := []string{count(event.Iterations, item)}
+		if event.ControlKind != "try" {
+			parts = append(parts, fmt.Sprintf("max %d concurrent", event.MaxConcurrency))
+		}
 		if event.Timeout > 0 {
 			parts = append(parts, "timeout "+formatDuration(event.Timeout))
 		}
-		if event.FailFast {
-			parts = append(parts, "fail fast")
-		} else {
-			parts = append(parts, "wait for all")
+		if event.ControlKind != "try" {
+			if event.FailFast {
+				parts = append(parts, "fail fast")
+			} else {
+				parts = append(parts, "wait for all")
+			}
 		}
 		fmt.Fprintf(progress.writer, "%s%s %s %s · %s\n", indent, progress.paint("36", "↻"), controlLabel(event.ControlKind), event.StepID, strings.Join(parts, " · "))
 	case engine.ControlFinished:
@@ -91,6 +98,8 @@ func (progress *Progress) Report(event engine.ProgressEvent) {
 			item := "iteration"
 			if event.ControlKind == "cancel_on" {
 				item = "participant"
+			} else if event.ControlKind == "try" {
+				item = "phase"
 			}
 			line += " · " + workSummary(event.Started, event.Succeeded, event.Iterations, item)
 		}

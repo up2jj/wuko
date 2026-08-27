@@ -407,3 +407,21 @@ func cancelOnDefinition(t *testing.T, monitors, body []workflow.Step, collect st
 		ID: "deployment_watch", CancelOn: &workflow.CancelOnGroup{Monitors: monitors, Steps: body, Collect: collect},
 	})
 }
+
+func TestCancelOnValidateRejectsInvalidCondition(t *testing.T) {
+	registry := newTestRegistry(t, map[string]step.Builder{
+		"noop": func(map[string]any) (step.Runner, error) {
+			return runnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
+		},
+	})
+	definition := cancelOnDefinition(t,
+		[]workflow.Step{{ID: "watchdog", Type: "noop", With: map[string]any{}}},
+		[]workflow.Step{{ID: "deploy", Type: "noop", With: map[string]any{}}},
+		"",
+	)
+	definition.Steps[0].If = "vars.enabled ==="
+	err := New(registry).Validate(t.Context(), definition, Options{})
+	if err == nil || !strings.Contains(err.Error(), `step "deployment_watch": if:`) {
+		t.Fatalf("Validate() error = %v", err)
+	}
+}

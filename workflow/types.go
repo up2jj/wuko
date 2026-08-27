@@ -100,8 +100,8 @@ func (c *Condition) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
-// Step declares a concrete step, a transparent conditional or working-directory block, a named
-// worktree control, a return control, a composite action, or a local step-file requirement.
+// Step declares a concrete step, a transparent block, a named control, a composite action,
+// or a local step-file requirement.
 type Step struct {
 	ID               string              `yaml:"id"`
 	Type             string              `yaml:"type,omitempty"`
@@ -119,6 +119,8 @@ type Step struct {
 	Matrix           *MatrixGroup        `yaml:"matrix,omitempty"`
 	Loop             *LoopGroup          `yaml:"loop,omitempty"`
 	CancelOn         *CancelOnGroup      `yaml:"cancel_on,omitempty"`
+	Try              *TryBlock           `yaml:"try,omitempty"`
+	Catch            *CatchBlock         `yaml:"catch,omitempty"`
 	Return           *ReturnControl      `yaml:"return,omitempty"`
 	SHA256           string              `yaml:"sha256,omitempty"`
 	If               Condition           `yaml:"if,omitempty"`
@@ -137,7 +139,7 @@ func (workflowStep *Step) UnmarshalYAML(node *yaml.Node) error {
 	}
 	if err := rejectUnknownFields(node, "step", map[string]bool{
 		"id": true, "type": true, "uses": true, "require": true, "working_directory": true, "worktree": true, "executor": true, "steps": true, "finally": true, "defer": true, "concurrent": true,
-		"batch": true, "foreach": true, "matrix": true, "loop": true, "cancel_on": true, "return": true, "sha256": true, "if": true, "timeout": true,
+		"batch": true, "foreach": true, "matrix": true, "loop": true, "cancel_on": true, "try": true, "catch": true, "return": true, "sha256": true, "if": true, "timeout": true,
 		"retry": true, "with": true,
 	}); err != nil {
 		return err
@@ -168,11 +170,16 @@ func (workflowStep *Step) UnmarshalYAML(node *yaml.Node) error {
 
 // IsConditionalBlock reports whether the step is an anonymous multi-step conditional.
 func (workflowStep Step) IsConditionalBlock() bool {
-	return workflowStep.Steps != nil && workflowStep.Loop == nil && workflowStep.CancelOn == nil && !workflowStep.IsWorkingDirectoryBlock() && !workflowStep.IsExecutorBlock() && workflowStep.Return == nil
+	return workflowStep.Steps != nil && workflowStep.Loop == nil && workflowStep.CancelOn == nil && !workflowStep.IsTryCatch() && !workflowStep.IsWorkingDirectoryBlock() && !workflowStep.IsExecutorBlock() && workflowStep.Return == nil
 }
 
 // IsCancelOn reports whether the step is a named monitored control.
 func (workflowStep Step) IsCancelOn() bool { return workflowStep.CancelOn != nil }
+
+// IsTryCatch reports whether the step is a named recovery control.
+func (workflowStep Step) IsTryCatch() bool {
+	return workflowStep.Try != nil || workflowStep.Catch != nil
+}
 
 // IsLoop reports whether the step repeats its child sequence until a condition matches.
 func (workflowStep Step) IsLoop() bool { return workflowStep.Loop != nil }
@@ -765,6 +772,26 @@ func validateStepScope(steps []Step, allowActions bool, scope stepScope, inherit
 
 func collectScopeIDs(steps []Step, seen map[string]struct{}) error {
 	for i, workflowStep := range steps {
+		if workflowStep.IsTryCatch() {
+			if !identifierPattern.MatchString(workflowStep.ID) {
+				return fmt.Errorf("step %d has invalid id %q", i+1, workflowStep.ID)
+			}
+			if _, exists := seen[workflowStep.ID]; exists {
+				return fmt.Errorf("duplicate step id %q", workflowStep.ID)
+			}
+			seen[workflowStep.ID] = struct{}{}
+			if workflowStep.Try != nil {
+				if err := collectScopeIDs(workflowStep.Try.Steps, seen); err != nil {
+					return fmt.Errorf("step %q try: %w", workflowStep.ID, err)
+				}
+			}
+			if workflowStep.Catch != nil {
+				if err := collectScopeIDs(workflowStep.Catch.Steps, seen); err != nil {
+					return fmt.Errorf("step %q catch: %w", workflowStep.ID, err)
+				}
+			}
+			continue
+		}
 		if workflowStep.IsCancelOn() {
 			if !identifierPattern.MatchString(workflowStep.ID) {
 				return fmt.Errorf("step %d has invalid id %q", i+1, workflowStep.ID)
@@ -855,6 +882,12 @@ func collectScopeIDs(steps []Step, seen map[string]struct{}) error {
 
 func validateSteps(steps []Step, allowActions bool, scope stepScope, seen map[string]struct{}) error {
 	for i, workflowStep := range steps {
+		if workflowStep.IsTryCatch() {
+			if err := validateTryCatchEntry(workflowStep, scope, allowActions, seen); err != nil {
+				return fmt.Errorf("step %q: %w", workflowStep.ID, err)
+			}
+			continue
+		}
 		if workflowStep.IsCancelOn() {
 			if err := validateCancelOnEntry(workflowStep, scope, allowActions, seen); err != nil {
 				return fmt.Errorf("step %q: %w", workflowStep.ID, err)
@@ -952,6 +985,34 @@ func validateSteps(steps []Step, allowActions bool, scope stepScope, seen map[st
 			workflowStep.With = make(map[string]any)
 			steps[i] = workflowStep
 		}
+	}
+	return nil
+}
+
+func validateTryCatchEntry(workflowStep Step, scope stepScope, allowActions bool, seen map[string]struct{}) error {
+	if workflowStep.Type != "" || !workflowStep.Uses.Empty() || workflowStep.Require != nil || workflowStep.Worktree != nil || workflowStep.Executor != nil || workflowStep.Finally != nil || workflowStep.Defer != nil || workflowStep.IsWorkingDirectoryBlock() || workflowStep.Concurrent != nil || workflowStep.Batch != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil || workflowStep.Loop != nil || workflowStep.CancelOn != nil || workflowStep.Return != nil || workflowStep.SHA256 != "" || workflowStep.Timeout != nil || workflowStep.Retry != nil || workflowStep.With != nil || workflowStep.Steps != nil {
+		return fmt.Errorf("try/catch cannot be combined with other step fields")
+	}
+	if workflowStep.ID == "" || !identifierPattern.MatchString(workflowStep.ID) {
+		return fmt.Errorf("try/catch requires a valid id")
+	}
+	if scope == scopeFinally || scope == scopeDefer || scope == scopeExecutorFinally || scope == scopeExecutorDefer {
+		return fmt.Errorf("try/catch is not supported inside cleanup")
+	}
+	if err := validateTryCatchDeclaration(workflowStep); err != nil {
+		return err
+	}
+	if err := tryCatchContainsForbidden(workflowStep.Try.Steps); err != nil {
+		return fmt.Errorf("try: %w", err)
+	}
+	if err := tryCatchContainsForbidden(workflowStep.Catch.Steps); err != nil {
+		return fmt.Errorf("catch: %w", err)
+	}
+	if err := validateSteps(workflowStep.Try.Steps, allowActions, scope, seen); err != nil {
+		return fmt.Errorf("try: %w", err)
+	}
+	if err := validateSteps(workflowStep.Catch.Steps, allowActions, scope, seen); err != nil {
+		return fmt.Errorf("catch: %w", err)
 	}
 	return nil
 }

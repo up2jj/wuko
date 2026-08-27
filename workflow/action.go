@@ -714,7 +714,7 @@ func (action *Action) ValidateReturnContracts() error {
 
 func validateActionReturnContracts(steps []Step, outputs map[string]ActionOutput) error {
 	for _, workflowStep := range steps {
-		if workflowStep.IsExecutorBlock() || workflowStep.IsWorkingDirectoryBlock() || workflowStep.IsWorktreeBlock() || workflowStep.IsConditionalBlock() || workflowStep.IsCancelOn() {
+		if workflowStep.IsExecutorBlock() || workflowStep.IsWorkingDirectoryBlock() || workflowStep.IsWorktreeBlock() || workflowStep.IsConditionalBlock() || workflowStep.IsCancelOn() || workflowStep.IsTryCatch() {
 			for _, child := range workflowStep.ChildSequences() {
 				if child.Role == ChildFinally || child.Role == ChildDefer {
 					continue

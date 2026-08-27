@@ -135,6 +135,12 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
   their own timeouts, make them idempotent, and select failures with stable `finally.status` and
   `finally.errors` metadata rather than error-message text. Cleanup cannot recover from an error;
   consult `docs/finally.md` when it is available for lifecycle and limitations.
+- Use a named `try`/`catch` control for recovery. Both sibling blocks contain `steps`, and the
+  parent ID is required. Failed or timed-out try children expose structured `.error` metadata to
+  catch; parent cancellation bypasses catch. Catch entries are best effort, successful recovery
+  continues ordinary execution, a catch whose entries are all skipped recovers nothing, and child
+  records are namespaced under `.steps.<id>.try` and `.steps.<id>.catch`. Registered child defers run after catch and before the atomic parent commit.
+  Do not nest try/catch, put `return` inside it, or place it inside `cancel_on`.
 - Managed `temp` resources outlive nested workflows and actions and remain available to explicit
   `finally`; the engine removes them afterward. Cleanup failures fail the run after every managed
   removal has been attempted.

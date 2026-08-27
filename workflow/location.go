@@ -76,6 +76,14 @@ func annotateSteps(steps []Step, sequence *yaml.Node, source string) {
 			annotateSteps(steps[i].CancelOn.Monitors, mappingValue(group, "monitors"), source)
 			annotateSteps(steps[i].CancelOn.Steps, mappingValue(group, "steps"), source)
 		}
+		if steps[i].IsTryCatch() {
+			if steps[i].Try != nil {
+				annotateSteps(steps[i].Try.Steps, mappingValue(mappingValue(node, "try"), "steps"), source)
+			}
+			if steps[i].Catch != nil {
+				annotateSteps(steps[i].Catch.Steps, mappingValue(mappingValue(node, "catch"), "steps"), source)
+			}
+		}
 		annotateSteps(steps[i].Defer, mappingValue(node, "defer"), source)
 		if steps[i].IsWorkingDirectoryBlock() {
 			annotateSteps(steps[i].Steps, mappingValue(node, "steps"), source)

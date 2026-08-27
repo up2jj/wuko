@@ -71,6 +71,7 @@ type expressionEnvironment struct {
 	Foreach      map[string]any            `expr:"foreach"`
 	Matrix       map[string]any            `expr:"matrix"`
 	Finally      map[string]any            `expr:"finally"`
+	Error        map[string]any            `expr:"error"`
 	Workflow     workflowValue             `expr:"workflow"`
 	Run          runValue                  `expr:"run"`
 }
@@ -350,6 +351,7 @@ func expressionEnvironmentFor(request step.Request) expressionEnvironment {
 		Foreach:      bindingRoot(request.Bindings, "foreach"),
 		Matrix:       bindingRoot(request.Bindings, "matrix"),
 		Finally:      bindingRoot(request.Bindings, "finally"),
+		Error:        bindingRoot(request.Bindings, "error"),
 		Workflow:     workflowValue{Name: request.WorkflowName, Dir: request.WorkflowDir},
 		Run:          runValue{Dir: request.RunDir},
 	}

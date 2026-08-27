@@ -74,6 +74,7 @@ type StepStats struct {
 // IterationStats records one control iteration or participant without retaining its binding values.
 type IterationStats struct {
 	Index     int
+	Label     string
 	Status    ExecutionStatus
 	StartedAt time.Time
 	Duration  time.Duration

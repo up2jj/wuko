@@ -328,6 +328,7 @@ Use controls to run independent work or repeat a block over runtime data.
 | `foreach` | Run a block once per item in a runtime list | [Workflow controls](docs/workflow-control.md#foreach) |
 | `matrix` | Run every combination of named dimensions | [Workflow controls](docs/workflow-control.md#matrix) |
 | `loop` | Repeat a sequential block until an expression is true | [Workflow controls](docs/workflow-control.md#loop) |
+| `try` / `catch` | Recover from a failed or timed-out sequential block | [Workflow controls](docs/workflow-control.md#try-and-catch) |
 | `cancel_on` | Race a sequential body against one or more named monitors and record the winner | [Workflow controls](docs/workflow-control.md#cancel-on) |
 | `timeout` | Bound how long a step or control may run | [Execution and composition](docs/execution.md#timeouts-and-retries) |
 | `retry` | Retry failed operations with backoff | [Execution and composition](docs/execution.md#timeouts-and-retries) |
