@@ -135,6 +135,62 @@ func TestCmuxAdapterReportsUnsupportedInstalledCapability(t *testing.T) {
 	}
 }
 
+func TestAdaptersKeepFlagShapedDisplayTextAsOperands(t *testing.T) {
+	cmuxHelp := process.Result{Stdout: "Commands:\n  rename-tab <title>\n  notify --title <text>\n  set-status <key> <value>\n  clear-status <key>\n  set-progress <value>\n  clear-progress\n  log <message>\n  clear-log\n"}
+	tests := []struct {
+		name        string
+		environment map[string]string
+		results     []process.Result
+		request     Request
+		want        []string
+	}{
+		{
+			name:        "herdr title",
+			environment: map[string]string{"HERDR_PANE_ID": "pane-9"},
+			request:     Request{Operation: OperationTitle, Title: "--clear"},
+			want:        []string{"pane", "rename", "pane-9", "--", "--clear"},
+		},
+		{
+			name:        "herdr notify",
+			environment: map[string]string{"HERDR_PANE_ID": "pane-9"},
+			request:     Request{Operation: OperationNotify, Title: "--body", Body: "deploy finished"},
+			want:        []string{"notification", "show", "--body", "deploy finished", "--", "--body"},
+		},
+		{
+			name:        "tmux notify",
+			environment: map[string]string{"TMUX": "socket", "TMUX_PANE": "%7"},
+			request:     Request{Operation: OperationNotify, Title: "-p"},
+			want:        []string{"display-message", "-t", "%7", "--", "-p"},
+		},
+		{
+			name:        "cmux status",
+			environment: map[string]string{"CMUX_SURFACE_ID": "surface:4"},
+			results:     []process.Result{cmuxHelp, {}},
+			request:     Request{Operation: OperationStatus, Key: "--icon", Value: "--color", Icon: "rocket"},
+			want:        []string{"set-status", "--icon", "rocket", "--", "--icon", "--color"},
+		},
+		{
+			name:        "cmux clear status",
+			environment: map[string]string{"CMUX_SURFACE_ID": "surface:4"},
+			results:     []process.Result{cmuxHelp, {}},
+			request:     Request{Operation: OperationClearStatus, Key: "--all"},
+			want:        []string{"clear-status", "--", "--all"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			executor := &fakeExecutor{results: test.results}
+			if _, err := New(executor).Execute(t.Context(), test.environment, test.request); err != nil {
+				t.Fatal(err)
+			}
+			call := executor.calls[len(executor.calls)-1]
+			if !slices.Equal(call.args, test.want) {
+				t.Fatalf("args = %#v, want %#v", call.args, test.want)
+			}
+		})
+	}
+}
+
 func TestCommandFailureIncludesCapturedDetail(t *testing.T) {
 	environment := map[string]string{"TMUX": "socket", "TMUX_PANE": "%1"}
 	executor := &fakeExecutor{results: []process.Result{{Stderr: "server unavailable\n"}}, errors: []error{errors.New("exit 1")}}

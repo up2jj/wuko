@@ -442,3 +442,32 @@ func TestRunControlCollectFailureIsAtomic(t *testing.T) {
 		})
 	}
 }
+
+func TestAllStepsSkippedTreatsABranchThatRecordedNothingAsSkipped(t *testing.T) {
+	tests := []struct {
+		name  string
+		stats RunStats
+		want  bool
+	}{
+		{name: "no steps recorded", stats: RunStats{}, want: true},
+		{name: "declared steps all skipped", stats: RunStats{Steps: []StepStats{
+			{ID: "first", Status: StatusSkipped}, {ID: "second", Status: StatusSkipped},
+		}}, want: true},
+		{name: "one step ran", stats: RunStats{Steps: []StepStats{
+			{ID: "first", Status: StatusSkipped}, {ID: "second", Status: StatusSucceeded},
+		}}, want: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := allStepsSkipped(test.stats); got != test.want {
+				t.Fatalf("allStepsSkipped(%#v) = %t, want %t", test.stats, got, test.want)
+			}
+		})
+	}
+}
+
+func TestCatchPhaseThatRecordedNoStepsIsSkipped(t *testing.T) {
+	if status := catchPhaseStatus(nil, RunStats{}); status != StatusSkipped {
+		t.Fatalf("catchPhaseStatus = %q, want %q", status, StatusSkipped)
+	}
+}

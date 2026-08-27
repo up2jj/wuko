@@ -33,7 +33,7 @@ func (adapter tmuxAdapter) Execute(ctx context.Context, target Target, request R
 		if request.Body != "" {
 			message += ": " + request.Body
 		}
-		_, err := runCommand(ctx, adapter.executor, environment, "tmux", "display-message", "-t", target.ID, message)
+		_, err := runCommand(ctx, adapter.executor, environment, "tmux", "display-message", "-t", target.ID, "--", message)
 		return err
 	default:
 		return &UnsupportedError{Provider: ProviderTmux, Operation: request.Operation}

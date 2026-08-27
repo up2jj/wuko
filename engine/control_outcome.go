@@ -63,10 +63,11 @@ func controlRecordedError(err error, suppressCancellation bool) any {
 	return err.Error()
 }
 
+// allStepsSkipped reports whether a branch ran without doing anything. Recording no step stats
+// at all counts as skipped: a branch that never got far enough to record a step did not run, and
+// callers use this to decide that nothing happened - a cancel_on monitor that never triggered,
+// or a catch phase that had no effect.
 func allStepsSkipped(stats RunStats) bool {
-	if len(stats.Steps) == 0 {
-		return false
-	}
 	for _, item := range stats.Steps {
 		if item.Status != StatusSkipped {
 			return false

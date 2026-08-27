@@ -24,16 +24,17 @@ func (adapter herdrAdapter) Execute(ctx context.Context, target Target, request 
 	var args []string
 	switch request.Operation {
 	case OperationTitle:
-		args = []string{"pane", "rename", target.ID, request.Title}
+		args = []string{"pane", "rename", target.ID, "--", request.Title}
 	case OperationClearTitle:
 		args = []string{"pane", "rename", target.ID, "--clear"}
 	case OperationZoom:
 		args = []string{"pane", "zoom", target.ID, "--" + request.Mode}
 	case OperationNotify:
-		args = []string{"notification", "show", request.Title}
+		args = []string{"notification", "show"}
 		if request.Body != "" {
 			args = append(args, "--body", request.Body)
 		}
+		args = append(args, "--", request.Title)
 	case OperationMetadata:
 		args = metadataArgs(target, request)
 	default:

@@ -68,7 +68,7 @@ func (adapter cmuxAdapter) Execute(ctx context.Context, target Target, request R
 		if !commandAdvertised(help, "set-status") {
 			return &UnsupportedError{Provider: ProviderCmux, Operation: request.Operation, Detail: "installed CLI does not advertise sidebar status commands"}
 		}
-		args = []string{"set-status", request.Key, request.Value}
+		args = []string{"set-status"}
 		if request.Icon != "" {
 			args = append(args, "--icon", request.Icon)
 		}
@@ -78,11 +78,12 @@ func (adapter cmuxAdapter) Execute(ctx context.Context, target Target, request R
 		if request.Priority != nil {
 			args = append(args, "--priority", strconv.Itoa(*request.Priority))
 		}
+		args = append(args, "--", request.Key, request.Value)
 	case OperationClearStatus:
 		if !commandAdvertised(help, "clear-status") {
 			return &UnsupportedError{Provider: ProviderCmux, Operation: request.Operation}
 		}
-		args = []string{"clear-status", request.Key}
+		args = []string{"clear-status", "--", request.Key}
 	case OperationProgress:
 		if !commandAdvertised(help, "set-progress") {
 			return &UnsupportedError{Provider: ProviderCmux, Operation: request.Operation}
