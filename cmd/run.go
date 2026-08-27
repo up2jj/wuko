@@ -56,8 +56,10 @@ func runWorkflow(command *cobra.Command, deps dependencies, args []string, confi
 	}
 	var workflowName string
 	var runState *engine.State
+	var attemptErr error
 	defer func() {
-		runErr = errors.Join(runErr, reporters.complete(command.Context(), workflowName, runState, runErr, config.dryRun))
+		state := completedRunState(runState, attemptErr, runErr)
+		runErr = errors.Join(runErr, reporters.complete(command.Context(), workflowName, state, runErr, config.dryRun))
 	}()
 	diagnostic.Emit(reporters.Diagnostic, diagnostic.Event{Phase: diagnostic.PhaseInvocation, Status: diagnostic.StatusStarted, Message: "run workflow", Attributes: []diagnostic.Attribute{diagnostic.Attr("run_dir", cwd), diagnostic.Attr("variable_files", fmt.Sprint(len(config.variableFiles))), diagnostic.Attr("variables", fmt.Sprint(len(config.variables))), diagnostic.Attr("environment", fmt.Sprint(len(config.environment)))}})
 	if config.workflowFile != "" && len(args) > 1 {
@@ -148,7 +150,7 @@ func runWorkflow(command *cobra.Command, deps dependencies, args []string, confi
 	engineFor := func() *engine.Engine { return workflowEngine(deps) }
 	executePlan := func(ctx context.Context, active *workflow.DependencyPlan) error {
 		state, err := executeDependencyPlan(ctx, active, engineFor, optionsFor)
-		runState = state
+		runState, attemptErr = state, err
 		return err
 	}
 	if config.dryRun || config.once || definition.Cron == "" {
@@ -193,6 +195,24 @@ func runWorkflow(command *cobra.Command, deps dependencies, args []string, confi
 		stderr: command.ErrOrStderr(), diagnostics: reporters.Diagnostic,
 	}
 	return runner.run(command.Context(), definition, releaseDependencyPlan(plans, definition, cleanup))
+}
+
+// completedRunState returns the run state that describes how the invocation ended. A scheduled
+// workflow keeps running after each occurrence, so state left over from an earlier attempt must
+// not stand in for an invocation that ended for an unrelated reason - a broken timer, say. When
+// it is discarded the reporter falls back to the terminal progress event, which carries its own
+// workflow name and status and is rejected when it does not describe this outcome.
+func completedRunState(state *engine.State, attemptErr, runErr error) *engine.State {
+	switch {
+	case state == nil:
+		return nil
+	case attemptErr == nil && runErr == nil:
+		return state
+	case attemptErr != nil && runErr != nil && errors.Is(runErr, attemptErr):
+		return state
+	default:
+		return nil
+	}
 }
 
 func releaseDependencyPlan(plans map[*workflow.Definition]*workflow.DependencyPlan, definition *workflow.Definition, release func()) func() {
