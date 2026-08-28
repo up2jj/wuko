@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -198,6 +199,112 @@ func TestSetIfDifferentIsAtomicAndDoesNotRewriteUnchangedValue(t *testing.T) {
 
 func TestConcurrentProcessUpdatesDoNotLoseValues(t *testing.T) {
 	dir := t.TempDir()
+	const processes = 12
+	runStoreHelpers(t, dir, processes, func(index int) []string {
+		return []string{"WUKO_KV_HELPER_MODE=set", "WUKO_KV_HELPER_KEY=" + fmt.Sprintf("key-%02d", index)}
+	})
+	store, err := Open(dir, "processes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := store.List(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != processes {
+		t.Fatalf("entries = %d, want %d", len(entries), processes)
+	}
+}
+
+// Separate wuko runs share one store through the lock file alone, so a read-modify-write
+// they all perform on the same key has to serialize across processes, not just goroutines.
+func TestConcurrentProcessUpdatesOfOneKeyAccumulate(t *testing.T) {
+	dir := t.TempDir()
+	const processes, rounds = 8, 5
+	runStoreHelpers(t, dir, processes, func(int) []string {
+		return []string{
+			"WUKO_KV_HELPER_MODE=update", "WUKO_KV_HELPER_KEY=runs",
+			"WUKO_KV_HELPER_ROUNDS=" + strconv.Itoa(rounds),
+		}
+	})
+	store, err := Open(dir, "processes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	value, found, err := store.Get(t.Context(), "runs")
+	if err != nil || !found {
+		t.Fatalf("get = %#v, %v, %v", value, found, err)
+	}
+	if got := value.(json.Number).String(); got != strconv.Itoa(processes*rounds) {
+		t.Fatalf("counter = %s, want %d", got, processes*rounds)
+	}
+}
+
+// Reads take the lock only when a writer's lock file happens to exist, so their safety
+// rests on writers publishing whole files with an atomic rename. A reader must never
+// observe a partial or absent store while one is being replaced.
+func TestReadsNeverObserveAPartialWrite(t *testing.T) {
+	store, err := Open(t.TempDir(), "hot")
+	if err != nil {
+		t.Fatal(err)
+	}
+	payloads := []any{strings.Repeat("a", 200_000), strings.Repeat("b", 200_000)}
+	if _, err := store.Set(t.Context(), "blob", payloads[0]); err != nil {
+		t.Fatal(err)
+	}
+	writing := make(chan struct{})
+	errs := make(chan error, 8)
+	var group sync.WaitGroup
+	group.Add(1)
+	go func() {
+		defer group.Done()
+		defer close(writing)
+		for i := range 40 {
+			if _, err := store.Set(t.Context(), "blob", payloads[i%len(payloads)]); err != nil {
+				errs <- err
+				return
+			}
+		}
+	}()
+	for range 4 {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			for {
+				select {
+				case <-writing:
+					return
+				default:
+				}
+				value, found, err := store.Get(t.Context(), "blob")
+				if err != nil {
+					errs <- err
+					return
+				}
+				if !found {
+					errs <- fmt.Errorf("blob disappeared while it was being replaced")
+					return
+				}
+				if value != payloads[0] && value != payloads[1] {
+					errs <- fmt.Errorf("read a value that was never written, %d bytes", len(value.(string)))
+					return
+				}
+			}
+		}()
+	}
+	group.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// runStoreHelpers starts count helper processes that block on a shared barrier, then
+// releases them together so their store operations overlap.
+func runStoreHelpers(t *testing.T, dir string, count int, environment func(index int) []string) {
+	t.Helper()
 	barrierPath := filepath.Join(dir, "barrier")
 	barrier, err := os.OpenFile(barrierPath, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
@@ -207,15 +314,14 @@ func TestConcurrentProcessUpdatesDoNotLoseValues(t *testing.T) {
 	if err := syscall.Flock(int(barrier.Fd()), syscall.LOCK_EX); err != nil {
 		t.Fatal(err)
 	}
-	commands := make([]*exec.Cmd, 12)
-	outputs := make([]bytes.Buffer, len(commands))
+	commands := make([]*exec.Cmd, count)
+	outputs := make([]bytes.Buffer, count)
 	for i := range commands {
 		command := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestStoreProcessHelper$")
-		command.Env = append(os.Environ(),
-			"WUKO_KV_HELPER_ROOT="+dir,
-			"WUKO_KV_HELPER_KEY="+fmt.Sprintf("key-%02d", i),
-			"WUKO_KV_HELPER_BARRIER="+barrierPath,
-		)
+		command.Env = append(os.Environ(), append([]string{
+			"WUKO_KV_HELPER_ROOT=" + dir,
+			"WUKO_KV_HELPER_BARRIER=" + barrierPath,
+		}, environment(i)...)...)
 		command.Stdout = &outputs[i]
 		command.Stderr = &outputs[i]
 		if err := command.Start(); err != nil {
@@ -230,17 +336,6 @@ func TestConcurrentProcessUpdatesDoNotLoseValues(t *testing.T) {
 		if err := command.Wait(); err != nil {
 			t.Fatalf("helper failed: %v\n%s", err, outputs[i].String())
 		}
-	}
-	store, err := Open(dir, "processes")
-	if err != nil {
-		t.Fatal(err)
-	}
-	entries, err := store.List(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(entries) != len(commands) {
-		t.Fatalf("entries = %d, want %d", len(entries), len(commands))
 	}
 }
 
@@ -262,8 +357,30 @@ func TestStoreProcessHelper(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.Set(t.Context(), os.Getenv("WUKO_KV_HELPER_KEY"), true); err != nil {
+	key := os.Getenv("WUKO_KV_HELPER_KEY")
+	if os.Getenv("WUKO_KV_HELPER_MODE") != "update" {
+		if _, err := store.Set(t.Context(), key, true); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	rounds, err := strconv.Atoi(os.Getenv("WUKO_KV_HELPER_ROUNDS"))
+	if err != nil {
 		t.Fatal(err)
+	}
+	for range rounds {
+		if _, _, err := store.Update(t.Context(), key, func(current any, found bool) (any, error) {
+			if !found {
+				return 1, nil
+			}
+			count, err := current.(json.Number).Int64()
+			if err != nil {
+				return nil, err
+			}
+			return count + 1, nil
+		}); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 
