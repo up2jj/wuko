@@ -23,11 +23,11 @@ func TestConditionalBlockRunsSequentiallyAfterOneConditionEvaluation(t *testing.
 	registry := conditionalTestRegistry(t, &runs)
 	definition := testDefinition(
 		t, "conditional",
-		workflow.Step{If: `!hasKey(vars, "result")`, Steps: []workflow.Step{
+		workflow.Step{If: `vars.result == nil`, Steps: []workflow.Step{
 			{ID: "first", Type: "capture", With: map[string]any{"value": "produced"}},
 			{ID: "second", Type: "capture", If: `steps.first.value == "produced"`, With: map[string]any{"value": "{{ .vars.result }}"}},
 		}})
-
+	definition.Vars = map[string]any{"result": nil}
 	state, err := New(registry).Run(t.Context(), definition, Options{})
 	if err != nil {
 		t.Fatal(err)
@@ -46,7 +46,7 @@ func TestConditionalBlockFalseRecordsLeafAndControlSkips(t *testing.T) {
 	definition := testDefinition(
 		t, "skipped",
 		workflow.Step{If: "false", Steps: []workflow.Step{
-			{ID: "ordinary", Type: "capture", With: map[string]any{"value": "{{ .vars.missing }}"}},
+			{ID: "ordinary", Type: "capture", With: map[string]any{"value": "unused"}},
 			{Concurrent: &workflow.ConcurrentGroup{MaxConcurrency: 2, FailFast: true, Steps: []workflow.Step{
 				{ID: "parallel_one", Type: "capture", With: map[string]any{"value": "one"}},
 				{ID: "parallel_two", Type: "capture", With: map[string]any{"value": "two"}},
@@ -159,6 +159,7 @@ func TestConditionalBlockDryRunDisplaysNestedPlan(t *testing.T) {
 			{ID: "first", Type: "capture", With: map[string]any{"value": "first"}},
 			{ID: "second", Type: "capture", With: map[string]any{"value": "second"}},
 		}})
+	definition.Vars = map[string]any{"enabled": false}
 
 	var output bytes.Buffer
 	if _, err := New(registry).Run(t.Context(), definition, Options{DryRun: true, Stdout: &output, Stderr: io.Discard}); err != nil {

@@ -168,19 +168,71 @@ func validateTemplateReferences(tmpl *template.Template) error {
 		if displayName == executionTemplateName {
 			displayName = "value"
 		}
-		if err := walkTemplateNodes(item.Tree.Root, func(name string) error {
+		if err := walkTemplateNodes(item.Tree.Root, templateNodeVisitor{template: func(name string) error {
 			if tmpl.Lookup(name) == nil {
 				return fmt.Errorf("template %q references undefined template %q", displayName, name)
 			}
 			return nil
-		}); err != nil {
+		}}); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func walkTemplateNodes(node parse.Node, visit func(string) error) error {
+// WalkDataReferences visits static data paths used by value and every named template it invokes.
+// Paths omit the leading dot or dollar sign: .steps.build.stdout becomes
+// ["steps", "build", "stdout"]. Dynamic index segments stop the static path.
+func (renderer *Renderer) WalkDataReferences(value string, visit func([]string) error) error {
+	tmpl, err := renderer.compile(value)
+	if err != nil {
+		return err
+	}
+	return walkTemplateDataReferences(tmpl, executionTemplateName, make(map[string]struct{}), visit)
+}
+
+// WalkNamedDataReferences visits static data paths in every declared named template.
+func (renderer *Renderer) WalkNamedDataReferences(visit func(name string, path []string) error) error {
+	items := renderer.base.Templates()
+	slices.SortFunc(items, func(left, right *template.Template) int {
+		return strings.Compare(left.Name(), right.Name())
+	})
+	for _, item := range items {
+		if item.Tree == nil || item.Tree.Root == nil {
+			continue
+		}
+		if err := walkTemplateNodes(item.Tree.Root, templateNodeVisitor{data: func(path []string) error {
+			return visit(item.Name(), path)
+		}}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func walkTemplateDataReferences(tmpl *template.Template, name string, visited map[string]struct{}, visit func([]string) error) error {
+	if _, ok := visited[name]; ok {
+		return nil
+	}
+	visited[name] = struct{}{}
+	item := tmpl.Lookup(name)
+	if item == nil || item.Tree == nil || item.Tree.Root == nil {
+		return nil
+	}
+	return walkTemplateNodes(item.Tree.Root, templateNodeVisitor{
+		data: visit,
+		template: func(child string) error {
+			return walkTemplateDataReferences(tmpl, child, visited, visit)
+		},
+	})
+}
+
+type templateNodeVisitor struct {
+	template func(string) error
+	data     func([]string) error
+}
+
+func walkTemplateNodes(node parse.Node, visit templateNodeVisitor) error {
 	if node == nil {
 		return nil
 	}
@@ -194,23 +246,192 @@ func walkTemplateNodes(node parse.Node, visit func(string) error) error {
 				return err
 			}
 		}
+	case *parse.ActionNode:
+		return walkTemplateNodes(typed.Pipe, visit)
+	case *parse.PipeNode:
+		if typed == nil {
+			return nil
+		}
+		if visit.data != nil {
+			if path := templatePipePath(typed); len(path) > 0 {
+				if err := visit.data(path); err != nil {
+					return err
+				}
+			}
+		}
+		for _, declaration := range typed.Decl {
+			if err := walkTemplateNodes(declaration, visit); err != nil {
+				return err
+			}
+		}
+		for _, command := range typed.Cmds {
+			if err := walkTemplateNodes(command, visit); err != nil {
+				return err
+			}
+		}
+	case *parse.CommandNode:
+		if visit.data != nil {
+			if path := templateCommandPath(typed); len(path) > 0 {
+				if err := visit.data(path); err != nil {
+					return err
+				}
+			}
+		}
+		for _, argument := range typed.Args {
+			if err := walkTemplateNodes(argument, visit); err != nil {
+				return err
+			}
+		}
+	case *parse.FieldNode:
+		if visit.data != nil && len(typed.Ident) > 0 {
+			return visit.data(slices.Clone(typed.Ident))
+		}
+	case *parse.VariableNode:
+		if visit.data != nil && len(typed.Ident) > 1 && typed.Ident[0] == "$" {
+			return visit.data(slices.Clone(typed.Ident[1:]))
+		}
+	case *parse.ChainNode:
+		if visit.data != nil {
+			if path := templateStaticPath(typed); len(path) > 0 {
+				if err := visit.data(path); err != nil {
+					return err
+				}
+			}
+		}
+		return walkTemplateNodes(typed.Node, visit)
 	case *parse.IfNode:
+		if err := walkTemplateNodes(typed.Pipe, visit); err != nil {
+			return err
+		}
 		if err := walkTemplateNodes(typed.List, visit); err != nil {
 			return err
 		}
 		return walkTemplateNodes(typed.ElseList, visit)
 	case *parse.RangeNode:
+		if err := walkTemplateNodes(typed.Pipe, visit); err != nil {
+			return err
+		}
 		if err := walkTemplateNodes(typed.List, visit); err != nil {
 			return err
 		}
 		return walkTemplateNodes(typed.ElseList, visit)
 	case *parse.WithNode:
+		if err := walkTemplateNodes(typed.Pipe, visit); err != nil {
+			return err
+		}
 		if err := walkTemplateNodes(typed.List, visit); err != nil {
 			return err
 		}
 		return walkTemplateNodes(typed.ElseList, visit)
 	case *parse.TemplateNode:
-		return visit(typed.Name)
+		if err := walkTemplateNodes(typed.Pipe, visit); err != nil {
+			return err
+		}
+		if visit.template != nil {
+			return visit.template(typed.Name)
+		}
+	}
+	return nil
+}
+
+func templatePipePath(pipe *parse.PipeNode) []string {
+	if len(pipe.Cmds) < 2 {
+		return nil
+	}
+	path := templateStaticPath(pipe.Cmds[0])
+	if len(path) == 0 {
+		return nil
+	}
+	matched := false
+	for _, command := range pipe.Cmds[1:] {
+		if len(command.Args) != 2 {
+			break
+		}
+		identifier, ok := command.Args[0].(*parse.IdentifierNode)
+		if !ok || (identifier.Ident != "get" && identifier.Ident != "hasKey") {
+			break
+		}
+		key, ok := command.Args[1].(*parse.StringNode)
+		if !ok {
+			break
+		}
+		if identifier.Ident == "hasKey" {
+			// A presence test must not require the key it asks about.
+			break
+		}
+		path = append(path, key.Text)
+		matched = true
+	}
+	if !matched {
+		return nil
+	}
+	return path
+}
+
+func templateCommandPath(command *parse.CommandNode) []string {
+	if len(command.Args) < 3 {
+		return nil
+	}
+	identifier, ok := command.Args[0].(*parse.IdentifierNode)
+	if !ok {
+		return nil
+	}
+	if identifier.Ident == "get" || identifier.Ident == "hasKey" {
+		key, ok := command.Args[1].(*parse.StringNode)
+		if !ok {
+			return nil
+		}
+		path := templateStaticPath(command.Args[2])
+		if len(path) == 0 {
+			return nil
+		}
+		if identifier.Ident == "hasKey" {
+			// A presence test must not require the key it asks about.
+			return path
+		}
+		return append(path, key.Text)
+	}
+	if identifier.Ident != "index" {
+		return nil
+	}
+	path := templateStaticPath(command.Args[1])
+	if len(path) == 0 {
+		return nil
+	}
+	for _, argument := range command.Args[2:] {
+		key, ok := argument.(*parse.StringNode)
+		if !ok {
+			break
+		}
+		path = append(path, key.Text)
+	}
+	return path
+}
+
+func templateStaticPath(node parse.Node) []string {
+	switch typed := node.(type) {
+	case *parse.FieldNode:
+		return slices.Clone(typed.Ident)
+	case *parse.VariableNode:
+		if len(typed.Ident) > 1 && typed.Ident[0] == "$" {
+			return slices.Clone(typed.Ident[1:])
+		}
+	case *parse.ChainNode:
+		path := templateStaticPath(typed.Node)
+		if len(path) > 0 {
+			return append(path, typed.Field...)
+		}
+	case *parse.PipeNode:
+		if len(typed.Cmds) == 1 {
+			return templateStaticPath(typed.Cmds[0])
+		}
+	case *parse.CommandNode:
+		if path := templateCommandPath(typed); len(path) > 0 {
+			return path
+		}
+		if len(typed.Args) == 1 {
+			return templateStaticPath(typed.Args[0])
+		}
 	}
 	return nil
 }

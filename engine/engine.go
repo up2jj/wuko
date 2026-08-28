@@ -126,6 +126,10 @@ func (e *Engine) Validate(ctx context.Context, definition *workflow.Definition, 
 		trace(options, diagnostic.Event{Phase: diagnostic.PhaseValidation, Status: diagnostic.StatusFailed, WorkflowName: definition.Name, Location: definition.Location, Duration: time.Since(started)})
 		return err
 	}
+	if err := validateDataReferences(definition, options, state); err != nil {
+		trace(options, diagnostic.Event{Phase: diagnostic.PhaseValidation, Status: diagnostic.StatusFailed, WorkflowName: definition.Name, Location: definition.Location, Duration: time.Since(started), Error: err})
+		return err
+	}
 	err = e.validateSteps(ctx, definition, definition.Steps, options, state)
 	if err == nil && len(definition.Finally) > 0 {
 		state.Bindings = map[string]any{"finally": map[string]any{

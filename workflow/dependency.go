@@ -312,6 +312,9 @@ func collectTemplateDependencyReferences(node parse.Node, references *[]dependen
 	case *parse.ActionNode:
 		collectTemplateDependencyReferences(typed.Pipe, references)
 	case *parse.PipeNode:
+		if typed == nil {
+			return
+		}
 		for _, command := range typed.Cmds {
 			collectTemplateDependencyReferences(command, references)
 		}

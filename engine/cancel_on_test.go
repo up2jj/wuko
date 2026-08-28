@@ -43,6 +43,7 @@ func TestCancelOnMonitorWinsAndRecordsPartialBodyState(t *testing.T) {
 		[]workflow.Step{{ID: "prepare", Type: "prepare", With: map[string]any{}}, {ID: "deploy", Type: "block", With: map[string]any{}}},
 		`{"deploy": steps.deploy.status, "artifact": vars.artifact, "monitor": cancel_on.winner.monitor, "monitor_status": monitors.deployment_finished.status}`,
 	)
+	definition.Vars = map[string]any{"artifact": nil}
 	definition.Steps = append(definition.Steps,
 		workflow.Step{ID: "parent_succeeded", Type: "capture", If: `steps.deployment_watch.status == "succeeded"`, With: map[string]any{"value": true}},
 		workflow.Step{ID: "deploy_succeeded", Type: "capture", If: `steps.deployment_watch.steps.deploy.status == "succeeded"`, With: map[string]any{"value": true}},
@@ -82,7 +83,7 @@ func TestCancelOnMonitorWinsAndRecordsPartialBodyState(t *testing.T) {
 	if len(monitor["steps"].(map[string]any)) != 0 {
 		t.Fatalf("direct monitor nested steps = %#v", monitor["steps"])
 	}
-	if _, exists := state.Vars["artifact"]; exists {
+	if state.Vars["artifact"] != nil {
 		t.Fatalf("body variable leaked into outer state: %#v", state.Vars)
 	}
 	if state.Steps["parent_succeeded"].(map[string]any)["value"] != true || state.Steps["monitor_succeeded"].(map[string]any)["value"] != true || state.Steps["artifact"].(map[string]any)["value"] != "dist/app.tar" {
@@ -371,9 +372,11 @@ func TestCancelOnCollectsRecordedOutcome(t *testing.T) {
 }
 
 func TestCancelOnCollectionFailureFailsParent(t *testing.T) {
+	var runs int
 	registry := newTestRegistry(t, map[string]step.Builder{
 		"done": func(map[string]any) (step.Runner, error) {
 			return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+				runs++
 				return step.Result{Outputs: map[string]any{}}, nil
 			}), nil
 		},
@@ -387,16 +390,16 @@ func TestCancelOnCollectionFailureFailsParent(t *testing.T) {
 	definition := cancelOnDefinition(t, []workflow.Step{{ID: "ready", Type: "done", With: map[string]any{}}}, []workflow.Step{{ID: "deploy", Type: "block", With: map[string]any{}}}, `steps.missing.value`)
 	var events []ProgressEvent
 	_, err := New(registry).Run(t.Context(), definition, Options{Progress: func(event ProgressEvent) { events = append(events, event) }})
-	if err == nil || !strings.Contains(err.Error(), "collecting result") {
+	if err == nil || !strings.Contains(err.Error(), `step "missing" is not available here`) {
 		t.Fatalf("error = %v", err)
 	}
-	var parentFailed bool
+	var parentStarted bool
 	for _, event := range events {
-		if event.Kind == StepFinished && event.StepID == "deployment_watch" && event.Status == StatusFailed {
-			parentFailed = true
+		if event.Kind == StepStarted && event.StepID == "deployment_watch" {
+			parentStarted = true
 		}
 	}
-	if !parentFailed {
+	if parentStarted || runs != 0 {
 		t.Fatalf("events = %#v", events)
 	}
 }

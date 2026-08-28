@@ -292,6 +292,7 @@ func TestTryCatchDryRunShowsBothPhases(t *testing.T) {
 		[]workflow.Step{{ID: "rollback", Type: "run", With: map[string]any{}}},
 	))
 	definition.Steps[0].If = "vars.enabled"
+	definition.Vars = map[string]any{"enabled": false}
 	var output bytes.Buffer
 	if _, err := New(registry).Run(t.Context(), definition, Options{DryRun: true, Stdout: &output}); err != nil {
 		t.Fatal(err)

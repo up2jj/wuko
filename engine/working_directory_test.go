@@ -253,6 +253,7 @@ func TestWorkingDirectoryDryRunDisplaysNestedPlan(t *testing.T) {
 	definition := testDefinition(t, "dry", workflow.Step{
 		WorkingDirectory: "{{ .vars.dir }}", Steps: []workflow.Step{{ID: "run", Type: "capture_dir", With: map[string]any{}}},
 	})
+	definition.Vars = map[string]any{"dir": "/unused"}
 
 	var output bytes.Buffer
 	if _, err := New(workingDirectoryRegistry(t)).Run(t.Context(), definition, Options{DryRun: true, Stdout: &output, Stderr: io.Discard}); err != nil {

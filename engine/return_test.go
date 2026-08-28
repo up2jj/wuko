@@ -80,6 +80,7 @@ func TestReturnSkipsLaterFanoutWithoutExpansion(t *testing.T) {
 			Steps: []workflow.Step{{ID: "child", Type: "capture_return", With: map[string]any{}}},
 		}},
 	)
+	definition.Vars = map[string]any{"missing": []any{}, "missing_size": 1}
 
 	state, err := New(registry).Run(t.Context(), definition, Options{})
 	if err != nil {
@@ -225,9 +226,10 @@ func TestDryRunDisplaysReturnControl(t *testing.T) {
 		t.Fatal(err)
 	}
 	definition := testDefinition(t, "dry-return",
-		workflow.Step{Return: &workflow.ReturnControl{Outputs: map[string]string{"cached": "true", "artifact": "steps.build.path"}}, If: "vars.cached"},
+		workflow.Step{Return: &workflow.ReturnControl{Outputs: map[string]string{"cached": "true", "artifact": "vars.artifact"}}, If: "vars.cached"},
 		workflow.Step{ID: "build", Type: "capture_return"},
 	)
+	definition.Vars = map[string]any{"cached": false, "artifact": "cached.tar"}
 
 	var output bytes.Buffer
 	if _, err := New(registry).Run(t.Context(), definition, Options{DryRun: true, Stdout: &output, Stderr: io.Discard}); err != nil {

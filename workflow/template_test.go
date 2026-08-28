@@ -274,3 +274,18 @@ func TestTemplateDefinitionUnmarshalRejectsAmbiguousObjects(t *testing.T) {
 		}
 	}
 }
+
+func TestRendererRendersArgumentLessTemplateInvocation(t *testing.T) {
+	t.Parallel()
+	renderer, err := NewRenderer(map[string]TemplateDefinition{"greeting": {Inline: "hello"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := renderer.Render(`{{ template "greeting" }}!`, map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "hello!" {
+		t.Fatalf("rendered = %q", got)
+	}
+}

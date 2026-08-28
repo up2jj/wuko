@@ -10,9 +10,9 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
 ## Workflow
 
 1. Inspect `README.md`, nearby workflows, referenced files, and the repository state before editing. Treat the task brief and existing workflow behavior as requirements.
-2. Model the workflow with `version: 1`, a stable `name`, a useful `description`, explicit `vars` and `env`, and an ordered `steps` list. Wuko does not infer a dependency graph or reorder steps. Use `depends_on` for prerequisite workflows with declared outputs, and set `invokable: false` when a prerequisite must not be selected through bare `wuko`, `wuko run`, or `wuko ui`. Use `require` only to split the current workflow without a state boundary, and `uses` for reusable behavior behind declared action inputs and outputs.
+2. Model the workflow with `version: 1`, a stable `name`, a useful `description`, explicit `vars` and `env`, and an ordered `steps` list. Declare every referenced `vars.<name>` key that no step produces, using a type-appropriate placeholder such as `""`, `false`, `[]`, `{}`, or `null`. A variable assigned by an earlier `set`, `tui_*` prompt, `extract`, `jsonpath`, or `semver` step counts as declared from that step onward, and invocation variables supplied with `--var` or `--var-file` count for that invocation. Wuko does not infer a dependency graph or reorder steps. Use `depends_on` for prerequisite workflows with declared outputs, and set `invokable: false` when a prerequisite must not be selected through bare `wuko`, `wuko run`, or `wuko ui`. Use `require` only to split the current workflow without a state boundary, and `uses` for reusable behavior behind declared action inputs and outputs.
 3. Choose the smallest appropriate step type. Declare every producer before its consumers. Use an anonymous `if` plus `steps` wrapper when several sequential children share one condition, `working_directory` plus `steps` when children share an existing run directory, `concurrent` for a fixed set of independent children, `foreach` for a runtime list, and `matrix` for a Cartesian product. Put consumers after the complete group or control.
-4. Render dynamic values with the documented template roots. Keep one-off substitutions inline; introduce a named template only for genuine reuse or a substantial multiline artifact. Use `if` only for boolean expressions and guard references to skipped steps with membership checks.
+4. Render dynamic values with the documented template roots. Static root keys and visible step IDs are checked before execution, including constant `index` and `get` access; genuinely dynamic keys remain allowed, and a `hasKey` presence test checks only the container it inspects. Environment names are not checked, because the effective environment inherits the host process environment. Keep one-off substitutions inline; introduce a named template only for genuine reuse or a substantial multiline artifact. Use `if` only for boolean expressions and guard references to skipped steps with membership checks.
 5. Keep local paths relative to the file or workflow context that resolves them. Preserve unique step IDs across required files, concurrent children, main steps, finally cleanup, and composite actions.
 6. Treat shell, Lua, Docker, composite actions, and agents as trusted executable code. Keep credentials in environment values, never in workflow text, arguments, URLs, logs, or operation IDs.
 
@@ -118,7 +118,15 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
 - `invokable` defaults to `true`. A workflow with `invokable: false` remains discoverable and may
   execute through `depends_on`, but direct name, file, HTTPS, and GitHub run/UI selectors reject it.
   Validation and tree inspection remain available; this marker is not a security boundary.
-- Step outputs and variables are committed only after success and are available only to later sequential steps. A forward `.steps` reference fails at runtime; a skipped producer is absent from `steps`.
+- `wuko validate`, `wuko run`, and dry runs perform static data-reference validation before any
+  step is constructed or executed. Direct variable references must name a workflow declaration, an
+  invocation variable, or a variable an earlier step declares it assigns.
+  Forward or out-of-scope step references fail validation. Output fields below a visible step stay
+  open because their runtime shape is not inferred.
+- Step outputs and variables are committed only after success and are available only to later
+  sequential steps. A statically valid reference to an earlier conditional step can still fail at
+  render or expression-evaluation time when that producer was skipped and is absent from `steps`;
+  guard optional producers with membership checks.
 - A triggered `return` preserves prior commits, marks later declared work skipped, publishes its
   typed expressions through workflow outputs or the invoking action step, and still runs `finally`
   with successful main status. Use `outputs: {}` for a successful no-op result.

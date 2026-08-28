@@ -68,8 +68,19 @@ Invoke a named template with `{{ template "name" . }}`. Passing `.` gives the na
 same data roots as the string invoking it. Named templates may invoke other declared templates.
 Names must start with a letter or underscore and contain only letters, digits, and underscores.
 
-Wuko parses every named template and verifies named references during validation. Data that only
-exists at runtime, such as a previous step's output, is checked when the consuming step starts.
+Wuko validates static data references before constructing or running any step. Variable names must
+be declared under `vars`, supplied by the invocation, or written by an earlier step that names the
+variable it assigns; `lua` and `import_vars` name their variables only at run time, so they end
+variable checking for the steps after them. Step IDs must be visible at the point where the
+template is used. Environment names are not checked, because the effective environment inherits the
+host process environment and would make the same workflow validate on one machine and fail on
+another. Constant-key forms such as `{{ index .vars "application" }}` are checked too; genuinely
+dynamic keys remain allowed, as does the key a `hasKey` presence test asks about.
+
+Named templates are checked both as declarations and in the scope of each invocation. Output
+fields below a visible step remain open because step output shapes are runtime-defined. A
+reference to an earlier step is therefore valid even when that step has an `if`; if the step is
+skipped, strict rendering still reports the missing runtime value when the consumer starts.
 
 ## File-backed templates
 

@@ -344,3 +344,11 @@ steps:
 func dependencyDefinition(name, path string) *Definition {
 	return &Definition{Version: 1, Name: name, Path: path, Steps: []Step{{Return: &ReturnControl{Outputs: map[string]string{}}}}}
 }
+
+func TestTemplateDependencyReferencesHandlesArgumentLessInvocation(t *testing.T) {
+	t.Parallel()
+	if references := templateDependencyReferences(`{{ template "banner" }}{{ .dependencies.build.path }}`); len(references) != 1 ||
+		references[0].alias != "build" || references[0].output != "path" {
+		t.Fatalf("references = %#v", references)
+	}
+}

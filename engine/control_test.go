@@ -27,7 +27,7 @@ func TestRunForeachAggregatesOrderedIsolatedResults(t *testing.T) {
 			{ID: "second", Type: "capture", If: "foreach.index >= 0", With: map[string]any{"value": "{{ .vars.temporary }}"}},
 		},
 	}})
-	definition.Vars = map[string]any{"targets": []any{"linux", "darwin"}}
+	definition.Vars = map[string]any{"targets": []any{"linux", "darwin"}, "temporary": nil}
 	definition.Env = workflow.Environment{"COLLECT": "available"}
 	runDir := t.TempDir()
 	state, err := New(registry).Run(t.Context(), definition, Options{inputs: map[string]any{"seed": 42}, RunDir: runDir})
@@ -47,7 +47,7 @@ func TestRunForeachAggregatesOrderedIsolatedResults(t *testing.T) {
 	if first["value"] != "0:linux" || first["local"] != "0:linux" || first["input"] != 42 || first["env"] != "available" || first["dir"] != runDir {
 		t.Fatalf("first result = %#v", first)
 	}
-	if _, exists := state.Vars["temporary"]; exists {
+	if state.Vars["temporary"] != nil {
 		t.Fatalf("iteration variable escaped: %#v", state.Vars)
 	}
 	if state.Stats.Total != 1 || state.Stats.Succeeded != 1 || len(state.Stats.Steps[0].Iterations) != 2 {
@@ -418,8 +418,9 @@ func TestRunControlCollectFailureIsAtomic(t *testing.T) {
 		stepType   string
 		expression string
 		want       string
+		preflight  bool
 	}{
-		{name: "missing output", stepType: "value", expression: "steps.missing.value", want: "collect iteration 0"},
+		{name: "missing output", stepType: "value", expression: "steps.missing.value", want: `step "missing" is not available here`, preflight: true},
 		{name: "unsupported value", stepType: "unsupported", expression: "steps.run.value", want: "YAML/JSON-compatible"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -435,6 +436,12 @@ func TestRunControlCollectFailureIsAtomic(t *testing.T) {
 			}})
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("error = %v, want %q", err, test.want)
+			}
+			if test.preflight {
+				if state != nil || finished.Kind != "" {
+					t.Fatalf("preflight executed the control: state = %#v, progress = %#v", state, finished)
+				}
+				return
 			}
 			if state != nil || finished.Status != StatusFailed || finished.Succeeded != 1 {
 				t.Fatalf("state = %#v, progress = %#v", state, finished)

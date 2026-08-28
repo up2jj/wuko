@@ -28,7 +28,7 @@ func TestRunSkipsGuardedStepAndDependent(t *testing.T) {
 		workflow.Step{ID: "upload", Type: "capture", If: `"prepare" in steps`, With: map[string]any{"value": "{{ .vars.artifact_path }}"}},
 		workflow.Step{ID: "fallback", Type: "capture", If: `"prepare" not in steps`, With: map[string]any{"value": "fallback"}},
 	)
-	definition.Vars = map[string]any{"prepare": false}
+	definition.Vars = map[string]any{"prepare": false, "artifact_path": ""}
 	var output bytes.Buffer
 	state, err := New(registry).Run(t.Context(), definition, Options{
 		RunDir: t.TempDir(), Stdout: &output, Stderr: io.Discard,
@@ -66,6 +66,7 @@ func TestRunConditionUsesRuntimeState(t *testing.T) {
 			With: map[string]any{"value": "consumed"},
 		},
 	)
+	definition.Vars = map[string]any{"result": nil}
 	state, err := New(registry).Run(t.Context(), definition, Options{
 		Env: map[string]string{"MODE": "test"}, RunDir: t.TempDir(), Stdout: io.Discard, Stderr: io.Discard,
 	})
@@ -212,6 +213,7 @@ func TestDryRunPrintsButDoesNotEvaluateCondition(t *testing.T) {
 		ID: "run", Type: "capture", If: "vars.missing",
 		Timeout: &timeout, Retry: immediateRetry(2), With: map[string]any{"value": "{{ .vars.also_missing }}"},
 	})
+	definition.Vars = map[string]any{"missing": false, "also_missing": ""}
 	var output bytes.Buffer
 	if _, err := New(registry).Run(t.Context(), definition, Options{
 		DryRun: true, Stdout: &output, Stderr: io.Discard,
@@ -229,6 +231,7 @@ func TestDryRunPrintsUnexpandedControls(t *testing.T) {
 		Items: "vars.missing", Collect: "steps.run.value", MaxConcurrency: 1, FailFast: true,
 		Steps: []workflow.Step{{ID: "run", Type: "capture", With: map[string]any{"value": "{{ .foreach.item }}"}}},
 	}})
+	definition.Vars = map[string]any{"missing": []any{}}
 	var output bytes.Buffer
 	if _, err := New(registry).Run(t.Context(), definition, Options{DryRun: true, Stdout: &output, Stderr: io.Discard}); err != nil {
 		t.Fatal(err)
@@ -267,6 +270,7 @@ func TestDryRunPrintsUnexpandedBatch(t *testing.T) {
 		Items: "vars.missing", Size: workflow.BatchSize{Expression: "vars.batch_size"}, Collect: "steps.run.value", MaxConcurrency: 2, FailFast: false,
 		Steps: []workflow.Step{{ID: "run", Type: "capture", With: map[string]any{"value": "{{ .batch.items }}"}}},
 	}})
+	definition.Vars = map[string]any{"missing": []any{}, "batch_size": 1}
 	var output bytes.Buffer
 	if _, err := New(registry).Run(t.Context(), definition, Options{DryRun: true, Stdout: &output, Stderr: io.Discard}); err != nil {
 		t.Fatal(err)

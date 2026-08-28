@@ -250,11 +250,19 @@ func TestRunConcurrentGroupUsesSnapshotAndRejectsVariableConflicts(t *testing.T)
 
 	steps = []workflow.Step{
 		{ID: "producer", Type: "write", With: map[string]any{"variable": "produced"}},
-		{ID: "consumer", Type: "write", With: map[string]any{"variable": "{{ .vars.produced }}"}},
+		{ID: "consumer", Type: "write", If: "vars.produced != nil", With: map[string]any{"variable": "observed"}},
 	}
-	_, err = New(registry).Run(t.Context(), concurrentDefinition(t, &workflow.ConcurrentGroup{Steps: steps, MaxConcurrency: 2, FailFast: false}), Options{})
-	if err == nil || !strings.Contains(err.Error(), `map has no entry for key "produced"`) {
-		t.Fatalf("snapshot error = %v", err)
+	definition := concurrentDefinition(t, &workflow.ConcurrentGroup{Steps: steps, MaxConcurrency: 2, FailFast: false})
+	definition.Vars = map[string]any{"produced": nil}
+	state, err := New(registry).Run(t.Context(), definition, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Vars["produced"] != "producer" {
+		t.Fatalf("producer value = %#v", state.Vars["produced"])
+	}
+	if _, exists := state.Steps["consumer"]; exists {
+		t.Fatalf("consumer observed a sibling write: %#v", state.Steps)
 	}
 }
 
