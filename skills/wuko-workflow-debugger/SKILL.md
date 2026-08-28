@@ -58,6 +58,7 @@ Find the smallest evidence-backed cause of a Wuko workflow failure before changi
 - Treat workflows, Lua, shell, Docker, composite actions, and agents as trusted executable code; review them before execution.
 - Remember that a successful external effect may remain after a later failure or retry.
 - Do not treat a missing key-value entry as an error unless the workflow requires `found` to be true.
+- For key-value failures, check scope and store name first: fetched code has no `local` store, and `changed` and `picker` are reserved for Wuko.
 - For concurrency failures, check whether a child incorrectly depends on a sibling or requests interactive input.
 
 Finish with a concise diagnosis, evidence, affected scope, and verification status.

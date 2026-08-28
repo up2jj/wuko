@@ -1,6 +1,6 @@
 ---
 name: wuko-workflow-author
-description: Create or update Wuko version-1 YAML workflows, including cron schedules, templates, conditions, early returns, finally cleanup, cancel-on monitors, foreach and matrix controls, required files, composite actions, waits, polling, retries, concurrency, interactive prompts and path selection, typed and imported variables, structured decoding, JSONPath selection, semantic versions, HTTP, files, managed temporary resources, glob discovery, native filesystem watches, persistent change detectors, content-addressed directory caches, Lua, shell, Docker, and agent steps. Use when designing workflow files, extending existing workflows, or reviewing workflow structure before execution.
+description: Create or update Wuko version-1 YAML workflows, including cron schedules, templates, conditions, early returns, finally cleanup, cancel-on monitors, foreach and matrix controls, required files, composite actions, waits, polling, retries, concurrency, interactive prompts and path selection, typed and imported variables, structured decoding, JSONPath selection, semantic versions, HTTP, files, managed temporary resources, glob discovery, native filesystem watches, persistent change detectors, persistent key-value stores, content-addressed directory caches, Lua, shell, Docker, and agent steps. Use when designing workflow files, extending existing workflows, or reviewing workflow structure before execution.
 ---
 
 # Wuko Workflow Author
@@ -10,7 +10,7 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
 ## Workflow
 
 1. Inspect `README.md`, nearby workflows, referenced files, and the repository state before editing. Treat the task brief and existing workflow behavior as requirements.
-2. Model the workflow with `version: 1`, a stable `name`, a useful `description`, explicit `vars` and `env`, and an ordered `steps` list. Declare every referenced `vars.<name>` key that no step produces, using a type-appropriate placeholder such as `""`, `false`, `[]`, `{}`, or `null`. A variable assigned by an earlier `set`, `tui_*` prompt, `extract`, `jsonpath`, or `semver` step counts as declared from that step onward, and invocation variables supplied with `--var` or `--var-file` count for that invocation. Wuko does not infer a dependency graph or reorder steps. Use `depends_on` for prerequisite workflows with declared outputs, and set `invokable: false` when a prerequisite must not be selected through bare `wuko`, `wuko run`, or `wuko ui`. Use `require` only to split the current workflow without a state boundary, and `uses` for reusable behavior behind declared action inputs and outputs.
+2. Model the workflow with `version: 1`, a stable `name`, a useful `description`, explicit `vars` and `env`, and an ordered `steps` list. Declare every referenced `vars.<name>` key that no step produces, using a type-appropriate placeholder such as `""`, `false`, `[]`, `{}`, or `null`. A variable assigned by an earlier `set`, `tui_*` prompt, `extract`, `jsonpath`, `semver`, or `key_value` step counts as declared from that step onward, and invocation variables supplied with `--var` or `--var-file` count for that invocation. Wuko does not infer a dependency graph or reorder steps. Use `depends_on` for prerequisite workflows with declared outputs, and set `invokable: false` when a prerequisite must not be selected through bare `wuko`, `wuko run`, or `wuko ui`. Use `require` only to split the current workflow without a state boundary, and `uses` for reusable behavior behind declared action inputs and outputs.
 3. Choose the smallest appropriate step type. Declare every producer before its consumers. Use an anonymous `if` plus `steps` wrapper when several sequential children share one condition, `working_directory` plus `steps` when children share an existing run directory, `concurrent` for a fixed set of independent children, `foreach` for a runtime list, and `matrix` for a Cartesian product. Put consumers after the complete group or control.
 4. Render dynamic values with the documented template roots. Static root keys and visible step IDs are checked before execution, including constant `index` and `get` access; genuinely dynamic keys remain allowed, and a `hasKey` presence test checks only the container it inspects. Environment names are not checked, because the effective environment inherits the host process environment. Keep one-off substitutions inline; introduce a named template only for genuine reuse or a substantial multiline artifact. Use `if` only for boolean expressions and guard references to skipped steps with membership checks.
 5. Keep local paths relative to the file or workflow context that resolves them. Preserve unique step IDs across required files, concurrent children, main steps, finally cleanup, and composite actions.
@@ -89,6 +89,14 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
 - Use `log_wait` to follow an existing or newly created regular log file until a regex matches.
   Scan existing content first, set a top-level timeout and an appropriate `max_bytes`, and consume
   its `match` plus named `captures` outputs.
+- Use `key_value` to persist JSON-compatible values between runs with `get`, `set`, `update`,
+  `delete`, `list`, and `clear` against a named `local` or `global` store. Prefer `expr` over
+  `value` for anything computed, because a template renders to text and stores `"3"` rather than
+  `3`. Use `update` whenever the new value derives from the stored one: its `expr` sees `current`
+  and `found` under one lock across the read and the write, which a `get` then `set` pair cannot
+  hold. Bind a result with `variable`, give `get` a `default` instead of branching on `found`, and
+  narrow `list` with `prefix`. Fetched code -- a remote workflow or a URL action -- has only
+  `global` scope, and the store names `changed` and `picker` are reserved for Wuko.
 - Use `changed` before guarded work that should run only when selected file contents or named
   values differ from the detector's previous local snapshot. Branch on its `changed` output, and
   give repeated foreach, matrix, or action detectors a templated key containing their binding.
