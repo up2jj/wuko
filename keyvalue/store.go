@@ -15,6 +15,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/up2jj/wuko/internal/filelock"
 )
@@ -62,9 +64,37 @@ var reservedNames = map[string]struct{}{"changed": {}, "once": {}, "picker": {}}
 // ErrClaimBusy reports that a non-blocking per-key claim is held elsewhere.
 var ErrClaimBusy = errors.New("key-value claim is busy")
 
+// ErrClaimDeadlock reports that waiting for a key would close a cycle: its holder is
+// waiting, directly or transitively, for a key the caller already holds. Waiting would
+// block both sides forever, so the wait is refused instead.
+var ErrClaimDeadlock = errors.New("waiting would deadlock: its holder is waiting for a key this run already holds")
+
+// claimRetryInterval is how long a waiting claim sleeps between attempts. It also
+// bounds how long a cycle goes unnoticed once the last edge of it appears.
+const claimRetryInterval = 10 * time.Millisecond
+
+// claimWalkLimit bounds a wait-for walk so a chain that is being rewritten under us
+// cannot spin. Any real cycle is far shorter than this.
+const claimWalkLimit = 64
+
+// claimRecord is the payload a holder publishes inside its own claim lock file so
+// other waiters can see who holds the key and what, if anything, that holder is itself
+// waiting for. Waiters read it without taking the lock.
+type claimRecord struct {
+	PID int    `json:"pid"`
+	Key string `json:"key"`
+	// Wanted names the key this holder is waiting for, and WantedPath locates that
+	// key's claim file. The path is what the walk follows, so a cycle is found even
+	// when it runs through a different store or scope than the one it started in.
+	Wanted     string `json:"wanted,omitempty"`
+	WantedPath string `json:"wanted_path,omitempty"`
+}
+
 // Claim owns one per-key advisory lock until Release is called.
 type Claim struct {
 	handle *filelock.Handle
+	key    string
+	path   string
 }
 
 // Release gives up a per-key claim. It is safe to call more than once.
@@ -73,6 +103,91 @@ func (claim *Claim) Release() error {
 		return nil
 	}
 	return claim.handle.Release()
+}
+
+// Path locates this claim's lock file. Callers collect the paths of the claims they
+// hold and pass them to ClaimKey so a wait that would close a cycle is refused.
+func (claim *Claim) Path() string {
+	if claim == nil {
+		return ""
+	}
+	return claim.path
+}
+
+// SetWanted publishes the key this claim's holder is now waiting for, together with that
+// key's claim path, or clears both when key is empty. Waiters walk these edges to find a
+// cycle before blocking, so a holder that is about to wait must announce it first:
+// announcing late risks two holders each missing the other, while announcing early only
+// costs a redundant check.
+func (claim *Claim) SetWanted(key, claimPath string) error {
+	if claim == nil {
+		return nil
+	}
+	payload, err := json.Marshal(claimRecord{
+		PID: os.Getpid(), Key: claim.key, Wanted: key, WantedPath: claimPath,
+	})
+	if err != nil {
+		return fmt.Errorf("encoding claim record: %w", err)
+	}
+	return claim.handle.SetContent(payload)
+}
+
+// ClaimPath is where the advisory lock for key lives. The digest keeps the name a fixed
+// length and free of anything the filesystem would object to.
+func (s *Store) ClaimPath(key string) string {
+	return s.path + "." + fmt.Sprintf("%x", sha256.Sum256([]byte(key))) + ".claim.lock"
+}
+
+// readClaimRecord reports the record a live holder published for key. It returns false
+// whenever that cannot be established: no file, an unparsable or half-written payload,
+// or a holder process that no longer exists. Callers treat false as "no edge", so every
+// uncertainty makes the deadlock check less eager rather than more.
+func readClaimRecord(claimPath string) (claimRecord, bool) {
+	data, err := filelock.ReadContent(claimPath)
+	if err != nil {
+		return claimRecord{}, false
+	}
+	var record claimRecord
+	if err := json.Unmarshal(data, &record); err != nil {
+		return claimRecord{}, false
+	}
+	if record.PID <= 0 || !processAlive(record.PID) {
+		return claimRecord{}, false
+	}
+	return record, true
+}
+
+// claimCycle walks the wait-for edges starting at the claim file wantPath and reports the
+// chain of keys back to a claim in held, meaning the caller would close a cycle by
+// waiting. The returned chain names the keys involved, starting with the one wanted.
+func claimCycle(wantKey, wantPath string, held map[string]struct{}) ([]string, bool) {
+	visited := make(map[string]struct{}, claimWalkLimit)
+	chain := []string{}
+	key, current := wantKey, wantPath
+	for len(chain) < claimWalkLimit {
+		if _, mine := held[current]; mine {
+			return append(chain, key), true
+		}
+		if _, seen := visited[current]; seen {
+			return nil, false
+		}
+		visited[current] = struct{}{}
+		record, ok := readClaimRecord(current)
+		if !ok || record.WantedPath == "" {
+			return nil, false
+		}
+		chain = append(chain, key)
+		key, current = record.Wanted, record.WantedPath
+	}
+	return nil, false
+}
+
+// processAlive reports whether pid still names a running process. Signal 0 performs the
+// permission and existence checks without delivering anything; EPERM means the process
+// exists but belongs to another user.
+func processAlive(pid int) bool {
+	err := syscall.Kill(pid, 0)
+	return err == nil || errors.Is(err, syscall.EPERM)
 }
 
 // OpenWorkflowScoped opens a store a workflow asked for by name. It refuses the names Wuko
@@ -285,7 +400,12 @@ func (s *Store) List(ctx context.Context) ([]Entry, error) {
 
 // ClaimKey acquires an exclusive claim for key without serializing unrelated keys.
 // A waiting claim honors ctx; a non-waiting claim returns ErrClaimBusy on contention.
-func (s *Store) ClaimKey(ctx context.Context, key string, wait bool) (*Claim, error) {
+//
+// held names the claim paths the caller already holds, from Claim.Path. A waiting claim
+// refuses with ErrClaimDeadlock rather than blocking when the holder of key is waiting,
+// directly or transitively, for one of them; holders publish those edges with
+// Claim.SetWanted.
+func (s *Store) ClaimKey(ctx context.Context, key string, wait bool, held ...string) (*Claim, error) {
 	if err := validateKey(key); err != nil {
 		return nil, err
 	}
@@ -296,23 +416,56 @@ func (s *Store) ClaimKey(ctx context.Context, key string, wait bool) (*Claim, er
 	if err := os.Chmod(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("setting store directory permissions: %w", err)
 	}
-	digest := fmt.Sprintf("%x", sha256.Sum256([]byte(key)))
-	path := s.path + "." + digest + ".claim.lock"
-	if wait {
-		handle, err := filelock.Acquire(ctx, path)
+	path := s.ClaimPath(key)
+	if !wait {
+		handle, acquired, err := filelock.TryAcquire(ctx, path)
 		if err != nil {
 			return nil, fmt.Errorf("claiming key %q: %w", key, err)
 		}
-		return &Claim{handle: handle}, nil
+		if !acquired {
+			return nil, fmt.Errorf("claiming key %q: %w", key, ErrClaimBusy)
+		}
+		return s.publishClaim(handle, key)
 	}
-	handle, acquired, err := filelock.TryAcquire(ctx, path)
-	if err != nil {
-		return nil, fmt.Errorf("claiming key %q: %w", key, err)
+	heldPaths := make(map[string]struct{}, len(held))
+	for _, name := range held {
+		heldPaths[name] = struct{}{}
 	}
-	if !acquired {
-		return nil, fmt.Errorf("claiming key %q: %w", key, ErrClaimBusy)
+	// Poll rather than block in flock so the wait-for graph is re-examined between
+	// attempts: the edge that closes a cycle is often published after this wait began.
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("claiming key %q: %w", key, err)
+		}
+		handle, acquired, err := filelock.TryAcquire(ctx, path)
+		if err != nil {
+			return nil, fmt.Errorf("claiming key %q: %w", key, err)
+		}
+		if acquired {
+			return s.publishClaim(handle, key)
+		}
+		if chain, cyclic := claimCycle(key, path, heldPaths); cyclic {
+			return nil, fmt.Errorf("claiming key %q: %w (cycle: %s)", key, ErrClaimDeadlock, strings.Join(chain, " -> "))
+		}
+		timer := time.NewTimer(claimRetryInterval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, fmt.Errorf("claiming key %q: %w", key, ctx.Err())
+		case <-timer.C:
+		}
 	}
-	return &Claim{handle: handle}, nil
+}
+
+// publishClaim records the new holder in its own lock file so other waiters can resolve
+// it. A claim that cannot publish is released rather than held silently, because an
+// unreadable holder is exactly what makes another process wait forever.
+func (s *Store) publishClaim(handle *filelock.Handle, key string) (*Claim, error) {
+	claim := &Claim{handle: handle, key: key, path: handle.Path()}
+	if err := claim.SetWanted("", ""); err != nil {
+		return nil, errors.Join(fmt.Errorf("claiming key %q: %w", key, err), claim.Release())
+	}
+	return claim, nil
 }
 
 func (s *Store) withLock(ctx context.Context, operation func() error) error {

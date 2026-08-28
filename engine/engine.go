@@ -14,6 +14,7 @@ import (
 	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/executor"
 	wukoexpr "github.com/up2jj/wuko/expression"
+	storepkg "github.com/up2jj/wuko/keyvalue"
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
@@ -70,11 +71,13 @@ type Options struct {
 	renderer               *workflow.Renderer
 	deferContextValidation bool
 	insideExecutor         bool
-	// onceClaims records the once keys already claimed on the current path. It must
-	// travel into action invocations too: the lock is held per open file description,
-	// so a second claim for the same key in this process would block against itself
-	// forever instead of reporting the recursion.
-	onceClaims map[string]struct{}
+	// onceClaims records the once claims already held on the current path, keyed by
+	// scope and key. It must travel into action invocations too: the lock is held per
+	// open file description, so a second claim for the same key in this process would
+	// block against itself forever instead of reporting the recursion. The claims
+	// themselves are carried, not just their names, because a nested once has to
+	// publish what it is waiting for on every claim its ancestors hold.
+	onceClaims map[string]*storepkg.Claim
 }
 
 // State carries one workflow's mutable values and is deliberately unsynchronized.

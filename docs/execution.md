@@ -208,6 +208,14 @@ to `error`: the contender fails immediately with a busy error. `wait` waits canc
 the owner's successful result or takes ownership if that execution failed. Different keys do not
 block each other. Recursive use of the same scope and key fails rather than deadlocking.
 
+Nesting `once` blocks makes a run hold several keys at once, so two runs can claim the same keys in
+opposite orders. A holder publishes the key it is waiting for beside its claim, and a contender that
+would close the resulting loop is refused with the cycle named in the error rather than blocking on
+it. Whichever side looks second is refused, so the other finishes normally. The check follows claims
+across scopes and across processes on the same machine, and ignores a claim whose process is gone.
+It only refuses a wait it can prove would cycle: an unreadable or half-written claim record is
+treated as no evidence, leaving that wait to proceed.
+
 `once` may have an outer `if`, which is evaluated before persistence is read. It cannot be combined
 with ordinary step fields or execution policies, cannot run inside cleanup, and cannot contain
 declared `defer` cleanup or a `return`: the body runs on a private state clone, so a `return` could

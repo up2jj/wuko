@@ -561,6 +561,70 @@ func TestClaimKeySerializesOneKeyButNotAnother(t *testing.T) {
 	}
 }
 
+func TestClaimKeyRefusesAWaitThatWouldCloseACycle(t *testing.T) {
+	t.Parallel()
+	store, err := Open(t.TempDir(), "claims")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mine, err := store.ClaimKey(t.Context(), "a", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = mine.Release() }()
+	theirs, err := store.ClaimKey(t.Context(), "b", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = theirs.Release() }()
+
+	// The holder of "b" announces that it is waiting for "a", which this caller holds.
+	if err := theirs.SetWanted("a", store.ClaimPath("a")); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	_, err = store.ClaimKey(ctx, "b", true, mine.Path())
+	if !errors.Is(err, ErrClaimDeadlock) {
+		t.Fatalf("waiting claim error = %v, want ErrClaimDeadlock", err)
+	}
+	if !strings.Contains(err.Error(), "b -> a") {
+		t.Errorf("error does not name the cycle: %v", err)
+	}
+}
+
+func TestClaimKeyWaitsWhenTheHolderWantsNothing(t *testing.T) {
+	t.Parallel()
+	store, err := Open(t.TempDir(), "claims")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mine, err := store.ClaimKey(t.Context(), "a", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = mine.Release() }()
+	theirs, err := store.ClaimKey(t.Context(), "b", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The holder of "b" wants nothing, so there is no cycle and this wait must be
+	// allowed to block until that claim is released.
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		_ = theirs.Release()
+	}()
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	claim, err := store.ClaimKey(ctx, "b", true, mine.Path())
+	if err != nil {
+		t.Fatalf("waiting claim without a cycle = %v", err)
+	}
+	if err := claim.Release(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestClearRemovesEveryKey(t *testing.T) {
 	dir := t.TempDir()
 	store, err := Open(dir, "preferences")

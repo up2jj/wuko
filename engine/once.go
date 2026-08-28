@@ -2,9 +2,11 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
+	"strconv"
 	"strings"
 	"time"
 
@@ -121,7 +123,32 @@ func (e *Engine) executeOnce(ctx context.Context, definition *workflow.Definitio
 		Depth: options.depth, StepID: workflowStep.ID, StepType: "once", Index: index, Total: total,
 	})
 	wait := workflowStep.Once.OnBusy == workflow.OnceBusyWait
-	claim, err := store.ClaimKey(ctx, key, wait)
+	// Announce this wait on every claim the current path already holds, so a contender
+	// walking the wait-for graph sees the edge, and collect those claim paths so this
+	// side sees the contender's. Whichever of the two looks second refuses; announcing
+	// before looking is what stops both from missing each other and blocking.
+	announce := wait && len(options.onceClaims) > 0
+	held := make([]string, 0, len(options.onceClaims))
+	if announce {
+		claimPath := store.ClaimPath(key)
+		for _, ancestor := range options.onceClaims {
+			held = append(held, ancestor.Path())
+			if announceErr := ancestor.SetWanted(key, claimPath); announceErr != nil {
+				stepErr := fmt.Errorf("workflow %q step %q (once): %w", definition.Name, workflowStep.ID, announceErr)
+				finish(StatusFailed, stepErr, RunStats{})
+				outcome.err = stepErr
+				return outcome
+			}
+		}
+	}
+	claim, err := store.ClaimKey(ctx, key, wait, held...)
+	if announce {
+		// Withdraw the edge as soon as the wait is over, however it ended, so the body
+		// below does not run with ancestors still advertising a wait they finished.
+		for _, ancestor := range options.onceClaims {
+			_ = ancestor.SetWanted("", "")
+		}
+	}
 	if errors.Is(err, storepkg.ErrClaimBusy) {
 		result, found, readErr := readOnceRecord(ctx, store, key)
 		if readErr != nil {
@@ -184,9 +211,9 @@ func (e *Engine) executeOnce(ctx context.Context, definition *workflow.Definitio
 	childOptions.stepRunID = ""
 	childOptions.onceClaims = maps.Clone(options.onceClaims)
 	if childOptions.onceClaims == nil {
-		childOptions.onceClaims = make(map[string]struct{})
+		childOptions.onceClaims = make(map[string]*storepkg.Claim)
 	}
-	childOptions.onceClaims[claimID] = struct{}{}
+	childOptions.onceClaims[claimID] = claim
 	bodyTotal := leafStepCount(workflowStep.Once.Steps)
 	nested := RunStats{StartedAt: time.Now(), Total: bodyTotal, Steps: make([]StepStats, 0, bodyTotal)}
 	if err := e.executeSequence(ctx, definition, workflowStep.Once.Steps, childOptions, private, &nested, 1, bodyTotal); err != nil {
@@ -256,8 +283,47 @@ func decodeOnceRecord(key string, value any) (step.Result, error) {
 	if !stepsOK || !varsOK {
 		return step.Result{}, fmt.Errorf("record for key %q has an invalid outcome", key)
 	}
+	decodedSteps, _ := onceRuntimeValue(steps).(map[string]any)
+	decodedVars, _ := onceRuntimeValue(variables).(map[string]any)
 	return step.Result{
-		Outputs:   map[string]any{"steps": steps, "vars": variables},
-		Variables: variables,
+		Outputs:   map[string]any{"steps": decodedSteps, "vars": decodedVars},
+		Variables: decodedVars,
 	}, nil
+}
+
+// onceRuntimeValue turns the json.Number values a store round-trip produces back into
+// the plain numbers workflow state carries. Both the recording run and every replay
+// decode through here, so a recorded outcome supports the same numeric conditions the
+// body's own variables did.
+func onceRuntimeValue(value any) any {
+	switch typed := value.(type) {
+	case json.Number:
+		if integer, err := typed.Int64(); err == nil {
+			return integer
+		}
+		if unsigned, err := strconv.ParseUint(string(typed), 10, 64); err == nil {
+			return unsigned
+		}
+		number, err := typed.Float64()
+		if err != nil {
+			// A magnitude no Go number holds still has to leave as a JSON shape,
+			// because json.Number is not one of the types workflow state carries.
+			return typed.String()
+		}
+		return number
+	case []any:
+		converted := make([]any, len(typed))
+		for i, item := range typed {
+			converted[i] = onceRuntimeValue(item)
+		}
+		return converted
+	case map[string]any:
+		converted := make(map[string]any, len(typed))
+		for name, item := range typed {
+			converted[name] = onceRuntimeValue(item)
+		}
+		return converted
+	default:
+		return value
+	}
 }

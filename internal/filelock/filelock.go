@@ -128,6 +128,41 @@ func locksNamedFile(file *os.File, path string) (bool, error) {
 	return os.SameFile(locked, named), nil
 }
 
+// Path is the filesystem location of this handle's lock file.
+func (handle *Handle) Path() string {
+	if handle == nil {
+		return ""
+	}
+	return handle.path
+}
+
+// SetContent replaces the lock file's body while this handle still holds the lock.
+// Waiters read it without locking, so the payload is written in place rather than
+// published by rename: replacing the file would leave the flock on an unnamed inode.
+// Keep payloads small enough that a single write is not torn, and have readers
+// tolerate one that is.
+func (handle *Handle) SetContent(data []byte) error {
+	if handle == nil || handle.file == nil {
+		return errors.New("lock handle no longer holds a lock")
+	}
+	if err := handle.file.Truncate(int64(len(data))); err != nil {
+		return fmt.Errorf("truncating lock file %s: %w", handle.path, err)
+	}
+	if _, err := handle.file.WriteAt(data, 0); err != nil {
+		return fmt.Errorf("writing lock file %s: %w", handle.path, err)
+	}
+	return nil
+}
+
+// ReadContent returns the body of the lock file at path without taking the lock, so
+// an observer can inspect a live holder's payload. A missing file reports an error
+// matching fs.ErrNotExist. The read is unsynchronized: it can return a payload the
+// holder is midway through rewriting, so callers must treat an unparsable result as
+// simply unknown.
+func ReadContent(path string) ([]byte, error) {
+	return os.ReadFile(path)
+}
+
 // Release deletes the lock file, unlocks it, and closes its descriptor. Calling it more
 // than once, or on a nil handle, is a no-op so callers can release from a defer and an
 // explicit close path both.
