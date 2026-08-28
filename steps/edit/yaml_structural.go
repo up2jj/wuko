@@ -11,6 +11,7 @@ import (
 
 type yamlStructure struct {
 	data     []byte
+	lines    *sourceLines
 	document yaml.Node
 	// inserted counts the members already added at an offset. Those edits
 	// coalesce into one, so each member after the first supplies the
@@ -31,7 +32,7 @@ type yamlLocation struct {
 
 func patchYAMLMutations(data []byte, original, updated any, mutations []mutation) ([]byte, error) {
 	structure := &yamlStructure{
-		data: data, inserted: map[int]int{}, flowAdds: map[*yaml.Node]int{},
+		data: data, lines: newSourceLines(data), inserted: map[int]int{}, flowAdds: map[*yaml.Node]int{},
 		deletions: map[string]int{}, collapsed: map[string]bool{},
 	}
 	if err := yaml.NewDecoder(bytes.NewReader(data)).Decode(&structure.document); err != nil {
@@ -128,7 +129,7 @@ func (s *yamlStructure) replaceEdit(path spec.NormalizedPath, value any) ([]text
 	if err != nil {
 		return nil, err
 	}
-	start, end, err := yamlNodeSpan(s.data, location.node, location.flow)
+	start, end, err := yamlNodeSpan(s.lines, location.node, location.flow)
 	if err != nil {
 		return nil, err
 	}
@@ -199,15 +200,15 @@ func (s *yamlStructure) deleteEdit(path spec.NormalizedPath) ([]textEdit, error)
 	if location.key != nil {
 		startNode = location.key
 	}
-	lineStart, err := lineColumnOffset(s.data, startNode.Line, 1)
+	lineStart, err := s.lines.offset(startNode.Line, 1)
 	if err != nil {
 		return nil, err
 	}
-	keyStart, err := lineColumnOffset(s.data, startNode.Line, startNode.Column)
+	keyStart, err := s.lines.offset(startNode.Line, startNode.Column)
 	if err != nil {
 		return nil, err
 	}
-	_, end, err := yamlNodeSpan(s.data, location.node, false)
+	_, end, err := yamlNodeSpan(s.lines, location.node, false)
 	if err != nil {
 		return nil, err
 	}
@@ -244,7 +245,7 @@ func (s *yamlStructure) collapseParent(parentPath spec.NormalizedPath, parent *y
 		return nil, nil
 	}
 	s.collapsed[pointer] = true
-	start, end, err := yamlNodeSpan(s.data, parent, parent.Style&yaml.FlowStyle != 0)
+	start, end, err := yamlNodeSpan(s.lines, parent, parent.Style&yaml.FlowStyle != 0)
 	if err != nil {
 		return nil, err
 	}
@@ -277,7 +278,7 @@ func (s *yamlStructure) nextMappingKey(location yamlLocation) (int, bool) {
 	if index >= len(parent.Content) {
 		return 0, false
 	}
-	offset, err := lineColumnOffset(s.data, parent.Content[index].Line, parent.Content[index].Column)
+	offset, err := s.lines.offset(parent.Content[index].Line, parent.Content[index].Column)
 	if err != nil {
 		return 0, false
 	}
@@ -292,7 +293,7 @@ func (s *yamlStructure) renameEdit(path spec.NormalizedPath, name string) ([]tex
 	if location.key == nil {
 		return nil, fmt.Errorf("cannot locate mapping key for %s", path)
 	}
-	start, err := lineColumnOffset(s.data, location.key.Line, location.key.Column)
+	start, err := s.lines.offset(location.key.Line, location.key.Column)
 	if err != nil {
 		return nil, err
 	}
@@ -360,7 +361,7 @@ func (s *yamlStructure) addMappingMember(mapping *yaml.Node, name string, value 
 		if err != nil {
 			return nil, err
 		}
-		_, end, err := yamlNodeSpan(s.data, mapping, true)
+		_, end, err := yamlNodeSpan(s.lines, mapping, true)
 		if err != nil {
 			return nil, err
 		}
@@ -378,7 +379,7 @@ func (s *yamlStructure) addMappingMember(mapping *yaml.Node, name string, value 
 	var prefix []byte
 	if len(mapping.Content) > 0 {
 		last := mapping.Content[len(mapping.Content)-1]
-		_, end, err := yamlNodeSpan(s.data, last, false)
+		_, end, err := yamlNodeSpan(s.lines, last, false)
 		if err != nil {
 			return nil, err
 		}
@@ -386,7 +387,7 @@ func (s *yamlStructure) addMappingMember(mapping *yaml.Node, name string, value 
 		prefix = s.lineBreakBefore(insert)
 		indent = mapping.Content[len(mapping.Content)-2].Column - 1
 	} else {
-		start, _, err := yamlNodeSpan(s.data, mapping, false)
+		start, _, err := yamlNodeSpan(s.lines, mapping, false)
 		if err != nil {
 			return nil, err
 		}
@@ -411,7 +412,7 @@ func (s *yamlStructure) addSequenceElement(sequence *yaml.Node, index int, value
 		return nil, err
 	}
 	if sequence.Style&yaml.FlowStyle != 0 {
-		_, end, err := yamlNodeSpan(s.data, sequence, true)
+		_, end, err := yamlNodeSpan(s.lines, sequence, true)
 		if err != nil {
 			return nil, err
 		}
@@ -422,7 +423,7 @@ func (s *yamlStructure) addSequenceElement(sequence *yaml.Node, index int, value
 			}
 			return []textEdit{{start: end - 1, end: end - 1, text: append(prefix, encoded...)}}, nil
 		}
-		start, _, err := yamlNodeSpan(s.data, sequence.Content[index], true)
+		start, _, err := yamlNodeSpan(s.lines, sequence.Content[index], true)
 		if err != nil {
 			return nil, err
 		}
@@ -433,13 +434,13 @@ func (s *yamlStructure) addSequenceElement(sequence *yaml.Node, index int, value
 	var prefix []byte
 	switch {
 	case len(sequence.Content) == 0:
-		start, _, err := yamlNodeSpan(s.data, sequence, false)
+		start, _, err := yamlNodeSpan(s.lines, sequence, false)
 		if err != nil {
 			return nil, err
 		}
 		insert = start
 	case index >= len(sequence.Content):
-		_, end, err := yamlNodeSpan(s.data, sequence.Content[len(sequence.Content)-1], false)
+		_, end, err := yamlNodeSpan(s.lines, sequence.Content[len(sequence.Content)-1], false)
 		if err != nil {
 			return nil, err
 		}
@@ -470,7 +471,7 @@ func (s *yamlStructure) flowSeparator(node *yaml.Node, closing int) ([]byte, err
 		if len(node.Content) == 0 {
 			separator = nil
 		} else {
-			_, end, err := yamlNodeSpan(s.data, node.Content[len(node.Content)-1], true)
+			_, end, err := yamlNodeSpan(s.lines, node.Content[len(node.Content)-1], true)
 			if err != nil {
 				return nil, err
 			}
@@ -497,7 +498,7 @@ func (s *yamlStructure) lineBreakBefore(insert int) []byte {
 // entryMarker returns the offset and indentation of the line carrying the "-"
 // that introduces element, which need not be the line its content starts on.
 func (s *yamlStructure) entryMarker(element *yaml.Node) (int, int, error) {
-	offset, err := lineColumnOffset(s.data, element.Line, element.Column)
+	offset, err := s.lines.offset(element.Line, element.Column)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -525,11 +526,11 @@ func (s *yamlStructure) deleteFlowEntry(location yamlLocation) ([]textEdit, erro
 		entryIndex *= 2
 		startNode = location.key
 	}
-	start, _, err := yamlNodeSpan(s.data, startNode, true)
+	start, _, err := yamlNodeSpan(s.lines, startNode, true)
 	if err != nil {
 		return nil, err
 	}
-	_, end, err := yamlNodeSpan(s.data, location.node, true)
+	_, end, err := yamlNodeSpan(s.lines, location.node, true)
 	if err != nil {
 		return nil, err
 	}
@@ -537,14 +538,14 @@ func (s *yamlStructure) deleteFlowEntry(location yamlLocation) ([]textEdit, erro
 		return []textEdit{{start: start, end: end}}, nil
 	}
 	if entryIndex+stride < len(entries) {
-		nextStart, _, err := yamlNodeSpan(s.data, entries[entryIndex+stride], true)
+		nextStart, _, err := yamlNodeSpan(s.lines, entries[entryIndex+stride], true)
 		if err != nil {
 			return nil, err
 		}
 		return []textEdit{{start: start, end: nextStart}}, nil
 	}
 	previous := entries[entryIndex-stride]
-	_, previousEnd, err := yamlNodeSpan(s.data, previous, true)
+	_, previousEnd, err := yamlNodeSpan(s.lines, previous, true)
 	if err != nil {
 		return nil, err
 	}

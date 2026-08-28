@@ -63,12 +63,13 @@ func patchDocument(data []byte, format string, matches []*spec.LocatedNode, repl
 		if err := decoder.Decode(&document); err != nil {
 			return nil, err
 		}
+		lines := newSourceLines(data)
 		for i, match := range matches {
 			node, flow, err := yamlNodeAt(&document, match.Path)
 			if err != nil {
 				return nil, err
 			}
-			start, end, err := yamlNodeSpan(data, node, flow)
+			start, end, err := yamlNodeSpan(lines, node, flow)
 			if err != nil {
 				return nil, fmt.Errorf("locating %s: %w", match.Path, err)
 			}
@@ -323,8 +324,9 @@ func yamlNodeAt(document *yaml.Node, path spec.NormalizedPath) (*yaml.Node, bool
 	return node, flow, nil
 }
 
-func yamlNodeSpan(data []byte, node *yaml.Node, flow bool) (int, int, error) {
-	start, err := lineColumnOffset(data, node.Line, node.Column)
+func yamlNodeSpan(lines *sourceLines, node *yaml.Node, flow bool) (int, int, error) {
+	data := lines.data
+	start, err := lines.offset(node.Line, node.Column)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -336,7 +338,7 @@ func yamlNodeSpan(data []byte, node *yaml.Node, flow bool) (int, int, error) {
 	}
 	end := start
 	for _, child := range node.Content {
-		_, childEnd, err := yamlNodeSpan(data, child, flow)
+		_, childEnd, err := yamlNodeSpan(lines, child, flow)
 		if err == nil && childEnd > end {
 			end = childEnd
 		}
@@ -492,23 +494,43 @@ func reindent(data []byte, indent int) []byte {
 	return bytes.Join(lines, []byte{'\n'})
 }
 
-func lineColumnOffset(data []byte, line, column int) (int, error) {
+// sourceLines records where every line of a document begins. A YAML node
+// reports its position as a line and column, and resolving that by counting
+// newlines from the start costs a pass over the whole document each time: one
+// edit per line turns locating them all into quadratic work.
+type sourceLines struct {
+	data   []byte
+	starts []int
+}
+
+func newSourceLines(data []byte) *sourceLines {
+	starts := []int{0}
+	for offset := 0; offset < len(data); {
+		next := bytes.IndexByte(data[offset:], '\n')
+		if next < 0 {
+			break
+		}
+		offset += next + 1
+		starts = append(starts, offset)
+	}
+	return &sourceLines{data: data, starts: starts}
+}
+
+// offset returns the byte offset of a one-based line and column. The column
+// counts runes, so it is still walked from the start of its own line.
+func (l *sourceLines) offset(line, column int) (int, error) {
 	if line < 1 || column < 1 {
 		return 0, fmt.Errorf("invalid line or column")
 	}
-	offset := 0
-	for current := 1; current < line; current++ {
-		next := bytes.IndexByte(data[offset:], '\n')
-		if next < 0 {
-			return 0, fmt.Errorf("line is outside source")
-		}
-		offset += next + 1
+	if line > len(l.starts) {
+		return 0, fmt.Errorf("line is outside source")
 	}
+	offset := l.starts[line-1]
 	for current := 1; current < column; current++ {
-		if offset >= len(data) {
+		if offset >= len(l.data) {
 			return 0, fmt.Errorf("column is outside source")
 		}
-		_, size := utf8.DecodeRune(data[offset:])
+		_, size := utf8.DecodeRune(l.data[offset:])
 		offset += size
 	}
 	return offset, nil

@@ -240,7 +240,7 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 		if err != nil {
 			return step.Result{}, fmt.Errorf("verifying edited %s: %w", file.path, err)
 		}
-		if !reflect.DeepEqual(normalizeNumbers(verified), normalizeNumbers(updated)) {
+		if !sameValue(verified, updated) {
 			return step.Result{}, fmt.Errorf("verifying edited %s: document differs from requested value", file.path)
 		}
 		if err := atomicReplace(ctx, file.path, patched, file.mode); err != nil {
@@ -514,7 +514,22 @@ func normalizeStringMaps(value any) any {
 // sameValue reports whether two JSON-compatible values are equal once numbers
 // are compared by value: a decoded document holds json.Number, while a
 // configured value or an expression result holds a plain Go number.
+//
+// Two collections of the same kind are compared entry by entry rather than
+// through normalizeNumbers, which reconciles their numbers by marshalling and
+// re-decoding whole documents. Verifying an edited file compares two of them,
+// so that round trip dominated the cost of a single-key edit.
 func sameValue(left, right any) bool {
+	switch left := left.(type) {
+	case map[string]any:
+		if right, ok := right.(map[string]any); ok {
+			return sameObject(left, right)
+		}
+	case []any:
+		if right, ok := right.([]any); ok {
+			return sameArray(left, right)
+		}
+	}
 	if reflect.DeepEqual(left, right) {
 		return true
 	}
@@ -524,6 +539,31 @@ func sameValue(left, right any) bool {
 		return leftIsNumber && rightIsNumber && leftNumber == rightNumber
 	}
 	return reflect.DeepEqual(normalizeNumbers(left), normalizeNumbers(right))
+}
+
+func sameObject(left, right map[string]any) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for key, value := range left {
+		other, ok := right[key]
+		if !ok || !sameValue(value, other) {
+			return false
+		}
+	}
+	return true
+}
+
+func sameArray(left, right []any) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if !sameValue(left[i], right[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 // numberText returns the JSON text of a number, the same form normalizeNumbers

@@ -4,12 +4,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strconv"
 
 	"github.com/theory/jsonpath/spec"
 )
 
 type jsonEntry struct {
-	path                 spec.NormalizedPath
+	pointer              string
 	keyStart, keyEnd     int
 	valueStart, valueEnd int
 }
@@ -18,6 +19,9 @@ type jsonContainer struct {
 	kind        byte
 	open, close int
 	entries     []jsonEntry
+	// index locates an entry by its pointer. Scanning entries instead turns a
+	// batch that deletes or renames a whole container into quadratic work.
+	index map[string]int
 	// added counts the members already appended to this container. They
 	// coalesce into one edit, so each member after the first supplies the
 	// separator an existing neighbour would otherwise have provided.
@@ -83,7 +87,7 @@ func patchJSONMutations(data []byte, original, updated any, mutations []mutation
 
 func (p *jsonStructure) parse() error {
 	p.skipSpace()
-	if err := p.value(nil); err != nil {
+	if err := p.value(""); err != nil {
 		return err
 	}
 	p.skipSpace()
@@ -93,7 +97,7 @@ func (p *jsonStructure) parse() error {
 	return nil
 }
 
-func (p *jsonStructure) value(path spec.NormalizedPath) error {
+func (p *jsonStructure) value(pointer string) error {
 	p.skipSpace()
 	start := p.pos
 	if p.pos >= len(p.data) {
@@ -101,7 +105,7 @@ func (p *jsonStructure) value(path spec.NormalizedPath) error {
 	}
 	switch p.data[p.pos] {
 	case '{':
-		container := &jsonContainer{kind: '{', open: p.pos}
+		container := &jsonContainer{kind: '{', open: p.pos, index: map[string]int{}}
 		p.pos++
 		p.skipSpace()
 		if !p.take('}') {
@@ -113,22 +117,23 @@ func (p *jsonStructure) value(path spec.NormalizedPath) error {
 					return err
 				}
 				keyEnd := p.pos
-				var key string
-				if err := json.Unmarshal(raw, &key); err != nil {
+				key, err := unquoteJSONString(raw)
+				if err != nil {
 					return err
 				}
 				p.skipSpace()
 				if !p.take(':') {
 					return fmt.Errorf("expected colon at byte %d", p.pos+1)
 				}
-				childPath := appendPath(path, spec.Name(key))
+				childPointer := pointer + "/" + pointerEscape(key)
 				p.skipSpace()
 				valueStart := p.pos
-				if err := p.value(childPath); err != nil {
+				if err := p.value(childPointer); err != nil {
 					return err
 				}
+				container.index[childPointer] = len(container.entries)
 				container.entries = append(container.entries, jsonEntry{
-					path: childPath, keyStart: keyStart, keyEnd: keyEnd, valueStart: valueStart, valueEnd: p.pos,
+					pointer: childPointer, keyStart: keyStart, keyEnd: keyEnd, valueStart: valueStart, valueEnd: p.pos,
 				})
 				p.skipSpace()
 				if p.take('}') {
@@ -140,21 +145,22 @@ func (p *jsonStructure) value(path spec.NormalizedPath) error {
 			}
 		}
 		container.close = p.pos - 1
-		p.containers[path.Pointer()] = container
+		p.containers[pointer] = container
 	case '[':
-		container := &jsonContainer{kind: '[', open: p.pos}
+		container := &jsonContainer{kind: '[', open: p.pos, index: map[string]int{}}
 		p.pos++
 		p.skipSpace()
 		if !p.take(']') {
 			for index := 0; ; index++ {
 				p.skipSpace()
-				childPath := appendPath(path, spec.Index(index))
+				childPointer := pointer + "/" + strconv.Itoa(index)
 				valueStart := p.pos
-				if err := p.value(childPath); err != nil {
+				if err := p.value(childPointer); err != nil {
 					return err
 				}
+				container.index[childPointer] = len(container.entries)
 				container.entries = append(container.entries, jsonEntry{
-					path: childPath, valueStart: valueStart, valueEnd: p.pos,
+					pointer: childPointer, valueStart: valueStart, valueEnd: p.pos,
 				})
 				p.skipSpace()
 				if p.take(']') {
@@ -166,20 +172,20 @@ func (p *jsonStructure) value(path spec.NormalizedPath) error {
 			}
 		}
 		container.close = p.pos - 1
-		p.containers[path.Pointer()] = container
+		p.containers[pointer] = container
 	case '"':
 		if _, err := p.stringToken(); err != nil {
 			return err
 		}
 	default:
-		for p.pos < len(p.data) && !bytes.ContainsRune([]byte(" \t\r\n,]}"), rune(p.data[p.pos])) {
+		for p.pos < len(p.data) && !jsonValueEnd(p.data[p.pos]) {
 			p.pos++
 		}
 		if p.pos == start {
 			return fmt.Errorf("invalid JSON value at byte %d", start+1)
 		}
 	}
-	p.spans[path.Pointer()] = textEdit{start: start, end: p.pos}
+	p.spans[pointer] = textEdit{start: start, end: p.pos}
 	return nil
 }
 
@@ -203,7 +209,7 @@ func (p *jsonStructure) stringToken() ([]byte, error) {
 }
 
 func (p *jsonStructure) skipSpace() {
-	for p.pos < len(p.data) && bytes.ContainsRune([]byte(" \t\r\n"), rune(p.data[p.pos])) {
+	for p.pos < len(p.data) && jsonSpace(p.data[p.pos]) {
 		p.pos++
 	}
 }
@@ -214,6 +220,28 @@ func (p *jsonStructure) take(want byte) bool {
 		return true
 	}
 	return false
+}
+
+func jsonSpace(c byte) bool {
+	return c == ' ' || c == '\t' || c == '\r' || c == '\n'
+}
+
+func jsonValueEnd(c byte) bool {
+	return jsonSpace(c) || c == ',' || c == ']' || c == '}'
+}
+
+// unquoteJSONString decodes a quoted JSON string. A key without an escape is
+// its own contents, and skipping the decoder there saves a full parse per
+// member of the document.
+func unquoteJSONString(raw []byte) (string, error) {
+	if bytes.IndexByte(raw, '\\') < 0 {
+		return string(raw[1 : len(raw)-1]), nil
+	}
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return "", err
+	}
+	return value, nil
 }
 
 func (p *jsonStructure) replaceEdit(path spec.NormalizedPath, value any) ([]textEdit, error) {
@@ -432,12 +460,11 @@ func (p *jsonStructure) entryIndex(container *jsonContainer, path spec.Normalize
 	if container == nil {
 		return -1
 	}
-	for i := range container.entries {
-		if container.entries[i].path.Compare(path) == 0 {
-			return i
-		}
+	index, ok := container.index[path.Pointer()]
+	if !ok {
+		return -1
 	}
-	return -1
+	return index
 }
 
 func entryStart(entry jsonEntry) int {
@@ -451,20 +478,18 @@ func entryStart(entry jsonEntry) int {
 // applyTextEdits can continue to reject genuinely overlapping source edits.
 func coalesceIdenticalInsertions(edits []textEdit) []textEdit {
 	result := make([]textEdit, 0, len(edits))
+	// Insertions are keyed by the offset they sit at rather than scanned for,
+	// so a batch that adds a member to every object stays linear.
+	at := make(map[int]int)
 	for _, edit := range edits {
-		merged := false
 		if edit.start == edit.end {
-			for i := range result {
-				if result[i].start == edit.start && result[i].end == edit.end {
-					result[i].text = append(result[i].text, edit.text...)
-					merged = true
-					break
-				}
+			if i, ok := at[edit.start]; ok {
+				result[i].text = append(result[i].text, edit.text...)
+				continue
 			}
+			at[edit.start] = len(result)
 		}
-		if !merged {
-			result = append(result, edit)
-		}
+		result = append(result, edit)
 	}
 	return result
 }
