@@ -50,11 +50,15 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
   with `format: lines`.
 - Use `jsonpath` for RFC 9535 selection from a typed `vars` or `steps` value. Use `result: all`
   for a nodelist and `result: one` only when exactly one match is required; read normalized match
-  locations from `paths`. Use Lua when the selected data also needs transformation or mutation.
+  locations from `paths`. Use `edit` when the selected data also needs transformation.
 - Use `extract` for exactly one typed record embedded in text. Prefer a typed `format` for a
   complete predictable line and named Go regexp captures for substring or multiline matching.
   Read captures directly from the step outputs and map only intentionally shared values through
   `variables`; use `jsonpath` instead when the source is already structured.
+- Use `edit` to replace existing JSON/YAML/TOML file nodes without re-encoding the whole file, or
+  to derive an edited clone from a variable/expression. Choose exactly one `from.file`, `from.var`,
+  or `from.expr`; use `expr` with `current` for calculated replacements. File edits are in place,
+  while variable/expression sources are output-only. Missing paths fail unless `missing: ignore`.
 - Use `semver` for strict semantic-version parsing, precedence comparison, constraint checks, and
   major/minor/patch increments. Read the operation's primary typed result from `value`; remember
   that build metadata does not affect comparison and ordinary constraints exclude prereleases.

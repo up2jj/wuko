@@ -163,6 +163,91 @@ Require exactly one version:
 `from` is a dotted path rooted at `vars` or `steps`. `all` returns an ordered list and permits no
 matches; `one` requires exactly one match. Results also include `count` and normalized `paths`.
 
+## `edit`
+
+Set an existing value selected with [RFC 9535 JSONPath](https://www.rfc-editor.org/rfc/rfc9535.html).
+File edits preserve comments and formatting outside the replaced values and are installed
+atomically. The format is inferred from `.json`, `.yaml`, `.yml`, or `.toml`; use `format` when a
+file has another extension.
+
+Bump a version in place:
+
+```yaml
+- id: bump
+  type: edit
+  with:
+    operation: set
+    from:
+      file: package.json
+    path: $.version
+    value: "{{ .steps.next.version }}"
+```
+
+Find matching nodes and calculate each replacement from its previous value:
+
+```yaml
+- id: expand_node_services
+  type: edit
+  with:
+    operation: set
+    from:
+      file: services.yaml
+    path: "$.services[?@.runtime == 'node'].replicas"
+    expr: current + 1
+    result: all
+```
+
+`expr` is evaluated once per selected node against the original document. It can use the normal
+expression roots plus `current`, the normalized JSONPath `path`, and the zero-based match `index`.
+Use exactly one of `value` or `expr`.
+
+Edit a workflow variable without mutating it:
+
+```yaml
+- id: adjusted
+  type: edit
+  with:
+    operation: set
+    from:
+      var: deployment
+    path: $.spec.replicas
+    expr: current + 1
+
+- id: save_adjusted
+  type: set
+  with:
+    variable: deployment
+    expr: steps.adjusted.value
+```
+
+An expression can also provide the source document:
+
+```yaml
+- id: production
+  type: edit
+  with:
+    operation: set
+    from:
+      expr: steps.configuration.value
+    path: $.environment
+    value: production
+```
+
+`from` must contain exactly one of `file`, `var`, or `expr`. A file source must be a regular file
+— a symlink is rejected rather than replaced — and is changed in place; variable and expression
+sources are cloned, never mutated, and the transformed document is returned as `steps.<id>.value`.
+
+`result` defaults to `one`, which requires exactly one match. Set `result: all` to update every
+match. A missing path fails by default. Set `missing: ignore` for a successful no-op; in that case
+the replacement expression is not evaluated and a file is not rewritten. Missing source files or
+variables always fail.
+
+Outputs include the complete transformed `value`, normalized `paths`, per-match `replacements`,
+`count`, `changed`, and `changed_count`. File edits also return the resolved `file` and `format`.
+The step only replaces existing nodes; it does not create missing keys, array entries, or parents.
+Files are limited to `1MiB` by default; increase `max_bytes` with a byte size such as `4MiB` when
+the larger input is intentional.
+
 ## `extract`
 
 Extract named, typed fields from exactly one line of text with a friendly format:
