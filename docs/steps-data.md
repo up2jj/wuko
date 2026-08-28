@@ -352,6 +352,25 @@ List or delete entries:
     key: legacy-artifact
 ```
 
+`set` takes exactly one of `value` or `expr`. Templates render to text, so
+`value: "{{ .vars.count }}"` stores the string `"3"`; use `expr` to keep the JSON type of a computed
+value, including across runs:
+
+```yaml
+- id: load_runs
+  type: key_value
+  with: {operation: get, scope: local, store: counter, key: runs}
+
+- id: count_run
+  type: key_value
+  with:
+    operation: set
+    scope: local
+    store: counter
+    key: runs
+    expr: "steps.load_runs.found ? steps.load_runs.value + 1 : 1"
+```
+
 `get` returns `value` and `found`; `set` returns `value`; `delete` returns the previous `value` and
 `deleted`; `list` returns key-sorted `entries`. Stores are atomic plain JSON, not encrypted secret
 vaults. `get` and `list` never create anything: reading a store that was never written returns an

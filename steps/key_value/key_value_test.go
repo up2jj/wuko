@@ -29,7 +29,15 @@ func TestConfigValidation(t *testing.T) {
 		{"bad static store with templated scope", map[string]any{"operation": "list", "scope": "{{ .vars.scope }}", "store": "../prefs"}, "invalid store name"},
 		{"get missing key", config("get", "", nil, false), "key is required"},
 		{"get with value", config("get", "key", true, true), "value is not allowed"},
-		{"set missing value", config("set", "key", nil, false), "value is required"},
+		{"set missing value and expr", config("set", "key", nil, false), "exactly one of value or expr is required"},
+		{"set with value and expr", withExpr(config("set", "key", "dark", true), "1 + 1"), "exactly one of value or expr is required"},
+		{"valid set expr", withExpr(config("set", "key", nil, false), "steps.load.value + 1"), ""},
+		{"set empty expr", withExpr(config("set", "key", nil, false), "  "), "expr must not be empty"},
+		{"set uncompilable expr", withExpr(config("set", "key", nil, false), "vars.count +"), "compiling expr"},
+		{"set templated expr", withExpr(config("set", "key", nil, false), "{{ .vars.expression }}"), ""},
+		{"get with expr", withExpr(config("get", "key", nil, false), "1"), "expr is not allowed for get"},
+		{"delete with expr", withExpr(config("delete", "key", nil, false), "1"), "expr is not allowed for delete"},
+		{"list with expr", withExpr(config("list", "", nil, false), "1"), "expr is not allowed for list"},
 		{"set invalid value", config("set", "key", math.NaN(), true), "value is not JSON-compatible"},
 		{"delete with value", config("delete", "key", true, true), "value is not allowed"},
 		{"list with key", config("list", "key", nil, false), "key is not allowed"},
@@ -157,6 +165,75 @@ func TestLocalUnavailable(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "local key-value storage is unavailable") {
 		t.Fatalf("error = %v", err)
 	}
+}
+
+func TestSetExprKeepsResultTypes(t *testing.T) {
+	request := step.Request{
+		LocalValueDir: t.TempDir(),
+		Vars:          map[string]any{"count": 2},
+		Steps:         map[string]any{"previous": map[string]any{"items": []any{"a", "b"}}},
+	}
+	run := func(raw map[string]any) step.Result {
+		t.Helper()
+		runner, err := New(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, err := runner.Run(t.Context(), request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+
+	set := run(withExpr(config("set", "report", nil, false), `{"total": vars.count + 1, "items": steps.previous.items}`))
+	want := map[string]any{"total": int64(3), "items": []any{"a", "b"}}
+	if !reflect.DeepEqual(set.Outputs["value"], want) {
+		t.Fatalf("set value = %#v", set.Outputs["value"])
+	}
+	got := run(config("get", "report", nil, false)).Outputs["value"]
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("get value = %#v", got)
+	}
+}
+
+func TestSetExprRejectsUnusableResults(t *testing.T) {
+	tests := []struct {
+		name       string
+		expression string
+		want       string
+	}{
+		{"non-JSON result", "1 / 0.0", "expr result is not JSON-compatible"},
+		{"failing expression", "vars.missing.field", "evaluating expr"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runner, err := New(withExpr(config("set", "key", nil, false), tt.expression))
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = runner.Run(t.Context(), step.Request{LocalValueDir: t.TempDir()})
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestSetRejectsAnUnrenderedExpr(t *testing.T) {
+	runner, err := New(withExpr(config("set", "key", nil, false), "{{ .vars.expression }}"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runner.Run(t.Context(), step.Request{LocalValueDir: t.TempDir()})
+	if err == nil || !strings.Contains(err.Error(), "expr contains an unresolved template") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func withExpr(raw map[string]any, expression string) map[string]any {
+	raw["expr"] = expression
+	return raw
 }
 
 func config(operation, key string, value any, hasValue bool) map[string]any {

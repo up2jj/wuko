@@ -8,6 +8,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/expr-lang/expr"
+	"github.com/expr-lang/expr/vm"
+	wukoexpr "github.com/up2jj/wuko/expression"
 	storepkg "github.com/up2jj/wuko/keyvalue"
 	"github.com/up2jj/wuko/step"
 )
@@ -26,12 +29,39 @@ type Config struct {
 	Store     string `yaml:"store"`
 	Key       string `yaml:"key,omitempty"`
 	Value     any    `yaml:"value,omitempty"`
+	Expr      string `yaml:"expr,omitempty"`
+}
+
+type expressionEnvironment struct {
+	Inputs       map[string]any            `expr:"inputs"`
+	Vars         map[string]any            `expr:"vars"`
+	Env          map[string]string         `expr:"env"`
+	Steps        map[string]any            `expr:"steps"`
+	Dependencies map[string]map[string]any `expr:"dependencies"`
+	Batch        map[string]any            `expr:"batch"`
+	Foreach      map[string]any            `expr:"foreach"`
+	Matrix       map[string]any            `expr:"matrix"`
+	Finally      map[string]any            `expr:"finally"`
+	Error        map[string]any            `expr:"error"`
+	Workflow     workflowValue             `expr:"workflow"`
+	Run          runValue                  `expr:"run"`
+}
+
+type workflowValue struct {
+	Name string `expr:"name"`
+	Dir  string `expr:"dir"`
+}
+
+type runValue struct {
+	Dir string `expr:"dir"`
 }
 
 // Runner executes a key-value operation.
 type Runner struct {
 	config   Config
 	hasValue bool
+	hasExpr  bool
+	program  *vm.Program
 }
 
 // Register adds the key_value step to a registry.
@@ -44,11 +74,29 @@ func New(raw map[string]any) (step.Runner, error) {
 		return nil, err
 	}
 	_, hasValue := raw["value"]
-	runner := &Runner{config: config, hasValue: hasValue}
+	_, hasExpr := raw["expr"]
+	runner := &Runner{config: config, hasValue: hasValue, hasExpr: hasExpr}
 	if err := runner.validateConfig(); err != nil {
 		return nil, err
 	}
+	if err := runner.compileValueExpression(); err != nil {
+		return nil, err
+	}
 	return runner, nil
+}
+
+// compileValueExpression prepares expr. A configuration that still holds templates is
+// compiled by the build that follows rendering, which is the one that runs.
+func (r *Runner) compileValueExpression() error {
+	if !r.hasExpr || templated(r.config.Expr) {
+		return nil
+	}
+	program, err := wukoexpr.Compile(r.config.Expr, expr.Env(expressionEnvironment{}))
+	if err != nil {
+		return fmt.Errorf("compiling expr: %w", err)
+	}
+	r.program = program
+	return nil
 }
 
 // Validate checks the selected storage root without touching the filesystem.
@@ -78,7 +126,11 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 		value, found, err := store.Get(ctx, r.config.Key)
 		return step.Result{Outputs: map[string]any{"value": runtimeValue(value), "found": found}}, err
 	case operationSet:
-		value, err := store.Set(ctx, r.config.Key, r.config.Value)
+		value, err := r.storedValue(request)
+		if err != nil {
+			return step.Result{}, err
+		}
+		value, err = store.Set(ctx, r.config.Key, value)
 		return step.Result{Outputs: map[string]any{"value": runtimeValue(value)}}, err
 	case operationDelete:
 		value, deleted, err := store.Delete(ctx, r.config.Key)
@@ -135,15 +187,21 @@ func (r *Runner) validateOperation() error {
 		if r.config.Key == "" {
 			return fmt.Errorf("key is required for %s", r.config.Operation)
 		}
-		if r.hasValue {
-			return fmt.Errorf("value is not allowed for %s", r.config.Operation)
+		if err := r.rejectValue(r.config.Operation); err != nil {
+			return err
 		}
 	case operationSet:
 		if r.config.Key == "" {
 			return fmt.Errorf("key is required for set")
 		}
-		if !r.hasValue {
-			return fmt.Errorf("value is required for set")
+		if r.hasValue == r.hasExpr {
+			return fmt.Errorf("exactly one of value or expr is required for set")
+		}
+		if r.hasExpr {
+			if strings.TrimSpace(r.config.Expr) == "" {
+				return fmt.Errorf("expr must not be empty")
+			}
+			return nil
 		}
 		normalized, err := storepkg.Normalize(r.config.Value)
 		if err != nil {
@@ -154,8 +212,8 @@ func (r *Runner) validateOperation() error {
 		if r.config.Key != "" {
 			return fmt.Errorf("key is not allowed for list")
 		}
-		if r.hasValue {
-			return fmt.Errorf("value is not allowed for list")
+		if err := r.rejectValue("list"); err != nil {
+			return err
 		}
 	case "":
 		return fmt.Errorf("operation is required")
@@ -163,6 +221,55 @@ func (r *Runner) validateOperation() error {
 		return fmt.Errorf("operation must be get, set, delete, or list")
 	}
 	return nil
+}
+
+func (r *Runner) rejectValue(operation string) error {
+	if r.hasValue {
+		return fmt.Errorf("value is not allowed for %s", operation)
+	}
+	if r.hasExpr {
+		return fmt.Errorf("expr is not allowed for %s", operation)
+	}
+	return nil
+}
+
+// storedValue resolves what set writes. expr keeps the JSON type of its result, which a
+// templated value cannot: rendering turns every value into a string.
+func (r *Runner) storedValue(request step.Request) (any, error) {
+	if r.hasValue {
+		return r.config.Value, nil
+	}
+	if r.program == nil {
+		return nil, fmt.Errorf("expr contains an unresolved template")
+	}
+	value, err := expr.Run(r.program, environment(request))
+	if err != nil {
+		return nil, fmt.Errorf("evaluating expr: %w", err)
+	}
+	normalized, err := storepkg.Normalize(value)
+	if err != nil {
+		return nil, fmt.Errorf("expr result is not JSON-compatible: %w", err)
+	}
+	return normalized, nil
+}
+
+func environment(request step.Request) expressionEnvironment {
+	return expressionEnvironment{
+		Inputs: request.Inputs, Vars: request.Vars, Env: request.Env, Steps: request.Steps,
+		Dependencies: request.Dependencies, Batch: binding(request.Bindings, "batch"),
+		Foreach: binding(request.Bindings, "foreach"), Matrix: binding(request.Bindings, "matrix"),
+		Finally: binding(request.Bindings, "finally"), Error: binding(request.Bindings, "error"),
+		Workflow: workflowValue{Name: request.WorkflowName, Dir: request.WorkflowDir},
+		Run:      runValue{Dir: request.RunDir},
+	}
+}
+
+func binding(bindings map[string]any, name string) map[string]any {
+	value, _ := bindings[name].(map[string]any)
+	if value == nil {
+		return map[string]any{}
+	}
+	return value
 }
 
 func templated(value string) bool { return strings.Contains(value, "{{") }

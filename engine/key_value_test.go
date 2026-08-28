@@ -95,3 +95,33 @@ func TestCompositeActionInheritsCallerValueRoots(t *testing.T) {
 		t.Fatalf("caller store outputs = %#v", result.Outputs)
 	}
 }
+
+func TestKeyValueExprPersistsTypesAcrossRuns(t *testing.T) {
+	registry := newTestRegistry(t, nil)
+	if err := keyvaluestep.Register(registry); err != nil {
+		t.Fatal(err)
+	}
+	localRoot := t.TempDir()
+	counter := func() *workflow.Definition {
+		return testDefinition(t, "counter",
+			workflow.Step{ID: "load", Type: "key_value", With: map[string]any{
+				"operation": "get", "scope": "local", "store": "counter", "key": "runs",
+			}},
+			workflow.Step{ID: "save", Type: "key_value", With: map[string]any{
+				"operation": "set", "scope": "local", "store": "counter", "key": "runs",
+				"expr": "steps.load.found ? steps.load.value + 1 : 1",
+			}},
+		)
+	}
+	for run := 1; run <= 3; run++ {
+		state, err := New(registry).Run(t.Context(), counter(), Options{
+			LocalValueDir: localRoot, GlobalValueDir: t.TempDir(), Stdout: io.Discard, Stderr: io.Discard,
+		})
+		if err != nil {
+			t.Fatalf("run %d: %v", run, err)
+		}
+		if got := state.Steps["save"].(map[string]any)["value"]; got != int64(run) {
+			t.Fatalf("run %d stored %#v, want %d", run, got, run)
+		}
+	}
+}
