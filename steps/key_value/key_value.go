@@ -20,6 +20,7 @@ const (
 	operationSet    = "set"
 	operationDelete = "delete"
 	operationList   = "list"
+	operationUpdate = "update"
 )
 
 // Config describes one persistent key-value operation.
@@ -45,6 +46,10 @@ type expressionEnvironment struct {
 	Error        map[string]any            `expr:"error"`
 	Workflow     workflowValue             `expr:"workflow"`
 	Run          runValue                  `expr:"run"`
+	// Current and Found describe the stored value an update replaces. They are nil and
+	// false for every other operation.
+	Current any  `expr:"current"`
+	Found   bool `expr:"found"`
 }
 
 type workflowValue struct {
@@ -132,6 +137,16 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 		}
 		value, err = store.Set(ctx, r.config.Key, value)
 		return step.Result{Outputs: map[string]any{"value": runtimeValue(value)}}, err
+	case operationUpdate:
+		existed := false
+		value, changed, err := store.Update(ctx, r.config.Key, func(current any, found bool) (any, error) {
+			existed = found
+			return r.updatedValue(request, current, found)
+		})
+		if err != nil {
+			return step.Result{}, err
+		}
+		return step.Result{Outputs: map[string]any{"value": runtimeValue(value), "found": existed, "changed": changed}}, nil
 	case operationDelete:
 		value, deleted, err := store.Delete(ctx, r.config.Key)
 		return step.Result{Outputs: map[string]any{"value": runtimeValue(value), "deleted": deleted}}, err
@@ -208,6 +223,19 @@ func (r *Runner) validateOperation() error {
 			return fmt.Errorf("value is not JSON-compatible: %w", err)
 		}
 		r.config.Value = normalized
+	case operationUpdate:
+		if r.config.Key == "" {
+			return fmt.Errorf("key is required for update")
+		}
+		if r.hasValue {
+			return fmt.Errorf("value is not allowed for update; use expr or set")
+		}
+		if !r.hasExpr {
+			return fmt.Errorf("expr is required for update")
+		}
+		if strings.TrimSpace(r.config.Expr) == "" {
+			return fmt.Errorf("expr must not be empty")
+		}
 	case operationList:
 		if r.config.Key != "" {
 			return fmt.Errorf("key is not allowed for list")
@@ -218,7 +246,7 @@ func (r *Runner) validateOperation() error {
 	case "":
 		return fmt.Errorf("operation is required")
 	default:
-		return fmt.Errorf("operation must be get, set, delete, or list")
+		return fmt.Errorf("operation must be get, set, update, delete, or list")
 	}
 	return nil
 }
@@ -247,6 +275,26 @@ func (r *Runner) storedValue(request step.Request) (any, error) {
 		return nil, fmt.Errorf("evaluating expr: %w", err)
 	}
 	normalized, err := storepkg.Normalize(value)
+	if err != nil {
+		return nil, fmt.Errorf("expr result is not JSON-compatible: %w", err)
+	}
+	return normalized, nil
+}
+
+// updatedValue evaluates expr against the stored value an update replaces. It runs while
+// the store lock is held, so the value it reads is the value it writes back.
+func (r *Runner) updatedValue(request step.Request, current any, found bool) (any, error) {
+	if r.program == nil {
+		return nil, fmt.Errorf("expr contains an unresolved template")
+	}
+	value := environment(request)
+	value.Current = runtimeValue(current)
+	value.Found = found
+	updated, err := expr.Run(r.program, value)
+	if err != nil {
+		return nil, fmt.Errorf("evaluating expr: %w", err)
+	}
+	normalized, err := storepkg.Normalize(updated)
 	if err != nil {
 		return nil, fmt.Errorf("expr result is not JSON-compatible: %w", err)
 	}

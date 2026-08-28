@@ -142,6 +142,45 @@ func (s *Store) SetIfDifferent(ctx context.Context, key string, value any) (bool
 	return changed, err
 }
 
+// Update atomically replaces the value stored under key with the result of mutate, which
+// receives the current value and whether key existed. The store lock is held across the
+// whole read-modify-write, so concurrent updates compose instead of overwriting one
+// another. It reports whether the stored value changed; an unchanged value is not
+// rewritten.
+func (s *Store) Update(ctx context.Context, key string, mutate func(current any, found bool) (any, error)) (any, bool, error) {
+	if err := validateKey(key); err != nil {
+		return nil, false, err
+	}
+	var stored any
+	changed := false
+	err := s.withLock(ctx, func() error {
+		values, err := s.read()
+		if err != nil {
+			return err
+		}
+		current, found := values[key]
+		next, err := mutate(clone(current), found)
+		if err != nil {
+			return err
+		}
+		normalized, err := Normalize(next)
+		if err != nil {
+			return fmt.Errorf("value is not JSON-compatible: %w", err)
+		}
+		stored = normalized
+		if found && reflect.DeepEqual(current, normalized) {
+			return nil
+		}
+		changed = true
+		values[key] = normalized
+		return s.write(values)
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	return clone(stored), changed, nil
+}
+
 // Delete removes key and returns its previous value and whether it existed.
 func (s *Store) Delete(ctx context.Context, key string) (any, bool, error) {
 	if err := validateKey(key); err != nil {

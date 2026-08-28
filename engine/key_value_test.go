@@ -125,3 +125,31 @@ func TestKeyValueExprPersistsTypesAcrossRuns(t *testing.T) {
 		}
 	}
 }
+
+func TestKeyValueUpdateSurvivesConcurrentIncrements(t *testing.T) {
+	registry := newTestRegistry(t, nil)
+	if err := keyvaluestep.Register(registry); err != nil {
+		t.Fatal(err)
+	}
+	definition := testDefinition(t, "concurrent-counter",
+		workflow.Step{ID: "bump", Foreach: &workflow.ForeachGroup{
+			Items: "[1, 2, 3, 4, 5, 6, 7, 8]", MaxConcurrency: 8,
+			Steps: []workflow.Step{{ID: "increment", Type: "key_value", With: map[string]any{
+				"operation": "update", "scope": "local", "store": "counter", "key": "runs",
+				"expr": "found ? current + 1 : 1",
+			}}},
+		}},
+		workflow.Step{ID: "total", Type: "key_value", With: map[string]any{
+			"operation": "get", "scope": "local", "store": "counter", "key": "runs",
+		}},
+	)
+	state, err := New(registry).Run(t.Context(), definition, Options{
+		LocalValueDir: t.TempDir(), GlobalValueDir: t.TempDir(), Stdout: io.Discard, Stderr: io.Discard,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := state.Steps["total"].(map[string]any)["value"]; got != int64(8) {
+		t.Fatalf("counter = %#v, want 8", got)
+	}
+}

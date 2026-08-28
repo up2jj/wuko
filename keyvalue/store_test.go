@@ -338,3 +338,68 @@ func TestReadsDoNotCreateALockFileBesideAnExistingStore(t *testing.T) {
 		t.Fatalf("reading created a lock file: %v", err)
 	}
 }
+
+func TestConcurrentUpdatesOfOneKeyAccumulate(t *testing.T) {
+	store, err := Open(t.TempDir(), "counter")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const writers = 16
+	var group sync.WaitGroup
+	errs := make(chan error, writers)
+	for range writers {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			_, _, err := store.Update(t.Context(), "runs", func(current any, found bool) (any, error) {
+				if !found {
+					return 1, nil
+				}
+				count, err := current.(json.Number).Int64()
+				if err != nil {
+					return nil, err
+				}
+				return count + 1, nil
+			})
+			errs <- err
+		}()
+	}
+	group.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	value, found, err := store.Get(t.Context(), "runs")
+	if err != nil || !found {
+		t.Fatalf("get = %#v, %v, %v", value, found, err)
+	}
+	if value.(json.Number).String() != fmt.Sprint(writers) {
+		t.Fatalf("counter = %v, want %d", value, writers)
+	}
+}
+
+func TestUpdateReportsWhetherTheValueChanged(t *testing.T) {
+	store, err := Open(t.TempDir(), "settings")
+	if err != nil {
+		t.Fatal(err)
+	}
+	keep := func(current any, _ bool) (any, error) { return "dark", nil }
+	value, changed, err := store.Update(t.Context(), "theme", keep)
+	if err != nil || !changed || value != "dark" {
+		t.Fatalf("first update = %#v, %v, %v", value, changed, err)
+	}
+	value, changed, err = store.Update(t.Context(), "theme", keep)
+	if err != nil || changed || value != "dark" {
+		t.Fatalf("repeated update = %#v, %v, %v", value, changed, err)
+	}
+	if _, _, err := store.Update(t.Context(), "theme", func(any, bool) (any, error) {
+		return nil, fmt.Errorf("boom")
+	}); err == nil || !strings.Contains(err.Error(), "boom") {
+		t.Fatalf("failing update error = %v", err)
+	}
+	if value, _, _ := store.Get(t.Context(), "theme"); value != "dark" {
+		t.Fatalf("failed update wrote %#v", value)
+	}
+}

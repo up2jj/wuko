@@ -312,8 +312,9 @@ Constrain exposes `matched`; increment exposes `previous` and the new `version`.
 
 ## `key_value`
 
-Persist JSON-compatible values between runs. `local` stores live beside the workflow under
-`.wuko/values/`; `global` stores live in Wuko's user configuration directory.
+Persist JSON-compatible values between runs with `get`, `set`, `update`, `delete`, and `list`.
+`local` stores live beside the workflow under `.wuko/values/`; `global` stores live in Wuko's user
+configuration directory.
 
 Set and get a preference:
 
@@ -371,7 +372,23 @@ value, including across runs:
     expr: "steps.load_runs.found ? steps.load_runs.value + 1 : 1"
 ```
 
-`get` returns `value` and `found`; `set` returns `value`; `delete` returns the previous `value` and
+`update` reads and writes under one lock, so concurrent workflow steps and separate `wuko` runs
+compose instead of overwriting one another. Its `expr` sees the stored value as `current` and
+whether the key existed as `found`, and a `get` followed by a `set` cannot make the same guarantee:
+
+```yaml
+- id: count_run
+  type: key_value
+  with:
+    operation: update
+    scope: local
+    store: counter
+    key: runs
+    expr: "found ? current + 1 : 1"
+```
+
+`get` returns `value` and `found`; `set` returns `value`; `update` returns the new `value`, the
+`found` state it replaced, and whether it `changed`; `delete` returns the previous `value` and
 `deleted`; `list` returns key-sorted `entries`. Stores are atomic plain JSON, not encrypted secret
 vaults. `get` and `list` never create anything: reading a store that was never written returns an
 empty result and leaves the values directory absent.

@@ -36,6 +36,10 @@ func TestConfigValidation(t *testing.T) {
 		{"set uncompilable expr", withExpr(config("set", "key", nil, false), "vars.count +"), "compiling expr"},
 		{"set templated expr", withExpr(config("set", "key", nil, false), "{{ .vars.expression }}"), ""},
 		{"get with expr", withExpr(config("get", "key", nil, false), "1"), "expr is not allowed for get"},
+		{"valid update", withExpr(config("update", "key", nil, false), "found ? current + 1 : 1"), ""},
+		{"update missing expr", config("update", "key", nil, false), "expr is required for update"},
+		{"update missing key", withExpr(config("update", "", nil, false), "1"), "key is required for update"},
+		{"update with value", withExpr(config("update", "key", 1, true), "1"), "value is not allowed for update"},
 		{"delete with expr", withExpr(config("delete", "key", nil, false), "1"), "expr is not allowed for delete"},
 		{"list with expr", withExpr(config("list", "", nil, false), "1"), "expr is not allowed for list"},
 		{"set invalid value", config("set", "key", math.NaN(), true), "value is not JSON-compatible"},
@@ -194,6 +198,36 @@ func TestSetExprKeepsResultTypes(t *testing.T) {
 	got := run(config("get", "report", nil, false)).Outputs["value"]
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("get value = %#v", got)
+	}
+}
+
+func TestUpdateReadsAndWritesUnderOneLock(t *testing.T) {
+	request := step.Request{LocalValueDir: t.TempDir()}
+	run := func(raw map[string]any) map[string]any {
+		t.Helper()
+		runner, err := New(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, err := runner.Run(t.Context(), request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result.Outputs
+	}
+
+	increment := withExpr(config("update", "runs", nil, false), "found ? current + 1 : 1")
+	first := run(increment)
+	if !reflect.DeepEqual(first, map[string]any{"value": int64(1), "found": false, "changed": true}) {
+		t.Fatalf("first update = %#v", first)
+	}
+	second := run(withExpr(config("update", "runs", nil, false), "found ? current + 1 : 1"))
+	if !reflect.DeepEqual(second, map[string]any{"value": int64(2), "found": true, "changed": true}) {
+		t.Fatalf("second update = %#v", second)
+	}
+	unchanged := run(withExpr(config("update", "runs", nil, false), "current"))
+	if !reflect.DeepEqual(unchanged, map[string]any{"value": int64(2), "found": true, "changed": false}) {
+		t.Fatalf("unchanged update = %#v", unchanged)
 	}
 }
 
