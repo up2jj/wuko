@@ -133,12 +133,32 @@ func (e *Engine) Validate(ctx context.Context, definition *workflow.Definition, 
 		}}
 		err = e.validateSteps(ctx, definition, definition.Finally, options, state)
 	}
+	if err == nil {
+		err = e.validateLifecycleSteps(ctx, definition, "install", definition.Install, options)
+	}
+	if err == nil {
+		err = e.validateLifecycleSteps(ctx, definition, "uninstall", definition.Uninstall, options)
+	}
 	status := diagnostic.StatusSucceeded
 	if err != nil {
 		status = diagnostic.StatusFailed
 	}
 	trace(options, diagnostic.Event{Phase: diagnostic.PhaseValidation, Status: status, WorkflowName: definition.Name, Location: definition.Location, Duration: time.Since(started)})
 	return err
+}
+
+func (e *Engine) validateLifecycleSteps(ctx context.Context, definition *workflow.Definition, name string, steps []workflow.Step, options Options) error {
+	if len(steps) == 0 {
+		return nil
+	}
+	state, err := initialState(definition, options)
+	if err != nil {
+		return fmt.Errorf("%s: %w", name, err)
+	}
+	if err := e.validateSteps(ctx, definition, steps, options, state); err != nil {
+		return fmt.Errorf("%s: %w", name, err)
+	}
+	return nil
 }
 
 func (e *Engine) validateSteps(ctx context.Context, definition *workflow.Definition, steps []workflow.Step, options Options, state *State) error {

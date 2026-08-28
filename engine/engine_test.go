@@ -3,6 +3,7 @@ package engine
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -92,6 +93,58 @@ func TestValidateRejectsInvalidOrNonBooleanCondition(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestValidateRejectsInvalidLifecycleStepConfig(t *testing.T) {
+	registry := newTestRegistry(t, map[string]step.Builder{"tui_review": lifecycleReviewBuilder})
+	tests := []struct {
+		name string
+		set  func(*workflow.Definition, []workflow.Step)
+	}{
+		{name: "install", set: func(definition *workflow.Definition, steps []workflow.Step) { definition.Install = steps }},
+		{name: "uninstall", set: func(definition *workflow.Definition, steps []workflow.Step) { definition.Uninstall = steps }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			definition := testDefinition(t, "lifecycle", workflow.Step{
+				ID: "run", Type: "tui_review",
+				With: map[string]any{"variable": "approved", "message": "Review", "content": "change"},
+			})
+			test.set(definition, []workflow.Step{{
+				ID: "review", Type: "tui_review",
+				With: map[string]any{"variable": "approved", "message": "Review", "content": "change", "format": "bogus_format"},
+			}})
+
+			err := New(registry).Validate(t.Context(), definition, Options{})
+			for _, want := range []string{test.name + ":", "format must be plain or diff"} {
+				if err == nil || !strings.Contains(err.Error(), want) {
+					t.Fatalf("Validate() error = %v, want %q", err, want)
+				}
+			}
+		})
+	}
+}
+
+func TestValidateAcceptsIndependentLifecycleStepIDs(t *testing.T) {
+	registry := newTestRegistry(t, map[string]step.Builder{"tui_review": lifecycleReviewBuilder})
+	reviewStep := workflow.Step{
+		ID: "review", Type: "tui_review",
+		With: map[string]any{"variable": "approved", "message": "Review", "content": "change", "format": "diff"},
+	}
+	definition := testDefinition(t, "lifecycle", reviewStep)
+	definition.Install = []workflow.Step{reviewStep}
+	definition.Uninstall = []workflow.Step{reviewStep}
+
+	if err := New(registry).Validate(t.Context(), definition, Options{}); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+}
+
+func lifecycleReviewBuilder(raw map[string]any) (step.Runner, error) {
+	if format := raw["format"]; format != nil && format != "plain" && format != "diff" {
+		return nil, fmt.Errorf("format must be plain or diff")
+	}
+	return countingRunner{}, nil
 }
 
 func TestValidateUsesWorkflowStructuralValidation(t *testing.T) {
