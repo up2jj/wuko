@@ -5,6 +5,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -147,6 +149,25 @@ func TestAcquireExistingRefusesToCreateTheLockFile(t *testing.T) {
 func TestAcquireExistingLocksAFileThatAlreadyExists(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "state.lock")
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	handle, err := AcquireExisting(t.Context(), path)
+	if err != nil {
+		t.Fatalf("AcquireExisting() error = %v", err)
+	}
+	if err := handle.Release(); err != nil {
+		t.Fatalf("Release() error = %v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("Release() left the lock file behind: %v", err)
+	}
+}
+
+func TestAcquireExistingWaitsOutAHolderAndThenSeesTheDeletedFile(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "state.lock")
 
 	created, err := Acquire(t.Context(), path)
 	if err != nil {
@@ -170,12 +191,58 @@ func TestAcquireExistingLocksAFileThatAlreadyExists(t *testing.T) {
 	if err := created.Release(); err != nil {
 		t.Fatalf("Release() error = %v", err)
 	}
+	// The holder deleted the lock file, so the waiter must report the absence rather than
+	// keep a lock on a file the path no longer names.
 	select {
 	case err := <-contended:
-		if err != nil {
-			t.Fatalf("AcquireExisting() after release: %v", err)
+		if !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("AcquireExisting() after release = %v, want a missing-file error", err)
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("AcquireExisting() never completed after the lock was released")
+	}
+}
+
+// Deleting the lock file on release is only safe if no two holders can ever overlap: an
+// acquirer that wakes on a file the path no longer names has to start over rather than
+// treat it as the lock.
+func TestDeletingOnReleaseKeepsHoldersFromOverlapping(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "state.lock")
+
+	const holders = 12
+	var held atomic.Bool
+	var overlaps atomic.Int64
+	var group sync.WaitGroup
+	errs := make(chan error, holders)
+	for range holders {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			handle, err := Acquire(t.Context(), path)
+			if err != nil {
+				errs <- err
+				return
+			}
+			if held.Swap(true) {
+				overlaps.Add(1)
+			}
+			time.Sleep(time.Millisecond)
+			held.Store(false)
+			errs <- handle.Release()
+		}()
+	}
+	group.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := overlaps.Load(); got != 0 {
+		t.Fatalf("%d holders overlapped", got)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("the last release left the lock file behind: %v", err)
 	}
 }

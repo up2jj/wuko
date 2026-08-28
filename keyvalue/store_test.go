@@ -60,16 +60,17 @@ func TestStoreOperationsAndPersistence(t *testing.T) {
 	if string(data) != "{\n  \"nothing\": null\n}\n" {
 		t.Fatalf("file = %q", data)
 	}
-	for _, name := range []string{"preferences.json", "preferences.lock"} {
-		info, err := os.Stat(filepath.Join(dir, name))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if info.Mode().Perm() != 0o600 {
-			t.Fatalf("%s mode = %o", name, info.Mode().Perm())
-		}
+	info, err := os.Stat(filepath.Join(dir, "preferences.json"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	info, err := os.Stat(dir)
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("preferences.json mode = %o", info.Mode().Perm())
+	}
+	if _, err := os.Stat(filepath.Join(dir, "preferences.lock")); !os.IsNotExist(err) {
+		t.Fatalf("operations left a lock file behind: %v", err)
+	}
+	info, err = os.Stat(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
