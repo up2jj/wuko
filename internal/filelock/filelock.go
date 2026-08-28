@@ -28,7 +28,18 @@ type Handle struct {
 // process exclude each other exactly as two processes do, because each Acquire opens
 // its own descriptor.
 func Acquire(ctx context.Context, path string) (*Handle, error) {
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	return acquire(ctx, path, os.O_CREATE|os.O_RDWR)
+}
+
+// AcquireExisting locks path only when it already exists and otherwise returns an error
+// matching fs.ErrNotExist. Read-only callers use it so observing state that was never
+// written creates neither the lock file nor the directory holding it.
+func AcquireExisting(ctx context.Context, path string) (*Handle, error) {
+	return acquire(ctx, path, os.O_RDWR)
+}
+
+func acquire(ctx context.Context, path string, flags int) (*Handle, error) {
+	file, err := os.OpenFile(path, flags, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("opening lock file %s: %w", path, err)
 	}

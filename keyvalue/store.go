@@ -79,7 +79,7 @@ func (s *Store) Get(ctx context.Context, key string) (any, bool, error) {
 	}
 	var value any
 	var found bool
-	err := s.withLock(ctx, func() error {
+	err := s.withReadLock(ctx, func() error {
 		values, err := s.read()
 		if err != nil {
 			return err
@@ -170,7 +170,7 @@ func (s *Store) Delete(ctx context.Context, key string) (any, bool, error) {
 // List returns all entries ordered by key.
 func (s *Store) List(ctx context.Context) ([]Entry, error) {
 	var entries []Entry
-	err := s.withLock(ctx, func() error {
+	err := s.withReadLock(ctx, func() error {
 		values, err := s.read()
 		if err != nil {
 			return err
@@ -189,7 +189,7 @@ func (s *Store) List(ctx context.Context) ([]Entry, error) {
 	return entries, err
 }
 
-func (s *Store) withLock(ctx context.Context, operation func() error) (resultErr error) {
+func (s *Store) withLock(ctx context.Context, operation func() error) error {
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
 		return fmt.Errorf("creating store directory: %w", err)
 	}
@@ -200,6 +200,28 @@ func (s *Store) withLock(ctx context.Context, operation func() error) (resultErr
 	if err != nil {
 		return fmt.Errorf("store %s: %w", s.path, err)
 	}
+	return s.holding(lock, operation)
+}
+
+// withReadLock runs a read-only operation without creating anything. A store that was
+// never written has no directory to make and no lock file to leave behind, so a workflow
+// that only reads leaves the values root untouched. Reading such a store without the lock
+// stays correct because writers publish with an atomic rename: a reader sees the complete
+// previous file or the complete new one, never a partial write.
+func (s *Store) withReadLock(ctx context.Context, operation func() error) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("store %s: %w", s.path, err)
+	}
+	lock, err := filelock.AcquireExisting(ctx, s.lockPath)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("store %s: %w", s.path, err)
+	}
+	return s.holding(lock, operation)
+}
+
+// holding runs operation and releases lock afterwards. A nil lock means the store has no
+// lock file to hold, which only the read path allows.
+func (s *Store) holding(lock *filelock.Handle, operation func() error) (resultErr error) {
 	defer func() {
 		if err := lock.Release(); resultErr == nil && err != nil {
 			resultErr = fmt.Errorf("store %s: %w", s.path, err)

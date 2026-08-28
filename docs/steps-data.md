@@ -354,7 +354,8 @@ List or delete entries:
 
 `get` returns `value` and `found`; `set` returns `value`; `delete` returns the previous `value` and
 `deleted`; `list` returns key-sorted `entries`. Stores are atomic plain JSON, not encrypted secret
-vaults.
+vaults. `get` and `list` never create anything: reading a store that was never written returns an
+empty result and leaves the values directory absent.
 
 ## `changed`
 

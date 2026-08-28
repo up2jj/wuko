@@ -131,6 +131,23 @@ func TestValidateDoesNotTouchFilesystem(t *testing.T) {
 	}
 }
 
+func TestReadOperationsDoNotTouchFilesystem(t *testing.T) {
+	root := t.TempDir() + "/not-created"
+	request := step.Request{LocalValueDir: root}
+	for _, raw := range []map[string]any{config("get", "missing", nil, false), config("list", "", nil, false)} {
+		runner, err := New(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := runner.Run(t.Context(), request); err != nil {
+			t.Fatalf("%s: %v", raw["operation"], err)
+		}
+		if _, err := os.Stat(root); !os.IsNotExist(err) {
+			t.Fatalf("%s created storage root: %v", raw["operation"], err)
+		}
+	}
+}
+
 func TestLocalUnavailable(t *testing.T) {
 	runner, err := New(config("list", "", nil, false))
 	if err != nil {

@@ -302,3 +302,39 @@ func TestCanceledContextDoesNotReadStore(t *testing.T) {
 		t.Fatalf("error = %v", err)
 	}
 }
+
+func TestReadsLeaveANeverWrittenStoreUntouched(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "values")
+	store, err := Open(root, "preferences")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value, found, err := store.Get(t.Context(), "theme"); err != nil || found || value != nil {
+		t.Fatalf("get = %#v, %v, %v", value, found, err)
+	}
+	entries, err := store.List(t.Context())
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("list = %#v, %v", entries, err)
+	}
+	if _, err := os.Stat(root); !os.IsNotExist(err) {
+		t.Fatalf("reading created the values root: %v", err)
+	}
+}
+
+func TestReadsDoNotCreateALockFileBesideAnExistingStore(t *testing.T) {
+	root := t.TempDir()
+	store, err := Open(root, "preferences")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "preferences.json"), []byte(`{"theme":"dark"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	value, found, err := store.Get(t.Context(), "theme")
+	if err != nil || !found || value != "dark" {
+		t.Fatalf("get = %#v, %v, %v", value, found, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "preferences.lock")); !os.IsNotExist(err) {
+		t.Fatalf("reading created a lock file: %v", err)
+	}
+}

@@ -130,3 +130,52 @@ func TestAcquireReportsAnUnopenableLockPath(t *testing.T) {
 		t.Fatal("Acquire() error = nil, want a failure opening the lock file")
 	}
 }
+
+func TestAcquireExistingRefusesToCreateTheLockFile(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	path := filepath.Join(root, "missing", "state.lock")
+
+	if _, err := AcquireExisting(t.Context(), path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("AcquireExisting() error = %v, want a missing-file error", err)
+	}
+	if _, err := os.Stat(filepath.Dir(path)); !os.IsNotExist(err) {
+		t.Errorf("AcquireExisting() created %s: %v", filepath.Dir(path), err)
+	}
+}
+
+func TestAcquireExistingLocksAFileThatAlreadyExists(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "state.lock")
+
+	created, err := Acquire(t.Context(), path)
+	if err != nil {
+		t.Fatalf("Acquire() error = %v", err)
+	}
+
+	contended := make(chan error, 1)
+	go func() {
+		handle, err := AcquireExisting(t.Context(), path)
+		if err == nil {
+			err = handle.Release()
+		}
+		contended <- err
+	}()
+	select {
+	case err := <-contended:
+		t.Fatalf("AcquireExisting() returned %v while Acquire still held the lock", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	if err := created.Release(); err != nil {
+		t.Fatalf("Release() error = %v", err)
+	}
+	select {
+	case err := <-contended:
+		if err != nil {
+			t.Fatalf("AcquireExisting() after release: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("AcquireExisting() never completed after the lock was released")
+	}
+}
