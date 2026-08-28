@@ -55,10 +55,12 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
   complete predictable line and named Go regexp captures for substring or multiline matching.
   Read captures directly from the step outputs and map only intentionally shared values through
   `variables`; use `jsonpath` instead when the source is already structured.
-- Use `edit` to replace existing JSON/YAML/TOML file nodes without re-encoding the whole file, or
-  to derive an edited clone from a variable/expression. Choose exactly one `from.file`, `from.var`,
-  or `from.expr`; use `expr` with `current` for calculated replacements. File edits are in place,
-  while variable/expression sources are output-only. Missing paths fail unless `missing: ignore`.
+- Use `edit` to set, create, delete, append/insert, deep-merge, or rename JSON/YAML/TOML nodes
+  without re-encoding the whole file, or to derive an edited clone from a variable/expression.
+  Choose exactly one `from.file`, `from.var`, or `from.expr`; use `expr` with `current` for
+  calculated values. File edits are in place, while variable/expression sources are output-only.
+  Missing paths fail unless `missing: ignore`; `missing: create` is only for `set` with a singular
+  key path and cannot synthesize array entries.
 - Use `semver` for strict semantic-version parsing, precedence comparison, constraint checks, and
   major/minor/patch increments. Read the operation's primary typed result from `value`; remember
   that build metadata does not affect comparison and ordinary constraints exclude prereleases.

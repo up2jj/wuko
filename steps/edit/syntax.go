@@ -15,6 +15,21 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// patchMutations applies semantic mutations through the syntax model for the
+// source format, preserving bytes unrelated to the changed entries.
+func patchMutations(data []byte, format string, original, updated any, mutations []mutation) ([]byte, error) {
+	switch format {
+	case "json":
+		return patchJSONMutations(data, original, updated, mutations)
+	case "yaml":
+		return patchYAMLMutations(data, original, updated, mutations)
+	case "toml":
+		return patchTOMLMutations(data, original, updated, mutations)
+	default:
+		return nil, fmt.Errorf("unsupported format %q", format)
+	}
+}
+
 type textEdit struct {
 	start int
 	end   int
@@ -89,7 +104,7 @@ func patchDocument(data []byte, format string, matches []*spec.LocatedNode, repl
 // the spans up front also yields the exact output size, so the document is
 // copied once however many spans are replaced.
 func applyTextEdits(data []byte, edits []textEdit) ([]byte, error) {
-	sort.Slice(edits, func(i, j int) bool { return edits[i].start < edits[j].start })
+	sort.SliceStable(edits, func(i, j int) bool { return edits[i].start < edits[j].start })
 	size := len(data)
 	previous := 0
 	for _, edit := range edits {
@@ -110,6 +125,19 @@ func applyTextEdits(data []byte, edits []textEdit) ([]byte, error) {
 		offset = edit.end
 	}
 	return append(result, data[offset:]...), nil
+}
+
+func mergeDeletionEdits(edits []textEdit) []textEdit {
+	sort.SliceStable(edits, func(i, j int) bool { return edits[i].start < edits[j].start })
+	result := make([]textEdit, 0, len(edits))
+	for _, edit := range edits {
+		if len(result) > 0 && len(edit.text) == 0 && len(result[len(result)-1].text) == 0 && edit.start <= result[len(result)-1].end {
+			result[len(result)-1].end = max(result[len(result)-1].end, edit.end)
+			continue
+		}
+		result = append(result, edit)
+	}
+	return result
 }
 
 type jsonSpanParser struct {
@@ -314,6 +342,18 @@ func yamlNodeSpan(data []byte, node *yaml.Node, flow bool) (int, int, error) {
 		}
 	}
 	return start, end, nil
+}
+
+// yamlKeyEnd returns the offset just past a mapping key. A plain scalar renders
+// verbatim, so scanning for a value terminator would run past the colon and
+// swallow the value the key introduces.
+func yamlKeyEnd(data []byte, start int, node *yaml.Node, flow bool) int {
+	if start < len(data) && data[start] != '\'' && data[start] != '"' &&
+		node.Style != yaml.LiteralStyle && node.Style != yaml.FoldedStyle &&
+		bytes.HasPrefix(data[start:], []byte(node.Value)) {
+		return start + len(node.Value)
+	}
+	return yamlScalarEnd(data, start, node, flow)
 }
 
 func yamlScalarEnd(data []byte, start int, node *yaml.Node, flow bool) int {

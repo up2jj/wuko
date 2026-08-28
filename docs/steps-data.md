@@ -165,10 +165,9 @@ matches; `one` requires exactly one match. Results also include `count` and norm
 
 ## `edit`
 
-Set an existing value selected with [RFC 9535 JSONPath](https://www.rfc-editor.org/rfc/rfc9535.html).
-File edits preserve comments and formatting outside the replaced values and are installed
-atomically. The format is inferred from `.json`, `.yaml`, `.yml`, or `.toml`; use `format` when a
-file has another extension.
+Mutate structured values selected with [RFC 9535 JSONPath](https://www.rfc-editor.org/rfc/rfc9535.html).
+File edits preserve unrelated comments and formatting and are installed atomically. The format is
+inferred from `.json`, `.yaml`, `.yml`, or `.toml`; use `format` when a file has another extension.
 
 Bump a version in place:
 
@@ -200,6 +199,83 @@ Find matching nodes and calculate each replacement from its previous value:
 `expr` is evaluated once per selected node against the original document. It can use the normal
 expression roots plus `current`, the normalized JSONPath `path`, and the zero-based match `index`.
 Use exactly one of `value` or `expr`.
+
+Create a key and any missing map parents with a singular path:
+
+```yaml
+- id: add_dependency
+  type: edit
+  with:
+    operation: set
+    from:
+      file: package.json
+    path: $.devDependencies.wuko
+    value: ^1.0.0
+    missing: create
+```
+
+Array and object mutations use the same source and selection model:
+
+```yaml
+- id: append_service
+  type: edit
+  with:
+    operation: append
+    from:
+      file: services.yaml
+    path: $.services
+    value: {name: worker, replicas: 2}
+
+- id: insert_before_production
+  type: edit
+  with:
+    operation: insert
+    from:
+      var: environments
+    path: "$[?@.name == 'production']"
+    position: before
+    value: {name: staging}
+
+- id: merge_defaults
+  type: edit
+  with:
+    operation: merge
+    from:
+      file: compose.yaml
+    path: $.services.api
+    value:
+      environment:
+        LOG_LEVEL: info
+
+- id: rename_key
+  type: edit
+  with:
+    operation: rename
+    from:
+      file: config.toml
+    path: $.server.bind
+    name: address
+```
+
+The operation determines its additional fields and target type:
+
+| Operation | Fields | Behavior |
+| --- | --- | --- |
+| `set` | exactly one of `value`, `expr` | Replace a selected value. |
+| `delete` | none | Remove selected object members or array elements; `$` is rejected. |
+| `append` | exactly one of `value`, `expr` | Add the supplied value as one element to each selected array. |
+| `insert` | exactly one of `value`, `expr`; `position: before \| after` | Insert one element relative to each selected array element. |
+| `merge` | exactly one of `value`, `expr` | Deep-merge maps; nested maps merge while arrays and other leaves replace. |
+| `rename` | `name` | Rename selected object members; an existing destination key is an error. |
+
+All matches and expressions use the original document snapshot. Array insertions and deletions are
+then applied in location-safe order, so one edit cannot shift a later selected target. Duplicate
+locations collapse and overlapping locations are rejected. Keys added by `merge` are written in
+sorted order, so the same merge produces the same file on every run.
+
+Members of a TOML inline table (`server = {host = "h"}`) cannot be edited individually; the step
+reports this rather than writing a dotted key that TOML would reject. Replace the whole value with
+`set`, or promote the inline table to a `[server]` table header.
 
 Edit a workflow variable without mutating it:
 
@@ -237,10 +313,11 @@ An expression can also provide the source document:
 — a symlink is rejected rather than replaced — and is changed in place; variable and expression
 sources are cloned, never mutated, and the transformed document is returned as `steps.<id>.value`.
 
-`result` defaults to `one`, which requires exactly one match. Set `result: all` to update every
+`result` defaults to `one`, which requires exactly one match. Set `result: all` to mutate every
 match. A missing path fails by default. Set `missing: ignore` for a successful no-op; in that case
-the replacement expression is not evaluated and a file is not rewritten. Missing source files or
-variables always fail.
+an expression is not evaluated and a file is not rewritten. `missing: create` is available only
+for `set`: the path must be singular, its final selector must be a key, and any array indexes must
+already exist. Missing map parents are created. Missing source files or variables always fail.
 
 Values keep their type across a rewrite. A TOML float is written with a decimal point, so a whole
 number is not read back as an integer, and TOML strings use TOML's own escapes, so a control
@@ -248,11 +325,10 @@ character does not produce a file its parser rejects. An integer too large for a
 through unchanged rather than being rounded through a float, which also means an `expr` of `current`
 rewrites nothing. Arithmetic on such a number fails instead of silently losing its low digits.
 
-Outputs include the complete transformed `value`, normalized `paths`, per-match `replacements`,
-`count`, `changed`, and `changed_count`. File edits also return the resolved `file` and `format`.
-The step only replaces existing nodes; it does not create missing keys, array entries, or parents.
-Files are limited to `1MiB` by default; increase `max_bytes` with a byte size such as `4MiB` when
-the larger input is intentional.
+Outputs include the complete transformed `value`, original normalized `paths`, operation-produced
+`replacements`, `count`, `changed`, and `changed_count`. `delete` returns an empty `replacements`
+list. File edits also return the resolved `file` and `format`. Files are limited to `1MiB` by
+default; increase `max_bytes` with a byte size such as `4MiB` when the larger input is intentional.
 
 ## `extract`
 

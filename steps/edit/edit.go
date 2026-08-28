@@ -40,6 +40,8 @@ type Config struct {
 	Path      string `yaml:"path"`
 	Value     any    `yaml:"value,omitempty"`
 	Expr      string `yaml:"expr,omitempty"`
+	Position  string `yaml:"position,omitempty"`
+	Name      string `yaml:"name,omitempty"`
 	Result    string `yaml:"result,omitempty"`
 	Missing   string `yaml:"missing,omitempty"`
 	Format    string `yaml:"format,omitempty"`
@@ -89,8 +91,8 @@ func New(raw map[string]any) (step.Runner, error) {
 	if err := step.DecodeConfig(raw, &config); err != nil {
 		return nil, err
 	}
-	if config.Operation != "set" {
-		return nil, fmt.Errorf("operation must be set")
+	if !oneOf(config.Operation, "set", "delete", "append", "insert", "merge", "rename") {
+		return nil, fmt.Errorf("operation must be set, delete, append, insert, merge, or rename")
 	}
 	sources := 0
 	for _, value := range []string{config.From.File, config.From.Var, config.From.Expr} {
@@ -104,19 +106,37 @@ func New(raw map[string]any) (step.Runner, error) {
 	if strings.TrimSpace(config.Path) == "" {
 		return nil, fmt.Errorf("path is required")
 	}
-	hasValue := false
-	if _, ok := raw["value"]; ok {
-		hasValue = true
-	}
+	_, hasValue := raw["value"]
 	_, hasExpr := raw["expr"]
-	if hasValue == hasExpr {
-		return nil, fmt.Errorf("exactly one of value or expr is required")
+	needsReplacement := oneOf(config.Operation, "set", "append", "insert", "merge")
+	if needsReplacement && hasValue == hasExpr {
+		return nil, fmt.Errorf("operation %s requires exactly one of value or expr", config.Operation)
+	}
+	if !needsReplacement && (hasValue || hasExpr) {
+		return nil, fmt.Errorf("value and expr are not allowed with operation %s", config.Operation)
+	}
+	if config.Operation == "insert" {
+		if !templated(config.Position) && config.Position != "before" && config.Position != "after" {
+			return nil, fmt.Errorf("position must be before or after with operation insert")
+		}
+	} else if config.Position != "" {
+		return nil, fmt.Errorf("position is only allowed with operation insert")
+	}
+	if config.Operation == "rename" {
+		if strings.TrimSpace(config.Name) == "" {
+			return nil, fmt.Errorf("name is required with operation rename")
+		}
+	} else if config.Name != "" {
+		return nil, fmt.Errorf("name is only allowed with operation rename")
 	}
 	if !templated(config.Result) && config.Result != "one" && config.Result != "all" {
 		return nil, fmt.Errorf("result must be one or all")
 	}
-	if !templated(config.Missing) && config.Missing != "error" && config.Missing != "ignore" {
-		return nil, fmt.Errorf("missing must be error or ignore")
+	if !templated(config.Missing) && !oneOf(config.Missing, "error", "ignore", "create") {
+		return nil, fmt.Errorf("missing must be error, ignore, or create")
+	}
+	if config.Missing == "create" && config.Operation != "set" {
+		return nil, fmt.Errorf("missing create is only allowed with operation set")
 	}
 	if config.From.File == "" && config.Format != "" {
 		return nil, fmt.Errorf("format is only supported with from.file")
@@ -147,7 +167,7 @@ func New(raw map[string]any) (step.Runner, error) {
 		}
 		runner.sourceExpr = program
 	}
-	if hasExpr {
+	if needsReplacement && hasExpr {
 		if strings.TrimSpace(config.Expr) == "" {
 			return nil, fmt.Errorf("expr must not be empty")
 		}
@@ -167,6 +187,15 @@ func New(raw map[string]any) (step.Runner, error) {
 	return runner, nil
 }
 
+func oneOf(value string, choices ...string) bool {
+	for _, choice := range choices {
+		if value == choice {
+			return true
+		}
+	}
+	return false
+}
+
 func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, error) {
 	if err := ctx.Err(); err != nil {
 		return step.Result{}, err
@@ -177,10 +206,10 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 	if r.maxBytes == 0 {
 		return step.Result{}, fmt.Errorf("max_bytes contains an unresolved template")
 	}
-	if templated(r.config.Result) || templated(r.config.Missing) || templated(r.config.Format) {
+	if templated(r.config.Result) || templated(r.config.Missing) || templated(r.config.Format) || templated(r.config.Name) || templated(r.config.Position) {
 		return step.Result{}, fmt.Errorf("configuration contains an unresolved template")
 	}
-	if !r.hasValue && r.replaceExpr == nil {
+	if oneOf(r.config.Operation, "set", "append", "insert", "merge") && !r.hasValue && r.replaceExpr == nil {
 		return step.Result{}, fmt.Errorf("expr contains an unresolved template")
 	}
 	value, file, err := r.resolveSource(ctx, request)
@@ -188,71 +217,22 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 		return step.Result{}, err
 	}
 	original := value
-	matches := r.path.SelectLocated(original)
-	if len(matches) == 0 {
-		if r.config.Missing == "error" {
-			return step.Result{}, fmt.Errorf("path returned no matches")
-		}
-		return r.result(original, file, nil, nil, 0), nil
-	}
-	matches, err = uniqueNonOverlapping(matches)
+	mutations, err := r.planMutations(ctx, request, original)
 	if err != nil {
 		return step.Result{}, err
 	}
-	if r.config.Result == "one" && len(matches) != 1 {
-		return step.Result{}, fmt.Errorf("path returned %d matches, want exactly one", len(matches))
+	if len(mutations) == 0 {
+		return r.result(original, file, nil, nil, 0), nil
 	}
-	replacements := make([]any, len(matches))
-	changed := make([]bool, len(matches))
-	changedCount := 0
-	var base expressionEnvironment
-	if !r.hasValue {
-		base = r.baseEnvironment(request)
+	updated, err := applyMutations(clone(original), mutations)
+	if err != nil {
+		return step.Result{}, err
 	}
-	for i, match := range matches {
-		if err := ctx.Err(); err != nil {
-			return step.Result{}, err
-		}
-		replacement := clone(r.config.Value)
-		if !r.hasValue {
-			environment := base
-			environment.Current = exprValue(match.Node)
-			environment.Path = match.Path.String()
-			environment.Index = i
-			replacement, err = expr.Run(r.replaceExpr, environment)
-			if err != nil {
-				return step.Result{}, fmt.Errorf("evaluating expr for %s: %w", match.Path, err)
-			}
-			if err := validateJSON(replacement); err != nil {
-				return step.Result{}, fmt.Errorf("replacement for %s is not JSON-compatible: %w", match.Path, err)
-			}
-			replacement = clone(replacement)
-		}
-		replacements[i] = replacement
-		if !sameValue(match.Node, replacement) {
-			changed[i] = true
-			changedCount++
-		}
-	}
-
-	updated := clone(original)
-	for i, match := range matches {
-		updated, err = assign(updated, match.Path, clone(replacements[i]))
-		if err != nil {
-			return step.Result{}, fmt.Errorf("setting %s: %w", match.Path, err)
-		}
-	}
+	matches := mutationMatches(mutations)
+	replacements := mutationOutputs(mutations)
+	changedCount := mutationChangedCount(mutations)
 	if file != nil && changedCount > 0 {
-		changedMatches := make([]*spec.LocatedNode, 0, changedCount)
-		changedReplacements := make([]any, 0, changedCount)
-		for i, match := range matches {
-			if !changed[i] {
-				continue
-			}
-			changedMatches = append(changedMatches, match)
-			changedReplacements = append(changedReplacements, replacements[i])
-		}
-		patched, err := patchDocument(file.data, file.format, changedMatches, changedReplacements)
+		patched, err := patchMutations(file.data, file.format, original, updated, mutations)
 		if err != nil {
 			return step.Result{}, fmt.Errorf("editing %s: %w", file.path, err)
 		}
@@ -361,6 +341,8 @@ func (r *Runner) result(value any, file *fileSource, matches []*spec.LocatedNode
 	values := make([]any, len(replacements))
 	for i := range matches {
 		paths[i] = matches[i].Path.String()
+	}
+	for i := range replacements {
 		values[i] = replacements[i]
 	}
 	outputs := map[string]any{

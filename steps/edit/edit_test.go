@@ -247,7 +247,7 @@ func TestNewRejectsInvalidConfiguration(t *testing.T) {
 		{name: "source union", want: "exactly one", raw: map[string]any{"operation": "set", "from": map[string]any{"file": "a.json", "var": "a"}, "path": "$", "value": 1}},
 		{name: "replacement union", want: "exactly one", raw: map[string]any{"operation": "set", "from": map[string]any{"var": "a"}, "path": "$", "value": 1, "expr": "2"}},
 		{name: "result", want: "one or all", raw: map[string]any{"operation": "set", "from": map[string]any{"var": "a"}, "path": "$", "value": 1, "result": "first"}},
-		{name: "missing", want: "error or ignore", raw: map[string]any{"operation": "set", "from": map[string]any{"var": "a"}, "path": "$", "value": 1, "missing": "create"}},
+		{name: "missing", want: "error, ignore, or create", raw: map[string]any{"operation": "set", "from": map[string]any{"var": "a"}, "path": "$", "value": 1, "missing": "skip"}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
