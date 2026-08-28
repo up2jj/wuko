@@ -4,12 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
+	toml "github.com/pelletier/go-toml/v2"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -245,9 +249,9 @@ func TestFileFailuresAreAtomic(t *testing.T) {
 func TestReadBoundedHonorsCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	data, err := readBounded(ctx, strings.NewReader("value"), 10)
-	if !errors.Is(err, context.Canceled) || data != nil {
-		t.Fatalf("data = %q, error = %v", data, err)
+	text, err := readBounded(ctx, strings.NewReader("value"), 10, 5)
+	if !errors.Is(err, context.Canceled) || text != "" {
+		t.Fatalf("text = %q, error = %v", text, err)
 	}
 }
 
@@ -279,4 +283,153 @@ func runFrom(t *testing.T, format, input string, options map[string]any) step.Re
 		t.Fatal(err)
 	}
 	return result
+}
+
+// legacyNormalize is the whole-document JSON round-trip that normalize replaced. The
+// tests below hold the walking implementation to exactly its results, including errors.
+func legacyNormalize(value any) (any, error) {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	decoder := json.NewDecoder(strings.NewReader(string(data)))
+	decoder.UseNumber()
+	var normalized any
+	if err := decoder.Decode(&normalized); err != nil {
+		return nil, err
+	}
+	return normalized, nil
+}
+
+func TestNormalizeMatchesJSONRoundTrip(t *testing.T) {
+	moment := time.Date(2026, 8, 26, 12, 30, 0, 0, time.UTC)
+	values := []struct {
+		name  string
+		value any
+	}{
+		{"nil", nil},
+		{"bool", true},
+		{"string", "wukó"},
+		{"empty string", ""},
+		{"invalid utf8", string([]byte{0xff, 0xfe, 'a'})},
+		{"int", 42},
+		{"negative int", -42},
+		{"int64", int64(math.MaxInt64)},
+		{"uint64", uint64(math.MaxUint64)},
+		{"float", 1.5},
+		{"float exponent", 1e-9},
+		{"float boundary low", 1e-6},
+		{"float boundary high", 1e21},
+		{"float below boundary", 1e20},
+		{"json number", json.Number("7")},
+		{"empty map", map[string]any{}},
+		{"empty slice", []any{}},
+		{"nil slice", []any(nil)},
+		{"nil map", map[string]any(nil)},
+		{"nil nested", map[string]any{"slice": []any(nil), "map": map[string]any(nil)}},
+		{"time", moment},
+		{"toml local date", toml.LocalDate{Year: 2026, Month: 8, Day: 26}},
+		{"toml local time", toml.LocalTime{Hour: 12, Minute: 30}},
+		{"toml local datetime", toml.LocalDateTime{
+			LocalDate: toml.LocalDate{Year: 2026, Month: 8, Day: 26},
+			LocalTime: toml.LocalTime{Hour: 12, Minute: 30},
+		}},
+		{"nested", map[string]any{
+			"items":    []any{1, int64(2), 3.5, "four", true, nil},
+			"released": moment,
+			"nested":   map[string]any{"deep": []any{map[string]any{"n": uint64(9)}}},
+		}},
+		{"invalid utf8 key", map[string]any{string([]byte{0xff}): 1}},
+		{"non-string keys", map[any]any{1: "one"}},
+		{"nan", math.NaN()},
+		{"positive infinity", math.Inf(1)},
+		{"negative infinity", math.Inf(-1)},
+		{"nan nested", map[string]any{"bad": []any{math.NaN()}}},
+		{"unsupported nested", map[string]any{"bad": make(chan int)}},
+	}
+	for _, test := range values {
+		t.Run(test.name, func(t *testing.T) {
+			want, wantErr := legacyNormalize(test.value)
+			got, gotErr := normalize(test.value)
+			if (wantErr == nil) != (gotErr == nil) {
+				t.Fatalf("error = %v, want %v", gotErr, wantErr)
+			}
+			if wantErr != nil {
+				if !strings.Contains(gotErr.Error(), wantErr.Error()) {
+					t.Fatalf("error = %v, want it to contain %v", gotErr, wantErr)
+				}
+				return
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("value = %#v, want %#v", got, want)
+			}
+		})
+	}
+}
+
+// TestJSONFloatTextMatchesEncodingJSON pins jsonFloatText to the standard library's
+// float formatting, which it reimplements to avoid a marshal per number.
+func TestJSONFloatTextMatchesEncodingJSON(t *testing.T) {
+	numbers := []float64{
+		0, math.Copysign(0, -1), 1, -1, 0.5, 1.5, 1e-6, 9.999999e-7, 1e-7, 1e-9, 1e-100,
+		1e20, 1e21, 1.0000001e21, 1e100, math.MaxFloat64, math.SmallestNonzeroFloat64,
+		math.Pi, 1 << 62, -(1 << 62),
+	}
+	generator := rand.New(rand.NewSource(1))
+	for len(numbers) < 20000 {
+		number := math.Float64frombits(generator.Uint64())
+		if math.IsNaN(number) || math.IsInf(number, 0) {
+			continue
+		}
+		numbers = append(numbers, number)
+	}
+	for _, number := range numbers {
+		want, err := json.Marshal(number)
+		if err != nil {
+			t.Fatalf("marshalling %v: %v", number, err)
+		}
+		got, ok := jsonFloatText(number)
+		if !ok || got != string(want) {
+			t.Fatalf("jsonFloatText(%v bits %#x) = %q %v, want %q", number, math.Float64bits(number), got, ok, want)
+		}
+	}
+	for _, number := range []float64{math.NaN(), math.Inf(1), math.Inf(-1)} {
+		if text, ok := jsonFloatText(number); ok {
+			t.Fatalf("jsonFloatText(%v) = %q, want it to report failure", number, text)
+		}
+	}
+}
+
+func TestReadCapacityUsesSizeHintWithinLimit(t *testing.T) {
+	tests := []struct {
+		name          string
+		maximum, size int64
+		want          int64
+	}{
+		{name: "size hint", maximum: 1 << 20, size: 4096, want: 4096},
+		{name: "unknown size", maximum: 1 << 20, size: 0, want: 32 * 1024},
+		{name: "unknown size below limit", maximum: 512, size: 0, want: 512},
+		{name: "hint above limit", maximum: 512, size: 4096, want: 512},
+		{name: "negative hint", maximum: 1 << 20, size: -1, want: 32 * 1024},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := readCapacity(test.maximum, test.size); got != test.want {
+				t.Fatalf("readCapacity(%d, %d) = %d, want %d", test.maximum, test.size, got, test.want)
+			}
+		})
+	}
+}
+
+// A file that grows between the caller's stat and the read must still hit the limit,
+// so the size hint stays a hint.
+func TestReadBoundedTreatsSizeAsHintOnly(t *testing.T) {
+	text, err := readBounded(t.Context(), strings.NewReader("0123456789"), 4, 2)
+	if !errors.Is(err, errInputTooLarge) || text != "" {
+		t.Fatalf("text = %q, error = %v", text, err)
+	}
+	text, err = readBounded(t.Context(), strings.NewReader("0123456789"), 32, 2)
+	if err != nil || text != "0123456789" {
+		t.Fatalf("text = %q, error = %v", text, err)
+	}
 }

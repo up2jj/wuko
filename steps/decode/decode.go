@@ -66,11 +66,11 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 		return step.Result{}, err
 	}
 
-	data, source, err := r.readInput(ctx, request)
+	text, source, err := r.readInput(ctx, request)
 	if err != nil {
 		return step.Result{}, err
 	}
-	value, err := r.decode(data)
+	value, err := r.decode(text)
 	if err != nil {
 		return step.Result{}, fmt.Errorf("decoding %s input from %s: %w", r.config.Format, source, err)
 	}
@@ -142,90 +142,90 @@ func (r *Runner) validateMaxBytes(resolved bool) error {
 	return nil
 }
 
-func (r *Runner) readInput(ctx context.Context, request step.Request) ([]byte, string, error) {
+func (r *Runner) readInput(ctx context.Context, request step.Request) (string, string, error) {
 	if r.present["from"] {
 		value, err := step.Lookup(request, r.config.From)
 		if err != nil {
-			return nil, "", fmt.Errorf("resolving input: %w", err)
+			return "", "", fmt.Errorf("resolving input: %w", err)
 		}
 		text, ok := value.(string)
 		if !ok {
-			return nil, "", fmt.Errorf("from %q resolved to %T, want string", r.config.From, value)
+			return "", "", fmt.Errorf("from %q resolved to %T, want string", r.config.From, value)
 		}
 		if int64(len(text)) > r.maxBytes {
-			return nil, "", fmt.Errorf("input from %q exceeds max_bytes %s", r.config.From, r.config.MaxBytes)
+			return "", "", fmt.Errorf("input from %q exceeds max_bytes %s", r.config.From, r.config.MaxBytes)
 		}
-		return []byte(text), fmt.Sprintf("%q", r.config.From), nil
+		return text, fmt.Sprintf("%q", r.config.From), nil
 	}
 
 	path, err := resolvePath(request.RunDir, r.config.Path)
 	if err != nil {
-		return nil, "", err
+		return "", "", err
 	}
 	file, err := os.Open(path)
 	if err != nil {
-		return nil, "", fmt.Errorf("opening decode file %s: %w", path, err)
+		return "", "", fmt.Errorf("opening decode file %s: %w", path, err)
 	}
 	defer file.Close()
 	info, err := file.Stat()
 	if err != nil {
-		return nil, "", fmt.Errorf("inspecting decode file %s: %w", path, err)
+		return "", "", fmt.Errorf("inspecting decode file %s: %w", path, err)
 	}
 	if !info.Mode().IsRegular() {
-		return nil, "", fmt.Errorf("decode file %s must be a regular file", path)
+		return "", "", fmt.Errorf("decode file %s must be a regular file", path)
 	}
 	if info.Size() > r.maxBytes {
-		return nil, "", fmt.Errorf("decode file %s exceeds max_bytes %s", path, r.config.MaxBytes)
+		return "", "", fmt.Errorf("decode file %s exceeds max_bytes %s", path, r.config.MaxBytes)
 	}
-	data, err := readBounded(ctx, file, r.maxBytes)
+	text, err := readBounded(ctx, file, r.maxBytes, info.Size())
 	if err != nil {
 		if errors.Is(err, errInputTooLarge) {
-			return nil, "", fmt.Errorf("decode file %s exceeds max_bytes %s", path, r.config.MaxBytes)
+			return "", "", fmt.Errorf("decode file %s exceeds max_bytes %s", path, r.config.MaxBytes)
 		}
-		return nil, "", fmt.Errorf("reading decode file %s: %w", path, err)
+		return "", "", fmt.Errorf("reading decode file %s: %w", path, err)
 	}
-	return data, path, nil
+	return text, path, nil
 }
 
-func (r *Runner) decode(data []byte) (any, error) {
+func (r *Runner) decode(text string) (any, error) {
 	switch r.config.Format {
 	case "json":
-		return decodeJSON(data)
+		return decodeJSON(text)
 	case "yaml":
-		return decodeYAML(data)
+		return decodeYAML(text)
 	case "toml":
-		return decodeTOML(data)
+		return decodeTOML(text)
 	case "lines":
-		return decodeLines(string(data), r.config.Trim, r.config.OmitEmpty), nil
+		return decodeLines(text, r.config.Trim, r.config.OmitEmpty), nil
 	default:
 		panic("validated decode format")
 	}
 }
 
-func decodeJSON(data []byte) (any, error) {
-	decoder := json.NewDecoder(bytes.NewReader(data))
+func decodeJSON(text string) (any, error) {
+	decoder := json.NewDecoder(strings.NewReader(text))
 	decoder.UseNumber()
 	var value any
 	if err := decoder.Decode(&value); err != nil {
-		return nil, jsonLocationError(data, err)
+		return nil, jsonLocationError(text, err)
 	}
-	extraOffset := nextNonSpace(data, decoder.InputOffset())
+	extraOffset := nextNonSpace(text, decoder.InputOffset())
 	var extra any
 	if err := decoder.Decode(&extra); err != io.EOF {
 		if err == nil {
-			line, column := lineColumn(data, extraOffset)
+			line, column := lineColumn(text, extraOffset)
 			return nil, fmt.Errorf("line %d, column %d: multiple JSON values are not supported", line, column)
 		}
-		return nil, jsonLocationError(data, err)
+		return nil, jsonLocationError(text, err)
 	}
 	return value, nil
 }
 
-func decodeYAML(data []byte) (any, error) {
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
+func decodeYAML(text string) (any, error) {
+	decoder := yaml.NewDecoder(strings.NewReader(text))
 	var document yaml.Node
 	if err := decoder.Decode(&document); err != nil {
-		return nil, yamlLocationError(data, err)
+		return nil, yamlLocationError(text, err)
 	}
 	var extra yaml.Node
 	if err := decoder.Decode(&extra); err != io.EOF {
@@ -236,18 +236,18 @@ func decodeYAML(data []byte) (any, error) {
 			}
 			return nil, fmt.Errorf("line %d, column %d: multiple YAML documents are not supported", line, column)
 		}
-		return nil, yamlLocationError(data, err)
+		return nil, yamlLocationError(text, err)
 	}
 	var value any
 	if err := document.Decode(&value); err != nil {
-		return nil, yamlLocationError(data, err)
+		return nil, yamlLocationError(text, err)
 	}
 	return normalize(value)
 }
 
-func decodeTOML(data []byte) (any, error) {
+func decodeTOML(text string) (any, error) {
 	value := make(map[string]any)
-	if err := toml.Unmarshal(data, &value); err != nil {
+	if err := toml.Unmarshal([]byte(text), &value); err != nil {
 		var decodeErr *toml.DecodeError
 		if errors.As(err, &decodeErr) {
 			line, column := decodeErr.Position()
@@ -280,7 +280,75 @@ func decodeLines(input string, trim, omitEmpty bool) []any {
 	return result
 }
 
+// normalize converts a decoded YAML or TOML value into the JSON-compatible shape the
+// rest of a workflow sees: objects, arrays, strings, bools, nil, and json.Number.
+//
+// It walks the tree directly for the types YAML and TOML actually produce, and hands
+// anything else to roundTrip, which is what this function used to do for the whole
+// document. Routing the leftovers keeps the exact behaviour -- including error text --
+// for values the walk deliberately does not model: timestamps and other json.Marshaler
+// types, maps with non-string keys, NaN and infinity, and strings holding invalid UTF-8,
+// which JSON encoding rewrites with the replacement rune.
 func normalize(value any) (any, error) {
+	switch typed := value.(type) {
+	case nil, bool, json.Number:
+		return value, nil
+	case string:
+		if utf8.ValidString(typed) {
+			return value, nil
+		}
+	case int:
+		return json.Number(strconv.Itoa(typed)), nil
+	case int64:
+		return json.Number(strconv.FormatInt(typed, 10)), nil
+	case uint64:
+		return json.Number(strconv.FormatUint(typed, 10)), nil
+	case float64:
+		if text, ok := jsonFloatText(typed); ok {
+			return json.Number(text), nil
+		}
+	case map[string]any:
+		return normalizeMap(typed)
+	case []any:
+		return normalizeSlice(typed)
+	}
+	return roundTrip(value)
+}
+
+func normalizeMap(source map[string]any) (any, error) {
+	if source == nil {
+		return nil, nil // A nil map encodes as JSON null, not as an empty object.
+	}
+	result := make(map[string]any, len(source))
+	for key, item := range source {
+		if !utf8.ValidString(key) {
+			return roundTrip(source)
+		}
+		converted, err := normalize(item)
+		if err != nil {
+			return nil, err
+		}
+		result[key] = converted
+	}
+	return result, nil
+}
+
+func normalizeSlice(source []any) (any, error) {
+	if source == nil {
+		return nil, nil // A nil slice encodes as JSON null, not as an empty array.
+	}
+	result := make([]any, len(source))
+	for i, item := range source {
+		converted, err := normalize(item)
+		if err != nil {
+			return nil, err
+		}
+		result[i] = converted
+	}
+	return result, nil
+}
+
+func roundTrip(value any) (any, error) {
 	data, err := json.Marshal(value)
 	if err != nil {
 		return nil, fmt.Errorf("value is not JSON-compatible: %w", err)
@@ -294,37 +362,75 @@ func normalize(value any) (any, error) {
 	return normalized, nil
 }
 
+// jsonFloatText renders f the way encoding/json does, so the walk in normalize yields
+// the same json.Number the marshal round-trip did. It reports false for NaN and
+// infinity, which JSON cannot represent, leaving those to roundTrip and its error.
+// TestJSONFloatTextMatchesEncodingJSON pins this to the standard library.
+func jsonFloatText(number float64) (string, bool) {
+	if math.IsNaN(number) || math.IsInf(number, 0) {
+		return "", false
+	}
+	// JSON switches to exponent form outside the range where %f stays compact.
+	format := byte('f')
+	if absolute := math.Abs(number); absolute != 0 && (absolute < 1e-6 || absolute >= 1e21) {
+		format = 'e'
+	}
+	text := strconv.AppendFloat(make([]byte, 0, 32), number, format, -1, 64)
+	if format == 'e' {
+		// Collapse a padded exponent, turning 1e-09 into 1e-9.
+		if size := len(text); size >= 4 && text[size-4] == 'e' && text[size-3] == '-' && text[size-2] == '0' {
+			text[size-2] = text[size-1]
+			text = text[:size-1]
+		}
+	}
+	return string(text), true
+}
+
 var errInputTooLarge = errors.New("input exceeds limit")
 
-func readBounded(ctx context.Context, reader io.Reader, maximum int64) ([]byte, error) {
-	capacity := int64(32 * 1024)
-	if maximum < capacity {
-		capacity = maximum
-	}
-	data := make([]byte, 0, int(capacity))
+// readBounded reads at most maximum bytes. size is the reader's expected length,
+// used only to size the buffer up front; it stays a hint because a file can grow
+// between the caller's stat and this read, so maximum remains the real limit.
+func readBounded(ctx context.Context, reader io.Reader, maximum, size int64) (string, error) {
+	var builder strings.Builder
+	builder.Grow(int(readCapacity(maximum, size)))
 	buffer := make([]byte, 32*1024)
 	for {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return "", err
 		}
 		count, readErr := reader.Read(buffer)
 		if count > 0 {
-			if int64(count) > maximum-int64(len(data)) {
-				return nil, errInputTooLarge
+			if int64(count) > maximum-int64(builder.Len()) {
+				return "", errInputTooLarge
 			}
-			data = append(data, buffer[:count]...)
+			builder.Write(buffer[:count])
 		}
 		if errors.Is(readErr, io.EOF) {
-			return data, nil
+			return builder.String(), nil
 		}
 		if readErr != nil {
-			return nil, readErr
+			return "", readErr
 		}
 	}
 }
 
-func jsonLocationError(data []byte, err error) error {
-	offset := int64(len(data) + 1)
+func readCapacity(maximum, size int64) int64 {
+	capacity := size
+	if capacity <= 0 {
+		capacity = 32 * 1024
+	}
+	if capacity > maximum {
+		capacity = maximum
+	}
+	if capacity > math.MaxInt {
+		capacity = math.MaxInt
+	}
+	return capacity
+}
+
+func jsonLocationError(text string, err error) error {
+	offset := int64(len(text) + 1)
 	var syntaxErr *json.SyntaxError
 	if errors.As(err, &syntaxErr) {
 		offset = syntaxErr.Offset
@@ -333,57 +439,57 @@ func jsonLocationError(data []byte, err error) error {
 	if errors.As(err, &typeErr) {
 		offset = typeErr.Offset
 	}
-	line, column := lineColumn(data, offset)
+	line, column := lineColumn(text, offset)
 	return fmt.Errorf("line %d, column %d: %w", line, column, err)
 }
 
-func yamlLocationError(data []byte, err error) error {
+func yamlLocationError(text string, err error) error {
 	line := 1
 	if match := yamlLinePattern.FindStringSubmatch(err.Error()); len(match) == 2 {
 		line, _ = strconv.Atoi(match[1])
 	}
-	column := lineEndColumn(data, line)
+	column := lineEndColumn(text, line)
 	return fmt.Errorf("line %d, column %d: %w", line, column, err)
 }
 
-func lineColumn(data []byte, offset int64) (int, int) {
+func lineColumn(text string, offset int64) (int, int) {
 	if offset < 1 {
 		offset = 1
 	}
-	if offset > int64(len(data)+1) {
-		offset = int64(len(data) + 1)
+	if offset > int64(len(text)+1) {
+		offset = int64(len(text) + 1)
 	}
-	prefix := data[:offset-1]
-	line := bytes.Count(prefix, []byte{'\n'}) + 1
-	start := bytes.LastIndexByte(prefix, '\n') + 1
-	column := utf8.RuneCount(prefix[start:]) + 1
+	prefix := text[:offset-1]
+	line := strings.Count(prefix, "\n") + 1
+	start := strings.LastIndexByte(prefix, '\n') + 1
+	column := utf8.RuneCountInString(prefix[start:]) + 1
 	return line, column
 }
 
-func lineEndColumn(data []byte, line int) int {
+func lineEndColumn(text string, line int) int {
 	if line < 1 {
 		return 1
 	}
-	lines := bytes.Split(data, []byte{'\n'})
+	lines := strings.Split(text, "\n")
 	if line > len(lines) {
 		line = len(lines)
 	}
 	if line == 0 {
 		return 1
 	}
-	return utf8.RuneCount(bytes.TrimSuffix(lines[line-1], []byte{'\r'})) + 1
+	return utf8.RuneCountInString(strings.TrimSuffix(lines[line-1], "\r")) + 1
 }
 
-func nextNonSpace(data []byte, offset int64) int64 {
-	for offset < int64(len(data)) {
-		switch data[offset] {
+func nextNonSpace(text string, offset int64) int64 {
+	for offset < int64(len(text)) {
+		switch text[offset] {
 		case ' ', '\t', '\r', '\n':
 			offset++
 		default:
 			return offset + 1
 		}
 	}
-	return int64(len(data) + 1)
+	return int64(len(text) + 1)
 }
 
 func resolvePath(runDir, path string) (string, error) {
