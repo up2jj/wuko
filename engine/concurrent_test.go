@@ -266,6 +266,200 @@ func TestRunConcurrentGroupUsesSnapshotAndRejectsVariableConflicts(t *testing.T)
 	}
 }
 
+func TestRunConcurrentGroupNeedsPropagatesAncestorState(t *testing.T) {
+	var mu sync.Mutex
+	observed := make(map[string]step.Request)
+	registry := newTestRegistry(t, map[string]step.Builder{"dag": func(map[string]any) (step.Runner, error) {
+		return runnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
+			mu.Lock()
+			observed[request.StepID] = request
+			mu.Unlock()
+			return step.Result{
+				Outputs:   map[string]any{"value": request.StepID},
+				Variables: map[string]any{"var_" + request.StepID: request.StepID},
+			}, nil
+		}), nil
+	}})
+	steps := []workflow.Step{
+		{ID: "build", Type: "dag", Needs: []string{"lint", "test"}, With: map[string]any{}},
+		{ID: "lint", Type: "dag", Needs: []string{"deps"}, With: map[string]any{}},
+		{ID: "deps", Type: "dag", With: map[string]any{}},
+		{ID: "test", Type: "dag", Needs: []string{"deps"}, With: map[string]any{}},
+	}
+	state, err := New(registry).Run(t.Context(), concurrentDefinition(t, &workflow.ConcurrentGroup{Steps: steps, MaxConcurrency: 2, FailFast: false}), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"deps", "lint", "test"} {
+		if _, exists := observed["build"].Steps[id]; !exists {
+			t.Errorf("build did not observe step %q: %#v", id, observed["build"].Steps)
+		}
+		if observed["build"].Vars["var_"+id] != id {
+			t.Errorf("build variable from %q = %#v", id, observed["build"].Vars["var_"+id])
+		}
+	}
+	if _, exists := observed["lint"].Steps["test"]; exists {
+		t.Fatalf("lint observed unrelated sibling state: %#v", observed["lint"].Steps)
+	}
+	if len(state.Steps) != 4 || state.Vars["var_build"] != "build" {
+		t.Fatalf("committed state = %#v", state)
+	}
+}
+
+func TestRunConcurrentGroupNeedsMergesReadsInDeclarationOrderBeforeJoinConflict(t *testing.T) {
+	observed := make(chan any, 1)
+	registry := newTestRegistry(t, map[string]step.Builder{"merge": func(map[string]any) (step.Runner, error) {
+		return runnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
+			if request.StepID == "consumer" {
+				observed <- request.Vars["shared"]
+				return step.Result{}, nil
+			}
+			return step.Result{Variables: map[string]any{"shared": request.StepID}}, nil
+		}), nil
+	}})
+	steps := []workflow.Step{
+		{ID: "first", Type: "merge", With: map[string]any{}},
+		{ID: "second", Type: "merge", With: map[string]any{}},
+		{ID: "consumer", Type: "merge", Needs: []string{"first", "second"}, With: map[string]any{}},
+	}
+	definition := concurrentDefinition(t, &workflow.ConcurrentGroup{Steps: steps, MaxConcurrency: 2, FailFast: false})
+	definition.Vars = map[string]any{"shared": "initial"}
+	_, err := New(registry).Run(t.Context(), definition, Options{})
+	if err == nil || !strings.Contains(err.Error(), `steps "first" and "second" both write variable "shared"`) {
+		t.Fatalf("conflict error = %v", err)
+	}
+	if got := <-observed; got != "second" {
+		t.Fatalf("consumer observed shared = %#v, want second", got)
+	}
+}
+
+func TestRunConcurrentGroupNeedsMergesAncestorsInDependencyOrder(t *testing.T) {
+	observed := make(chan any, 1)
+	registry := newTestRegistry(t, map[string]step.Builder{"merge": func(map[string]any) (step.Runner, error) {
+		return runnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
+			if request.StepID == "consumer" {
+				observed <- request.Vars["shared"]
+				return step.Result{}, nil
+			}
+			return step.Result{Variables: map[string]any{"shared": request.StepID}}, nil
+		}), nil
+	}})
+	// "later" is declared before the "earlier" it needs, so slice order and
+	// dependency order disagree; the consumer must see the later write.
+	steps := []workflow.Step{
+		{ID: "later", Type: "merge", Needs: []string{"earlier"}, With: map[string]any{}},
+		{ID: "earlier", Type: "merge", With: map[string]any{}},
+		{ID: "consumer", Type: "merge", Needs: []string{"later"}, With: map[string]any{}},
+	}
+	definition := concurrentDefinition(t, &workflow.ConcurrentGroup{Steps: steps, MaxConcurrency: 2, FailFast: false})
+	definition.Vars = map[string]any{"shared": "initial"}
+	_, err := New(registry).Run(t.Context(), definition, Options{})
+	if err == nil || !strings.Contains(err.Error(), `both write variable "shared"`) {
+		t.Fatalf("conflict error = %v", err)
+	}
+	if got := <-observed; got != "later" {
+		t.Fatalf("consumer observed shared = %#v, want later", got)
+	}
+}
+
+func TestRunConcurrentGroupNeedsSkipsDescendantsAndContinuesIndependentWork(t *testing.T) {
+	var runs sync.Map
+	registry := newTestRegistry(t, map[string]step.Builder{"dependency": func(map[string]any) (step.Runner, error) {
+		return runnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
+			runs.Store(request.StepID, true)
+			if request.StepID == "failed" {
+				return step.Result{}, errors.New("broken prerequisite")
+			}
+			return step.Result{}, nil
+		}), nil
+	}})
+	steps := []workflow.Step{
+		{ID: "failed", Type: "dependency", With: map[string]any{}},
+		{ID: "child", Type: "dependency", Needs: []string{"failed"}, With: map[string]any{}},
+		{ID: "grandchild", Type: "dependency", Needs: []string{"child"}, With: map[string]any{}},
+		{ID: "independent", Type: "dependency", With: map[string]any{}},
+	}
+	statuses := make(map[string]ExecutionStatus)
+	_, err := New(registry).Run(t.Context(), concurrentDefinition(t, &workflow.ConcurrentGroup{Steps: steps, MaxConcurrency: 2, FailFast: false}), Options{Progress: func(event ProgressEvent) {
+		if event.Kind == StepFinished {
+			statuses[event.StepID] = event.Status
+		}
+	}})
+	if err == nil || !strings.Contains(err.Error(), "broken prerequisite") {
+		t.Fatalf("error = %v", err)
+	}
+	if _, ran := runs.Load("child"); ran {
+		t.Fatal("failed dependency child ran")
+	}
+	if _, ran := runs.Load("grandchild"); ran {
+		t.Fatal("failed dependency grandchild ran")
+	}
+	if _, ran := runs.Load("independent"); !ran {
+		t.Fatal("independent branch did not run with fail_fast false")
+	}
+	if statuses["child"] != StatusSkipped || statuses["grandchild"] != StatusSkipped {
+		t.Fatalf("dependency statuses = %#v", statuses)
+	}
+}
+
+func TestRunConcurrentGroupNeedsSkipsDescendantsBeforeFailFastStopsAdmission(t *testing.T) {
+	var independentRuns atomic.Int32
+	registry := newTestRegistry(t, map[string]step.Builder{"fail_fast_dependency": func(map[string]any) (step.Runner, error) {
+		return runnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
+			if request.StepID == "failed" {
+				return step.Result{}, errors.New("broken prerequisite")
+			}
+			independentRuns.Add(1)
+			return step.Result{}, nil
+		}), nil
+	}})
+	steps := []workflow.Step{
+		{ID: "failed", Type: "fail_fast_dependency", With: map[string]any{}},
+		{ID: "child", Type: "fail_fast_dependency", Needs: []string{"failed"}, With: map[string]any{}},
+		{ID: "independent", Type: "fail_fast_dependency", With: map[string]any{}},
+	}
+	statuses := make(map[string]ExecutionStatus)
+	_, err := New(registry).Run(t.Context(), concurrentDefinition(t, &workflow.ConcurrentGroup{Steps: steps, MaxConcurrency: 1, FailFast: true}), Options{Progress: func(event ProgressEvent) {
+		if event.Kind == StepFinished {
+			statuses[event.StepID] = event.Status
+		}
+	}})
+	if err == nil || !strings.Contains(err.Error(), "broken prerequisite") {
+		t.Fatalf("error = %v", err)
+	}
+	if statuses["child"] != StatusSkipped {
+		t.Fatalf("child status = %q", statuses["child"])
+	}
+	if independentRuns.Load() != 0 {
+		t.Fatalf("independent runs = %d", independentRuns.Load())
+	}
+}
+
+func TestRunConcurrentGroupConditionSkippedNeedAllowsDependent(t *testing.T) {
+	var dependentRuns atomic.Int32
+	registry := newTestRegistry(t, map[string]step.Builder{"conditional_need": func(map[string]any) (step.Runner, error) {
+		return runnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
+			if request.StepID == "dependent" {
+				dependentRuns.Add(1)
+				if _, exists := request.Steps["optional"]; exists {
+					return step.Result{}, errors.New("skipped prerequisite published state")
+				}
+			}
+			return step.Result{}, nil
+		}), nil
+	}})
+	steps := []workflow.Step{
+		{ID: "optional", Type: "conditional_need", If: "false", With: map[string]any{}},
+		{ID: "dependent", Type: "conditional_need", Needs: []string{"optional"}, With: map[string]any{}},
+	}
+	if _, err := New(registry).Run(t.Context(), concurrentDefinition(t, &workflow.ConcurrentGroup{Steps: steps, MaxConcurrency: 2, FailFast: true}), Options{}); err != nil {
+		t.Fatal(err)
+	}
+	if dependentRuns.Load() != 1 {
+		t.Fatalf("dependent runs = %d", dependentRuns.Load())
+	}
+}
+
 func TestRunConcurrentGroupSerializesProgressAndOutput(t *testing.T) {
 	registry := newTestRegistry(t, map[string]step.Builder{"write_output": func(map[string]any) (step.Runner, error) {
 		return runnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
@@ -304,7 +498,7 @@ func TestConcurrentGroupDryRunShowsChildrenAndPolicies(t *testing.T) {
 	timeout := workflow.Duration(5 * time.Minute)
 	steps := []workflow.Step{
 		{ID: "lint", Type: "noop", With: map[string]any{}},
-		{ID: "test", Type: "noop", Retry: immediateRetry(2), With: map[string]any{}},
+		{ID: "test", Type: "noop", Needs: []string{"lint"}, Retry: immediateRetry(2), With: map[string]any{}},
 	}
 	var output bytes.Buffer
 	_, err := New(registry).Run(t.Context(), concurrentDefinition(t, &workflow.ConcurrentGroup{
@@ -315,7 +509,7 @@ func TestConcurrentGroupDryRunShowsChildrenAndPolicies(t *testing.T) {
 	}
 	want := `1. concurrent [max 2, timeout 5m0s, wait for all]
    1.1 lint (noop)
-   1.2 test (noop) [2 attempts]
+   1.2 test (noop) [2 attempts] [needs: lint]
 `
 	if output.String() != want {
 		t.Fatalf("output = %q, want %q", output.String(), want)

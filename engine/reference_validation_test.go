@@ -125,6 +125,9 @@ func TestReferenceValidationChecksConstantKeysAndAllowsDynamicKeys(t *testing.T)
 
 func TestReferenceValidationTracksStepVisibility(t *testing.T) {
 	registry := referenceTestRegistry(t, nil)
+	if err := set.Register(registry); err != nil {
+		t.Fatal(err)
+	}
 	foreach := func() workflow.Step {
 		return workflow.Step{ID: "group", Foreach: &workflow.ForeachGroup{
 			Items: "[1]", MaxConcurrency: 1, FailFast: true,
@@ -151,6 +154,28 @@ func TestReferenceValidationTracksStepVisibility(t *testing.T) {
 				{ID: "consumer", Type: "capture", With: map[string]any{"value": `{{ .steps.producer.value }}`}},
 			}}}},
 			want: `step "producer" is not available here`,
+		},
+		{
+			name: "concurrent prerequisite",
+			steps: []workflow.Step{{Concurrent: &workflow.ConcurrentGroup{MaxConcurrency: 2, FailFast: true, Steps: []workflow.Step{
+				{ID: "consumer", Type: "capture", Needs: []string{"producer"}, With: map[string]any{"value": `{{ .steps.producer.value }}`}},
+				{ID: "producer", Type: "capture", With: map[string]any{"value": "ready"}},
+			}}}},
+		},
+		{
+			name: "concurrent transitive prerequisite",
+			steps: []workflow.Step{{Concurrent: &workflow.ConcurrentGroup{MaxConcurrency: 2, FailFast: true, Steps: []workflow.Step{
+				{ID: "consumer", Type: "capture", Needs: []string{"middle"}, With: map[string]any{"value": `{{ .steps.producer.value }}`}},
+				{ID: "middle", Type: "capture", Needs: []string{"producer"}, With: map[string]any{"value": `{{ .steps.producer.value }}`}},
+				{ID: "producer", Type: "capture", With: map[string]any{"value": "ready"}},
+			}}}},
+		},
+		{
+			name: "concurrent prerequisite variable",
+			steps: []workflow.Step{{Concurrent: &workflow.ConcurrentGroup{MaxConcurrency: 2, FailFast: true, Steps: []workflow.Step{
+				{ID: "consumer", Type: "capture", Needs: []string{"producer"}, With: map[string]any{"value": `{{ .vars.generated }}`}},
+				{ID: "producer", Type: "set", With: map[string]any{"variable": "generated", "expr": `"ready"`}},
+			}}}},
 		},
 		{
 			name: "concurrent merge",

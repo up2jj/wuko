@@ -3,7 +3,7 @@
 Wuko has seven controls for scheduling, repeating, recovering, or monitoring operations:
 `concurrent`, `batch`, `foreach`, `matrix`, `loop`, `try`/`catch`, and `cancel_on`.
 
-- Use `concurrent` for a fixed set of independent steps.
+- Use `concurrent` for a fixed bounded DAG; omit `needs` when every child is independent.
 - Use `batch` when each block should receive a fixed-size chunk of one runtime list.
 - Use `foreach` when one runtime list determines how many times a block runs.
 - Use `matrix` when every combination of several named dimensions must run.

@@ -158,10 +158,11 @@ steps:
 ```
 
 Templates use `.steps` and `.vars`; Expr conditions use `steps` and `vars`. Steps remain sequential
-and have no `needs` field; workflow-level prerequisites are described below. Failed steps and
+outside a `concurrent` group; workflow-level prerequisites are described below. Failed steps and
 condition-based skips commit no state. A replayed `once` block is the exception: it reports skipped
-while republishing its recorded state. Concurrent children share the snapshot from group entry and
-cannot consume sibling results.
+while republishing its recorded state. Concurrent roots share the snapshot from group entry. A
+concurrent child with `needs` can additionally consume the committed sub-state of those sibling
+ancestors.
 
 Use the anonymous `return` control to finish the current workflow or composite action successfully
 with typed Expr outputs. It may appear in sequential conditional or working-directory scopes, still
@@ -579,28 +580,48 @@ restrictions on directly nested conditional, concurrent, batch, foreach, or matr
 
 ## Concurrency
 
-Group independent work with a bounded concurrency level:
+Group a fixed set of work in a bounded fork/join bracket. Add sibling-scoped `needs` edges when
+some children consume others:
 
 ```yaml
 - concurrent:
-    max_concurrency: 3
+    max_concurrency: 4
     timeout: 10m
     fail_fast: true
     steps:
+      - id: deps
+        type: shell
+        with: {command: go, args: [mod, download]}
       - id: lint
         type: shell
+        needs: [deps]
         with: {command: golangci-lint, args: [run]}
       - id: test
         type: shell
+        needs: [deps]
         timeout: 3m
         retry: {max_attempts: 3}
         with: {command: go, args: [test, ./...]}
+      - id: build
+        type: shell
+        needs: [lint, test]
+        with: {command: go, args: [build, ./...]}
 ```
 
-`max_concurrency` defaults to 4 and accepts 1–100. `fail_fast` defaults to true. Child results are
-committed in declaration order only after the whole group succeeds. Children cannot read sibling
-outputs or write the same variable. Interactive children require pre-supplied values. Directly
-nested concurrent groups are not supported.
+`needs` may name only direct siblings in the same group. Forward references are valid, but unknown,
+duplicate, self-referential, and cyclic edges fail validation. A root reads the group-entry snapshot;
+a dependent reads that snapshot plus all successful transitive ancestors, merged in dependency order
+and then sibling declaration order, so a later write in a chain overwrites the earlier one.
+Unrelated siblings remain invisible. A condition-skipped prerequisite satisfies its edge
+without adding state.
+
+`max_concurrency` defaults to 4 and accepts 1–100. `fail_fast` defaults to true. A failed, canceled,
+or timed-out child skips its descendants. With `fail_fast: false`, independent work continues; with
+`fail_fast: true`, Wuko also cancels running siblings and stops new independent admission. Child
+results are committed in declaration order only after the whole group succeeds. Variable conflicts
+are still detected at that final join, including conflicts between ancestors and descendants.
+Interactive children require pre-supplied values. Directly nested concurrent groups are not
+supported. A group without `needs` retains the original independent fan-out behavior.
 
 For repeated blocks, use [batch, foreach, and matrix controls](workflow-control.md).
 

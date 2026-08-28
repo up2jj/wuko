@@ -8,7 +8,6 @@ import (
 	"slices"
 	"time"
 
-	controlpkg "github.com/up2jj/wuko/control"
 	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/workflow"
 )
@@ -19,6 +18,17 @@ type concurrentBranchOutcome struct {
 	err     error
 	started bool
 	skipped bool
+}
+
+type concurrentGraph struct {
+	dependencies [][]int
+	dependents   [][]int
+	ancestors    [][]int
+}
+
+type concurrentCompletion struct {
+	index   int
+	outcome concurrentBranchOutcome
 }
 
 func (e *Engine) runConcurrent(ctx context.Context, definition *workflow.Definition, concurrent *workflow.ConcurrentGroup, options Options, state *State, firstIndex, total int) ([]concurrentBranchOutcome, error) {
@@ -48,17 +58,7 @@ func (e *Engine) runConcurrent(ctx context.Context, definition *workflow.Definit
 	childOptions.Stdin = nil
 	childOptions.depth++
 
-	// MaxConcurrency is guaranteed to be in [1,100] here: Engine.Run validates every
-	// definition through ValidateStructure, which reaches ConcurrentGroup.Validate
-	// (workflow/types.go).
-	//
-	// executeConcurrentBranch re-checks the branch context before recording the branch
-	// as started; see control.FanOut for why admission alone does not imply that.
-	controlpkg.FanOut(groupCtx, len(concurrent.Steps), concurrent.MaxConcurrency, concurrent.FailFast,
-		func(branchCtx context.Context, i int) error {
-			outcomes[i] = e.executeConcurrentBranch(branchCtx, definition, concurrent.Steps[i], childOptions, snapshot, indexes[i], total)
-			return outcomes[i].err
-		})
+	e.runConcurrentGraph(groupCtx, definition, concurrent, childOptions, snapshot, indexes, total, outcomes)
 
 	groupErr := concurrentExecutionError(ctx, groupCtx, concurrent, outcomes)
 	if groupErr == nil {
@@ -89,6 +89,154 @@ func (e *Engine) runConcurrent(ctx context.Context, definition *workflow.Definit
 		return outcomes, fmt.Errorf("workflow %q concurrent group: %w", definition.Name, groupErr)
 	}
 	return outcomes, nil
+}
+
+func (e *Engine) runConcurrentGraph(ctx context.Context, definition *workflow.Definition, group *workflow.ConcurrentGroup, options Options, snapshot *State, indexes []int, total int, outcomes []concurrentBranchOutcome) {
+	graph := newConcurrentGraph(group.Steps)
+	remaining := make([]int, len(group.Steps))
+	ready := make([]int, 0, len(group.Steps))
+	for index, dependencies := range graph.dependencies {
+		remaining[index] = len(dependencies)
+		if len(dependencies) == 0 {
+			ready = append(ready, index)
+		}
+	}
+
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	completed := make(chan concurrentCompletion, len(group.Steps))
+	status := make([]uint8, len(group.Steps)) // 0 pending, 1 running, 2 finished, 3 dependency-skipped
+	running := 0
+	terminal := 0
+	stopAdmission := false
+
+	for terminal < len(group.Steps) {
+		for running < group.MaxConcurrency && len(ready) > 0 && !stopAdmission && runCtx.Err() == nil {
+			index := ready[0]
+			ready = ready[1:]
+			if status[index] != 0 {
+				continue
+			}
+			branchSnapshot := concurrentReadState(snapshot, group.Steps, outcomes, graph.ancestors[index])
+			status[index] = 1
+			running++
+			go func() {
+				outcome := e.executeConcurrentBranch(runCtx, definition, group.Steps[index], options, branchSnapshot, indexes[index], total)
+				completed <- concurrentCompletion{index: index, outcome: outcome}
+			}()
+		}
+		if running == 0 {
+			break
+		}
+
+		completion := <-completed
+		running--
+		terminal++
+		status[completion.index] = 2
+		outcomes[completion.index] = completion.outcome
+		if completion.outcome.err != nil {
+			terminal += skipConcurrentDescendants(definition, group.Steps, graph.dependents, completion.index, options, indexes, total, outcomes, status)
+			if group.FailFast {
+				stopAdmission = true
+				cancel()
+			}
+			continue
+		}
+
+		for _, dependent := range graph.dependents[completion.index] {
+			if status[dependent] != 0 {
+				continue
+			}
+			remaining[dependent]--
+			if remaining[dependent] == 0 {
+				ready = append(ready, dependent)
+			}
+		}
+		slices.Sort(ready)
+	}
+}
+
+func newConcurrentGraph(steps []workflow.Step) concurrentGraph {
+	ids := make(map[string]int, len(steps))
+	for index, workflowStep := range steps {
+		if workflowStep.ID != "" {
+			ids[workflowStep.ID] = index
+		}
+	}
+	graph := concurrentGraph{
+		dependencies: make([][]int, len(steps)),
+		dependents:   make([][]int, len(steps)),
+		ancestors:    make([][]int, len(steps)),
+	}
+	for index, workflowStep := range steps {
+		for _, need := range workflowStep.Needs {
+			// Unknown needs fail validation; ignore the edge rather than
+			// letting the zero value fabricate a dependency on the first step.
+			dependency, exists := ids[need]
+			if !exists {
+				continue
+			}
+			graph.dependencies[index] = append(graph.dependencies[index], dependency)
+			graph.dependents[dependency] = append(graph.dependents[dependency], index)
+		}
+		slices.Sort(graph.dependencies[index])
+	}
+	for index := range steps {
+		seen := make([]bool, len(steps))
+		var visit func(int)
+		visit = func(current int) {
+			for _, dependency := range graph.dependencies[current] {
+				if seen[dependency] {
+					continue
+				}
+				seen[dependency] = true
+				visit(dependency)
+				// Append after recursing so an ancestor follows its own
+				// ancestors: a later write in a chain overwrites the earlier
+				// one. Sorted dependencies keep unordered ancestors in
+				// declaration order.
+				graph.ancestors[index] = append(graph.ancestors[index], dependency)
+			}
+		}
+		visit(index)
+	}
+	return graph
+}
+
+func concurrentReadState(snapshot *State, steps []workflow.Step, outcomes []concurrentBranchOutcome, ancestors []int) *State {
+	state := cloneState(snapshot)
+	for _, index := range ancestors {
+		outcome := outcomes[index]
+		if outcome.state == nil || outcome.err != nil {
+			continue
+		}
+		maps.Copy(state.Steps, selectedStepOutputs(outcome.state, []workflow.Step{steps[index]}))
+		for variable := range outcome.state.writtenVars {
+			state.Vars[variable] = cloneAny(outcome.state.Vars[variable])
+		}
+	}
+	return state
+}
+
+func skipConcurrentDescendants(definition *workflow.Definition, steps []workflow.Step, dependents [][]int, failed int, options Options, indexes []int, total int, outcomes []concurrentBranchOutcome, status []uint8) int {
+	skipped := 0
+	queue := slices.Clone(dependents[failed])
+	for len(queue) > 0 {
+		index := queue[0]
+		queue = queue[1:]
+		if status[index] != 0 {
+			continue
+		}
+		status[index] = 3
+		stats := RunStats{StartedAt: time.Now(), Total: leafStepCount([]workflow.Step{steps[index]})}
+		recordSkippedSteps(definition, []workflow.Step{steps[index]}, options, &stats, indexes[index], total)
+		stats.FinishedAt = time.Now()
+		stats.Duration = stats.FinishedAt.Sub(stats.StartedAt)
+		outcomes[index] = concurrentBranchOutcome{stats: stats, skipped: true}
+		skipped++
+		queue = append(queue, dependents[index]...)
+	}
+	return skipped
 }
 
 func (e *Engine) executeConcurrentBranch(ctx context.Context, definition *workflow.Definition, declaration workflow.Step, options Options, snapshot *State, firstIndex, total int) concurrentBranchOutcome {

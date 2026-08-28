@@ -326,7 +326,7 @@ Use controls to run independent work or repeat a block over runtime data.
 | --- | --- | --- |
 | `if` | Run a step or sequential block only when an expression is true | [Execution and composition](docs/execution.md#conditions) |
 | `working_directory` | Run a block from an existing directory | [Execution and composition](docs/execution.md#scoped-working-directories) |
-| `concurrent` | Run a fixed set of independent steps in parallel | [Execution and composition](docs/execution.md#concurrency) |
+| `concurrent` | Run a bounded fixed DAG of parallel steps | [Execution and composition](docs/execution.md#concurrency) |
 | `batch` | Process a runtime list in fixed-size chunks | [Workflow controls](docs/workflow-control.md#batch) |
 | `foreach` | Run a block once per item in a runtime list | [Workflow controls](docs/workflow-control.md#foreach) |
 | `matrix` | Run every combination of named dimensions | [Workflow controls](docs/workflow-control.md#matrix) |

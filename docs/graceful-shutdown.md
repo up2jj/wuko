@@ -60,7 +60,8 @@ External workflow cancellation always takes precedence over `fail_fast`:
 
 For ordinary execution failures, `fail_fast: true` cancels active siblings and stops queued work;
 `fail_fast: false` waits for every child or iteration and reports failures in declaration or
-expansion order.
+expansion order. Inside a concurrent dependency graph, a failed child skips its descendants under
+either policy; independent children follow the selected `fail_fast` behavior.
 
 A batch, foreach, or matrix can contain a concurrent group. Cancellation then propagates through the
 control, into each active iteration, and into all active children of its nested concurrent group.

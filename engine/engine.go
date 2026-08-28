@@ -80,7 +80,8 @@ type Options struct {
 // State carries one workflow's mutable values and is deliberately unsynchronized.
 // Parallel execution never shares it: runConcurrent, executeControl, and executeCancelOn
 // hand every branch a deep clone (see cloneState and workflow.Clone) and publish or merge
-// results only after the group has joined. The validation rules that keep this true live
+// results only after the group has joined. Concurrent dependencies enrich a clone with
+// completed ancestor deltas without sharing the mutable State itself. The validation rules that keep this true live
 // in validateSteps in workflow/types.go.
 type State struct {
 	Inputs map[string]any

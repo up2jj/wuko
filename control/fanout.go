@@ -12,13 +12,11 @@ import (
 //
 // When failFast is true the first task error cancels the context handed to the
 // remaining tasks and stops further admission; otherwise task errors are ignored.
-// Either way FanOut reports nothing: callers record per-task outcomes themselves,
-// because a concurrent group and a fan-out control describe their failures
-// differently.
+// Either way FanOut reports nothing: callers record per-task outcomes themselves.
 //
 // limit must be positive. errgroup.SetLimit(0) makes every Go call block forever,
 // so callers validate their concurrency bound before reaching here -- see
-// Policy.Validate and workflow.ConcurrentGroup.Validate.
+// Policy.Validate.
 //
 // SetLimit may unblock one admission after cancellation, as an already-running
 // task exits and frees its slot. Admission therefore does not imply the task ran:

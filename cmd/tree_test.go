@@ -272,7 +272,7 @@ func TestWorkflowTreeDisplaysConcurrentGroup(t *testing.T) {
 	timeout := workflow.Duration(5 * time.Minute)
 	definition := &workflow.Definition{Name: "checks", Steps: []workflow.Step{{Concurrent: &workflow.ConcurrentGroup{
 		MaxConcurrency: 2, Timeout: &timeout, FailFast: false,
-		Steps: []workflow.Step{{ID: "lint", Type: "shell"}, {ID: "test", Type: "shell"}},
+		Steps: []workflow.Step{{ID: "lint", Type: "shell"}, {ID: "test", Type: "shell", Needs: []string{"lint"}}},
 	}}}}
 	var output bytes.Buffer
 	if err := writeWorkflowTree(&output, definition); err != nil {
@@ -281,7 +281,7 @@ func TestWorkflowTreeDisplaysConcurrentGroup(t *testing.T) {
 	want := `checks
 └── concurrent [max 2, timeout 5m0s, wait for all]
     ├── lint (shell)
-    └── test (shell)
+    └── test (shell) [needs: lint]
 `
 	if output.String() != want {
 		t.Fatalf("output = %q, want %q", output.String(), want)

@@ -128,6 +128,9 @@ func (scope *referenceScope) addWrittenVariables(stepType string, raw map[string
 // branches and try/catch bodies namespace their step IDs away but commit their
 // variable writes to the enclosing run.
 func (scope *referenceScope) mergeVariables(other *referenceScope) {
+	if other == nil {
+		return
+	}
 	source := other.roots["vars"]
 	if source == nil {
 		return
@@ -144,6 +147,23 @@ func (scope *referenceScope) mergeVariables(other *referenceScope) {
 		if _, declared := target.fields[name]; !declared {
 			target.fields[name] = cloneReferenceSchema(schema)
 		}
+	}
+}
+
+func (scope *referenceScope) mergeSteps(source *referenceSchema) {
+	if source == nil {
+		return
+	}
+	target := scope.roots["steps"]
+	if target == nil || target.open {
+		return
+	}
+	if source.open {
+		scope.roots["steps"] = openReference
+		return
+	}
+	for id, schema := range source.fields {
+		target.fields[id] = cloneReferenceSchema(schema)
 	}
 }
 
@@ -498,16 +518,44 @@ func (validator *referenceValidator) validateActionSource(step workflow.Step, sc
 }
 
 func (validator *referenceValidator) validateConcurrent(step workflow.Step, scope *referenceScope) (*referenceScope, []deferredReferences, error) {
-	result := scope.clone()
-	for _, branch := range step.Concurrent.Steps {
-		branchScope, _, err := validator.validateSteps([]workflow.Step{branch}, scope.clone())
+	graph := newConcurrentGraph(step.Concurrent.Steps)
+	remaining := make([]int, len(step.Concurrent.Steps))
+	ready := make([]int, 0, len(step.Concurrent.Steps))
+	branchScopes := make([]*referenceScope, len(step.Concurrent.Steps))
+	for index, dependencies := range graph.dependencies {
+		remaining[index] = len(dependencies)
+		if len(dependencies) == 0 {
+			ready = append(ready, index)
+		}
+	}
+	for len(ready) > 0 {
+		index := ready[0]
+		ready = ready[1:]
+		branchInput := scope.clone()
+		for _, ancestor := range graph.ancestors[index] {
+			branchInput.mergeSteps(selectedStepSchema([]workflow.Step{step.Concurrent.Steps[ancestor]}))
+			branchInput.mergeVariables(branchScopes[ancestor])
+		}
+		branchScope, _, err := validator.validateSteps([]workflow.Step{step.Concurrent.Steps[index]}, branchInput)
 		if err != nil {
 			return nil, nil, fmt.Errorf("concurrent group: %w", err)
 		}
+		branchScopes[index] = branchScope
+		for _, dependent := range graph.dependents[index] {
+			remaining[dependent]--
+			if remaining[dependent] == 0 {
+				ready = append(ready, dependent)
+			}
+		}
+		slices.Sort(ready)
+	}
+
+	result := scope.clone()
+	for index, branch := range step.Concurrent.Steps {
 		for id := range selectedStepSchema([]workflow.Step{branch}).fields {
 			result.addStep(id)
 		}
-		result.mergeVariables(branchScope)
+		result.mergeVariables(branchScopes[index])
 	}
 	return result, nil, nil
 }

@@ -104,6 +104,7 @@ func (c *Condition) UnmarshalYAML(node *yaml.Node) error {
 // or a local step-file requirement.
 type Step struct {
 	ID               string              `yaml:"id"`
+	Needs            []string            `yaml:"needs,omitempty"`
 	Type             string              `yaml:"type,omitempty"`
 	Uses             ActionSource        `yaml:"uses,omitempty"`
 	Require          *string             `yaml:"require,omitempty"`
@@ -131,6 +132,7 @@ type Step struct {
 	Action           *Action             `yaml:"-"`
 	Location         diagnostic.Location `yaml:"-"`
 	hasWorkingDir    bool
+	hasNeeds         bool
 	sourcePath       string
 }
 
@@ -139,7 +141,7 @@ func (workflowStep *Step) UnmarshalYAML(node *yaml.Node) error {
 		return fmt.Errorf("step must be an object")
 	}
 	if err := rejectUnknownFields(node, "step", map[string]bool{
-		"id": true, "type": true, "uses": true, "require": true, "working_directory": true, "worktree": true, "executor": true, "steps": true, "finally": true, "defer": true, "concurrent": true,
+		"id": true, "needs": true, "type": true, "uses": true, "require": true, "working_directory": true, "worktree": true, "executor": true, "steps": true, "finally": true, "defer": true, "concurrent": true,
 		"batch": true, "foreach": true, "matrix": true, "loop": true, "once": true, "cancel_on": true, "try": true, "catch": true, "return": true, "sha256": true, "if": true, "timeout": true,
 		"retry": true, "with": true,
 	}); err != nil {
@@ -148,6 +150,9 @@ func (workflowStep *Step) UnmarshalYAML(node *yaml.Node) error {
 	for i := 0; i < len(node.Content); i += 2 {
 		if node.Content[i].Value == "working_directory" && (node.Content[i+1].Kind != yaml.ScalarNode || node.Content[i+1].Tag != "!!str") {
 			return fmt.Errorf("working_directory must be a string path")
+		}
+		if node.Content[i].Value == "needs" && node.Content[i+1].Kind != yaml.SequenceNode {
+			return fmt.Errorf("needs must be a list")
 		}
 		if node.Content[i].Value == "steps" && node.Content[i+1].Kind != yaml.SequenceNode {
 			return fmt.Errorf("steps must be a list")
@@ -166,6 +171,7 @@ func (workflowStep *Step) UnmarshalYAML(node *yaml.Node) error {
 	}
 	*workflowStep = Step(decoded)
 	workflowStep.hasWorkingDir = hasMappingField(node, "working_directory")
+	workflowStep.hasNeeds = hasMappingField(node, "needs")
 	return nil
 }
 
@@ -348,7 +354,7 @@ func (scope *ExecutorScope) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
-// ConcurrentGroup runs independent child steps against one shared pre-group state snapshot.
+// ConcurrentGroup runs a bounded sibling DAG behind one atomic fork/join boundary.
 type ConcurrentGroup struct {
 	Steps          []Step    `yaml:"steps"`
 	MaxConcurrency int       `yaml:"max_concurrency,omitempty"`
@@ -699,6 +705,12 @@ func validateDefinitionStructure(definition *Definition, allowActions bool) erro
 	if err := definition.ValidateOutputContract(); err != nil {
 		return err
 	}
+	if err := validateNeedsPlacement(definition.Steps, false); err != nil {
+		return err
+	}
+	if err := validateNeedsPlacement(definition.Finally, false); err != nil {
+		return fmt.Errorf("finally: %w", err)
+	}
 
 	seen := make(map[string]struct{}, len(definition.Steps)+len(definition.Finally))
 	if err := collectScopeIDs(definition.Steps, seen); err != nil {
@@ -740,11 +752,35 @@ func validateLifecycleSteps(steps []Step, allowActions bool, name string) error 
 		return nil
 	}
 	seen := make(map[string]struct{}, len(steps))
+	if err := validateNeedsPlacement(steps, false); err != nil {
+		return fmt.Errorf("%s: %w", name, err)
+	}
 	if err := collectScopeIDs(steps, seen); err != nil {
 		return fmt.Errorf("%s: %w", name, err)
 	}
 	if err := validateSteps(steps, allowActions, scopeTop, seen); err != nil {
 		return fmt.Errorf("%s: %w", name, err)
+	}
+	return nil
+}
+
+func validateNeedsPlacement(steps []Step, concurrentChildren bool) error {
+	for index, workflowStep := range steps {
+		if (workflowStep.hasNeeds || len(workflowStep.Needs) > 0) && !concurrentChildren {
+			label := workflowStep.ID
+			if label == "" {
+				label = fmt.Sprintf("step %d", index+1)
+			} else {
+				label = fmt.Sprintf("step %q", label)
+			}
+			return fmt.Errorf("%s: needs is only supported on direct children of concurrent", label)
+		}
+		for _, child := range workflowStep.ChildSequences() {
+			childrenAreConcurrent := workflowStep.Concurrent != nil && child.Role == ChildSteps
+			if err := validateNeedsPlacement(child.Steps, childrenAreConcurrent); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
@@ -1301,7 +1337,77 @@ func (group ConcurrentGroup) Validate() error {
 	if group.Timeout != nil && group.Timeout.Value() <= 0 {
 		return fmt.Errorf("concurrent timeout must be greater than zero")
 	}
-	return nil
+	return validateConcurrentNeeds(group.Steps)
+}
+
+func validateConcurrentNeeds(steps []Step) error {
+	ids := make(map[string]int, len(steps))
+	for index, workflowStep := range steps {
+		if workflowStep.ID == "" {
+			continue
+		}
+		if previous, exists := ids[workflowStep.ID]; exists {
+			return fmt.Errorf("concurrent children %d and %d have duplicate id %q", previous+1, index+1, workflowStep.ID)
+		}
+		ids[workflowStep.ID] = index
+	}
+
+	indegree := make([]int, len(steps))
+	dependents := make([][]int, len(steps))
+	for index, workflowStep := range steps {
+		seen := make(map[string]struct{}, len(workflowStep.Needs))
+		for _, need := range workflowStep.Needs {
+			if _, duplicate := seen[need]; duplicate {
+				return fmt.Errorf("concurrent child %q lists duplicate need %q", concurrentStepLabel(workflowStep, index), need)
+			}
+			seen[need] = struct{}{}
+			dependency, exists := ids[need]
+			if !exists {
+				return fmt.Errorf("concurrent child %q needs unknown sibling %q", concurrentStepLabel(workflowStep, index), need)
+			}
+			if dependency == index {
+				return fmt.Errorf("concurrent child %q cannot need itself", concurrentStepLabel(workflowStep, index))
+			}
+			indegree[index]++
+			dependents[dependency] = append(dependents[dependency], index)
+		}
+	}
+
+	ready := make([]int, 0, len(steps))
+	for index, degree := range indegree {
+		if degree == 0 {
+			ready = append(ready, index)
+		}
+	}
+	visited := 0
+	for len(ready) > 0 {
+		index := ready[0]
+		ready = ready[1:]
+		visited++
+		for _, dependent := range dependents[index] {
+			indegree[dependent]--
+			if indegree[dependent] == 0 {
+				ready = append(ready, dependent)
+			}
+		}
+	}
+	if visited == len(steps) {
+		return nil
+	}
+	cyclic := make([]string, 0, len(steps)-visited)
+	for index, degree := range indegree {
+		if degree > 0 {
+			cyclic = append(cyclic, concurrentStepLabel(steps[index], index))
+		}
+	}
+	return fmt.Errorf("concurrent needs contain a cycle involving %q", strings.Join(cyclic, ", "))
+}
+
+func concurrentStepLabel(workflowStep Step, index int) string {
+	if workflowStep.ID != "" {
+		return workflowStep.ID
+	}
+	return fmt.Sprintf("branch %d", index+1)
 }
 
 // ValidateExecutionPolicy validates retry and timeout settings for a step.
