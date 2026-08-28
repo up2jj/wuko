@@ -93,6 +93,11 @@ func TestChangedTracksMissingPathsAndExcludesOwnStore(t *testing.T) {
 	if !runChanged(t, runner, request) || runChanged(t, runner, request) {
 		t.Fatal("snapshot file caused self-triggering")
 	}
+	writeTestFile(t, runDir, ".wuko/values/prefs.json", `{"theme":"dark"}`)
+	writeTestFile(t, runDir, ".wuko/values/prefs.lock", "")
+	if runChanged(t, runner, request) {
+		t.Fatal("a key_value store in the values root triggered the detector")
+	}
 	writeTestFile(t, runDir, "missing.txt", "present")
 	if !runChanged(t, runner, request) {
 		t.Fatal("creation of a missing literal path was not reported")

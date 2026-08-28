@@ -372,11 +372,13 @@ func excludedStoreFile(root, relative, localValueDir string) bool {
 		return false
 	}
 	localValueDir, err = filepath.Abs(localValueDir)
-	if err != nil || filepath.Clean(filepath.Dir(absolute)) != filepath.Clean(localValueDir) {
+	if err != nil {
 		return false
 	}
-	name := filepath.Base(absolute)
-	return name == storeName+".json" || name == storeName+".lock" || strings.HasPrefix(name, ".wuko-values-")
+	// Everything in the values root is state Wuko manages: this detector's snapshots and
+	// the stores key_value steps write. None of it is workflow input, so a pattern that
+	// reaches the values root must not make a detector trigger on Wuko's own writes.
+	return filepath.Clean(filepath.Dir(absolute)) == filepath.Clean(localValueDir)
 }
 
 func uniqueStrings(values []string) func(func(string) bool) {

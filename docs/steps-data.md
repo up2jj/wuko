@@ -453,4 +453,6 @@ Detect configuration changes in a matrix:
 
 At least one non-empty `files` or `values` input is required. The first execution returns
 `changed: true`. Snapshots are stored atomically in the workflow-local
-`.wuko/values/changed.json`; file timestamps and permissions do not affect the fingerprint.
+`.wuko/values/changed.json`; file timestamps and permissions do not affect the fingerprint. Files in
+the values root are Wuko's own state, so a pattern that reaches it never makes a detector trigger on
+a snapshot or on a store a `key_value` step wrote.
