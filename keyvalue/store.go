@@ -315,6 +315,11 @@ func (s *Store) read() (map[string]any, error) {
 	if err != nil {
 		return nil, fmt.Errorf("reading store %s: %w", s.path, err)
 	}
+	// An empty file is what an interrupted create leaves behind. Read it as the empty
+	// store a missing file already reads as, rather than failing every later operation.
+	if len(bytes.TrimSpace(data)) == 0 {
+		return make(map[string]any), nil
+	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.UseNumber()
 	var values map[string]any

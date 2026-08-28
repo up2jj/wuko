@@ -3,6 +3,7 @@ package keyvalue
 import (
 	"math"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -30,6 +31,9 @@ func TestConfigValidation(t *testing.T) {
 		{"list with prefix", map[string]any{"operation": "list", "scope": "local", "store": "prefs", "prefix": "build-"}, ""},
 		{"get with prefix", map[string]any{"operation": "get", "scope": "local", "store": "prefs", "key": "k", "prefix": "build-"}, "prefix is not allowed for get"},
 		{"missing scope", map[string]any{"operation": "list", "store": "prefs"}, "scope is required"},
+		{"blank scope", map[string]any{"operation": "list", "scope": " ", "store": "prefs"}, "scope must not be empty"},
+		{"blank store", map[string]any{"operation": "list", "scope": "local", "store": ""}, "store must not be empty"},
+		{"blank operation", map[string]any{"operation": "", "scope": "local", "store": "prefs"}, "operation must not be empty"},
 		{"bad scope", map[string]any{"operation": "list", "scope": "shared", "store": "prefs"}, "scope must be"},
 		{"bad static scope with templated store", map[string]any{"operation": "list", "scope": "shared", "store": "{{ .vars.store }}"}, "scope must be"},
 		{"bad store", map[string]any{"operation": "list", "scope": "local", "store": "../prefs"}, "invalid store name"},
@@ -358,6 +362,67 @@ func TestSetExprRejectsUnusableResults(t *testing.T) {
 				t.Fatalf("error = %v, want %q", err, tt.want)
 			}
 		})
+	}
+}
+
+func TestRunReportsWhichFieldIsUnrendered(t *testing.T) {
+	tests := []struct {
+		name  string
+		raw   map[string]any
+		field string
+	}{
+		{"key", map[string]any{"operation": "get", "scope": "local", "store": "prefs", "key": "{{ .vars.key }}"}, "key"},
+		{"prefix", map[string]any{"operation": "list", "scope": "local", "store": "prefs", "prefix": "{{ .vars.prefix }}"}, "prefix"},
+		{"store", map[string]any{"operation": "list", "scope": "local", "store": "{{ .vars.store }}"}, "store"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runner, err := New(tt.raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = runner.Run(t.Context(), step.Request{LocalValueDir: t.TempDir()})
+			want := tt.field + " contains an unresolved template"
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("error = %v, want %q", err, want)
+			}
+		})
+	}
+}
+
+func TestFailedOperationsReportNoOutputs(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "prefs.json"), []byte("[1,2"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runner, err := New(config("get", "theme", nil, false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runner.Run(t.Context(), step.Request{LocalValueDir: dir})
+	if err == nil || !strings.Contains(err.Error(), "decoding store") {
+		t.Fatalf("error = %v", err)
+	}
+	if result.Outputs != nil {
+		t.Fatalf("failed run reported outputs %#v", result.Outputs)
+	}
+}
+
+func TestNumbersNoGoTypeHoldsStayJSONShapes(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "prefs.json"), []byte(`{"huge": 1e400}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runner, err := New(config("get", "huge", nil, false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runner.Run(t.Context(), step.Request{LocalValueDir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := result.Outputs["value"]; got != "1e400" {
+		t.Fatalf("value = %#v (%T), want the string 1e400", got, got)
 	}
 }
 

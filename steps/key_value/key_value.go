@@ -162,7 +162,7 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 	}
 	result, err := r.perform(ctx, store, request)
 	if err != nil {
-		return result, err
+		return step.Result{}, err
 	}
 	return r.withVariable(result), nil
 }
@@ -231,14 +231,13 @@ func (r *Runner) perform(ctx context.Context, store *storepkg.Store, request ste
 }
 
 func (r *Runner) validateConfig() error {
-	if r.config.Scope == "" {
-		return fmt.Errorf("scope is required")
+	for _, field := range []string{"scope", "store"} {
+		if err := r.requireNonEmpty(field); err != nil {
+			return err
+		}
 	}
-	if r.config.Store == "" {
-		return fmt.Errorf("store is required")
-	}
-	if _, declared := r.present["variable"]; declared && strings.TrimSpace(r.config.Variable) == "" {
-		return fmt.Errorf("variable must not be empty")
+	if err := r.rejectEmpty("variable"); err != nil {
+		return err
 	}
 	// OpenWorkflowScoped validates resolved store names and scopes without accessing the filesystem.
 	if !templated(r.config.Store) {
@@ -258,8 +257,10 @@ func (r *Runner) validateConfig() error {
 }
 
 func (r *Runner) validateResolvedConfig() error {
-	if templated(r.config.Operation) || templated(r.config.Scope) || templated(r.config.Store) {
-		return fmt.Errorf("key-value configuration contains an unresolved template")
+	for _, field := range r.textFields() {
+		if templated(field.value) {
+			return fmt.Errorf("%s contains an unresolved template", field.name)
+		}
 	}
 	if _, err := storepkg.OpenWorkflowScoped("local", "global", r.config.Scope, r.config.Store); err != nil {
 		return err
@@ -268,8 +269,8 @@ func (r *Runner) validateResolvedConfig() error {
 }
 
 func (r *Runner) validateOperation() error {
-	if r.config.Operation == "" {
-		return fmt.Errorf("operation is required")
+	if err := r.requireNonEmpty("operation"); err != nil {
+		return err
 	}
 	allowed, known := operationFields[r.config.Operation]
 	if !known {
@@ -296,10 +297,54 @@ func (r *Runner) validateOperation() error {
 			return fmt.Errorf("expr is required for update")
 		}
 	}
-	if r.hasExpr && strings.TrimSpace(r.config.Expr) == "" {
-		return fmt.Errorf("expr must not be empty")
+	if err := r.rejectEmpty("expr"); err != nil {
+		return err
 	}
 	return r.normalizeLiterals()
+}
+
+type textField struct {
+	name  string
+	value string
+}
+
+// textFields are the string inputs in a fixed order, so a configuration with more than one
+// problem always reports the same one.
+func (r *Runner) textFields() []textField {
+	return []textField{
+		{"operation", r.config.Operation}, {"scope", r.config.Scope}, {"store", r.config.Store},
+		{"key", r.config.Key}, {"expr", r.config.Expr}, {"prefix", r.config.Prefix},
+		{"variable", r.config.Variable},
+	}
+}
+
+// requireNonEmpty reports a missing mandatory field, separating one the workflow left out
+// from one it declared that rendered to nothing: both used to read as "field is required".
+func (r *Runner) requireNonEmpty(name string) error {
+	if r.fieldValue(name) != "" {
+		return nil
+	}
+	if _, declared := r.present[name]; declared {
+		return fmt.Errorf("%s must not be empty", name)
+	}
+	return fmt.Errorf("%s is required", name)
+}
+
+// rejectEmpty reports an optional field the workflow declared but left blank.
+func (r *Runner) rejectEmpty(name string) error {
+	if _, declared := r.present[name]; !declared || r.fieldValue(name) != "" {
+		return nil
+	}
+	return fmt.Errorf("%s must not be empty", name)
+}
+
+func (r *Runner) fieldValue(name string) string {
+	for _, field := range r.textFields() {
+		if field.name == name {
+			return strings.TrimSpace(field.value)
+		}
+	}
+	return ""
 }
 
 // normalizeLiterals converts the literal inputs to the shapes the store round-trips, which
@@ -390,7 +435,9 @@ func runtimeValue(value any) any {
 		}
 		number, err := typed.Float64()
 		if err != nil {
-			return typed
+			// A magnitude no Go number holds still has to leave as a YAML/JSON shape,
+			// because json.Number is not one of the types workflow state carries.
+			return typed.String()
 		}
 		return number
 	case []any:

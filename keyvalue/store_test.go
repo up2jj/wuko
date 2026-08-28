@@ -446,3 +446,24 @@ func TestClearRemovesEveryKey(t *testing.T) {
 		t.Fatalf("repeated clear = %d, %v", removed, err)
 	}
 }
+
+func TestEmptyStoreFileReadsAsAnEmptyStore(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "interrupted.json"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := Open(dir, "interrupted")
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := store.List(t.Context())
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("entries = %#v, %v", entries, err)
+	}
+	if _, err := store.Set(t.Context(), "theme", "dark"); err != nil {
+		t.Fatalf("set on an empty file: %v", err)
+	}
+	if value, found, err := store.Get(t.Context(), "theme"); err != nil || !found || value != "dark" {
+		t.Fatalf("get = %#v, %v, %v", value, found, err)
+	}
+}
