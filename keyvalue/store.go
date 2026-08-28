@@ -13,6 +13,7 @@ import (
 	"reflect"
 	"regexp"
 	"slices"
+	"strings"
 
 	"github.com/up2jj/wuko/internal/filelock"
 )
@@ -50,6 +51,22 @@ func Open(dir, name string) (*Store, error) {
 		path:     filepath.Join(dir, name+".json"),
 		lockPath: filepath.Join(dir, name+".lock"),
 	}, nil
+}
+
+// reservedNames are the stores Wuko manages for itself: the changed step's snapshots and
+// the workflow picker's history. Their owners open them through Open, which does not
+// consult this list.
+var reservedNames = map[string]struct{}{"changed": {}, "picker": {}}
+
+// OpenWorkflowScoped opens a store a workflow asked for by name. It refuses the names Wuko
+// reserves so a workflow cannot read or rewrite Wuko's own state through the generic
+// key-value interface. Matching ignores case because reserved and workflow stores share a
+// directory, and that directory may sit on a case-insensitive filesystem.
+func OpenWorkflowScoped(localDir, globalDir, scope, name string) (*Store, error) {
+	if _, reserved := reservedNames[strings.ToLower(name)]; reserved {
+		return nil, fmt.Errorf("store name %q is reserved by wuko", name)
+	}
+	return OpenScoped(localDir, globalDir, scope, name)
 }
 
 // OpenScoped selects a root explicitly by scope and opens a named store in it.

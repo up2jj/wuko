@@ -516,7 +516,7 @@ func (r *runtime) kvStore(state *glua.LState, operation string, needsKey bool) (
 			return nil, kvOptions{}, false
 		}
 	}
-	store, err := storepkg.OpenScoped(r.request.LocalValueDir, r.request.GlobalValueDir, scope, name)
+	store, err := storepkg.OpenWorkflowScoped(r.request.LocalValueDir, r.request.GlobalValueDir, scope, name)
 	if err != nil {
 		state.RaiseError("key-value %s: %v", operation, err)
 		return nil, kvOptions{}, false

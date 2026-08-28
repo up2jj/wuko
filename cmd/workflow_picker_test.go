@@ -8,8 +8,18 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/keyvalue"
 	"github.com/up2jj/wuko/workflow"
 )
+
+// Picker state lives in the global values root beside workflow-managed stores, so a
+// workflow must not be able to read or rewrite it by name.
+func TestPickerStoreNameIsReservedFromWorkflows(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := keyvalue.OpenWorkflowScoped(dir, dir, keyvalue.Global, workflowPickerStoreName); err == nil {
+		t.Fatalf("a workflow can open the picker store %q", workflowPickerStoreName)
+	}
+}
 
 func TestWorkflowPickerStatePersistsAndPrunesUnavailable(t *testing.T) {
 	configDir := t.TempDir()

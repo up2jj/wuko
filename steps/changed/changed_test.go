@@ -9,8 +9,18 @@ import (
 	"testing"
 	"time"
 
+	storepkg "github.com/up2jj/wuko/keyvalue"
 	"github.com/up2jj/wuko/step"
 )
+
+// The snapshot store shares the values directory with workflow-managed stores, so a
+// workflow must not be able to open it by name and rewrite the detector's history.
+func TestSnapshotStoreNameIsReservedFromWorkflows(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := storepkg.OpenWorkflowScoped(dir, dir, storepkg.Local, storeName); err == nil {
+		t.Fatalf("a workflow can open the changed snapshot store %q", storeName)
+	}
+}
 
 func TestChangedTracksFilesDirectoriesGlobsAndValues(t *testing.T) {
 	runDir := t.TempDir()

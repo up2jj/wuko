@@ -113,7 +113,7 @@ func (r *Runner) Validate(_ context.Context, request step.Request) error {
 	if templated(name) {
 		name = "rendered-store"
 	}
-	_, err := storepkg.OpenScoped(request.LocalValueDir, request.GlobalValueDir, r.config.Scope, name)
+	_, err := storepkg.OpenWorkflowScoped(request.LocalValueDir, request.GlobalValueDir, r.config.Scope, name)
 	return err
 }
 
@@ -122,7 +122,7 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 	if err := r.validateResolvedConfig(); err != nil {
 		return step.Result{}, err
 	}
-	store, err := storepkg.OpenScoped(request.LocalValueDir, request.GlobalValueDir, r.config.Scope, r.config.Store)
+	store, err := storepkg.OpenWorkflowScoped(request.LocalValueDir, request.GlobalValueDir, r.config.Scope, r.config.Store)
 	if err != nil {
 		return step.Result{}, err
 	}
@@ -169,14 +169,14 @@ func (r *Runner) validateConfig() error {
 	if r.config.Store == "" {
 		return fmt.Errorf("store is required")
 	}
-	// Open and OpenScoped validate resolved store names and scopes without accessing the filesystem.
+	// OpenWorkflowScoped validates resolved store names and scopes without accessing the filesystem.
 	if !templated(r.config.Store) {
-		if _, err := storepkg.Open("root", r.config.Store); err != nil {
+		if _, err := storepkg.OpenWorkflowScoped("root", "root", storepkg.Local, r.config.Store); err != nil {
 			return err
 		}
 	}
 	if !templated(r.config.Scope) {
-		if _, err := storepkg.OpenScoped("local", "global", r.config.Scope, "store"); err != nil {
+		if _, err := storepkg.OpenWorkflowScoped("local", "global", r.config.Scope, "store"); err != nil {
 			return err
 		}
 	}
@@ -190,7 +190,7 @@ func (r *Runner) validateResolvedConfig() error {
 	if templated(r.config.Operation) || templated(r.config.Scope) || templated(r.config.Store) {
 		return fmt.Errorf("key-value configuration contains an unresolved template")
 	}
-	if _, err := storepkg.OpenScoped("local", "global", r.config.Scope, r.config.Store); err != nil {
+	if _, err := storepkg.OpenWorkflowScoped("local", "global", r.config.Scope, r.config.Store); err != nil {
 		return err
 	}
 	return r.validateOperation()

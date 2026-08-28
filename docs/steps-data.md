@@ -393,6 +393,9 @@ whether the key existed as `found`, and a `get` followed by a `set` cannot make 
 vaults. `get` and `list` never create anything: reading a store that was never written returns an
 empty result and leaves the values directory absent.
 
+The store names `changed` and `picker` are reserved: Wuko keeps the change detector's snapshots and
+the workflow picker's history there, and neither workflows nor Lua's `wuko.kv` API may open them.
+
 ## `changed`
 
 Compare files and structured values with the detector's previous successful execution.

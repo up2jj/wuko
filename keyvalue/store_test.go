@@ -403,3 +403,18 @@ func TestUpdateReportsWhetherTheValueChanged(t *testing.T) {
 		t.Fatalf("failed update wrote %#v", value)
 	}
 }
+
+func TestOpenWorkflowScopedRefusesReservedStores(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"changed", "picker", "CHANGED", "Picker"} {
+		if _, err := OpenWorkflowScoped(dir, dir, Local, name); err == nil || !strings.Contains(err.Error(), "reserved") {
+			t.Errorf("OpenWorkflowScoped(%q) error = %v, want a reserved-name error", name, err)
+		}
+		if _, err := Open(dir, name); err != nil {
+			t.Errorf("Open(%q) error = %v, want the owner to keep access", name, err)
+		}
+	}
+	if _, err := OpenWorkflowScoped(dir, dir, Local, "changed-files"); err != nil {
+		t.Errorf("OpenWorkflowScoped(\"changed-files\") error = %v", err)
+	}
+}

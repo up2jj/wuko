@@ -26,6 +26,8 @@ func TestConfigValidation(t *testing.T) {
 		{"bad scope", map[string]any{"operation": "list", "scope": "shared", "store": "prefs"}, "scope must be"},
 		{"bad static scope with templated store", map[string]any{"operation": "list", "scope": "shared", "store": "{{ .vars.store }}"}, "scope must be"},
 		{"bad store", map[string]any{"operation": "list", "scope": "local", "store": "../prefs"}, "invalid store name"},
+		{"reserved store", map[string]any{"operation": "list", "scope": "local", "store": "changed"}, `store name "changed" is reserved`},
+		{"reserved store ignoring case", map[string]any{"operation": "get", "scope": "global", "store": "Picker", "key": "state"}, "is reserved"},
 		{"bad static store with templated scope", map[string]any{"operation": "list", "scope": "{{ .vars.scope }}", "store": "../prefs"}, "invalid store name"},
 		{"get missing key", config("get", "", nil, false), "key is required"},
 		{"get with value", config("get", "key", true, true), "value is not allowed"},

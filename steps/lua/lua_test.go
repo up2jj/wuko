@@ -378,6 +378,7 @@ func TestLuaKeyValueRejectsInvalidOptionsAndUnavailableLocalStore(t *testing.T) 
 		{"unknown option", `wuko.kv.list({scope="global", store="prefs", extra=true})`, "unknown option"},
 		{"wrong key type", `wuko.kv.get({scope="global", store="prefs", key=true})`, "key must be a non-empty string"},
 		{"bad scope", `wuko.kv.list({scope="shared", store="prefs"})`, "scope must be"},
+		{"reserved store", `wuko.kv.list({scope="global", store="picker"})`, "is reserved by wuko"},
 		{"local unavailable", `wuko.kv.list({scope="local", store="prefs"})`, "local key-value storage is unavailable"},
 	}
 	for _, tt := range tests {
