@@ -110,7 +110,7 @@ func parseTOMLStructure(data []byte) (*tomlStructure, error) {
 		}
 		if trimmed[0] == '[' {
 			previous := structure.tables[current.Pointer()]
-			previous.insertAt = tomlCommentBlockStart(data, offset)
+			previous.insertAt = tomlTableInsertPoint(data, offset)
 			structure.tables[current.Pointer()] = previous
 			array := len(trimmed) > 1 && trimmed[1] == '['
 			closing := []byte("]")
@@ -179,17 +179,17 @@ func parseTOMLStructure(data []byte) (*tomlStructure, error) {
 	return structure, nil
 }
 
-// tomlCommentBlockStart backs up over the comment lines directly above a table
-// header so a created key lands before them, leaving the comment attached to
-// the table it documents.
-func tomlCommentBlockStart(data []byte, offset int) int {
+// tomlTableInsertPoint backs up over the blank and comment lines directly above
+// a table header so a key created in the preceding table lands before them,
+// leaving the header with the spacing and comment that introduce it.
+func tomlTableInsertPoint(data []byte, offset int) int {
 	start := offset
 	for start > 0 {
 		lineStart := start - 1
 		for lineStart > 0 && data[lineStart-1] != '\n' {
 			lineStart--
 		}
-		if trimmed := bytes.TrimSpace(data[lineStart : start-1]); len(trimmed) == 0 || trimmed[0] != '#' {
+		if line := bytes.TrimSpace(data[lineStart : start-1]); len(line) > 0 && line[0] != '#' {
 			break
 		}
 		start = lineStart
@@ -349,7 +349,11 @@ func (s *tomlStructure) insertEdit(path spec.NormalizedPath, position string, va
 	if index >= len(elements) {
 		return []textEdit{s.arrayAppendEdit(elements, open, close, encoded)}, nil
 	}
-	return []textEdit{{start: elements[index].start, end: elements[index].start, text: append(encoded, []byte(", ")...)}}, nil
+	separator := []byte(", ")
+	if bytes.ContainsRune(s.data[open:close], '\n') {
+		separator = []byte(",\n" + lineIndent(s.data, elements[index].start))
+	}
+	return []textEdit{{start: elements[index].start, end: elements[index].start, text: append(encoded, separator...)}}, nil
 }
 
 func (s *tomlStructure) deleteArrayElement(path spec.NormalizedPath) ([]textEdit, error) {
@@ -523,11 +527,21 @@ func tomlArrayElementEnd(data []byte, start, close int) int {
 			}
 		case ',':
 			if depth == 0 {
-				return trimSpaceEnd(data, start, i)
+				return trimArrayElementEnd(data, start, i)
 			}
 		}
 	}
-	return trimSpaceEnd(data, start, close)
+	return trimArrayElementEnd(data, start, close)
+}
+
+// trimArrayElementEnd drops the whitespace between an element and whatever
+// follows it. A multi-line array separates elements with newlines, which belong
+// to the array's layout rather than to the element.
+func trimArrayElementEnd(data []byte, start, end int) int {
+	for end > start && (data[end-1] == ' ' || data[end-1] == '\t' || data[end-1] == '\r' || data[end-1] == '\n') {
+		end--
+	}
+	return end
 }
 
 func coalesceTOMLInsertions(edits []textEdit) []textEdit {

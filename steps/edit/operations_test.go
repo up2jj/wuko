@@ -144,7 +144,7 @@ func TestTOMLStructuralEditsPreserveUnrelatedBytes(t *testing.T) {
 		{
 			name: "create", input: "# top\nname = 'demo'\n\n[dependencies]\nold = 'keep' # inline\n\n[tail]\nenabled = true\n",
 			config: map[string]any{"operation": "set", "path": "$.dependencies.wuko", "value": "v1", "missing": "create"},
-			want:   "# top\nname = 'demo'\n\n[dependencies]\nold = 'keep' # inline\n\nwuko = \"v1\"\n[tail]\nenabled = true\n",
+			want:   "# top\nname = 'demo'\n\n[dependencies]\nold = 'keep' # inline\nwuko = \"v1\"\n\n[tail]\nenabled = true\n",
 		},
 		{
 			name: "delete", input: "keep = 1\nremove = 2 # gone\n# standalone\ntail = 3\n",
@@ -164,7 +164,7 @@ func TestTOMLStructuralEditsPreserveUnrelatedBytes(t *testing.T) {
 		{
 			name: "merge", input: "[service]\nimage = 'v1'\nkeep = true # styled\n\n[tail]\nvalue = 3\n",
 			config: map[string]any{"operation": "merge", "path": "$.service", "value": map[string]any{"image": "v2", "added": 4}},
-			want:   "[service]\nimage = \"v2\"\nkeep = true # styled\n\nadded = 4\n[tail]\nvalue = 3\n",
+			want:   "[service]\nimage = \"v2\"\nkeep = true # styled\nadded = 4\n\n[tail]\nvalue = 3\n",
 		},
 		{
 			name: "rename", input: "'old' = { styled = true }\nkeep = 2\n",
@@ -473,7 +473,7 @@ func TestStructuralEditsSurviveAwkwardLayouts(t *testing.T) {
 			name: "toml create above a documented table", file: "document.toml",
 			input:  "x = 1\n\n# describes the server\n[server]\nport = 80\n",
 			config: map[string]any{"operation": "set", "path": "$.y", "value": 2, "missing": "create"},
-			want:   "x = 1\n\ny = 2\n# describes the server\n[server]\nport = 80\n",
+			want:   "x = 1\ny = 2\n\n# describes the server\n[server]\nport = 80\n",
 		},
 	}
 	for _, test := range tests {

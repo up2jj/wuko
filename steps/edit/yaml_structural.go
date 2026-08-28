@@ -17,6 +17,10 @@ type yamlStructure struct {
 	// separator an existing neighbour would otherwise have provided.
 	inserted map[int]int
 	flowAdds map[*yaml.Node]int
+	// deletions counts the entries this batch removes from each container,
+	// and collapsed records the containers already rewritten as empty.
+	deletions map[string]int
+	collapsed map[string]bool
 }
 
 type yamlLocation struct {
@@ -26,9 +30,17 @@ type yamlLocation struct {
 }
 
 func patchYAMLMutations(data []byte, original, updated any, mutations []mutation) ([]byte, error) {
-	structure := &yamlStructure{data: data, inserted: map[int]int{}, flowAdds: map[*yaml.Node]int{}}
+	structure := &yamlStructure{
+		data: data, inserted: map[int]int{}, flowAdds: map[*yaml.Node]int{},
+		deletions: map[string]int{}, collapsed: map[string]bool{},
+	}
 	if err := yaml.NewDecoder(bytes.NewReader(data)).Decode(&structure.document); err != nil {
 		return nil, err
+	}
+	for _, mutation := range mutations {
+		if mutation.changed && mutation.operation == "delete" && len(mutation.match.Path) > 0 {
+			structure.deletions[mutation.match.Path[:len(mutation.match.Path)-1].Pointer()]++
+		}
 	}
 	edits := make([]textEdit, 0, len(mutations))
 	for _, mutation := range mutations {
@@ -177,6 +189,9 @@ func (s *yamlStructure) deleteEdit(path spec.NormalizedPath) ([]textEdit, error)
 	if err != nil {
 		return nil, err
 	}
+	if s.emptiesParent(path, location) {
+		return s.collapseParent(path[:len(path)-1], location.parent)
+	}
 	if location.parent.Style&yaml.FlowStyle != 0 {
 		return s.deleteFlowEntry(location)
 	}
@@ -205,6 +220,50 @@ func (s *yamlStructure) deleteEdit(path spec.NormalizedPath) ([]textEdit, error)
 		}
 	}
 	return []textEdit{{start: lineStart, end: throughLineEnd(s.data, end)}}, nil
+}
+
+// emptiesParent reports whether this batch removes every entry of the container
+// holding path. A block collection cannot simply lose its last line: the key
+// introducing it would be left with no value at all.
+func (s *yamlStructure) emptiesParent(path spec.NormalizedPath, location yamlLocation) bool {
+	if location.parent == nil {
+		return false
+	}
+	entries := len(location.parent.Content)
+	if location.parent.Kind == yaml.MappingNode {
+		entries /= 2
+	}
+	return entries > 0 && s.deletions[path[:len(path)-1].Pointer()] >= entries
+}
+
+// collapseParent rewrites an emptied container as an empty flow collection,
+// once however many of its entries the batch deletes.
+func (s *yamlStructure) collapseParent(parentPath spec.NormalizedPath, parent *yaml.Node) ([]textEdit, error) {
+	pointer := parentPath.Pointer()
+	if s.collapsed[pointer] {
+		return nil, nil
+	}
+	s.collapsed[pointer] = true
+	start, end, err := yamlNodeSpan(s.data, parent, parent.Style&yaml.FlowStyle != 0)
+	if err != nil {
+		return nil, err
+	}
+	text := []byte("{}")
+	if parent.Kind == yaml.SequenceNode {
+		text = []byte("[]")
+	}
+	// A block collection written under its own key would leave that key
+	// dangling, so pull the empty collection up onto the key's line.
+	lineStart := bytes.LastIndexByte(s.data[:start], '\n') + 1
+	if lineStart > 0 && len(bytes.TrimSpace(s.data[lineStart:start])) == 0 {
+		previousStart := bytes.LastIndexByte(s.data[:lineStart-1], '\n') + 1
+		previous := bytes.TrimRight(s.data[previousStart:lineStart-1], " \t\r")
+		if len(previous) > 0 && previous[len(previous)-1] == ':' {
+			start = lineStart - 1
+			text = append([]byte{' '}, text...)
+		}
+	}
+	return []textEdit{{start: start, end: end, text: text}}, nil
 }
 
 // nextMappingKey returns the offset of the key that follows location in its

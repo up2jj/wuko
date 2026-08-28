@@ -273,6 +273,9 @@ then applied in location-safe order, so one edit cannot shift a later selected t
 locations collapse and overlapping locations are rejected. Keys added by `merge` are written in
 sorted order, so the same merge produces the same file on every run.
 
+Deleting the last entry of an object or array rewrites it as an empty collection rather than
+leaving the key that introduces it without a value.
+
 Members of a TOML inline table (`server = {host = "h"}`) cannot be edited individually; the step
 reports this rather than writing a dotted key that TOML would reject. Replace the whole value with
 `set`, or promote the inline table to a `[server]` table header.

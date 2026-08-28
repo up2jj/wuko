@@ -29,14 +29,24 @@ type jsonStructure struct {
 	pos        int
 	spans      map[string]textEdit
 	containers map[string]*jsonContainer
+	// deletions counts the entries this batch removes from each container,
+	// and collapsed records the containers already rewritten as empty.
+	deletions map[string]int
+	collapsed map[string]bool
 }
 
 func patchJSONMutations(data []byte, original, updated any, mutations []mutation) ([]byte, error) {
 	structure := &jsonStructure{
 		data: data, spans: make(map[string]textEdit), containers: make(map[string]*jsonContainer),
+		deletions: make(map[string]int), collapsed: make(map[string]bool),
 	}
 	if err := structure.parse(); err != nil {
 		return nil, err
+	}
+	for _, mutation := range mutations {
+		if mutation.changed && mutation.operation == "delete" && len(mutation.match.Path) > 0 {
+			structure.deletions[mutation.match.Path[:len(mutation.match.Path)-1].Pointer()]++
+		}
 	}
 	edits := make([]textEdit, 0, len(mutations))
 	for _, mutation := range mutations {
@@ -277,10 +287,16 @@ func (p *jsonStructure) deleteEdit(path spec.NormalizedPath) ([]textEdit, error)
 	if index < 0 {
 		return nil, fmt.Errorf("cannot locate %s in JSON source", path)
 	}
-	entry := container.entries[index]
-	if len(container.entries) == 1 {
-		return []textEdit{{start: entryStart(entry), end: entry.valueEnd}}, nil
+	// Emptying a container leaves its layout behind: replace everything
+	// between the brackets so no blank indented line survives.
+	if p.deletions[parent.Pointer()] >= len(container.entries) {
+		if p.collapsed[parent.Pointer()] {
+			return nil, nil
+		}
+		p.collapsed[parent.Pointer()] = true
+		return []textEdit{{start: container.open + 1, end: container.close}}, nil
 	}
+	entry := container.entries[index]
 	if index < len(container.entries)-1 {
 		next := container.entries[index+1]
 		return []textEdit{{start: entryStart(entry), end: entryStart(next)}}, nil
@@ -367,15 +383,19 @@ func (p *jsonStructure) appendMember(container *jsonContainer, text []byte) text
 	added := container.added
 	container.added++
 	if len(container.entries) == 0 {
-		indent := lineIndent(p.data, container.close) + "  "
+		// An empty container already holds the whitespace its brackets sit
+		// around, so the first member opens a line of its own after the
+		// opening bracket rather than crowding the closing one.
+		if multiline {
+			prefix := []byte("\n" + lineIndent(p.data, container.close) + "  ")
+			if added > 0 {
+				prefix = append([]byte{','}, prefix...)
+			}
+			return textEdit{start: container.open + 1, end: container.open + 1, text: append(prefix, text...)}
+		}
 		var prefix []byte
-		switch {
-		case added > 0 && multiline:
-			prefix = []byte(",\n" + indent)
-		case added > 0:
+		if added > 0 {
 			prefix = []byte(", ")
-		case multiline:
-			prefix = []byte(indent)
 		}
 		return textEdit{start: container.close, end: container.close, text: append(prefix, text...)}
 	}
