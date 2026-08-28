@@ -13,23 +13,27 @@ import (
 )
 
 func TestCancelOnMonitorWinsAndRecordsPartialBodyState(t *testing.T) {
-	prepared := make(chan struct{})
+	// This case is the one where the monitor wins while deploy is running, so deploy is
+	// canceled rather than skipped. Waiting on prepare would not establish that: an
+	// unstarted body step is documented to record as skipped, and the monitor could win
+	// in the gap between the two. The monitor waits for deploy itself to be running.
+	deploying := make(chan struct{})
 	registry := newTestRegistry(t, map[string]step.Builder{
 		"prepare": func(map[string]any) (step.Runner, error) {
 			return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
-				close(prepared)
 				return step.Result{Outputs: map[string]any{}, Variables: map[string]any{"artifact": "dist/app.tar"}}, nil
 			}), nil
 		},
 		"block": func(map[string]any) (step.Runner, error) {
 			return runnerFunc(func(ctx context.Context, _ step.Request) (step.Result, error) {
+				close(deploying)
 				<-ctx.Done()
 				return step.Result{}, ctx.Err()
 			}), nil
 		},
 		"monitor": func(map[string]any) (step.Runner, error) {
 			return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
-				<-prepared
+				<-deploying
 				return step.Result{Outputs: map[string]any{"matched": true}}, nil
 			}), nil
 		},
