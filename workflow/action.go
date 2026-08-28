@@ -260,7 +260,7 @@ func (loader *Loader) resolveActions(ctx context.Context, workflowName string, s
 					return err
 				}
 			}
-			if workflowStep.IsExecutorBlock() || workflowStep.IsConditionalBlock() || workflowStep.Concurrent != nil || workflowStep.Batch != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil {
+			if workflowStep.IsExecutorBlock() || workflowStep.IsConditionalBlock() || workflowStep.IsOnce() || workflowStep.Concurrent != nil || workflowStep.Batch != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil {
 				continue
 			}
 		}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -524,7 +525,7 @@ func TestUpdateReportsWhetherTheValueChanged(t *testing.T) {
 
 func TestOpenWorkflowScopedRefusesReservedStores(t *testing.T) {
 	dir := t.TempDir()
-	for _, name := range []string{"changed", "picker", "CHANGED", "Picker"} {
+	for _, name := range []string{"changed", "once", "picker", "CHANGED", "ONCE", "Picker"} {
 		if _, err := OpenWorkflowScoped(dir, dir, Local, name); err == nil || !strings.Contains(err.Error(), "reserved") {
 			t.Errorf("OpenWorkflowScoped(%q) error = %v, want a reserved-name error", name, err)
 		}
@@ -534,6 +535,29 @@ func TestOpenWorkflowScopedRefusesReservedStores(t *testing.T) {
 	}
 	if _, err := OpenWorkflowScoped(dir, dir, Local, "changed-files"); err != nil {
 		t.Errorf("OpenWorkflowScoped(\"changed-files\") error = %v", err)
+	}
+}
+
+func TestClaimKeySerializesOneKeyButNotAnother(t *testing.T) {
+	t.Parallel()
+	store, err := Open(t.TempDir(), "claims")
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := store.ClaimKey(t.Context(), "same", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = first.Release() }()
+	if _, err := store.ClaimKey(t.Context(), "same", false); !errors.Is(err, ErrClaimBusy) {
+		t.Fatalf("same-key claim error = %v, want ErrClaimBusy", err)
+	}
+	other, err := store.ClaimKey(t.Context(), "other", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := other.Release(); err != nil {
+		t.Fatal(err)
 	}
 }
 

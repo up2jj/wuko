@@ -227,6 +227,15 @@ func writeTreeStepsWithFollowing(writer io.Writer, steps []workflow.Step, prefix
 			}
 			continue
 		}
+		if workflowStep.IsOnce() {
+			if _, err := fmt.Fprintf(writer, "%s%s%s (once %s; %s; on busy %s)%s\n", prefix, branch, workflowStep.ID, workflowStep.Once.Key, workflowStep.Once.Scope, workflowStep.Once.OnBusy, treeCondition(workflowStep)); err != nil {
+				return err
+			}
+			if err := writeTreeSteps(writer, workflowStep.Once.Steps, childPrefix); err != nil {
+				return err
+			}
+			continue
+		}
 		if workflowStep.IsCancelOn() {
 			collect := ""
 			if workflowStep.CancelOn.Collect != "" {

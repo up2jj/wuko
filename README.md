@@ -294,6 +294,7 @@ Each linked guide contains multiple examples for every step.
 | `semver` | Parse, compare, constrain, or increment versions | [Data steps](docs/steps-data.md#semver) |
 | `key_value` | Persist JSON-compatible values between runs | [Data steps](docs/steps-data.md#key_value) |
 | `changed` | Detect changed files or structured inputs | [Data steps](docs/steps-data.md#changed) |
+| `once` | Run a named block once per successful persisted key | [Execution and composition](docs/execution.md#idempotency-across-runs) |
 | `require_tool` | Require an executable and optionally validate its version | [System steps](docs/steps-system.md#require_tool) |
 | `multiplexer` | Label and annotate the current tmux, cmux, or Herdr context | [System steps](docs/steps-system.md#multiplexer) |
 | `git_clean` | Assert that a Git working tree is clean | [System steps](docs/steps-system.md#git_clean) |

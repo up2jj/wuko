@@ -4,6 +4,7 @@ package keyvalue
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -53,10 +54,26 @@ func Open(dir, name string) (*Store, error) {
 	}, nil
 }
 
-// reservedNames are the stores Wuko manages for itself: the changed step's snapshots and
-// the workflow picker's history. Their owners open them through Open, which does not
-// consult this list.
-var reservedNames = map[string]struct{}{"changed": {}, "picker": {}}
+// reservedNames are stores Wuko manages for its change snapshots, once outcomes, and
+// workflow picker history. Their owners open them through Open, which does not consult
+// this list.
+var reservedNames = map[string]struct{}{"changed": {}, "once": {}, "picker": {}}
+
+// ErrClaimBusy reports that a non-blocking per-key claim is held elsewhere.
+var ErrClaimBusy = errors.New("key-value claim is busy")
+
+// Claim owns one per-key advisory lock until Release is called.
+type Claim struct {
+	handle *filelock.Handle
+}
+
+// Release gives up a per-key claim. It is safe to call more than once.
+func (claim *Claim) Release() error {
+	if claim == nil {
+		return nil
+	}
+	return claim.handle.Release()
+}
 
 // OpenWorkflowScoped opens a store a workflow asked for by name. It refuses the names Wuko
 // reserves so a workflow cannot read or rewrite Wuko's own state through the generic
@@ -264,6 +281,38 @@ func (s *Store) List(ctx context.Context) ([]Entry, error) {
 		return nil
 	})
 	return entries, err
+}
+
+// ClaimKey acquires an exclusive claim for key without serializing unrelated keys.
+// A waiting claim honors ctx; a non-waiting claim returns ErrClaimBusy on contention.
+func (s *Store) ClaimKey(ctx context.Context, key string, wait bool) (*Claim, error) {
+	if err := validateKey(key); err != nil {
+		return nil, err
+	}
+	dir := filepath.Dir(s.path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, fmt.Errorf("creating store directory: %w", err)
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return nil, fmt.Errorf("setting store directory permissions: %w", err)
+	}
+	digest := fmt.Sprintf("%x", sha256.Sum256([]byte(key)))
+	path := s.path + "." + digest + ".claim.lock"
+	if wait {
+		handle, err := filelock.Acquire(ctx, path)
+		if err != nil {
+			return nil, fmt.Errorf("claiming key %q: %w", key, err)
+		}
+		return &Claim{handle: handle}, nil
+	}
+	handle, acquired, err := filelock.TryAcquire(ctx, path)
+	if err != nil {
+		return nil, fmt.Errorf("claiming key %q: %w", key, err)
+	}
+	if !acquired {
+		return nil, fmt.Errorf("claiming key %q: %w", key, ErrClaimBusy)
+	}
+	return &Claim{handle: handle}, nil
 }
 
 func (s *Store) withLock(ctx context.Context, operation func() error) error {

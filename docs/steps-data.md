@@ -403,10 +403,10 @@ configured `variable` receives that same value, or the entries a `list` returned
 
 Each operation accepts only the fields it uses, so a `key` on a `list` or a `prefix` on a `get`
 fails when the workflow loads. `get` and `list` create nothing: reading a store that was never
-written returns an empty result and leaves the values directory absent. The store names `changed`
-and `picker` are reserved, because Wuko keeps the change detector's snapshots and the workflow
-picker's history there; neither a workflow nor Lua's `wuko.kv` API may open them. Stores are atomic
-plain JSON, not encrypted secret vaults.
+written returns an empty result and leaves the values directory absent. The store names `changed`,
+`once`, and `picker` are reserved, because Wuko keeps change snapshots, idempotency outcomes, and
+workflow picker history there; neither a workflow nor Lua's `wuko.kv` API may open them. Stores are
+atomic plain JSON, not encrypted secret vaults.
 
 ## `changed`
 

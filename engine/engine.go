@@ -70,6 +70,11 @@ type Options struct {
 	renderer               *workflow.Renderer
 	deferContextValidation bool
 	insideExecutor         bool
+	// onceClaims records the once keys already claimed on the current path. It must
+	// travel into action invocations too: the lock is held per open file description,
+	// so a second claim for the same key in this process would block against itself
+	// forever instead of reporting the recursion.
+	onceClaims map[string]struct{}
 }
 
 // State carries one workflow's mutable values and is deliberately unsynchronized.
@@ -220,6 +225,12 @@ func (e *Engine) validateSteps(ctx context.Context, definition *workflow.Definit
 				Phase: diagnostic.PhaseValidation, Status: diagnostic.StatusSucceeded, Time: time.Now(), Duration: time.Since(started),
 				WorkflowName: definition.Name, Location: workflowStep.Location,
 			})
+			continue
+		}
+		if workflowStep.IsOnce() {
+			if err := e.validateOnce(ctx, definition, workflowStep, options, state); err != nil {
+				return fmt.Errorf("step %q: %w", workflowStep.ID, err)
+			}
 			continue
 		}
 		if workflowStep.Batch != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil {
@@ -603,6 +614,8 @@ func (e *Engine) executeSequence(ctx context.Context, definition *workflow.Defin
 			outcome = e.executeTryCatch(ctx, definition, workflowStep, stepOptions, state, index, total)
 		} else if workflowStep.IsCancelOn() {
 			outcome = e.executeCancelOn(ctx, definition, workflowStep, stepOptions, state, index, total)
+		} else if workflowStep.IsOnce() {
+			outcome = e.executeOnce(ctx, definition, workflowStep, stepOptions, state, index, total)
 		} else if workflowStep.Batch != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil {
 			outcome = e.executeControl(ctx, definition, workflowStep, stepOptions, state, index, total)
 		} else if workflowStep.Loop != nil {
@@ -620,7 +633,7 @@ func (e *Engine) executeSequence(ctx context.Context, definition *workflow.Defin
 		if outcome.err != nil {
 			return outcome.err
 		}
-		if outcome.skipped {
+		if outcome.skipped && !outcome.commitSkipped {
 			continue
 		}
 		commitStarted := time.Now()
@@ -720,7 +733,9 @@ type stepOutcome struct {
 	err     error
 	started bool
 	skipped bool
-	nested  *RunStats
+	// commitSkipped distinguishes a durable replay from a condition-based skip.
+	commitSkipped bool
+	nested        *RunStats
 }
 
 func (e *Engine) executeStep(ctx context.Context, definition *workflow.Definition, workflowStep workflow.Step, options Options, state *State, index, total int) stepOutcome {
@@ -942,6 +957,9 @@ func executionKind(workflowStep workflow.Step) string {
 	if workflowStep.IsWorktreeBlock() {
 		return "worktree"
 	}
+	if workflowStep.IsOnce() {
+		return "once"
+	}
 	if workflowStep.Action != nil {
 		return "uses"
 	}
@@ -1085,6 +1103,7 @@ func (e *Engine) validateAction(ctx context.Context, definition *workflow.Defini
 		Stdin: options.Stdin, Stdout: options.Stdout, Stderr: options.Stderr, Interactive: options.Interactive,
 		Diagnostics: options.Diagnostics, runID: options.runID, parentRunID: options.parentRunID,
 		parentStepRunID: options.parentStepRunID, depth: options.depth + 1, runtime: options.runtime,
+		onceClaims: options.onceClaims,
 	})
 }
 
@@ -1111,6 +1130,7 @@ func (e *Engine) prepareActionExecutor(definition *workflow.Definition, workflow
 			Diagnostics:     options.Diagnostics,
 			operationPrefix: request.OperationID, parentRunID: options.runID,
 			parentStepRunID: options.stepRunID, depth: options.depth + 1, runtime: options.runtime,
+			onceClaims: options.onceClaims,
 		})
 		if err != nil {
 			return step.Result{}, err

@@ -194,6 +194,24 @@ func TestWorkflowTreeDisplaysExecutionPolicy(t *testing.T) {
 	}
 }
 
+func TestWorkflowTreeDisplaysOnceBlock(t *testing.T) {
+	t.Parallel()
+	definition := &workflow.Definition{Name: "migration", Steps: []workflow.Step{{
+		ID: "migrate", If: "vars.enabled", Once: &workflow.OnceGroup{
+			Key: "schema-v1", Scope: "local", OnBusy: workflow.OnceBusyError,
+			Steps: []workflow.Step{{ID: "apply", Type: "shell"}},
+		},
+	}}}
+	var output bytes.Buffer
+	if err := writeWorkflowTree(&output, definition); err != nil {
+		t.Fatal(err)
+	}
+	want := "migration\n└── migrate (once schema-v1; local; on busy error) if: vars.enabled\n    └── apply (shell)\n"
+	if output.String() != want {
+		t.Fatalf("tree output = %q, want %q", output.String(), want)
+	}
+}
+
 func TestWriteWorkflowTreeShowsFinallySections(t *testing.T) {
 	action := &workflow.Action{
 		Version: 1, Name: "action",

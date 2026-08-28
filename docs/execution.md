@@ -158,14 +158,63 @@ steps:
 ```
 
 Templates use `.steps` and `.vars`; Expr conditions use `steps` and `vars`. Steps remain sequential
-and have no `needs` field; workflow-level prerequisites are described below. Failed and skipped
-steps commit no state. Concurrent children share the snapshot from group entry and cannot consume
-sibling results.
+and have no `needs` field; workflow-level prerequisites are described below. Failed steps and
+condition-based skips commit no state. A replayed `once` block is the exception: it reports skipped
+while republishing its recorded state. Concurrent children share the snapshot from group entry and
+cannot consume sibling results.
 
 Use the anonymous `return` control to finish the current workflow or composite action successfully
 with typed Expr outputs. It may appear in sequential conditional or working-directory scopes, still
 runs `finally`, and cannot appear inside concurrent or fan-out bodies. See
 [Early successful return](return.md) for the complete contract and examples.
+
+## Idempotency across runs
+
+Use a named `once` block for work that should be considered complete after one successful run for
+an explicit key: local bootstrap, fixture downloads, or a schema migration. The key is rendered
+when execution reaches the block, so changing an input can intentionally create a new completion:
+
+```yaml
+- id: migrate
+  once:
+    key: "schema-{{ .vars.version }}"
+    scope: local
+    steps:
+      - id: apply
+        type: shell
+        with: {command: ./migrate}
+```
+
+`key` and `scope` are required. Scope follows `key_value`: `local` stores beside the workflow in
+`.wuko/values/`, while `global` stores in Wuko's user configuration directory. A direct remote
+workflow or URL action has no local store and must use `global`. Keys are not prefixed with workflow
+identity, so choose globally scoped keys accordingly.
+
+The first successful execution records the block's child results and variable writes. Later runs
+report the outer block as skipped, execute no children, and republish the same data:
+
+```text
+steps.migrate.steps.apply = {status: succeeded, error: null, outputs: {...}}
+steps.migrate.vars = {...}
+```
+
+Recorded variables are also restored into `.vars`. Child step IDs remain private to the block and
+do not appear directly under the surrounding `.steps` map. Only a completely successful body is
+recorded; failure or cancellation leaves the key incomplete, so a later run tries again.
+
+Concurrent processes claim each key independently. `on_busy` accepts `error` or `wait` and defaults
+to `error`: the contender fails immediately with a busy error. `wait` waits cancelably, then replays
+the owner's successful result or takes ownership if that execution failed. Different keys do not
+block each other. Recursive use of the same scope and key fails rather than deadlocking.
+
+`once` may have an outer `if`, which is evaluated before persistence is read. It cannot be combined
+with ordinary step fields or execution policies, cannot run inside cleanup, and cannot contain
+declared `defer` cleanup or a `return`: the body runs on a private state clone, so a `return` could
+not end the surrounding workflow and would be baked into the record. The body keeps the enclosing
+scope's restrictions, so wrapping a step in `once` does not lift the rules of the nesting it sits
+in. There is no expiry or reset operation; change the key to invalidate a completion. If a process
+crashes after causing external effects but before recording success, the next run retries because
+Wuko cannot atomically commit arbitrary external effects with local state.
 
 ## Workflow prerequisites
 

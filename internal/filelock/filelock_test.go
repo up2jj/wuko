@@ -50,6 +50,23 @@ func TestAcquireExcludesASecondHolderUntilRelease(t *testing.T) {
 	}
 }
 
+func TestTryAcquireReportsContentionWithoutWaiting(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "state.lock")
+	holder, err := Acquire(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = holder.Release() }()
+	claim, acquired, err := TryAcquire(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if acquired || claim != nil {
+		t.Fatalf("TryAcquire() = %#v, %t, want nil, false", claim, acquired)
+	}
+}
+
 func TestAcquireHonorsContextCancellationWhileContended(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "state.lock")

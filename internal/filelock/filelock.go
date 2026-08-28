@@ -42,6 +42,44 @@ func AcquireExisting(ctx context.Context, path string) (*Handle, error) {
 	return acquire(ctx, path, os.O_RDWR)
 }
 
+// TryAcquire creates path if needed and makes one non-blocking attempt to hold it.
+// The boolean is false when another holder owns the lock.
+func TryAcquire(ctx context.Context, path string) (*Handle, bool, error) {
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, false, fmt.Errorf("locking %s: %w", path, err)
+		}
+		file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+		if err != nil {
+			return nil, false, fmt.Errorf("opening lock file %s: %w", path, err)
+		}
+		if err := file.Chmod(0o600); err != nil {
+			_ = file.Close()
+			return nil, false, fmt.Errorf("setting permissions on lock file %s: %w", path, err)
+		}
+		err = syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN) {
+			_ = file.Close()
+			return nil, false, nil
+		}
+		if err != nil {
+			_ = file.Close()
+			return nil, false, fmt.Errorf("locking %s: %w", file.Name(), err)
+		}
+		named, err := locksNamedFile(file, path)
+		if err != nil {
+			_ = file.Close()
+			return nil, false, err
+		}
+		if named {
+			return &Handle{file: file, path: path}, true, nil
+		}
+		if err := file.Close(); err != nil {
+			return nil, false, fmt.Errorf("closing lock file %s: %w", path, err)
+		}
+	}
+}
+
 func acquire(ctx context.Context, path string, flags int) (*Handle, error) {
 	for {
 		file, err := os.OpenFile(path, flags, 0o600)

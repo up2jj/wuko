@@ -24,6 +24,7 @@ func TestStepChildSequences(t *testing.T) {
 		{name: "batch", step: Step{Batch: &BatchGroup{Steps: []Step{step("run")}}}, want: []ChildSequence{{Role: ChildSteps, Steps: []Step{step("run")}}}},
 		{name: "foreach", step: Step{Foreach: &ForeachGroup{Steps: []Step{step("run")}}}, want: []ChildSequence{{Role: ChildSteps, Steps: []Step{step("run")}}}},
 		{name: "matrix", step: Step{Matrix: &MatrixGroup{Steps: []Step{step("run")}}}, want: []ChildSequence{{Role: ChildSteps, Steps: []Step{step("run")}}}},
+		{name: "once", step: Step{Once: &OnceGroup{Steps: []Step{step("run")}}}, want: []ChildSequence{{Role: ChildSteps, Steps: []Step{step("run")}}}},
 	}
 
 	for _, test := range tests {

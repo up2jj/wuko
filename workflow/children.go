@@ -89,6 +89,8 @@ func (workflowStep *Step) childSequenceRefs() []childSequenceRef {
 		return deferred([]childSequenceRef{{role: ChildSteps, steps: &workflowStep.Matrix.Steps}})
 	case workflowStep.Loop != nil:
 		return deferred([]childSequenceRef{{role: ChildSteps, steps: &workflowStep.Loop.Steps}})
+	case workflowStep.Once != nil:
+		return deferred([]childSequenceRef{{role: ChildSteps, steps: &workflowStep.Once.Steps}})
 	case workflowStep.CancelOn != nil:
 		return []childSequenceRef{
 			{role: ChildMonitors, steps: &workflowStep.CancelOn.Monitors},

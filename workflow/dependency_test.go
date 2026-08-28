@@ -115,6 +115,29 @@ func TestResolveDependencyPlanRejectsCyclesAndUnknownOutputs(t *testing.T) {
 	}
 }
 
+func TestResolveDependencyPlanValidatesOnceKeyTemplates(t *testing.T) {
+	t.Parallel()
+	producer := dependencyDefinition("producer", "/producer.yaml")
+	consumer := dependencyDefinition("consumer", "/consumer.yaml")
+	consumer.DependsOn = map[string]string{"build": "producer"}
+	consumer.Steps = []Step{{
+		ID: "migrate",
+		Once: &OnceGroup{
+			Key:    `schema-{{ .dependencies.build.missing }}`,
+			Scope:  "local",
+			OnBusy: OnceBusyError,
+			Steps:  []Step{{ID: "apply", Type: "shell"}},
+		},
+	}}
+
+	_, err := ResolveDependencyPlan(t.Context(), consumer, func(context.Context, string) (*Definition, error) {
+		return producer, nil
+	})
+	if err == nil || !strings.Contains(err.Error(), `does not declare output "missing"`) {
+		t.Fatalf("once key dependency reference error = %v", err)
+	}
+}
+
 func TestResolveDependencyPlanValidatesChoiceExpressions(t *testing.T) {
 	t.Parallel()
 	producer := dependencyDefinition("producer", "/producer.yaml")

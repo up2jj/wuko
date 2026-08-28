@@ -96,7 +96,12 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
   and `found` under one lock across the read and the write, which a `get` then `set` pair cannot
   hold. Bind a result with `variable`, give `get` a `default` instead of branching on `found`, and
   narrow `list` with `prefix`. Fetched code -- a remote workflow or a URL action -- has only
-  `global` scope, and the store names `changed` and `picker` are reserved for Wuko.
+  `global` scope, and the store names `changed`, `once`, and `picker` are reserved for Wuko.
+- Use a named `once` block for bootstrap, fixture, or migration work that is complete after one
+  successful persisted key. Set an explicit rendered `key`, choose `scope: local|global`, and keep
+  the default `on_busy: error` unless concurrent invocations should wait and replay with
+  `on_busy: wait`. Children are private; consume their recorded results through
+  `steps.<once_id>.steps.<child_id>.outputs`, while recorded variable writes are restored normally.
 - Use `changed` before guarded work that should run only when selected file contents or named
   values differ from the detector's previous local snapshot. Branch on its `changed` output, and
   give repeated foreach, matrix, or action detectors a templated key containing their binding.
@@ -197,6 +202,12 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
 - A successful `changed` detector advances its local snapshot immediately, even if later guarded
   work fails. It is unavailable to direct remote workflows and does not react to file timestamps
   or permissions.
+- A `once` block records only after its complete body succeeds. Later runs report the block skipped
+  while republishing its `steps` and `vars` outcome. Failure, cancellation, or a crash before the
+  record is written causes a later retry; changing the key intentionally starts a new completion.
+  Do not put `defer` or `return` inside `once` (its body runs on a private state clone, so a
+  `return` cannot end the surrounding workflow), and remember that URL-fetched code has only global
+  persistence.
 - Foreach and matrix iterations also start from one pre-control snapshot, but steps within an
   iteration remain sequential. Read bindings from `.foreach` or `.matrix`. Add a typed `collect`
   Expr to expose one ordered value per iteration; it can read the final iteration's steps, local

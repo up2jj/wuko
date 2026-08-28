@@ -396,6 +396,8 @@ func (validator *referenceValidator) validateStep(step workflow.Step, scope *ref
 		return validator.validateTryCatch(step, scope)
 	case step.IsCancelOn():
 		return validator.validateCancelOn(step, scope)
+	case step.IsOnce():
+		return validator.validateOnce(step, scope)
 	case step.IsExecutorBlock():
 		return validator.validateExecutor(step, scope)
 	case step.IsWorkingDirectoryBlock():
@@ -429,6 +431,23 @@ func (validator *referenceValidator) validateStep(step workflow.Step, scope *ref
 	default:
 		return validator.validateOrdinaryStep(step, scope)
 	}
+}
+
+func (validator *referenceValidator) validateOnce(step workflow.Step, scope *referenceScope) (*referenceScope, []deferredReferences, error) {
+	if err := validator.validateExpression("if", string(step.If), scope); err != nil {
+		return nil, nil, err
+	}
+	if err := validator.validateTemplate("once key", step.Once.Key, scope); err != nil {
+		return nil, nil, err
+	}
+	private, _, err := validator.validateSteps(step.Once.Steps, scope.clone())
+	if err != nil {
+		return nil, nil, fmt.Errorf("once body: %w", err)
+	}
+	result := scope.clone()
+	result.mergeVariables(private)
+	result.addStep(step.ID)
+	return result, nil, nil
 }
 
 func (validator *referenceValidator) validateOrdinaryStep(step workflow.Step, scope *referenceScope) (*referenceScope, []deferredReferences, error) {
