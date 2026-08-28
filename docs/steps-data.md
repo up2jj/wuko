@@ -312,7 +312,8 @@ Constrain exposes `matched`; increment exposes `previous` and the new `version`.
 
 ## `key_value`
 
-Persist JSON-compatible values between runs with `get`, `set`, `update`, `delete`, and `list`.
+Persist JSON-compatible values between runs with `get`, `set`, `update`, `delete`, `list`, and
+`clear`.
 `local` stores live beside the workflow under `.wuko/values/`; `global` stores live in Wuko's user
 configuration directory. Code Wuko fetched -- a remote workflow, or an action pulled from a URL --
 has no local store and can only use `global`.
@@ -338,12 +339,17 @@ Set and get a preference:
     key: theme
 ```
 
-List or delete entries:
+List, delete, or empty a store. `get` takes a `default` for a key that is absent, `list` takes a
+key `prefix`, and `clear` removes every key at once:
 
 ```yaml
-- id: list_preferences
+- id: list_builds
   type: key_value
-  with: {operation: list, scope: global, store: preferences}
+  with: {operation: list, scope: local, store: build, prefix: "artifact-"}
+
+- id: load_theme
+  type: key_value
+  with: {operation: get, scope: global, store: preferences, key: theme, default: light}
 
 - id: delete_legacy
   type: key_value
@@ -352,6 +358,10 @@ List or delete entries:
     scope: local
     store: build
     key: legacy-artifact
+
+- id: reset_build_state
+  type: key_value
+  with: {operation: clear, scope: local, store: build}
 ```
 
 `set` takes exactly one of `value` or `expr`. Templates render to text, so
@@ -399,8 +409,10 @@ used as `vars.<name>` afterwards:
 
 `get` returns `value` and `found`; `set` returns `value`; `update` returns the new `value`, the
 `found` state it replaced, and whether it `changed`; `delete` returns the previous `value` and
-`deleted`; `list` returns key-sorted `entries`. A configured `variable` receives that value, or the
-entries for `list`. Stores are atomic plain JSON, not encrypted secret
+`deleted`; `list` returns key-sorted `entries`; `clear` returns the number of keys it `cleared`. A
+configured `variable` receives that value, or the entries a `list` returned. Each operation accepts
+only the fields it uses, so a `key` on a `list` or a `prefix` on a `get` fails when the workflow
+loads. Stores are atomic plain JSON, not encrypted secret
 vaults. `get` and `list` never create anything: reading a store that was never written returns an
 empty result and leaves the values directory absent.
 

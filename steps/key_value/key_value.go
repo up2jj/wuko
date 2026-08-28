@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -21,7 +23,31 @@ const (
 	operationDelete = "delete"
 	operationList   = "list"
 	operationUpdate = "update"
+	operationClear  = "clear"
 )
+
+// alwaysAllowed are the fields every operation accepts; operationFields adds the optional
+// inputs each one understands. A field outside both sets is rejected for that operation
+// rather than silently ignored.
+var (
+	alwaysAllowed   = fields("operation", "scope", "store", "variable")
+	operationFields = map[string]map[string]struct{}{
+		operationGet:    fields("key", "default"),
+		operationSet:    fields("key", "value", "expr"),
+		operationUpdate: fields("key", "expr"),
+		operationDelete: fields("key"),
+		operationList:   fields("prefix"),
+		operationClear:  fields(),
+	}
+)
+
+func fields(names ...string) map[string]struct{} {
+	set := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		set[name] = struct{}{}
+	}
+	return set
+}
 
 // Config describes one persistent key-value operation.
 type Config struct {
@@ -32,6 +58,8 @@ type Config struct {
 	Value     any    `yaml:"value,omitempty"`
 	Expr      string `yaml:"expr,omitempty"`
 	Variable  string `yaml:"variable,omitempty"`
+	Default   any    `yaml:"default,omitempty"`
+	Prefix    string `yaml:"prefix,omitempty"`
 }
 
 type expressionEnvironment struct {
@@ -147,7 +175,10 @@ func (r *Runner) withVariable(result step.Result) step.Result {
 	}
 	value, ok := result.Outputs["value"]
 	if !ok {
-		value = result.Outputs["entries"]
+		value, ok = result.Outputs["entries"]
+	}
+	if !ok {
+		value = result.Outputs["cleared"]
 	}
 	result.Variables = map[string]any{r.config.Variable: value}
 	return result
@@ -157,6 +188,9 @@ func (r *Runner) perform(ctx context.Context, store *storepkg.Store, request ste
 	switch r.config.Operation {
 	case operationGet:
 		value, found, err := store.Get(ctx, r.config.Key)
+		if err == nil && !found {
+			value = r.config.Default
+		}
 		return step.Result{Outputs: map[string]any{"value": runtimeValue(value), "found": found}}, err
 	case operationSet:
 		value, err := r.storedValue(request)
@@ -180,11 +214,17 @@ func (r *Runner) perform(ctx context.Context, store *storepkg.Store, request ste
 		return step.Result{Outputs: map[string]any{"value": runtimeValue(value), "deleted": deleted}}, err
 	case operationList:
 		entries, err := store.List(ctx)
-		outputs := make([]any, len(entries))
-		for i, entry := range entries {
-			outputs[i] = map[string]any{"key": entry.Key, "value": runtimeValue(entry.Value)}
+		outputs := make([]any, 0, len(entries))
+		for _, entry := range entries {
+			if !strings.HasPrefix(entry.Key, r.config.Prefix) {
+				continue
+			}
+			outputs = append(outputs, map[string]any{"key": entry.Key, "value": runtimeValue(entry.Value)})
 		}
 		return step.Result{Outputs: map[string]any{"entries": outputs}}, err
+	case operationClear:
+		cleared, err := store.Clear(ctx)
+		return step.Result{Outputs: map[string]any{"cleared": int64(cleared)}}, err
 	default:
 		panic("validated key-value operation")
 	}
@@ -228,66 +268,52 @@ func (r *Runner) validateResolvedConfig() error {
 }
 
 func (r *Runner) validateOperation() error {
+	if r.config.Operation == "" {
+		return fmt.Errorf("operation is required")
+	}
+	allowed, known := operationFields[r.config.Operation]
+	if !known {
+		return fmt.Errorf("operation must be get, set, update, delete, list, or clear")
+	}
+	for _, field := range slices.Sorted(maps.Keys(r.present)) {
+		if _, common := alwaysAllowed[field]; common {
+			continue
+		}
+		if _, ok := allowed[field]; !ok {
+			return fmt.Errorf("%s is not allowed for %s", field, r.config.Operation)
+		}
+	}
+	if _, needsKey := allowed["key"]; needsKey && r.config.Key == "" {
+		return fmt.Errorf("key is required for %s", r.config.Operation)
+	}
 	switch r.config.Operation {
-	case operationGet, operationDelete:
-		if r.config.Key == "" {
-			return fmt.Errorf("key is required for %s", r.config.Operation)
-		}
-		if err := r.rejectValue(r.config.Operation); err != nil {
-			return err
-		}
 	case operationSet:
-		if r.config.Key == "" {
-			return fmt.Errorf("key is required for set")
-		}
 		if r.hasValue == r.hasExpr {
 			return fmt.Errorf("exactly one of value or expr is required for set")
 		}
-		if r.hasExpr {
-			if strings.TrimSpace(r.config.Expr) == "" {
-				return fmt.Errorf("expr must not be empty")
-			}
-			return nil
-		}
-		normalized, err := storepkg.Normalize(r.config.Value)
-		if err != nil {
-			return fmt.Errorf("value is not JSON-compatible: %w", err)
-		}
-		r.config.Value = normalized
 	case operationUpdate:
-		if r.config.Key == "" {
-			return fmt.Errorf("key is required for update")
-		}
-		if r.hasValue {
-			return fmt.Errorf("value is not allowed for update; use expr or set")
-		}
 		if !r.hasExpr {
 			return fmt.Errorf("expr is required for update")
 		}
-		if strings.TrimSpace(r.config.Expr) == "" {
-			return fmt.Errorf("expr must not be empty")
-		}
-	case operationList:
-		if r.config.Key != "" {
-			return fmt.Errorf("key is not allowed for list")
-		}
-		if err := r.rejectValue("list"); err != nil {
-			return err
-		}
-	case "":
-		return fmt.Errorf("operation is required")
-	default:
-		return fmt.Errorf("operation must be get, set, update, delete, or list")
 	}
-	return nil
+	if r.hasExpr && strings.TrimSpace(r.config.Expr) == "" {
+		return fmt.Errorf("expr must not be empty")
+	}
+	return r.normalizeLiterals()
 }
 
-func (r *Runner) rejectValue(operation string) error {
-	if r.hasValue {
-		return fmt.Errorf("value is not allowed for %s", operation)
-	}
-	if r.hasExpr {
-		return fmt.Errorf("expr is not allowed for %s", operation)
+// normalizeLiterals converts the literal inputs to the shapes the store round-trips, which
+// also rejects anything that is not JSON-compatible.
+func (r *Runner) normalizeLiterals() error {
+	for name, literal := range map[string]*any{"value": &r.config.Value, "default": &r.config.Default} {
+		if _, declared := r.present[name]; !declared {
+			continue
+		}
+		normalized, err := storepkg.Normalize(*literal)
+		if err != nil {
+			return fmt.Errorf("%s is not JSON-compatible: %w", name, err)
+		}
+		*literal = normalized
 	}
 	return nil
 }

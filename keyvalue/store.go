@@ -223,6 +223,27 @@ func (s *Store) Delete(ctx context.Context, key string) (any, bool, error) {
 	return clone(value), deleted, nil
 }
 
+// Clear removes every key and reports how many it removed. A store that is already empty
+// is not rewritten.
+func (s *Store) Clear(ctx context.Context) (int, error) {
+	removed := 0
+	err := s.withLock(ctx, func() error {
+		values, err := s.read()
+		if err != nil {
+			return err
+		}
+		removed = len(values)
+		if removed == 0 {
+			return nil
+		}
+		return s.write(make(map[string]any))
+	})
+	if err != nil {
+		return 0, err
+	}
+	return removed, nil
+}
+
 // List returns all entries ordered by key.
 func (s *Store) List(ctx context.Context) ([]Entry, error) {
 	var entries []Entry

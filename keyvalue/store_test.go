@@ -418,3 +418,31 @@ func TestOpenWorkflowScopedRefusesReservedStores(t *testing.T) {
 		t.Errorf("OpenWorkflowScoped(\"changed-files\") error = %v", err)
 	}
 }
+
+func TestClearRemovesEveryKey(t *testing.T) {
+	dir := t.TempDir()
+	store, err := Open(dir, "preferences")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"theme", "layout"} {
+		if _, err := store.Set(t.Context(), key, key); err != nil {
+			t.Fatal(err)
+		}
+	}
+	removed, err := store.Clear(t.Context())
+	if err != nil || removed != 2 {
+		t.Fatalf("clear = %d, %v", removed, err)
+	}
+	entries, err := store.List(t.Context())
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("entries = %#v, %v", entries, err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "preferences.json"))
+	if err != nil || string(data) != "{}\n" {
+		t.Fatalf("store file = %q, %v", data, err)
+	}
+	if removed, err := store.Clear(t.Context()); err != nil || removed != 0 {
+		t.Fatalf("repeated clear = %d, %v", removed, err)
+	}
+}

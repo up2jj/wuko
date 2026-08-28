@@ -21,7 +21,14 @@ func TestConfigValidation(t *testing.T) {
 		{"valid list", config("list", "", nil, false), ""},
 		{"valid templated selectors", map[string]any{"operation": "{{ .vars.operation }}", "scope": "{{ .vars.scope }}", "store": "prefs-{{ .vars.suffix }}"}, ""},
 		{"missing operation", map[string]any{"scope": "local", "store": "prefs"}, "operation is required"},
-		{"bad operation", map[string]any{"operation": "clear", "scope": "local", "store": "prefs"}, "operation must be"},
+		{"bad operation", map[string]any{"operation": "purge", "scope": "local", "store": "prefs"}, "operation must be"},
+		{"valid clear", map[string]any{"operation": "clear", "scope": "local", "store": "prefs"}, ""},
+		{"clear with key", config("clear", "key", nil, false), "key is not allowed for clear"},
+		{"get with default", map[string]any{"operation": "get", "scope": "local", "store": "prefs", "key": "theme", "default": "light"}, ""},
+		{"set with default", map[string]any{"operation": "set", "scope": "local", "store": "prefs", "key": "k", "value": 1, "default": 2}, "default is not allowed for set"},
+		{"get with invalid default", map[string]any{"operation": "get", "scope": "local", "store": "prefs", "key": "k", "default": math.NaN()}, "default is not JSON-compatible"},
+		{"list with prefix", map[string]any{"operation": "list", "scope": "local", "store": "prefs", "prefix": "build-"}, ""},
+		{"get with prefix", map[string]any{"operation": "get", "scope": "local", "store": "prefs", "key": "k", "prefix": "build-"}, "prefix is not allowed for get"},
 		{"missing scope", map[string]any{"operation": "list", "store": "prefs"}, "scope is required"},
 		{"bad scope", map[string]any{"operation": "list", "scope": "shared", "store": "prefs"}, "scope must be"},
 		{"bad static scope with templated store", map[string]any{"operation": "list", "scope": "shared", "store": "{{ .vars.store }}"}, "scope must be"},
@@ -277,6 +284,57 @@ func TestVariableReceivesTheOperationResult(t *testing.T) {
 	}
 	if result.Variables != nil {
 		t.Fatalf("variables without a target = %#v", result.Variables)
+	}
+}
+
+func TestGetDefaultListPrefixAndClear(t *testing.T) {
+	request := step.Request{LocalValueDir: t.TempDir()}
+	run := func(raw map[string]any) map[string]any {
+		t.Helper()
+		runner, err := New(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, err := runner.Run(t.Context(), request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result.Outputs
+	}
+
+	missing := run(map[string]any{
+		"operation": "get", "scope": "local", "store": "prefs", "key": "theme", "default": map[string]any{"name": "light"},
+	})
+	if !reflect.DeepEqual(missing, map[string]any{"value": map[string]any{"name": "light"}, "found": false}) {
+		t.Fatalf("default = %#v", missing)
+	}
+	run(config("set", "theme", "dark", true))
+	stored := run(map[string]any{"operation": "get", "scope": "local", "store": "prefs", "key": "theme", "default": "light"})
+	if !reflect.DeepEqual(stored, map[string]any{"value": "dark", "found": true}) {
+		t.Fatalf("stored value = %#v", stored)
+	}
+
+	run(config("set", "build-linux", 1, true))
+	run(config("set", "build-darwin", 2, true))
+	filtered := run(map[string]any{"operation": "list", "scope": "local", "store": "prefs", "prefix": "build-"})
+	want := []any{
+		map[string]any{"key": "build-darwin", "value": int64(2)},
+		map[string]any{"key": "build-linux", "value": int64(1)},
+	}
+	if !reflect.DeepEqual(filtered["entries"], want) {
+		t.Fatalf("prefixed entries = %#v", filtered["entries"])
+	}
+
+	cleared := run(map[string]any{"operation": "clear", "scope": "local", "store": "prefs"})
+	if !reflect.DeepEqual(cleared, map[string]any{"cleared": int64(3)}) {
+		t.Fatalf("clear = %#v", cleared)
+	}
+	empty := run(config("list", "", nil, false))
+	if len(empty["entries"].([]any)) != 0 {
+		t.Fatalf("entries after clear = %#v", empty["entries"])
+	}
+	if again := run(map[string]any{"operation": "clear", "scope": "local", "store": "prefs"}); !reflect.DeepEqual(again, map[string]any{"cleared": int64(0)}) {
+		t.Fatalf("repeated clear = %#v", again)
 	}
 }
 
