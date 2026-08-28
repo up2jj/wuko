@@ -10,6 +10,7 @@ import (
 	"github.com/up2jj/wuko/steps/extract"
 	importvars "github.com/up2jj/wuko/steps/import_vars"
 	"github.com/up2jj/wuko/steps/jsonpath"
+	keyvaluestep "github.com/up2jj/wuko/steps/key_value"
 	luastep "github.com/up2jj/wuko/steps/lua"
 	"github.com/up2jj/wuko/steps/semver"
 	"github.com/up2jj/wuko/steps/set"
@@ -22,7 +23,7 @@ import (
 func TestVariableWriterTablesNameRegisteredSteps(t *testing.T) {
 	registry := step.NewRegistry()
 	for _, register := range []func(*step.Registry) error{
-		set.Register, jsonpath.Register, semver.Register,
+		set.Register, jsonpath.Register, semver.Register, keyvaluestep.Register,
 		extract.Register, luastep.Register, importvars.Register,
 	} {
 		if err := register(registry); err != nil {

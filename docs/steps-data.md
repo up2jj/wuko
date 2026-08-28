@@ -388,9 +388,19 @@ whether the key existed as `found`, and a `get` followed by a `set` cannot make 
     expr: "found ? current + 1 : 1"
 ```
 
+`variable` assigns the result to a workflow variable as well, so a stored value can be read once and
+used as `vars.<name>` afterwards:
+
+```yaml
+- id: load_theme
+  type: key_value
+  with: {operation: get, scope: global, store: preferences, key: theme, variable: theme}
+```
+
 `get` returns `value` and `found`; `set` returns `value`; `update` returns the new `value`, the
 `found` state it replaced, and whether it `changed`; `delete` returns the previous `value` and
-`deleted`; `list` returns key-sorted `entries`. Stores are atomic plain JSON, not encrypted secret
+`deleted`; `list` returns key-sorted `entries`. A configured `variable` receives that value, or the
+entries for `list`. Stores are atomic plain JSON, not encrypted secret
 vaults. `get` and `list` never create anything: reading a store that was never written returns an
 empty result and leaves the values directory absent.
 

@@ -47,6 +47,8 @@ func TestConfigValidation(t *testing.T) {
 		{"set invalid value", config("set", "key", math.NaN(), true), "value is not JSON-compatible"},
 		{"delete with value", config("delete", "key", true, true), "value is not allowed"},
 		{"list with key", config("list", "key", nil, false), "key is not allowed"},
+		{"valid variable", map[string]any{"operation": "list", "scope": "local", "store": "prefs", "variable": "entries"}, ""},
+		{"empty variable", map[string]any{"operation": "list", "scope": "local", "store": "prefs", "variable": " "}, "variable must not be empty"},
 		{"unknown field", map[string]any{"operation": "list", "scope": "local", "store": "prefs", "extra": true}, "field extra not found"},
 	}
 	for _, tt := range tests {
@@ -230,6 +232,51 @@ func TestUpdateReadsAndWritesUnderOneLock(t *testing.T) {
 	unchanged := run(withExpr(config("update", "runs", nil, false), "current"))
 	if !reflect.DeepEqual(unchanged, map[string]any{"value": int64(2), "found": true, "changed": false}) {
 		t.Fatalf("unchanged update = %#v", unchanged)
+	}
+}
+
+func TestVariableReceivesTheOperationResult(t *testing.T) {
+	request := step.Request{LocalValueDir: t.TempDir()}
+	run := func(raw map[string]any, variable string) map[string]any {
+		t.Helper()
+		raw["variable"] = variable
+		runner, err := New(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, err := runner.Run(t.Context(), request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result.Variables
+	}
+
+	if got := run(config("set", "theme", "dark", true), "saved"); !reflect.DeepEqual(got, map[string]any{"saved": "dark"}) {
+		t.Fatalf("set variables = %#v", got)
+	}
+	if got := run(config("get", "theme", nil, false), "theme"); !reflect.DeepEqual(got, map[string]any{"theme": "dark"}) {
+		t.Fatalf("get variables = %#v", got)
+	}
+	if got := run(withExpr(config("update", "theme", nil, false), `current + "-high-contrast"`), "theme"); !reflect.DeepEqual(got, map[string]any{"theme": "dark-high-contrast"}) {
+		t.Fatalf("update variables = %#v", got)
+	}
+	want := map[string]any{"all": []any{map[string]any{"key": "theme", "value": "dark-high-contrast"}}}
+	if got := run(config("list", "", nil, false), "all"); !reflect.DeepEqual(got, want) {
+		t.Fatalf("list variables = %#v", got)
+	}
+	if got := run(config("delete", "theme", nil, false), "removed"); !reflect.DeepEqual(got, map[string]any{"removed": "dark-high-contrast"}) {
+		t.Fatalf("delete variables = %#v", got)
+	}
+	runner, err := New(config("get", "theme", nil, false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runner.Run(t.Context(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Variables != nil {
+		t.Fatalf("variables without a target = %#v", result.Variables)
 	}
 }
 

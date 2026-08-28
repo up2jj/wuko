@@ -189,3 +189,33 @@ func TestKeyValueUpdateSurvivesConcurrentIncrements(t *testing.T) {
 		t.Fatalf("counter = %#v, want 8", got)
 	}
 }
+
+func TestKeyValueVariableIsAvailableToLaterExpressions(t *testing.T) {
+	registry := newTestRegistry(t, map[string]step.Builder{"capture": func(raw map[string]any) (step.Runner, error) {
+		return countingRunner{value: raw["value"]}, nil
+	}})
+	if err := keyvaluestep.Register(registry); err != nil {
+		t.Fatal(err)
+	}
+	definition := testDefinition(t, "variables",
+		workflow.Step{ID: "save", Type: "key_value", With: map[string]any{
+			"operation": "set", "scope": "local", "store": "build", "key": "attempts", "expr": "3",
+		}},
+		workflow.Step{ID: "load", Type: "key_value", With: map[string]any{
+			"operation": "get", "scope": "local", "store": "build", "key": "attempts", "variable": "attempts",
+		}},
+		workflow.Step{ID: "consume", Type: "capture", If: "vars.attempts > 2", With: map[string]any{"value": "{{ .vars.attempts }}"}},
+	)
+	state, err := New(registry).Run(t.Context(), definition, Options{
+		LocalValueDir: t.TempDir(), GlobalValueDir: t.TempDir(), Stdout: io.Discard, Stderr: io.Discard,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := state.Vars["attempts"]; got != int64(3) {
+		t.Fatalf("variable = %#v, want 3", got)
+	}
+	if got := state.Steps["consume"].(map[string]any)["value"]; got != "3" {
+		t.Fatalf("consumed value = %#v", got)
+	}
+}

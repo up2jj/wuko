@@ -31,6 +31,7 @@ type Config struct {
 	Key       string `yaml:"key,omitempty"`
 	Value     any    `yaml:"value,omitempty"`
 	Expr      string `yaml:"expr,omitempty"`
+	Variable  string `yaml:"variable,omitempty"`
 }
 
 type expressionEnvironment struct {
@@ -64,6 +65,7 @@ type runValue struct {
 // Runner executes a key-value operation.
 type Runner struct {
 	config   Config
+	present  map[string]struct{}
 	hasValue bool
 	hasExpr  bool
 	program  *vm.Program
@@ -78,9 +80,13 @@ func New(raw map[string]any) (step.Runner, error) {
 	if err := step.DecodeConfig(raw, &config); err != nil {
 		return nil, err
 	}
-	_, hasValue := raw["value"]
-	_, hasExpr := raw["expr"]
-	runner := &Runner{config: config, hasValue: hasValue, hasExpr: hasExpr}
+	present := make(map[string]struct{}, len(raw))
+	for field := range raw {
+		present[field] = struct{}{}
+	}
+	_, hasValue := present["value"]
+	_, hasExpr := present["expr"]
+	runner := &Runner{config: config, present: present, hasValue: hasValue, hasExpr: hasExpr}
 	if err := runner.validateConfig(); err != nil {
 		return nil, err
 	}
@@ -126,6 +132,28 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 	if err != nil {
 		return step.Result{}, err
 	}
+	result, err := r.perform(ctx, store, request)
+	if err != nil {
+		return result, err
+	}
+	return r.withVariable(result), nil
+}
+
+// withVariable copies the operation's result into the configured workflow variable: the
+// value it read or wrote, or the entries a list returned.
+func (r *Runner) withVariable(result step.Result) step.Result {
+	if r.config.Variable == "" {
+		return result
+	}
+	value, ok := result.Outputs["value"]
+	if !ok {
+		value = result.Outputs["entries"]
+	}
+	result.Variables = map[string]any{r.config.Variable: value}
+	return result
+}
+
+func (r *Runner) perform(ctx context.Context, store *storepkg.Store, request step.Request) (step.Result, error) {
 	switch r.config.Operation {
 	case operationGet:
 		value, found, err := store.Get(ctx, r.config.Key)
@@ -168,6 +196,9 @@ func (r *Runner) validateConfig() error {
 	}
 	if r.config.Store == "" {
 		return fmt.Errorf("store is required")
+	}
+	if _, declared := r.present["variable"]; declared && strings.TrimSpace(r.config.Variable) == "" {
+		return fmt.Errorf("variable must not be empty")
 	}
 	// OpenWorkflowScoped validates resolved store names and scopes without accessing the filesystem.
 	if !templated(r.config.Store) {
