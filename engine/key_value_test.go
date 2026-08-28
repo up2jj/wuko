@@ -2,6 +2,8 @@ package engine
 
 import (
 	"io"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/up2jj/wuko/step"
@@ -62,6 +64,40 @@ func TestKeyValueTemplatesAndNumericConditions(t *testing.T) {
 	}
 }
 
+func TestRemoteActionIsDeniedTheCallerLocalStore(t *testing.T) {
+	registry := newTestRegistry(t, nil)
+	if err := keyvaluestep.Register(registry); err != nil {
+		t.Fatal(err)
+	}
+	localRoot := t.TempDir()
+	run := func(scope string) error {
+		action := testAction(t, "store-action",
+			workflow.Step{ID: "save", Type: "key_value", With: map[string]any{
+				"operation": "set", "scope": scope, "store": "shared", "key": "from_remote", "value": true,
+			}},
+		)
+		definition := testDefinition(t, "caller", workflow.Step{
+			ID: "call", Uses: workflow.ActionSource{URL: "https://actions.example.test/store"}, Action: action,
+		})
+		_, err := New(registry).Run(t.Context(), definition, Options{
+			LocalValueDir: localRoot, GlobalValueDir: t.TempDir(), Stdout: io.Discard, Stderr: io.Discard,
+		})
+		return err
+	}
+	if err := run("local"); err == nil || !strings.Contains(err.Error(), "local key-value storage is unavailable") {
+		t.Fatalf("local scope error = %v", err)
+	}
+	if _, err := os.Stat(localRoot); err != nil {
+		t.Fatalf("caller value root: %v", err)
+	}
+	if entries, err := os.ReadDir(localRoot); err != nil || len(entries) != 0 {
+		t.Fatalf("remote action wrote %#v (%v) into the caller store", entries, err)
+	}
+	if err := run("global"); err != nil {
+		t.Fatalf("global scope: %v", err)
+	}
+}
+
 func TestCompositeActionInheritsCallerValueRoots(t *testing.T) {
 	registry := newTestRegistry(t, nil)
 	if err := keyvaluestep.Register(registry); err != nil {
@@ -72,7 +108,7 @@ func TestCompositeActionInheritsCallerValueRoots(t *testing.T) {
 		workflow.Step{ID: "load", Type: "key_value", With: map[string]any{"operation": "get", "scope": "local", "store": "shared", "key": "from_action"}},
 	)
 	action.Outputs = map[string]workflow.ActionOutput{"value": {Value: "steps.load.value"}}
-	definition := testDefinition(t, "caller", workflow.Step{ID: "call", Uses: workflow.ActionSource{URL: "https://example.test/action"}, Action: action})
+	definition := testDefinition(t, "caller", workflow.Step{ID: "call", Uses: workflow.ActionSource{Path: "./actions/store/action.yaml"}, Action: action})
 	localRoot := t.TempDir()
 	state, err := New(registry).Run(t.Context(), definition, Options{
 		LocalValueDir: localRoot, GlobalValueDir: t.TempDir(), Stdout: io.Discard, Stderr: io.Discard,

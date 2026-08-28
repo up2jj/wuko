@@ -1045,6 +1045,17 @@ func makeRequest(definition *workflow.Definition, stepID string, options Options
 	}
 }
 
+// actionLocalValueDir scopes an action's local key-value storage. A remote action is
+// fetched code the caller did not write, so it gets what a remote workflow gets: no store
+// beside the caller's workflow. Path and command actions are workspace content the caller
+// already trusts, and keep the caller's root.
+func actionLocalValueDir(workflowStep workflow.Step, options Options) string {
+	if workflowStep.Uses.URL != "" {
+		return ""
+	}
+	return options.LocalValueDir
+}
+
 func (e *Engine) validateAction(ctx context.Context, definition *workflow.Definition, workflowStep workflow.Step, options Options, state *State) error {
 	if workflowStep.Action == nil {
 		return fmt.Errorf("action was not resolved by the workflow loader")
@@ -1070,7 +1081,7 @@ func (e *Engine) validateAction(ctx context.Context, definition *workflow.Defini
 	return e.Validate(ctx, inner, Options{
 		InvocationID: options.InvocationID,
 		inputs:       inputs, BaseEnv: state.Env, RunDir: options.RunDir,
-		LocalValueDir: options.LocalValueDir, GlobalValueDir: options.GlobalValueDir,
+		LocalValueDir: actionLocalValueDir(workflowStep, options), GlobalValueDir: options.GlobalValueDir,
 		Stdin: options.Stdin, Stdout: options.Stdout, Stderr: options.Stderr, Interactive: options.Interactive,
 		Diagnostics: options.Diagnostics, runID: options.runID, parentRunID: options.parentRunID,
 		parentStepRunID: options.parentStepRunID, depth: options.depth + 1, runtime: options.runtime,
@@ -1094,7 +1105,7 @@ func (e *Engine) prepareActionExecutor(definition *workflow.Definition, workflow
 		innerState, err := e.Run(ctx, inner, Options{
 			InvocationID: options.InvocationID,
 			inputs:       inputs, BaseEnv: state.Env, RunDir: options.RunDir,
-			LocalValueDir: options.LocalValueDir, GlobalValueDir: options.GlobalValueDir,
+			LocalValueDir: actionLocalValueDir(workflowStep, options), GlobalValueDir: options.GlobalValueDir,
 			Stdin: options.Stdin, Stdout: options.Stdout, Stderr: options.Stderr,
 			Interactive: options.Interactive, Progress: options.Progress,
 			Diagnostics:     options.Diagnostics,

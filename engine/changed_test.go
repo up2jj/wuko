@@ -107,7 +107,7 @@ func TestChangedStepSupportsCompositeActionInputsInKey(t *testing.T) {
 	}
 	definition := &workflow.Definition{
 		Version: 1, Name: "caller", Dir: root, Location: diagnostic.Location{Source: filepath.Join(root, "workflow.yaml")},
-		Steps: []workflow.Step{{ID: "call", Uses: workflow.ActionSource{URL: "https://actions.example.test/changed@v1"}, Action: action, With: map[string]any{"target": "linux"}}},
+		Steps: []workflow.Step{{ID: "call", Uses: workflow.ActionSource{Path: "./actions/changed/action.yaml"}, Action: action, With: map[string]any{"target": "linux"}}},
 	}
 	options := Options{RunDir: root, LocalValueDir: filepath.Join(root, ".wuko", "values"), Stdout: io.Discard, Stderr: io.Discard}
 	if _, err := New(registry).Run(t.Context(), definition, options); err != nil {

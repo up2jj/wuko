@@ -314,7 +314,8 @@ Constrain exposes `matched`; increment exposes `previous` and the new `version`.
 
 Persist JSON-compatible values between runs with `get`, `set`, `update`, `delete`, and `list`.
 `local` stores live beside the workflow under `.wuko/values/`; `global` stores live in Wuko's user
-configuration directory.
+configuration directory. Code Wuko fetched -- a remote workflow, or an action pulled from a URL --
+has no local store and can only use `global`.
 
 Set and get a preference:
 

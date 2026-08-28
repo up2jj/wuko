@@ -862,7 +862,10 @@ An HTTPS reference fetches an action instead:
 ```
 
 The URL may return an action manifest or an archive containing one root `action.yml` or
-`action.yaml`. Pin immutable releases with the SHA-256 of the exact downloaded bytes. A manifest
+`action.yaml`. Pin immutable releases with the SHA-256 of the exact downloaded bytes. A fetched
+action has no local key-value store: `key_value` and `wuko.kv` steps inside it can use `scope:
+global` but not `scope: local`, exactly as in a remote workflow. Path and command actions are
+workspace content and keep the caller's local store. A manifest
 declares typed inputs, internal steps, and exported outputs:
 
 ```yaml
