@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -512,7 +513,8 @@ func balancedEnd(data []byte, start int, opener byte) int {
 func tomlSpans(data []byte) (map[string]textEdit, error) {
 	spans := make(map[string]textEdit)
 	table := []string{}
-	arrayIndexes := make(map[string]int)
+	arrayNext := make(map[string]int)
+	arrayCurrent := make(map[string]int)
 	for offset := 0; offset < len(data); {
 		lineEnd := bytes.IndexByte(data[offset:], '\n')
 		if lineEnd < 0 {
@@ -533,7 +535,7 @@ func tomlSpans(data []byte) (map[string]textEdit, error) {
 			if array {
 				closing = []byte("]]")
 			}
-			end := bytes.Index(trimmed, closing)
+			end := tomlHeaderEnd(trimmed, closing)
 			if end < 0 {
 				return nil, fmt.Errorf("unterminated TOML table header")
 			}
@@ -545,12 +547,17 @@ func tomlSpans(data []byte) (map[string]textEdit, error) {
 			if err != nil {
 				return nil, err
 			}
-			table = parts
-			if array {
-				key := "/" + strings.Join(escapeParts(parts), "/")
-				index := arrayIndexes[key]
-				arrayIndexes[key] = index + 1
-				table = append(parts, strconv.Itoa(index))
+			if !array {
+				table = expandArrayPath(parts, arrayCurrent)
+			} else {
+				// The last segment names the array being appended to, so only the
+				// prefix leading to it is resolved against existing elements.
+				table = append(expandArrayPath(parts[:len(parts)-1], arrayCurrent), parts[len(parts)-1])
+				key := "/" + strings.Join(escapeParts(table), "/")
+				index := arrayNext[key]
+				arrayNext[key] = index + 1
+				arrayCurrent[key] = index
+				table = append(table, strconv.Itoa(index))
 			}
 			offset += lineEnd
 			if offset < len(data) {
@@ -582,6 +589,49 @@ func tomlSpans(data []byte) (map[string]textEdit, error) {
 		}
 	}
 	return spans, nil
+}
+
+// tomlHeaderEnd locates the closing bracket sequence of a table header, skipping any
+// that sits inside a quoted key. Scanning for the first "]" instead meant a single key
+// such as ["we]ird"] truncated the name and made the whole file unreadable.
+func tomlHeaderEnd(header []byte, closing []byte) int {
+	quote := byte(0)
+	for i := 0; i < len(header); i++ {
+		c := header[i]
+		if quote != 0 {
+			if quote == '"' && c == '\\' {
+				i++
+				continue
+			}
+			if c == quote {
+				quote = 0
+			}
+			continue
+		}
+		if c == '\'' || c == '"' {
+			quote = c
+			continue
+		}
+		if bytes.HasPrefix(header[i:], closing) {
+			return i
+		}
+	}
+	return -1
+}
+
+// expandArrayPath rewrites a table path so every prefix naming an array of tables
+// carries the index of its most recent element. TOML resolves [items.sub] against the
+// last [[items]], so without this the sub-table was recorded under /items/sub, a path
+// the decoded document does not contain, while its real location stayed unreachable.
+func expandArrayPath(parts []string, current map[string]int) []string {
+	expanded := make([]string, 0, len(parts)+1)
+	for _, part := range parts {
+		expanded = append(expanded, part)
+		if index, ok := current["/"+strings.Join(escapeParts(expanded), "/")]; ok {
+			expanded = append(expanded, strconv.Itoa(index))
+		}
+	}
+	return expanded
 }
 
 func tomlEquals(line []byte) int {
@@ -703,12 +753,72 @@ func tomlKeyParts(key string) ([]string, error) {
 	return parts, nil
 }
 
+// tomlString encodes a TOML basic string. strconv.Quote produces Go syntax, which
+// defines escapes TOML does not have: a string holding a vertical tab or any other
+// control character came out as \v or \x01, and the file it was written into no
+// longer parsed. TOML allows only \b, \t, \n, \f, \r, \", \\ and the \u/\U forms.
+func tomlString(value string) ([]byte, error) {
+	if !utf8.ValidString(value) {
+		return nil, fmt.Errorf("TOML strings must be valid UTF-8")
+	}
+	var encoded strings.Builder
+	encoded.Grow(len(value) + 2)
+	encoded.WriteByte('"')
+	for _, symbol := range value {
+		switch symbol {
+		case '"':
+			encoded.WriteString(`\"`)
+		case '\\':
+			encoded.WriteString(`\\`)
+		case '\b':
+			encoded.WriteString(`\b`)
+		case '\t':
+			encoded.WriteString(`\t`)
+		case '\n':
+			encoded.WriteString(`\n`)
+		case '\f':
+			encoded.WriteString(`\f`)
+		case '\r':
+			encoded.WriteString(`\r`)
+		default:
+			// The remaining control characters, and DEL, have no shorthand and must
+			// travel as escapes; everything else is written literally.
+			if symbol < 0x20 || symbol == 0x7f {
+				fmt.Fprintf(&encoded, `\u%04X`, symbol)
+				continue
+			}
+			encoded.WriteRune(symbol)
+		}
+	}
+	encoded.WriteByte('"')
+	return []byte(encoded.String()), nil
+}
+
+// tomlFloat keeps a float looking like one. FormatFloat renders a whole value as "3",
+// which TOML reads back as an integer, so the edit silently changed the value's type.
+// TOML spells the non-finite values in lower case and without a leading plus.
+func tomlFloat(value float64) string {
+	switch {
+	case math.IsNaN(value):
+		return "nan"
+	case math.IsInf(value, 1):
+		return "inf"
+	case math.IsInf(value, -1):
+		return "-inf"
+	}
+	text := strconv.FormatFloat(value, 'g', -1, 64)
+	if !strings.ContainsAny(text, ".eE") {
+		text += ".0"
+	}
+	return text
+}
+
 func renderTOML(value any) ([]byte, error) {
 	switch value := value.(type) {
 	case nil:
 		return nil, fmt.Errorf("TOML has no null value")
 	case string:
-		return []byte(strconv.Quote(value)), nil
+		return tomlString(value)
 	case bool:
 		return []byte(strconv.FormatBool(value)), nil
 	case json.Number:
@@ -718,7 +828,7 @@ func renderTOML(value any) ([]byte, error) {
 	case int64:
 		return []byte(strconv.FormatInt(value, 10)), nil
 	case float64:
-		return []byte(strconv.FormatFloat(value, 'g', -1, 64)), nil
+		return []byte(tomlFloat(value)), nil
 	case time.Time:
 		return []byte(value.Format(time.RFC3339Nano)), nil
 	case []any:
@@ -743,7 +853,12 @@ func renderTOML(value any) ([]byte, error) {
 			if err != nil {
 				return nil, err
 			}
-			parts[i] = strconv.Quote(key) + " = " + string(encoded)
+			// The key needs TOML quoting for the same reason the value does.
+			quoted, err := tomlString(key)
+			if err != nil {
+				return nil, err
+			}
+			parts[i] = string(quoted) + " = " + string(encoded)
 		}
 		return []byte("{" + strings.Join(parts, ", ") + "}"), nil
 	default:

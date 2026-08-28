@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -474,8 +475,13 @@ func decodeDocument(data []byte, format string) (any, error) {
 			return nil, err
 		}
 		var extra any
-		if err := decoder.Decode(&extra); err != io.EOF {
+		switch err := decoder.Decode(&extra); {
+		case err == nil:
 			return nil, fmt.Errorf("multiple JSON values are not supported")
+		case !errors.Is(err, io.EOF):
+			// A second value that fails to decode is a syntax error in the document,
+			// not a second document; reporting it as one hid the real problem.
+			return nil, err
 		}
 	case "yaml":
 		decoder := yaml.NewDecoder(bytes.NewReader(data))
@@ -483,8 +489,11 @@ func decodeDocument(data []byte, format string) (any, error) {
 			return nil, err
 		}
 		var extra any
-		if err := decoder.Decode(&extra); err != io.EOF {
+		switch err := decoder.Decode(&extra); {
+		case err == nil:
 			return nil, fmt.Errorf("multiple YAML documents are not supported")
+		case !errors.Is(err, io.EOF):
+			return nil, err
 		}
 	case "toml":
 		value = map[string]any{}
@@ -557,16 +566,30 @@ func numberText(value any) (string, bool) {
 
 // exprValue turns decoded json.Number values into the plain numbers expression
 // operators understand, so arithmetic on current works for every format.
+//
+// An integer too large for any Go integer type is left as the json.Number it already
+// was. Converting it to a float loses digits, and because a replacement is compared
+// against the original to decide whether the file changed, that rounded value counted
+// as a change and was written back: an expr of just "current" rewrote the document
+// with a truncated number. Passing it through unchanged makes that edit the no-op it
+// should be, and leaves arithmetic on such a number to fail rather than quietly round.
 func exprValue(value any) any {
 	switch value := value.(type) {
 	case json.Number:
 		if integer, err := value.Int64(); err == nil {
 			return integer
 		}
-		if number, err := value.Float64(); err == nil {
-			return number
+		if unsigned, err := strconv.ParseUint(value.String(), 10, 64); err == nil {
+			return unsigned
 		}
-		return value.String()
+		// Only a genuinely fractional number becomes a float; a plain integer this
+		// large would lose its low digits on the way.
+		if strings.ContainsAny(value.String(), ".eE") {
+			if number, err := value.Float64(); err == nil {
+				return number
+			}
+		}
+		return value
 	case map[string]any:
 		result := make(map[string]any, len(value))
 		for key, child := range value {

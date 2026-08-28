@@ -242,6 +242,12 @@ match. A missing path fails by default. Set `missing: ignore` for a successful n
 the replacement expression is not evaluated and a file is not rewritten. Missing source files or
 variables always fail.
 
+Values keep their type across a rewrite. A TOML float is written with a decimal point, so a whole
+number is not read back as an integer, and TOML strings use TOML's own escapes, so a control
+character does not produce a file its parser rejects. An integer too large for a 64-bit type passes
+through unchanged rather than being rounded through a float, which also means an `expr` of `current`
+rewrites nothing. Arithmetic on such a number fails instead of silently losing its low digits.
+
 Outputs include the complete transformed `value`, normalized `paths`, per-match `replacements`,
 `count`, `changed`, and `changed_count`. File edits also return the resolved `file` and `format`.
 The step only replaces existing nodes; it does not create missing keys, array entries, or parents.
