@@ -89,8 +89,9 @@ func TestLoadRemoteYAMLAndCleansUp(t *testing.T) {
 }
 
 func TestLoadRemoteReportsPreparationFailureAsLoadFailure(t *testing.T) {
-	// Not parallel: this test snapshots the process-global os.TempDir()/wuko-workflow-*
-	// namespace, so a concurrently-materializing test would look like a leak.
+	// Not parallel: this test snapshots the os.TempDir()/wuko-workflow-* namespace, so a
+	// concurrently-materializing test would look like a leak.
+	isolateRemoteWorkflowTempDir(t)
 	workflowData := []byte("version: 1\nname: remote\nsteps:\n  - id: action\n    uses: https://actions.example.test/missing\n")
 	client := testHTTPClient(func(request *http.Request) (*http.Response, error) {
 		if request.URL.Host == "example.test" {
@@ -119,8 +120,9 @@ func TestLoadRemoteReportsPreparationFailureAsLoadFailure(t *testing.T) {
 }
 
 func TestDecodeRemoteRemovesMaterializedWorkflowOnDecodeFailure(t *testing.T) {
-	// Not parallel: this test snapshots the process-global os.TempDir()/wuko-workflow-*
-	// namespace, so a concurrently-materializing test would look like a leak.
+	// Not parallel: this test snapshots the os.TempDir()/wuko-workflow-* namespace, so a
+	// concurrently-materializing test would look like a leak.
+	isolateRemoteWorkflowTempDir(t)
 	client := testHTTPClient(func(*http.Request) (*http.Response, error) {
 		return testResponse(http.StatusOK, []byte("version: [")), nil
 	})
@@ -366,6 +368,19 @@ func TestLoadRemoteRejectsInsecureURLAndReportsGitHubFailure(t *testing.T) {
 	}
 	if _, _, err := loader.LoadRemote(t.Context(), "github:acme/missing", LoadOptions{}); err == nil || !strings.Contains(err.Error(), "404 Not Found") {
 		t.Fatalf("GitHub failure = %v", err)
+	}
+}
+
+// isolateRemoteWorkflowTempDir gives one test its own os.TempDir() so the leak assertions
+// below observe only the directories that test materialized. The prefix is created by
+// production code, so any other test binary running concurrently under `go test ./...` --
+// the cmd package runs remote workflows -- would otherwise appear as a leak. The caller
+// must not be parallel, because the environment is process-global.
+func isolateRemoteWorkflowTempDir(t *testing.T) {
+	t.Helper()
+	directory := t.TempDir()
+	for _, name := range []string{"TMPDIR", "TMP", "TEMP"} {
+		t.Setenv(name, directory)
 	}
 }
 
