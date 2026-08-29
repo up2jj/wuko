@@ -48,7 +48,11 @@ type Action struct {
 	Finally     []Step                        `yaml:"finally,omitempty"`
 	Dir         string                        `yaml:"-"`
 	Files       map[string]ActionFile         `yaml:"-"`
-	Location    diagnostic.Location           `yaml:"-"`
+	// DirBorrowed reports that Dir belongs to the calling workflow rather than to the action.
+	// A remote action fetched as a plain YAML manifest carries no files of its own, so steps
+	// that read the package tree must refuse it instead of reading the caller's files.
+	DirBorrowed bool                `yaml:"-"`
+	Location    diagnostic.Location `yaml:"-"`
 }
 
 // ActionInput declares one typed action input.
@@ -643,7 +647,8 @@ func decodeAction(data []byte, description, dir string, files map[string]ActionF
 	}
 	action.Dir = dir
 	action.Files = files
-	if action.Files == nil && localFileRoot == "" {
+	action.DirBorrowed = action.Files == nil && localFileRoot == ""
+	if action.DirBorrowed {
 		for name, definition := range action.Templates {
 			if definition.File != "" {
 				return nil, fmt.Errorf("loading %s templates: template %q file %q requires a packaged action", description, name, definition.File)

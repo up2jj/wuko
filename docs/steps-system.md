@@ -340,6 +340,52 @@ Other operations are `move`, `remove`, `mkdir`, `list`, `stat`, `chmod`, `find`,
 `truncate`, `tail`, `disk_usage`, `atomic_swap`, `permissions`, and `touch`. See
 [Filesystem operations](filesystem-operations.md) for every field, output, safety rule, and example.
 
+## `scaffold`
+
+Render a packaged directory tree into the active run directory. `from` is a required relative path
+within the owning workflow or composite-action package; `into` is required and resolves from
+`run.dir` unless it is absolute. Both configuration fields, every relative source path component,
+and every regular file body use the owning workflow or action's strict Go-template environment.
+Filename suffixes are preserved.
+
+```yaml
+- id: new_service
+  type: scaffold
+  with:
+    from: templates/service
+    into: "services/{{ .vars.name }}"
+    on_conflict: fail
+```
+
+For example, `templates/service/cmd/{{ .vars.name }}/main.go` becomes
+`services/<name>/cmd/<name>/main.go`, with its contents rendered from the same `.vars`, `.inputs`,
+`.env`, `.steps`, control bindings, functions, and named templates available to ordinary step
+configuration. The source directory itself is not added below `into`. Hidden files are included,
+and new files preserve source permission bits. Empty directories and directory permission bits
+survive only while the owning workflow or action runs from a directory: packaging carries files
+alone, so a scaffold tree shipped inside a workflow package or action archive loses its empty
+directories and the directories the step creates fall back to `0755`. Keep a placeholder file in
+any directory that must survive packaging.
+
+`on_conflict` defaults to `fail`:
+
+- `fail` checks the complete rendered plan before writing and fails when any destination file
+  exists.
+- `skip` leaves existing files or leaf symbolic links unchanged and creates the remaining files.
+- `overwrite` atomically replaces existing files or leaf symbolic links.
+
+Existing directories are merged without changing their modes. File/directory type mismatches,
+symbolic-link destination directories, source symbolic links, special files, invalid UTF-8, unsafe
+rendered path components, and duplicate rendered paths fail. Two entries whose rendered paths
+differ only in case are rejected as duplicates on every platform, because such a tree cannot be
+written on a case-insensitive filesystem. Every source regular file is treated as text; binary
+assets are not supported. `from` requires a directory the owning package carries, so a remote
+action loaded as a plain YAML manifest is refused rather than read from the caller's package. The
+step is local-filesystem-only and cannot run inside an executor block.
+
+Outputs are absolute `from` and `into` paths, integer `created`, `skipped`, and `overwritten`
+counts, and `files`, a sorted list of absolute destination paths represented by the scaffold.
+
 ## `glob`
 
 Discover regular files with portable patterns. Patterns use forward slashes on every platform and

@@ -1080,12 +1080,16 @@ func templateData(definition *workflow.Definition, runDir string, state *State) 
 
 func makeRequest(definition *workflow.Definition, stepID string, options Options, state *State, attempt, maxAttempts int, operationID string) step.Request {
 	return step.Request{
-		StepID: stepID, WorkflowName: definition.Name, WorkflowSource: definition.Location.Source, WorkflowDir: definition.Dir, WorkflowTimezone: definition.Timezone,
+		StepID: stepID, WorkflowName: definition.Name, WorkflowSource: definition.Location.Source, WorkflowDir: definition.Dir,
+		WorkflowDirBorrowed: definition.DirBorrowed, WorkflowTimezone: definition.Timezone,
 		RunDir: options.RunDir, LocalValueDir: options.LocalValueDir, GlobalValueDir: options.GlobalValueDir,
 		Inputs: cloneMap(state.Inputs), Vars: cloneMap(state.Vars), PresetVars: cloneMap(state.presetVars), Env: maps.Clone(state.Env),
 		Steps: cloneMap(state.Steps), Dependencies: cloneDependencies(state.Dependencies), Bindings: cloneMap(state.Bindings), Stdin: options.Stdin, Stdout: options.Stdout,
 		Stderr: options.Stderr, Interactive: options.Interactive,
 		Attempt: attempt, MaxAttempts: maxAttempts, OperationID: operationID,
+		TemplateRenderer: newBoundTemplateRenderer(options.renderer, func() map[string]any {
+			return templateData(definition, options.RunDir, state)
+		}),
 		Executor: options.Executor,
 	}
 }
@@ -1122,7 +1126,7 @@ func (e *Engine) validateAction(ctx context.Context, definition *workflow.Defini
 	}
 	defer cleanup()
 	inputs := actionValidationInputs(workflowStep.Action)
-	inner := &workflow.Definition{Version: 1, Name: workflowStep.Action.Name, Timezone: definition.Timezone, Templates: workflowStep.Action.Templates, Dir: dir, Steps: workflowStep.Action.Steps, Finally: workflowStep.Action.Finally, Vars: map[string]any{}, Env: workflow.Environment{}, Location: workflowStep.Action.Location}
+	inner := &workflow.Definition{Version: 1, Name: workflowStep.Action.Name, Timezone: definition.Timezone, Templates: workflowStep.Action.Templates, Dir: dir, DirBorrowed: workflowStep.Action.DirBorrowed, Steps: workflowStep.Action.Steps, Finally: workflowStep.Action.Finally, Vars: map[string]any{}, Env: workflow.Environment{}, Location: workflowStep.Action.Location}
 	return e.Validate(ctx, inner, Options{
 		InvocationID: options.InvocationID,
 		inputs:       inputs, BaseEnv: state.Env, RunDir: options.RunDir,
@@ -1146,7 +1150,7 @@ func (e *Engine) prepareActionExecutor(definition *workflow.Definition, workflow
 	if err != nil {
 		return nil, nil, err
 	}
-	inner := &workflow.Definition{Version: 1, Name: workflowStep.Action.Name, Timezone: definition.Timezone, Templates: workflowStep.Action.Templates, Dir: dir, Steps: workflowStep.Action.Steps, Finally: workflowStep.Action.Finally, Vars: map[string]any{}, Env: workflow.Environment{}, Location: workflowStep.Action.Location}
+	inner := &workflow.Definition{Version: 1, Name: workflowStep.Action.Name, Timezone: definition.Timezone, Templates: workflowStep.Action.Templates, Dir: dir, DirBorrowed: workflowStep.Action.DirBorrowed, Steps: workflowStep.Action.Steps, Finally: workflowStep.Action.Finally, Vars: map[string]any{}, Env: workflow.Environment{}, Location: workflowStep.Action.Location}
 	execute := func(ctx context.Context, request step.Request) (step.Result, error) {
 		innerState, err := e.Run(ctx, inner, Options{
 			InvocationID: options.InvocationID,

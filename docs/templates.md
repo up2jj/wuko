@@ -171,6 +171,30 @@ steps:
 
 Inside the action template, the bound value is available as `.inputs.target`.
 
+## Template trees
+
+Use the `scaffold` step when a workflow or action needs to render a complete directory instead of
+passing one named template to one `file` step:
+
+```yaml
+- id: new_service
+  type: scaffold
+  with:
+    from: templates/service
+    into: "services/{{ .inputs.name }}"
+    on_conflict: fail
+```
+
+`from` resolves from the owning workflow or action package, so the complete source tree can be
+bundled in a remote archive. An archive carries files alone: empty directories do not survive
+packaging, and directory modes fall back to `0755`. A remote action published as a plain YAML
+manifest carries no files at all, so `scaffold` refuses it rather than reading the caller's
+package. Each UTF-8 regular file and each relative path component is rendered with that owner's
+template namespace and runtime data. Nested files may invoke declared named
+templates. Filename suffixes are preserved, and binary files and symbolic links are rejected.
+
+See [`scaffold`](steps-system.md#scaffold) for conflict policies, outputs, and path safety rules.
+
 ## Typed action inputs
 
 Go templates always render strings. They work directly for string inputs:

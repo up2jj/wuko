@@ -38,20 +38,24 @@ type Definition struct {
 	DependsOn      map[string]string         `yaml:"depends_on,omitempty"`
 	Outputs        map[string]WorkflowOutput `yaml:"outputs,omitempty"`
 	// Form is intentionally opaque to core workflow execution. The optional browser UI decodes it.
-	Form        yaml.Node                     `yaml:"form,omitempty"`
-	Cron        string                        `yaml:"cron,omitempty"`
-	Timezone    string                        `yaml:"timezone,omitempty"`
-	Templates   map[string]TemplateDefinition `yaml:"templates,omitempty"`
-	Vars        map[string]any                `yaml:"vars,omitempty"`
-	Env         Environment                   `yaml:"env,omitempty"`
-	Steps       []Step                        `yaml:"steps"`
-	Finally     []Step                        `yaml:"finally,omitempty"`
-	Targets     map[string]TargetDefinition   `yaml:"targets,omitempty"`
-	Install     []Step                        `yaml:"install,omitempty"`
-	Uninstall   []Step                        `yaml:"uninstall,omitempty"`
-	Path        string                        `yaml:"-"`
-	Dir         string                        `yaml:"-"`
-	Location    diagnostic.Location           `yaml:"-"`
+	Form      yaml.Node                     `yaml:"form,omitempty"`
+	Cron      string                        `yaml:"cron,omitempty"`
+	Timezone  string                        `yaml:"timezone,omitempty"`
+	Templates map[string]TemplateDefinition `yaml:"templates,omitempty"`
+	Vars      map[string]any                `yaml:"vars,omitempty"`
+	Env       Environment                   `yaml:"env,omitempty"`
+	Steps     []Step                        `yaml:"steps"`
+	Finally   []Step                        `yaml:"finally,omitempty"`
+	Targets   map[string]TargetDefinition   `yaml:"targets,omitempty"`
+	Install   []Step                        `yaml:"install,omitempty"`
+	Uninstall []Step                        `yaml:"uninstall,omitempty"`
+	Path      string                        `yaml:"-"`
+	Dir       string                        `yaml:"-"`
+	// DirBorrowed reports that Dir belongs to a calling workflow rather than to this
+	// definition. It is set for the inner definition of a remote action loaded as a plain
+	// manifest, which carries no files of its own. See Action.DirBorrowed.
+	DirBorrowed bool                `yaml:"-"`
+	Location    diagnostic.Location `yaml:"-"`
 	sourceRoot  string
 	sourceLabel string
 }

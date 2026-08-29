@@ -13,17 +13,36 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// TemplateRenderer validates and renders text with the current workflow or action template set
+// and execution data. Steps that consume external template content should use this interface
+// rather than constructing an independent renderer, so named templates and strict missing-key
+// behavior remain consistent with ordinary step configuration.
+type TemplateRenderer interface {
+	Validate(string) error
+	Render(string) (string, error)
+	// ValidateContent and RenderContent handle one-off external content such as a file body.
+	// They behave like Validate and Render but do not retain the compiled template, which is
+	// cached by its whole text for the length of the run.
+	ValidateContent(string) error
+	RenderContent(string) (string, error)
+}
+
 type Request struct {
 	StepID       string
 	WorkflowName string
 	// WorkflowSource is the stable logical source of the workflow or action definition.
-	WorkflowSource   string
-	WorkflowDir      string
-	WorkflowTimezone string
-	RunDir           string
-	LocalValueDir    string
-	GlobalValueDir   string
-	Vars             map[string]any
+	WorkflowSource string
+	WorkflowDir    string
+	// WorkflowDirBorrowed reports that WorkflowDir belongs to a calling workflow rather than to
+	// the definition running this step: a remote action loaded as a plain YAML manifest carries
+	// no files of its own. Steps that read the package tree must refuse such a request instead
+	// of reading the caller's files.
+	WorkflowDirBorrowed bool
+	WorkflowTimezone    string
+	RunDir              string
+	LocalValueDir       string
+	GlobalValueDir      string
+	Vars                map[string]any
 	// PresetVars holds the variables supplied before the run began -- the workflow's
 	// own vars: block plus invocation --var overrides. Unlike Vars it never grows as
 	// steps write variables, so a step can tell a pinned value from one it produced.
@@ -42,6 +61,9 @@ type Request struct {
 	Attempt     int
 	MaxAttempts int
 	OperationID string
+	// TemplateRenderer is bound to the current workflow or action state. It is nil only when a
+	// runner is invoked directly instead of through the engine.
+	TemplateRenderer TemplateRenderer
 	// Executor runs process-backed work. A nil executor means local execution.
 	Executor process.Executor
 	// PreviousAttempt is the most recent failed attempt that produced a complete result.

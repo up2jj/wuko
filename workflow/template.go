@@ -99,13 +99,32 @@ func NewRenderer(definitions map[string]TemplateDefinition) (*Renderer, error) {
 
 // Validate parses one template string and checks named-template references.
 func (renderer *Renderer) Validate(value string) error {
-	_, err := renderer.compile(value)
+	_, err := renderer.compile(value, true)
 	return err
 }
 
 // Render executes one template string with the supplied data.
 func (renderer *Renderer) Render(value string, data map[string]any) (string, error) {
-	tmpl, err := renderer.compile(value)
+	return renderer.render(value, data, true)
+}
+
+// ValidateUncached parses one template string without retaining it in the compiled-template
+// cache. Use it for one-off external content such as a file body: the cache is keyed by the
+// whole template text and lives for the run, so it suits short configuration values that
+// repeat across steps rather than large bodies read once.
+func (renderer *Renderer) ValidateUncached(value string) error {
+	_, err := renderer.compile(value, false)
+	return err
+}
+
+// RenderUncached executes one template string without retaining it in the compiled-template
+// cache. See ValidateUncached.
+func (renderer *Renderer) RenderUncached(value string, data map[string]any) (string, error) {
+	return renderer.render(value, data, false)
+}
+
+func (renderer *Renderer) render(value string, data map[string]any, cache bool) (string, error) {
+	tmpl, err := renderer.compile(value, cache)
 	if err != nil {
 		return "", err
 	}
@@ -116,9 +135,11 @@ func (renderer *Renderer) Render(value string, data map[string]any) (string, err
 	return rendered.String(), nil
 }
 
-func (renderer *Renderer) compile(value string) (*template.Template, error) {
-	if cached, ok := renderer.cache.Load(value); ok {
-		return cached.(*template.Template), nil
+func (renderer *Renderer) compile(value string, cache bool) (*template.Template, error) {
+	if cache {
+		if cached, ok := renderer.cache.Load(value); ok {
+			return cached.(*template.Template), nil
+		}
 	}
 	parsed, err := newTemplate(executionTemplateName).Parse(value)
 	if err != nil {
@@ -150,6 +171,9 @@ func (renderer *Renderer) compile(value string) (*template.Template, error) {
 	}
 	if err := validateTemplateReferences(compiled); err != nil {
 		return nil, err
+	}
+	if !cache {
+		return compiled, nil
 	}
 	actual, _ := renderer.cache.LoadOrStore(value, compiled)
 	return actual.(*template.Template), nil
@@ -184,7 +208,7 @@ func validateTemplateReferences(tmpl *template.Template) error {
 // Paths omit the leading dot or dollar sign: .steps.build.stdout becomes
 // ["steps", "build", "stdout"]. Dynamic index segments stop the static path.
 func (renderer *Renderer) WalkDataReferences(value string, visit func([]string) error) error {
-	tmpl, err := renderer.compile(value)
+	tmpl, err := renderer.compile(value, true)
 	if err != nil {
 		return err
 	}

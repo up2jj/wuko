@@ -307,6 +307,7 @@ Each linked guide contains multiple examples for every step.
 | `github_release` | Check GitHub repository drift since the latest stable release | [System steps](docs/steps-system.md#github_release) |
 | `github_actions` | Observe one GitHub Actions run through `gh` | [System steps](docs/steps-system.md#github_actions) |
 | `file` | Perform shell-independent filesystem operations | [System steps](docs/steps-system.md#file) |
+| `scaffold` | Render a packaged template directory tree | [System steps](docs/steps-system.md#scaffold) |
 | `glob` | Discover regular files with portable patterns | [System steps](docs/steps-system.md#glob) |
 | `watch` | Wait for native filesystem events | [System steps](docs/steps-system.md#watch) |
 | `log_wait` | Follow a growing log until a regex matches | [System steps](docs/steps-system.md#log_wait) |

@@ -30,6 +30,37 @@ func TestRendererExecutesInlineAndNestedTemplates(t *testing.T) {
 	}
 }
 
+func TestRendererUncachedRenderingKeepsCacheEmpty(t *testing.T) {
+	t.Parallel()
+	renderer, err := NewRenderer(map[string]TemplateDefinition{"header": {Inline: "generated"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := `{{ template "header" . }} for {{ .vars.name }}`
+	if err := renderer.ValidateUncached(body); err != nil {
+		t.Fatal(err)
+	}
+	got, err := renderer.RenderUncached(body, map[string]any{"vars": map[string]any{"name": "billing"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "generated for billing" {
+		t.Fatalf("rendered = %q", got)
+	}
+	cached := 0
+	renderer.cache.Range(func(any, any) bool { cached++; return true })
+	if cached != 0 {
+		t.Fatalf("cached templates = %d, want 0", cached)
+	}
+	if _, err := renderer.Render(body, map[string]any{"vars": map[string]any{"name": "billing"}}); err != nil {
+		t.Fatal(err)
+	}
+	renderer.cache.Range(func(any, any) bool { cached++; return true })
+	if cached != 1 {
+		t.Fatalf("cached templates after Render = %d, want 1", cached)
+	}
+}
+
 func TestRendererExposesHelpersToNamedAndInlineTemplates(t *testing.T) {
 	t.Parallel()
 	renderer, err := NewRenderer(map[string]TemplateDefinition{

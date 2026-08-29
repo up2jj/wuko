@@ -1,6 +1,6 @@
 ---
 name: wuko-workflow-author
-description: Create or update Wuko version-1 YAML workflows, including cron schedules, explicit time capture and transformation, templates, conditions, early returns, finally cleanup, cancel-on monitors, foreach and matrix controls, required files, composite actions, waits, polling, retries, concurrency, interactive prompts and path selection, typed and imported variables, structured decoding, JSONPath selection, semantic versions, HTTP, files, managed temporary resources, glob discovery, native filesystem watches, persistent change detectors, persistent key-value stores, content-addressed directory caches, Lua, shell, Docker, and agent steps. Use when designing workflow files, extending existing workflows, or reviewing workflow structure before execution.
+description: Create or update Wuko version-1 YAML workflows, including cron schedules, explicit time capture and transformation, templates and scaffold trees, conditions, early returns, finally cleanup, cancel-on monitors, foreach and matrix controls, required files, composite actions, waits, polling, retries, concurrency, interactive prompts and path selection, typed and imported variables, structured decoding, JSONPath selection, semantic versions, HTTP, files, managed temporary resources, glob discovery, native filesystem watches, persistent change detectors, persistent key-value stores, content-addressed directory caches, Lua, shell, Docker, and agent steps. Use when designing workflow files, extending existing workflows, or reviewing workflow structure before execution.
 ---
 
 # Wuko Workflow Author
@@ -80,6 +80,13 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
   truncation, bounded tails, permissions, and timestamps. Consult
   `docs/filesystem-operations.md` for the strict fields, outputs, symlink rules, and failure guarantees.
   Quote modes such as `"0755"`, opt into overwrites, and use recursive removal narrowly.
+- Use `scaffold` to render every UTF-8 file and relative path component in a packaged template tree.
+  Keep `from` relative to the owning workflow or action package, choose `on_conflict: fail` for a
+  new artifact, `skip` for additive generation, or `overwrite` for deliberate regeneration, and
+  consume its sorted `files` output when later steps need the generated paths. Scaffold preserves
+  filename suffixes and file modes, rejects binary files and symlinks, and is unavailable in
+  executors. Packaging carries files alone, so keep a placeholder file in any template directory
+  that must survive an archive.
 - Use `temp` for an empty file, directory, or POSIX FIFO that should live through the complete root
   run and be removed automatically after explicit `finally`. Consume its absolute `path` output in
   later steps; use `file` afterward when file content or custom permissions are required. Prefer an
@@ -155,6 +162,9 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
 - Use inline named templates for text reused in multiple places. Use file-backed templates for
   substantial generated files or scripts that are easier to review separately. Keep template
   file paths static and relative; bundle them with remote workflow or action archives.
+- Use `scaffold` instead of repeated `file` writes when a reusable artifact is naturally a directory
+  tree. Its files and path components share the owning workflow or action's strict template roots,
+  functions, and named-template namespace.
 - Templates always return strings. Preserve boolean, number, array, and object action inputs with
   `expr`; keep reusable typed configuration in `vars`. Quote or encode rendered values for their
   destination format, because templates do not provide shell, JSON, YAML, or HTML escaping.

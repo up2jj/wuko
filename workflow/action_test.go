@@ -737,6 +737,27 @@ func testHTTPClient(function roundTripFunc) *http.Client {
 	return &http.Client{Transport: function}
 }
 
+func TestDecodeActionMarksBorrowedDirectory(t *testing.T) {
+	t.Parallel()
+	manifest := []byte("version: 1\nname: action\nsteps:\n  - id: work\n    type: shell\n")
+	callerDir := t.TempDir()
+	action, err := decodeActionPayload(manifest, callerDir, "https://example.test/action.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !action.DirBorrowed || action.Dir != callerDir {
+		t.Fatalf("manifest action: DirBorrowed = %v, Dir = %q", action.DirBorrowed, action.Dir)
+	}
+	archive := makeZIP(t, map[string]archiveTestFile{"action.yaml": {data: manifest, mode: 0o644}})
+	action, err = decodeActionPayload(archive, callerDir, "https://example.test/action.zip")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if action.DirBorrowed || action.Dir != "" {
+		t.Fatalf("archived action: DirBorrowed = %v, Dir = %q", action.DirBorrowed, action.Dir)
+	}
+}
+
 func testResponse(status int, body []byte) *http.Response {
 	return &http.Response{StatusCode: status, Status: fmt.Sprintf("%d %s", status, http.StatusText(status)), Body: io.NopCloser(bytes.NewReader(body)), Header: make(http.Header)}
 }
