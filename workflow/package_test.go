@@ -57,3 +57,59 @@ func writePackageTestManifest(t *testing.T, directory, data string) {
 		t.Fatal(err)
 	}
 }
+
+func TestBuildWorkflowPackageExcludesLocalValueStore(t *testing.T) {
+	t.Parallel()
+	directory := t.TempDir()
+	writePackageTestManifest(t, directory, "version: 1\nname: stateful\nsteps: []\n")
+	values := filepath.Join(directory, ".wuko", "values")
+	if err := os.MkdirAll(values, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// once completions and key_value stores are the machine's run state. Packaging
+	// them shipped one author's state, and an installed once completion made another
+	// machine skip a bootstrap it had never performed.
+	for _, name := range []string{"once.json", "build.json", "changed.json"} {
+		if err := os.WriteFile(filepath.Join(values, name), []byte(`{"seeded": true}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(directory, "README.md"), []byte("kept\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	files, err := collectPackageFiles(directory)
+	if err != nil {
+		t.Fatalf("collectPackageFiles() error = %v", err)
+	}
+	var names []string
+	for _, file := range files {
+		names = append(names, file.name)
+	}
+	want := []string{"README.md", "wuko.yaml"}
+	if len(names) != len(want) {
+		t.Fatalf("packaged files = %v, want %v", names, want)
+	}
+	for index, name := range want {
+		if names[index] != name {
+			t.Fatalf("packaged files = %v, want %v", names, want)
+		}
+	}
+
+	// The digest is taken over the same file set, so run state cannot make a
+	// package look stale and force a pointless rebuild either.
+	withState, err := WorkflowPackageDigest(directory)
+	if err != nil {
+		t.Fatalf("WorkflowPackageDigest() error = %v", err)
+	}
+	if err := os.RemoveAll(filepath.Join(directory, ".wuko")); err != nil {
+		t.Fatal(err)
+	}
+	withoutState, err := WorkflowPackageDigest(directory)
+	if err != nil {
+		t.Fatalf("WorkflowPackageDigest() error = %v", err)
+	}
+	if withState != withoutState {
+		t.Fatalf("digest with run state = %s, without = %s; want equal", withState, withoutState)
+	}
+}

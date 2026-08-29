@@ -22,6 +22,13 @@ const (
 	WorkflowPackageMarkerName = ".wuko-package.json"
 )
 
+// packageValuesRoot is the workflow-local value store, relative to a package root.
+// It holds run state -- key_value stores, change snapshots, once completions --
+// that belongs to the machine that ran the workflow, not to the package. Packaging
+// it published one author's state, and an installed once completion made another
+// machine skip the bootstrap it had never performed.
+var packageValuesRoot = filepath.Join(".wuko", "values")
+
 // ErrWorkflowPackageManifestNotFound indicates that a directory is not a workflow package root.
 var ErrWorkflowPackageManifestNotFound = errors.New("workflow package manifest not found")
 
@@ -128,7 +135,14 @@ func collectPackageFiles(directory string) ([]packageFile, error) {
 		if entry.Type()&os.ModeSymlink != 0 {
 			return fmt.Errorf("workflow package contains symlink %s", path)
 		}
+		relativePath, relErr := filepath.Rel(directory, path)
+		if relErr != nil {
+			return fmt.Errorf("relating workflow package file %s: %w", path, relErr)
+		}
 		if entry.IsDir() {
+			if relativePath == packageValuesRoot {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		info, err := entry.Info()
@@ -138,11 +152,7 @@ func collectPackageFiles(directory string) ([]packageFile, error) {
 		if !info.Mode().IsRegular() {
 			return fmt.Errorf("workflow package file %s is not regular", path)
 		}
-		relative, err := filepath.Rel(directory, path)
-		if err != nil {
-			return fmt.Errorf("relating workflow package file %s: %w", path, err)
-		}
-		name := filepath.ToSlash(relative)
+		name := filepath.ToSlash(relativePath)
 		if name == "wuko.yml" {
 			name = "wuko.yaml"
 		}

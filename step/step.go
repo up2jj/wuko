@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"strconv"
 	"strings"
 
@@ -164,7 +165,7 @@ func (r *Registry) Build(name string, raw map[string]any) (Runner, error) {
 
 // DecodeConfig converts an untyped YAML mapping into a strict typed step configuration.
 func DecodeConfig(raw map[string]any, target any) error {
-	data, err := yaml.Marshal(raw)
+	data, err := yaml.Marshal(preserveFloats(raw))
 	if err != nil {
 		return fmt.Errorf("encoding step configuration: %w", err)
 	}
@@ -174,6 +175,56 @@ func DecodeConfig(raw map[string]any, target any) error {
 		return err
 	}
 	return nil
+}
+
+// yamlFloat keeps a float looking like one across the encode/decode round trip
+// DecodeConfig uses. yaml.v3 writes a whole float64 as "45", which decodes back as
+// an int, so a configured 45.0 reached the step as an integer and an edit of a TOML
+// float silently changed the value's type.
+type yamlFloat float64
+
+func (value yamlFloat) MarshalYAML() (any, error) {
+	number := float64(value)
+	var text string
+	switch {
+	case math.IsNaN(number):
+		text = ".nan"
+	case math.IsInf(number, 1):
+		text = ".inf"
+	case math.IsInf(number, -1):
+		text = "-.inf"
+	default:
+		text = strconv.FormatFloat(number, 'g', -1, 64)
+		if !strings.ContainsAny(text, ".eE") {
+			text += ".0"
+		}
+	}
+	return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!float", Value: text}, nil
+}
+
+// preserveFloats rewrites the float values of an untyped configuration tree so
+// yaml.Marshal emits them with a fractional part.
+func preserveFloats(value any) any {
+	switch value := value.(type) {
+	case map[string]any:
+		result := make(map[string]any, len(value))
+		for key, child := range value {
+			result[key] = preserveFloats(child)
+		}
+		return result
+	case []any:
+		result := make([]any, len(value))
+		for index, child := range value {
+			result[index] = preserveFloats(child)
+		}
+		return result
+	case float64:
+		return yamlFloat(value)
+	case float32:
+		return yamlFloat(value)
+	default:
+		return value
+	}
 }
 
 // Lookup resolves a dotted path rooted at vars or steps.
