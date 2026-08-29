@@ -86,6 +86,19 @@ func writeDryRun(writer io.Writer, steps []workflow.Step, indent string, parent 
 			}
 			continue
 		}
+		if workflowStep.IsEnvironmentBlock() {
+			label := "env: " + strings.Join(slices.Sorted(maps.Keys(workflowStep.Env)), ", ")
+			if workflowStep.ID != "" {
+				label = fmt.Sprintf("%s (%s)", workflowStep.ID, label)
+			}
+			if _, err := fmt.Fprintf(writer, "%s%s %s%s\n", indent, index, label, needs); err != nil {
+				return err
+			}
+			if err := writeDryRun(writer, workflowStep.Steps, indent+"   ", path); err != nil {
+				return err
+			}
+			continue
+		}
 		if workflowStep.IsWorkingDirectoryBlock() {
 			label := "working_directory: " + workflowStep.WorkingDirectory
 			if workflowStep.ID != "" {

@@ -71,6 +71,9 @@ type Options struct {
 	renderer               *workflow.Renderer
 	deferContextValidation bool
 	insideExecutor         bool
+	// scopedEnv captures the active transparent env block for deferred cleanup, which may
+	// execute after the block itself has restored State.Env.
+	scopedEnv map[string]string
 	// onceClaims records the once claims already held on the current path, keyed by
 	// scope and key. It must travel into action invocations too: the lock is held per
 	// open file description, so a second claim for the same key in this process would
@@ -190,6 +193,12 @@ func (e *Engine) validateSteps(ctx context.Context, definition *workflow.Definit
 		}
 		if workflowStep.IsExecutorBlock() {
 			if err := e.validateExecutorBlock(ctx, definition, workflowStep, options, state); err != nil {
+				return err
+			}
+			continue
+		}
+		if workflowStep.IsEnvironmentBlock() {
+			if err := e.validateEnvironmentBlock(ctx, definition, workflowStep, options, state); err != nil {
 				return err
 			}
 			continue
@@ -527,6 +536,17 @@ func (e *Engine) executeSequence(ctx context.Context, definition *workflow.Defin
 				return err
 			}
 			index += leafStepCount(workflowStep.Steps) + newDeferStack(workflowStep.Steps).stepCount() + leafStepCount(workflowStep.Finally)
+			if state.returning {
+				recordSkippedSteps(definition, steps[position+1:], options, stats, index, total)
+				return nil
+			}
+			continue
+		}
+		if workflowStep.IsEnvironmentBlock() {
+			if err := e.executeEnvironmentBlock(ctx, definition, workflowStep, options, state, stats, index, total); err != nil {
+				return err
+			}
+			index += leafStepCount(workflowStep.Steps)
 			if state.returning {
 				recordSkippedSteps(definition, steps[position+1:], options, stats, index, total)
 				return nil
@@ -914,7 +934,7 @@ func leafStepCount(steps []workflow.Step) int {
 }
 
 func transparentChildSequences(workflowStep workflow.Step) ([]workflow.ChildSequence, bool) {
-	if workflowStep.IsExecutorBlock() || workflowStep.IsWorkingDirectoryBlock() || workflowStep.IsConditionalBlock() || workflowStep.Concurrent != nil {
+	if workflowStep.IsExecutorBlock() || workflowStep.IsEnvironmentBlock() || workflowStep.IsWorkingDirectoryBlock() || workflowStep.IsConditionalBlock() || workflowStep.Concurrent != nil {
 		return workflowStep.ChildSequences(), true
 	}
 	return nil, false

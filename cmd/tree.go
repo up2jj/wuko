@@ -284,6 +284,19 @@ func writeTreeStepsWithFollowing(writer io.Writer, steps []workflow.Step, prefix
 			}
 			continue
 		}
+		if workflowStep.IsEnvironmentBlock() {
+			label := "env: " + strings.Join(slices.Sorted(maps.Keys(workflowStep.Env)), ", ")
+			if workflowStep.ID != "" {
+				label = fmt.Sprintf("%s (%s)", workflowStep.ID, label)
+			}
+			if _, err := fmt.Fprintf(writer, "%s%s%s%s\n", prefix, branch, label, needs); err != nil {
+				return err
+			}
+			if err := writeTreeSteps(writer, workflowStep.Steps, childPrefix); err != nil {
+				return err
+			}
+			continue
+		}
 		if workflowStep.IsWorkingDirectoryBlock() {
 			label := "working_directory: " + workflowStep.WorkingDirectory
 			if workflowStep.ID != "" {

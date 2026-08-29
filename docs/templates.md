@@ -11,7 +11,7 @@ Every rendered string can access these roots:
 | Root | Contents |
 | --- | --- |
 | `.vars` | Workflow variables, including values written by earlier sequential steps. |
-| `.env` | The effective workflow environment. |
+| `.env` | The effective workflow environment, including any enclosing scoped `env` blocks. |
 | `.steps` | Outputs committed by earlier sequential steps. |
 | `.workflow.name` | The owning workflow or action name. |
 | `.workflow.dir` | The directory containing the owning workflow or materialized action. |

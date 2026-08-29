@@ -18,6 +18,7 @@ func TestStepChildSequences(t *testing.T) {
 			step: Step{Executor: &ExecutorScope{Type: "docker"}, Steps: []Step{step("run")}, Finally: []Step{step("cleanup")}},
 			want: []ChildSequence{{Role: ChildSteps, Steps: []Step{step("run")}}, {Role: ChildFinally, Steps: []Step{step("cleanup")}}},
 		},
+		{name: "environment", step: Step{Env: Environment{"MODE": "test"}, Steps: []Step{step("run")}}, want: []ChildSequence{{Role: ChildSteps, Steps: []Step{step("run")}}}},
 		{name: "working directory", step: Step{WorkingDirectory: "build", Steps: []Step{step("run")}}, want: []ChildSequence{{Role: ChildSteps, Steps: []Step{step("run")}}}},
 		{name: "conditional", step: Step{If: "true", Steps: []Step{step("run")}}, want: []ChildSequence{{Role: ChildSteps, Steps: []Step{step("run")}}}},
 		{name: "concurrent", step: Step{Concurrent: &ConcurrentGroup{Steps: []Step{step("run")}}}, want: []ChildSequence{{Role: ChildSteps, Steps: []Step{step("run")}}}},

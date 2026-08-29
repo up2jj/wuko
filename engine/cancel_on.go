@@ -257,6 +257,8 @@ func cancelOnDeclarationKind(declaration workflow.Step) string {
 	switch {
 	case declaration.IsExecutorBlock():
 		return "executor"
+	case declaration.IsEnvironmentBlock():
+		return "env"
 	case declaration.IsWorkingDirectoryBlock():
 		return "working_directory"
 	case declaration.IsConditionalBlock():

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"maps"
 	"strings"
 	"testing"
 
@@ -17,19 +18,39 @@ import (
 )
 
 type recordingExecutor struct {
-	commands []string
-	closed   int
-	fail     string
+	commands     []string
+	environments []map[string]string
+	closed       int
+	fail         string
 }
 
 func (executor *recordingExecutor) Run(_ context.Context, options process.Options) (process.Result, error) {
 	executor.commands = append(executor.commands, options.Command+" "+strings.Join(options.Args, " "))
+	executor.environments = append(executor.environments, maps.Clone(options.Env))
 	result := process.Result{Stdout: options.Command + "-output", ExitCode: 0}
 	if options.Command == executor.fail {
 		result.ExitCode = 7
 		return result, &process.ExitError{Command: options.Command, Code: 7}
 	}
 	return result, nil
+}
+
+func TestExecutorScopeReceivesEnvironmentBlock(t *testing.T) {
+	scoped := &recordingExecutor{}
+	definition := testDefinition(t, "env-executor", workflow.Step{
+		Env: workflow.Environment{"MODE": "scoped"}, Steps: []workflow.Step{{
+			Executor: &workflow.ExecutorScope{Type: "recording", With: map[string]any{}},
+			Steps:    []workflow.Step{{ID: "run", Type: "shell", With: map[string]any{"command": "printenv", "args": []any{"MODE"}}}},
+		}},
+	})
+	if _, err := executorTestEngine(t, scoped).Run(t.Context(), definition, Options{
+		BaseEnv: map[string]string{"MODE": "outer"}, RunDir: t.TempDir(), Stdout: io.Discard, Stderr: io.Discard,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(scoped.environments) != 1 || scoped.environments[0]["MODE"] != "scoped" {
+		t.Fatalf("executor environments = %#v", scoped.environments)
+	}
 }
 
 func (executor *recordingExecutor) Close(context.Context) error {

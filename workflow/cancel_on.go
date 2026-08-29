@@ -66,7 +66,7 @@ func (group CancelOnGroup) Validate() error {
 }
 
 func cancelOnMonitorDeclaration(step Step) Step {
-	if step.IsExecutorBlock() || step.IsWorkingDirectoryBlock() || step.IsConditionalBlock() || step.Concurrent != nil {
+	if step.IsExecutorBlock() || step.IsEnvironmentBlock() || step.IsWorkingDirectoryBlock() || step.IsConditionalBlock() || step.Concurrent != nil {
 		step.ID = ""
 	}
 	return step

@@ -335,6 +335,23 @@ func TestWorkflowTreeDisplaysWorkingDirectoryBlock(t *testing.T) {
 	}
 }
 
+func TestWorkflowTreeDisplaysEnvironmentBlockNames(t *testing.T) {
+	definition := &workflow.Definition{Name: "scoped", Steps: []workflow.Step{
+		{Env: workflow.Environment{"TOKEN": "secret", "GOOS": "linux"}, Steps: []workflow.Step{{ID: "build", Type: "shell"}}},
+	}}
+	var output bytes.Buffer
+	if err := writeWorkflowTree(&output, definition); err != nil {
+		t.Fatal(err)
+	}
+	want := "scoped\n└── env: GOOS, TOKEN\n    └── build (shell)\n"
+	if output.String() != want {
+		t.Fatalf("output = %q, want %q", output.String(), want)
+	}
+	if strings.Contains(output.String(), "secret") {
+		t.Fatalf("tree exposed environment value: %q", output.String())
+	}
+}
+
 func TestWorkflowTreeDisplaysFanoutControls(t *testing.T) {
 	definition := &workflow.Definition{Name: "fanout", Steps: []workflow.Step{
 		{ID: "uploads", Batch: &workflow.BatchGroup{

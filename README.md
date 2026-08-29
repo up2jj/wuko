@@ -325,6 +325,7 @@ Use controls to run independent work or repeat a block over runtime data.
 | Control | Use it to | Examples |
 | --- | --- | --- |
 | `if` | Run a step or sequential block only when an expression is true | [Execution and composition](docs/execution.md#conditions) |
+| `env` | Apply an environment overlay to a block | [Execution and composition](docs/execution.md#scoped-environments) |
 | `working_directory` | Run a block from an existing directory | [Execution and composition](docs/execution.md#scoped-working-directories) |
 | `concurrent` | Run a bounded fixed DAG of parallel steps | [Execution and composition](docs/execution.md#concurrency) |
 | `batch` | Process a runtime list in fixed-size chunks | [Workflow controls](docs/workflow-control.md#batch) |

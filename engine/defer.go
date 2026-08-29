@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"fmt"
+	"maps"
 
 	"github.com/up2jj/wuko/workflow"
 )
@@ -63,7 +64,7 @@ func (stack *deferStack) collect(steps []workflow.Step) {
 		case workflowStep.IsWorktreeBlock():
 			// Worktree blocks own an independent defer scope that must run before
 			// the worktree is removed.
-		case workflowStep.IsWorkingDirectoryBlock(), workflowStep.IsConditionalBlock():
+		case workflowStep.IsEnvironmentBlock(), workflowStep.IsWorkingDirectoryBlock(), workflowStep.IsConditionalBlock():
 			stack.collect(workflowStep.Steps)
 		default:
 			if len(workflowStep.Defer) == 0 {
@@ -105,7 +106,7 @@ func nestedDeferScopeStepCount(steps []workflow.Step) int {
 		switch {
 		case workflowStep.IsExecutorBlock():
 			total += newDeferStack(workflowStep.Steps).stepCount()
-		case workflowStep.IsWorkingDirectoryBlock(), workflowStep.IsConditionalBlock():
+		case workflowStep.IsEnvironmentBlock(), workflowStep.IsWorkingDirectoryBlock(), workflowStep.IsConditionalBlock():
 			total += nestedDeferScopeStepCount(workflowStep.Steps)
 		}
 	}
@@ -122,7 +123,12 @@ func (e *Engine) executeDeferred(ctx context.Context, definition *workflow.Defin
 		options := fallback
 		if group.active {
 			options = group.options
+			previousEnv := state.Env
+			if options.scopedEnv != nil {
+				state.Env = maps.Clone(options.scopedEnv)
+			}
 			cleanupErrors = append(cleanupErrors, e.executeCleanupSteps(ctx, definition, group.steps, options, state, stats, index, total)...)
+			state.Env = previousEnv
 		} else {
 			recordSkippedSteps(definition, group.steps, options, stats, index, total)
 		}

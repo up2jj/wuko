@@ -378,6 +378,55 @@ errors fail the workflow. Use an anonymous block when several sequential steps s
 
 The block condition is evaluated once. Its children remain in the surrounding output namespace.
 
+## Scoped environments
+
+Use `env` with `steps` when several descendants need the same environment overlay:
+
+```yaml
+- env:
+    GOOS: linux
+    CGO_ENABLED: "0"
+  steps:
+    - id: build
+      type: shell
+      with: {command: go, args: [build, ./...]}
+    - id: test
+      type: shell
+      with: {command: go, args: [test, ./...]}
+```
+
+An env block is transparent: it has no ID or outputs, and only its executable descendants appear
+in progress and run statistics. Its string-valued entries overlay the effective host, workflow,
+and invocation environment. Nested env blocks override enclosing keys, while keys they do not set
+remain inherited. The previous environment is restored when the block exits, including after
+failure, cancellation, or an early `return`. Env blocks do not unset inherited variables.
+
+Values are rendered together when the block is entered, against the enclosing environment and all
+state committed by earlier sequential steps. Entries in the same block cannot refer to one another:
+
+```yaml
+- env:
+    RELEASE: "{{ .steps.prepare.version }}"
+    CACHE_ROOT: "{{ .env.HOME }}/.cache/wuko"
+  steps:
+    - id: publish
+      type: shell
+      with: {command: ./publish}
+```
+
+The overlay reaches nested conditions, controls, executor sessions, and composite-action execution.
+Independent concurrent branches receive independent environment snapshots. A `defer` attached to a
+successful child retains the environment active when that child ran, even though its cleanup runs
+after the env block has exited; workflow-level `finally` remains outside the block.
+
+Composite-action sources are resolved while loading the workflow, before runtime blocks are entered.
+Consequently, a child step's `uses` URL, path, or source command uses only the workflow and invocation
+environment. The already-resolved action's inputs and child steps do receive the scoped overlay.
+Structural output such as `wuko tree` and `--dry-run` lists scoped variable names but never values.
+
+The block boundary also provides the execution scope for future secret bindings without exposing a
+credential to the whole workflow.
+
 ## Scoped working directories
 
 Use `working_directory` when several steps should run from the same existing directory:

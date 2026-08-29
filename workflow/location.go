@@ -85,6 +85,9 @@ func annotateSteps(steps []Step, sequence *yaml.Node, source string) {
 			}
 		}
 		annotateSteps(steps[i].Defer, mappingValue(node, "defer"), source)
+		if steps[i].IsEnvironmentBlock() {
+			annotateSteps(steps[i].Steps, mappingValue(node, "steps"), source)
+		}
 		if steps[i].IsWorkingDirectoryBlock() {
 			annotateSteps(steps[i].Steps, mappingValue(node, "steps"), source)
 		}
@@ -211,7 +214,7 @@ func flattenSteps(steps []Step) []Step {
 			flattened = append(flattened, workflowStep)
 			continue
 		}
-		if !workflowStep.IsExecutorBlock() && !workflowStep.IsWorkingDirectoryBlock() && !workflowStep.IsConditionalBlock() && workflowStep.Concurrent == nil {
+		if !workflowStep.IsExecutorBlock() && !workflowStep.IsEnvironmentBlock() && !workflowStep.IsWorkingDirectoryBlock() && !workflowStep.IsConditionalBlock() && workflowStep.Concurrent == nil {
 			flattened = append(flattened, workflowStep)
 		}
 		for _, child := range children {

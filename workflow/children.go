@@ -77,7 +77,7 @@ func (workflowStep *Step) childSequenceRefs() []childSequenceRef {
 		})
 	case workflowStep.IsWorktreeBlock():
 		return deferred([]childSequenceRef{{role: ChildSteps, steps: &workflowStep.Worktree.Steps}})
-	case workflowStep.IsWorkingDirectoryBlock(), workflowStep.IsConditionalBlock():
+	case workflowStep.IsEnvironmentBlock(), workflowStep.IsWorkingDirectoryBlock(), workflowStep.IsConditionalBlock():
 		return deferred([]childSequenceRef{{role: ChildSteps, steps: &workflowStep.Steps}})
 	case workflowStep.Concurrent != nil:
 		return deferred([]childSequenceRef{{role: ChildSteps, steps: &workflowStep.Concurrent.Steps}})

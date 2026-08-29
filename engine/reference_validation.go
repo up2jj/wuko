@@ -420,6 +420,13 @@ func (validator *referenceValidator) validateStep(step workflow.Step, scope *ref
 		return validator.validateOnce(step, scope)
 	case step.IsExecutorBlock():
 		return validator.validateExecutor(step, scope)
+	case step.IsEnvironmentBlock():
+		for _, name := range slices.Sorted(maps.Keys(step.Env)) {
+			if err := validator.validateTemplate("env "+fmt.Sprintf("%q", name), step.Env[name], scope); err != nil {
+				return nil, nil, err
+			}
+		}
+		return validator.validateSteps(step.Steps, scope)
 	case step.IsWorkingDirectoryBlock():
 		if err := validator.validateTemplate("working_directory", step.WorkingDirectory, scope); err != nil {
 			return nil, nil, err
@@ -682,7 +689,7 @@ func (validator *referenceValidator) validateCancelOn(step workflow.Step, scope 
 func selectedStepSchema(steps []workflow.Step) *referenceSchema {
 	result := &referenceSchema{fields: make(map[string]*referenceSchema)}
 	for _, step := range steps {
-		if step.IsExecutorBlock() || step.IsWorkingDirectoryBlock() || step.IsConditionalBlock() || step.Concurrent != nil {
+		if step.IsExecutorBlock() || step.IsEnvironmentBlock() || step.IsWorkingDirectoryBlock() || step.IsConditionalBlock() || step.Concurrent != nil {
 			for _, child := range step.ChildSequences() {
 				maps.Copy(result.fields, selectedStepSchema(child.Steps).fields)
 			}
