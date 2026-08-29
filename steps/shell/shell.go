@@ -72,13 +72,8 @@ type expressionEnvironment struct {
 	Matrix       map[string]any            `expr:"matrix"`
 	Finally      map[string]any            `expr:"finally"`
 	Error        map[string]any            `expr:"error"`
-	Workflow     workflowValue             `expr:"workflow"`
+	Workflow     step.WorkflowValue        `expr:"workflow"`
 	Run          runValue                  `expr:"run"`
-}
-
-type workflowValue struct {
-	Name string `expr:"name"`
-	Dir  string `expr:"dir"`
 }
 
 type runValue struct {
@@ -352,7 +347,7 @@ func expressionEnvironmentFor(request step.Request) expressionEnvironment {
 		Matrix:       bindingRoot(request.Bindings, "matrix"),
 		Finally:      bindingRoot(request.Bindings, "finally"),
 		Error:        bindingRoot(request.Bindings, "error"),
-		Workflow:     workflowValue{Name: request.WorkflowName, Dir: request.WorkflowDir},
+		Workflow:     request.WorkflowValue(),
 		Run:          runValue{Dir: request.RunDir},
 	}
 }

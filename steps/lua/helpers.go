@@ -36,6 +36,9 @@ func helperFunctions() map[string]glua.LGFunction {
 		"to_json":         helperToJSON,
 		"to_json_compact": helperToJSONCompact,
 		"to_yaml":         helperToYAML,
+		"parse_time":      helperParseTime,
+		"add_time":        helperAddTime,
+		"format_time":     helperFormatTime,
 	}
 }
 
@@ -237,6 +240,49 @@ func helperToYAML(state *glua.LState) int {
 	}
 	result, err := expression.ToYAML(value)
 	return pushHelperResult(state, "to_yaml", result, err)
+}
+
+func helperParseTime(state *glua.LState) int {
+	if state.GetTop() != 2 && state.GetTop() != 3 {
+		state.RaiseError("helpers.parse_time: expected a time value, layout, and optional timezone")
+		return 0
+	}
+	timezone := ""
+	if state.GetTop() == 3 {
+		timezone = state.CheckString(3)
+	}
+	result, err := expression.ParseTime(state.CheckString(1), state.CheckString(2), timezone)
+	return pushHelperResult(state, "parse_time", result, err)
+}
+
+func helperAddTime(state *glua.LState) int {
+	if state.GetTop() != 2 {
+		state.RaiseError("helpers.add_time: expected a time value and adjustments object")
+		return 0
+	}
+	value, err := helperValue(state.Get(2))
+	if err != nil {
+		return pushHelperResult(state, "add_time", nil, err)
+	}
+	adjustments, ok := value.(map[string]any)
+	if !ok {
+		return pushHelperResult(state, "add_time", nil, fmt.Errorf("adjustments must be an object, got %T", value))
+	}
+	result, err := expression.AddTime(state.CheckString(1), adjustments)
+	return pushHelperResult(state, "add_time", result, err)
+}
+
+func helperFormatTime(state *glua.LState) int {
+	if state.GetTop() != 2 && state.GetTop() != 3 {
+		state.RaiseError("helpers.format_time: expected a time value, layout, and optional timezone")
+		return 0
+	}
+	timezone := ""
+	if state.GetTop() == 3 {
+		timezone = state.CheckString(3)
+	}
+	result, err := expression.FormatTime(state.CheckString(1), state.CheckString(2), timezone)
+	return pushHelperResult(state, "format_time", result, err)
 }
 
 func helperValues(state *glua.LState, start int) ([]any, error) {

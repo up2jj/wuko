@@ -395,6 +395,62 @@ Check a constraint or increment a part:
 Parse exposes normalized components. Compare exposes `comparison`, `less`, `equal`, and `greater`.
 Constrain exposes `matched`; increment exposes `previous` and the new `version`.
 
+## `time`
+
+Capture the current time through an explicit workflow step, or parse an existing timestamp. The
+final string is published as `.steps.<id>.value` and as a workflow variable. `variable` defaults
+to the step ID, so this date stamp is available as both `.steps.stamp.value` and `.vars.stamp`:
+
+```yaml
+timezone: Europe/Warsaw
+steps:
+  - id: stamp
+    type: time
+    with:
+      format: "2006-01-02"
+```
+
+Only the `time` step can read the clock. Supply the variable before the run -- with `--var` or in
+the workflow's top-level `vars:` -- to make a run reproducible; the supplied string is published
+unchanged and the clock is not consulted:
+
+```console
+wuko run release --var stamp=2026-08-29
+```
+
+A quoted string is published verbatim. An unquoted YAML date -- `stamp: 2026-08-29` -- decodes to
+a time value rather than text, so it is rendered with the step's `format` in the zone it carries;
+quote it to publish it exactly as written.
+
+Only that pre-run set pins the step. A variable a step writes during the run never does, so a
+`time` step inside a `loop` captures the clock on every iteration, and an earlier step that happens
+to write a same-named variable does not silently replace the capture.
+
+Parse, convert, adjust, and format in one step:
+
+```yaml
+- id: release_date
+  type: time
+  with:
+    value: "2026-08-29T10:00:00Z"
+    parse_format: "2006-01-02T15:04:05Z07:00"
+    timezone: America/New_York
+    add: {years: 1, months: -2, days: 3, duration: 90m}
+    format: "2006-01-02"
+    variable: published_date
+```
+
+Without `value`, the step captures the clock once per attempt. `parse_format` defaults to
+RFC3339Nano and may only be used with `value`; `format` also defaults to RFC3339Nano. Timezone
+precedence is the step's `timezone`, the workflow's top-level `timezone`, then the machine's local
+timezone. Calendar years, months, and days are applied in that location before the exact Go
+duration, so calendar days follow daylight-saving transitions. Negative adjustments subtract.
+
+Variable names, overrides, formats, timezones, timestamps, durations, and adjustment fields are
+validated strictly. A failed step publishes neither its output nor its variable. Use the shared
+[`parseTime`, `addTime`, and `formatTime` helpers](template-functions.md#time-functions) to transform
+recorded values later without reading the clock.
+
 ## `key_value`
 
 Persist JSON-compatible values between runs. `local` stores live beside the workflow under

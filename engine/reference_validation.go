@@ -69,7 +69,7 @@ func newReferenceScope(state *State) *referenceScope {
 		"env":          openReference,
 		"steps":        schemaForAnyMap(state.Steps),
 		"dependencies": schemaForDependencies(state.Dependencies),
-		"workflow":     closedReference("name", "dir"),
+		"workflow":     closedReference("name", "dir", "timezone"),
 		"run":          closedReference("dir"),
 	}}
 	for name, value := range state.Bindings {
@@ -101,18 +101,22 @@ func schemaForDependencies(values map[string]map[string]any) *referenceSchema {
 var (
 	varWriters = map[string]struct{}{
 		"set": {}, "jsonpath": {}, "semver": {}, "key_value": {}, "tui_choice": {}, "tui_confirm": {},
-		"tui_input": {}, "tui_password": {}, "tui_path": {}, "tui_review": {},
+		"tui_input": {}, "tui_password": {}, "tui_path": {}, "tui_review": {}, "time": {},
 	}
 	dynamicVarWriters = map[string]struct{}{"lua": {}, "import_vars": {}}
 )
 
-func (scope *referenceScope) addWrittenVariables(stepType string, raw map[string]any) {
+func (scope *referenceScope) addWrittenVariables(stepType, stepID string, raw map[string]any) {
 	if _, dynamic := dynamicVarWriters[stepType]; dynamic {
 		scope.roots["vars"] = openReference
 		return
 	}
 	if _, writes := varWriters[stepType]; writes {
-		scope.addVariable(stringValue(raw, "variable"))
+		variable := stringValue(raw, "variable")
+		if stepType == "time" && variable == "" {
+			variable = stepID
+		}
+		scope.addVariable(variable)
 		return
 	}
 	if stepType == "extract" {
@@ -489,10 +493,10 @@ func (validator *referenceValidator) validateOrdinaryStep(step workflow.Step, sc
 	if err := validator.validateActionSource(step, scope); err != nil {
 		return nil, nil, err
 	}
-	if err := validator.validateStepConfiguration(step.Type, step.With, scope); err != nil {
+	if err := validator.validateStepConfiguration(step.ID, step.Type, step.With, scope); err != nil {
 		return nil, nil, err
 	}
-	scope.addWrittenVariables(step.Type, step.With)
+	scope.addWrittenVariables(step.Type, step.ID, step.With)
 	if step.Action != nil {
 		if err := validator.validateTypedBindings("input", step.With, scope); err != nil {
 			return nil, nil, err
@@ -832,7 +836,7 @@ func (validator *referenceValidator) validateAction(action *workflow.Action, cal
 	return nil
 }
 
-func (validator *referenceValidator) validateStepConfiguration(stepType string, raw map[string]any, scope *referenceScope) error {
+func (validator *referenceValidator) validateStepConfiguration(stepID, stepType string, raw map[string]any, scope *referenceScope) error {
 	if stepType == "wait" {
 		for _, key := range slices.Sorted(maps.Keys(raw)) {
 			if key == "step" || key == "until" {
@@ -844,10 +848,10 @@ func (validator *referenceValidator) validateStepConfiguration(stepType string, 
 		}
 		if nested := nestedMap(raw, "step"); nested != nil {
 			nestedType, _ := nested["type"].(string)
-			if err := validator.validateStepConfiguration(nestedType, nestedMap(nested, "with"), scope); err != nil {
+			if err := validator.validateStepConfiguration(stepID, nestedType, nestedMap(nested, "with"), scope); err != nil {
 				return fmt.Errorf("nested step: %w", err)
 			}
-			scope.addWrittenVariables(nestedType, nestedMap(nested, "with"))
+			scope.addWrittenVariables(nestedType, stepID, nestedMap(nested, "with"))
 			waitScope := scope.clone()
 			waitScope.roots["result"] = openReference
 			waitScope.roots["error"] = openReference

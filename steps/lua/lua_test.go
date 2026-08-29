@@ -221,6 +221,44 @@ wuko.output("helpers", {
 	}
 }
 
+func TestLuaTimeHelpersAndWorkflowTimezone(t *testing.T) {
+	t.Parallel()
+	runner, err := New(map[string]any{"source": `
+local h = wuko.helpers
+local parsed = h.parse_time("2026-03-28 12:00", "2006-01-02 15:04", wuko.workflow.timezone)
+local tomorrow = h.add_time(parsed, {days = 1, timezone = wuko.workflow.timezone})
+wuko.output("value", h.format_time(tomorrow, "2006-01-02 15:04 Z07:00", wuko.workflow.timezone))
+`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runner.Run(t.Context(), step.Request{StepID: "time", WorkflowName: "release", WorkflowTimezone: "Europe/Warsaw"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Outputs["value"] != "2026-03-29 12:00 +02:00" {
+		t.Fatalf("value = %#v", result.Outputs["value"])
+	}
+}
+
+func TestLuaHelpersExposeNoClockFunction(t *testing.T) {
+	t.Parallel()
+	runner, err := New(map[string]any{"source": `
+if wuko.helpers.now ~= nil then error("clock helper exposed") end
+wuko.output("pure", true)
+`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runner.Run(t.Context(), step.Request{StepID: "time"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Outputs["pure"] != true {
+		t.Fatalf("pure = %#v", result.Outputs["pure"])
+	}
+}
+
 func TestLuaHelpersRejectInvalidArguments(t *testing.T) {
 	tests := []struct {
 		name   string

@@ -58,7 +58,7 @@ func TestDefinitionScheduleValidation(t *testing.T) {
 		{name: "unscheduled"},
 		{name: "five fields", cron: "0 9 * * *"},
 		{name: "seconds and timezone", cron: "0 0 9 * * *", timezone: "Europe/Warsaw"},
-		{name: "timezone without cron", timezone: "UTC", wantError: "timezone requires cron"},
+		{name: "timezone without cron", timezone: "UTC"},
 		{name: "invalid cron", cron: "0 25 * * *", wantError: "invalid cron"},
 		{name: "invalid timezone", cron: "0 9 * * *", timezone: "Mars/Olympus", wantError: "invalid timezone"},
 	}

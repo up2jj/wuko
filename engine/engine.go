@@ -99,8 +99,11 @@ type State struct {
 	// Dependencies contains immutable outputs from direct prerequisite workflows.
 	Dependencies map[string]map[string]any
 	// Bindings contains lifecycle and iteration-local roots such as batch, error, finally, foreach, and matrix.
-	Bindings    map[string]any
-	Stats       RunStats
+	Bindings map[string]any
+	Stats    RunStats
+	// presetVars is the variable set the run started with. It is fixed once the run
+	// begins and shared by every derived state, so it is never mutated.
+	presetVars  map[string]any
 	writtenVars map[string]struct{}
 	returning   bool
 	didReturn   bool
@@ -1067,7 +1070,7 @@ func initialState(definition *workflow.Definition, options Options) (*State, err
 	}
 	return &State{
 		Inputs: cloneMap(options.inputs), Vars: vars, Env: environment, Steps: make(map[string]any), Outputs: make(map[string]any),
-		Dependencies: cloneDependencies(options.Dependencies),
+		Dependencies: cloneDependencies(options.Dependencies), presetVars: cloneMap(vars),
 	}, nil
 }
 
@@ -1077,9 +1080,9 @@ func templateData(definition *workflow.Definition, runDir string, state *State) 
 
 func makeRequest(definition *workflow.Definition, stepID string, options Options, state *State, attempt, maxAttempts int, operationID string) step.Request {
 	return step.Request{
-		StepID: stepID, WorkflowName: definition.Name, WorkflowSource: definition.Location.Source, WorkflowDir: definition.Dir,
+		StepID: stepID, WorkflowName: definition.Name, WorkflowSource: definition.Location.Source, WorkflowDir: definition.Dir, WorkflowTimezone: definition.Timezone,
 		RunDir: options.RunDir, LocalValueDir: options.LocalValueDir, GlobalValueDir: options.GlobalValueDir,
-		Inputs: cloneMap(state.Inputs), Vars: cloneMap(state.Vars), Env: maps.Clone(state.Env),
+		Inputs: cloneMap(state.Inputs), Vars: cloneMap(state.Vars), PresetVars: cloneMap(state.presetVars), Env: maps.Clone(state.Env),
 		Steps: cloneMap(state.Steps), Dependencies: cloneDependencies(state.Dependencies), Bindings: cloneMap(state.Bindings), Stdin: options.Stdin, Stdout: options.Stdout,
 		Stderr: options.Stderr, Interactive: options.Interactive,
 		Attempt: attempt, MaxAttempts: maxAttempts, OperationID: operationID,
@@ -1119,7 +1122,7 @@ func (e *Engine) validateAction(ctx context.Context, definition *workflow.Defini
 	}
 	defer cleanup()
 	inputs := actionValidationInputs(workflowStep.Action)
-	inner := &workflow.Definition{Version: 1, Name: workflowStep.Action.Name, Templates: workflowStep.Action.Templates, Dir: dir, Steps: workflowStep.Action.Steps, Finally: workflowStep.Action.Finally, Vars: map[string]any{}, Env: workflow.Environment{}, Location: workflowStep.Action.Location}
+	inner := &workflow.Definition{Version: 1, Name: workflowStep.Action.Name, Timezone: definition.Timezone, Templates: workflowStep.Action.Templates, Dir: dir, Steps: workflowStep.Action.Steps, Finally: workflowStep.Action.Finally, Vars: map[string]any{}, Env: workflow.Environment{}, Location: workflowStep.Action.Location}
 	return e.Validate(ctx, inner, Options{
 		InvocationID: options.InvocationID,
 		inputs:       inputs, BaseEnv: state.Env, RunDir: options.RunDir,
@@ -1143,7 +1146,7 @@ func (e *Engine) prepareActionExecutor(definition *workflow.Definition, workflow
 	if err != nil {
 		return nil, nil, err
 	}
-	inner := &workflow.Definition{Version: 1, Name: workflowStep.Action.Name, Templates: workflowStep.Action.Templates, Dir: dir, Steps: workflowStep.Action.Steps, Finally: workflowStep.Action.Finally, Vars: map[string]any{}, Env: workflow.Environment{}, Location: workflowStep.Action.Location}
+	inner := &workflow.Definition{Version: 1, Name: workflowStep.Action.Name, Timezone: definition.Timezone, Templates: workflowStep.Action.Templates, Dir: dir, Steps: workflowStep.Action.Steps, Finally: workflowStep.Action.Finally, Vars: map[string]any{}, Env: workflow.Environment{}, Location: workflowStep.Action.Location}
 	execute := func(ctx context.Context, request step.Request) (step.Result, error) {
 		innerState, err := e.Run(ctx, inner, Options{
 			InvocationID: options.InvocationID,
@@ -1162,7 +1165,7 @@ func (e *Engine) prepareActionExecutor(definition *workflow.Definition, workflow
 		if innerState.didReturn {
 			return step.Result{Outputs: cloneMap(innerState.Outputs)}, nil
 		}
-		environment := map[string]any{"inputs": innerState.Inputs, "vars": innerState.Vars, "steps": innerState.Steps, "env": innerState.Env, "workflow": map[string]any{"name": inner.Name, "dir": inner.Dir}, "run": map[string]any{"dir": options.RunDir}}
+		environment := map[string]any{"inputs": innerState.Inputs, "vars": innerState.Vars, "steps": innerState.Steps, "env": innerState.Env, "workflow": map[string]any{"name": inner.Name, "dir": inner.Dir, "timezone": inner.Timezone}, "run": map[string]any{"dir": options.RunDir}}
 		outputs := make(map[string]any, len(workflowStep.Action.Outputs))
 		outputsStarted := time.Now()
 		traceStep(options, definition, workflowStep, diagnostic.PhaseActionOutputs, diagnostic.StatusStarted, time.Time{}, "evaluating action outputs", nil)

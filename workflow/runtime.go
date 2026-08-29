@@ -94,8 +94,9 @@ func TemplateDataWithDependencies(definition *Definition, runDir string, inputs,
 		"steps":        steps,
 		"dependencies": CloneDependencies(dependencies),
 		"workflow": map[string]any{
-			"name": definition.Name,
-			"dir":  definition.Dir,
+			"name":     definition.Name,
+			"dir":      definition.Dir,
+			"timezone": definition.Timezone,
 		},
 		"run": map[string]any{"dir": runDir},
 	}

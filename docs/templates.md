@@ -15,6 +15,7 @@ Every rendered string can access these roots:
 | `.steps` | Outputs committed by earlier sequential steps. |
 | `.workflow.name` | The owning workflow or action name. |
 | `.workflow.dir` | The directory containing the owning workflow or materialized action. |
+| `.workflow.timezone` | The workflow's declared IANA timezone, or an empty string when none is declared. |
 | `.run.dir` | The active run directory: initially where Wuko was invoked, or the directory established by an enclosing `working_directory` or `worktree` block. |
 | `.inputs` | Composite-action inputs; empty in a top-level workflow. |
 | `.batch` | Active zero-based batch index and current item chunk; available only inside a batch body. |
@@ -222,5 +223,7 @@ therefore cannot depend on `.steps`, `.batch`, `.foreach`, or `.matrix`.
 Templates do not provide shell or HTML escaping automatically. Use the documented JSON or YAML
 serialization helpers where appropriate, quote values for their destination format, and avoid
 treating untrusted values as executable shell source. Wuko does not add filesystem,
-command-execution, network, clock, random, or environment-lookup functions; templates receive
-only the documented data roots and [side-effect-free helpers](template-functions.md).
+command-execution, network, live-clock, random, or environment-lookup functions; templates receive
+only the documented data roots and [side-effect-free helpers](template-functions.md). Capture time
+explicitly with the recordable [`time` step](steps-data.md#time), then use pure time helpers on its
+output or variable.

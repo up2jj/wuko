@@ -245,6 +245,49 @@ spec:
   labels:{{ .vars.labels | toYAML | nindent 4 }}
 ```
 
+## Time functions
+
+Time helpers transform explicit string values. They never read the clock; use the [`time`
+step](steps-data.md#time) to capture a recordable, overridable current time. Go layouts use the
+reference instant syntax, such as `2006-01-02` for a calendar date.
+
+| Function | Go template | Expr | Lua | Result |
+| --- | --- | --- | --- | --- |
+| `parseTime` | `{{ value \| parseTime layout timezone }}` | `parseTime(value, layout, timezone)` | `h.parse_time(value, layout, timezone)` | Canonical RFC3339Nano string |
+| `addTime` | `{{ value \| addTime adjustments }}` | `addTime(value, adjustments)` | `h.add_time(value, adjustments)` | Adjusted RFC3339Nano string |
+| `formatTime` | `{{ value \| formatTime layout timezone }}` | `formatTime(value, layout, timezone)` | `h.format_time(value, layout, timezone)` | Formatted string |
+
+The timezone argument to `parseTime` and `formatTime` is optional. Zone-less parsing defaults to
+UTC; an explicit IANA timezone supplies calendar and daylight-saving semantics. `addTime` accepts
+an object containing `years`, `months`, `days`, `duration`, and optional `timezone`. A blank
+`timezone` keeps the instant's own zone, so `.workflow.timezone` can be passed straight through in
+a workflow that declares none. It requires at least one of `years`, `months`, `days`, or
+`duration` to be present -- a computed adjustment may be zero, which returns the same instant --
+applies calendar fields before the exact Go duration, and rejects unknown options:
+
+```gotemplate
+{{ .vars.stamp | addTime (dict "days" 1 "timezone" .workflow.timezone) | formatTime "January 2, 2006" .workflow.timezone }}
+```
+
+```expr
+formatTime(
+  addTime(vars.stamp, {"days": 1, "timezone": workflow.timezone}),
+  "January 2, 2006",
+  workflow.timezone,
+)
+```
+
+```lua
+local h = wuko.helpers
+local parsed = h.parse_time(wuko.args.date, "2006-01-02", "UTC")
+local next_week = h.add_time(parsed, {days = 7, timezone = "UTC"})
+wuko.output("next_week", h.format_time(next_week, "2006-01-02", "UTC"))
+```
+
+`parseTime` accepts a custom source layout and normalizes it for composition. `addTime` and
+`formatTime` consume RFC3339 or RFC3339Nano strings, so custom source text must be parsed first.
+Offset-bearing inputs retain their instant before an explicit timezone conversion.
+
 ## Availability and safety
 
 Helpers are available in named and inline Go templates, in every Wuko Expr surface, and in Lua as
@@ -253,7 +296,10 @@ and matrix expressions, composite-action inputs and outputs, and the `set` and `
 
 Wuko intentionally keeps these helpers side-effect-free. They cannot read the process environment
 or filesystem, execute commands, access the network, obtain the current time, generate random
-values, perform cryptography, or quote shell commands. The helpers operate only on their
-arguments. JSON and YAML serialization does not make a value safe to interpolate into executable
-shell source. Lua's existing `wuko.json.encode` remains the compact JSON encoder;
-`wuko.helpers.to_json` adds the shared indented form.
+values, perform cryptography, or quote shell commands. Time helpers parse and transform only their
+explicit arguments; current time enters state only through the `time` step. Expr's own `now()`
+builtin is disabled for the same reason, so an expression that calls it fails to compile with
+`unknown name now`: capture the instant in a [`time` step](steps-data.md#time) and read
+`.vars.<id>`, which keeps the run recordable and overridable. JSON and YAML serialization does not
+make a value safe to interpolate into executable shell source. Lua's existing `wuko.json.encode`
+remains the compact JSON encoder; `wuko.helpers.to_json` adds the shared indented form.

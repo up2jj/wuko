@@ -73,17 +73,12 @@ type expressionEnvironment struct {
 	Matrix       map[string]any            `expr:"matrix"`
 	Finally      map[string]any            `expr:"finally"`
 	Error        map[string]any            `expr:"error"`
-	Workflow     workflowValue             `expr:"workflow"`
+	Workflow     step.WorkflowValue        `expr:"workflow"`
 	Run          runValue                  `expr:"run"`
 	// Current and Found describe the stored value an update replaces. They are nil and
 	// false for every other operation.
 	Current any  `expr:"current"`
 	Found   bool `expr:"found"`
-}
-
-type workflowValue struct {
-	Name string `expr:"name"`
-	Dir  string `expr:"dir"`
 }
 
 type runValue struct {
@@ -409,7 +404,7 @@ func environment(request step.Request) expressionEnvironment {
 		Dependencies: request.Dependencies, Batch: binding(request.Bindings, "batch"),
 		Foreach: binding(request.Bindings, "foreach"), Matrix: binding(request.Bindings, "matrix"),
 		Finally: binding(request.Bindings, "finally"), Error: binding(request.Bindings, "error"),
-		Workflow: workflowValue{Name: request.WorkflowName, Dir: request.WorkflowDir},
+		Workflow: request.WorkflowValue(),
 		Run:      runValue{Dir: request.RunDir},
 	}
 }

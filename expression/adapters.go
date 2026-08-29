@@ -1,6 +1,7 @@
 package expression
 
 import (
+	"fmt"
 	"strings"
 	"text/template"
 
@@ -37,6 +38,9 @@ func TemplateFuncs() template.FuncMap {
 		"toJSON":        toJSON,
 		"toJSONCompact": toJSONCompact,
 		"toYAML":        toYAML,
+		"parseTime":     templateParseTime,
+		"addTime":       templateAddTime,
+		"formatTime":    templateFormatTime,
 	}
 }
 
@@ -57,6 +61,10 @@ func Eval(source string, environment any) (any, error) {
 
 func exprOptions() []expr.Option {
 	return []expr.Option{
+		// Expr's now() would let any expression read the clock, which would defeat the
+		// time step's recordable, --var-overridable capture. Disabling it fails such an
+		// expression at compile time with "unknown name now".
+		expr.DisableBuiltin("now"),
 		expr.Function("default", func(values ...any) (any, error) {
 			return defaultValue(values[1], values[0]), nil
 		}, new(func(any, any) any)),
@@ -106,5 +114,107 @@ func exprOptions() []expr.Option {
 		expr.Function("toYAML", func(values ...any) (any, error) {
 			return toYAML(values[0])
 		}, new(func(any) string)),
+		expr.Function("parseTime", exprParseTime, new(func(...any) string)),
+		expr.Function("addTime", exprAddTime, new(func(...any) string)),
+		expr.Function("formatTime", exprFormatTime, new(func(...any) string)),
 	}
+}
+
+func templateParseTime(values ...any) (string, error) {
+	value, layout, timezone, err := templateTimeArguments("parseTime", values)
+	if err != nil {
+		return "", err
+	}
+	return ParseTime(value, layout, timezone)
+}
+
+func templateFormatTime(values ...any) (string, error) {
+	value, layout, timezone, err := templateTimeArguments("formatTime", values)
+	if err != nil {
+		return "", err
+	}
+	return FormatTime(value, layout, timezone)
+}
+
+func templateTimeArguments(name string, values []any) (value, layout, timezone string, err error) {
+	if len(values) != 2 && len(values) != 3 {
+		return "", "", "", fmt.Errorf("%s expects a layout, optional timezone, and piped time value", name)
+	}
+	stringsByPosition := make([]string, len(values))
+	for i, candidate := range values {
+		text, ok := candidate.(string)
+		if !ok {
+			return "", "", "", fmt.Errorf("%s argument %d must be a string, got %T", name, i+1, candidate)
+		}
+		stringsByPosition[i] = text
+	}
+	layout = stringsByPosition[0]
+	value = stringsByPosition[len(stringsByPosition)-1]
+	if len(stringsByPosition) == 3 {
+		timezone = stringsByPosition[1]
+	}
+	return value, layout, timezone, nil
+}
+
+func templateAddTime(values ...any) (string, error) {
+	if len(values) != 2 {
+		return "", fmt.Errorf("addTime expects an adjustments object and piped time value")
+	}
+	adjustments, ok := values[0].(map[string]any)
+	if !ok {
+		return "", fmt.Errorf("addTime adjustments must be an object, got %T", values[0])
+	}
+	value, ok := values[1].(string)
+	if !ok {
+		return "", fmt.Errorf("addTime value must be a string, got %T", values[1])
+	}
+	return AddTime(value, adjustments)
+}
+
+func exprParseTime(values ...any) (any, error) {
+	value, layout, timezone, err := exprTimeArguments("parseTime", values)
+	if err != nil {
+		return nil, err
+	}
+	return ParseTime(value, layout, timezone)
+}
+
+func exprFormatTime(values ...any) (any, error) {
+	value, layout, timezone, err := exprTimeArguments("formatTime", values)
+	if err != nil {
+		return nil, err
+	}
+	return FormatTime(value, layout, timezone)
+}
+
+func exprTimeArguments(name string, values []any) (value, layout, timezone string, err error) {
+	if len(values) != 2 && len(values) != 3 {
+		return "", "", "", fmt.Errorf("%s expects a time value, layout, and optional timezone", name)
+	}
+	for i, candidate := range values {
+		if _, ok := candidate.(string); !ok {
+			return "", "", "", fmt.Errorf("%s argument %d must be a string, got %T", name, i+1, candidate)
+		}
+	}
+	value = values[0].(string)
+	layout = values[1].(string)
+	if len(values) == 3 {
+		timezone = values[2].(string)
+	}
+	return value, layout, timezone, nil
+}
+
+func exprAddTime(values ...any) (any, error) {
+	if len(values) != 2 {
+		return nil, fmt.Errorf("addTime expects a time value and adjustments object")
+	}
+	value, ok := values[0].(string)
+	if !ok {
+		return nil, fmt.Errorf("addTime value must be a string, got %T", values[0])
+	}
+	adjustments, ok := values[1].(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("addTime adjustments must be an object, got %T", values[1])
+	}
+	return AddTime(value, adjustments)
 }

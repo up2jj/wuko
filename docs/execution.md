@@ -714,8 +714,13 @@ For fixed delays and polling, see the [`wait` step](steps-automation.md#wait).
 
 ## Scheduled runs
 
+Top-level `timezone` is the workflow's IANA timezone for scheduled runs and explicit time
+operations. It is available as `.workflow.timezone`, `workflow.timezone` in Expr, and
+`wuko.workflow.timezone` in Lua. It may be declared without `cron`; when omitted, scheduling and
+the `time` step use the machine's local timezone.
+
 Add `cron` to keep `wuko run` alive on a five-field schedule, or a six-field schedule with seconds
-first. Set `timezone` to an IANA name; otherwise the machine's local timezone is used.
+first.
 
 ```yaml
 version: 1

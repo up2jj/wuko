@@ -356,6 +356,7 @@ func cloneState(state *State) *State {
 	return &State{
 		Inputs: cloneMap(state.Inputs), Vars: cloneMap(state.Vars), Env: maps.Clone(state.Env),
 		Steps: cloneMap(state.Steps), Outputs: cloneMap(state.Outputs), Dependencies: cloneDependencies(state.Dependencies), Bindings: cloneMap(state.Bindings),
+		presetVars: state.presetVars,
 	}
 }
 

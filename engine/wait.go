@@ -39,7 +39,7 @@ type waitEnvironment struct {
 	Foreach      map[string]any            `expr:"foreach"`
 	Matrix       map[string]any            `expr:"matrix"`
 	Finally      map[string]any            `expr:"finally"`
-	Workflow     conditionWorkflow         `expr:"workflow"`
+	Workflow     step.WorkflowValue        `expr:"workflow"`
 	Run          conditionRun              `expr:"run"`
 	Result       map[string]any            `expr:"result"`
 	Error        any                       `expr:"error"`
@@ -256,7 +256,7 @@ func evaluateWaitCondition(program *vm.Program, request step.Request, result map
 		Batch:   bindingRoot(request.Bindings, "batch"),
 		Foreach: bindingRoot(request.Bindings, "foreach"), Matrix: bindingRoot(request.Bindings, "matrix"),
 		Finally:  bindingRoot(request.Bindings, "finally"),
-		Workflow: conditionWorkflow{Name: request.WorkflowName, Dir: request.WorkflowDir},
+		Workflow: request.WorkflowValue(),
 		Run:      conditionRun{Dir: request.RunDir}, Result: result, Error: errorValue, Poll: poll,
 	})
 	if err != nil {

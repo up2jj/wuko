@@ -1534,7 +1534,9 @@ func validateDefinitionHeader(definition *Definition) error {
 	}
 	if definition.Cron == "" {
 		if definition.Timezone != "" {
-			return fmt.Errorf("timezone requires cron")
+			if _, err := time.LoadLocation(definition.Timezone); err != nil {
+				return fmt.Errorf("invalid timezone %q: %w", definition.Timezone, err)
+			}
 		}
 		return nil
 	}

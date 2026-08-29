@@ -1,6 +1,6 @@
 ---
 name: wuko-workflow-author
-description: Create or update Wuko version-1 YAML workflows, including cron schedules, templates, conditions, early returns, finally cleanup, cancel-on monitors, foreach and matrix controls, required files, composite actions, waits, polling, retries, concurrency, interactive prompts and path selection, typed and imported variables, structured decoding, JSONPath selection, semantic versions, HTTP, files, managed temporary resources, glob discovery, native filesystem watches, persistent change detectors, persistent key-value stores, content-addressed directory caches, Lua, shell, Docker, and agent steps. Use when designing workflow files, extending existing workflows, or reviewing workflow structure before execution.
+description: Create or update Wuko version-1 YAML workflows, including cron schedules, explicit time capture and transformation, templates, conditions, early returns, finally cleanup, cancel-on monitors, foreach and matrix controls, required files, composite actions, waits, polling, retries, concurrency, interactive prompts and path selection, typed and imported variables, structured decoding, JSONPath selection, semantic versions, HTTP, files, managed temporary resources, glob discovery, native filesystem watches, persistent change detectors, persistent key-value stores, content-addressed directory caches, Lua, shell, Docker, and agent steps. Use when designing workflow files, extending existing workflows, or reviewing workflow structure before execution.
 ---
 
 # Wuko Workflow Author
@@ -64,6 +64,10 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
 - Use `semver` for strict semantic-version parsing, precedence comparison, constraint checks, and
   major/minor/patch increments. Read the operation's primary typed result from `value`; remember
   that build metadata does not affect comparison and ordinary constraints exclude prereleases.
+- Use `time` as the only current-time boundary. Its output and default same-named variable are
+  recordable and may be supplied with `--var` for reproducible runs. Use `parseTime`, `addTime`, and
+  `formatTime` in templates, Expr, or Lua only to transform explicit strings; they never read the
+  clock. Top-level `timezone` supplies the workflow default even without `cron`.
 - Use `require_tool` before external commands that need an executable or supported tool version.
   Configure nonstandard version flags with `version_args`, and consume its `path` or checked
   `version` output only after the guard succeeds.
@@ -175,8 +179,8 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
   earlier top-level values and explicit `--var` entries take final initial-state precedence.
 - Use `timeout` and `retry` deliberately. Retries have at-least-once effects; do not assume commands, requests, writes, containers, or agents can be rolled back.
 - Use top-level `cron` only when `wuko run` should remain alive and execute repeatedly. Write five
-  conventional cron fields or six fields with seconds first; add an IANA `timezone` only when the
-  machine-local default is inappropriate. Scheduled attempts are serial, skip missed occurrences,
+  conventional cron fields or six fields with seconds first. Set an IANA `timezone` whenever
+  schedule or calendar operations must not use the machine-local default. Scheduled attempts are serial, skip missed occurrences,
   reload the workflow at each occurrence, and continue after failures until canceled.
 - Distinguish polling from retries: polling repeats successful observations until `until` matches,
   commits only the final result, and can still repeat external effects with at-least-once semantics.

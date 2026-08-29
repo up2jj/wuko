@@ -6,6 +6,7 @@ import (
 	"github.com/expr-lang/expr"
 	"github.com/expr-lang/expr/vm"
 	wukoexpr "github.com/up2jj/wuko/expression"
+	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
 )
 
@@ -20,13 +21,8 @@ type conditionEnvironment struct {
 	Matrix       map[string]any            `expr:"matrix"`
 	Finally      map[string]any            `expr:"finally"`
 	Error        map[string]any            `expr:"error"`
-	Workflow     conditionWorkflow         `expr:"workflow"`
+	Workflow     step.WorkflowValue        `expr:"workflow"`
 	Run          conditionRun              `expr:"run"`
-}
-
-type conditionWorkflow struct {
-	Name string `expr:"name"`
-	Dir  string `expr:"dir"`
 }
 
 type conditionRun struct {
@@ -76,9 +72,8 @@ func makeConditionEnvironment(definition *workflow.Definition, runDir string, st
 		Matrix:       bindingRoot(state.Bindings, "matrix"),
 		Finally:      bindingRoot(state.Bindings, "finally"),
 		Error:        bindingRoot(state.Bindings, "error"),
-		Workflow: conditionWorkflow{
-			Name: definition.Name,
-			Dir:  definition.Dir,
+		Workflow: step.WorkflowValue{
+			Name: definition.Name, Dir: definition.Dir, Timezone: definition.Timezone,
 		},
 		Run: conditionRun{Dir: runDir},
 	}

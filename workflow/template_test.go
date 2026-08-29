@@ -52,6 +52,18 @@ func TestRendererExposesHelpersToNamedAndInlineTemplates(t *testing.T) {
 	}
 }
 
+func TestTemplateDataExposesWorkflowTimezone(t *testing.T) {
+	t.Parallel()
+	definition := &Definition{Name: "release", Dir: "/workflow", Timezone: "Europe/Warsaw"}
+	got, err := RenderString(`{{ .workflow.timezone }}`, TemplateData(definition, "/run", nil, nil, nil, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "Europe/Warsaw" {
+		t.Fatalf("timezone = %q", got)
+	}
+}
+
 func TestRendererValidatesNamedTemplateWithOptionalBranches(t *testing.T) {
 	t.Parallel()
 	const resultsTable = `Repository | Status

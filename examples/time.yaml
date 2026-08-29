@@ -1,0 +1,21 @@
+version: 1
+name: release-stamp
+description: Capture one overridable release date and derive another with pure time helpers
+timezone: Europe/Warsaw
+steps:
+  - id: stamp
+    type: time
+    with:
+      format: "2006-01-02T15:04:05Z07:00"
+
+  - id: tomorrow
+    type: set
+    with:
+      variable: tomorrow
+      expr: 'addTime(vars.stamp, {"days": 1, "timezone": workflow.timezone})'
+
+  - id: summary
+    type: set
+    with:
+      variable: release_message
+      value: 'Release date: {{ .vars.tomorrow | formatTime "January 2, 2006" .workflow.timezone }}'

@@ -48,13 +48,8 @@ type expressionEnvironment struct {
 	Matrix       map[string]any            `expr:"matrix"`
 	Finally      map[string]any            `expr:"finally"`
 	Error        map[string]any            `expr:"error"`
-	Workflow     workflowValue             `expr:"workflow"`
+	Workflow     step.WorkflowValue        `expr:"workflow"`
 	Run          runValue                  `expr:"run"`
-}
-
-type workflowValue struct {
-	Name string `expr:"name"`
-	Dir  string `expr:"dir"`
 }
 
 type runValue struct {
@@ -179,7 +174,7 @@ func (r *Runner) resolveArgs(ctx context.Context, request step.Request) (map[str
 			Matrix:       bindingRoot(request.Bindings, "matrix"),
 			Finally:      bindingRoot(request.Bindings, "finally"),
 			Error:        bindingRoot(request.Bindings, "error"),
-			Workflow:     workflowValue{Name: request.WorkflowName, Dir: request.WorkflowDir},
+			Workflow:     request.WorkflowValue(),
 			Run:          runValue{Dir: request.RunDir},
 		})
 		if err != nil {
@@ -234,7 +229,7 @@ func (r *runtime) module(state *glua.LState) (*glua.LTable, error) {
 		"inputs":       r.request.Inputs,
 		"steps":        r.request.Steps,
 		"dependencies": r.request.Dependencies,
-		"workflow":     map[string]any{"name": r.request.WorkflowName, "dir": r.request.WorkflowDir},
+		"workflow":     map[string]any{"name": r.request.WorkflowName, "dir": r.request.WorkflowDir, "timezone": r.request.WorkflowTimezone},
 		"run":          map[string]any{"dir": r.request.RunDir},
 	} {
 		converted, err := toLua(state, value)

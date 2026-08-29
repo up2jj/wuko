@@ -19,9 +19,28 @@ import (
 	gitstep "github.com/up2jj/wuko/steps/git"
 	inputstep "github.com/up2jj/wuko/steps/input"
 	luastep "github.com/up2jj/wuko/steps/lua"
+	setstep "github.com/up2jj/wuko/steps/set"
 	"github.com/up2jj/wuko/steps/shell"
+	timestep "github.com/up2jj/wuko/steps/time"
 	"github.com/up2jj/wuko/workflow"
 )
+
+func TestTimeExampleValidates(t *testing.T) {
+	t.Parallel()
+	definition, err := workflow.NewLoader(nil).Load(t.Context(), filepath.Join("examples", "time.yaml"), workflow.LoadOptions{RunDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := step.NewRegistry()
+	for _, register := range []func(*step.Registry) error{timestep.Register, setstep.Register} {
+		if err := register(registry); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := engine.New(registry).Validate(t.Context(), definition, engine.Options{RunDir: t.TempDir()}); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestClickUpTaskExampleValidates(t *testing.T) {
 	definition := loadClickUpTaskExample(t)

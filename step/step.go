@@ -16,15 +16,20 @@ type Request struct {
 	StepID       string
 	WorkflowName string
 	// WorkflowSource is the stable logical source of the workflow or action definition.
-	WorkflowSource string
-	WorkflowDir    string
-	RunDir         string
-	LocalValueDir  string
-	GlobalValueDir string
-	Vars           map[string]any
-	Inputs         map[string]any
-	Env            map[string]string
-	Steps          map[string]any
+	WorkflowSource   string
+	WorkflowDir      string
+	WorkflowTimezone string
+	RunDir           string
+	LocalValueDir    string
+	GlobalValueDir   string
+	Vars             map[string]any
+	// PresetVars holds the variables supplied before the run began -- the workflow's
+	// own vars: block plus invocation --var overrides. Unlike Vars it never grows as
+	// steps write variables, so a step can tell a pinned value from one it produced.
+	PresetVars map[string]any
+	Inputs     map[string]any
+	Env        map[string]string
+	Steps      map[string]any
 	// Dependencies contains outputs from direct prerequisite workflows keyed by alias.
 	Dependencies map[string]map[string]any
 	// Bindings contains active lifecycle and workflow-control roots such as batch, error, finally, foreach, and matrix.
@@ -41,6 +46,18 @@ type Request struct {
 	// PreviousAttempt is the most recent failed attempt that produced a complete result.
 	// It is nil on the first attempt and remains immutable for the duration of Run.
 	PreviousAttempt *Result
+}
+
+// WorkflowValue is the shared, statically typed workflow root exposed to Expr evaluators.
+type WorkflowValue struct {
+	Name     string `expr:"name"`
+	Dir      string `expr:"dir"`
+	Timezone string `expr:"timezone"`
+}
+
+// WorkflowValue returns the request's workflow metadata in evaluator form.
+func (request Request) WorkflowValue() WorkflowValue {
+	return WorkflowValue{Name: request.WorkflowName, Dir: request.WorkflowDir, Timezone: request.WorkflowTimezone}
 }
 
 // Result carries a step's outputs and the workflow variables it writes. Both are cloned
