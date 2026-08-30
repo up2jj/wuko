@@ -220,6 +220,9 @@ func reportBackgroundControlEvent(options Options, definition *workflow.Definiti
 		report(options, ProgressEvent{Kind: BackgroundTriggered, Status: StatusRunning, Time: time.Now(), WorkflowName: definition.Name, Depth: options.depth - 1, StepID: workflowStep.ID, StepType: kind, ControlKind: kind, Action: event.Action})
 	case BackgroundSourceFailure:
 		report(options, ProgressEvent{Kind: BackgroundSourceFailed, Status: StatusFailed, Time: time.Now(), WorkflowName: definition.Name, Depth: options.depth - 1, StepID: workflowStep.ID, StepType: kind, ControlKind: kind, Action: event.Action, Error: event.Error})
+		// A tolerated failure never becomes the job's outcome, so the diagnostic stream is the
+		// only place a source broken for a whole CI run would otherwise be visible.
+		traceStep(options, definition, workflowStep, diagnostic.PhaseControl, diagnostic.StatusFailed, time.Time{}, kind+" source failed, still observing", event.Error)
 	}
 }
 

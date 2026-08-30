@@ -2,6 +2,7 @@ package observe
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,7 +13,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/up2jj/wuko/engine"
 	"github.com/up2jj/wuko/process"
+	"github.com/up2jj/wuko/workflow"
 )
 
 func TestRegistryAcceptsFutureSourceWithoutEngineChanges(t *testing.T) {
@@ -279,14 +282,79 @@ func TestShellSourceRejectsInvalidEnvironmentName(t *testing.T) {
 	}
 }
 
-func TestSchedulerSourceRetryBackoffIsBounded(t *testing.T) {
-	scheduler := Scheduler{RetryBase: time.Second}
-	for failures, want := range map[int]time.Duration{1: time.Second, 2: 2 * time.Second, 4: 8 * time.Second, 10: maxSourceRetryDelay} {
-		if delay := scheduler.retryDelay(failures); delay != want {
-			t.Fatalf("retryDelay(%d) = %s, want %s", failures, delay, want)
-		}
+func TestSchedulerGivesUpOnASourceThatOnlyChurns(t *testing.T) {
+	source := &churningSource{err: errors.New("event channel closed unexpectedly")}
+	tolerated := 0
+	_, err := Scheduler{
+		Source: source, SourceType: "test", OnError: workflow.ObserveContinue, FailurePace: time.Millisecond,
+	}.Run(t.Context(), engine.BackgroundControlRuntime{
+		RunIteration: func(context.Context, map[string]any) error { return nil },
+		Report: func(event engine.BackgroundControlEvent) {
+			if event.Kind == engine.BackgroundSourceFailure {
+				tolerated++
+			}
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "without doing any work") {
+		t.Fatalf("run error = %v", err)
 	}
-	if delay := (Scheduler{}).retryDelay(1); delay != defaultSourceRetryBase {
-		t.Fatalf("default retryDelay = %s", delay)
+	if tolerated != failureWindowPaces {
+		t.Fatalf("tolerated %d failures before giving up, want %d", tolerated, failureWindowPaces)
 	}
 }
+
+func TestSchedulerPacesInstantFailuresAndKeepsObserving(t *testing.T) {
+	const failures = 10
+	pace := 20 * time.Millisecond
+	source := &churningSource{err: errors.New("transient"), recoverAfter: failures}
+	runs := make(chan struct{}, 4)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	started := time.Now()
+	go func() {
+		<-runs // the initial run
+		<-runs // the run the recovered source triggered
+		cancel()
+	}()
+	_, err := Scheduler{
+		Source: source, SourceType: "test", OnError: workflow.ObserveContinue, FailurePace: pace,
+	}.Run(ctx, engine.BackgroundControlRuntime{
+		RunIteration: func(context.Context, map[string]any) error {
+			runs <- struct{}{}
+			return nil
+		},
+		Report: func(engine.BackgroundControlEvent) {},
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("run error = %v", err)
+	}
+	// Failing instantly is paced rather than retried in a spin, and a source that recovers
+	// inside the window keeps observing.
+	if elapsed := time.Since(started); elapsed < failures*pace {
+		t.Fatalf("%d instant failures took %s, want at least %s", failures, elapsed, failures*pace)
+	}
+}
+
+type churningSource struct {
+	err          error
+	recoverAfter int
+	calls        int
+}
+
+func (source *churningSource) Initial() any { return nil }
+
+func (source *churningSource) Next(ctx context.Context) (any, error) {
+	source.calls++
+	if source.recoverAfter > 0 && source.calls > source.recoverAfter {
+		if source.calls > source.recoverAfter+1 {
+			<-ctx.Done()
+			return nil, ctx.Err()
+		}
+		return map[string]any{"recovered": true}, nil
+	}
+	return nil, source.err
+}
+
+func (*churningSource) NewBatch() Batch          { return &latestBatch{root: "test"} }
+func (*churningSource) Metadata() map[string]any { return map[string]any{} }
+func (*churningSource) Close() error             { return nil }

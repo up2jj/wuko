@@ -2,6 +2,7 @@ package observe
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/up2jj/wuko/engine"
@@ -15,19 +16,28 @@ type Scheduler struct {
 	OnChange   string
 	// OnError decides whether a source failure ends observation. Zero means workflow.ObserveFail.
 	OnError string
-	// RetryBase is the first delay after a tolerated source failure, doubling up to
-	// maxSourceRetryDelay. Zero means defaultSourceRetryBase.
-	RetryBase time.Duration
+	// FailurePace overrides how fast a source that fails instantly may be retried, and with it
+	// how long such a source churns before its failure is treated as permanent. Zero means
+	// defaultFailurePace.
+	FailurePace time.Duration
 }
 
 const (
-	defaultSourceRetryBase = 250 * time.Millisecond
-	maxSourceRetryDelay    = 30 * time.Second
+	// defaultFailurePace bounds how quickly a source that fails without doing any work is
+	// retried. It is deliberately short: the pump is the only reader of a push source, so a
+	// paused pump is a source draining nothing and losing events, not a source resting.
+	defaultFailurePace = 50 * time.Millisecond
+	// failureWindowPaces is how many paced retries a source may churn through, failing
+	// instantly every time, before observation gives up on it. Any failure that took real
+	// work, and any observation at all, starts the count over.
+	failureWindowPaces = 200
 )
 
 type observation struct {
 	event any
 	err   error
+	// fatal marks an error that ends observation even under workflow.ObserveContinue.
+	fatal bool
 }
 
 type bodyResult struct {
@@ -40,32 +50,49 @@ type bodyResult struct {
 func (scheduler Scheduler) Run(ctx context.Context, runtime engine.BackgroundControlRuntime) (engine.BackgroundControlSummary, error) {
 	observations := make(chan observation, 1)
 	pumpDone := make(chan struct{})
+	// The pump reads the source until its own context ends. Cancelling that context on the way
+	// out is what lets Run return while the pump is parked inside Next: without it, an exit the
+	// source did not cause — a panic unwinding through Run, or a future early return — would
+	// block forever on pumpDone instead of surfacing.
+	pumpCtx, stopPump := context.WithCancel(ctx)
 	go func() {
 		defer close(pumpDone)
-		failures := 0
+		pace := scheduler.failurePace()
+		churn := 0
 		for {
-			event, err := scheduler.Source.Next(ctx)
+			polled := time.Now()
+			event, err := scheduler.Source.Next(pumpCtx)
+			elapsed := time.Since(polled)
+			fatal := err != nil && !scheduler.toleratesSourceErrors()
+			switch {
+			case err == nil || elapsed >= pace:
+				// The source produced something, or spent real work failing. Either way it
+				// is still doing its job, however badly, so nothing is churning.
+				churn = 0
+			case churn >= failureWindowPaces:
+				err = fmt.Errorf("source failed %d times without doing any work: %w", churn, err)
+				fatal = true
+			default:
+				churn++
+			}
 			select {
-			case observations <- observation{event: event, err: err}:
-			case <-ctx.Done():
+			case observations <- observation{event: event, err: err, fatal: fatal}:
+			case <-pumpCtx.Done():
 				return
 			}
-			if err == nil {
-				failures = 0
-				continue
-			}
-			if !scheduler.toleratesSourceErrors() {
+			if fatal {
 				return
 			}
-			// A source that fails immediately would otherwise spin. Back off between
-			// retries and start over once it produces an observation again.
-			failures++
-			if !sleep(ctx, scheduler.retryDelay(failures)) {
+			// Pace instant failures instead of pausing on them: retrying at once would spin,
+			// but waiting is not free either, because a push source buffers nothing while the
+			// pump is asleep.
+			if err != nil && elapsed < pace && !sleep(pumpCtx, pace-elapsed) {
 				return
 			}
 		}
 	}()
 	defer func() { <-pumpDone }()
+	defer stopPump()
 
 	iterations := 0
 	var bodyDone <-chan bodyResult
@@ -134,7 +161,7 @@ func (scheduler Scheduler) Run(ctx context.Context, runtime engine.BackgroundCon
 				if ctx.Err() != nil {
 					continue
 				}
-				if scheduler.toleratesSourceErrors() {
+				if scheduler.toleratesSourceErrors() && !observed.fatal {
 					runtime.Report(engine.BackgroundControlEvent{Kind: engine.BackgroundSourceFailure, Action: workflow.ObserveContinue, Error: observed.err})
 					continue
 				}
@@ -203,16 +230,11 @@ func (scheduler Scheduler) toleratesSourceErrors() bool {
 	return scheduler.OnError == workflow.ObserveContinue
 }
 
-func (scheduler Scheduler) retryDelay(failures int) time.Duration {
-	base := scheduler.RetryBase
-	if base <= 0 {
-		base = defaultSourceRetryBase
+func (scheduler Scheduler) failurePace() time.Duration {
+	if scheduler.FailurePace <= 0 {
+		return defaultFailurePace
 	}
-	delay := base
-	for attempt := 1; attempt < failures && delay < maxSourceRetryDelay; attempt++ {
-		delay *= 2
-	}
-	return min(delay, maxSourceRetryDelay)
+	return scheduler.FailurePace
 }
 
 // sleep reports whether the delay elapsed rather than the context ending.

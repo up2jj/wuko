@@ -43,9 +43,9 @@ steps:
 
 `id`, `source.type`, and a non-empty `steps` body are required. `debounce` defaults to `300ms`,
 `on_change` defaults to `restart`, and `on_error` defaults to `fail`; an explicit `0s` disables
-debounce. The `filesystem` source
-requires `paths`, defaults `root` to `.` and events to `create`, `modify`, `rename`, and `remove`,
-and otherwise matches the one-shot [`type: watch`](steps-system.md#watch) step.
+debounce. The `filesystem` source requires `paths`, defaults `root` to `.` and events to `create`,
+`modify`, `rename`, and `remove`, and otherwise matches the one-shot
+[`type: watch`](steps-system.md#watch) step.
 
 The body runs immediately once, then receives an `.observe` binding on each trigger. Every source
 provides `initial`, the one-based `iteration`, and `source`. Filesystem runs additionally provide
@@ -126,14 +126,21 @@ observation, and start from the workflow environment visible where the control w
 - `fail`, the default, stops the observer and cancels the foreground workflow and sibling
   observers. Use it when a source that stopped working means the run is no longer meaningful.
 - `continue` reports the failure and keeps observing. Use it for sources whose failures are
-  routinely transient, such as a polled command that times out once or an endpoint that refuses a
-  single connection. Retries back off from `250ms` to `30s` and reset once the source produces an
-  observation again, so a source failing immediately and repeatedly cannot spin. The active body
-  is left alone, and the failure does not fail the workflow: an observer that never recovers keeps
-  running until Ctrl-C or a `return`.
+  routinely transient, such as a polled command that times out once or a health endpoint that
+  refuses a connection between polls. The active body is left alone, and the failure does not fail
+  the workflow.
 
-`on_error` governs failures observed while running. A source that cannot be opened at all always
-fails its step, because there is nothing to observe.
+A tolerated failure is retried immediately when it took real work to produce, because a source is
+also the only thing draining its own events and a paused observer is one losing them. A source that
+fails *instantly* is instead retried at most every `50ms`, and one that keeps failing instantly for
+200 consecutive retries is treated as permanently broken: observation ends with that error even
+under `continue`, so a source that can never recover surfaces instead of quietly idling. Any
+observation, and any failure that took real work, starts that count over.
+
+`on_error` governs failures observed while running. A source that cannot be opened always fails its
+step, because there is nothing to observe: sources that poll, such as `http` and `shell`, make
+their first request during readiness, so a first request that fails is a launch failure whatever
+`on_error` says.
 
 ```yaml
 - id: pods
