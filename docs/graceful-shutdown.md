@@ -14,6 +14,25 @@ The first `SIGINT` or `SIGTERM` starts graceful shutdown:
 5. Every active child and iteration receives the canceled context.
 6. Wuko waits for active work and cleanup to return.
 
+Supervised background controls, including `observe`, receive the same first cancellation and are
+joined before deferred steps, workflow `finally`, or managed-resource cleanup starts. If foreground
+execution finishes normally while observers remain active, Wuko waits at an implicit background join
+until interruption. An explicit workflow `return` cancels that background work deliberately and
+continues to cleanup as a successful return.
+
+The run-level supervisor stops accepting new background jobs when foreground execution ends. A
+fatal background error becomes the cancellation cause for foreground work and sibling jobs; a
+foreground failure remains the primary reported error, followed by independent background failures
+in registration order. Cancellation errors caused by an already-recorded failure are suppressed.
+Background jobs own and close their goroutines and resources before returning, so cleanup cannot
+race with late cleanup registration.
+
+The supervisor is source-neutral infrastructure. It stores only stable job identity, kind, and
+final lifecycle outcome; each registered program owns its mutable state. Workflow controls are
+installed through the engine's background-control extension point. The `observe` package is the
+first client and separately owns scheduling plus its pluggable filesystem and HTTP source registry,
+so adding a future service or observation source does not add source logic to the engine.
+
 If the workflow or action declares `finally`, Wuko detaches that cleanup list from the first
 cancellation so it can run during graceful shutdown. The same 10-second process-wide budget and
 second-signal force still apply. See [Finally cleanup](finally.md) for cleanup context, error data,

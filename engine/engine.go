@@ -21,8 +21,9 @@ import (
 )
 
 type Engine struct {
-	registry  *step.Registry
-	executors *executor.Registry
+	registry           *step.Registry
+	executors          *executor.Registry
+	backgroundControls []BackgroundControl
 }
 
 type Option func(*Engine)
@@ -71,6 +72,10 @@ type Options struct {
 	renderer               *workflow.Renderer
 	deferContextValidation bool
 	insideExecutor         bool
+	// cleanups scopes managed-resource cleanup to a background control iteration, whose
+	// resources must be released when the iteration ends rather than accumulating for
+	// the life of the run. Nil everywhere else, meaning the run-level scope.
+	cleanups *cleanupScope
 	// scopedEnv captures the active transparent env block for deferred cleanup, which may
 	// execute after the block itself has restored State.Env.
 	scopedEnv map[string]string
@@ -141,7 +146,7 @@ func (e *Engine) Validate(ctx context.Context, definition *workflow.Definition, 
 		trace(options, diagnostic.Event{Phase: diagnostic.PhaseValidation, Status: diagnostic.StatusFailed, WorkflowName: definition.Name, Location: definition.Location, Duration: time.Since(started)})
 		return err
 	}
-	if err := validateDataReferences(definition, options, state); err != nil {
+	if err := e.validateDataReferences(definition, options, state); err != nil {
 		trace(options, diagnostic.Event{Phase: diagnostic.PhaseValidation, Status: diagnostic.StatusFailed, WorkflowName: definition.Name, Location: definition.Location, Duration: time.Since(started), Error: err})
 		return err
 	}
@@ -194,6 +199,16 @@ func (e *Engine) validateSteps(ctx context.Context, definition *workflow.Definit
 			}
 			continue
 		}
+		if workflowStep.IsBackgroundControl() {
+			control := e.backgroundControl(workflowStep)
+			if control == nil {
+				return fmt.Errorf("step %q: background control %q is not registered", workflowStep.ID, workflowStep.BackgroundControlKind())
+			}
+			if err := e.validateBackgroundControl(ctx, definition, workflowStep, options, state, control); err != nil {
+				return fmt.Errorf("step %q: %w", workflowStep.ID, err)
+			}
+			continue
+		}
 		if workflowStep.IsExecutorBlock() {
 			if err := e.validateExecutorBlock(ctx, definition, workflowStep, options, state); err != nil {
 				return err
@@ -231,7 +246,7 @@ func (e *Engine) validateSteps(ctx context.Context, definition *workflow.Definit
 				})
 				return err
 			}
-			if _, err := compileCondition(workflowStep.If); err != nil {
+			if _, err := e.compileCondition(workflowStep.If); err != nil {
 				return fail(fmt.Errorf("conditional block if: %w", err))
 			}
 			if err := e.validateSteps(ctx, definition, workflowStep.Steps, options, state); err != nil {
@@ -284,13 +299,13 @@ func (e *Engine) validateSteps(ctx context.Context, definition *workflow.Definit
 		started := time.Now()
 		traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusStarted, time.Time{}, "validating step", nil)
 		if workflowStep.If != "" {
-			if _, err := compileCondition(workflowStep.If); err != nil {
+			if _, err := e.compileCondition(workflowStep.If); err != nil {
 				traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusFailed, started, "compiling condition", err)
 				return fmt.Errorf("step %q if: %w", workflowStep.ID, err)
 			}
 		}
 		if workflowStep.Retry != nil && workflowStep.Retry.When != "" {
-			if _, err := compileCondition(workflowStep.Retry.When); err != nil {
+			if _, err := e.compileCondition(workflowStep.Retry.When); err != nil {
 				traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusFailed, started, "compiling retry condition", err)
 				return fmt.Errorf("step %q retry when: %w", workflowStep.ID, err)
 			}
@@ -364,6 +379,11 @@ func (e *Engine) validateSteps(ctx context.Context, definition *workflow.Definit
 func (e *Engine) Run(ctx context.Context, definition *workflow.Definition, options Options) (runState *State, runErr error) {
 	rootRun := options.runtime == nil
 	options = prepareRunOptions(options)
+	if rootRun {
+		options.runtime.background = newBackgroundSupervisor(ctx)
+		defer options.runtime.background.cancel(errBackgroundStopped)
+		ctx = options.runtime.background.context()
+	}
 	options.runID = correlation.NewRunID()
 	options.stepRunID = ""
 	if options.renderer == nil {
@@ -423,10 +443,27 @@ func (e *Engine) Run(ctx context.Context, definition *workflow.Definition, optio
 
 	mainErr = e.executeSequence(ctx, definition, definition.Steps, options, state, &stats, 1, total)
 	state.returning = false
+	if rootRun {
+		options.runtime.background.seal()
+		if mainErr != nil || state.didReturn {
+			options.runtime.background.stop(errBackgroundStopped)
+		}
+		if count := options.runtime.background.count(); count > 0 {
+			report(options, ProgressEvent{Kind: BackgroundJoining, Status: StatusRunning, Time: time.Now(), WorkflowName: definition.Name, Depth: options.depth, Started: count})
+		}
+		backgroundErr := options.runtime.background.wait()
+		if cancellationOnly(mainErr) && nonCancellationError(backgroundErr) != nil {
+			// A background failure canceled the foreground; report the originating
+			// failure instead of presenting the resulting cancellation as primary.
+			mainErr = backgroundErr
+		} else {
+			mainErr = errors.Join(mainErr, backgroundErr)
+		}
+	}
 	cleanupCtx := context.WithoutCancel(ctx)
 	cleanupErrors := e.executeCleanupScope(cleanupCtx, definition, options.defers, definition.Finally, options, state, &stats, mainErr, stats.Steps, mainTotal+1, total)
 	if rootRun {
-		cleanupErrors = append(cleanupErrors, options.runtime.runCleanups(cleanupCtx)...)
+		cleanupErrors = append(cleanupErrors, options.runtime.cleanups.run(cleanupCtx)...)
 	}
 	runErr = errors.Join(append([]error{mainErr}, cleanupErrors...)...)
 	if runErr != nil {
@@ -601,7 +638,7 @@ func (e *Engine) executeSequence(ctx context.Context, definition *workflow.Defin
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			run, err := evaluateConditionalBlock(definition, workflowStep, options, state)
+			run, err := e.evaluateConditionalBlock(definition, workflowStep, options, state)
 			if err != nil {
 				return err
 			}
@@ -647,6 +684,8 @@ func (e *Engine) executeSequence(ctx context.Context, definition *workflow.Defin
 			outcome = e.executeTryCatch(ctx, definition, workflowStep, stepOptions, state, index, total)
 		} else if workflowStep.IsCancelOn() {
 			outcome = e.executeCancelOn(ctx, definition, workflowStep, stepOptions, state, index, total)
+		} else if control := e.backgroundControl(workflowStep); control != nil {
+			outcome = e.executeBackgroundControl(ctx, definition, workflowStep, stepOptions, state, index, total, control)
 		} else if workflowStep.IsOnce() {
 			outcome = e.executeOnce(ctx, definition, workflowStep, stepOptions, state, index, total)
 		} else if workflowStep.Batch != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil {
@@ -681,14 +720,14 @@ func (e *Engine) executeSequence(ctx context.Context, definition *workflow.Defin
 	return nil
 }
 
-func evaluateConditionalBlock(definition *workflow.Definition, workflowStep workflow.Step, options Options, state *State) (bool, error) {
+func (e *Engine) evaluateConditionalBlock(definition *workflow.Definition, workflowStep workflow.Step, options Options, state *State) (bool, error) {
 	started := time.Now()
 	trace(options, diagnostic.Event{
 		Phase: diagnostic.PhaseCondition, Status: diagnostic.StatusStarted, Time: started,
 		WorkflowName: definition.Name, Location: workflowStep.Location,
 		Message: string(workflowStep.If),
 	})
-	run, err := evaluateCondition(workflowStep.If, makeConditionEnvironment(definition, options.RunDir, state))
+	run, err := e.evaluateCondition(workflowStep.If, makeConditionEnvironment(definition, options.RunDir, state))
 	if err != nil {
 		trace(options, diagnostic.Event{
 			Phase: diagnostic.PhaseCondition, Status: diagnostic.StatusFailed, Time: time.Now(), Duration: time.Since(started),
@@ -790,7 +829,7 @@ func (e *Engine) executeStep(ctx context.Context, definition *workflow.Definitio
 	}
 	conditionStarted := time.Now()
 	traceStep(options, definition, workflowStep, diagnostic.PhaseCondition, diagnostic.StatusStarted, time.Time{}, string(workflowStep.If), nil)
-	run, err := evaluateCondition(workflowStep.If, makeConditionEnvironment(definition, options.RunDir, state))
+	run, err := e.evaluateCondition(workflowStep.If, makeConditionEnvironment(definition, options.RunDir, state))
 	if err != nil {
 		traceStep(options, definition, workflowStep, diagnostic.PhaseCondition, diagnostic.StatusFailed, conditionStarted, "", err)
 		stepErr := fmt.Errorf("workflow %q step %q (%s): evaluating if: %w", definition.Name, workflowStep.ID, kind, err)
@@ -884,6 +923,14 @@ func (e *Engine) executeStep(ctx context.Context, definition *workflow.Definitio
 	return outcome
 }
 
+// cleanupScope returns the scope that owns managed resources created on this path.
+func (options Options) cleanupScope() *cleanupScope {
+	if options.cleanups != nil {
+		return options.cleanups
+	}
+	return &options.runtime.cleanups
+}
+
 func managedExecutor(options Options, stepID string, runner step.Runner) stepExecutor {
 	return func(ctx context.Context, request step.Request) (step.Result, error) {
 		result, err := runner.Run(ctx, request)
@@ -898,7 +945,7 @@ func managedExecutor(options Options, stepID string, runner step.Runner) stepExe
 			Outputs:   cloneMap(result.Outputs),
 			Variables: cloneMap(result.Variables),
 		}
-		options.runtime.registerCleanup(func(cleanupCtx context.Context) error {
+		options.cleanupScope().register(func(cleanupCtx context.Context) error {
 			if err := cleaner.Cleanup(cleanupCtx, cleanupResult); err != nil {
 				return fmt.Errorf("cleaning managed resources for step %q: %w", stepID, err)
 			}
@@ -986,6 +1033,9 @@ func executionKind(workflowStep workflow.Step) string {
 	}
 	if workflowStep.IsCancelOn() {
 		return "cancel_on"
+	}
+	if kind := workflowStep.BackgroundControlKind(); kind != "" {
+		return kind
 	}
 	if workflowStep.IsWorktreeBlock() {
 		return "worktree"
@@ -1167,6 +1217,7 @@ func (e *Engine) prepareActionExecutor(definition *workflow.Definition, workflow
 			Diagnostics:     options.Diagnostics,
 			operationPrefix: request.OperationID, parentRunID: options.runID,
 			parentStepRunID: options.stepRunID, depth: options.depth + 1, runtime: options.runtime,
+			cleanups:   options.cleanups,
 			onceClaims: options.onceClaims,
 		})
 		if err != nil {

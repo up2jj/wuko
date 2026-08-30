@@ -113,6 +113,8 @@ func requiredChildContext(workflowStep Step, role ChildRole) string {
 		return "cancel_on monitors"
 	case workflowStep.IsCancelOn():
 		return "cancel_on body"
+	case workflowStep.IsObserve():
+		return "observe body"
 	case workflowStep.Concurrent != nil:
 		return "concurrent group"
 	case workflowStep.Batch != nil:

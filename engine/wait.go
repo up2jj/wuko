@@ -29,22 +29,7 @@ type waitNestedStep struct {
 	With map[string]any `yaml:"with,omitempty"`
 }
 
-type waitEnvironment struct {
-	Inputs       map[string]any            `expr:"inputs"`
-	Vars         map[string]any            `expr:"vars"`
-	Env          map[string]string         `expr:"env"`
-	Steps        map[string]any            `expr:"steps"`
-	Dependencies map[string]map[string]any `expr:"dependencies"`
-	Batch        map[string]any            `expr:"batch"`
-	Foreach      map[string]any            `expr:"foreach"`
-	Matrix       map[string]any            `expr:"matrix"`
-	Finally      map[string]any            `expr:"finally"`
-	Workflow     step.WorkflowValue        `expr:"workflow"`
-	Run          conditionRun              `expr:"run"`
-	Result       map[string]any            `expr:"result"`
-	Error        any                       `expr:"error"`
-	Poll         int                       `expr:"poll"`
-}
+type waitEnvironment = map[string]any
 
 type waitMetrics struct {
 	polls    int
@@ -91,12 +76,19 @@ func decodeWaitConfig(raw map[string]any) (waitConfig, error) {
 	return config, nil
 }
 
-func compileWaitCondition(condition string) (*vm.Program, error) {
-	program, err := wukoexpr.Compile(condition, expr.Env(waitEnvironment{}), expr.AsBool())
+func (e *Engine) compileWaitCondition(condition string) (*vm.Program, error) {
+	shape := e.conditionEnvironmentShape()
+	shape["result"] = map[string]any{}
+	shape["poll"] = 0
+	program, err := wukoexpr.Compile(condition, expr.Env(shape), expr.AsBool())
 	if err != nil {
 		return nil, fmt.Errorf("compiling until: %w", err)
 	}
 	return program, nil
+}
+
+func compileWaitCondition(condition string) (*vm.Program, error) {
+	return (&Engine{}).compileWaitCondition(condition)
 }
 
 func (e *Engine) validateWaitStep(ctx context.Context, definition *workflow.Definition, workflowStep workflow.Step, options Options, state *State, validateRunner bool) error {
@@ -110,7 +102,7 @@ func (e *Engine) validateWaitStep(ctx context.Context, definition *workflow.Defi
 	if workflowStep.Timeout == nil {
 		return fmt.Errorf("polling wait requires a top-level timeout")
 	}
-	if _, err := compileWaitCondition(config.Until); err != nil {
+	if _, err := e.compileWaitCondition(config.Until); err != nil {
 		return err
 	}
 	if err := validateTemplates(options.renderer, config.Step.With, config.Step.Type == "lua"); err != nil {
@@ -151,7 +143,7 @@ func (e *Engine) prepareWaitExecutor(definition *workflow.Definition, workflowSt
 	if err != nil {
 		return nil, fmt.Errorf("nested step: %w", err)
 	}
-	program, err := compileWaitCondition(config.Until)
+	program, err := e.compileWaitCondition(config.Until)
 	if err != nil {
 		return nil, err
 	}
@@ -251,14 +243,16 @@ func (e *Engine) pollExecutor(definition *workflow.Definition, workflowStep work
 }
 
 func evaluateWaitCondition(program *vm.Program, request step.Request, result map[string]any, errorValue any, poll int) (bool, error) {
-	value, err := expr.Run(program, waitEnvironment{
-		Inputs: request.Inputs, Vars: request.Vars, Env: request.Env, Steps: request.Steps, Dependencies: request.Dependencies,
-		Batch:   bindingRoot(request.Bindings, "batch"),
-		Foreach: bindingRoot(request.Bindings, "foreach"), Matrix: bindingRoot(request.Bindings, "matrix"),
-		Finally:  bindingRoot(request.Bindings, "finally"),
-		Workflow: request.WorkflowValue(),
-		Run:      conditionRun{Dir: request.RunDir}, Result: result, Error: errorValue, Poll: poll,
-	})
+	environment := waitEnvironment{
+		"inputs": request.Inputs, "vars": request.Vars, "env": request.Env,
+		"steps": request.Steps, "dependencies": request.Dependencies,
+		"workflow": request.WorkflowValue(), "run": conditionRun{Dir: request.RunDir},
+		"result": result, "error": errorValue, "poll": poll,
+	}
+	for name, binding := range request.Bindings {
+		environment[name] = binding
+	}
+	value, err := expr.Run(program, environment)
 	if err != nil {
 		return false, fmt.Errorf("evaluating until: %w", err)
 	}

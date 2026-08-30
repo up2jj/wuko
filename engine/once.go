@@ -23,7 +23,7 @@ const (
 
 func (e *Engine) validateOnce(ctx context.Context, definition *workflow.Definition, workflowStep workflow.Step, options Options, state *State) error {
 	if workflowStep.If != "" {
-		if _, err := compileCondition(workflowStep.If); err != nil {
+		if _, err := e.compileCondition(workflowStep.If); err != nil {
 			return fmt.Errorf("if: %w", err)
 		}
 	}
@@ -60,7 +60,7 @@ func (e *Engine) executeOnce(ctx context.Context, definition *workflow.Definitio
 
 	conditionStarted := time.Now()
 	traceStep(options, definition, workflowStep, diagnostic.PhaseCondition, diagnostic.StatusStarted, time.Time{}, string(workflowStep.If), nil)
-	run, err := evaluateCondition(workflowStep.If, makeConditionEnvironment(definition, options.RunDir, state))
+	run, err := e.evaluateCondition(workflowStep.If, makeConditionEnvironment(definition, options.RunDir, state))
 	if err != nil {
 		stepErr := fmt.Errorf("workflow %q step %q (once): evaluating if: %w", definition.Name, workflowStep.ID, err)
 		traceStep(options, definition, workflowStep, diagnostic.PhaseCondition, diagnostic.StatusFailed, conditionStarted, "", err)

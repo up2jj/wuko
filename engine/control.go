@@ -27,7 +27,7 @@ type controlExpression struct {
 
 func (e *Engine) validateControl(ctx context.Context, definition *workflow.Definition, workflowStep workflow.Step, options Options, state *State) error {
 	if workflowStep.If != "" {
-		if _, err := compileCondition(workflowStep.If); err != nil {
+		if _, err := e.compileCondition(workflowStep.If); err != nil {
 			return fmt.Errorf("if: %w", err)
 		}
 	}
@@ -80,7 +80,7 @@ func (e *Engine) executeControl(ctx context.Context, definition *workflow.Defini
 
 	conditionStarted := time.Now()
 	traceStep(options, definition, workflowStep, diagnostic.PhaseCondition, diagnostic.StatusStarted, time.Time{}, string(workflowStep.If), nil)
-	run, err := evaluateCondition(workflowStep.If, makeConditionEnvironment(definition, options.RunDir, state))
+	run, err := e.evaluateCondition(workflowStep.If, makeConditionEnvironment(definition, options.RunDir, state))
 	if err != nil {
 		traceStep(options, definition, workflowStep, diagnostic.PhaseCondition, diagnostic.StatusFailed, conditionStarted, "", err)
 		stepErr := fmt.Errorf("workflow %q step %q (%s): evaluating if: %w", definition.Name, workflowStep.ID, kind, err)
@@ -129,7 +129,7 @@ func (e *Engine) executeControl(ctx context.Context, definition *workflow.Defini
 		childOptions.Stdin = nil
 	}
 	policy := controlpkg.Policy{MaxConcurrency: maxConcurrency, Timeout: timeout, FailFast: failFast}
-	observer := func(event controlpkg.Event) {
+	reportIteration := func(event controlpkg.Event) {
 		progressKind := IterationStarted
 		status := StatusRunning
 		if event.Kind == controlpkg.IterationFinished {
@@ -142,7 +142,7 @@ func (e *Engine) executeControl(ctx context.Context, definition *workflow.Defini
 			Iteration: event.Index, Iterations: len(iterations), Duration: event.Duration, Error: event.Err,
 		})
 	}
-	outcomes, runErr := controlpkg.Run(ctx, iterations, policy, observer, func(iterationCtx context.Context, iteration controlpkg.Iteration) (controlExecution, error) {
+	outcomes, runErr := controlpkg.Run(ctx, iterations, policy, reportIteration, func(iterationCtx context.Context, iteration controlpkg.Iteration) (controlExecution, error) {
 		iterationState := cloneState(state)
 		if iterationState.Bindings == nil {
 			iterationState.Bindings = make(map[string]any)

@@ -56,6 +56,15 @@ func writeDryRun(writer io.Writer, steps []workflow.Step, indent string, parent 
 			}
 			continue
 		}
+		if workflowStep.IsBackgroundControl() {
+			if _, err := fmt.Fprintf(writer, "%s%s %s (%s %s)%s\n", indent, index, workflowStep.ID, workflowStep.BackgroundControlKind(), workflowStep.BackgroundControlDescription(), needs); err != nil {
+				return err
+			}
+			if err := writeDryRun(writer, workflowStep.BackgroundControlBody(), indent+"   ", path); err != nil {
+				return err
+			}
+			continue
+		}
 		if workflowStep.IsOnce() {
 			if _, err := fmt.Fprintf(writer, "%s%s %s (once %s; %s; on busy %s)%s%s\n", indent, index, workflowStep.ID, workflowStep.Once.Key, workflowStep.Once.Scope, workflowStep.Once.OnBusy, dryRunCondition(workflowStep), needs); err != nil {
 				return err

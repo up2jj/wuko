@@ -419,6 +419,10 @@ unless the leading dot is explicit. Outputs include absolute `root`, `count`, an
 Wait for the first matching native filesystem notification without polling or invoking a shell.
 Patterns use the same relative, forward-slash syntax and hidden-path behavior as `glob`.
 
+This is the one-shot step form. For a background development loop that reruns a block and keeps the
+foreground workflow moving, use the [`observe` workflow control](workflow-control.md#observe) with
+the `filesystem` source.
+
 Wait up to five minutes for Go source activity:
 
 ```yaml

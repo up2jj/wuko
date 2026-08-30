@@ -19,6 +19,7 @@ import (
 	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/engine"
 	"github.com/up2jj/wuko/executor"
+	"github.com/up2jj/wuko/observe"
 	workflowschedule "github.com/up2jj/wuko/schedule"
 	"github.com/up2jj/wuko/step"
 	agentstep "github.com/up2jj/wuko/steps/agent"
@@ -197,7 +198,11 @@ func NewRootCmd() *cobra.Command {
 }
 
 func workflowEngine(deps dependencies) *engine.Engine {
-	return engine.New(deps.registry, engine.WithExecutors(deps.executors))
+	return engine.New(
+		deps.registry,
+		engine.WithExecutors(deps.executors),
+		engine.WithBackgroundControl(observe.NewControl(nil)),
+	)
 }
 
 func newRootCmd(deps dependencies) *cobra.Command {

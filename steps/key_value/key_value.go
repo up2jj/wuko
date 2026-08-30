@@ -71,6 +71,7 @@ type expressionEnvironment struct {
 	Batch        map[string]any            `expr:"batch"`
 	Foreach      map[string]any            `expr:"foreach"`
 	Matrix       map[string]any            `expr:"matrix"`
+	Observe      map[string]any            `expr:"observe"`
 	Finally      map[string]any            `expr:"finally"`
 	Error        map[string]any            `expr:"error"`
 	Workflow     step.WorkflowValue        `expr:"workflow"`
@@ -402,7 +403,7 @@ func environment(request step.Request) expressionEnvironment {
 	return expressionEnvironment{
 		Inputs: request.Inputs, Vars: request.Vars, Env: request.Env, Steps: request.Steps,
 		Dependencies: request.Dependencies, Batch: binding(request.Bindings, "batch"),
-		Foreach: binding(request.Bindings, "foreach"), Matrix: binding(request.Bindings, "matrix"),
+		Foreach: binding(request.Bindings, "foreach"), Matrix: binding(request.Bindings, "matrix"), Observe: binding(request.Bindings, "observe"),
 		Finally: binding(request.Bindings, "finally"), Error: binding(request.Bindings, "error"),
 		Workflow: request.WorkflowValue(),
 		Run:      runValue{Dir: request.RunDir},

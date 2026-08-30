@@ -71,6 +71,10 @@ func (progress *Progress) Report(event engine.ProgressEvent) {
 		}
 		fmt.Fprintln(progress.writer, line)
 	case engine.ControlStarted:
+		if event.ControlKind == "observe" {
+			fmt.Fprintf(progress.writer, "%s%s Observe %s · waiting for events\n", indent, progress.paint("36", "↻"), event.StepID)
+			return
+		}
 		item := "iteration"
 		if event.ControlKind == "cancel_on" {
 			item = "participant"
@@ -107,9 +111,36 @@ func (progress *Progress) Report(event engine.ProgressEvent) {
 			line += ": " + singleLine(event.Error.Error())
 		}
 		fmt.Fprintln(progress.writer, line)
+	case engine.BackgroundJoining:
+		fmt.Fprintf(progress.writer, "%s%s Waiting for %s\n", indent, progress.paint("36", "↻"), count(event.Started, "background job"))
+	case engine.BackgroundTriggered:
+		label := event.Action
+		if event.Action == "restart" {
+			label = "restarting active run"
+		} else if event.Action == "queue" {
+			label = "queued next run"
+		} else if event.Action == "skip" {
+			label = "skipped while active"
+		}
+		fmt.Fprintf(progress.writer, "%s%s observe %s · %s\n", indent, progress.paint("33", "↻"), event.StepID, label)
 	case engine.IterationStarted:
+		if event.ControlKind == "observe" {
+			fmt.Fprintf(progress.writer, "%s%s observe run %d started\n", indent, progress.paint("2", "•"), event.Iteration+1)
+			return
+		}
 		fmt.Fprintf(progress.writer, "%s%s iteration %d/%d started\n", indent, progress.paint("2", "•"), event.Iteration+1, event.Iterations)
 	case engine.IterationFinished:
+		if event.ControlKind == "observe" {
+			if event.Status == engine.StatusSucceeded {
+				return
+			}
+			line := fmt.Sprintf("%s%s observe run %d %s after %s", indent, progress.statusMarker(event.Status), event.Iteration+1, statusLabel(event.Status), formatDuration(event.Duration))
+			if event.Error != nil {
+				line += ": " + singleLine(event.Error.Error())
+			}
+			fmt.Fprintln(progress.writer, line)
+			return
+		}
 		if event.Status == engine.StatusSucceeded {
 			return
 		}

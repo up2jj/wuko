@@ -75,7 +75,7 @@ func (e *Engine) runWithRetry(ctx context.Context, definition *workflow.Definiti
 	var retryWhen *vm.Program
 	if workflowStep.Retry != nil && workflowStep.Retry.When != "" {
 		var err error
-		retryWhen, err = compileCondition(workflowStep.Retry.When)
+		retryWhen, err = e.compileCondition(workflowStep.Retry.When)
 		if err != nil {
 			execution.err = fmt.Errorf("compiling retry when: %w", err)
 			return execution
@@ -153,7 +153,7 @@ func (e *Engine) runWithRetry(ctx context.Context, definition *workflow.Definiti
 		}
 		if retryWhen != nil {
 			environment := makeConditionEnvironment(definition, options.RunDir, state)
-			environment.Error = retryErrorValue(attemptStats.Status, workflowStep.ID, executionKind(workflowStep), runErr, retryConditionOutputs(runErr, result.Outputs))
+			environment["error"] = retryErrorValue(attemptStats.Status, workflowStep.ID, executionKind(workflowStep), runErr, retryConditionOutputs(runErr, result.Outputs))
 			retry, err := evaluateConditionProgram(retryWhen, environment)
 			if err != nil {
 				execution.err = fmt.Errorf("evaluating retry when after %v: %w", runErr, err)

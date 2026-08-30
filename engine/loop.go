@@ -79,7 +79,7 @@ func (e *Engine) executeLoop(ctx context.Context, definition *workflow.Definitio
 			return outcome
 		}
 
-		matched, err := evaluateCondition(group.Until, makeConditionEnvironment(definition, options.RunDir, state))
+		matched, err := e.evaluateCondition(group.Until, makeConditionEnvironment(definition, options.RunDir, state))
 		if err != nil {
 			err = fmt.Errorf("evaluating loop until: %w", err)
 			finish(StatusFailed, err, nested)

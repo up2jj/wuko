@@ -99,6 +99,11 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
 - Use `watch` to block until the first selected create, modify, rename, or remove notification below
   an existing local root. Prefer it over polling a shell probe, keep recursive roots narrow, give
   bounded waits a top-level timeout, and consume the relative `path` plus `operations` list.
+- Use the named `observe:` control for a supervised background loop. Select a `filesystem` or
+  `http` source under `source.type`; its body runs once and then on debounced source triggers while
+  later foreground steps continue. Choose `restart`, `queue`, or `skip` for triggers received while
+  active. Body runs read `.observe` and start from the declaration-time state snapshot. The workflow
+  joins observers before `finally` on Ctrl-C or `return`.
 - Use `log_wait` to follow an existing or newly created regular log file until a regex matches.
   Scan existing content first, set a top-level timeout and an appropriate `max_bytes`, and consume
   its `match` plus named `captures` outputs.

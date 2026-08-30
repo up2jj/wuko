@@ -1,0 +1,367 @@
+// Package fswatch provides cancellation-aware native filesystem observations.
+package fswatch
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io/fs"
+	"os"
+	"path"
+	"path/filepath"
+	"slices"
+	"strings"
+	"sync"
+
+	"github.com/bmatcuk/doublestar/v4"
+	"github.com/fsnotify/fsnotify"
+)
+
+const (
+	EventCreate = "create"
+	EventModify = "modify"
+	EventRename = "rename"
+	EventRemove = "remove"
+)
+
+type eventDefinition struct {
+	name string
+	op   fsnotify.Op
+}
+
+var supportedEvents = []eventDefinition{
+	{name: EventCreate, op: fsnotify.Create},
+	{name: EventModify, op: fsnotify.Write},
+	{name: EventRename, op: fsnotify.Rename},
+	{name: EventRemove, op: fsnotify.Remove},
+}
+
+type Config struct {
+	Root     string
+	Patterns []string
+	Events   []string
+}
+
+type Change struct {
+	Path       string
+	Operations []string
+}
+
+// Source is the native event capability consumed by Observer.
+type Source interface {
+	Add(string) error
+	Close() error
+	EventChannel() <-chan fsnotify.Event
+	ErrorChannel() <-chan error
+}
+
+type nativeSource struct{ *fsnotify.Watcher }
+
+func (source nativeSource) EventChannel() <-chan fsnotify.Event { return source.Events }
+func (source nativeSource) ErrorChannel() <-chan error          { return source.Errors }
+
+type Factory func() (Source, error)
+
+func NativeFactory() (Source, error) {
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		return nil, err
+	}
+	return nativeSource{Watcher: watcher}, nil
+}
+
+// Normalize validates a declaration and applies root and event defaults.
+func Normalize(config Config, hasRoot, hasEvents, resolved bool) (Config, error) {
+	if !hasRoot {
+		config.Root = "."
+	}
+	if hasRoot && strings.TrimSpace(config.Root) == "" {
+		return Config{}, fmt.Errorf("root must not be empty")
+	}
+	if resolved && templated(config.Root) {
+		return Config{}, fmt.Errorf("watch configuration contains an unresolved template")
+	}
+	if len(config.Patterns) == 0 {
+		return Config{}, fmt.Errorf("patterns must contain at least one pattern")
+	}
+	for index, pattern := range config.Patterns {
+		if resolved && templated(pattern) {
+			return Config{}, fmt.Errorf("watch configuration contains an unresolved template")
+		}
+		if err := validatePattern(pattern); err != nil {
+			return Config{}, fmt.Errorf("patterns[%d]: %w", index, err)
+		}
+	}
+	if hasEvents && len(config.Events) == 0 {
+		return Config{}, fmt.Errorf("events must contain at least one event")
+	}
+	if !hasEvents {
+		config.Events = EventNames()
+	}
+	events, err := normalizeEvents(config.Events, resolved)
+	if err != nil {
+		return Config{}, err
+	}
+	config.Events = events
+	return config, nil
+}
+
+func EventNames() []string {
+	names := make([]string, len(supportedEvents))
+	for index, event := range supportedEvents {
+		names[index] = event.name
+	}
+	return names
+}
+
+type Observer struct {
+	root      string
+	config    Config
+	selected  map[string]bool
+	source    Source
+	closeOnce sync.Once
+	closeErr  error
+}
+
+// Open validates the root and registers its complete existing directory tree.
+func Open(ctx context.Context, runDir string, config Config, factory Factory) (*Observer, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	root, err := resolveRoot(runDir, config.Root)
+	if err != nil {
+		return nil, err
+	}
+	info, err := os.Lstat(root)
+	if err != nil {
+		return nil, fmt.Errorf("inspecting watch root %s: %w", root, err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("watch root %s is not a directory", root)
+	}
+	if factory == nil {
+		factory = NativeFactory
+	}
+	source, err := factory()
+	if err != nil {
+		return nil, fmt.Errorf("creating filesystem watcher: %w", err)
+	}
+	if err := addTree(ctx, source, root, false); err != nil {
+		_ = source.Close()
+		return nil, fmt.Errorf("registering watch root %s: %w", root, err)
+	}
+	selected := make(map[string]bool, len(config.Events))
+	for _, event := range config.Events {
+		selected[event] = true
+	}
+	return &Observer{root: root, config: config, selected: selected, source: source}, nil
+}
+
+func (observer *Observer) Root() string { return observer.root }
+
+func (observer *Observer) Next(ctx context.Context) (Change, error) {
+	for {
+		select {
+		case <-ctx.Done():
+			return Change{}, ctx.Err()
+		case event, ok := <-observer.source.EventChannel():
+			if !ok {
+				return Change{}, fmt.Errorf("filesystem watch event channel closed unexpectedly")
+			}
+			if event.Has(fsnotify.Create) {
+				if err := addCreatedTree(ctx, observer.source, event.Name); err != nil {
+					return Change{}, fmt.Errorf("registering created directory %s: %w", event.Name, err)
+				}
+			}
+			relative, matches := matchingPath(observer.root, observer.config.Patterns, event.Name)
+			if !matches {
+				continue
+			}
+			operations := matchingOperations(event, observer.selected)
+			if len(operations) > 0 {
+				return Change{Path: relative, Operations: operations}, nil
+			}
+		case watchErr, ok := <-observer.source.ErrorChannel():
+			if !ok {
+				return Change{}, fmt.Errorf("filesystem watch error channel closed unexpectedly")
+			}
+			if watchErr != nil {
+				return Change{}, fmt.Errorf("watching filesystem: %w", watchErr)
+			}
+		}
+	}
+}
+
+func (observer *Observer) Close() error {
+	observer.closeOnce.Do(func() {
+		observer.closeErr = observer.source.Close()
+	})
+	return observer.closeErr
+}
+
+func validatePattern(pattern string) error {
+	if pattern == "" {
+		return fmt.Errorf("pattern must not be empty")
+	}
+	if templated(pattern) {
+		return nil
+	}
+	if path.IsAbs(pattern) || windowsAbsolute(pattern) {
+		return fmt.Errorf("pattern must be relative to root")
+	}
+	for _, component := range strings.Split(pattern, "/") {
+		if component == ".." {
+			return fmt.Errorf("pattern must not contain a parent directory component")
+		}
+	}
+	if !doublestar.ValidatePattern(pattern) {
+		return fmt.Errorf("invalid pattern %q", pattern)
+	}
+	return nil
+}
+
+func normalizeEvents(events []string, resolved bool) ([]string, error) {
+	present := make(map[string]bool, len(events))
+	var templates []string
+	for index, event := range events {
+		if templated(event) {
+			if resolved {
+				return nil, fmt.Errorf("watch configuration contains an unresolved template")
+			}
+			templates = append(templates, event)
+			continue
+		}
+		if !slices.Contains(EventNames(), event) {
+			return nil, fmt.Errorf("events[%d] must be create, modify, rename, or remove", index)
+		}
+		present[event] = true
+	}
+	normalized := make([]string, 0, len(present)+len(templates))
+	for _, event := range EventNames() {
+		if present[event] {
+			normalized = append(normalized, event)
+		}
+	}
+	return append(normalized, templates...), nil
+}
+
+func matchingOperations(event fsnotify.Event, selected map[string]bool) []string {
+	operations := make([]string, 0, len(supportedEvents))
+	for _, definition := range supportedEvents {
+		if selected[definition.name] && event.Has(definition.op) {
+			operations = append(operations, definition.name)
+		}
+	}
+	return operations
+}
+
+func matchingPath(root string, patterns []string, name string) (string, bool) {
+	absolute, err := filepath.Abs(name)
+	if err != nil {
+		return "", false
+	}
+	relative, err := filepath.Rel(root, absolute)
+	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	relative = filepath.ToSlash(relative)
+	for _, pattern := range patterns {
+		if matchNoHidden(pattern, relative) {
+			return relative, true
+		}
+	}
+	return "", false
+}
+
+func matchNoHidden(pattern, name string) bool {
+	return matchComponents(strings.Split(path.Clean(pattern), "/"), strings.Split(path.Clean(name), "/"))
+}
+
+func matchComponents(pattern, name []string) bool {
+	if len(pattern) == 0 {
+		return len(name) == 0
+	}
+	if pattern[0] == "**" {
+		if matchComponents(pattern[1:], name) {
+			return true
+		}
+		return len(name) > 0 && !strings.HasPrefix(name[0], ".") && matchComponents(pattern, name[1:])
+	}
+	if len(name) == 0 {
+		return false
+	}
+	if strings.HasPrefix(name[0], ".") && (strings.HasPrefix(pattern[0], "*") || strings.HasPrefix(pattern[0], "?")) {
+		return false
+	}
+	matched, err := doublestar.Match(pattern[0], name[0])
+	return err == nil && matched && matchComponents(pattern[1:], name[1:])
+}
+
+func addTree(ctx context.Context, source Source, root string, allowMissing bool) error {
+	err := filepath.WalkDir(root, func(current string, entry fs.DirEntry, walkErr error) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if walkErr != nil {
+			if allowMissing && errors.Is(walkErr, os.ErrNotExist) {
+				return fs.SkipDir
+			}
+			return walkErr
+		}
+		if entry.Type()&os.ModeSymlink != 0 || !entry.IsDir() {
+			return nil
+		}
+		if err := source.Add(current); err != nil {
+			if allowMissing && errors.Is(err, os.ErrNotExist) {
+				return fs.SkipDir
+			}
+			return fmt.Errorf("adding directory %s: %w", current, err)
+		}
+		return nil
+	})
+	if allowMissing && errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return err
+}
+
+func addCreatedTree(ctx context.Context, source Source, created string) error {
+	info, err := os.Lstat(created)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return nil
+	}
+	return addTree(ctx, source, created, true)
+}
+
+func resolveRoot(runDir, root string) (string, error) {
+	if filepath.IsAbs(root) {
+		return filepath.Clean(root), nil
+	}
+	if runDir == "" {
+		var err error
+		runDir, err = os.Getwd()
+		if err != nil {
+			return "", fmt.Errorf("finding run directory: %w", err)
+		}
+	}
+	value, err := filepath.Abs(filepath.Join(runDir, root))
+	if err != nil {
+		return "", fmt.Errorf("resolving watch root %s: %w", root, err)
+	}
+	return filepath.Clean(value), nil
+}
+
+func windowsAbsolute(value string) bool {
+	if strings.HasPrefix(value, `\\`) {
+		return true
+	}
+	return len(value) >= 3 && ((value[0] >= 'a' && value[0] <= 'z') || (value[0] >= 'A' && value[0] <= 'Z')) && value[1] == ':' && (value[2] == '/' || value[2] == '\\')
+}
+
+func templated(value string) bool { return strings.Contains(value, "{{") }

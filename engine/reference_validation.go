@@ -29,21 +29,24 @@ type deferredReferences struct {
 }
 
 type referenceValidator struct {
-	definition *workflow.Definition
-	renderer   *workflow.Renderer
-	initial    *referenceScope
-	actions    map[*workflow.Action]struct{}
+	definition      *workflow.Definition
+	renderer        *workflow.Renderer
+	initial         *referenceScope
+	actions         map[*workflow.Action]struct{}
+	controls        []BackgroundControl
+	templateRoots   map[string]struct{}
+	expressionRoots map[string]struct{}
 }
 
 var (
-	openReference = &referenceSchema{open: true}
-	leafReference = &referenceSchema{}
-	templateRoots = map[string]struct{}{
+	openReference     = &referenceSchema{open: true}
+	leafReference     = &referenceSchema{}
+	baseTemplateRoots = map[string]struct{}{
 		"inputs": {}, "vars": {}, "env": {}, "steps": {}, "dependencies": {},
 		"batch": {}, "foreach": {}, "matrix": {}, "finally": {}, "error": {},
 		"workflow": {}, "run": {},
 	}
-	expressionRoots = map[string]struct{}{
+	baseExpressionRoots = map[string]struct{}{
 		"inputs": {}, "vars": {}, "env": {}, "steps": {}, "dependencies": {},
 		"batch": {}, "foreach": {}, "matrix": {}, "finally": {}, "error": {},
 		"workflow": {}, "run": {}, "cancel_on": {}, "monitors": {},
@@ -52,11 +55,15 @@ var (
 	}
 )
 
-func validateDataReferences(definition *workflow.Definition, options Options, state *State) error {
+func (e *Engine) validateDataReferences(definition *workflow.Definition, options Options, state *State) error {
 	validator := &referenceValidator{
-		definition: definition,
-		renderer:   options.renderer,
-		actions:    make(map[*workflow.Action]struct{}),
+		definition: definition, renderer: options.renderer,
+		actions: make(map[*workflow.Action]struct{}), controls: e.backgroundControls,
+		templateRoots: maps.Clone(baseTemplateRoots), expressionRoots: maps.Clone(baseExpressionRoots),
+	}
+	for _, control := range validator.controls {
+		validator.templateRoots[control.BindingRoot()] = struct{}{}
+		validator.expressionRoots[control.BindingRoot()] = struct{}{}
 	}
 	validator.initial = newReferenceScope(state)
 	return validator.validateDefinition()
@@ -349,8 +356,14 @@ func (validator *referenceValidator) validateNamedTemplates() error {
 		addDeclaredStepIDs(global, steps)
 	}
 	addGlobalTemplateBindings(global, validator.definition)
+	for _, control := range validator.controls {
+		// Named templates are validated once for every call site, so a control binding
+		// has to be in scope here the same way validateBackgroundControl puts it in
+		// scope for the body; addBinding only knows the built-in binding shapes.
+		global.roots[control.BindingRoot()] = openReference
+	}
 	return validator.renderer.WalkNamedDataReferences(func(name string, path []string) error {
-		if err := global.validate(path, templateRoots); err != nil {
+		if err := global.validate(path, validator.templateRoots); err != nil {
 			return fmt.Errorf("template %q: %w", name, err)
 		}
 		return nil
@@ -420,6 +433,12 @@ func (validator *referenceValidator) validateStep(step workflow.Step, scope *ref
 		return validator.validateTryCatch(step, scope)
 	case step.IsCancelOn():
 		return validator.validateCancelOn(step, scope)
+	case step.IsBackgroundControl():
+		control := validator.backgroundControl(step)
+		if control == nil {
+			return nil, nil, fmt.Errorf("background control %q is not registered", step.BackgroundControlKind())
+		}
+		return validator.validateBackgroundControl(step, scope, control)
 	case step.IsOnce():
 		return validator.validateOnce(step, scope)
 	case step.IsExecutorBlock():
@@ -695,6 +714,30 @@ func (validator *referenceValidator) validateCancelOn(step workflow.Step, scope 
 	return result, nil, nil
 }
 
+func (validator *referenceValidator) backgroundControl(step workflow.Step) BackgroundControl {
+	for _, control := range validator.controls {
+		if control.Matches(step) {
+			return control
+		}
+	}
+	return nil
+}
+
+func (validator *referenceValidator) validateBackgroundControl(step workflow.Step, scope *referenceScope, control BackgroundControl) (*referenceScope, []deferredReferences, error) {
+	kind := control.Kind()
+	if err := validator.validateTemplateValue(kind+" configuration", control.Configuration(step), scope, false); err != nil {
+		return nil, nil, err
+	}
+	private := scope.clone()
+	private.roots[control.BindingRoot()] = openReference
+	if _, _, err := validator.validateSteps(control.Body(step), private); err != nil {
+		return nil, nil, fmt.Errorf("%s body: %w", kind, err)
+	}
+	result := scope.clone()
+	result.addStep(step.ID)
+	return result, nil, nil
+}
+
 func selectedStepSchema(steps []workflow.Step) *referenceSchema {
 	result := &referenceSchema{fields: make(map[string]*referenceSchema)}
 	for _, step := range steps {
@@ -813,8 +856,14 @@ func (validator *referenceValidator) validateAction(action *workflow.Action, cal
 	for _, binding := range []string{"batch", "foreach", "matrix", "finally", "error"} {
 		delete(scope.roots, binding)
 	}
+	for _, control := range validator.controls {
+		delete(scope.roots, control.BindingRoot())
+	}
 	inner := &workflow.Definition{Version: 1, Name: action.Name, Templates: action.Templates, Dir: action.Dir, Steps: action.Steps, Finally: action.Finally, Vars: map[string]any{}, Env: workflow.Environment{}, Location: action.Location}
-	child := &referenceValidator{definition: inner, renderer: renderer, initial: scope, actions: validator.actions}
+	child := &referenceValidator{
+		definition: inner, renderer: renderer, initial: scope, actions: validator.actions,
+		controls: validator.controls, templateRoots: validator.templateRoots, expressionRoots: validator.expressionRoots,
+	}
 	if err := child.validateNamedTemplates(); err != nil {
 		return fmt.Errorf("action %q: %w", action.Name, err)
 	}
@@ -877,7 +926,7 @@ func (validator *referenceValidator) validateStepConfiguration(stepID, stepType 
 		}
 		if source := nestedMap(raw, "from"); source != nil {
 			if name, _ := source["var"].(string); name != "" && !strings.Contains(name, "{{") {
-				if err := scope.validate([]string{"vars", name}, expressionRoots); err != nil {
+				if err := scope.validate([]string{"vars", name}, validator.expressionRoots); err != nil {
 					return fmt.Errorf("from.var: %w", err)
 				}
 			}
@@ -952,7 +1001,7 @@ func (validator *referenceValidator) validateExpression(label, source string, sc
 	}
 	metadata := expressionReferenceMetadata{locals: make(map[string]struct{}), callees: make(map[*ast.IdentifierNode]struct{})}
 	ast.Walk(&tree.Node, &metadata)
-	visitor := expressionReferenceVisitor{scope: scope, locals: metadata.locals, callees: metadata.callees}
+	visitor := expressionReferenceVisitor{scope: scope, roots: validator.expressionRoots, locals: metadata.locals, callees: metadata.callees}
 	ast.Walk(&tree.Node, &visitor)
 	if visitor.err != nil {
 		return fmt.Errorf("%s: %w", label, visitor.err)
@@ -962,6 +1011,7 @@ func (validator *referenceValidator) validateExpression(label, source string, sc
 
 type expressionReferenceVisitor struct {
 	scope   *referenceScope
+	roots   map[string]struct{}
 	locals  map[string]struct{}
 	callees map[*ast.IdentifierNode]struct{}
 	err     error
@@ -981,12 +1031,12 @@ func (visitor *expressionReferenceVisitor) Visit(node *ast.Node) {
 			return
 		}
 		if _, exists := visitor.scope.roots[path[0]]; !exists {
-			if _, known := expressionRoots[path[0]]; !known {
+			if _, known := visitor.roots[path[0]]; !known {
 				visitor.err = fmt.Errorf("data root %q is not available here", path[0])
 				return
 			}
 		}
-		visitor.err = visitor.scope.validate(path, expressionRoots)
+		visitor.err = visitor.scope.validate(path, visitor.roots)
 		if visitor.err != nil {
 			return
 		}
@@ -1030,14 +1080,14 @@ func (visitor *expressionReferenceVisitor) validateConstantKeyCall(name string, 
 	}
 	if name == "hasKey" {
 		// A presence test must not require the key it asks about.
-		visitor.err = visitor.scope.validate(path, expressionRoots)
+		visitor.err = visitor.scope.validate(path, visitor.roots)
 		return
 	}
 	key, ok := arguments[1].(*ast.StringNode)
 	if !ok {
 		return
 	}
-	visitor.err = visitor.scope.validate(append(path, key.Value), expressionRoots)
+	visitor.err = visitor.scope.validate(append(path, key.Value), visitor.roots)
 }
 
 func expressionStaticPath(node ast.Node) []string {
@@ -1065,7 +1115,7 @@ func (validator *referenceValidator) validateTemplate(label, value string, scope
 		return nil
 	}
 	err := validator.renderer.WalkDataReferences(value, func(path []string) error {
-		return scope.validate(path, templateRoots)
+		return scope.validate(path, validator.templateRoots)
 	})
 	if err != nil {
 		return fmt.Errorf("%s template: %w", label, err)
@@ -1110,7 +1160,7 @@ func (validator *referenceValidator) validateLookup(label, value string, scope *
 	if len(path) < 2 || (path[0] != "vars" && path[0] != "steps") {
 		return nil // The owning runner reports malformed lookup syntax.
 	}
-	if err := scope.validate(path, expressionRoots); err != nil {
+	if err := scope.validate(path, validator.expressionRoots); err != nil {
 		return fmt.Errorf("%s: %w", label, err)
 	}
 	return nil

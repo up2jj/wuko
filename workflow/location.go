@@ -76,6 +76,10 @@ func annotateSteps(steps []Step, sequence *yaml.Node, source string) {
 			annotateSteps(steps[i].CancelOn.Monitors, mappingValue(group, "monitors"), source)
 			annotateSteps(steps[i].CancelOn.Steps, mappingValue(group, "steps"), source)
 		}
+		if steps[i].IsObserve() {
+			group := mappingValue(node, "observe")
+			annotateSteps(steps[i].Observe.Steps, mappingValue(group, "steps"), source)
+		}
 		if steps[i].IsTryCatch() {
 			if steps[i].Try != nil {
 				annotateSteps(steps[i].Try.Steps, mappingValue(mappingValue(node, "try"), "steps"), source)

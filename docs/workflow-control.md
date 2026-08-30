@@ -1,7 +1,7 @@
 # Workflow controls
 
-Wuko has seven controls for scheduling, repeating, recovering, or monitoring operations:
-`concurrent`, `batch`, `foreach`, `matrix`, `loop`, `try`/`catch`, and `cancel_on`.
+Wuko has eight controls for scheduling, repeating, recovering, or monitoring operations:
+`concurrent`, `batch`, `foreach`, `matrix`, `loop`, `try`/`catch`, `cancel_on`, and `observe`.
 
 - Use `concurrent` for a fixed bounded DAG; omit `needs` when every child is independent.
 - Use `batch` when each block should receive a fixed-size chunk of one runtime list.
@@ -10,6 +10,90 @@ Wuko has seven controls for scheduling, repeating, recovering, or monitoring ope
 - Use `loop` when a sequential block should repeat until a runtime expression becomes true.
 - Use `try`/`catch` when a failed sequential operation needs an explicit recovery path.
 - Use `cancel_on` when a sequential body should stop as soon as one named monitor finishes.
+- Use `observe` for a background loop driven by filesystem, HTTP, or future event sources.
+
+## Observe
+
+`observe` opens and validates its selected source, publishes a ready result, and continues the
+foreground workflow while its body runs in the background. After the foreground sequence succeeds,
+Wuko waits for every active observer until interruption. Background jobs are always joined before
+workflow `finally` and managed-resource cleanup begin.
+
+```yaml
+steps:
+  - id: go_tests
+    observe:
+      source:
+        type: filesystem
+        with:
+          root: .
+          paths: ["**/*.go"]
+          events: [create, modify, rename, remove]
+      debounce: 300ms
+      on_change: restart
+      steps:
+        - id: test
+          type: shell
+          with: {command: go, args: [test, ./...]}
+
+  - id: server
+    type: shell
+    with: {command: ./server}
+```
+
+`id`, `source.type`, and a non-empty `steps` body are required. `debounce` defaults to `300ms`, and
+`on_change` defaults to `restart`; an explicit `0s` disables debounce. The `filesystem` source
+requires `paths`, defaults `root` to `.` and events to `create`, `modify`, `rename`, and `remove`,
+and otherwise matches the one-shot [`type: watch`](steps-system.md#watch) step.
+
+The body runs immediately once, then receives an `.observe` binding on each trigger. Every source
+provides `initial`, the one-based `iteration`, and `source`. Filesystem runs additionally provide
+`.observe.filesystem.paths` and sorted `.observe.filesystem.changes` records containing `path` and
+`operations`. Each run starts from a private snapshot taken when the control was declared; later
+foreground outputs and previous body outputs are deliberately unavailable.
+
+HTTP observation polls a response and triggers when it changes by default:
+
+```yaml
+- id: api_health
+  observe:
+    source:
+      type: http
+      with:
+        every: 5s
+        timeout: 10s
+        trigger: change       # change | always
+        request:
+          url: https://example.test/health
+          response: json      # text | json
+    on_change: queue
+    steps:
+      - id: report
+        type: shell
+        with:
+          command: ./report-health
+          args: ['{{ .observe.http.status }}']
+```
+
+The HTTP source performs its first request during synchronous readiness and exposes that response
+to the initial run under `.observe.http`. Later polls emit only changed responses unless `trigger`
+is `always`. HTTP status failures remain observable responses with an `error` field; transport,
+timeout, oversized-body, and decoding failures are fatal source errors.
+
+- `restart` cancels and joins the active body before starting a replacement.
+- `queue` coalesces changes into at most one pending run.
+- `skip` ignores triggers received while the body is active.
+
+Body failures are reported but do not stop observation. Fatal source failures cancel the foreground
+workflow and sibling observers. A workflow `return` deliberately cancels and joins observers
+without turning that shutdown into a failure. The immutable launch result at `steps.<id>` contains
+`status: observing`, source type and readiness metadata, `debounce`, and `on_change`; it is never
+mutated from a background goroutine.
+
+Version 1 permits the control only in the main sequential workflow flow, including transparent
+`env` and `working_directory` scopes. It is rejected in actions, lifecycle hooks, cleanup,
+executors, concurrent or fan-out bodies, and nested observers. Use workflow `finally` for shutdown
+work; it runs after the observer body and its child processes have stopped.
 
 ## Try and catch
 

@@ -259,6 +259,16 @@ func writeTreeStepsWithFollowing(writer io.Writer, steps []workflow.Step, prefix
 			}
 			continue
 		}
+		if workflowStep.IsObserve() {
+			group := workflowStep.Observe
+			if _, err := fmt.Fprintf(writer, "%s%s%s (observe %s; debounce %s; on change %s)%s\n", prefix, branch, workflowStep.ID, group.Source.Type, group.EffectiveDebounce(), group.EffectiveOnChange(), needs); err != nil {
+				return err
+			}
+			if err := writeTreeSteps(writer, group.Steps, childPrefix); err != nil {
+				return err
+			}
+			continue
+		}
 		if workflowStep.IsExecutorBlock() {
 			label := fmt.Sprintf("executor: %s", workflowStep.Executor.Type)
 			if workflowStep.ID != "" {

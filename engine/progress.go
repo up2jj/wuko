@@ -15,22 +15,26 @@ import (
 type ProgressKind string
 
 const (
-	WorkflowStarted    ProgressKind = "workflow_started"
-	WorkflowFinished   ProgressKind = "workflow_finished"
-	StepStarted        ProgressKind = "step_started"
-	StepFinished       ProgressKind = "step_finished"
-	AttemptStarted     ProgressKind = "attempt_started"
-	AttemptFinished    ProgressKind = "attempt_finished"
-	RetryScheduled     ProgressKind = "retry_scheduled"
-	PollStarted        ProgressKind = "poll_started"
-	PollFinished       ProgressKind = "poll_finished"
-	PollScheduled      ProgressKind = "poll_scheduled"
-	ConcurrentStarted  ProgressKind = "concurrent_started"
-	ConcurrentFinished ProgressKind = "concurrent_finished"
-	ControlStarted     ProgressKind = "control_started"
-	ControlFinished    ProgressKind = "control_finished"
-	IterationStarted   ProgressKind = "iteration_started"
-	IterationFinished  ProgressKind = "iteration_finished"
+	WorkflowStarted     ProgressKind = "workflow_started"
+	WorkflowFinished    ProgressKind = "workflow_finished"
+	StepStarted         ProgressKind = "step_started"
+	StepFinished        ProgressKind = "step_finished"
+	AttemptStarted      ProgressKind = "attempt_started"
+	AttemptFinished     ProgressKind = "attempt_finished"
+	RetryScheduled      ProgressKind = "retry_scheduled"
+	PollStarted         ProgressKind = "poll_started"
+	PollFinished        ProgressKind = "poll_finished"
+	PollScheduled       ProgressKind = "poll_scheduled"
+	ConcurrentStarted   ProgressKind = "concurrent_started"
+	ConcurrentFinished  ProgressKind = "concurrent_finished"
+	ControlStarted      ProgressKind = "control_started"
+	ControlFinished     ProgressKind = "control_finished"
+	IterationStarted    ProgressKind = "iteration_started"
+	IterationFinished   ProgressKind = "iteration_finished"
+	BackgroundStarted   ProgressKind = "background_started"
+	BackgroundJoining   ProgressKind = "background_joining"
+	BackgroundFinished  ProgressKind = "background_finished"
+	BackgroundTriggered ProgressKind = "background_triggered"
 )
 
 // ExecutionStatus is the terminal state of a workflow, step, or attempt.
@@ -129,6 +133,7 @@ type ProgressEvent struct {
 	Started         int
 	Succeeded       int
 	ControlKind     string
+	Action          string
 	Iteration       int
 	Iterations      int
 	MaxConcurrency  int
@@ -174,25 +179,33 @@ type runRuntime struct {
 	// reportMu serializes the Progress and Diagnostics callbacks. One lock covers
 	// both so progress and trace events stay mutually ordered.
 	reportMu sync.Mutex
-	// cleanupMu guards cleanups, which branches append to concurrently.
-	cleanupMu sync.Mutex
-	cleanups  []func(context.Context) error
+	// cleanups is the run-level managed-resource scope, released once the root run
+	// finishes. Background control bodies scope their own iteration instead.
+	cleanups   cleanupScope
+	background *backgroundSupervisor
 }
 
-func (runtime *runRuntime) registerCleanup(cleanup func(context.Context) error) {
-	runtime.cleanupMu.Lock()
-	defer runtime.cleanupMu.Unlock()
-	runtime.cleanups = append(runtime.cleanups, cleanup)
+// cleanupScope owns the managed resources created on one execution path and releases
+// them together. Branches append to it concurrently, so it carries its own lock.
+type cleanupScope struct {
+	mu       sync.Mutex
+	cleanups []func(context.Context) error
 }
 
-// runCleanups runs registered cleanups in reverse completion order. ctx should be
+func (scope *cleanupScope) register(cleanup func(context.Context) error) {
+	scope.mu.Lock()
+	defer scope.mu.Unlock()
+	scope.cleanups = append(scope.cleanups, cleanup)
+}
+
+// run releases the scope's resources in reverse completion order. ctx should be
 // detached from the run's cancellation so managed resources are still released after
 // Ctrl-C; see step.Cleaner for why it carries no overall deadline.
-func (runtime *runRuntime) runCleanups(ctx context.Context) []error {
-	runtime.cleanupMu.Lock()
-	cleanups := runtime.cleanups
-	runtime.cleanups = nil
-	runtime.cleanupMu.Unlock()
+func (scope *cleanupScope) run(ctx context.Context) []error {
+	scope.mu.Lock()
+	cleanups := scope.cleanups
+	scope.cleanups = nil
+	scope.mu.Unlock()
 
 	var cleanupErrors []error
 	for index := len(cleanups) - 1; index >= 0; index-- {
@@ -263,6 +276,16 @@ func reportLegacy(options Options, event ProgressEvent) {
 		if event.Status == StatusSkipped {
 			fmt.Fprintf(writerOrDiscard(options.Stdout), "[%d/%d] %s (%s) skipped\n", event.Index, event.Total, event.StepID, event.StepType)
 		}
+	case BackgroundStarted:
+		fmt.Fprintf(writerOrDiscard(options.Stdout), "%s (%s) started in background\n", event.StepID, event.StepType)
+	case BackgroundJoining:
+		fmt.Fprintf(writerOrDiscard(options.Stdout), "waiting for %d background job(s)\n", event.Started)
+	case BackgroundFinished:
+		if event.Error != nil {
+			fmt.Fprintf(writerOrDiscard(options.Stderr), "%s (%s) background stopped: %v\n", event.StepID, event.StepType, event.Error)
+		}
+	case BackgroundTriggered:
+		fmt.Fprintf(writerOrDiscard(options.Stdout), "%s (%s) trigger %s\n", event.StepID, event.StepType, event.Action)
 	case AttemptFinished:
 		if event.Status != StatusSucceeded && event.Attempt < event.MaxAttempts {
 			fmt.Fprintf(writerOrDiscard(options.Stderr), "%s: attempt %d/%d failed: %v\n", event.StepID, event.Attempt, event.MaxAttempts, event.Error)

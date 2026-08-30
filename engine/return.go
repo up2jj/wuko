@@ -15,7 +15,7 @@ import (
 
 func (e *Engine) validateReturn(workflowStep workflow.Step) error {
 	if workflowStep.If != "" {
-		if _, err := compileCondition(workflowStep.If); err != nil {
+		if _, err := e.compileCondition(workflowStep.If); err != nil {
 			return fmt.Errorf("if: %w", err)
 		}
 	}
@@ -46,7 +46,7 @@ func (e *Engine) executeReturn(ctx context.Context, definition *workflow.Definit
 		WorkflowName: definition.Name, Location: workflowStep.Location, Message: "evaluating return",
 	})
 	environment := makeConditionEnvironment(definition, options.RunDir, state)
-	run, err := evaluateCondition(workflowStep.If, environment)
+	run, err := e.evaluateCondition(workflowStep.If, environment)
 	if err != nil {
 		trace(options, diagnostic.Event{Phase: diagnostic.PhaseControl, Status: diagnostic.StatusFailed, Time: time.Now(), Duration: time.Since(started), WorkflowName: definition.Name, Location: workflowStep.Location, Error: err})
 		return false, fmt.Errorf("workflow %q return: evaluating if: %w", definition.Name, err)

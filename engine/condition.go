@@ -10,29 +10,16 @@ import (
 	"github.com/up2jj/wuko/workflow"
 )
 
-type conditionEnvironment struct {
-	Inputs       map[string]any            `expr:"inputs"`
-	Vars         map[string]any            `expr:"vars"`
-	Env          map[string]string         `expr:"env"`
-	Steps        map[string]any            `expr:"steps"`
-	Dependencies map[string]map[string]any `expr:"dependencies"`
-	Batch        map[string]any            `expr:"batch"`
-	Foreach      map[string]any            `expr:"foreach"`
-	Matrix       map[string]any            `expr:"matrix"`
-	Finally      map[string]any            `expr:"finally"`
-	Error        map[string]any            `expr:"error"`
-	Workflow     step.WorkflowValue        `expr:"workflow"`
-	Run          conditionRun              `expr:"run"`
-}
+type conditionEnvironment = map[string]any
 
 type conditionRun struct {
 	Dir string `expr:"dir"`
 }
 
-func compileCondition(condition workflow.Condition) (*vm.Program, error) {
+func (e *Engine) compileCondition(condition workflow.Condition) (*vm.Program, error) {
 	program, err := wukoexpr.Compile(
 		string(condition),
-		expr.Env(conditionEnvironment{}),
+		expr.Env(e.conditionEnvironmentShape()),
 		expr.AsBool(),
 	)
 	if err != nil {
@@ -41,15 +28,29 @@ func compileCondition(condition workflow.Condition) (*vm.Program, error) {
 	return program, nil
 }
 
-func evaluateCondition(condition workflow.Condition, environment conditionEnvironment) (bool, error) {
+func (e *Engine) evaluateCondition(condition workflow.Condition, environment conditionEnvironment) (bool, error) {
 	if condition == "" {
 		return true, nil
 	}
-	program, err := compileCondition(condition)
+	program, err := e.compileCondition(condition)
 	if err != nil {
 		return false, err
 	}
 	return evaluateConditionProgram(program, environment)
+}
+
+func (e *Engine) conditionEnvironmentShape() conditionEnvironment {
+	shape := conditionEnvironment{
+		"inputs": map[string]any{}, "vars": map[string]any{}, "env": map[string]string{},
+		"steps": map[string]any{}, "dependencies": map[string]map[string]any{},
+		"batch": map[string]any{}, "foreach": map[string]any{}, "matrix": map[string]any{},
+		"finally": map[string]any{}, "error": map[string]any{},
+		"workflow": step.WorkflowValue{}, "run": conditionRun{},
+	}
+	for _, control := range e.backgroundControls {
+		shape[control.BindingRoot()] = map[string]any{}
+	}
+	return shape
 }
 
 func evaluateConditionProgram(program *vm.Program, environment conditionEnvironment) (bool, error) {
@@ -65,20 +66,22 @@ func evaluateConditionProgram(program *vm.Program, environment conditionEnvironm
 }
 
 func makeConditionEnvironment(definition *workflow.Definition, runDir string, state *State) conditionEnvironment {
-	return conditionEnvironment{
-		Inputs:       state.Inputs,
-		Vars:         state.Vars,
-		Env:          state.Env,
-		Steps:        state.Steps,
-		Dependencies: state.Dependencies,
-		Batch:        bindingRoot(state.Bindings, "batch"),
-		Foreach:      bindingRoot(state.Bindings, "foreach"),
-		Matrix:       bindingRoot(state.Bindings, "matrix"),
-		Finally:      bindingRoot(state.Bindings, "finally"),
-		Error:        bindingRoot(state.Bindings, "error"),
-		Workflow: step.WorkflowValue{
+	environment := conditionEnvironment{
+		"inputs":       state.Inputs,
+		"vars":         state.Vars,
+		"env":          state.Env,
+		"steps":        state.Steps,
+		"dependencies": state.Dependencies,
+		"workflow": step.WorkflowValue{
 			Name: definition.Name, Dir: definition.Dir, Timezone: definition.Timezone,
 		},
-		Run: conditionRun{Dir: runDir},
+		"run":   conditionRun{Dir: runDir},
+		"batch": bindingRoot(state.Bindings, "batch"), "foreach": bindingRoot(state.Bindings, "foreach"),
+		"matrix": bindingRoot(state.Bindings, "matrix"), "finally": bindingRoot(state.Bindings, "finally"),
+		"error": bindingRoot(state.Bindings, "error"),
 	}
+	for name, value := range state.Bindings {
+		environment[name] = value
+	}
+	return environment
 }
