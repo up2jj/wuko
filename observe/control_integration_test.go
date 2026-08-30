@@ -490,3 +490,47 @@ func TestObserveNamedTemplateReferencesBinding(t *testing.T) {
 		t.Fatalf("run error = %v", err)
 	}
 }
+
+func TestObserveShellSourceUsesWorkflowEnvironment(t *testing.T) {
+	bindings := make(chan map[string]any, 3)
+	registry := newTestRegistry(t, map[string]step.Builder{
+		"body": func(map[string]any) (step.Runner, error) {
+			return observeRunnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
+				bindings <- workflow.Clone(request.Bindings["observe"]).(map[string]any)
+				return step.Result{}, nil
+			}), nil
+		},
+	})
+	control := workflow.Step{ID: "revision", Observe: &workflow.ObserveGroup{
+		Source: workflow.ObserveSource{Type: "shell", With: map[string]any{
+			"command": "sh", "args": []any{"-c", `printf '%s' "$GREETING"`},
+			"every": "1ms", "trigger": "always",
+		}},
+		Debounce: workflow.Duration(time.Millisecond),
+		Steps:    []workflow.Step{{ID: "body", Type: "body", With: map[string]any{}}},
+	}}
+	definition := testDefinition(t, "shell-observe", control)
+	definition.Env = workflow.Environment{"GREETING": "hello"}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() {
+		_, err := engine.New(registry, engine.WithBackgroundControl(observe.NewControl(nil))).Run(ctx, definition, engine.Options{RunDir: t.TempDir()})
+		done <- err
+	}()
+
+	initial := receiveObserveTest(t, bindings)
+	if initial["source"] != "shell" || initial["initial"] != true {
+		t.Fatalf("initial binding = %#v", initial)
+	}
+	observation := initial["shell"].(map[string]any)
+	if observation["value"] != "hello" || observation["exit_code"] != 0 {
+		t.Fatalf("observation = %#v", observation)
+	}
+	if next := receiveObserveTest(t, bindings); next["initial"] != false {
+		t.Fatalf("next binding = %#v", next)
+	}
+	cancel()
+	if err := receiveObserveTest(t, done); !errors.Is(err, context.Canceled) {
+		t.Fatalf("run error = %v", err)
+	}
+}

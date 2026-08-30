@@ -10,7 +10,7 @@ Wuko has eight controls for scheduling, repeating, recovering, or monitoring ope
 - Use `loop` when a sequential block should repeat until a runtime expression becomes true.
 - Use `try`/`catch` when a failed sequential operation needs an explicit recovery path.
 - Use `cancel_on` when a sequential body should stop as soon as one named monitor finishes.
-- Use `observe` for a background loop driven by filesystem, HTTP, or future event sources.
+- Use `observe` for a background loop driven by filesystem, HTTP, shell, or future event sources.
 
 ## Observe
 
@@ -79,6 +79,42 @@ The HTTP source performs its first request during synchronous readiness and expo
 to the initial run under `.observe.http`. Later polls emit only changed responses unless `trigger`
 is `always`. HTTP status failures remain observable responses with an `error` field; transport,
 timeout, oversized-body, and decoding failures are fatal source errors.
+
+Shell observation polls a command and triggers when its result changes:
+
+```yaml
+- id: revision
+  observe:
+    source:
+      type: shell
+      with:
+        command: git
+        args: [rev-parse, HEAD]
+        working_directory: .   # relative paths resolve against the run directory
+        env: {GIT_PAGER: cat}  # overlays the workflow environment
+        every: 10s
+        timeout: 30s
+        trigger: change        # change | always
+        output: text           # text | json
+    steps:
+      - id: rebuild
+        type: shell
+        with:
+          command: ./rebuild
+          args: ['{{ .observe.shell.value }}']
+```
+
+`command` is required; use `command: sh` with `args: [-c, ...]` for a script. The source runs the
+command once during synchronous readiness and exposes that result to the initial run under
+`.observe.shell` as `command`, `stdout`, `stderr`, `exit_code`, `truncated`, and `value` — trimmed
+stdout, or its parsed JSON when `output` is `json`. A non-zero exit is an observation carrying an
+`error` field, not a source failure, because an exit code is often the thing worth watching; a
+command that cannot be started at all, a poll that exceeds `timeout`, and unparsable JSON from a
+command that *succeeded* are fatal source errors. `trigger: change` compares stdout and the exit
+code; stderr is captured for the body but stays out of that comparison, so a command that
+annotates every run does not retrigger it forever. Output is captured, never streamed to the
+workflow, and each stream is truncated past 1 MiB. Commands run on the host, like filesystem
+observation, and start from the workflow environment visible where the control was declared.
 
 - `restart` cancels and joins the active body before starting a replacement.
 - `queue` coalesces changes into at most one pending run.

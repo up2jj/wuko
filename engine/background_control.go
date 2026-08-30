@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"sync/atomic"
 	"time"
 
@@ -28,6 +29,9 @@ type BackgroundControl interface {
 type BackgroundControlRequest struct {
 	Step   workflow.Step
 	RunDir string
+	// Env is the workflow environment visible where the control was declared. Controls that
+	// run commands start from it instead of the bare host environment.
+	Env    map[string]string
 	Render func(any) (any, error)
 }
 
@@ -112,7 +116,7 @@ func (e *Engine) executeBackgroundControl(ctx context.Context, definition *workf
 
 	baseline := cloneState(state)
 	program, err := control.Launch(ctx, BackgroundControlRequest{
-		Step: workflowStep, RunDir: options.RunDir,
+		Step: workflowStep, RunDir: options.RunDir, Env: maps.Clone(state.Env),
 		Render: func(value any) (any, error) {
 			return renderValue(options.renderer, value, templateData(definition, options.RunDir, state), false)
 		},

@@ -232,7 +232,7 @@ func (source *httpSource) poll(ctx context.Context) (map[string]any, error) {
 	return result, nil
 }
 
-func (*httpSource) NewBatch() Batch { return &httpBatch{} }
+func (*httpSource) NewBatch() Batch { return &latestBatch{root: "http"} }
 
 func (source *httpSource) Metadata() map[string]any {
 	return map[string]any{"every": source.config.every.String(), "timeout": source.config.timeout.String(), "trigger": source.config.trigger}
@@ -241,28 +241,6 @@ func (source *httpSource) Metadata() map[string]any {
 func (source *httpSource) Close() error {
 	source.closeIdle()
 	return nil
-}
-
-type httpBatch struct {
-	latest map[string]any
-}
-
-func (batch *httpBatch) Add(value any) { batch.latest = cloneMap(value.(map[string]any)) }
-
-func (batch *httpBatch) Merge(other Batch) {
-	if latest := other.(*httpBatch).latest; latest != nil {
-		batch.latest = cloneMap(latest)
-	}
-}
-
-func (batch *httpBatch) Empty() bool { return batch.latest == nil }
-
-func (batch *httpBatch) Binding() map[string]any {
-	response := map[string]any{}
-	if batch.latest != nil {
-		response = cloneMap(batch.latest)
-	}
-	return map[string]any{"http": response}
 }
 
 func cloneMap(source map[string]any) map[string]any {

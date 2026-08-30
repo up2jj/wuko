@@ -55,7 +55,7 @@ func (control *Control) Launch(ctx context.Context, request engine.BackgroundCon
 	if !ok {
 		return engine.BackgroundControlProgram{}, fmt.Errorf("rendered source configuration has type %T", rendered)
 	}
-	source, err := control.sources.Open(ctx, group.Source.Type, OpenRequest{RunDir: request.RunDir, Config: raw})
+	source, err := control.sources.Open(ctx, group.Source.Type, OpenRequest{RunDir: request.RunDir, Env: request.Env, Config: raw})
 	if err != nil {
 		return engine.BackgroundControlProgram{}, err
 	}

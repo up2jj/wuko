@@ -99,8 +99,10 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
 - Use `watch` to block until the first selected create, modify, rename, or remove notification below
   an existing local root. Prefer it over polling a shell probe, keep recursive roots narrow, give
   bounded waits a top-level timeout, and consume the relative `path` plus `operations` list.
-- Use the named `observe:` control for a supervised background loop. Select a `filesystem` or
-  `http` source under `source.type`; its body runs once and then on debounced source triggers while
+- Use the named `observe:` control for a supervised background loop. Select a `filesystem`,
+  `http`, or `shell` source under `source.type`; the `shell` source polls a command every `every`
+  and triggers on a changed stdout or exit code, exposing `.observe.shell.value` and `exit_code`.
+  Its body runs once and then on debounced source triggers while
   later foreground steps continue. Choose `restart`, `queue`, or `skip` for triggers received while
   active. Body runs read `.observe` and start from the declaration-time state snapshot. The workflow
   joins observers before `finally` on Ctrl-C or `return`.

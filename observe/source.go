@@ -33,6 +33,9 @@ type Source interface {
 // New source-neutral capabilities can be added here without changing every engine call site.
 type OpenRequest struct {
 	RunDir string
+	// Env is the workflow environment where the control was declared, including any enclosing
+	// transparent env scope. Sources that run commands start from it.
+	Env    map[string]string
 	Config map[string]any
 }
 
@@ -62,7 +65,7 @@ func NewRegistry(builders ...Builder) *Registry {
 // NewDefaultRegistry returns the built-in source set. The observe control depends on this
 // registry; the engine does not import this package or any concrete source implementation.
 func NewDefaultRegistry() *Registry {
-	return NewRegistry(FilesystemBuilder{}, HTTPBuilder{})
+	return NewRegistry(FilesystemBuilder{}, HTTPBuilder{}, ShellBuilder{})
 }
 
 // Register adds a source type. Duplicate types are rejected.
@@ -114,6 +117,32 @@ func (registry *Registry) lookup(sourceType string) (Builder, error) {
 		return nil, fmt.Errorf("observe source type %q is not registered (available: %v)", sourceType, registry.Types())
 	}
 	return builder, nil
+}
+
+// latestBatch coalesces polling observations by keeping the most recent one. Polling sources
+// describe a current state rather than a stream of increments, so an older poll carries nothing
+// the newest one has not already replaced.
+type latestBatch struct {
+	root   string
+	latest map[string]any
+}
+
+func (batch *latestBatch) Add(value any) { batch.latest = cloneMap(value.(map[string]any)) }
+
+func (batch *latestBatch) Merge(other Batch) {
+	if latest := other.(*latestBatch).latest; latest != nil {
+		batch.latest = cloneMap(latest)
+	}
+}
+
+func (batch *latestBatch) Empty() bool { return batch.latest == nil }
+
+func (batch *latestBatch) Binding() map[string]any {
+	observation := map[string]any{}
+	if batch.latest != nil {
+		observation = cloneMap(batch.latest)
+	}
+	return map[string]any{batch.root: observation}
 }
 
 func decodeConfig(raw map[string]any, target any) error {
