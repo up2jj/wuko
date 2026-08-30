@@ -113,6 +113,12 @@ func (progress *Progress) Report(event engine.ProgressEvent) {
 		fmt.Fprintln(progress.writer, line)
 	case engine.BackgroundJoining:
 		fmt.Fprintf(progress.writer, "%s%s Waiting for %s\n", indent, progress.paint("36", "↻"), count(event.Started, "background job"))
+	case engine.BackgroundSourceFailed:
+		line := fmt.Sprintf("%s%s %s %s · source failed, still observing", indent, progress.paint("33", "!"), controlLabel(event.ControlKind), event.StepID)
+		if event.Error != nil {
+			line += ": " + singleLine(event.Error.Error())
+		}
+		fmt.Fprintln(progress.writer, line)
 	case engine.BackgroundTriggered:
 		label := event.Action
 		if event.Action == "restart" {

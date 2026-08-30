@@ -65,12 +65,13 @@ func (control *Control) Launch(ctx context.Context, request engine.BackgroundCon
 	}
 	scheduler := Scheduler{
 		Source: source, SourceType: group.Source.Type,
-		Debounce: group.EffectiveDebounce(), OnChange: group.EffectiveOnChange(),
+		Debounce: group.EffectiveDebounce(), OnChange: group.EffectiveOnChange(), OnError: group.EffectiveOnError(),
 	}
 	return engine.BackgroundControlProgram{
 		Result: step.Result{Outputs: map[string]any{
 			"status": "observing", "source": metadata,
 			"debounce": group.EffectiveDebounce().String(), "on_change": group.EffectiveOnChange(),
+			"on_error": group.EffectiveOnError(),
 		}},
 		Run:   scheduler.Run,
 		Close: source.Close,

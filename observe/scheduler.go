@@ -13,7 +13,17 @@ type Scheduler struct {
 	SourceType string
 	Debounce   time.Duration
 	OnChange   string
+	// OnError decides whether a source failure ends observation. Zero means workflow.ObserveFail.
+	OnError string
+	// RetryBase is the first delay after a tolerated source failure, doubling up to
+	// maxSourceRetryDelay. Zero means defaultSourceRetryBase.
+	RetryBase time.Duration
 }
+
+const (
+	defaultSourceRetryBase = 250 * time.Millisecond
+	maxSourceRetryDelay    = 30 * time.Second
+)
 
 type observation struct {
 	event any
@@ -32,6 +42,7 @@ func (scheduler Scheduler) Run(ctx context.Context, runtime engine.BackgroundCon
 	pumpDone := make(chan struct{})
 	go func() {
 		defer close(pumpDone)
+		failures := 0
 		for {
 			event, err := scheduler.Source.Next(ctx)
 			select {
@@ -39,7 +50,17 @@ func (scheduler Scheduler) Run(ctx context.Context, runtime engine.BackgroundCon
 			case <-ctx.Done():
 				return
 			}
-			if err != nil {
+			if err == nil {
+				failures = 0
+				continue
+			}
+			if !scheduler.toleratesSourceErrors() {
+				return
+			}
+			// A source that fails immediately would otherwise spin. Back off between
+			// retries and start over once it produces an observation again.
+			failures++
+			if !sleep(ctx, scheduler.retryDelay(failures)) {
 				return
 			}
 		}
@@ -113,6 +134,10 @@ func (scheduler Scheduler) Run(ctx context.Context, runtime engine.BackgroundCon
 				if ctx.Err() != nil {
 					continue
 				}
+				if scheduler.toleratesSourceErrors() {
+					runtime.Report(engine.BackgroundControlEvent{Kind: engine.BackgroundSourceFailure, Action: workflow.ObserveContinue, Error: observed.err})
+					continue
+				}
 				stopBody()
 				return engine.BackgroundControlSummary{Iterations: iterations}, observed.err
 			}
@@ -171,6 +196,34 @@ func (scheduler Scheduler) Run(ctx context.Context, runtime engine.BackgroundCon
 				startBody(false, batch)
 			}
 		}
+	}
+}
+
+func (scheduler Scheduler) toleratesSourceErrors() bool {
+	return scheduler.OnError == workflow.ObserveContinue
+}
+
+func (scheduler Scheduler) retryDelay(failures int) time.Duration {
+	base := scheduler.RetryBase
+	if base <= 0 {
+		base = defaultSourceRetryBase
+	}
+	delay := base
+	for attempt := 1; attempt < failures && delay < maxSourceRetryDelay; attempt++ {
+		delay *= 2
+	}
+	return min(delay, maxSourceRetryDelay)
+}
+
+// sleep reports whether the delay elapsed rather than the context ending.
+func sleep(ctx context.Context, delay time.Duration) bool {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return true
+	case <-ctx.Done():
+		return false
 	}
 }
 

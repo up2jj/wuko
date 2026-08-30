@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/up2jj/wuko/process"
 )
@@ -275,5 +276,17 @@ func TestShellSourceRejectsInvalidEnvironmentName(t *testing.T) {
 	err := (ShellBuilder{}).Validate(map[string]any{"command": "status", "env": map[string]any{"FOO=BAR": "value"}})
 	if err == nil || !strings.Contains(err.Error(), `invalid environment name "FOO=BAR"`) {
 		t.Fatalf("validation error = %v", err)
+	}
+}
+
+func TestSchedulerSourceRetryBackoffIsBounded(t *testing.T) {
+	scheduler := Scheduler{RetryBase: time.Second}
+	for failures, want := range map[int]time.Duration{1: time.Second, 2: 2 * time.Second, 4: 8 * time.Second, 10: maxSourceRetryDelay} {
+		if delay := scheduler.retryDelay(failures); delay != want {
+			t.Fatalf("retryDelay(%d) = %s, want %s", failures, delay, want)
+		}
+	}
+	if delay := (Scheduler{}).retryDelay(1); delay != defaultSourceRetryBase {
+		t.Fatalf("default retryDelay = %s", delay)
 	}
 }

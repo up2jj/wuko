@@ -534,3 +534,54 @@ func TestObserveShellSourceUsesWorkflowEnvironment(t *testing.T) {
 		t.Fatalf("run error = %v", err)
 	}
 }
+
+func TestObserveContinuesAfterToleratedSourceFailure(t *testing.T) {
+	root := t.TempDir()
+	source := newFilesystemTestSource()
+	runs := make(chan int, 4)
+	var started atomic.Int32
+	registry := newTestRegistry(t, map[string]step.Builder{
+		"body": func(map[string]any) (step.Runner, error) {
+			return observeRunnerFunc(func(context.Context, step.Request) (step.Result, error) {
+				runs <- int(started.Add(1))
+				return step.Result{}, nil
+			}), nil
+		},
+	})
+	control := observeControl("dev", root, []workflow.Step{{ID: "body", Type: "body", With: map[string]any{}}})
+	control.Observe.Debounce = workflow.Duration(time.Millisecond)
+	control.Observe.OnError = workflow.ObserveContinue
+	failures := make(chan engine.ProgressEvent, 4)
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() {
+		_, err := engine.New(registry, withFilesystemTestSource(source)).Run(ctx, testDefinition(t, "tolerant", control), engine.Options{
+			RunDir: root,
+			Progress: func(event engine.ProgressEvent) {
+				if event.Kind == engine.BackgroundSourceFailed {
+					failures <- event
+				}
+			},
+		})
+		done <- err
+	}()
+
+	if run := receiveObserveTest(t, runs); run != 1 {
+		t.Fatalf("initial run = %d", run)
+	}
+	source.errs <- errors.New("watch overflow")
+	failure := receiveObserveTest(t, failures)
+	if failure.Error == nil || !strings.Contains(failure.Error.Error(), "watch overflow") || failure.Action != workflow.ObserveContinue {
+		t.Fatalf("failure event = %#v", failure)
+	}
+
+	// Observation survives the failure: a later change still runs the body.
+	source.events <- fsnotify.Event{Name: filepath.Join(root, "a.go"), Op: fsnotify.Write}
+	if run := receiveObserveTest(t, runs); run != 2 {
+		t.Fatalf("run after tolerated failure = %d", run)
+	}
+	cancel()
+	if err := receiveObserveTest(t, done); !errors.Is(err, context.Canceled) {
+		t.Fatalf("run error = %v", err)
+	}
+}

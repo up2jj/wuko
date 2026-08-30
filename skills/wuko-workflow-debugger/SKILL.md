@@ -24,8 +24,9 @@ Find the smallest evidence-backed cause of a Wuko workflow failure before changi
      metadata, prerelease constraint matching, and increment-part behavior.
    - Concurrency and retry: pre-group snapshots, non-interactive children, deadlines, cancellation, duplicate writes, and at-least-once effects.
    - Background observe controls: synchronous source readiness, declaration-time state snapshots,
-     debounce and `on_change` policy, body failures that intentionally keep observing, fatal source
-     errors, implicit final joining, and cancellation before detached cleanup.
+     debounce and `on_change` policy, body failures that intentionally keep observing, source
+     errors that are fatal under `on_error: fail` and tolerated with backoff under `continue`,
+     implicit final joining, and cancellation before detached cleanup.
    - Finally cleanup: main status, committed-state visibility, structured errors, continued cleanup
      failures, detached cancellation, action attempts, and forced-shutdown limits.
    - Composite actions and trust: declaring-file-relative local paths, action-root companion files,

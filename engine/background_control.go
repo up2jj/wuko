@@ -56,6 +56,9 @@ const (
 	BackgroundIterationStarted BackgroundControlEventKind = iota
 	BackgroundIterationFinished
 	BackgroundTriggerHandled
+	// BackgroundSourceFailure reports a failure the control chose to survive. A failure that
+	// ends the program is reported by returning it from Run instead.
+	BackgroundSourceFailure
 )
 
 type BackgroundControlEvent struct {
@@ -215,6 +218,8 @@ func reportBackgroundControlEvent(options Options, definition *workflow.Definiti
 		report(options, ProgressEvent{Kind: IterationFinished, Status: status, Time: event.StartedAt.Add(event.Duration), WorkflowName: definition.Name, Depth: options.depth, StepID: workflowStep.ID, ControlKind: kind, Iteration: event.Iteration - 1, Duration: event.Duration, Error: nonCancellationError(event.Error)})
 	case BackgroundTriggerHandled:
 		report(options, ProgressEvent{Kind: BackgroundTriggered, Status: StatusRunning, Time: time.Now(), WorkflowName: definition.Name, Depth: options.depth - 1, StepID: workflowStep.ID, StepType: kind, ControlKind: kind, Action: event.Action})
+	case BackgroundSourceFailure:
+		report(options, ProgressEvent{Kind: BackgroundSourceFailed, Status: StatusFailed, Time: time.Now(), WorkflowName: definition.Name, Depth: options.depth - 1, StepID: workflowStep.ID, StepType: kind, ControlKind: kind, Action: event.Action, Error: event.Error})
 	}
 }
 

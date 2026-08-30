@@ -104,7 +104,7 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
   and triggers on a changed stdout or exit code, exposing `.observe.shell.value` and `exit_code`.
   Its body runs once and then on debounced source triggers while
   later foreground steps continue. Choose `restart`, `queue`, or `skip` for triggers received while
-  active. Body runs read `.observe` and start from the declaration-time state snapshot. The workflow
+  active, and `on_error: continue` when a transient source failure should not end the run. Body runs read `.observe` and start from the declaration-time state snapshot. The workflow
   joins observers before `finally` on Ctrl-C or `return`.
 - Use `log_wait` to follow an existing or newly created regular log file until a regex matches.
   Scan existing content first, set a top-level timeout and an appropriate `max_bytes`, and consume

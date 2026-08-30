@@ -217,7 +217,11 @@ func (workflowStep Step) BackgroundControlBody() []Step {
 func (workflowStep Step) BackgroundControlDescription() string {
 	if workflowStep.Observe != nil {
 		group := workflowStep.Observe
-		return fmt.Sprintf("%s; debounce %s; on change %s", group.Source.Type, group.EffectiveDebounce(), group.EffectiveOnChange())
+		description := fmt.Sprintf("%s; debounce %s; on change %s", group.Source.Type, group.EffectiveDebounce(), group.EffectiveOnChange())
+		if group.EffectiveOnError() != ObserveFail {
+			description += "; on error " + group.EffectiveOnError()
+		}
+		return description
 	}
 	return ""
 }

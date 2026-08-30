@@ -12,6 +12,12 @@ const (
 	ObserveQueue   = "queue"
 	ObserveSkip    = "skip"
 
+	// ObserveFail stops observation on the first source failure and fails the workflow.
+	// ObserveContinue reports the failure and keeps observing, for sources whose failures
+	// are routinely transient, such as a polled command that times out once.
+	ObserveFail     = "fail"
+	ObserveContinue = "continue"
+
 	defaultObserveDebounce = 300 * time.Millisecond
 )
 
@@ -40,6 +46,7 @@ type ObserveGroup struct {
 	Source      ObserveSource `yaml:"source"`
 	Debounce    Duration      `yaml:"debounce,omitempty"`
 	OnChange    string        `yaml:"on_change,omitempty"`
+	OnError     string        `yaml:"on_error,omitempty"`
 	Steps       []Step        `yaml:"steps"`
 	hasDebounce bool
 }
@@ -49,7 +56,7 @@ func (group *ObserveGroup) UnmarshalYAML(node *yaml.Node) error {
 		return fmt.Errorf("observe must be an object")
 	}
 	if err := rejectUnknownFields(node, "observe", map[string]bool{
-		"source": true, "debounce": true, "on_change": true, "steps": true,
+		"source": true, "debounce": true, "on_change": true, "on_error": true, "steps": true,
 	}); err != nil {
 		return err
 	}
@@ -57,7 +64,7 @@ func (group *ObserveGroup) UnmarshalYAML(node *yaml.Node) error {
 		return fmt.Errorf("observe steps must be a list")
 	}
 	type plain ObserveGroup
-	decoded := plain{OnChange: ObserveRestart, Debounce: Duration(defaultObserveDebounce)}
+	decoded := plain{OnChange: ObserveRestart, OnError: ObserveFail, Debounce: Duration(defaultObserveDebounce)}
 	if err := node.Decode(&decoded); err != nil {
 		return err
 	}
@@ -80,6 +87,15 @@ func (group ObserveGroup) EffectiveOnChange() string {
 	return group.OnChange
 }
 
+// EffectiveOnError reports what a source failure does. Failures while opening the source are
+// always fatal: a source that never started cannot be observed.
+func (group ObserveGroup) EffectiveOnError() string {
+	if group.OnError == "" {
+		return ObserveFail
+	}
+	return group.OnError
+}
+
 func (group ObserveGroup) Validate() error {
 	if group.Source.Type == "" || !identifierPattern.MatchString(group.Source.Type) {
 		return fmt.Errorf("observe source requires a valid type")
@@ -94,6 +110,11 @@ func (group ObserveGroup) Validate() error {
 	case ObserveRestart, ObserveQueue, ObserveSkip:
 	default:
 		return fmt.Errorf("observe on_change must be restart, queue, or skip")
+	}
+	switch group.EffectiveOnError() {
+	case ObserveFail, ObserveContinue:
+	default:
+		return fmt.Errorf("observe on_error must be fail or continue")
 	}
 	return nil
 }

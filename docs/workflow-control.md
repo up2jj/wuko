@@ -41,8 +41,9 @@ steps:
     with: {command: ./server}
 ```
 
-`id`, `source.type`, and a non-empty `steps` body are required. `debounce` defaults to `300ms`, and
-`on_change` defaults to `restart`; an explicit `0s` disables debounce. The `filesystem` source
+`id`, `source.type`, and a non-empty `steps` body are required. `debounce` defaults to `300ms`,
+`on_change` defaults to `restart`, and `on_error` defaults to `fail`; an explicit `0s` disables
+debounce. The `filesystem` source
 requires `paths`, defaults `root` to `.` and events to `create`, `modify`, `rename`, and `remove`,
 and otherwise matches the one-shot [`type: watch`](steps-system.md#watch) step.
 
@@ -120,11 +121,37 @@ observation, and start from the workflow environment visible where the control w
 - `queue` coalesces changes into at most one pending run.
 - `skip` ignores triggers received while the body is active.
 
-Body failures are reported but do not stop observation. Fatal source failures cancel the foreground
-workflow and sibling observers. A workflow `return` deliberately cancels and joins observers
+`on_error` decides what a source failure does:
+
+- `fail`, the default, stops the observer and cancels the foreground workflow and sibling
+  observers. Use it when a source that stopped working means the run is no longer meaningful.
+- `continue` reports the failure and keeps observing. Use it for sources whose failures are
+  routinely transient, such as a polled command that times out once or an endpoint that refuses a
+  single connection. Retries back off from `250ms` to `30s` and reset once the source produces an
+  observation again, so a source failing immediately and repeatedly cannot spin. The active body
+  is left alone, and the failure does not fail the workflow: an observer that never recovers keeps
+  running until Ctrl-C or a `return`.
+
+`on_error` governs failures observed while running. A source that cannot be opened at all always
+fails its step, because there is nothing to observe.
+
+```yaml
+- id: pods
+  observe:
+    source:
+      type: shell
+      with: {command: kubectl, args: [get, pods, -o, json], every: 10s, output: json}
+    on_error: continue     # fail | continue
+    steps:
+      - id: reconcile
+        type: shell
+        with: {command: ./reconcile}
+```
+
+Body failures are reported but do not stop observation, whatever `on_error` says. A workflow `return` deliberately cancels and joins observers
 without turning that shutdown into a failure. The immutable launch result at `steps.<id>` contains
-`status: observing`, source type and readiness metadata, `debounce`, and `on_change`; it is never
-mutated from a background goroutine.
+`status: observing`, source type and readiness metadata, `debounce`, `on_change`, and `on_error`;
+it is never mutated from a background goroutine.
 
 Version 1 permits the control only in the main sequential workflow flow, including transparent
 `env` and `working_directory` scopes. It is rejected in actions, lifecycle hooks, cleanup,

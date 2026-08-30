@@ -29,6 +29,9 @@ steps:
 		t.Fatal(err)
 	}
 	group := definition.Steps[0].Observe
+	if group.EffectiveOnError() != ObserveFail {
+		t.Fatalf("on_error default = %q", group.EffectiveOnError())
+	}
 	if group.Source.Type != "filesystem" || group.EffectiveDebounce() != 300*time.Millisecond || group.EffectiveOnChange() != ObserveRestart {
 		t.Fatalf("observe = %#v", group)
 	}
@@ -49,6 +52,7 @@ func TestObserveControlRejectsInvalidDeclarations(t *testing.T) {
 		{"missing source", Step{ID: "observe", Observe: &ObserveGroup{Steps: validBody}}, "source requires"},
 		{"missing body", Step{ID: "observe", Observe: &ObserveGroup{Source: validSource}}, "at least one step"},
 		{"policy", Step{ID: "observe", Observe: &ObserveGroup{Source: validSource, Steps: validBody, OnChange: "parallel"}}, "restart, queue, or skip"},
+		{"error policy", Step{ID: "observe", Observe: &ObserveGroup{Source: validSource, Steps: validBody, OnError: "retry"}}, "fail or continue"},
 		{"nested", Step{Concurrent: &ConcurrentGroup{MaxConcurrency: 2, Steps: []Step{
 			{ID: "observe", Observe: &ObserveGroup{Source: validSource, Steps: validBody}},
 			{ID: "other", Type: "shell", With: map[string]any{"command": "true"}},
@@ -67,4 +71,33 @@ func TestObserveControlRejectsInvalidDeclarations(t *testing.T) {
 
 func testDefinitionForObserve(step Step) *Definition {
 	return &Definition{Version: 1, Name: "observe-test", Steps: []Step{step}}
+}
+
+func TestObserveControlLoadsErrorPolicy(t *testing.T) {
+	var definition Definition
+	err := yaml.Unmarshal([]byte(`
+version: 1
+name: observe-test
+steps:
+  - id: dev
+    observe:
+      source:
+        type: shell
+        with: {command: status}
+      on_error: continue
+      steps:
+        - id: body
+          type: shell
+          with: {command: go}
+`), &definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	group := definition.Steps[0].Observe
+	if group.EffectiveOnError() != ObserveContinue {
+		t.Fatalf("on_error = %q", group.EffectiveOnError())
+	}
+	if description := definition.Steps[0].BackgroundControlDescription(); !strings.Contains(description, "on error continue") {
+		t.Fatalf("description = %q", description)
+	}
 }

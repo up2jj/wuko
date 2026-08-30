@@ -35,6 +35,9 @@ const (
 	BackgroundJoining   ProgressKind = "background_joining"
 	BackgroundFinished  ProgressKind = "background_finished"
 	BackgroundTriggered ProgressKind = "background_triggered"
+	// BackgroundSourceFailed reports a source failure a background control tolerated. The
+	// control is still running; the failure is not the job's outcome.
+	BackgroundSourceFailed ProgressKind = "background_source_failed"
 )
 
 // ExecutionStatus is the terminal state of a workflow, step, or attempt.
@@ -286,6 +289,8 @@ func reportLegacy(options Options, event ProgressEvent) {
 		}
 	case BackgroundTriggered:
 		fmt.Fprintf(writerOrDiscard(options.Stdout), "%s (%s) trigger %s\n", event.StepID, event.StepType, event.Action)
+	case BackgroundSourceFailed:
+		fmt.Fprintf(writerOrDiscard(options.Stderr), "%s (%s) source failed, still observing: %v\n", event.StepID, event.StepType, event.Error)
 	case AttemptFinished:
 		if event.Status != StatusSucceeded && event.Attempt < event.MaxAttempts {
 			fmt.Fprintf(writerOrDiscard(options.Stderr), "%s: attempt %d/%d failed: %v\n", event.StepID, event.Attempt, event.MaxAttempts, event.Error)
