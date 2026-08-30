@@ -232,3 +232,48 @@ type shellExecutorFunc func(context.Context, process.Options) (process.Result, e
 func (run shellExecutorFunc) Run(ctx context.Context, options process.Options) (process.Result, error) {
 	return run(ctx, options)
 }
+
+func TestShellSourceKeepsAnEmptyWorkflowEnvironmentEmpty(t *testing.T) {
+	t.Setenv("WUKO_OBSERVE_MARKER", "leaked")
+	command := map[string]any{"command": " sh ", "args": []any{"-c", `printf '%s' "$WUKO_OBSERVE_MARKER"`}}
+
+	// A non-nil empty environment is a deliberate override, not a missing one.
+	overridden, err := (ShellBuilder{}).Open(t.Context(), OpenRequest{RunDir: t.TempDir(), Env: map[string]string{}, Config: command})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer overridden.Close()
+	if value := overridden.Initial().(map[string]any)["value"]; value != "" {
+		t.Fatalf("host environment leaked into an empty workflow environment: %#v", value)
+	}
+	// A trimmed command is the one that runs.
+	if overridden.Metadata()["command"] != "sh" {
+		t.Fatalf("metadata = %#v", overridden.Metadata())
+	}
+
+	inherited, err := (ShellBuilder{}).Open(t.Context(), OpenRequest{RunDir: t.TempDir(), Config: command})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer inherited.Close()
+	if value := inherited.Initial().(map[string]any)["value"]; value != "leaked" {
+		t.Fatalf("absent workflow environment did not fall back to the host: %#v", value)
+	}
+}
+
+func TestShellSourceReportsTruncationBehindMalformedJSON(t *testing.T) {
+	builder := ShellBuilder{Executor: shellExecutorFunc(func(context.Context, process.Options) (process.Result, error) {
+		return process.Result{Stdout: `{"items":[1,2`, StdoutTruncated: true}, nil
+	})}
+	_, err := builder.Open(t.Context(), OpenRequest{Config: map[string]any{"command": "status", "output": "json"}})
+	if err == nil || !strings.Contains(err.Error(), "stdout was truncated at 1048576 bytes") {
+		t.Fatalf("open error = %v", err)
+	}
+}
+
+func TestShellSourceRejectsInvalidEnvironmentName(t *testing.T) {
+	err := (ShellBuilder{}).Validate(map[string]any{"command": "status", "env": map[string]any{"FOO=BAR": "value"}})
+	if err == nil || !strings.Contains(err.Error(), `invalid environment name "FOO=BAR"`) {
+		t.Fatalf("validation error = %v", err)
+	}
+}

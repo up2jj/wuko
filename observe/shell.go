@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/up2jj/wuko/process"
+	"github.com/up2jj/wuko/workflow"
 )
 
 const (
@@ -85,8 +86,14 @@ func (ShellBuilder) normalize(raw map[string]any, resolved bool) (normalizedShel
 	if err := decodeConfig(raw, &declared); err != nil {
 		return normalizedShellConfig{}, err
 	}
-	if strings.TrimSpace(declared.Command) == "" {
+	declared.Command = strings.TrimSpace(declared.Command)
+	if declared.Command == "" {
 		return normalizedShellConfig{}, fmt.Errorf("command is required")
+	}
+	for key := range declared.Env {
+		if !workflow.ValidEnvironmentName(key) {
+			return normalizedShellConfig{}, fmt.Errorf("invalid environment name %q", key)
+		}
 	}
 	every := defaultShellEvery
 	if resolved || !templated(declared.Every) {
@@ -137,11 +144,12 @@ func resolveShellDirectory(runDir, directory string) (string, error) {
 }
 
 // shellEnvironment overlays the declared source environment on the workflow environment.
-// The host environment stands in when a caller opens a source without one, because an empty
-// map would otherwise run the command with no PATH at all.
+// The host environment stands in only when a caller opens a source without supplying one at all:
+// an empty workflow environment is a deliberate override, and leaking the host's variables into
+// it would hand the observed command more than the same run's shell steps receive.
 func shellEnvironment(workflowEnv, declared map[string]string) map[string]string {
 	base := workflowEnv
-	if len(base) == 0 {
+	if base == nil {
 		base = hostEnvironment()
 	}
 	merged := make(map[string]string, len(base)+len(declared))
@@ -227,6 +235,11 @@ func (source *shellSource) poll(ctx context.Context) (map[string]any, error) {
 		"truncated": result.StdoutTruncated || result.StderrTruncated,
 	}
 	value, valueErr := shellValue(source.config.output, result.Stdout)
+	if valueErr != nil && result.StdoutTruncated {
+		// Blaming the command for output wuko itself cut short would send anyone reading the
+		// error looking in the wrong place.
+		valueErr = fmt.Errorf("%w: stdout was truncated at %d bytes", valueErr, int64(maxShellOutput))
+	}
 	if valueErr != nil {
 		// A command that failed is allowed to write something other than the declared
 		// output; its exit status is the observation. Malformed output from a command
