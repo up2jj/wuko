@@ -49,6 +49,10 @@ func evaluateCondition(condition workflow.Condition, environment conditionEnviro
 	if err != nil {
 		return false, err
 	}
+	return evaluateConditionProgram(program, environment)
+}
+
+func evaluateConditionProgram(program *vm.Program, environment conditionEnvironment) (bool, error) {
 	value, err := expr.Run(program, environment)
 	if err != nil {
 		return false, err

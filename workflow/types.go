@@ -90,7 +90,7 @@ func (e *Environment) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
-// Condition is a boolean expression controlling whether a step runs.
+// Condition is a boolean expression controlling conditional workflow behavior.
 type Condition string
 
 func (c *Condition) UnmarshalYAML(node *yaml.Node) error {
@@ -437,6 +437,7 @@ type RetryPolicy struct {
 	Jitter            float64       `yaml:"jitter,omitempty"`
 	MaxElapsedTime    Duration      `yaml:"max_elapsed_time,omitempty"`
 	OperationID       string        `yaml:"operation_id,omitempty"`
+	When              Condition     `yaml:"when,omitempty"`
 	Methods           []string      `yaml:"methods,omitempty"`
 	Statuses          []StatusRange `yaml:"statuses,omitempty"`
 	hasMethods        bool
@@ -486,11 +487,20 @@ func (policy *RetryPolicy) UnmarshalYAML(node *yaml.Node) error {
 	allowed := map[string]bool{
 		"max_attempts": true, "initial_delay": true, "backoff_multiplier": true,
 		"max_delay": true, "jitter": true, "max_elapsed_time": true,
-		"operation_id": true, "methods": true, "statuses": true,
+		"operation_id": true, "when": true, "methods": true, "statuses": true,
 	}
 	for i := 0; i < len(node.Content); i += 2 {
 		if !allowed[node.Content[i].Value] {
 			return fmt.Errorf("field %s not found in retry policy", node.Content[i].Value)
+		}
+		if node.Content[i].Value == "when" {
+			value := node.Content[i+1]
+			if value.Kind != yaml.ScalarNode || (value.Tag != "!!str" && value.Tag != "!!bool") {
+				return fmt.Errorf("retry when must be a boolean expression")
+			}
+			if strings.TrimSpace(value.Value) == "" {
+				return fmt.Errorf("retry when must not be empty")
+			}
 		}
 	}
 	type plainRetryPolicy RetryPolicy
@@ -1479,6 +1489,12 @@ func (workflowStep Step) ValidateExecutionPolicy() error {
 	}
 	if policy.OperationID != "" && strings.TrimSpace(policy.OperationID) == "" {
 		return fmt.Errorf("retry operation_id cannot be blank")
+	}
+	if policy.When != "" && strings.TrimSpace(string(policy.When)) == "" {
+		return fmt.Errorf("retry when must not be empty")
+	}
+	if policy.When != "" && (policy.hasMethods || policy.hasStatuses || len(policy.Methods) > 0 || len(policy.Statuses) > 0) {
+		return fmt.Errorf("retry when cannot be combined with methods or statuses")
 	}
 	if workflowStep.Type != "http" && (policy.hasMethods || policy.hasStatuses || len(policy.Methods) > 0 || len(policy.Statuses) > 0) {
 		return fmt.Errorf("retry methods and statuses are only supported for http steps")

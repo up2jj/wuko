@@ -278,9 +278,32 @@ func recoveryErrorValue(status ExecutionStatus, err error, stats []StepStats) ma
 	if len(converted) == 0 {
 		converted = append(converted, map[string]any{"status": string(status), "message": err.Error(), "step": "", "type": ""})
 	}
+	return structuredErrorValue(status, err, stepID, stepType, converted)
+}
+
+func structuredErrorValue(status ExecutionStatus, err error, stepID, stepType string, records []any) map[string]any {
 	return map[string]any{
-		"status": string(status), "message": err.Error(), "step": stepID, "type": stepType, "errors": converted,
+		"status": string(status), "message": err.Error(), "step": stepID, "type": stepType, "errors": records,
 	}
+}
+
+var retryErrorReservedFields = map[string]struct{}{
+	"status": {}, "message": {}, "step": {}, "type": {}, "errors": {}, "outputs": {},
+}
+
+func retryErrorValue(status ExecutionStatus, stepID, stepType string, err error, outputs map[string]any) map[string]any {
+	record := map[string]any{
+		"status": string(status), "message": err.Error(), "step": stepID, "type": stepType,
+	}
+	value := structuredErrorValue(status, err, stepID, stepType, []any{record})
+	value["outputs"] = cloneMap(outputs)
+	for name, output := range outputs {
+		if _, reserved := retryErrorReservedFields[name]; reserved {
+			continue
+		}
+		value[name] = cloneAny(output)
+	}
+	return value
 }
 
 func phaseOutput(status ExecutionStatus, err any, declarations []workflow.Step, state *State, stats RunStats, vars map[string]any) map[string]any {

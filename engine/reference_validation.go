@@ -489,6 +489,11 @@ func (validator *referenceValidator) validateOrdinaryStep(step workflow.Step, sc
 		if err := validator.validateTemplate("retry operation_id", step.Retry.OperationID, scope); err != nil {
 			return nil, nil, err
 		}
+		retryScope := scope.clone()
+		retryScope.roots["error"] = openReference
+		if err := validator.validateExpression("retry when", string(step.Retry.When), retryScope); err != nil {
+			return nil, nil, err
+		}
 	}
 	if err := validator.validateActionSource(step, scope); err != nil {
 		return nil, nil, err

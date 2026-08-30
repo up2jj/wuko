@@ -25,6 +25,7 @@ steps:
       jitter: 0.1
       max_elapsed_time: 10s
       operation_id: "release:{{ .vars.version }}"
+      when: 'error.exit_code == 75'
     with: {command: publish}
 `)
 	definition, err := Load(path)
@@ -41,6 +42,9 @@ steps:
 	}
 	if policy.OperationID != "release:{{ .vars.version }}" {
 		t.Fatalf("operation ID = %q", policy.OperationID)
+	}
+	if policy.When != `error.exit_code == 75` {
+		t.Fatalf("when = %q", policy.When)
 	}
 }
 
@@ -107,6 +111,8 @@ func TestLoadRejectsInvalidExecutionPolicy(t *testing.T) {
 		{name: "max delay", fields: "    retry: {initial_delay: 2s, max_delay: 1s}\n", want: "max_delay"},
 		{name: "jitter", fields: "    retry: {jitter: 1.1}\n", want: "jitter"},
 		{name: "elapsed", fields: "    retry: {max_elapsed_time: -1s}\n", want: "max_elapsed_time"},
+		{name: "blank when", fields: "    retry: {when: ''}\n", want: "retry when must not be empty"},
+		{name: "non-scalar when", fields: "    retry: {when: [true]}\n", want: "retry when must be a boolean expression"},
 		{name: "HTTP fields on shell", fields: "    retry: {methods: [GET]}\n", want: "only supported for http"},
 		{name: "empty methods", fields: "    retry: {methods: []}\n", want: "only supported for http"},
 		{name: "unknown", fields: "    retry: {unknown: true}\n", want: "field unknown"},
@@ -138,6 +144,8 @@ func TestLoadRejectsInvalidHTTPRetryPolicy(t *testing.T) {
 		{name: "descending range", policy: "statuses: ['599-500']", want: "ascending"},
 		{name: "out of range", policy: "statuses: [99]", want: "between 100 and 599"},
 		{name: "overlap", policy: "statuses: ['500-550', '525-599']", want: "overlap"},
+		{name: "when with methods", policy: "when: 'true', methods: [GET]", want: "cannot be combined"},
+		{name: "when with statuses", policy: "when: 'true', statuses: [503]", want: "cannot be combined"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

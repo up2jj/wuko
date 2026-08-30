@@ -289,6 +289,12 @@ func (e *Engine) validateSteps(ctx context.Context, definition *workflow.Definit
 				return fmt.Errorf("step %q if: %w", workflowStep.ID, err)
 			}
 		}
+		if workflowStep.Retry != nil && workflowStep.Retry.When != "" {
+			if _, err := compileCondition(workflowStep.Retry.When); err != nil {
+				traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusFailed, started, "compiling retry condition", err)
+				return fmt.Errorf("step %q retry when: %w", workflowStep.ID, err)
+			}
+		}
 		if workflowStep.Retry != nil && workflowStep.Retry.OperationID != "" {
 			if err := validateTemplates(options.renderer, workflowStep.Retry.OperationID, false); err != nil {
 				traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusFailed, started, "validating retry operation ID", err)

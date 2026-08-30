@@ -8,12 +8,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"math"
 	randv2 "math/rand/v2"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/expr-lang/expr/vm"
 	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
@@ -33,6 +35,13 @@ type httpRetryError interface {
 	HTTPRequestMethod() string
 	HTTPStatusCode() int
 	HTTPRetryAfter() time.Duration
+}
+
+// retryOutputProvider lets a failure describe the outputs a retry condition should see when the
+// step itself produced none.
+type retryOutputProvider interface {
+	error
+	RetryConditionOutputs() map[string]any
 }
 
 type attemptTimeoutError struct {
@@ -63,6 +72,15 @@ var defaultHTTPRetryStatuses = []workflow.StatusRange{
 func (e *Engine) runWithRetry(ctx context.Context, definition *workflow.Definition, workflowStep workflow.Step, options Options, state *State, execute stepExecutor) stepExecution {
 	var execution stepExecution
 	var previousAttempt *step.Result
+	var retryWhen *vm.Program
+	if workflowStep.Retry != nil && workflowStep.Retry.When != "" {
+		var err error
+		retryWhen, err = compileCondition(workflowStep.Retry.When)
+		if err != nil {
+			execution.err = fmt.Errorf("compiling retry when: %w", err)
+			return execution
+		}
+	}
 	operationID, err := executionOperationID(definition, workflowStep, options, state)
 	if err != nil {
 		traceStep(options, definition, workflowStep, diagnostic.PhaseAttempt, diagnostic.StatusFailed, time.Time{}, "preparing operation", err)
@@ -133,7 +151,19 @@ func (e *Engine) runWithRetry(ctx context.Context, definition *workflow.Definiti
 			execution.err = fmt.Errorf("attempt %d/%d failed: %w", attempt, maximum, runErr)
 			return execution
 		}
-		if !shouldRetry(workflowStep, runErr) {
+		if retryWhen != nil {
+			environment := makeConditionEnvironment(definition, options.RunDir, state)
+			environment.Error = retryErrorValue(attemptStats.Status, workflowStep.ID, executionKind(workflowStep), runErr, retryConditionOutputs(runErr, result.Outputs))
+			retry, err := evaluateConditionProgram(retryWhen, environment)
+			if err != nil {
+				execution.err = fmt.Errorf("evaluating retry when after %v: %w", runErr, err)
+				return execution
+			}
+			if !retry {
+				execution.err = runErr
+				return execution
+			}
+		} else if !shouldRetry(workflowStep, runErr) {
 			execution.err = runErr
 			return execution
 		}
@@ -164,6 +194,25 @@ func (e *Engine) runWithRetry(ctx context.Context, definition *workflow.Definiti
 		execution.retryWait += time.Since(waitStartedAt)
 	}
 	panic("unreachable")
+}
+
+// retryConditionOutputs exposes a failed attempt's outputs to a retry condition. A failure that
+// produces no outputs at all can still describe itself through retryOutputProvider, so conditions
+// see the same shape whether or not the step got far enough to report anything. Reported outputs
+// always win over the fallback.
+func retryConditionOutputs(err error, outputs map[string]any) map[string]any {
+	var provider retryOutputProvider
+	if !errors.As(err, &provider) {
+		return outputs
+	}
+	fallback := provider.RetryConditionOutputs()
+	if len(fallback) == 0 {
+		return outputs
+	}
+	merged := make(map[string]any, len(outputs)+len(fallback))
+	maps.Copy(merged, fallback)
+	maps.Copy(merged, outputs)
+	return merged
 }
 
 func shouldRetry(workflowStep workflow.Step, err error) bool {

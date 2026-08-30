@@ -110,6 +110,11 @@ func (err requestError) HTTPRequestMethod() string { return err.method }
 func (requestError) HTTPStatusCode() int           { return 0 }
 func (requestError) HTTPRetryAfter() time.Duration { return 0 }
 
+// RetryConditionOutputs reports the response code a transport failure never received, so a
+// `retry.when` expression can compare `error.outputs.status` without special-casing the absence
+// of a response.
+func (requestError) RetryConditionOutputs() map[string]any { return map[string]any{"status": 0} }
+
 func Register(registry *step.Registry) error { return registry.Register("http", New) }
 
 func New(raw map[string]any) (step.Runner, error) {

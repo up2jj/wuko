@@ -751,6 +751,25 @@ are retried. The default retryable statuses are `408`, `425`, `429`, and `500-59
 codes and inclusive quoted ranges can be supplied with `retry.statuses`. Include `POST` or `PATCH`
 explicitly when the endpoint makes those requests safe to repeat.
 
+`retry.when` replaces method and status eligibility when present, so it can accept a normally
+terminal response or reject a normally transient one. Inspect the response code as
+`error.outputs.status`; connection, DNS, TLS, and timeout failures never reach a response, so they
+report status `0` and carry no other outputs. Because the expression replaces the defaults
+entirely, retry those transport failures explicitly:
+
+```yaml
+- id: publish
+  type: http
+  retry:
+    max_attempts: 4
+    when: 'error.outputs.status == 0 || error.outputs.status >= 500'
+  with: {method: POST, url: "{{ .vars.endpoint }}"}
+```
+
+`when` cannot be combined with explicit `retry.methods` or `retry.statuses`; encode the complete
+eligibility decision in the expression instead. HTTP `Retry-After` handling still applies after the
+expression permits a retry.
+
 A retryable response's `Retry-After` delta-seconds or HTTP date can extend the next backoff, up to
 the policy's `max_delay` and `max_elapsed_time`. For buffered responses containing `ETag` or
 `Last-Modified`, the next attempt sends `If-None-Match` or `If-Modified-Since` unless that header

@@ -222,6 +222,7 @@ steps:
     timeout: 5m
     retry:
       max_attempts: 3
+      when: 'error.exit_code == 75 || error.stderr contains "rate limit"'
     with:
       command: ./build
       args: ["{{ .vars.target }}"]

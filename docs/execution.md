@@ -698,6 +698,7 @@ For repeated blocks, use [batch, foreach, and matrix controls](workflow-control.
     jitter: 0.2
     max_elapsed_time: 6m
     operation_id: "{{ .vars.release_id }}:publish"
+    when: 'error.exit_code == 75 || error.stderr contains "rate limit"'
   with: {command: ./publish}
 ```
 
@@ -705,6 +706,19 @@ Defaults are 3 total attempts, a 1-second initial delay, multiplier 2, 30-second
 20% jitter. `max_elapsed_time` covers attempts and retry delays. Workflow cancellation stops
 immediately. Retried operations have at-least-once semantics: Wuko commits state only after success,
 but cannot roll back external effects.
+
+By default, non-HTTP failures are eligible for retry. Add `when` to make eligibility conditional.
+It is a boolean Expr expression evaluated after each failed attempt except the last, using the normal
+runtime roots plus a retry-local `error` value describing that attempt. Inside a `catch` block the
+retry-local value replaces the enclosing handler's `error` for the duration of the expression, so
+`when` always inspects the attempt that just failed. `false` returns the original failure immediately;
+an expression evaluation error is terminal. Failed-attempt variables are not committed.
+
+`error` contains `status`, `message`, `step`, `type`, `errors`, and `outputs`. The complete failed
+step output map is available under `error.outputs`. Output names that do not conflict with those
+reserved fields are also available directly, so shell retries can use `error.exit_code` and
+`error.stderr`. A conflicting output remains available only in `error.outputs`; for example, an
+HTTP response code is `error.outputs.status` while `error.status` remains the execution status.
 
 Process steps and Lua environment access receive `WUKO_STEP_ATTEMPT`,
 `WUKO_STEP_MAX_ATTEMPTS`, and `WUKO_STEP_OPERATION_ID`. Use the operation ID as a receiving
