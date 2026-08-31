@@ -84,7 +84,8 @@ nested in version 1, that currently means returning to the local executor. A roo
 `finally` list is therefore local; use the block's own `finally` when cleanup must run inside its
 container.
 
-Version 1 executor scopes support shell steps, working-directory and conditional blocks, early
+Version 1 executor scopes support shell and lifecycle-managed
+[`process`](steps-automation.md#process) steps, working-directory and conditional blocks, early
 return, and sequential batch, foreach, or matrix controls. Other leaf steps, actions, waits, concurrent
 groups, parallel fan-out, and nested executor blocks are rejected instead of running unexpectedly
 on the host.
@@ -93,6 +94,13 @@ For `batch`, `foreach`, or `matrix` inside an executor block, explicitly set `ma
 iteration then uses the one persistent session sequentially. Transparent conditional and
 working-directory blocks may wrap an executor block, and may also appear inside it. Executor blocks
 cannot be placed inside a batch, foreach, or matrix body, concurrent group, or composite action.
+
+Managed processes are stopped and joined before the executor session closes. Replicas in a
+sequential fan-out start one at a time but remain alive together. Docker services need an explicit
+`shutdown.command`: Unix host signals do not address a container exec, and the Docker API can only
+detach from one, so a canceled exec keeps running until its session container is removed. A
+`process` step configuring `restart` inside a Docker executor scope is rejected without one, because
+each restart would otherwise leave the previous instance alive.
 
 ## devenv executor
 

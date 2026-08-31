@@ -317,6 +317,7 @@ Each linked guide contains multiple examples for every step.
 | `http` | Make structured HTTP API calls | [System steps](docs/steps-system.md#http) |
 | `docker` | Run containers and manage Docker files and resources | [System steps](docs/steps-system.md#docker) |
 | `shell` | Run argv commands, inline shell, or scripted PTY interactions | [Automation steps](docs/steps-automation.md#shell) |
+| `process` | Run a readiness-gated, lifecycle-managed service | [Automation steps](docs/steps-automation.md#process) |
 | `agent` | Start an external coding agent with a prompt | [Automation steps](docs/steps-automation.md#agent) |
 | `lua` | Run typed in-process automation | [Automation steps](docs/steps-automation.md#lua) |
 | `wait` | Delay or poll another step | [Automation steps](docs/steps-automation.md#wait) |

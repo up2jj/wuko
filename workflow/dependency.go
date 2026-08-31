@@ -183,7 +183,7 @@ func stepDependencyReferences(steps []Step) []dependencyOutputReference {
 					references = append(references, expressionDependencyReferences(expression)...)
 				}
 			}
-		case "shell":
+		case "shell", "process":
 			if argv, ok := workflowStep.With["argv"].(map[string]any); ok {
 				if expression, ok := argv["expr"].(string); ok {
 					references = append(references, expressionDependencyReferences(expression)...)

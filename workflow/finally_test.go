@@ -75,3 +75,49 @@ finally:
 		t.Fatalf("cleanup location = %#v", action.Finally[0].Location)
 	}
 }
+
+func TestLoadRejectsServiceStepsInsideCleanup(t *testing.T) {
+	t.Parallel()
+	for name, body := range map[string]string{
+		"finally": `version: 1
+name: cleanup-service
+steps:
+  - id: work
+    type: shell
+finally:
+  - id: late
+    type: process
+`,
+		"defer": `version: 1
+name: cleanup-service
+steps:
+  - id: work
+    type: shell
+    defer:
+      - id: late
+        type: process
+`,
+		"nested in a finally block": `version: 1
+name: cleanup-service
+steps:
+  - id: work
+    type: shell
+finally:
+  - if: "true"
+    steps:
+      - id: late
+        type: process
+`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			path := filepath.Join(dir, "workflow.yaml")
+			writeTestFile(t, path, body)
+			_, err := NewLoader(nil).Load(t.Context(), path, LoadOptions{RunDir: dir})
+			if err == nil || !strings.Contains(err.Error(), "not supported inside finally or defer") {
+				t.Fatalf("Load() error = %v", err)
+			}
+		})
+	}
+}

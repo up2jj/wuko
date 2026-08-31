@@ -1,0 +1,27 @@
+version: 1
+name: process-pool
+
+vars:
+  workers:
+    - {name: worker-1, queue: critical}
+    - {name: worker-2, queue: default}
+    - {name: worker-3, queue: default}
+
+steps:
+  - id: workers
+    foreach:
+      items: vars.workers
+      max_concurrency: 3
+      steps:
+        - id: worker
+          type: process
+          with:
+            command: ./bin/worker
+            args: ["--queue={{ .foreach.item.queue }}"]
+            label: "{{ .foreach.item.name }}"
+            readiness:
+              log: {pattern: "waiting for jobs", timeout: 30s}
+
+  - id: exercise_pool
+    type: shell
+    with: {command: ./bin/enqueue-fixtures}

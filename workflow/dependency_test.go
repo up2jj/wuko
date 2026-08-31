@@ -246,24 +246,30 @@ func TestResolveDependencyPlanChecksOnlySemanticDependencyReferences(t *testing.
 
 func TestResolveDependencyPlanChecksShellArgvExpressionReferences(t *testing.T) {
 	t.Parallel()
-	producer := dependencyDefinition("producer", "/producer.yaml")
-	producer.Outputs = map[string]WorkflowOutput{"argv": {Type: "array", Value: `list("tool")`}}
-	consumer := dependencyDefinition("consumer", "/consumer.yaml")
-	consumer.DependsOn = map[string]string{"build": "producer"}
-	consumer.Steps = []Step{{
-		ID: "run", Type: "shell",
-		With: map[string]any{"argv": map[string]any{"expr": "dependencies.build.argv"}},
-	}}
-	resolve := func(context.Context, string) (*Definition, error) { return producer, nil }
+	// process exposes the same typed argv surface as shell, so both are checked here.
+	for _, stepType := range []string{"shell", "process"} {
+		t.Run(stepType, func(t *testing.T) {
+			t.Parallel()
+			producer := dependencyDefinition("producer", "/producer.yaml")
+			producer.Outputs = map[string]WorkflowOutput{"argv": {Type: "array", Value: `list("tool")`}}
+			consumer := dependencyDefinition("consumer", "/consumer.yaml")
+			consumer.DependsOn = map[string]string{"build": "producer"}
+			consumer.Steps = []Step{{
+				ID: "run", Type: stepType,
+				With: map[string]any{"argv": map[string]any{"expr": "dependencies.build.argv"}},
+			}}
+			resolve := func(context.Context, string) (*Definition, error) { return producer, nil }
 
-	if _, err := ResolveDependencyPlan(t.Context(), consumer, resolve); err != nil {
-		t.Fatalf("valid argv dependency reference rejected: %v", err)
-	}
+			if _, err := ResolveDependencyPlan(t.Context(), consumer, resolve); err != nil {
+				t.Fatalf("valid argv dependency reference rejected: %v", err)
+			}
 
-	consumer.Steps[0].With = map[string]any{"argv": map[string]any{"expr": "dependencies.build.missing"}}
-	_, err := ResolveDependencyPlan(t.Context(), consumer, resolve)
-	if err == nil || !strings.Contains(err.Error(), `does not declare output "missing"`) {
-		t.Fatalf("argv dependency reference error = %v", err)
+			consumer.Steps[0].With = map[string]any{"argv": map[string]any{"expr": "dependencies.build.missing"}}
+			_, err := ResolveDependencyPlan(t.Context(), consumer, resolve)
+			if err == nil || !strings.Contains(err.Error(), `does not declare output "missing"`) {
+				t.Fatalf("argv dependency reference error = %v", err)
+			}
+		})
 	}
 }
 

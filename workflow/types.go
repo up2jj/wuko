@@ -798,6 +798,12 @@ func validateDefinitionStructure(definition *Definition, allowActions bool) erro
 	if err := validateSteps(definition.Finally, allowActions, scopeFinally, seen); err != nil {
 		return fmt.Errorf("finally: %w", err)
 	}
+	if err := validateCleanupServices(definition.Steps, false); err != nil {
+		return err
+	}
+	if err := validateCleanupServices(definition.Finally, true); err != nil {
+		return fmt.Errorf("finally: %w", err)
+	}
 	if err := validateLifecycleSteps(definition.Install, allowActions, "install"); err != nil {
 		return err
 	}
@@ -1356,6 +1362,24 @@ func validateConcurrentEntry(workflowStep Step, scope stepScope, allowActions bo
 		return err
 	}
 	return validateSteps(group.Steps, allowActions, scopeConcurrent, seen)
+}
+
+// validateCleanupServices rejects service steps inside cleanup. A scope stops and joins its
+// services before running finally or defer, so a service started from cleanup could never be
+// launched, and the failure would otherwise surface only at run time.
+func validateCleanupServices(steps []Step, cleanup bool) error {
+	for _, workflowStep := range steps {
+		if cleanup && workflowStep.Type == "process" {
+			return fmt.Errorf("step %q: process steps are not supported inside finally or defer, which join services rather than start them", workflowStep.ID)
+		}
+		for _, child := range workflowStep.ChildSequences() {
+			nested := cleanup || child.Role == ChildFinally || child.Role == ChildDefer
+			if err := validateCleanupServices(child.Steps, nested); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func executorStepScope(scope stepScope) bool {

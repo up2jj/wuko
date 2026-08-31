@@ -51,6 +51,14 @@ type Options struct {
 	CaptureLimit int64
 	StdoutPolicy OutputPolicy
 	StderrPolicy OutputPolicy
+	// Started is called exactly once after the command has been started successfully.
+	Started func()
+	// TerminationSignal is sent on cancellation before SIGKILL escalation. Zero means SIGTERM.
+	TerminationSignal syscall.Signal
+	// TerminationParentOnly signals only the direct child instead of its process group.
+	TerminationParentOnly bool
+	// TerminationGracePeriod bounds the wait before SIGKILL. Zero uses the package default.
+	TerminationGracePeriod time.Duration
 }
 
 type Result struct {
@@ -73,6 +81,13 @@ func (e *ExitError) Unwrap() error { return e.Err }
 // Executor runs commands in one execution environment.
 type Executor interface {
 	Run(context.Context, Options) (Result, error)
+}
+
+// CancelPolicy lets an executor declare that canceling Run does not stop the process it
+// started. A Docker exec has no kill API, so its command keeps running inside the container
+// after Run returns. Executors that do not implement this are assumed to stop on cancel.
+type CancelPolicy interface {
+	CancelStopsProcess() bool
 }
 
 // LocalExecutor runs commands as child processes on the current host.
@@ -124,6 +139,9 @@ func (LocalExecutor) Run(ctx context.Context, options Options) (Result, error) {
 		}
 		return Result{}, fmt.Errorf("starting %s: %w", options.Command, err)
 	}
+	if options.Started != nil {
+		options.Started()
+	}
 	wait := make(chan error, 1)
 	go func() { wait <- command.Wait() }()
 
@@ -133,7 +151,7 @@ func (LocalExecutor) Run(ctx context.Context, options Options) (Result, error) {
 	case err = <-wait:
 	case <-ctx.Done():
 		canceled = true
-		err = terminateProcessGroup(command.Process.Pid, wait)
+		err = terminateProcess(command.Process.Pid, wait, options)
 	}
 	result := Result{Stdout: stdout.String(), Stderr: stderr.String(), ExitCode: 0, StdoutTruncated: stdout.truncated, StderrTruncated: stderr.truncated}
 	if canceled {
@@ -181,6 +199,9 @@ func runTTY(ctx context.Context, options Options, credential *syscall.Credential
 			return Result{}, fmt.Errorf("starting %s as user %q with TTY: %w", options.Command, options.User, err)
 		}
 		return Result{}, fmt.Errorf("starting %s with TTY: %w", options.Command, err)
+	}
+	if options.Started != nil {
+		options.Started()
 	}
 
 	stopResize := startTTYResize(terminal, ptmx)
@@ -271,7 +292,7 @@ func runTTY(ctx context.Context, options Options, credential *syscall.Credential
 		select {
 		case interactionErr = <-interactionResult:
 			if interactionErr != nil {
-				err = terminateProcessGroup(command.Process.Pid, wait)
+				err = terminateProcess(command.Process.Pid, wait, options)
 				waited = true
 				markProcessExited()
 			}
@@ -281,7 +302,7 @@ func runTTY(ctx context.Context, options Options, credential *syscall.Credential
 			interactionErr = <-interactionResult
 		case <-ctx.Done():
 			canceled = true
-			err = terminateProcessGroup(command.Process.Pid, wait)
+			err = terminateProcess(command.Process.Pid, wait, options)
 			waited = true
 			markProcessExited()
 			interactionErr = <-interactionResult
@@ -290,7 +311,7 @@ func runTTY(ctx context.Context, options Options, credential *syscall.Credential
 	if interactionErr == nil && handoff && !waited {
 		if startErr := startHandoff(); startErr != nil {
 			interactionErr = startErr
-			err = terminateProcessGroup(command.Process.Pid, wait)
+			err = terminateProcess(command.Process.Pid, wait, options)
 			waited = true
 			markProcessExited()
 		}
@@ -301,7 +322,7 @@ func runTTY(ctx context.Context, options Options, credential *syscall.Credential
 			markProcessExited()
 		case <-ctx.Done():
 			canceled = true
-			err = terminateProcessGroup(command.Process.Pid, wait)
+			err = terminateProcess(command.Process.Pid, wait, options)
 			markProcessExited()
 		}
 	}
@@ -556,9 +577,17 @@ func parseUserID(kind, value string) (uint32, error) {
 	return uint32(parsed), nil
 }
 
-func terminateProcessGroup(processID int, wait <-chan error) error {
-	termErr := signalProcessGroup(processID, syscall.SIGTERM)
-	timer := time.NewTimer(terminationGracePeriod)
+func terminateProcess(processID int, wait <-chan error, options Options) error {
+	signal := options.TerminationSignal
+	if signal == 0 {
+		signal = syscall.SIGTERM
+	}
+	gracePeriod := options.TerminationGracePeriod
+	if gracePeriod == 0 {
+		gracePeriod = terminationGracePeriod
+	}
+	termErr := signalProcess(processID, signal, options.TerminationParentOnly)
+	timer := time.NewTimer(gracePeriod)
 	defer timer.Stop()
 
 	var waitErr error
@@ -573,11 +602,22 @@ func terminateProcessGroup(processID int, wait <-chan error) error {
 	case <-timer.C:
 	}
 
-	killErr := signalProcessGroup(processID, syscall.SIGKILL)
+	killErr := signalProcess(processID, syscall.SIGKILL, options.TerminationParentOnly)
 	if !waited {
 		waitErr = <-wait
 	}
 	return errors.Join(waitErr, termErr, killErr)
+}
+
+func signalProcess(processID int, signal syscall.Signal, parentOnly bool) error {
+	if parentOnly {
+		err := syscall.Kill(processID, signal)
+		if errors.Is(err, syscall.ESRCH) {
+			return nil
+		}
+		return err
+	}
+	return signalProcessGroup(processID, signal)
 }
 
 func signalProcessGroup(processID int, signal syscall.Signal) error {

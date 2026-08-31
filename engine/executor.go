@@ -77,9 +77,20 @@ func (e *Engine) executeExecutorBlock(ctx context.Context, definition *workflow.
 	childOptions := options
 	childOptions.Executor = session
 	childOptions.insideExecutor = true
+	serviceScope := newBackgroundSupervisor(ctx)
+	childOptions.services = serviceScope
 	childOptions.defers = newDeferStack(block.Steps)
 	statsStart := len(stats.Steps)
-	mainErr := e.executeSequence(ctx, definition, block.Steps, childOptions, state, stats, firstIndex, total)
+	mainErr := e.executeSequence(serviceScope.context(), definition, block.Steps, childOptions, state, stats, firstIndex, total)
+	serviceScope.seal()
+	if mainErr != nil || state.didReturn {
+		serviceScope.stop(errBackgroundStopped)
+	}
+	serviceErr := serviceScope.wait()
+	if serviceScope.endedScope() && cancellationOnly(mainErr) {
+		mainErr = nil
+	}
+	mainErr = errors.Join(mainErr, serviceErr)
 	returning := state.returning
 	state.returning = false
 	cleanupErrors := e.executeCleanupScope(context.WithoutCancel(ctx), definition, childOptions.defers, block.Finally, childOptions, state, stats, mainErr, stats.Steps[statsStart:], firstIndex+leafStepCount(block.Steps), total)

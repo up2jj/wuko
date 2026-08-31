@@ -1,5 +1,11 @@
 # Defer and finally cleanup
 
+Lifecycle-managed [`process`](steps-automation.md#process) services stop and join before the root
+`finally` list starts. Their immutable readiness outputs remain available as `.steps.<id>` during
+cleanup; use the process step's `shutdown` configuration when shutdown must happen while an
+executor session is still open. Because that join has already happened, a `process` step inside
+`defer` or `finally` is rejected during validation rather than failing at run time.
+
 Attach `defer` to a resource-creating step to keep its cleanup beside it. Workflows and composite
 actions may also declare one `finally` list for general cleanup. Registered defers run first, then
 `finally`, after main execution succeeds, fails, times out, returns early, or is canceled.

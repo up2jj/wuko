@@ -290,7 +290,12 @@ func (session *dockerExecutorSession) Run(ctx context.Context, options process.O
 		return process.Result{}, fmt.Errorf("invalid output policy")
 	}
 	session.mu.Lock()
-	defer session.mu.Unlock()
+	locked := true
+	defer func() {
+		if locked {
+			session.mu.Unlock()
+		}
+	}()
 	if options.Command == "" {
 		return process.Result{}, fmt.Errorf("command is required")
 	}
@@ -320,6 +325,11 @@ func (session *dockerExecutorSession) Run(ctx context.Context, options process.O
 		return process.Result{}, fmt.Errorf("attaching Docker exec for %s: %w", options.Command, err)
 	}
 	defer attached.Close()
+	session.mu.Unlock()
+	locked = false
+	if options.Started != nil {
+		options.Started()
+	}
 
 	stdout := newExecutorCapture(options.CaptureLimit)
 	stderr := newExecutorCapture(options.CaptureLimit)
@@ -347,10 +357,18 @@ func (session *dockerExecutorSession) Run(ctx context.Context, options process.O
 	select {
 	case copyErr = <-copyDone:
 	case <-ctx.Done():
+		// Closing the stream only detaches: the exec keeps running inside the container. A
+		// one-shot exec is reaped by removing the container; a service exec cannot be, so it
+		// runs until the session closes unless the step configures a shutdown command.
 		attached.Close()
-		cleanupCtx, cancel := detachedCleanupContext(ctx)
-		removeErr := session.removeLocked(cleanupCtx)
-		cancel()
+		var removeErr error
+		if options.Started == nil {
+			cleanupCtx, cancel := detachedCleanupContext(ctx)
+			session.mu.Lock()
+			removeErr = session.removeLocked(cleanupCtx)
+			session.mu.Unlock()
+			cancel()
+		}
 		// Join both stream pumps before returning: attached.Close above unblocks
 		// them, and options.Stdin must not still be read after Run returns.
 		<-copyDone
@@ -380,6 +398,11 @@ func (session *dockerExecutorSession) Run(ctx context.Context, options process.O
 	}
 	return result, nil
 }
+
+// CancelStopsProcess reports that a canceled exec keeps running: the Docker API can detach
+// from an exec but cannot signal it, so the command runs until the session container is
+// removed. Services hosted here need an explicit shutdown command to be stopped on demand.
+func (session *dockerExecutorSession) CancelStopsProcess() bool { return false }
 
 func (session *dockerExecutorSession) translatePath(value string) (string, error) {
 	if value == "" {

@@ -72,6 +72,7 @@ type Options struct {
 	renderer               *workflow.Renderer
 	deferContextValidation bool
 	insideExecutor         bool
+	services               step.ServiceLauncher
 	// cleanups scopes managed-resource cleanup to a background control iteration, whose
 	// resources must be released when the iteration ends rather than accumulating for
 	// the life of the run. Nil everywhere else, meaning the run-level scope.
@@ -381,8 +382,11 @@ func (e *Engine) Run(ctx context.Context, definition *workflow.Definition, optio
 	options = prepareRunOptions(options)
 	if rootRun {
 		options.runtime.background = newBackgroundSupervisor(ctx)
+		options.services = options.runtime.background
 		defer options.runtime.background.cancel(errBackgroundStopped)
 		ctx = options.runtime.background.context()
+	} else if options.services == nil {
+		options.services = options.runtime.background
 	}
 	options.runID = correlation.NewRunID()
 	options.stepRunID = ""
@@ -452,6 +456,9 @@ func (e *Engine) Run(ctx context.Context, definition *workflow.Definition, optio
 			report(options, ProgressEvent{Kind: BackgroundJoining, Status: StatusRunning, Time: time.Now(), WorkflowName: definition.Name, Depth: options.depth, Started: count})
 		}
 		backgroundErr := options.runtime.background.wait()
+		if options.runtime.background.endedScope() && cancellationOnly(mainErr) {
+			mainErr = nil
+		}
 		if cancellationOnly(mainErr) && nonCancellationError(backgroundErr) != nil {
 			// A background failure canceled the foreground; report the originating
 			// failure instead of presenting the resulting cancellation as primary.
@@ -1147,6 +1154,7 @@ func makeRequest(definition *workflow.Definition, stepID string, options Options
 			return templateData(definition, options.RunDir, state)
 		}),
 		Executor: options.Executor,
+		Services: reportingServiceLauncher{launcher: options.services, options: options, workflowName: definition.Name},
 	}
 }
 

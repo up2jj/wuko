@@ -3,6 +3,7 @@ package step
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -66,9 +67,35 @@ type Request struct {
 	TemplateRenderer TemplateRenderer
 	// Executor runs process-backed work. A nil executor means local execution.
 	Executor process.Executor
+	// Services registers ready, lifecycle-managed background work in the nearest workflow or
+	// executor scope. It is nil when a runner is invoked outside the engine.
+	Services ServiceLauncher
 	// PreviousAttempt is the most recent failed attempt that produced a complete result.
 	// It is nil on the first attempt and remains immutable for the duration of Run.
 	PreviousAttempt *Result
+}
+
+// ServiceOptions controls how a managed service affects its owning scope.
+type ServiceOptions struct {
+	// KeepAlive keeps the scope open after its foreground steps have completed.
+	KeepAlive bool
+	// FailFast cancels foreground and sibling work as soon as the service fails.
+	FailFast bool
+	// ExitOnEnd ends the scope successfully when the service exits successfully.
+	ExitOnEnd bool
+}
+
+// ErrServiceAborted reports that a managed service never took ownership of its scope: it
+// failed, or was abandoned, before the step that owns it returned. The step reports that
+// failure as its own result, so a scope must treat such a job as neither a service that
+// failed while running nor one that ran to completion.
+var ErrServiceAborted = errors.New("service aborted before it started")
+
+// ServiceLauncher is the deliberately small engine capability used by steps that become ready
+// before their underlying work exits. The function must stop all of its own children before it
+// returns.
+type ServiceLauncher interface {
+	StartService(id, kind string, options ServiceOptions, run func(context.Context) error) error
 }
 
 // WorkflowValue is the shared, statically typed workflow root exposed to Expr evaluators.

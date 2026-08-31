@@ -5,6 +5,496 @@
 Automation steps run local programs, coding agents, in-process Lua, or cancellation-aware waits.
 Use `timeout` and `retry` on ordinary steps when an operation can hang or fail transiently.
 
+## `process`
+
+Run one long-lived program as a readiness-gated service. The step succeeds when the program is
+ready; the program then remains managed by its workflow scope. Wuko prefixes live lines with the
+step `label`, stops non-keepalive services when foreground work ends, joins them before `finally`,
+and reports an unexpected terminal failure at that join. This follows the useful headless lifecycle
+parts of Process Compose while keeping dependencies and pools in Wuko's existing controls.
+
+Exactly one of `command`, `script`, or typed `argv.expr` selects the program. `args`, `shell`,
+`working_directory`, `env`, and `user` behave like their `shell` counterparts. `stdout` and
+`stderr` accept `inherit` (the default) or `discard`; unbounded service output is not retained in
+step state. Discarding both streams is rejected together with log readiness, which reads them. The immutable startup result contains `ready`, `label`, `detached`, and `readiness`.
+
+### 1. Ready on successful spawn
+
+Without a readiness probe, successful spawn is readiness. The following test step starts only after
+`api` has spawned, and the service is stopped after the test finishes:
+
+```yaml
+version: 1
+name: process-spawn
+steps:
+  - id: api
+    type: process
+    with: {command: ./bin/api}
+  - id: test
+    type: shell
+    with: {command: curl, args: [-f, http://127.0.0.1:8080/]}
+```
+
+### Position and lifetime
+
+Position controls when a service starts; its owning workflow or executor scope controls when it
+stops. Services stop before workflow `finally`, while their committed startup outputs remain
+available there.
+
+### 2. At the beginning
+
+The service starts first, reaches readiness, and remains active during all later foreground steps:
+
+```yaml
+version: 1
+name: process-first
+steps:
+  - id: api
+    type: process
+    with:
+      command: ./bin/api
+      readiness: {http: {url: http://127.0.0.1:8080/ready, period: 500ms}}
+  - id: integration
+    type: shell
+    with: {command: go, args: [test, ./integration/...]}
+```
+
+### 3. In the middle
+
+Earlier steps finish before the service starts; later steps run while it is active:
+
+```yaml
+version: 1
+name: process-middle
+steps:
+  - id: build
+    type: shell
+    with: {command: go, args: [build, -o, bin/api, ./cmd/api]}
+  - id: api
+    type: process
+    with:
+      command: ./bin/api
+      readiness: {log: {pattern: "listening on :8080", timeout: 20s}}
+  - id: smoke
+    type: shell
+    with: {command: curl, args: [-f, http://127.0.0.1:8080/]}
+```
+
+### 4. At the end: startup smoke test
+
+An ending process is started, checked for readiness, and immediately stopped because no foreground
+work follows it:
+
+```yaml
+version: 1
+name: startup-smoke
+steps:
+  - id: api_starts
+    type: process
+    with:
+      command: ./bin/api
+      readiness: {log: {pattern: ready, timeout: 10s}}
+```
+
+### 5. At the end: development server
+
+`keep_alive: true` keeps the scope open after foreground work. This workflow runs until the server
+exits or the user interrupts Wuko:
+
+```yaml
+version: 1
+name: dev-server
+steps:
+  - id: web
+    type: process
+    with:
+      command: npm
+      args: [run, dev]
+      keep_alive: true
+      readiness: {log: {pattern: "Local:.*http", timeout: 30s}}
+```
+
+### Readiness and health
+
+Probe durations use Go duration strings. Exec and HTTP probes default to `initial_delay: 0s`,
+`period: 10s`, `timeout: 1s`, `success_threshold: 1`, and `failure_threshold: 3`. Log readiness
+defaults to a 30-second timeout and matches a rolling, bounded 1 MiB window across stdout and
+stderr, so at least one of those streams must be `inherit`.
+
+### 6. Log readiness
+
+```yaml
+version: 1
+name: log-ready
+steps:
+  - id: web
+    type: process
+    with:
+      script: exec ./bin/web --port "$1"
+      args: [8080]
+      label: web
+      readiness:
+        log: {pattern: "server ready on .*8080", timeout: 30s}
+```
+
+### 7. Exec readiness
+
+```yaml
+version: 1
+name: exec-ready
+steps:
+  - id: database
+    type: process
+    with:
+      command: postgres
+      args: [-D, .data/postgres]
+      readiness:
+        exec:
+          command: pg_isready
+          args: [-h, 127.0.0.1]
+          period: 1s
+          timeout: 500ms
+          failure_threshold: 30
+```
+
+### 8. HTTP readiness
+
+```yaml
+version: 1
+name: http-ready
+steps:
+  - id: api
+    type: process
+    with:
+      argv: {expr: '["./bin/api", "--port", vars.port]'}
+      readiness:
+        http:
+          url: "http://127.0.0.1:{{ .vars.port }}/ready"
+          method: GET
+          expected_status: [200, 204]
+          period: 500ms
+          timeout: 250ms
+vars: {port: 8080}
+```
+
+### 9. Liveness and restart
+
+Liveness begins after readiness. A failed liveness threshold terminates the current program and
+enters the same restart policy as an unexpected exit. `max_restarts: 0` means unlimited.
+
+```yaml
+version: 1
+name: resilient-worker
+steps:
+  - id: worker
+    type: process
+    with:
+      command: ./bin/worker
+      readiness: {log: {pattern: "waiting for jobs"}}
+      liveness:
+        exec: {command: ./bin/worker-health, period: 5s, timeout: 1s, failure_threshold: 3}
+      restart: {policy: on_failure, backoff: 2s, max_restarts: 5}
+```
+
+Restart policies are `never` (default), `on_failure`, and `always`. `allowed_exit_codes` defaults
+to `[0]`. Restart eligibility is evaluated before `exit_on_end` or `exit_on_failure`. Lifecycle
+shutdown never triggers a restart or exit policy, and neither does a service that fails before it
+becomes ready: that failure is the step's own result. A liveness failure stops the service the same
+way the lifecycle does, so `shutdown.command` runs before a restart replaces the instance. Under an
+executor that cannot stop a process by cancellation, such as Docker, a restart policy requires
+`shutdown.command` and is rejected without one.
+
+### Shutdown
+
+Local processes receive `SIGTERM` as a process group, wait up to `shutdown.timeout` (10 seconds by
+default), then escalate to `SIGKILL`. Supported configured signals are `SIGTERM`, `SIGINT`,
+`SIGHUP`, and `SIGQUIT`. `parent_only` avoids signaling descendants.
+
+### 10. Signal shutdown
+
+```yaml
+version: 1
+name: signal-shutdown
+steps:
+  - id: daemon
+    type: process
+    with:
+      command: ./bin/daemon
+      readiness: {log: {pattern: ready}}
+      shutdown: {signal: SIGINT, timeout: 15s, parent_only: false}
+  - id: exercise
+    type: shell
+    with: {command: ./bin/client, args: [check]}
+```
+
+### 11. Shutdown command and detached launcher
+
+A detached launcher must declare a shutdown command. Wuko treats launcher exit as expected, keeps
+probing the external daemon, and runs the command while the executor session is still open:
+
+```yaml
+version: 1
+name: detached-daemon
+steps:
+  - id: daemon
+    type: process
+    with:
+      command: ./bin/daemonctl
+      args: [start, --detach]
+      detached: true
+      readiness: {exec: {command: ./bin/daemonctl, args: [status], period: 1s}}
+      shutdown:
+        timeout: 20s
+        command: {command: ./bin/daemonctl, args: [stop]}
+  - id: use_daemon
+    type: shell
+    with: {command: ./bin/client}
+```
+
+### Dependencies with Wuko constructs
+
+Yes—dependencies stay in Wuko. Sequential order is the simplest ready dependency. For a DAG, put
+the steps directly under one `concurrent` group and use `needs`. A process satisfies its edge when
+it becomes ready, not when it exits. Use `shell` for a finite prerequisite whose exit must be
+awaited. Cross-iteration dependencies are intentionally unsupported.
+
+### 12. Sequential database → API → tests
+
+```yaml
+version: 1
+name: sequential-stack
+steps:
+  - id: database
+    type: process
+    with: {command: ./bin/database, readiness: {log: {pattern: ready}}}
+  - id: api
+    type: process
+    with: {command: ./bin/api, readiness: {http: {url: http://127.0.0.1:8080/ready}}}
+  - id: tests
+    type: shell
+    with: {command: go, args: [test, ./integration/...]}
+```
+
+### 13. Concurrent database/cache → API → tests
+
+```yaml
+version: 1
+name: dependency-stack
+steps:
+  - concurrent:
+      max_concurrency: 3
+      steps:
+        - id: database
+          type: process
+          with: {command: ./bin/database, readiness: {log: {pattern: ready}}}
+        - id: cache
+          type: process
+          with: {command: ./bin/cache, readiness: {exec: {command: ./bin/cache-cli, args: [ping]}}}
+        - id: api
+          type: process
+          needs: [database, cache]
+          with: {command: ./bin/api, readiness: {http: {url: http://127.0.0.1:8080/ready}}}
+        - id: tests
+          type: shell
+          needs: [api]
+          with: {command: go, args: [test, ./integration/...]}
+```
+
+### Replicas and pools
+
+One `process` step owns one program. Express replicas with `foreach` over explicit runtime objects
+or IDs, and multiple dimensions with `matrix`. The fan-out parent becomes ready only after every
+iteration is ready. `max_concurrency` controls startup/readiness concurrency, not final pool size;
+started replicas remain active together until their owning scope ends. There is no numeric
+`replicas` shorthand or live autoscaling in version 1.
+
+### 14. HTTP replica pool
+
+```yaml
+version: 1
+name: http-pool
+vars: {ports: [8101, 8102, 8103]}
+steps:
+  - id: replicas
+    foreach:
+      items: vars.ports
+      max_concurrency: 3
+      steps:
+        - id: api
+          type: process
+          with:
+            command: ./bin/api
+            args: ["--port={{ .foreach.item }}"]
+            label: "api-{{ .foreach.index }}"
+            readiness: {http: {url: "http://127.0.0.1:{{ .foreach.item }}/ready", period: 500ms}}
+  - id: tests
+    type: shell
+    with: {command: ./bin/test-pool}
+```
+
+### 15. Shared-queue worker pool
+
+```yaml
+version: 1
+name: worker-pool
+vars: {workers: [worker-a, worker-b, worker-c, worker-d]}
+steps:
+  - id: pool
+    foreach:
+      items: vars.workers
+      max_concurrency: 2
+      steps:
+        - id: worker
+          type: process
+          with:
+            command: ./bin/worker
+            args: [--queue, shared]
+            label: "{{ .foreach.item }}"
+            readiness: {log: {pattern: "waiting for jobs"}}
+  - id: enqueue
+    type: shell
+    with: {command: ./bin/enqueue-fixtures}
+```
+
+All four workers remain active; `max_concurrency: 2` only starts and readies at most two iterations
+at once.
+
+### 16. Matrix pool
+
+```yaml
+version: 1
+name: regional-pool
+steps:
+  - id: workers
+    matrix:
+      axes:
+        region: [eu, us]
+        queue: [critical, default]
+      max_concurrency: 4
+      steps:
+        - id: worker
+          type: process
+          with:
+            command: ./bin/worker
+            args: ["--region={{ .matrix.region }}", "--queue={{ .matrix.queue }}"]
+            label: "{{ .matrix.region }}-{{ .matrix.queue }}"
+            readiness: {log: {pattern: ready}}
+  - id: verify
+    type: shell
+    with: {command: ./bin/check-workers}
+```
+
+### 17. Per-replica sidecar → worker
+
+Sequential children inside each iteration express a dependency local to that replica:
+
+```yaml
+version: 1
+name: sidecar-workers
+vars: {workers: [one, two, three]}
+steps:
+  - id: pool
+    foreach:
+      items: vars.workers
+      max_concurrency: 3
+      steps:
+        - id: sidecar
+          type: process
+          with: {command: ./bin/sidecar, args: ["{{ .foreach.item }}"], readiness: {log: {pattern: ready}}}
+        - id: worker
+          type: process
+          with: {command: ./bin/worker, args: ["{{ .foreach.item }}"], readiness: {log: {pattern: ready}}}
+  - id: verify
+    type: shell
+    with: {command: ./bin/check-pool}
+```
+
+### 18. Executor-scoped pool
+
+Services stop and join before their executor session closes. Fan-out inside an executor retains the
+existing `max_concurrency: 1` restriction: replicas start serially but remain active together.
+Docker-hosted services need an explicit shutdown command: a canceled exec keeps running inside the
+container until the session closes, so a restart policy without one is rejected.
+
+```yaml
+version: 1
+name: executor-workers
+vars: {workers: [one, two]}
+steps:
+  - executor:
+      type: docker
+      with: {image: alpine:3.22}
+    steps:
+      - id: pool
+        foreach:
+          items: vars.workers
+          max_concurrency: 1
+          steps:
+            - id: worker
+              type: process
+              with:
+                command: /app/worker
+                args: ["{{ .foreach.item }}"]
+                readiness: {log: {pattern: ready}}
+                shutdown:
+                  command: {command: /app/workerctl, args: [stop, "{{ .foreach.item }}"]}
+      - id: verify
+        type: shell
+        with: {command: /app/check-workers}
+```
+
+### Failure behavior
+
+By default, an unexpected exhausted process failure is recorded and reported when services join;
+unrelated foreground and sibling work continues. `exit_on_failure: true` cancels the scope
+immediately. `exit_on_end: true` ends the scope successfully when an allowed terminal exit remains
+after restart evaluation.
+
+### 19. Deferred failure versus fail-fast
+
+```yaml
+version: 1
+name: failure-policy
+steps:
+  - id: optional_metrics
+    type: process
+    with:
+      command: ./bin/metrics
+      readiness: {log: {pattern: ready}}
+      restart: {policy: on_failure, max_restarts: 3, backoff: 1s}
+  - id: critical_api
+    type: process
+    with:
+      command: ./bin/api
+      readiness: {log: {pattern: ready}}
+      exit_on_failure: true
+  - id: tests
+    type: shell
+    with: {command: go, args: [test, ./integration/...]}
+```
+
+### 20. Finite prerequisite, then managed process
+
+Use `shell` when success means process completion, then start the managed service:
+
+```yaml
+version: 1
+name: migrate-and-serve
+steps:
+  - id: migrations
+    type: shell
+    with: {command: ./bin/migrate, args: [up]}
+  - id: api
+    type: process
+    with: {command: ./bin/api, readiness: {http: {url: http://127.0.0.1:8080/ready}}}
+  - id: smoke
+    type: shell
+    with: {command: curl, args: [-f, http://127.0.0.1:8080/]}
+```
+
+The runnable [process DAG](../examples/process-dag.yaml) and [process pool](../examples/process-pool.yaml)
+files supplement these embedded examples; the behavior-defining configurations remain here.
+
 ## `shell`
 
 Run an argv command directly or execute inline shell source.

@@ -1,0 +1,30 @@
+version: 1
+name: process-dag
+
+steps:
+  - concurrent:
+      max_concurrency: 3
+      steps:
+        - id: database
+          type: process
+          with:
+            command: ./bin/database
+            readiness:
+              log: {pattern: "ready for connections", timeout: 30s}
+        - id: cache
+          type: process
+          with:
+            command: ./bin/cache
+            readiness:
+              exec: {command: ./bin/cache-cli, args: [ping], period: 1s, timeout: 500ms}
+        - id: api
+          type: process
+          needs: [database, cache]
+          with:
+            command: ./bin/api
+            readiness:
+              http: {url: "http://127.0.0.1:8080/ready", period: 1s, timeout: 500ms}
+        - id: integration_tests
+          type: shell
+          needs: [api]
+          with: {command: go, args: [test, ./integration/...], env: {API_URL: "http://127.0.0.1:8080"}}
