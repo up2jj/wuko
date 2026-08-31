@@ -78,6 +78,25 @@ func TestExpressionUsesSharedHelpers(t *testing.T) {
 	}
 }
 
+func TestExpressionUsesSecretHelper(t *testing.T) {
+	runner, err := New(map[string]any{"variable": "token", "expr": `secret("op://Production/API/token")`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runner.Run(t.Context(), step.Request{Secret: func(reference string) (string, error) {
+		if reference != "op://Production/API/token" {
+			t.Fatalf("reference = %q", reference)
+		}
+		return "resolved-token", nil
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Outputs["value"] != "resolved-token" {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
 func TestExpressionStoresTypedCollectionResults(t *testing.T) {
 	tests := []struct {
 		name string

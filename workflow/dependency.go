@@ -287,7 +287,7 @@ func templateDependencyReferences(value string) []dependencyOutputReference {
 	if !strings.Contains(value, "{{") {
 		return nil
 	}
-	tmpl, err := newTemplate("dependency-reference").Parse(value)
+	tmpl, err := newTemplate("dependency-reference", nil).Parse(value)
 	if err != nil {
 		return nil
 	}

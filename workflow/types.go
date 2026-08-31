@@ -18,6 +18,7 @@ import (
 	controlpkg "github.com/up2jj/wuko/control"
 	"github.com/up2jj/wuko/diagnostic"
 	workflowschedule "github.com/up2jj/wuko/schedule"
+	"github.com/up2jj/wuko/secret"
 	"gopkg.in/yaml.v3"
 )
 
@@ -54,10 +55,27 @@ type Definition struct {
 	// DirBorrowed reports that Dir belongs to a calling workflow rather than to this
 	// definition. It is set for the inner definition of a remote action loaded as a plain
 	// manifest, which carries no files of its own. See Action.DirBorrowed.
-	DirBorrowed bool                `yaml:"-"`
-	Location    diagnostic.Location `yaml:"-"`
-	sourceRoot  string
-	sourceLabel string
+	DirBorrowed   bool                `yaml:"-"`
+	Location      diagnostic.Location `yaml:"-"`
+	Secrets       secret.Config       `yaml:"secrets,omitempty"`
+	secretSession *secret.Session
+	sourceRoot    string
+	sourceLabel   string
+}
+
+// SecretSession returns the resolver bound to this loaded workflow occurrence.
+func (definition *Definition) SecretSession() *secret.Session {
+	if definition == nil {
+		return nil
+	}
+	return definition.secretSession
+}
+
+// InheritSecretSession binds a composite action definition to its calling workflow occurrence.
+func (definition *Definition) InheritSecretSession(parent *Definition) {
+	if definition != nil && parent != nil {
+		definition.secretSession = parent.secretSession
+	}
 }
 
 // IsInvokable reports whether the workflow may be selected as a direct run or UI root.
@@ -1643,6 +1661,9 @@ func (workflowStep Step) ValidateExecutionPolicy() error {
 }
 
 func validateDefinitionHeader(definition *Definition) error {
+	if err := definition.Secrets.Validate(); err != nil {
+		return err
+	}
 	if definition.Version != 1 {
 		return fmt.Errorf("unsupported version %d (want 1)", definition.Version)
 	}

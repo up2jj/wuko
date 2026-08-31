@@ -46,6 +46,7 @@ func (e *Engine) conditionEnvironmentShape() conditionEnvironment {
 		"batch": map[string]any{}, "foreach": map[string]any{}, "matrix": map[string]any{},
 		"finally": map[string]any{}, "error": map[string]any{},
 		"workflow": step.WorkflowValue{}, "run": conditionRun{},
+		"secret": func(string) (string, error) { return "", fmt.Errorf("secret resolver is unavailable") },
 	}
 	for _, control := range e.backgroundControls {
 		shape[control.BindingRoot()] = map[string]any{}
@@ -79,6 +80,12 @@ func makeConditionEnvironment(definition *workflow.Definition, runDir string, st
 		"batch": bindingRoot(state.Bindings, "batch"), "foreach": bindingRoot(state.Bindings, "foreach"),
 		"matrix": bindingRoot(state.Bindings, "matrix"), "finally": bindingRoot(state.Bindings, "finally"),
 		"error": bindingRoot(state.Bindings, "error"),
+		"secret": func(reference string) (string, error) {
+			if session := definition.SecretSession(); session != nil {
+				return session.Resolve(reference)
+			}
+			return "", fmt.Errorf("secret resolver is unavailable")
+		},
 	}
 	for name, value := range state.Bindings {
 		environment[name] = value

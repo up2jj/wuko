@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"fmt"
+	"io"
 	"maps"
 	"os"
 	"reflect"
@@ -9,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/up2jj/wuko/diagnostic"
+	"github.com/up2jj/wuko/secret"
 )
 
 // LoadOptions supplies the pre-run values used to resolve composite action references.
@@ -27,6 +29,18 @@ type LoadOptions struct {
 	RunDir  string
 	// Diagnostics receives opt-in workflow loading and preparation events.
 	Diagnostics diagnostic.Reporter
+	// SecretSession reuses one provider cache and private authentication environment across
+	// loading and execution of a workflow occurrence.
+	SecretSession *secret.Session
+	// EnsureSecretAuth performs the workflow's configured secret provider authentication while
+	// preparing the definition. Only commands that execute the workflow set it: authenticating
+	// may prompt for a native login or run the configured fallback login command, which
+	// read-only inspection such as validate and tree must never do.
+	EnsureSecretAuth bool
+	Stdin            io.Reader
+	Stdout           io.Writer
+	Stderr           io.Writer
+	Interactive      bool
 	// RejectRemoteArchives prevents remote workflow loading from accepting archive payloads.
 	RejectRemoteArchives bool
 	sourceRoot           string
@@ -35,7 +49,11 @@ type LoadOptions struct {
 
 // PrepareValues applies workflow and caller overrides using the same precedence as execution.
 func PrepareValues(definition *Definition, options LoadOptions) (map[string]any, map[string]string, error) {
-	renderer, err := NewRenderer(definition.Templates)
+	session := options.SecretSession
+	if session == nil {
+		session = definition.SecretSession()
+	}
+	renderer, err := NewRendererWithSecrets(definition.Templates, session)
 	if err != nil {
 		return nil, nil, err
 	}

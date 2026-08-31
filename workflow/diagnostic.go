@@ -5,7 +5,22 @@ import (
 	"time"
 
 	"github.com/up2jj/wuko/diagnostic"
+	"github.com/up2jj/wuko/secret"
 )
+
+func secretDiagnostics(reporter diagnostic.Reporter, session *secret.Session) diagnostic.Reporter {
+	if reporter == nil || session == nil {
+		return reporter
+	}
+	return func(event diagnostic.Event) {
+		event.Message = session.Redact(event.Message)
+		event.Error = session.RedactError(event.Error)
+		for i := range event.Attributes {
+			event.Attributes[i].Value = session.Redact(event.Attributes[i].Value)
+		}
+		reporter(event)
+	}
+}
 
 func traceStart(reporter diagnostic.Reporter, phase diagnostic.Phase, location diagnostic.Location, workflowName, stepID, stepType, message string, attributes ...diagnostic.Attribute) time.Time {
 	started := time.Now()

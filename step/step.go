@@ -73,6 +73,17 @@ type Request struct {
 	// PreviousAttempt is the most recent failed attempt that produced a complete result.
 	// It is nil on the first attempt and remains immutable for the duration of Run.
 	PreviousAttempt *Result
+	// Secret resolves provider references through the current workflow occurrence. Provider
+	// session variables remain private and are never added to Env.
+	Secret func(string) (string, error)
+}
+
+// ResolveSecret resolves a secret or reports missing engine wiring.
+func (request Request) ResolveSecret(reference string) (string, error) {
+	if request.Secret == nil {
+		return "", fmt.Errorf("secret resolver is unavailable")
+	}
+	return request.Secret(reference)
 }
 
 // ServiceOptions controls how a managed service affects its owning scope.

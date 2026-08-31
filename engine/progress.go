@@ -154,6 +154,10 @@ type ProgressEvent struct {
 }
 
 func report(options Options, event ProgressEvent) {
+	if options.secretSession != nil {
+		event.Error = options.secretSession.RedactError(event.Error)
+		event.Stats = redactRunStats(event.Stats, options.secretSession.RedactError)
+	}
 	event.InvocationID = options.InvocationID
 	event.RunID = options.runID
 	event.ParentRunID = options.parentRunID
@@ -168,6 +172,31 @@ func report(options Options, event ProgressEvent) {
 		return
 	}
 	reportLegacy(options, event)
+}
+
+func redactRunStats(stats RunStats, redact func(error) error) RunStats {
+	stats.Steps = append([]StepStats(nil), stats.Steps...)
+	for i := range stats.Steps {
+		stats.Steps[i] = redactStepStats(stats.Steps[i], redact)
+	}
+	return stats
+}
+
+func redactStepStats(stats StepStats, redact func(error) error) StepStats {
+	stats.Error = redact(stats.Error)
+	stats.Attempts = append([]AttemptStats(nil), stats.Attempts...)
+	for i := range stats.Attempts {
+		stats.Attempts[i].Error = redact(stats.Attempts[i].Error)
+	}
+	stats.Iterations = append([]IterationStats(nil), stats.Iterations...)
+	for i := range stats.Iterations {
+		stats.Iterations[i].Error = redact(stats.Iterations[i].Error)
+		stats.Iterations[i].Steps = append([]StepStats(nil), stats.Iterations[i].Steps...)
+		for j := range stats.Iterations[i].Steps {
+			stats.Iterations[i].Steps[j] = redactStepStats(stats.Iterations[i].Steps[j], redact)
+		}
+	}
+	return stats
 }
 
 // runRuntime holds the state one root run shares across concurrent branches.

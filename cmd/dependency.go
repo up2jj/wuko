@@ -37,6 +37,9 @@ func resolveDependencyPlan(ctx context.Context, root *workflow.Definition, loade
 		}
 		dependencyOptions := options
 		dependencyOptions.Target = ""
+		// Every workflow in the plan shares the root's provider session, so authentication
+		// happens once, the resolve cache is shared, and one redaction set covers the run.
+		dependencyOptions.SecretSession = root.SecretSession()
 		definition, err := loader.Load(ctx, source.Path, dependencyOptions)
 		if err != nil {
 			return nil, err

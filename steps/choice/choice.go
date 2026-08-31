@@ -56,19 +56,20 @@ type resolvedChoice struct {
 }
 
 type expressionRoots struct {
-	Inputs       map[string]any            `expr:"inputs"`
-	Vars         map[string]any            `expr:"vars"`
-	Env          map[string]string         `expr:"env"`
-	Steps        map[string]any            `expr:"steps"`
-	Dependencies map[string]map[string]any `expr:"dependencies"`
-	Batch        map[string]any            `expr:"batch"`
-	Foreach      map[string]any            `expr:"foreach"`
-	Matrix       map[string]any            `expr:"matrix"`
-	Observe      map[string]any            `expr:"observe"`
-	Finally      map[string]any            `expr:"finally"`
-	Error        map[string]any            `expr:"error"`
-	Workflow     step.WorkflowValue        `expr:"workflow"`
-	Run          runValue                  `expr:"run"`
+	Inputs       map[string]any               `expr:"inputs"`
+	Vars         map[string]any               `expr:"vars"`
+	Env          map[string]string            `expr:"env"`
+	Steps        map[string]any               `expr:"steps"`
+	Dependencies map[string]map[string]any    `expr:"dependencies"`
+	Batch        map[string]any               `expr:"batch"`
+	Foreach      map[string]any               `expr:"foreach"`
+	Matrix       map[string]any               `expr:"matrix"`
+	Observe      map[string]any               `expr:"observe"`
+	Finally      map[string]any               `expr:"finally"`
+	Error        map[string]any               `expr:"error"`
+	Workflow     step.WorkflowValue           `expr:"workflow"`
+	Run          runValue                     `expr:"run"`
+	Secret       func(string) (string, error) `expr:"secret"`
 }
 
 type runValue struct {
@@ -405,6 +406,7 @@ func expressionRootsFor(request step.Request) expressionRoots {
 		Error:        bindingRoot(request.Bindings, "error"),
 		Workflow:     request.WorkflowValue(),
 		Run:          runValue{Dir: request.RunDir},
+		Secret:       request.ResolveSecret,
 	}
 }
 

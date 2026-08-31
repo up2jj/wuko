@@ -22,6 +22,7 @@ import (
 
 	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/process"
+	"github.com/up2jj/wuko/secret"
 	"gopkg.in/yaml.v3"
 )
 
@@ -176,7 +177,28 @@ func (loader *Loader) Decode(filename string, options LoadOptions) (*Definition,
 }
 
 // Prepare resolves value-dependent workflow environment and composite actions in a decoded definition.
-func (loader *Loader) Prepare(ctx context.Context, definition *Definition, options LoadOptions) error {
+func (loader *Loader) Prepare(ctx context.Context, definition *Definition, options LoadOptions) (err error) {
+	if definition.secretSession == nil {
+		definition.secretSession = options.SecretSession
+	}
+	if definition.secretSession == nil {
+		definition.secretSession = secret.NewSession(ctx, secret.Options{
+			BaseEnv: options.BaseEnv, Stdin: options.Stdin, Stdout: options.Stdout, Stderr: options.Stderr,
+			Interactive: options.Interactive,
+		})
+	}
+	session := definition.secretSession
+	// Preparation renders workflow values, which may resolve secrets, so a failure here can
+	// carry a resolved value in its message. Redact what this function returns the way
+	// engine.Run does for step failures.
+	defer func() { err = session.RedactError(err) }()
+	options.SecretSession = session
+	if options.EnsureSecretAuth {
+		if err := session.EnsureAuth(definition.Secrets); err != nil {
+			return err
+		}
+	}
+	options.Diagnostics = secretDiagnostics(options.Diagnostics, session)
 	if options.sourceRoot == "" {
 		options.sourceRoot = definition.sourceRoot
 	}
@@ -198,7 +220,7 @@ func (loader *Loader) Prepare(ctx context.Context, definition *Definition, optio
 	}
 	traceFinish(options.Diagnostics, valuesStarted, diagnostic.PhaseValues, diagnostic.StatusSucceeded, definition.Location, definition.Name, "", "", "", nil, countAttr("variables", len(vars)), countAttr("environment", len(environment)))
 	data := TemplateData(definition, options.RunDir, nil, vars, environment, nil)
-	renderer, err := NewRenderer(definition.Templates)
+	renderer, err := NewRendererWithSecrets(definition.Templates, session)
 	if err != nil {
 		return err
 	}

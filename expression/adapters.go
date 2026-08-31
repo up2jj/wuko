@@ -11,7 +11,26 @@ import (
 
 // TemplateFuncs returns the functions exposed to Wuko Go templates.
 func TemplateFuncs() template.FuncMap {
+	return TemplateFuncsWithSecret(nil)
+}
+
+// SecretResolver is the capability exposed to template and expression adapters.
+type SecretResolver interface {
+	Resolve(string) (string, error)
+}
+
+// TemplateFuncsWithSecret returns the shared template functions with secret bound to one
+// workflow occurrence. A nil resolver keeps parsing and static validation available, but calls
+// fail at execution time.
+func TemplateFuncsWithSecret(resolver SecretResolver) template.FuncMap {
+	secret := func(reference string) (string, error) {
+		if resolver == nil {
+			return "", fmt.Errorf("secret resolver is unavailable")
+		}
+		return resolver.Resolve(reference)
+	}
 	return template.FuncMap{
+		"secret":        secret,
 		"lower":         strings.ToLower,
 		"upper":         strings.ToUpper,
 		"trim":          strings.TrimSpace,

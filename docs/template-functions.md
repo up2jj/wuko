@@ -1,5 +1,9 @@
 # Template, Expr, and Lua functions
 
+The `secret(reference)` helper is available to Go templates and Expr expressions. It resolves
+1Password (`op://...`) and Bitwarden (`bw://selector/item`) references lazily; see
+[Secrets](secrets.md) for provider and authentication configuration.
+
 Wuko exposes the same deterministic, side-effect-free helpers to Go templates, Expr, and Lua.
 Go templates always render strings, while Expr and Lua preserve typed results such as booleans,
 numbers, lists, and objects.

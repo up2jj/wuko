@@ -123,6 +123,7 @@ type expressionEnvironment struct {
 	Run          struct {
 		Dir string `expr:"dir"`
 	} `expr:"run"`
+	Secret func(string) (string, error) `expr:"secret"`
 }
 
 type Runner struct {
@@ -393,7 +394,7 @@ func boolInt(value bool) int {
 }
 
 func expressionEnvironmentFor(request step.Request) expressionEnvironment {
-	value := expressionEnvironment{Inputs: request.Inputs, Vars: request.Vars, Env: request.Env, Steps: request.Steps, Dependencies: request.Dependencies,
+	value := expressionEnvironment{Inputs: request.Inputs, Vars: request.Vars, Env: request.Env, Steps: request.Steps, Dependencies: request.Dependencies, Secret: request.ResolveSecret,
 		Batch: binding(request.Bindings, "batch"), Foreach: binding(request.Bindings, "foreach"), Matrix: binding(request.Bindings, "matrix"), Workflow: request.WorkflowValue()}
 	value.Run.Dir = request.RunDir
 	return value

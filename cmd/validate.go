@@ -59,7 +59,8 @@ func newValidateCmd(deps dependencies) *cobra.Command {
 				if loader == nil {
 					loader = workflow.NewLoader(nil)
 				}
-				loadOptions := workflow.LoadOptions{Vars: vars, Env: env, BaseEnv: baseEnv, RunDir: cwd, Diagnostics: reporter}
+				loadOptions := workflow.LoadOptions{Vars: vars, Env: env, BaseEnv: baseEnv, RunDir: cwd, Diagnostics: reporter,
+					Stdin: command.InOrStdin(), Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(), Interactive: interactive(command.InOrStdin())}
 				if len(args) == 0 {
 					loadOptions.Target = source.Target
 				}

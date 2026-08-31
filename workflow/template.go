@@ -15,6 +15,7 @@ import (
 	"text/template/parse"
 
 	"github.com/up2jj/wuko/expression"
+	"github.com/up2jj/wuko/secret"
 	"gopkg.in/yaml.v3"
 )
 
@@ -58,13 +59,27 @@ func (definition *TemplateDefinition) UnmarshalYAML(node *yaml.Node) error {
 
 // Renderer parses and executes one immutable set of strict named Go templates.
 type Renderer struct {
-	base  *template.Template
-	cache sync.Map
+	base     *template.Template
+	cache    sync.Map
+	resolver expression.SecretResolver
 }
 
 // NewRenderer constructs a renderer from resolved template definitions.
 func NewRenderer(definitions map[string]TemplateDefinition) (*Renderer, error) {
-	base := newTemplate("templates")
+	return NewRendererWithSecrets(definitions, nil)
+}
+
+// NewRendererWithSecrets constructs a renderer whose secret helper is bound to one workflow
+// occurrence. A nil session is accepted and keeps parsing and static validation available while
+// secret calls fail at execution time.
+func NewRendererWithSecrets(definitions map[string]TemplateDefinition, session *secret.Session) (*Renderer, error) {
+	// A nil *secret.Session must not be boxed into the interface: the resulting value is
+	// non-nil and defeats every nil check downstream.
+	var resolver expression.SecretResolver
+	if session != nil {
+		resolver = session
+	}
+	base := newTemplate("templates", resolver)
 	names := slices.Sorted(maps.Keys(definitions))
 	for _, name := range names {
 		if !identifierPattern.MatchString(name) {
@@ -78,7 +93,7 @@ func NewRenderer(definitions map[string]TemplateDefinition) (*Renderer, error) {
 		if strings.TrimSpace(body) == "" {
 			return nil, fmt.Errorf("template %q body must not be empty", name)
 		}
-		parsed, err := newTemplate(name).Parse(body)
+		parsed, err := newTemplate(name, resolver).Parse(body)
 		if err != nil {
 			return nil, fmt.Errorf("template %q: %w", name, err)
 		}
@@ -94,7 +109,7 @@ func NewRenderer(definitions map[string]TemplateDefinition) (*Renderer, error) {
 	if err := validateTemplateReferences(base); err != nil {
 		return nil, err
 	}
-	return &Renderer{base: base}, nil
+	return &Renderer{base: base, resolver: resolver}, nil
 }
 
 // Validate parses one template string and checks named-template references.
@@ -141,7 +156,7 @@ func (renderer *Renderer) compile(value string, cache bool) (*template.Template,
 			return cached.(*template.Template), nil
 		}
 	}
-	parsed, err := newTemplate(executionTemplateName).Parse(value)
+	parsed, err := newTemplate(executionTemplateName, renderer.resolver).Parse(value)
 	if err != nil {
 		return nil, err
 	}
@@ -152,7 +167,7 @@ func (renderer *Renderer) compile(value string, cache bool) (*template.Template,
 	}
 	// Parse under a second root name so an explicit definition of the execution root
 	// cannot be mistaken for the value's own parse tree.
-	definitionCheck, err := newTemplate(definitionCheckTemplateName).Parse(value)
+	definitionCheck, err := newTemplate(definitionCheckTemplateName, renderer.resolver).Parse(value)
 	if err != nil {
 		return nil, err
 	}
@@ -179,8 +194,8 @@ func (renderer *Renderer) compile(value string, cache bool) (*template.Template,
 	return actual.(*template.Template), nil
 }
 
-func newTemplate(name string) *template.Template {
-	return template.New(name).Funcs(expression.TemplateFuncs()).Option("missingkey=error")
+func newTemplate(name string, resolver expression.SecretResolver) *template.Template {
+	return template.New(name).Funcs(expression.TemplateFuncsWithSecret(resolver)).Option("missingkey=error")
 }
 
 func validateTemplateReferences(tmpl *template.Template) error {

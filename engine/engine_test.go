@@ -81,6 +81,28 @@ func TestRunConditionUsesRuntimeState(t *testing.T) {
 	}
 }
 
+func TestConditionUsesSecretHelper(t *testing.T) {
+	engine := New(step.NewRegistry())
+	program, err := engine.compileCondition(`secret("bw://password/Registry") == "resolved"`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	environment := engine.conditionEnvironmentShape()
+	environment["secret"] = func(reference string) (string, error) {
+		if reference != "bw://password/Registry" {
+			t.Fatalf("reference = %q", reference)
+		}
+		return "resolved", nil
+	}
+	matched, err := evaluateConditionProgram(program, environment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !matched {
+		t.Fatal("condition did not match")
+	}
+}
+
 func TestValidateRejectsInvalidOrNonBooleanCondition(t *testing.T) {
 	registry := newTestRegistry(t, map[string]step.Builder{"capture": func(raw map[string]any) (step.Runner, error) {
 		return countingRunner{}, nil

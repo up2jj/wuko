@@ -95,7 +95,9 @@ func runWorkflowUI(command *cobra.Command, deps dependencies, args []string, con
 	if loader == nil {
 		loader = workflow.NewLoader(nil)
 	}
-	loadOptions := workflow.LoadOptions{Vars: vars, Env: env, BaseEnv: baseEnv, RunDir: cwd, Diagnostics: reporters.Diagnostic}
+	loadOptions := workflow.LoadOptions{Vars: vars, Env: env, BaseEnv: baseEnv, RunDir: cwd, Diagnostics: reporters.Diagnostic,
+		Stdin: command.InOrStdin(), Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(), Interactive: interactive(command.InOrStdin()),
+		EnsureSecretAuth: true}
 	definition, cleanup, err := target.decode(command.Context(), loader, loadOptions)
 	if err != nil {
 		return err

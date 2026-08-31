@@ -49,22 +49,23 @@ type Config struct {
 }
 
 type expressionEnvironment struct {
-	Inputs       map[string]any            `expr:"inputs"`
-	Vars         map[string]any            `expr:"vars"`
-	Env          map[string]string         `expr:"env"`
-	Steps        map[string]any            `expr:"steps"`
-	Dependencies map[string]map[string]any `expr:"dependencies"`
-	Batch        map[string]any            `expr:"batch"`
-	Foreach      map[string]any            `expr:"foreach"`
-	Matrix       map[string]any            `expr:"matrix"`
-	Observe      map[string]any            `expr:"observe"`
-	Finally      map[string]any            `expr:"finally"`
-	Error        map[string]any            `expr:"error"`
-	Workflow     step.WorkflowValue        `expr:"workflow"`
-	Run          runValue                  `expr:"run"`
-	Current      any                       `expr:"current"`
-	Path         string                    `expr:"path"`
-	Index        int                       `expr:"index"`
+	Inputs       map[string]any               `expr:"inputs"`
+	Vars         map[string]any               `expr:"vars"`
+	Env          map[string]string            `expr:"env"`
+	Steps        map[string]any               `expr:"steps"`
+	Dependencies map[string]map[string]any    `expr:"dependencies"`
+	Batch        map[string]any               `expr:"batch"`
+	Foreach      map[string]any               `expr:"foreach"`
+	Matrix       map[string]any               `expr:"matrix"`
+	Observe      map[string]any               `expr:"observe"`
+	Finally      map[string]any               `expr:"finally"`
+	Error        map[string]any               `expr:"error"`
+	Workflow     step.WorkflowValue           `expr:"workflow"`
+	Run          runValue                     `expr:"run"`
+	Current      any                          `expr:"current"`
+	Path         string                       `expr:"path"`
+	Index        int                          `expr:"index"`
+	Secret       func(string) (string, error) `expr:"secret"`
 }
 
 type runValue struct {
@@ -318,6 +319,7 @@ func (r *Runner) baseEnvironment(request step.Request) expressionEnvironment {
 		Finally: binding(request.Bindings, "finally"), Error: binding(request.Bindings, "error"),
 		Workflow: request.WorkflowValue(),
 		Run:      runValue{Dir: request.RunDir},
+		Secret:   request.ResolveSecret,
 	}
 }
 

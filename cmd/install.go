@@ -148,7 +148,9 @@ func installMarketplace(command *cobra.Command, deps dependencies, source string
 		if _, selected := selectedSet[index]; !selected {
 			continue
 		}
-		loadOptions := workflow.LoadOptions{Vars: invocation.vars, Env: invocation.env, BaseEnv: invocation.baseEnv, RunDir: invocation.cwd, Diagnostics: diagnosticsFor(command, deps, invocation.cwd)}
+		loadOptions := workflow.LoadOptions{Vars: invocation.vars, Env: invocation.env, BaseEnv: invocation.baseEnv, RunDir: invocation.cwd, Diagnostics: diagnosticsFor(command, deps, invocation.cwd),
+			Stdin: command.InOrStdin(), Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(), Interactive: interactive(command.InOrStdin()),
+			EnsureSecretAuth: true}
 		definition, directory, cleanup, err := invocation.loader.LoadMarketplacePackage(command.Context(), source, item, loadOptions)
 		if err != nil {
 			return fmt.Errorf("preparing marketplace package %q: %w", item.Name, err)
@@ -244,7 +246,9 @@ func installSingleWorkflow(command *cobra.Command, deps dependencies, source str
 }
 
 func prepareInstallSource(command *cobra.Command, deps dependencies, invocation installInvocation, source string) (*preparedInstallSource, error) {
-	loadOptions := workflow.LoadOptions{Vars: invocation.vars, Env: invocation.env, BaseEnv: invocation.baseEnv, RunDir: invocation.cwd, Diagnostics: diagnosticsFor(command, deps, invocation.cwd)}
+	loadOptions := workflow.LoadOptions{Vars: invocation.vars, Env: invocation.env, BaseEnv: invocation.baseEnv, RunDir: invocation.cwd, Diagnostics: diagnosticsFor(command, deps, invocation.cwd),
+		Stdin: command.InOrStdin(), Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(), Interactive: interactive(command.InOrStdin()),
+		EnsureSecretAuth: true}
 	sourceDefinition, cleanup, err := decodeInstallSource(command.Context(), invocation.loader, source, loadOptions)
 	if err != nil {
 		return nil, err
@@ -283,7 +287,9 @@ func installPreparedWorkflow(command *cobra.Command, deps dependencies, config w
 	}
 	defer os.Remove(stage)
 
-	stagedOptions := workflow.LoadOptions{Vars: invocation.vars, Env: invocation.env, BaseEnv: invocation.baseEnv, RunDir: workflowDir, Diagnostics: diagnosticsFor(command, deps, workflowDir), Lifecycle: true}
+	stagedOptions := workflow.LoadOptions{Vars: invocation.vars, Env: invocation.env, BaseEnv: invocation.baseEnv, RunDir: workflowDir, Diagnostics: diagnosticsFor(command, deps, workflowDir), Lifecycle: true,
+		Stdin: command.InOrStdin(), Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(), Interactive: interactive(command.InOrStdin()),
+		EnsureSecretAuth: true}
 	definition, err := invocation.loader.Load(command.Context(), stage, stagedOptions)
 	if err != nil {
 		return fmt.Errorf("preparing workflow for installation: %w", err)
@@ -340,7 +346,9 @@ func installPreparedMarketplacePackage(command *cobra.Command, deps dependencies
 		return fmt.Errorf("copying workflow package: %w", err)
 	}
 	stagedPath := filepath.Join(stage, "wuko.yaml")
-	stagedOptions := workflow.LoadOptions{Vars: invocation.vars, Env: invocation.env, BaseEnv: invocation.baseEnv, RunDir: stage, Diagnostics: diagnosticsFor(command, deps, stage), Lifecycle: true}
+	stagedOptions := workflow.LoadOptions{Vars: invocation.vars, Env: invocation.env, BaseEnv: invocation.baseEnv, RunDir: stage, Diagnostics: diagnosticsFor(command, deps, stage), Lifecycle: true,
+		Stdin: command.InOrStdin(), Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(), Interactive: interactive(command.InOrStdin()),
+		EnsureSecretAuth: true}
 	definition, err := invocation.loader.Load(command.Context(), stagedPath, stagedOptions)
 	if err != nil {
 		return fmt.Errorf("preparing workflow package for installation: %w", err)
@@ -523,7 +531,9 @@ func uninstallWorkflow(command *cobra.Command, deps dependencies, name string, c
 	if err != nil {
 		return err
 	}
-	loadOptions := workflow.LoadOptions{Vars: vars, Env: env, BaseEnv: baseEnv, RunDir: runDir, Diagnostics: diagnosticsFor(command, deps, runDir), Lifecycle: true}
+	loadOptions := workflow.LoadOptions{Vars: vars, Env: env, BaseEnv: baseEnv, RunDir: runDir, Diagnostics: diagnosticsFor(command, deps, runDir), Lifecycle: true,
+		Stdin: command.InOrStdin(), Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(), Interactive: interactive(command.InOrStdin()),
+		EnsureSecretAuth: true}
 	definition, err := loader.Load(command.Context(), path, loadOptions)
 	if err != nil {
 		return fmt.Errorf("loading workflow %q: %w", name, err)

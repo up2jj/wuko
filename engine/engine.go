@@ -16,6 +16,7 @@ import (
 	wukoexpr "github.com/up2jj/wuko/expression"
 	storepkg "github.com/up2jj/wuko/keyvalue"
 	"github.com/up2jj/wuko/process"
+	"github.com/up2jj/wuko/secret"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
 )
@@ -76,7 +77,8 @@ type Options struct {
 	// cleanups scopes managed-resource cleanup to a background control iteration, whose
 	// resources must be released when the iteration ends rather than accumulating for
 	// the life of the run. Nil everywhere else, meaning the run-level scope.
-	cleanups *cleanupScope
+	cleanups      *cleanupScope
+	secretSession *secret.Session
 	// scopedEnv captures the active transparent env block for deferred cleanup, which may
 	// execute after the block itself has restored State.Env.
 	scopedEnv map[string]string
@@ -124,6 +126,7 @@ func New(registry *step.Registry, options ...Option) *Engine {
 }
 
 func (e *Engine) Validate(ctx context.Context, definition *workflow.Definition, options Options) error {
+	options.secretSession = definition.SecretSession()
 	started := time.Now()
 	trace(options, diagnostic.Event{Phase: diagnostic.PhaseValidation, Status: diagnostic.StatusStarted, Time: started, WorkflowName: definition.Name, Location: definition.Location, Message: "validating workflow"})
 	if err := definition.ValidateStructure(); err != nil {
@@ -136,7 +139,7 @@ func (e *Engine) Validate(ctx context.Context, definition *workflow.Definition, 
 	}
 	if options.renderer == nil {
 		var err error
-		options.renderer, err = workflow.NewRenderer(definition.Templates)
+		options.renderer, err = workflow.NewRendererWithSecrets(definition.Templates, definition.SecretSession())
 		if err != nil {
 			return err
 		}
@@ -378,6 +381,10 @@ func (e *Engine) validateSteps(ctx context.Context, definition *workflow.Definit
 }
 
 func (e *Engine) Run(ctx context.Context, definition *workflow.Definition, options Options) (runState *State, runErr error) {
+	options.secretSession = definition.SecretSession()
+	if session := definition.SecretSession(); session != nil {
+		defer func() { runErr = session.RedactError(runErr) }()
+	}
 	rootRun := options.runtime == nil
 	options = prepareRunOptions(options)
 	if rootRun {
@@ -391,7 +398,7 @@ func (e *Engine) Run(ctx context.Context, definition *workflow.Definition, optio
 	options.runID = correlation.NewRunID()
 	options.stepRunID = ""
 	if options.renderer == nil {
-		options.renderer, runErr = workflow.NewRenderer(definition.Templates)
+		options.renderer, runErr = workflow.NewRendererWithSecrets(definition.Templates, definition.SecretSession())
 		if runErr != nil {
 			return nil, runErr
 		}
@@ -897,7 +904,11 @@ func (e *Engine) executeStep(ctx context.Context, definition *workflow.Definitio
 		}
 		var configuration []diagnostic.Attribute
 		if options.Diagnostics != nil {
-			configuration = []diagnostic.Attribute{diagnostic.Attr("config", diagnostic.RedactedJSON(rendered))}
+			configText := diagnostic.RedactedJSON(rendered)
+			if session := definition.SecretSession(); session != nil {
+				configText = session.Redact(configText)
+			}
+			configuration = []diagnostic.Attribute{diagnostic.Attr("config", configText)}
 		}
 		traceStep(options, definition, workflowStep, diagnostic.PhaseRender, diagnostic.StatusSucceeded, renderStarted, "", nil, configuration...)
 		raw, ok := rendered.(map[string]any)
@@ -1127,7 +1138,7 @@ func runStatsIdentity(options Options) RunStats {
 }
 
 func initialState(definition *workflow.Definition, options Options) (*State, error) {
-	vars, environment, err := workflow.PrepareValues(definition, workflow.LoadOptions{Vars: options.Vars, Env: options.Env, BaseEnv: options.BaseEnv, RunDir: options.RunDir})
+	vars, environment, err := workflow.PrepareValues(definition, workflow.LoadOptions{Vars: options.Vars, Env: options.Env, BaseEnv: options.BaseEnv, RunDir: options.RunDir, SecretSession: definition.SecretSession()})
 	if err != nil {
 		return nil, err
 	}
@@ -1142,6 +1153,10 @@ func templateData(definition *workflow.Definition, runDir string, state *State) 
 }
 
 func makeRequest(definition *workflow.Definition, stepID string, options Options, state *State, attempt, maxAttempts int, operationID string) step.Request {
+	var resolveSecret func(string) (string, error)
+	if session := definition.SecretSession(); session != nil {
+		resolveSecret = session.Resolve
+	}
 	return step.Request{
 		StepID: stepID, WorkflowName: definition.Name, WorkflowSource: definition.Location.Source, WorkflowDir: definition.Dir,
 		WorkflowDirBorrowed: definition.DirBorrowed, WorkflowTimezone: definition.Timezone,
@@ -1155,6 +1170,7 @@ func makeRequest(definition *workflow.Definition, stepID string, options Options
 		}),
 		Executor: options.Executor,
 		Services: reportingServiceLauncher{launcher: options.services, options: options, workflowName: definition.Name},
+		Secret:   resolveSecret,
 	}
 }
 
@@ -1191,6 +1207,7 @@ func (e *Engine) validateAction(ctx context.Context, definition *workflow.Defini
 	defer cleanup()
 	inputs := actionValidationInputs(workflowStep.Action)
 	inner := &workflow.Definition{Version: 1, Name: workflowStep.Action.Name, Timezone: definition.Timezone, Templates: workflowStep.Action.Templates, Dir: dir, DirBorrowed: workflowStep.Action.DirBorrowed, Steps: workflowStep.Action.Steps, Finally: workflowStep.Action.Finally, Vars: map[string]any{}, Env: workflow.Environment{}, Location: workflowStep.Action.Location}
+	inner.InheritSecretSession(definition)
 	return e.Validate(ctx, inner, Options{
 		InvocationID: options.InvocationID,
 		inputs:       inputs, BaseEnv: state.Env, RunDir: options.RunDir,
@@ -1208,13 +1225,18 @@ func (e *Engine) prepareActionExecutor(definition *workflow.Definition, workflow
 		return nil, nil, err
 	}
 	if options.Diagnostics != nil {
-		traceStep(options, definition, workflowStep, diagnostic.PhaseActionInputs, diagnostic.StatusDetail, time.Time{}, "resolved action inputs", nil, diagnostic.Attr("config", diagnostic.RedactedJSON(inputs)))
+		configText := diagnostic.RedactedJSON(inputs)
+		if session := definition.SecretSession(); session != nil {
+			configText = session.Redact(configText)
+		}
+		traceStep(options, definition, workflowStep, diagnostic.PhaseActionInputs, diagnostic.StatusDetail, time.Time{}, "resolved action inputs", nil, diagnostic.Attr("config", configText))
 	}
 	dir, cleanup, err := workflowStep.Action.Materialize()
 	if err != nil {
 		return nil, nil, err
 	}
 	inner := &workflow.Definition{Version: 1, Name: workflowStep.Action.Name, Timezone: definition.Timezone, Templates: workflowStep.Action.Templates, Dir: dir, DirBorrowed: workflowStep.Action.DirBorrowed, Steps: workflowStep.Action.Steps, Finally: workflowStep.Action.Finally, Vars: map[string]any{}, Env: workflow.Environment{}, Location: workflowStep.Action.Location}
+	inner.InheritSecretSession(definition)
 	execute := func(ctx context.Context, request step.Request) (step.Result, error) {
 		innerState, err := e.Run(ctx, inner, Options{
 			InvocationID: options.InvocationID,
