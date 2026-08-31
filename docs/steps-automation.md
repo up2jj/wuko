@@ -200,15 +200,21 @@ Restart policies are `never` (default), `on_failure`, and `always`. `allowed_exi
 to `[0]`. Restart eligibility is evaluated before `exit_on_end` or `exit_on_failure`. Lifecycle
 shutdown never triggers a restart or exit policy, and neither does a service that fails before it
 becomes ready: that failure is the step's own result. A liveness failure stops the service the same
-way the lifecycle does, so `shutdown.command` runs before a restart replaces the instance. Under an
-executor that cannot stop a process by cancellation, such as Docker, a restart policy requires
-`shutdown.command` and is rejected without one.
+way the lifecycle does, so `shutdown.command` runs before a restart replaces the instance. An
+executor that cannot stop a process by cancellation rejects a restart policy that has no
+`shutdown.command`, because each restart would otherwise leave the previous instance running.
 
 ### Shutdown
 
 Local processes receive `SIGTERM` as a process group, wait up to `shutdown.timeout` (10 seconds by
 default), then escalate to `SIGKILL`. Supported configured signals are `SIGTERM`, `SIGINT`,
 `SIGHUP`, and `SIGQUIT`. `parent_only` avoids signaling descendants.
+
+Docker-hosted services follow the same rules from inside the container. The Docker API cannot
+signal an exec, so a managed service is launched through the session's init shell, which records
+the service PID and then `exec`s it, leaving its argv unchanged. Stopping runs a second exec that
+signals that PID. This needs a shell as the executor's `init.command`, which is the default; a
+session configured with a non-shell init can only stop its services with `shutdown.command`.
 
 ### 10. Signal shutdown
 
@@ -413,8 +419,9 @@ steps:
 
 Services stop and join before their executor session closes. Fan-out inside an executor retains the
 existing `max_concurrency: 1` restriction: replicas start serially but remain active together.
-Docker-hosted services need an explicit shutdown command: a canceled exec keeps running inside the
-container until the session closes, so a restart policy without one is rejected.
+Docker-hosted services are supervised through the session's init shell, so `shutdown.signal`,
+`shutdown.timeout`, and `parent_only` behave as they do locally. A shutdown command remains useful
+when a service needs an orderly drain rather than a signal.
 
 ```yaml
 version: 1

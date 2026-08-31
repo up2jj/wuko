@@ -5,11 +5,15 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -291,5 +295,167 @@ func TestDockerExecutorCancellationWaitsForStdinPump(t *testing.T) {
 	}
 	if stdin.reading.Load() {
 		t.Error("options.Stdin still being read after Run() returned")
+	}
+}
+
+func dockerServiceSession(t *testing.T, client *fakeClient, config map[string]any) *dockerExecutorSession {
+	t.Helper()
+	providerValue, err := NewExecutor(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := providerValue.(*ExecutorProvider)
+	provider.newClient = func() (dockerClient, error) { return client, nil }
+	session, err := provider.Open(t.Context(), executor.Request{WorkflowName: "services", RunDir: t.TempDir(), Stdout: io.Discard, Stderr: io.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return session.(*dockerExecutorSession)
+}
+
+func TestDockerExecutorSignalsCanceledServiceInsideTheContainer(t *testing.T) {
+	client := &fakeClient{execStreamBlocks: true}
+	session := dockerServiceSession(t, client, map[string]any{"image": "alpine:3.22"})
+	if !session.CancelStopsProcess() {
+		t.Fatal("a shell session cannot stop its services")
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	started := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		_, err := session.Run(ctx, process.Options{
+			Command: "./bin/api", Args: []string{"--port", "8080", "a b"},
+			Started:           func() { close(started) },
+			TerminationSignal: syscall.SIGINT, TerminationGracePeriod: 2 * time.Second,
+			Stdout: io.Discard, Stderr: io.Discard,
+		})
+		done <- err
+	}()
+	select {
+	case <-started:
+	case <-time.After(10 * time.Second):
+		t.Fatal("service exec never started")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Run() error = %v, want context.Canceled", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Run() did not return after cancellation")
+	}
+
+	if len(client.execCreated) != 2 {
+		t.Fatalf("execs = %d, want a launch and a stop", len(client.execCreated))
+	}
+	launch := client.execCreated[0].Cmd
+	if len(launch) < 5 || launch[0] != "/bin/sh" || launch[1] != "-c" || launch[3] != "wuko-service" {
+		t.Fatalf("launch cmd = %#v", launch)
+	}
+	if !strings.Contains(launch[2], `exec "$@"`) || !strings.Contains(launch[2], "/tmp/wuko-service-1.pid") {
+		t.Fatalf("launch script = %q", launch[2])
+	}
+	// The wrapper must leave the service argv byte-exact.
+	if !slices.Equal(launch[4:], []string{"./bin/api", "--port", "8080", "a b"}) {
+		t.Fatalf("wrapped argv = %#v", launch[4:])
+	}
+	stop := client.execCreated[1].Cmd
+	if len(stop) != 3 || stop[0] != "/bin/sh" || stop[1] != "-c" {
+		t.Fatalf("stop cmd = %#v", stop)
+	}
+	for _, want := range []string{"/tmp/wuko-service-1.pid", `kill -2 "-$pid"`, `kill -9 "$pid"`, `-lt 2 `} {
+		if !strings.Contains(stop[2], want) {
+			t.Fatalf("stop script = %q, want %q", stop[2], want)
+		}
+	}
+}
+
+func TestDockerExecutorWithoutAShellLeavesServicesUnsupervised(t *testing.T) {
+	client := &fakeClient{}
+	session := dockerServiceSession(t, client, map[string]any{
+		"image": "gcr.io/distroless/base", "init": map[string]any{"command": "/pause"},
+	})
+	if session.CancelStopsProcess() {
+		t.Fatal("a session without a shell reported that it can stop its services")
+	}
+	if _, err := session.Run(t.Context(), process.Options{
+		Command: "./bin/api", Started: func() {}, Stdout: io.Discard, Stderr: io.Discard,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(client.execOptions.Cmd, []string{"./bin/api"}) {
+		t.Fatalf("cmd = %#v, want the unwrapped service command", client.execOptions.Cmd)
+	}
+}
+
+// The supervision scripts only ever run inside a container, so they are exercised here against a
+// local shell: a syntax error or a wrong signal would otherwise surface only against a daemon.
+func TestDockerServiceScriptsAreValidPOSIXShell(t *testing.T) {
+	service := serviceExec{shell: "/bin/sh", pidPath: "/tmp/wuko-service-1.pid"}
+	for name, script := range map[string]string{
+		"launch":           service.launchScript(),
+		"stop group":       service.stopScript(process.Options{TerminationSignal: syscall.SIGINT, TerminationGracePeriod: 3 * time.Second}),
+		"stop parent only": service.stopScript(process.Options{TerminationParentOnly: true}),
+	} {
+		t.Run(name, func(t *testing.T) {
+			check := exec.Command("/bin/sh", "-n")
+			check.Stdin = strings.NewReader(script)
+			if output, err := check.CombinedOutput(); err != nil {
+				t.Fatalf("sh -n: %v\n%s\n%s", err, output, script)
+			}
+		})
+	}
+}
+
+func TestDockerServiceScriptsRecordAndStopTheService(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		command []string
+		grace   time.Duration
+	}{
+		{name: "signal", command: []string{"sleep", "60"}, grace: 5 * time.Second},
+		// A service that ignores the configured signal must still be gone after the grace period.
+		{name: "escalation", command: []string{"/bin/sh", "-c", `trap "" TERM; while :; do sleep 1; done`}, grace: time.Second},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			service := serviceExec{shell: "/bin/sh", pidPath: filepath.Join(t.TempDir(), "service.pid")}
+			// parent_only keeps the local run from signaling this test's own process group.
+			options := process.Options{TerminationGracePeriod: test.grace, TerminationParentOnly: true}
+			launch := exec.Command("/bin/sh", append([]string{"-c", service.launchScript(), "wuko-service"}, test.command...)...)
+			if err := launch.Start(); err != nil {
+				t.Fatal(err)
+			}
+			exited := make(chan error, 1)
+			go func() { exited <- launch.Wait() }()
+			defer func() { _ = launch.Process.Kill() }()
+
+			recorded := ""
+			for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); {
+				if data, err := os.ReadFile(service.pidPath); err == nil && len(strings.TrimSpace(string(data))) > 0 {
+					recorded = strings.TrimSpace(string(data))
+					break
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+			// exec replaces the shell, so the recorded PID is the service itself.
+			if recorded != strconv.Itoa(launch.Process.Pid) {
+				t.Fatalf("recorded pid = %q, want the service pid %d", recorded, launch.Process.Pid)
+			}
+
+			stop := exec.Command("/bin/sh", "-c", service.stopScript(options))
+			if output, err := stop.CombinedOutput(); err != nil {
+				t.Fatalf("stop script: %v\n%s", err, output)
+			}
+			select {
+			case <-exited:
+			case <-time.After(10 * time.Second):
+				t.Fatal("the stop script left the service running")
+			}
+			if _, err := os.Stat(service.pidPath); !os.IsNotExist(err) {
+				t.Fatalf("pid file survived the stop script: %v", err)
+			}
+		})
 	}
 }

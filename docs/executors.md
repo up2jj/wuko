@@ -96,11 +96,13 @@ working-directory blocks may wrap an executor block, and may also appear inside 
 cannot be placed inside a batch, foreach, or matrix body, concurrent group, or composite action.
 
 Managed processes are stopped and joined before the executor session closes. Replicas in a
-sequential fan-out start one at a time but remain alive together. Docker services need an explicit
-`shutdown.command`: Unix host signals do not address a container exec, and the Docker API can only
-detach from one, so a canceled exec keeps running until its session container is removed. A
-`process` step configuring `restart` inside a Docker executor scope is rejected without one, because
-each restart would otherwise leave the previous instance alive.
+sequential fan-out start one at a time but remain alive together. Unix host signals do not address
+a container exec and the Docker API can only detach from one, so a Docker-hosted service is
+launched through the session's `init.command` shell: it records the service PID inside the
+container and `exec`s the service, and stopping runs a second exec that signals that PID and
+escalates to `SIGKILL` after `shutdown.timeout`. A session whose `init.command` is not a shell
+cannot do this, and there a `process` step configuring `restart` is rejected unless it also sets
+`shutdown.command`, because each restart would otherwise leave the previous instance alive.
 
 ## devenv executor
 

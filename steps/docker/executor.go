@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
+	"time"
 
 	"github.com/containerd/errdefs"
 	"github.com/moby/moby/api/pkg/stdcopy"
@@ -26,6 +28,10 @@ import (
 )
 
 const defaultExecutorWorkspace = "/workspace"
+
+// defaultServiceGracePeriod matches the process package default for a service that does not
+// configure shutdown.timeout.
+const defaultServiceGracePeriod = 10 * time.Second
 
 type ExecutorConfig struct {
 	Image     string           `yaml:"image"`
@@ -158,6 +164,71 @@ func executorInit(config ExecutorConfig) InitConfig {
 	return InitConfig{Command: "/bin/sh", Args: []string{"-c", "trap 'exit 0' TERM INT; while :; do sleep 86400; done"}}
 }
 
+// serviceShell reports the shell this session can use to supervise a managed service. The Docker
+// API can detach from an exec but never signal it, so a service is launched through a shell that
+// records its container PID and stopped by a second exec that signals that PID. The session's
+// init command is that shell: keeping the container alive already depends on it, so an image
+// that works as an executor at all has it. A session configured with a non-shell init keeps the
+// older behavior, where only an explicit shutdown command can stop a service.
+func serviceShell(config ExecutorConfig) (string, bool) {
+	shell := executorInit(config).Command
+	switch filepath.Base(shell) {
+	case "sh", "bash", "ash", "dash", "ksh", "zsh":
+		return shell, true
+	}
+	return "", false
+}
+
+// serviceExec is the state needed to stop one supervised service exec.
+type serviceExec struct {
+	shell   string
+	pidPath string
+	user    string
+}
+
+func (service serviceExec) launchScript() string {
+	// exec replaces the shell, so the recorded PID is the service itself and its argv is
+	// unchanged. A read-only /tmp leaves no PID file, which the stop script tolerates.
+	return "echo $$ > '" + service.pidPath + `' 2>/dev/null; exec "$@"`
+}
+
+func (service serviceExec) stopScript(options process.Options) string {
+	signal := int(options.TerminationSignal)
+	if signal == 0 {
+		signal = int(syscall.SIGTERM)
+	}
+	grace := options.TerminationGracePeriod
+	if grace <= 0 {
+		grace = defaultServiceGracePeriod
+	}
+	seconds := int(grace / time.Second)
+	if seconds < 1 {
+		seconds = 1
+	}
+	quoted := "'" + service.pidPath + "'"
+	// The exec is usually its own process group leader, so the group is signaled first and the
+	// bare PID is the fallback. parent_only asks for the direct process only.
+	send := func(number int) string {
+		if options.TerminationParentOnly {
+			return fmt.Sprintf(`kill -%d "$pid" 2>/dev/null`, number)
+		}
+		return fmt.Sprintf(`{ kill -%d "-$pid" 2>/dev/null || kill -%d "$pid" 2>/dev/null; }`, number, number)
+	}
+	return strings.Join([]string{
+		// read is a shell builtin, so stopping needs nothing from the image that keeping the
+		// container alive does not already need.
+		"pid=",
+		"[ -r " + quoted + " ] && read pid < " + quoted,
+		`[ -n "$pid" ] || exit 0`,
+		send(signal) + " || { rm -f " + quoted + "; exit 0; }",
+		"n=0",
+		fmt.Sprintf(`while [ "$n" -lt %d ] && kill -0 "$pid" 2>/dev/null; do sleep 1; n=$((n+1)); done`, seconds),
+		send(int(syscall.SIGKILL)),
+		"rm -f " + quoted,
+		"exit 0",
+	}, "\n")
+}
+
 func (provider *ExecutorProvider) Open(ctx context.Context, request executor.Request) (executor.Session, error) {
 	if err := validateExecutorConfig(provider.config); err != nil {
 		return nil, err
@@ -196,6 +267,7 @@ type dockerExecutorSession struct {
 	containerID string
 	mappings    []pathMapping
 	closed      bool
+	services    int
 }
 
 func (session *dockerExecutorSession) startLocked(ctx context.Context) error {
@@ -313,9 +385,18 @@ func (session *dockerExecutorSession) Run(ctx context.Context, options process.O
 	if user == "" {
 		user = session.config.User
 	}
+	command := append([]string{options.Command}, options.Args...)
+	var service *serviceExec
+	if options.Started != nil {
+		if shell, ok := serviceShell(session.config); ok {
+			session.services++
+			service = &serviceExec{shell: shell, pidPath: fmt.Sprintf("/tmp/wuko-service-%d.pid", session.services), user: user}
+			command = append([]string{shell, "-c", service.launchScript(), "wuko-service"}, command...)
+		}
+	}
 	created, err := session.client.ExecCreate(ctx, session.containerID, client.ExecCreateOptions{
 		User: user, AttachStdin: options.Stdin != nil, AttachStdout: true, AttachStderr: true,
-		Env: environmentList(options.Env), WorkingDir: workingDir, Cmd: append([]string{options.Command}, options.Args...),
+		Env: environmentList(options.Env), WorkingDir: workingDir, Cmd: command,
 	})
 	if err != nil {
 		return process.Result{}, fmt.Errorf("creating Docker exec for %s: %w", options.Command, err)
@@ -357,9 +438,13 @@ func (session *dockerExecutorSession) Run(ctx context.Context, options process.O
 	select {
 	case copyErr = <-copyDone:
 	case <-ctx.Done():
-		// Closing the stream only detaches: the exec keeps running inside the container. A
-		// one-shot exec is reaped by removing the container; a service exec cannot be, so it
-		// runs until the session closes unless the step configures a shutdown command.
+		// Closing the stream only detaches, so the exec must be signaled through the container
+		// before the stream goes away. A one-shot exec is instead reaped by removing the
+		// container, which a shared service session must keep open for its siblings.
+		var stopErr error
+		if service != nil {
+			stopErr = session.stopService(ctx, *service, options)
+		}
 		attached.Close()
 		var removeErr error
 		if options.Started == nil {
@@ -376,7 +461,7 @@ func (session *dockerExecutorSession) Run(ctx context.Context, options process.O
 			<-inputDone
 		}
 		result := executorResult(stdout, stderr, -1)
-		return result, errors.Join(ctx.Err(), removeErr)
+		return result, errors.Join(ctx.Err(), removeErr, stopErr)
 	}
 	var inputErr error
 	if options.Stdin != nil {
@@ -399,10 +484,55 @@ func (session *dockerExecutorSession) Run(ctx context.Context, options process.O
 	return result, nil
 }
 
-// CancelStopsProcess reports that a canceled exec keeps running: the Docker API can detach
-// from an exec but cannot signal it, so the command runs until the session container is
-// removed. Services hosted here need an explicit shutdown command to be stopped on demand.
-func (session *dockerExecutorSession) CancelStopsProcess() bool { return false }
+// CancelStopsProcess reports whether this session can stop a canceled service exec. It can when
+// the container has the shell that wraps a managed service, because stopping then signals the
+// recorded PID from inside the container. A non-shell init leaves the older behavior, where the
+// exec keeps running until the session container is removed.
+func (session *dockerExecutorSession) CancelStopsProcess() bool {
+	_, ok := serviceShell(session.config)
+	return ok
+}
+
+// stopService signals a supervised service inside the container. The Docker API offers no way to
+// signal an exec, so this runs a second exec that reads the PID recorded at launch, sends the
+// configured signal, and escalates to SIGKILL once the grace period expires.
+func (session *dockerExecutorSession) stopService(ctx context.Context, service serviceExec, options process.Options) error {
+	grace := options.TerminationGracePeriod
+	if grace <= 0 {
+		grace = defaultServiceGracePeriod
+	}
+	stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), grace+cleanupTimeout)
+	defer cancel()
+	session.mu.Lock()
+	containerID, closed := session.containerID, session.closed
+	session.mu.Unlock()
+	if closed || containerID == "" {
+		return nil
+	}
+	created, err := session.client.ExecCreate(stopCtx, containerID, client.ExecCreateOptions{
+		User: service.user, AttachStdout: true, AttachStderr: true,
+		Cmd: []string{service.shell, "-c", service.stopScript(options)},
+	})
+	if err != nil {
+		if errdefs.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("creating Docker exec to stop %s: %w", options.Command, err)
+	}
+	attached, err := session.client.ExecAttach(stopCtx, created.ID, client.ExecAttachOptions{})
+	if err != nil {
+		if errdefs.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("attaching Docker exec to stop %s: %w", options.Command, err)
+	}
+	defer attached.Close()
+	// Draining the stream is how the API reports that the stop exec finished.
+	if _, err := io.Copy(io.Discard, attached.Reader); err != nil && !expectedStreamError(err) {
+		return fmt.Errorf("stopping Docker service %s: %w", options.Command, err)
+	}
+	return nil
+}
 
 func (session *dockerExecutorSession) translatePath(value string) (string, error) {
 	if value == "" {

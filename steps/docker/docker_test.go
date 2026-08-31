@@ -344,7 +344,9 @@ type fakeClient struct {
 	removedIDs              []string
 	removedOptions          client.ContainerRemoveOptions
 	execOptions             client.ExecCreateOptions
+	execCreated             []client.ExecCreateOptions
 	execCreates             int
+	execAttaches            int
 	execStreamBlocks        bool
 	execPeer                net.Conn
 }
@@ -443,12 +445,16 @@ func (f *fakeClient) ContainerStart(context.Context, string, client.ContainerSta
 
 func (f *fakeClient) ExecCreate(_ context.Context, _ string, options client.ExecCreateOptions) (client.ExecCreateResult, error) {
 	f.execOptions = options
+	f.execCreated = append(f.execCreated, options)
 	f.execCreates++
 	return client.ExecCreateResult{ID: "exec-id"}, nil
 }
 
 func (f *fakeClient) ExecAttach(context.Context, string, client.ExecAttachOptions) (client.ExecAttachResult, error) {
-	if f.execStreamBlocks {
+	f.execAttaches++
+	// Only the first attach models a live stream. Later ones are the short helper execs a
+	// session runs to stop a service, which finish on their own.
+	if f.execStreamBlocks && f.execAttaches == 1 {
 		// Model a real hijacked stream: reads and writes both block on the same
 		// connection and only unblock when the caller closes it. The peer is kept
 		// open so nothing completes on its own.
