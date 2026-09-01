@@ -818,3 +818,34 @@ func makeTarGzip(t *testing.T, files map[string]archiveTestFile) []byte {
 	}
 	return buffer.Bytes()
 }
+
+func TestActionWorkingDirectoryScopeKeepsInvocationProvenance(t *testing.T) {
+	renderer, err := NewRenderer(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition := &Definition{Name: "scoped"}
+	data := TemplateDataWithRun(definition, "/run", []string{"mise", "direnv"}, nil, nil, nil, nil)
+	for _, testCase := range []struct {
+		name        string
+		runDirKnown bool
+		wantDir     string
+	}{
+		{name: "known run directory", runDirKnown: true, wantDir: filepath.Join("/run", "child")},
+		{name: "dynamic run directory", runDirKnown: false, wantDir: dynamicRunDir},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			scoped, _, _ := actionWorkingDirectoryScope(renderer, data, "/run", testCase.runDirKnown, "child")
+			rendered, err := RenderString(`{{ .run.dir }}:{{ index .run.environment_loaders 0 }}`, scoped)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if rendered != testCase.wantDir+":mise" {
+				t.Fatalf("rendered = %q", rendered)
+			}
+		})
+	}
+	if len(data["run"].(map[string]any)["environment_loaders"].([]string)) != 2 {
+		t.Fatalf("source data mutated: %#v", data["run"])
+	}
+}

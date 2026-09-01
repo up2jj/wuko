@@ -75,16 +75,12 @@ type expressionEnvironment struct {
 	Finally      map[string]any               `expr:"finally"`
 	Error        map[string]any               `expr:"error"`
 	Workflow     step.WorkflowValue           `expr:"workflow"`
-	Run          runValue                     `expr:"run"`
+	Run          step.RunValue                `expr:"run"`
 	Secret       func(string) (string, error) `expr:"secret"`
 	// Current and Found describe the stored value an update replaces. They are nil and
 	// false for every other operation.
 	Current any  `expr:"current"`
 	Found   bool `expr:"found"`
-}
-
-type runValue struct {
-	Dir string `expr:"dir"`
 }
 
 // Runner executes a key-value operation.
@@ -407,7 +403,7 @@ func environment(request step.Request) expressionEnvironment {
 		Foreach: binding(request.Bindings, "foreach"), Matrix: binding(request.Bindings, "matrix"), Observe: binding(request.Bindings, "observe"),
 		Finally: binding(request.Bindings, "finally"), Error: binding(request.Bindings, "error"),
 		Workflow: request.WorkflowValue(),
-		Run:      runValue{Dir: request.RunDir},
+		Run:      request.RunValue(),
 		Secret:   request.ResolveSecret,
 	}
 }

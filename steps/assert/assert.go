@@ -30,12 +30,8 @@ type expressionEnvironment struct {
 	Finally      map[string]any               `expr:"finally"`
 	Error        map[string]any               `expr:"error"`
 	Workflow     step.WorkflowValue           `expr:"workflow"`
-	Run          runValue                     `expr:"run"`
+	Run          step.RunValue                `expr:"run"`
 	Secret       func(string) (string, error) `expr:"secret"`
-}
-
-type runValue struct {
-	Dir string `expr:"dir"`
 }
 
 type Runner struct {
@@ -80,7 +76,7 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 		Finally:      bindingRoot(request.Bindings, "finally"),
 		Error:        bindingRoot(request.Bindings, "error"),
 		Workflow:     request.WorkflowValue(),
-		Run:          runValue{Dir: request.RunDir},
+		Run:          request.RunValue(),
 		Secret:       request.ResolveSecret,
 	})
 	if err != nil {

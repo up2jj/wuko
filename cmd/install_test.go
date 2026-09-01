@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+	envload "github.com/up2jj/wuko/environment"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/steps/shell"
 	"github.com/up2jj/wuko/workflow"
@@ -27,10 +28,12 @@ func lifecycleTestRegistry(t *testing.T) *step.Registry {
 func lifecycleTestCommand(root, home string, registry *step.Registry, interactive bool, confirm func(context.Context, io.Reader, io.Writer, string, bool) (bool, error)) *cobra.Command {
 	return newRootCmd(dependencies{
 		stdin: bytes.NewReader(nil), stdout: &bytes.Buffer{}, stderr: &bytes.Buffer{},
-		cwd:           func() (string, error) { return root, nil },
-		homeDir:       func() (string, error) { return home, nil },
-		configDir:     func() (string, error) { return filepath.Join(home, "config"), nil },
-		environment:   func(context.Context, string) (map[string]string, error) { return map[string]string{}, nil },
+		cwd:       func() (string, error) { return root, nil },
+		homeDir:   func() (string, error) { return home, nil },
+		configDir: func() (string, error) { return filepath.Join(home, "config"), nil },
+		environment: envload.InvocationLoaderFunc(func(context.Context, string, map[string]string, envload.Policy) (envload.InvocationEnvironment, error) {
+			return envload.InvocationEnvironment{Values: map[string]string{}}, nil
+		}),
 		isInteractive: func(io.Reader) bool { return interactive },
 		confirm:       confirm,
 		registry:      registry,

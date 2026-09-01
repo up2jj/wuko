@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -42,8 +43,9 @@ type Options struct {
 	// Dependencies contains outputs from direct prerequisite workflows keyed by alias.
 	Dependencies map[string]map[string]any
 	// BaseEnv overrides the current process environment when non-nil.
-	BaseEnv map[string]string
-	RunDir  string
+	BaseEnv            map[string]string
+	EnvironmentLoaders []string
+	RunDir             string
 	// LocalValueDir is empty when local persistence is unavailable, such as for a remote workflow.
 	LocalValueDir  string
 	GlobalValueDir string
@@ -98,10 +100,11 @@ type Options struct {
 // completed ancestor deltas without sharing the mutable State itself. The validation rules that keep this true live
 // in validateSteps in workflow/types.go.
 type State struct {
-	Inputs map[string]any
-	Vars   map[string]any
-	Env    map[string]string
-	Steps  map[string]any
+	Inputs             map[string]any
+	Vars               map[string]any
+	Env                map[string]string
+	EnvironmentLoaders []string
+	Steps              map[string]any
 	// Outputs contains values produced by a return control or declared output expressions.
 	Outputs map[string]any
 	// Dependencies contains immutable outputs from direct prerequisite workflows.
@@ -1138,18 +1141,18 @@ func runStatsIdentity(options Options) RunStats {
 }
 
 func initialState(definition *workflow.Definition, options Options) (*State, error) {
-	vars, environment, err := workflow.PrepareValues(definition, workflow.LoadOptions{Vars: options.Vars, Env: options.Env, BaseEnv: options.BaseEnv, RunDir: options.RunDir, SecretSession: definition.SecretSession()})
+	vars, environment, err := workflow.PrepareValues(definition, workflow.LoadOptions{Vars: options.Vars, Env: options.Env, BaseEnv: options.BaseEnv, EnvironmentLoaders: options.EnvironmentLoaders, RunDir: options.RunDir, SecretSession: definition.SecretSession()})
 	if err != nil {
 		return nil, err
 	}
 	return &State{
-		Inputs: cloneMap(options.inputs), Vars: vars, Env: environment, Steps: make(map[string]any), Outputs: make(map[string]any),
+		Inputs: cloneMap(options.inputs), Vars: vars, Env: environment, EnvironmentLoaders: slices.Clone(options.EnvironmentLoaders), Steps: make(map[string]any), Outputs: make(map[string]any),
 		Dependencies: cloneDependencies(options.Dependencies), presetVars: cloneMap(vars),
 	}, nil
 }
 
 func templateData(definition *workflow.Definition, runDir string, state *State) map[string]any {
-	return workflow.TemplateDataWithDependencies(definition, runDir, state.Inputs, state.Vars, state.Env, state.Steps, state.Dependencies, state.Bindings)
+	return workflow.TemplateDataWithRunDependencies(definition, runDir, state.EnvironmentLoaders, state.Inputs, state.Vars, state.Env, state.Steps, state.Dependencies, state.Bindings)
 }
 
 func makeRequest(definition *workflow.Definition, stepID string, options Options, state *State, attempt, maxAttempts int, operationID string) step.Request {
@@ -1160,7 +1163,7 @@ func makeRequest(definition *workflow.Definition, stepID string, options Options
 	return step.Request{
 		StepID: stepID, WorkflowName: definition.Name, WorkflowSource: definition.Location.Source, WorkflowDir: definition.Dir,
 		WorkflowDirBorrowed: definition.DirBorrowed, WorkflowTimezone: definition.Timezone,
-		RunDir: options.RunDir, LocalValueDir: options.LocalValueDir, GlobalValueDir: options.GlobalValueDir,
+		RunDir: options.RunDir, EnvironmentLoaders: slices.Clone(state.EnvironmentLoaders), LocalValueDir: options.LocalValueDir, GlobalValueDir: options.GlobalValueDir,
 		Inputs: cloneMap(state.Inputs), Vars: cloneMap(state.Vars), PresetVars: cloneMap(state.presetVars), Env: maps.Clone(state.Env),
 		Steps: cloneMap(state.Steps), Dependencies: cloneDependencies(state.Dependencies), Bindings: cloneMap(state.Bindings), Stdin: options.Stdin, Stdout: options.Stdout,
 		Stderr: options.Stderr, Interactive: options.Interactive,
@@ -1210,7 +1213,7 @@ func (e *Engine) validateAction(ctx context.Context, definition *workflow.Defini
 	inner.InheritSecretSession(definition)
 	return e.Validate(ctx, inner, Options{
 		InvocationID: options.InvocationID,
-		inputs:       inputs, BaseEnv: state.Env, RunDir: options.RunDir,
+		inputs:       inputs, BaseEnv: state.Env, EnvironmentLoaders: slices.Clone(state.EnvironmentLoaders), RunDir: options.RunDir,
 		LocalValueDir: actionLocalValueDir(workflowStep, options), GlobalValueDir: options.GlobalValueDir,
 		Stdin: options.Stdin, Stdout: options.Stdout, Stderr: options.Stderr, Interactive: options.Interactive,
 		Diagnostics: options.Diagnostics, runID: options.runID, parentRunID: options.parentRunID,
@@ -1240,7 +1243,7 @@ func (e *Engine) prepareActionExecutor(definition *workflow.Definition, workflow
 	execute := func(ctx context.Context, request step.Request) (step.Result, error) {
 		innerState, err := e.Run(ctx, inner, Options{
 			InvocationID: options.InvocationID,
-			inputs:       inputs, BaseEnv: state.Env, RunDir: options.RunDir,
+			inputs:       inputs, BaseEnv: state.Env, EnvironmentLoaders: slices.Clone(state.EnvironmentLoaders), RunDir: options.RunDir,
 			LocalValueDir: actionLocalValueDir(workflowStep, options), GlobalValueDir: options.GlobalValueDir,
 			Stdin: options.Stdin, Stdout: options.Stdout, Stderr: options.Stderr,
 			Interactive: options.Interactive, Progress: options.Progress,
@@ -1256,7 +1259,7 @@ func (e *Engine) prepareActionExecutor(definition *workflow.Definition, workflow
 		if innerState.didReturn {
 			return step.Result{Outputs: cloneMap(innerState.Outputs)}, nil
 		}
-		environment := map[string]any{"inputs": innerState.Inputs, "vars": innerState.Vars, "steps": innerState.Steps, "env": innerState.Env, "workflow": map[string]any{"name": inner.Name, "dir": inner.Dir, "timezone": inner.Timezone}, "run": map[string]any{"dir": options.RunDir}}
+		environment := map[string]any{"inputs": innerState.Inputs, "vars": innerState.Vars, "steps": innerState.Steps, "env": innerState.Env, "workflow": map[string]any{"name": inner.Name, "dir": inner.Dir, "timezone": inner.Timezone}, "run": map[string]any{"dir": options.RunDir, "environment_loaders": slices.Clone(state.EnvironmentLoaders)}}
 		outputs := make(map[string]any, len(workflowStep.Action.Outputs))
 		outputsStarted := time.Now()
 		traceStep(options, definition, workflowStep, diagnostic.PhaseActionOutputs, diagnostic.StatusStarted, time.Time{}, "evaluating action outputs", nil)

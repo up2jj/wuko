@@ -246,7 +246,7 @@ func evaluateWaitCondition(program *vm.Program, request step.Request, result map
 	environment := waitEnvironment{
 		"inputs": request.Inputs, "vars": request.Vars, "env": request.Env,
 		"steps": request.Steps, "dependencies": request.Dependencies,
-		"workflow": request.WorkflowValue(), "run": conditionRun{Dir: request.RunDir},
+		"workflow": request.WorkflowValue(), "run": request.RunValue(),
 		"result": result, "error": errorValue, "poll": poll, "secret": request.ResolveSecret,
 	}
 	for name, binding := range request.Bindings {

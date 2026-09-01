@@ -221,6 +221,10 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
   resolve from the enclosing `.run.dir`; the prior scope is restored when the block ends. Compose
   conditions by nesting an anonymous `if` block, and treat a directory block directly inside
   `concurrent` as one atomic sequential branch occupying one concurrency slot.
+- Read `.run.environment_loaders` when behavior must depend on invocation environment activation;
+  it is the ordered list of `mise`, `asdf`, and `direnv` loaders that actually changed the
+  environment, and remains unchanged through working-directory, worktree, action, control,
+  lifecycle, and executor scopes. A loader that ran without activating anything is omitted.
 - An `env` block transparently overlays string-valued environment entries for all descendants.
   Values render together on entry from the enclosing runtime state, so they may use earlier step
   outputs but not sibling entries in the same map. Nested blocks override outer keys and restore

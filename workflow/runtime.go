@@ -25,8 +25,9 @@ type LoadOptions struct {
 	// install and uninstall steps themselves remain workflow-level.
 	Lifecycle bool
 	// BaseEnv overrides the current process environment when non-nil.
-	BaseEnv map[string]string
-	RunDir  string
+	BaseEnv            map[string]string
+	EnvironmentLoaders []string
+	RunDir             string
 	// Diagnostics receives opt-in workflow loading and preparation events.
 	Diagnostics diagnostic.Reporter
 	// SecretSession reuses one provider cache and private authentication environment across
@@ -66,7 +67,7 @@ func PrepareValues(definition *Definition, options LoadOptions) (map[string]any,
 		host = maps.Clone(options.BaseEnv)
 	}
 	wfEnv := make(map[string]string, len(definition.Env))
-	root := TemplateData(definition, options.RunDir, nil, vars, host, nil)
+	root := TemplateDataWithRun(definition, options.RunDir, options.EnvironmentLoaders, nil, vars, host, nil)
 	keys := slices.Sorted(maps.Keys(definition.Env))
 	for _, key := range keys {
 		value, err := renderer.Render(definition.Env[key], root)
@@ -83,16 +84,20 @@ func PrepareValues(definition *Definition, options LoadOptions) (map[string]any,
 
 // TemplateData constructs the common Go-template roots for a workflow or action.
 func TemplateData(definition *Definition, runDir string, inputs, vars map[string]any, environment map[string]string, steps map[string]any) map[string]any {
-	return TemplateDataWithBindings(definition, runDir, inputs, vars, environment, steps, nil)
+	return TemplateDataWithRun(definition, runDir, nil, inputs, vars, environment, steps)
 }
 
-// TemplateDataWithBindings constructs template roots including active workflow-control bindings.
-func TemplateDataWithBindings(definition *Definition, runDir string, inputs, vars map[string]any, environment map[string]string, steps, bindings map[string]any) map[string]any {
-	return TemplateDataWithDependencies(definition, runDir, inputs, vars, environment, steps, nil, bindings)
+// TemplateDataWithRun constructs template roots with invocation environment provenance.
+func TemplateDataWithRun(definition *Definition, runDir string, environmentLoaders []string, inputs, vars map[string]any, environment map[string]string, steps map[string]any) map[string]any {
+	return templateData(definition, runDir, environmentLoaders, inputs, vars, environment, steps, nil, nil)
 }
 
-// TemplateDataWithDependencies constructs template roots including direct workflow dependencies.
-func TemplateDataWithDependencies(definition *Definition, runDir string, inputs, vars map[string]any, environment map[string]string, steps map[string]any, dependencies map[string]map[string]any, bindings map[string]any) map[string]any {
+// TemplateDataWithRunDependencies includes invocation provenance and dependency outputs.
+func TemplateDataWithRunDependencies(definition *Definition, runDir string, environmentLoaders []string, inputs, vars map[string]any, environment map[string]string, steps map[string]any, dependencies map[string]map[string]any, bindings map[string]any) map[string]any {
+	return templateData(definition, runDir, environmentLoaders, inputs, vars, environment, steps, dependencies, bindings)
+}
+
+func templateData(definition *Definition, runDir string, environmentLoaders []string, inputs, vars map[string]any, environment map[string]string, steps map[string]any, dependencies map[string]map[string]any, bindings map[string]any) map[string]any {
 	if inputs == nil {
 		inputs = map[string]any{}
 	}
@@ -116,7 +121,7 @@ func TemplateDataWithDependencies(definition *Definition, runDir string, inputs,
 			"dir":      definition.Dir,
 			"timezone": definition.Timezone,
 		},
-		"run": map[string]any{"dir": runDir},
+		"run": map[string]any{"dir": runDir, "environment_loaders": slices.Clone(environmentLoaders)},
 	}
 	for key, value := range bindings {
 		result[key] = Clone(value)

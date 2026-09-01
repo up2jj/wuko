@@ -17,7 +17,8 @@ Find the smallest evidence-backed cause of a Wuko workflow failure before changi
    - Template or condition evaluation: malformed or undefined named templates, missing roots,
      skipped-step references, caller/action scope confusion, string versus typed values, or
      non-boolean expressions.
-   - Environment and directories: `--env`, `--var`, direnv, workflow directory, run directory, and relative files.
+   - Environment and directories: `--env`, `--var`, `--env-loader`, `WUKO_ENV_LOADERS`, mise,
+     asdf, direnv, `.run.environment_loaders`, workflow directory, run directory, and relative files.
    - Runtime step behavior: shell exit status, Lua errors, HTTP responses, filesystem effects, Docker setup, or agent exit codes.
    - JSONPath selection: query syntax after template rendering, missing `vars` or `steps` source paths, `all` list semantics, and `one` cardinality failures.
    - Semantic versions: strict version syntax, normalized `v` prefixes, precedence versus build

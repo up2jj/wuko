@@ -354,7 +354,7 @@ func concurrentBranchLabel(declaration workflow.Step, index int) string {
 
 func cloneState(state *State) *State {
 	return &State{
-		Inputs: cloneMap(state.Inputs), Vars: cloneMap(state.Vars), Env: maps.Clone(state.Env),
+		Inputs: cloneMap(state.Inputs), Vars: cloneMap(state.Vars), Env: maps.Clone(state.Env), EnvironmentLoaders: slices.Clone(state.EnvironmentLoaders),
 		Steps: cloneMap(state.Steps), Outputs: cloneMap(state.Outputs), Dependencies: cloneDependencies(state.Dependencies), Bindings: cloneMap(state.Bindings),
 		presetVars: state.presetVars,
 	}

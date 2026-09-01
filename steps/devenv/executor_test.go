@@ -80,6 +80,22 @@ func TestOpenActivatesConfiguredProfilesOutsideDevenv(t *testing.T) {
 	}
 }
 
+func TestOpenUsesManagerPreparedPathToLaunchDevenv(t *testing.T) {
+	root := t.TempDir()
+	command := &recordedCommand{}
+	provider := &ExecutorProvider{config: ExecutorConfig{Directory: root}, command: command.run}
+	session, err := provider.Open(t.Context(), executor.Request{RunDir: root, Env: map[string]string{"PATH": "/managed/bin:/bin"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := session.Close(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if command.options.Command != "devenv" || command.options.Env["PATH"] != "/managed/bin:/bin" {
+		t.Fatalf("version command = %#v", command.options)
+	}
+}
+
 func TestOpenRejectsDifferentActiveRoot(t *testing.T) {
 	provider := &ExecutorProvider{config: ExecutorConfig{Directory: t.TempDir()}, command: (&recordedCommand{}).run}
 	_, err := provider.Open(t.Context(), executor.Request{RunDir: t.TempDir(), Env: map[string]string{"DEVENV_ROOT": t.TempDir()}})

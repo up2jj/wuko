@@ -76,10 +76,11 @@ func runWorkflow(command *cobra.Command, deps dependencies, args []string, confi
 	if err != nil {
 		return err
 	}
-	baseEnv, err := invocationEnvironment(command, deps, cwd)
+	invocationEnv, err := invocationEnvironment(command, deps, cwd)
 	if err != nil {
 		return err
 	}
+	baseEnv, environmentLoaders := environmentValues(invocationEnv)
 	var target workflowRunTarget
 	if config.workflowFile != "" {
 		path, err := filepath.Abs(config.workflowFile)
@@ -114,7 +115,7 @@ func runWorkflow(command *cobra.Command, deps dependencies, args []string, confi
 	if loader == nil {
 		loader = workflow.NewLoader(nil)
 	}
-	loadOptions := workflow.LoadOptions{Vars: vars, Env: env, BaseEnv: baseEnv, RunDir: cwd, Diagnostics: reporters.Diagnostic,
+	loadOptions := workflow.LoadOptions{Vars: vars, Env: env, BaseEnv: baseEnv, EnvironmentLoaders: environmentLoaders, RunDir: cwd, Diagnostics: reporters.Diagnostic,
 		Stdin: command.InOrStdin(), Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(), Interactive: interactive(command.InOrStdin()),
 		EnsureSecretAuth: true}
 	definition, cleanup, err := target.load(command.Context(), loader, loadOptions)
@@ -141,7 +142,7 @@ func runWorkflow(command *cobra.Command, deps dependencies, args []string, confi
 		}
 		return engine.Options{
 			InvocationID: reporters.InvocationID(),
-			Vars:         vars, Env: env, BaseEnv: baseEnv, RunDir: cwd, Stdin: command.InOrStdin(),
+			Vars:         vars, Env: env, BaseEnv: baseEnv, EnvironmentLoaders: environmentLoaders, RunDir: cwd, Stdin: command.InOrStdin(),
 			Dependencies:  dependencies,
 			LocalValueDir: localValueDir, GlobalValueDir: filepath.Join(configDir, "wuko", "values"),
 			Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(),
@@ -257,15 +258,4 @@ func requireDirectlyInvokable(definition *workflow.Definition) error {
 		return nil
 	}
 	return fmt.Errorf("workflow %q is not directly invokable", definition.Name)
-}
-
-func invocationEnvironment(command *cobra.Command, deps dependencies, cwd string) (map[string]string, error) {
-	if deps.environment == nil {
-		return nil, nil
-	}
-	environment, err := deps.environment(command.Context(), cwd)
-	if err != nil {
-		return nil, err
-	}
-	return environment, nil
 }

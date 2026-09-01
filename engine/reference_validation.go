@@ -77,7 +77,7 @@ func newReferenceScope(state *State) *referenceScope {
 		"steps":        schemaForAnyMap(state.Steps),
 		"dependencies": schemaForDependencies(state.Dependencies),
 		"workflow":     closedReference("name", "dir", "timezone"),
-		"run":          closedReference("dir"),
+		"run":          closedReference("dir", "environment_loaders"),
 	}}
 	for name, value := range state.Bindings {
 		scope.addBinding(name, value)

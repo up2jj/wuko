@@ -62,13 +62,13 @@ func TestRunConditionUsesRuntimeState(t *testing.T) {
 		workflow.Step{ID: "prepare", Type: "capture", With: map[string]any{"value": true}},
 		workflow.Step{
 			ID: "consume", Type: "capture",
-			If:   `hasKey(steps, "prepare") && steps.prepare.value && vars.result && env.MODE == "test" && workflow.name == "conditional" && run.dir != ""`,
+			If:   `hasKey(steps, "prepare") && steps.prepare.value && vars.result && env.MODE == "test" && workflow.name == "conditional" && run.dir != "" && "mise" in run.environment_loaders`,
 			With: map[string]any{"value": "consumed"},
 		},
 	)
 	definition.Vars = map[string]any{"result": nil}
 	state, err := New(registry).Run(t.Context(), definition, Options{
-		Env: map[string]string{"MODE": "test"}, RunDir: t.TempDir(), Stdout: io.Discard, Stderr: io.Discard,
+		Env: map[string]string{"MODE": "test"}, EnvironmentLoaders: []string{"mise", "direnv"}, RunDir: t.TempDir(), Stdout: io.Discard, Stderr: io.Discard,
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -14,6 +14,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	envload "github.com/up2jj/wuko/environment"
 	"github.com/up2jj/wuko/step"
 	keyvaluestep "github.com/up2jj/wuko/steps/key_value"
 	luastep "github.com/up2jj/wuko/steps/lua"
@@ -820,12 +821,14 @@ func TestRunCommandUsesInvocationEnvironment(t *testing.T) {
 name: environment
 env:
   DERIVED: "{{ .env.FROM_DIRENV }}"
+  LOADER: "{{ index .run.environment_loaders 0 }}"
   PRIORITY: workflow
 steps:
   - id: environment
     type: shell
+    if: '"direnv" in run.environment_loaders'
     with:
-      script: "printf '%s:%s' \"$DERIVED\" \"$PRIORITY\""
+      script: "printf '%s:%s:%s' \"$DERIVED\" \"$PRIORITY\" \"$LOADER\""
 `
 	if err := os.WriteFile(filepath.Join(workflowDir, "environment.yaml"), []byte(data), 0o644); err != nil {
 		t.Fatal(err)
@@ -838,12 +841,12 @@ steps:
 	command := newRootCmd(dependencies{
 		stdin: bytes.NewReader(nil), stdout: &output, stderr: &output,
 		cwd: func() (string, error) { return root, nil },
-		environment: func(_ context.Context, dir string) (map[string]string, error) {
+		environment: envload.InvocationLoaderFunc(func(_ context.Context, dir string, _ map[string]string, _ envload.Policy) (envload.InvocationEnvironment, error) {
 			if dir != root {
 				t.Fatalf("dir = %q, want %q", dir, root)
 			}
-			return map[string]string{"FROM_DIRENV": "loaded", "PRIORITY": "direnv"}, nil
-		},
+			return envload.InvocationEnvironment{Values: map[string]string{"FROM_DIRENV": "loaded", "PRIORITY": "direnv"}, Loaders: []string{"direnv"}}, nil
+		}),
 		homeDir:   func() (string, error) { return filepath.Join(root, "home"), nil },
 		configDir: func() (string, error) { return filepath.Join(root, "config"), nil },
 		registry:  registry,
@@ -852,7 +855,7 @@ steps:
 	if err := command.ExecuteContext(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), "loaded:cli") {
+	if !strings.Contains(output.String(), "loaded:cli:direnv") {
 		t.Fatalf("output = %q", output.String())
 	}
 }

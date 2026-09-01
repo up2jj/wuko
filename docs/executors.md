@@ -139,6 +139,13 @@ host-side. Devenv must be version 2.2 or newer.
 user profiles remain active. If Wuko is already running inside devenv, it reuses the active root and
 profile identity; a configured directory or profile set that does not match is rejected.
 
+Invocation environment loaders and the devenv executor are separate layers. mise, asdf, or
+direnv may make the `devenv` executable available and may supply an already active `DEVENV_*`
+environment. The executor consumes that prepared environment, reuses a matching active devenv,
+or enters `devenv shell` when inactive. Inside the block, devenv owns the child command
+environment. Devenv is therefore not listed in `.run.environment_loaders`, and selecting
+`--env-loader none` does not disable an explicitly declared devenv executor.
+
 SecretSpec modes are `auto`, `runtime`, `inherit`, and `disabled`. Runtime mode invokes
 `secretspec run --` for each child command and keeps secret values out of workflow state and
 diagnostics. `auto` enables runtime mode when `secretspec.toml` or active SecretSpec configuration

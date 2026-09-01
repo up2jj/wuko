@@ -53,6 +53,24 @@ func TestExecutorScopeReceivesEnvironmentBlock(t *testing.T) {
 	}
 }
 
+func TestExecutorScopePreservesInvocationEnvironmentLoaders(t *testing.T) {
+	scoped := &recordingExecutor{}
+	definition := testDefinition(t, "loader-executor", workflow.Step{
+		Executor: &workflow.ExecutorScope{Type: "recording", With: map[string]any{}},
+		Steps: []workflow.Step{{ID: "run", Type: "shell", If: `"direnv" in run.environment_loaders`, With: map[string]any{
+			"command": "echo", "args": []any{"{{ index .run.environment_loaders 0 }}"},
+		}}},
+	})
+	if _, err := executorTestEngine(t, scoped).Run(t.Context(), definition, Options{
+		EnvironmentLoaders: []string{"direnv"}, RunDir: t.TempDir(), Stdout: io.Discard, Stderr: io.Discard,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(scoped.commands, ","); got != "echo direnv" {
+		t.Fatalf("commands = %q", got)
+	}
+}
+
 func (executor *recordingExecutor) Close(context.Context) error {
 	executor.closed++
 	return nil

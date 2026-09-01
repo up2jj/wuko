@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/expr-lang/expr"
 	"github.com/expr-lang/expr/vm"
@@ -11,10 +12,6 @@ import (
 )
 
 type conditionEnvironment = map[string]any
-
-type conditionRun struct {
-	Dir string `expr:"dir"`
-}
 
 func (e *Engine) compileCondition(condition workflow.Condition) (*vm.Program, error) {
 	program, err := wukoexpr.Compile(
@@ -45,7 +42,7 @@ func (e *Engine) conditionEnvironmentShape() conditionEnvironment {
 		"steps": map[string]any{}, "dependencies": map[string]map[string]any{},
 		"batch": map[string]any{}, "foreach": map[string]any{}, "matrix": map[string]any{},
 		"finally": map[string]any{}, "error": map[string]any{},
-		"workflow": step.WorkflowValue{}, "run": conditionRun{},
+		"workflow": step.WorkflowValue{}, "run": step.RunValue{},
 		"secret": func(string) (string, error) { return "", fmt.Errorf("secret resolver is unavailable") },
 	}
 	for _, control := range e.backgroundControls {
@@ -76,7 +73,7 @@ func makeConditionEnvironment(definition *workflow.Definition, runDir string, st
 		"workflow": step.WorkflowValue{
 			Name: definition.Name, Dir: definition.Dir, Timezone: definition.Timezone,
 		},
-		"run":   conditionRun{Dir: runDir},
+		"run":   step.RunValue{Dir: runDir, EnvironmentLoaders: slices.Clone(state.EnvironmentLoaders)},
 		"batch": bindingRoot(state.Bindings, "batch"), "foreach": bindingRoot(state.Bindings, "foreach"),
 		"matrix": bindingRoot(state.Bindings, "matrix"), "finally": bindingRoot(state.Bindings, "finally"),
 		"error": bindingRoot(state.Bindings, "error"),

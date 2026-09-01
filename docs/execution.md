@@ -1070,8 +1070,46 @@ input/output boundary.
 ## Environment and templates
 
 Environment precedence is step environment, CLI `--env`, workflow environment, then the host
-environment. When installed, `direnv` supplies the host environment for `run` and `validate`; its
-applicable `.envrc` must already be allowed.
+environment. Before loading a workflow, Wuko prepares that host environment with an invocation
+environment-loader chain. Automatic mode is the default: the nearest native mise configuration
+selects mise, while `.tool-versions` selects asdf when available and otherwise mise; an installed
+direnv runs afterward. A native mise file wins over `.tool-versions` in the same directory. The
+search climbs from the invocation directory and stops at your home directory, so configuration in
+a shared parent such as `/Users` or `/` never selects a manager.
+
+Steer the chain explicitly with repeatable `--env-loader` flags:
+
+```sh
+wuko run build --env-loader mise --env-loader direnv
+wuko run build --env-loader mise,direnv
+wuko validate --env-loader asdf
+wuko run build --env-loader none
+```
+
+`WUKO_ENV_LOADERS=mise,direnv` supplies the default when no flag is present. Valid values are
+`auto`, `none`, `mise`, `asdf`, and `direnv`, repeated or comma-separated. `auto` and `none` must
+be used alone; an explicit chain accepts at most one of mise or asdf, followed optionally by
+direnv. Flags replace the environment variable. Explicit loaders are required to be installed.
+Automatic mode treats a missing direnv as a no-op, but a manager selected by a discovered marker
+is required: when a mise file or `.tool-versions` applies and no matching executable is on `PATH`,
+the invocation fails rather than running with an unmanaged toolchain. Wuko does not install tool
+versions, trust configuration, or modify manager files; a `.tool-versions` naming an uninstalled
+version is not an error here. An applicable `.envrc` must already be allowed.
+
+The ordered loaders that actually changed the invocation environment are available as
+`.run.environment_loaders` in templates, `run.environment_loaders` in expressions, and
+`wuko.run.environment_loaders` in Lua. A loader that ran without activating anything is omitted:
+mise when it exported no variables, asdf when its shims directory does not exist, and direnv
+without an active `.envrc`. The value is always a list and is empty when no loader applied:
+
+```yaml
+steps:
+  - id: managed_build
+    type: shell
+    if: '"mise" in run.environment_loaders'
+    with:
+      command: make
+```
 
 Strings use strict Go templates. Templates can read `.vars`, `.env`, `.steps`, `.workflow`,
 `.run`, and action `.inputs`. See [Templates](templates.md) and

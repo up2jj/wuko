@@ -50,12 +50,8 @@ type expressionEnvironment struct {
 	Finally      map[string]any               `expr:"finally"`
 	Error        map[string]any               `expr:"error"`
 	Workflow     step.WorkflowValue           `expr:"workflow"`
-	Run          runValue                     `expr:"run"`
+	Run          step.RunValue                `expr:"run"`
 	Secret       func(string) (string, error) `expr:"secret"`
-}
-
-type runValue struct {
-	Dir string `expr:"dir"`
 }
 
 type runtime struct {
@@ -178,7 +174,7 @@ func (r *Runner) resolveArgs(ctx context.Context, request step.Request) (map[str
 			Finally:      bindingRoot(request.Bindings, "finally"),
 			Error:        bindingRoot(request.Bindings, "error"),
 			Workflow:     request.WorkflowValue(),
-			Run:          runValue{Dir: request.RunDir},
+			Run:          request.RunValue(),
 			Secret:       request.ResolveSecret,
 		})
 		if err != nil {
@@ -234,7 +230,7 @@ func (r *runtime) module(state *glua.LState) (*glua.LTable, error) {
 		"steps":        r.request.Steps,
 		"dependencies": r.request.Dependencies,
 		"workflow":     map[string]any{"name": r.request.WorkflowName, "dir": r.request.WorkflowDir, "timezone": r.request.WorkflowTimezone},
-		"run":          map[string]any{"dir": r.request.RunDir},
+		"run":          map[string]any{"dir": r.request.RunDir, "environment_loaders": slices.Clone(r.request.EnvironmentLoaders)},
 	} {
 		converted, err := toLua(state, value)
 		if err != nil {

@@ -109,6 +109,7 @@ wuko.output("roots", {
   workflow_name = wuko.workflow.name,
   workflow_dir = wuko.workflow.dir,
   run_dir = wuko.run.dir,
+  environment_loaders = wuko.run.environment_loaders,
 })
 `})
 	if err != nil {
@@ -116,7 +117,7 @@ wuko.output("roots", {
 	}
 	steps := map[string]any{"decode": map[string]any{"value": []any{map[string]any{"name": "api"}}}}
 	result, err := runner.Run(t.Context(), step.Request{
-		WorkflowName: "release", WorkflowDir: "/workflow", RunDir: "/run",
+		WorkflowName: "release", WorkflowDir: "/workflow", RunDir: "/run", EnvironmentLoaders: []string{"mise", "direnv"},
 		Inputs: map[string]any{"target": "prod"}, Steps: steps,
 		Dependencies: map[string]map[string]any{"build": {"artifact": "app.tar.gz"}},
 	})
@@ -125,7 +126,7 @@ wuko.output("roots", {
 	}
 	want := map[string]any{
 		"input": "prod", "step": "changed", "dependency": "app.tar.gz",
-		"workflow_name": "release", "workflow_dir": "/workflow", "run_dir": "/run",
+		"workflow_name": "release", "workflow_dir": "/workflow", "run_dir": "/run", "environment_loaders": []any{"mise", "direnv"},
 	}
 	if got := result.Outputs["roots"]; !reflect.DeepEqual(got, want) {
 		t.Fatalf("roots = %#v, want %#v", got, want)

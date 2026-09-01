@@ -95,6 +95,19 @@ func TestTemplateDataExposesWorkflowTimezone(t *testing.T) {
 	}
 }
 
+func TestTemplateDataExposesEnvironmentLoaders(t *testing.T) {
+	t.Parallel()
+	definition := &Definition{Name: "release", Dir: "/workflow"}
+	data := TemplateDataWithRun(definition, "/run", []string{"mise", "direnv"}, nil, nil, nil, nil)
+	got, err := RenderString(`{{ index .run.environment_loaders 0 }}:{{ index .run.environment_loaders 1 }}`, data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "mise:direnv" {
+		t.Fatalf("loaders = %q", got)
+	}
+}
+
 func TestRendererValidatesNamedTemplateWithOptionalBranches(t *testing.T) {
 	t.Parallel()
 	const resultsTable = `Repository | Status

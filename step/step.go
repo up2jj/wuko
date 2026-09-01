@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -41,6 +42,7 @@ type Request struct {
 	WorkflowDirBorrowed bool
 	WorkflowTimezone    string
 	RunDir              string
+	EnvironmentLoaders  []string
 	LocalValueDir       string
 	GlobalValueDir      string
 	Vars                map[string]any
@@ -114,6 +116,17 @@ type WorkflowValue struct {
 	Name     string `expr:"name"`
 	Dir      string `expr:"dir"`
 	Timezone string `expr:"timezone"`
+}
+
+// RunValue is the shared run metadata exposed to Expr evaluators.
+type RunValue struct {
+	Dir                string   `expr:"dir"`
+	EnvironmentLoaders []string `expr:"environment_loaders"`
+}
+
+// RunValue returns the request's run metadata in evaluator form.
+func (request Request) RunValue() RunValue {
+	return RunValue{Dir: request.RunDir, EnvironmentLoaders: slices.Clone(request.EnvironmentLoaders)}
 }
 
 // WorkflowValue returns the request's workflow metadata in evaluator form.

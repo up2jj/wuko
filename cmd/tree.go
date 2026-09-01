@@ -43,16 +43,17 @@ func newTreeCmd(deps dependencies) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			baseEnv, err := invocationEnvironment(command, deps, cwd)
+			invocationEnv, err := invocationEnvironment(command, deps, cwd)
 			if err != nil {
 				return err
 			}
+			baseEnv, environmentLoaders := environmentValues(invocationEnv)
 
 			loader := deps.loader
 			if loader == nil {
 				loader = workflow.NewLoader(nil)
 			}
-			options := workflow.LoadOptions{Vars: vars, Env: env, BaseEnv: baseEnv, RunDir: cwd, Diagnostics: reporter,
+			options := workflow.LoadOptions{Vars: vars, Env: env, BaseEnv: baseEnv, EnvironmentLoaders: environmentLoaders, RunDir: cwd, Diagnostics: reporter,
 				Stdin: command.InOrStdin(), Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(), Interactive: interactive(command.InOrStdin())}
 			if workflowFile != "" {
 				if len(args) == 1 {

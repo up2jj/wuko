@@ -32,10 +32,11 @@ func newValidateCmd(deps dependencies) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			baseEnv, err := invocationEnvironment(command, deps, cwd)
+			invocationEnv, err := invocationEnvironment(command, deps, cwd)
 			if err != nil {
 				return err
 			}
+			baseEnv, environmentLoaders := environmentValues(invocationEnv)
 			var sources []workflow.Source
 			discoveryStarted := time.Now()
 			diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusStarted, Time: discoveryStarted, Message: "discovering workflows"})
@@ -59,7 +60,7 @@ func newValidateCmd(deps dependencies) *cobra.Command {
 				if loader == nil {
 					loader = workflow.NewLoader(nil)
 				}
-				loadOptions := workflow.LoadOptions{Vars: vars, Env: env, BaseEnv: baseEnv, RunDir: cwd, Diagnostics: reporter,
+				loadOptions := workflow.LoadOptions{Vars: vars, Env: env, BaseEnv: baseEnv, EnvironmentLoaders: environmentLoaders, RunDir: cwd, Diagnostics: reporter,
 					Stdin: command.InOrStdin(), Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(), Interactive: interactive(command.InOrStdin())}
 				if len(args) == 0 {
 					loadOptions.Target = source.Target
@@ -77,7 +78,7 @@ func newValidateCmd(deps dependencies) *cobra.Command {
 				}
 				optionsFor := func(definition *workflow.Definition, dependencies map[string]map[string]any) engine.Options {
 					return engine.Options{
-						Vars: vars, Env: env, BaseEnv: baseEnv, Dependencies: dependencies, RunDir: cwd,
+						Vars: vars, Env: env, BaseEnv: baseEnv, EnvironmentLoaders: environmentLoaders, Dependencies: dependencies, RunDir: cwd,
 						Stdin: command.InOrStdin(), Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(),
 						LocalValueDir: filepath.Join(definition.Dir, ".wuko", "values"), GlobalValueDir: filepath.Join(config, "wuko", "values"),
 						Diagnostics: reporter,

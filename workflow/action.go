@@ -219,7 +219,7 @@ func (loader *Loader) Prepare(ctx context.Context, definition *Definition, optio
 		return err
 	}
 	traceFinish(options.Diagnostics, valuesStarted, diagnostic.PhaseValues, diagnostic.StatusSucceeded, definition.Location, definition.Name, "", "", "", nil, countAttr("variables", len(vars)), countAttr("environment", len(environment)))
-	data := TemplateData(definition, options.RunDir, nil, vars, environment, nil)
+	data := TemplateDataWithRun(definition, options.RunDir, options.EnvironmentLoaders, nil, vars, environment, nil)
 	renderer, err := NewRendererWithSecrets(definition.Templates, session)
 	if err != nil {
 		return err
@@ -375,9 +375,17 @@ func actionWorkingDirectoryScope(renderer *Renderer, data map[string]any, runDir
 	return templateDataWithRunDir(data, dynamicRunDir), "", false
 }
 
+// templateDataWithRunDir rescopes .run.dir while preserving every other run root
+// entry, so invocation provenance such as .run.environment_loaders survives a
+// working-directory scope exactly as it does at runtime.
 func templateDataWithRunDir(data map[string]any, runDir string) map[string]any {
 	result := CloneMap(data)
-	result["run"] = map[string]any{"dir": runDir}
+	run, _ := result["run"].(map[string]any)
+	if run == nil {
+		run = map[string]any{}
+	}
+	run["dir"] = runDir
+	result["run"] = run
 	return result
 }
 

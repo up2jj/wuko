@@ -18,6 +18,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/engine"
+	envload "github.com/up2jj/wuko/environment"
 	"github.com/up2jj/wuko/executor"
 	"github.com/up2jj/wuko/observe"
 	workflowschedule "github.com/up2jj/wuko/schedule"
@@ -114,7 +115,7 @@ type dependencies struct {
 	stdout        io.Writer
 	stderr        io.Writer
 	cwd           func() (string, error)
-	environment   func(context.Context, string) (map[string]string, error)
+	environment   envload.InvocationLoader
 	homeDir       func() (string, error)
 	configDir     func() (string, error)
 	agentLookPath func(string) (string, error)
@@ -184,9 +185,10 @@ func NewRootCmd() *cobra.Command {
 	if err := devenvstep.RegisterExecutor(executors); err != nil {
 		panic(err)
 	}
+	environments := envload.NewDefaultResolver()
 	return newRootCmd(dependencies{
 		stdin: os.Stdin, stdout: os.Stdout, stderr: os.Stderr,
-		cwd: os.Getwd, environment: direnvEnvironment,
+		cwd: os.Getwd, environment: environments,
 		homeDir: os.UserHomeDir, configDir: os.UserConfigDir, registry: registry, executors: executors,
 		agentLookPath: exec.LookPath,
 		loader:        workflow.NewLoader(nil), isInteractive: interactive,
@@ -248,6 +250,10 @@ func newRootCmd(deps dependencies) *cobra.Command {
 	root.SetOut(deps.stdout)
 	root.SetErr(deps.stderr)
 	root.PersistentFlags().BoolVar(&debug, "debug", false, "trace workflow loading, validation, and execution to stderr (may expose non-secret configuration)")
+	root.PersistentFlags().StringArray("env-loader", nil, "load the invocation environment with auto, none, mise, asdf, or direnv (repeatable)")
+	_ = root.RegisterFlagCompletionFunc("env-loader", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
+		return []string{envload.LoaderAuto, envload.LoaderNone, envload.LoaderMise, envload.LoaderASDF, envload.LoaderDirenv}, cobra.ShellCompDirectiveNoFileComp
+	})
 	root.AddCommand(newRunCmd(deps), newUICmd(deps), newListCmd(deps), newTreeCmd(deps), newValidateCmd(deps), newAgentCmd(deps), newInstallCmd(deps), newUninstallCmd(deps), newMarketplaceCmd(deps), newCompletionCmd())
 	return root
 }

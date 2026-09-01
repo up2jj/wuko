@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	envload "github.com/up2jj/wuko/environment"
 	"github.com/up2jj/wuko/step"
 	setstep "github.com/up2jj/wuko/steps/set"
 	"github.com/up2jj/wuko/workflow"
@@ -90,7 +91,9 @@ func TestRunCommandOrdersAndDeduplicatesDiamondDependencies(t *testing.T) {
 		stdin: bytes.NewReader(nil), stdout: io.Discard, stderr: io.Discard,
 		cwd: func() (string, error) { return root, nil }, homeDir: func() (string, error) { return t.TempDir(), nil },
 		configDir: func() (string, error) { return t.TempDir(), nil }, registry: registry,
-		getenv: func(string) string { return "" }, environment: func(context.Context, string) (map[string]string, error) { return map[string]string{}, nil },
+		getenv: func(string) string { return "" }, environment: envload.InvocationLoaderFunc(func(context.Context, string, map[string]string, envload.Policy) (envload.InvocationEnvironment, error) {
+			return envload.InvocationEnvironment{Values: map[string]string{}}, nil
+		}),
 	})
 	command.SetArgs([]string{"run", "root", "--var", "marker=shared", "--env", "MODE=test"})
 	if err := command.ExecuteContext(t.Context()); err != nil {
@@ -150,7 +153,9 @@ func TestDocumentedDependencyExamplesValidateTreeAndDryRun(t *testing.T) {
 			stdin: bytes.NewReader(nil), stdout: &output, stderr: &output,
 			cwd: func() (string, error) { return root, nil }, homeDir: func() (string, error) { return t.TempDir(), nil },
 			configDir: func() (string, error) { return t.TempDir(), nil }, registry: registry,
-			getenv: func(string) string { return "" }, environment: func(context.Context, string) (map[string]string, error) { return map[string]string{}, nil },
+			getenv: func(string) string { return "" }, environment: envload.InvocationLoaderFunc(func(context.Context, string, map[string]string, envload.Policy) (envload.InvocationEnvironment, error) {
+				return envload.InvocationEnvironment{Values: map[string]string{}}, nil
+			}),
 		})
 		command.SetOut(io.Writer(&output))
 		command.SetErr(io.Writer(&output))
