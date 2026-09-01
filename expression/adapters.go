@@ -60,6 +60,8 @@ func TemplateFuncsWithSecret(resolver SecretResolver) template.FuncMap {
 		"parseTime":     templateParseTime,
 		"addTime":       templateAddTime,
 		"formatTime":    templateFormatTime,
+		"parseURI":      ParseURI,
+		"buildURI":      BuildURI,
 	}
 }
 
@@ -136,6 +138,12 @@ func exprOptions() []expr.Option {
 		expr.Function("parseTime", exprParseTime, new(func(...any) string)),
 		expr.Function("addTime", exprAddTime, new(func(...any) string)),
 		expr.Function("formatTime", exprFormatTime, new(func(...any) string)),
+		expr.Function("parseURI", func(values ...any) (any, error) {
+			return ParseURI(values[0].(string))
+		}, new(func(string) map[string]any)),
+		expr.Function("buildURI", func(values ...any) (any, error) {
+			return BuildURI(values[0].(map[string]any))
+		}, new(func(map[string]any) string)),
 	}
 }
 

@@ -39,6 +39,8 @@ func helperFunctions() map[string]glua.LGFunction {
 		"parse_time":      helperParseTime,
 		"add_time":        helperAddTime,
 		"format_time":     helperFormatTime,
+		"parse_uri":       helperParseURI,
+		"build_uri":       helperBuildURI,
 	}
 }
 
@@ -283,6 +285,32 @@ func helperFormatTime(state *glua.LState) int {
 	}
 	result, err := expression.FormatTime(state.CheckString(1), state.CheckString(2), timezone)
 	return pushHelperResult(state, "format_time", result, err)
+}
+
+func helperParseURI(state *glua.LState) int {
+	if state.GetTop() != 1 {
+		state.RaiseError("helpers.parse_uri: expected a URI string")
+		return 0
+	}
+	result, err := expression.ParseURI(state.CheckString(1))
+	return pushHelperResult(state, "parse_uri", result, err)
+}
+
+func helperBuildURI(state *glua.LState) int {
+	if state.GetTop() != 1 {
+		state.RaiseError("helpers.build_uri: expected a URI components object")
+		return 0
+	}
+	value, err := helperValue(state.Get(1))
+	if err != nil {
+		return pushHelperResult(state, "build_uri", nil, err)
+	}
+	parts, ok := value.(map[string]any)
+	if !ok {
+		return pushHelperResult(state, "build_uri", nil, fmt.Errorf("components must be an object, got %T", value))
+	}
+	result, err := expression.BuildURI(parts)
+	return pushHelperResult(state, "build_uri", result, err)
 }
 
 func helperValues(state *glua.LState, start int) ([]any, error) {

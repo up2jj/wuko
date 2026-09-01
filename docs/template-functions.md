@@ -249,6 +249,161 @@ spec:
   labels:{{ .vars.labels | toYAML | nindent 4 }}
 ```
 
+## URI functions
+
+`parseURI` and `buildURI` parse and construct absolute or relative URI references without making
+network requests. Hierarchical components and query parameters are decoded while represented as
+typed values; `buildURI` applies the required percent-encoding when it creates the final string.
+The `opaque` field follows Go's `net/url` representation and contains the encoded opaque payload.
+
+| Function | Go template | Expr | Lua | Result |
+| --- | --- | --- | --- | --- |
+| `parseURI` | `{{ value \| parseURI }}` | `parseURI(value)` | `h.parse_uri(value)` | Object containing decoded URI components |
+| `buildURI` | `{{ parts \| buildURI }}` | `buildURI(parts)` | `h.build_uri(parts)` | Canonically encoded URI string |
+
+Build an HTTP endpoint in a template without manually escaping query values. A query value may be
+a string or a list of strings; lists create repeated parameters:
+
+```yaml
+- id: fetch
+  type: http
+  with:
+    url: >-
+      {{ dict
+          "scheme" "https"
+          "host" "api.example.com"
+          "path" "/releases/latest"
+          "query" (dict
+            "channel" "stable"
+            "tag" (list "v1" "v2"))
+        | buildURI }}
+```
+
+The resulting URL is:
+
+```text
+https://api.example.com/releases/latest?channel=stable&tag=v1&tag=v2
+```
+
+Parse a URI and select its host:
+
+```gotemplate
+{{ "https://api.example.com:8443/releases?id=42#notes" | parseURI | get "host" }}
+```
+
+The result is `api.example.com:8443`. Serialize the complete parsed object when it needs to remain
+text inside a template:
+
+```gotemplate
+{{ "https://example.com/search?q=hello+world&q=wuko" | parseURI | toJSON }}
+```
+
+That produces:
+
+```json
+{
+  "fragment": "",
+  "host": "example.com",
+  "opaque": "",
+  "path": "/search",
+  "query": {
+    "q": [
+      "hello world",
+      "wuko"
+    ]
+  },
+  "scheme": "https"
+}
+```
+
+Expr preserves the typed result. Construct an endpoint inside a `set` step:
+
+```yaml
+- id: endpoint
+  type: set
+  with:
+    variable: endpoint
+    expr: |
+      buildURI({
+        "scheme": "https",
+        "host": "api.example.com",
+        "path": "/search",
+        "query": {
+          "q": vars.search_term,
+          "include": ["releases", "prereleases"]
+        }
+      })
+```
+
+Parsed components and individual query values can be used directly:
+
+```expr
+parseURI(vars.endpoint).host
+parseURI(vars.endpoint).query.include[0]
+```
+
+The second expression returns the first `include` value, `"releases"`. A scheme and host are not
+required, so Expr can also create a relative reference:
+
+```expr
+buildURI({
+  "path": "/search",
+  "query": {"q": "hello world"}
+})
+```
+
+The result is `/search?q=hello+world`.
+
+Lua exposes the same operations with snake_case names:
+
+```lua
+local h = wuko.helpers
+
+local endpoint = h.build_uri({
+  scheme = "https",
+  host = "api.example.com",
+  path = "/releases",
+  query = {
+    channel = "stable",
+    tag = {"v1", "v2"}
+  }
+})
+
+local parts = h.parse_uri(endpoint)
+
+wuko.output("uri", endpoint)
+wuko.output("host", parts.host)
+wuko.output("tags", parts.query.tag)
+```
+
+The outputs are the URI
+`https://api.example.com/releases?channel=stable&tag=v1&tag=v2`, host `api.example.com`, and tag
+list `["v1", "v2"]`.
+
+Opaque URIs such as `mailto:` use `opaque` instead of `host` and `path`:
+
+```lua
+local mailto = wuko.helpers.build_uri({
+  scheme = "mailto",
+  opaque = "ops@example.com",
+  query = {subject = "Deployment ready"}
+})
+```
+
+The result is `mailto:ops@example.com?subject=Deployment+ready`.
+
+Parsed objects always contain `scheme`, `opaque`, `host`, `path`, `query`, and `fragment`.
+`username` appears only when userinfo is present, and `password` appears only when the URI contains
+a password delimiter; an explicitly empty password is therefore distinct from no password. Query
+keys map to ordered string lists so duplicate values remain ordered. Building sorts query keys for
+deterministic output, preserves the order of values for each key, and uses standard form encoding
+(`+` for spaces in query values). This is semantic canonicalization rather than a byte-for-byte
+round trip.
+
+Blank or malformed URIs, invalid percent escapes, unknown component names, non-string components,
+invalid query value types, a password without `username`, and combinations of `opaque` with
+userinfo, `host`, or `path` stop evaluation with an error.
+
 ## Time functions
 
 Time helpers transform explicit string values. They never read the clock; use the [`time`

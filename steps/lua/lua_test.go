@@ -242,6 +242,66 @@ wuko.output("value", h.format_time(tomorrow, "2006-01-02 15:04 Z07:00", wuko.wor
 	}
 }
 
+func TestLuaURIHelpers(t *testing.T) {
+	runner, err := New(map[string]any{
+		"source": `
+local h = wuko.helpers
+local uri = h.build_uri({
+  scheme = "https",
+  host = "api.example.com",
+  path = "/releases",
+  query = {channel = "stable", tag = {"v1", "v2"}},
+})
+local parts = h.parse_uri(uri)
+local mailto = h.build_uri({
+  scheme = "mailto",
+  opaque = "ops@example.com",
+  query = {subject = "Deployment ready"},
+})
+wuko.output("uri", uri)
+wuko.output("host", parts.host)
+wuko.output("tags", parts.query.tag)
+wuko.output("mailto", mailto)
+`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runner.Run(t.Context(), step.Request{StepID: "helpers", WorkflowName: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Outputs["uri"] != "https://api.example.com/releases?channel=stable&tag=v1&tag=v2" ||
+		result.Outputs["host"] != "api.example.com" || result.Outputs["mailto"] != "mailto:ops@example.com?subject=Deployment+ready" {
+		t.Fatalf("outputs = %#v", result.Outputs)
+	}
+	if tags := result.Outputs["tags"].([]any); !reflect.DeepEqual(tags, []any{"v1", "v2"}) {
+		t.Fatalf("tags = %#v", tags)
+	}
+}
+
+func TestLuaURIHelperErrors(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{name: "parse", source: `wuko.helpers.parse_uri("https://example.com/%zz")`, want: "invalid URL escape"},
+		{name: "build", source: `wuko.helpers.build_uri({path = "/", query = {q = 1}})`, want: "string or list"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			runner, err := New(map[string]any{"source": test.source})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = runner.Run(t.Context(), step.Request{StepID: "helpers", WorkflowName: "test"})
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
 func TestLuaHelpersExposeNoClockFunction(t *testing.T) {
 	t.Parallel()
 	runner, err := New(map[string]any{"source": `
