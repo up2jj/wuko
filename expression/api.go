@@ -44,3 +44,9 @@ func ToJSONCompact(value any) (string, error) { return toJSONCompact(value) }
 
 // ToYAML returns one YAML document, including its terminal newline.
 func ToYAML(value any) (string, error) { return toYAML(value) }
+
+// ParseJSON parses exactly one JSON value into Wuko's runtime data types.
+func ParseJSON(value string) (any, error) { return parseJSON(value) }
+
+// ParseYAML parses exactly one YAML document into Wuko's runtime data types.
+func ParseYAML(value string) (any, error) { return parseYAML(value) }

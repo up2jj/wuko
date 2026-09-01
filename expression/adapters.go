@@ -57,6 +57,8 @@ func TemplateFuncsWithSecret(resolver SecretResolver) template.FuncMap {
 		"toJSON":        toJSON,
 		"toJSONCompact": toJSONCompact,
 		"toYAML":        toYAML,
+		"parseJSON":     parseJSON,
+		"parseYAML":     parseYAML,
 		"parseTime":     templateParseTime,
 		"addTime":       templateAddTime,
 		"formatTime":    templateFormatTime,
@@ -135,6 +137,12 @@ func exprOptions() []expr.Option {
 		expr.Function("toYAML", func(values ...any) (any, error) {
 			return toYAML(values[0])
 		}, new(func(any) string)),
+		expr.Function("parseJSON", func(values ...any) (any, error) {
+			return parseJSON(values[0].(string))
+		}, new(func(string) any)),
+		expr.Function("parseYAML", func(values ...any) (any, error) {
+			return parseYAML(values[0].(string))
+		}, new(func(string) any)),
 		expr.Function("parseTime", exprParseTime, new(func(...any) string)),
 		expr.Function("addTime", exprAddTime, new(func(...any) string)),
 		expr.Function("formatTime", exprFormatTime, new(func(...any) string)),

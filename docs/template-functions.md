@@ -228,7 +228,7 @@ The equivalent manual foreach form passes each list through `.foreach.item`:
           args: ['{{ .foreach.item | toJSONCompact }}']
 ```
 
-## Indentation and serialization
+## Parsing and serialization
 
 | Function | Go template | Expr | Lua | Result |
 | --- | --- | --- | --- | --- |
@@ -237,10 +237,70 @@ The equivalent manual foreach form passes each list through `.foreach.item`:
 | `toJSON` | `{{ value \| toJSON }}` | `toJSON(value)` | `h.to_json(value)` | JSON indented with two spaces |
 | `toJSONCompact` | `{{ value \| toJSONCompact }}` | `toJSONCompact(value)` | `h.to_json_compact(value)` | Compact JSON |
 | `toYAML` | `{{ value \| toYAML }}` | `toYAML(value)` | `h.to_yaml(value)` | YAML with a terminal newline |
+| `parseJSON` | `{{ value \| parseJSON }}` | `parseJSON(value)` | — | Typed value decoded from one JSON value |
+| `parseYAML` | `{{ value \| parseYAML }}` | `parseYAML(value)` | — | Typed value decoded from one YAML document |
 
 Indent widths must be non-negative. A terminal newline is preserved without adding trailing
 spaces after it. JSON object keys and string-keyed YAML map keys are serialized deterministically.
 Encoding an unsupported value stops evaluation.
+
+`parseJSON` and `parseYAML` return Wuko's runtime value types: null, booleans, strings, signed or
+unsigned integers, floating-point numbers, lists, and string-keyed objects. JSON integral values
+remain integers when they fit in 64 bits; fractional and exponent values become floating-point
+numbers. YAML mappings must have string keys, and YAML-native scalar types outside Wuko's runtime
+model, such as timestamps, are rejected.
+
+Go templates can parse an object and continue through the normal collection helpers:
+
+```gotemplate
+{{ .vars.payload | parseJSON | get "name" }}
+```
+
+Expr preserves the parsed structure, so member access, indexing, and collection operations work
+without an intermediate decode step:
+
+```expr
+parseJSON(vars.payload).services[0].name
+```
+
+```expr
+parseYAML(vars.config).targets | sortAlpha()
+```
+
+Parsed scalar types are preserved as well:
+
+```expr
+parseJSON('{"enabled":true,"retries":3}').enabled == true
+```
+
+Parsing and serialization can be composed to normalize input into another format:
+
+```yaml
+- id: normalize
+  type: set
+  with:
+    variable: normalized
+    expr: 'toJSONCompact(parseYAML(inputs.configuration))'
+```
+
+Each parser accepts exactly one value or document. Whitespace after a JSON value is allowed, but
+a second value is rejected:
+
+```text
+{"first": true} {"second": true}
+```
+
+YAML multi-document streams are also rejected, including streams whose additional document is
+empty:
+
+```yaml
+name: first
+---
+name: second
+```
+
+Lua does not expose `h.parse_json` or `h.parse_yaml`. Its existing `wuko.json.decode(value)` API
+remains available for JSON input.
 
 `nindent` is useful when embedding generated configuration:
 
