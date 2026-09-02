@@ -3,6 +3,7 @@ package observe
 import (
 	"context"
 	"fmt"
+	"runtime/debug"
 	"time"
 
 	"github.com/up2jj/wuko/engine"
@@ -47,7 +48,20 @@ type bodyResult struct {
 	duration  time.Duration
 }
 
-func (scheduler Scheduler) Run(ctx context.Context, runtime engine.BackgroundControlRuntime) (engine.BackgroundControlSummary, error) {
+func (scheduler Scheduler) Run(ctx context.Context, runtime engine.BackgroundControlRuntime) (summary engine.BackgroundControlSummary, runErr error) {
+	iterations := 0
+	// Sources and their batches are a registry extension point, and the body is arbitrary
+	// workflow steps, but the background supervisor runs jobs in bare goroutines. A panic that
+	// escapes any of them would end the process instead of the step. Recovering is registered
+	// first so it unwinds last, once the pump is stopped and joined and the body is released:
+	// observation still ends, but it ends the way a source failure does.
+	defer func() {
+		if failure := recoveredPanic(recover()); failure != nil {
+			summary = engine.BackgroundControlSummary{Iterations: iterations}
+			runErr = failure
+		}
+	}()
+
 	// The first observation is read before the pump exists. Source does not promise that
 	// Initial and Next are safe to call at the same time, and starting the pump first would
 	// call them concurrently on every run.
@@ -65,6 +79,19 @@ func (scheduler Scheduler) Run(ctx context.Context, runtime engine.BackgroundCon
 	pumpCtx, stopPump := context.WithCancel(ctx)
 	go func() {
 		defer close(pumpDone)
+		// A panicking source ends observation, not the process. The failure takes the path a
+		// fatal source error takes, so Run reports it and stops the body; it is never paced
+		// and retried, because a source that panics is broken rather than merely failing.
+		defer func() {
+			failure := recoveredPanic(recover())
+			if failure == nil {
+				return
+			}
+			select {
+			case observations <- observation{err: failure, fatal: true}:
+			case <-pumpCtx.Done():
+			}
+		}()
 		pace := scheduler.failurePace()
 		churn := 0
 		for {
@@ -102,7 +129,6 @@ func (scheduler Scheduler) Run(ctx context.Context, runtime engine.BackgroundCon
 	defer func() { <-pumpDone }()
 	defer stopPump()
 
-	iterations := 0
 	var bodyDone <-chan bodyResult
 	var cancelBody context.CancelFunc
 	pending := scheduler.Source.NewBatch()
@@ -118,13 +144,14 @@ func (scheduler Scheduler) Run(ctx context.Context, runtime engine.BackgroundCon
 	startBody := func(initial bool, batch Batch) {
 		iterations++
 		iteration := iterations
-		bodyCtx, cancel := context.WithCancel(ctx)
-		cancelBody = cancel
-		done := make(chan bodyResult, 1)
-		bodyDone = done
 		// Binding already hands back a fresh map, and the engine deep-copies it again before
 		// the body can reach it, so copying here only multiplies a payload that can be an
 		// entire JSON response.
+		//
+		// It is also source code, so it can panic. Nothing that has to be paired with a
+		// running body is published until the goroutine that owns it has started: an
+		// unwinding startBody must not leave a cancel dangling, nor a result channel that
+		// stopBody would then wait on forever.
 		binding := batch.Binding()
 		if binding == nil {
 			binding = make(map[string]any)
@@ -134,10 +161,22 @@ func (scheduler Scheduler) Run(ctx context.Context, runtime engine.BackgroundCon
 		binding["source"] = scheduler.SourceType
 		started := time.Now()
 		runtime.Report(engine.BackgroundControlEvent{Kind: engine.BackgroundIterationStarted, Iteration: iteration, StartedAt: started})
+		bodyCtx, cancel := context.WithCancel(ctx)
+		done := make(chan bodyResult, 1)
 		go func() {
-			err := runtime.RunIteration(bodyCtx, binding)
-			done <- bodyResult{iteration: iteration, err: err, started: started, duration: time.Since(started)}
+			// A panicking body fails its iteration the way a returned error does, so the
+			// iteration is still reported and the change policy still decides what runs next.
+			var err error
+			defer func() {
+				if failure := recoveredPanic(recover()); failure != nil {
+					err = failure
+				}
+				done <- bodyResult{iteration: iteration, err: err, started: started, duration: time.Since(started)}
+			}()
+			err = runtime.RunIteration(bodyCtx, binding)
 		}()
+		cancelBody = cancel
+		bodyDone = done
 	}
 
 	finishIteration := func(result bodyResult) {
@@ -156,6 +195,10 @@ func (scheduler Scheduler) Run(ctx context.Context, runtime engine.BackgroundCon
 			bodyDone = nil
 		}
 	}
+	// Every ordinary exit calls stopBody itself and leaves nothing for this to do. It is here
+	// for the panic path, so an unwinding Run still cancels and reports its iteration instead
+	// of leaving the body running until the supervisor gets around to cancelling the job.
+	defer stopBody()
 
 	startBody(true, initial)
 	for {
@@ -260,4 +303,26 @@ func readyTimerChannel() <-chan time.Time {
 	channel := make(chan time.Time, 1)
 	channel <- time.Now()
 	return channel
+}
+
+// panicError carries a panic recovered from a source, a batch, or a body. The stack is kept
+// because a panic crossing this boundary is a bug in the code being observed, and the trace is
+// the only thing that says where.
+type panicError struct {
+	value any
+	stack []byte
+}
+
+func (failure *panicError) Error() string {
+	return fmt.Sprintf("panic: %v\n\n%s", failure.value, failure.stack)
+}
+
+// recoveredPanic converts a recovered value into an error. Call it as recoveredPanic(recover())
+// directly inside a deferred function: recover reports a panic only to the function the runtime
+// defers, so a helper that called recover itself would always see nil.
+func recoveredPanic(recovered any) error {
+	if recovered == nil {
+		return nil
+	}
+	return &panicError{value: recovered, stack: debug.Stack()}
 }
