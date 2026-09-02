@@ -211,7 +211,8 @@ func (source *httpSource) poll(ctx context.Context) (map[string]any, error) {
 	if len(data) > maxHTTPBody {
 		return nil, fmt.Errorf("HTTP observation body exceeds %d bytes", maxHTTPBody)
 	}
-	value := any(string(data))
+	body := string(data)
+	value := any(body)
 	if source.config.request.Response == "json" {
 		if err := json.Unmarshal(data, &value); err != nil {
 			return nil, fmt.Errorf("decoding HTTP observation JSON: %w", err)
@@ -225,7 +226,7 @@ func (source *httpSource) poll(ctx context.Context) (map[string]any, error) {
 		}
 		headers[key] = items
 	}
-	result := map[string]any{"status": response.StatusCode, "headers": headers, "body": string(data), "value": value}
+	result := map[string]any{"status": response.StatusCode, "headers": headers, "body": body, "value": value}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		result["error"] = fmt.Sprintf("HTTP request returned status %d", response.StatusCode)
 	}
@@ -269,9 +270,13 @@ func cloneValue(value any) any {
 	}
 }
 
+// httpFingerprint decides what "changed" means: the status and the bytes the endpoint returned.
+// The decoded value stays out because body already answers the question. value is json.Unmarshal
+// of body, or body itself for a text response, so keeping it would deep-copy and deep-compare the
+// whole parsed tree on every poll to reach a verdict body has already reached.
 func httpFingerprint(observation map[string]any) map[string]any {
-	fingerprint := make(map[string]any, 4)
-	for _, key := range []string{"status", "body", "value", "error"} {
+	fingerprint := make(map[string]any, 3)
+	for _, key := range []string{"status", "body", "error"} {
 		if value, ok := observation[key]; ok {
 			fingerprint[key] = cloneValue(value)
 		}
