@@ -181,16 +181,14 @@ type shellSource struct {
 func (source *shellSource) Initial() any { return cloneMap(source.initial) }
 
 func (source *shellSource) Next(ctx context.Context) (any, error) {
+	// One timer for the whole call. A source that triggers only on change stays in this loop
+	// for as long as nothing changes, and a fresh Timer every interval is pure garbage. Reset
+	// only ever follows a receive from the channel, so no stale tick can survive it.
+	timer := time.NewTimer(source.config.every)
+	defer timer.Stop()
 	for {
-		timer := time.NewTimer(source.config.every)
 		select {
 		case <-ctx.Done():
-			if !timer.Stop() {
-				select {
-				case <-timer.C:
-				default:
-				}
-			}
 			return nil, ctx.Err()
 		case <-timer.C:
 		}
@@ -204,6 +202,7 @@ func (source *shellSource) Next(ctx context.Context) (any, error) {
 		if source.config.trigger == "always" || changed {
 			return observation, nil
 		}
+		timer.Reset(source.config.every)
 	}
 }
 

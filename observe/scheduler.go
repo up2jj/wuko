@@ -223,7 +223,7 @@ func (scheduler Scheduler) Run(ctx context.Context, runtime engine.BackgroundCon
 			}
 			pending.Add(observed.event)
 			if scheduler.Debounce == 0 {
-				timerC = readyTimerChannel()
+				timerC = immediate
 				continue
 			}
 			if timer == nil {
@@ -298,8 +298,11 @@ func sleep(ctx context.Context, delay time.Duration) bool {
 	}
 }
 
-func readyTimerChannel() <-chan time.Time {
-	channel := make(chan time.Time, 1)
-	channel <- time.Now()
+// immediate is closed, so a receive from it always succeeds at once. A zero debounce means run
+// as soon as the loop reaches the select again, and the scheduler never reads the value, so a
+// closed channel says exactly that without allocating one per observation.
+var immediate = func() <-chan time.Time {
+	channel := make(chan time.Time)
+	close(channel)
 	return channel
-}
+}()

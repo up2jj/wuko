@@ -100,11 +100,17 @@ func (batch *filesystemBatch) Add(value any) {
 	}
 }
 
+// Merge takes ownership of the other batch, per the Batch contract, so a path this batch has
+// not seen adopts its operation set outright. Round-tripping through Add rebuilt every change
+// as a one-element slice, which is a lot of garbage for a tree that churns.
 func (batch *filesystemBatch) Merge(other Batch) {
 	for path, operations := range other.(*filesystemBatch).changes {
-		for operation := range operations {
-			batch.Add(fswatch.Change{Path: path, Operations: []string{operation}})
+		merged := batch.changes[path]
+		if merged == nil {
+			batch.changes[path] = operations
+			continue
 		}
+		maps.Copy(merged, operations)
 	}
 }
 

@@ -9,7 +9,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 
@@ -119,12 +118,24 @@ func Normalize(config Config, hasRoot, hasEvents, resolved bool) (Config, error)
 	return config, nil
 }
 
+// EventNames returns the supported event names in canonical order. The slice is freshly built
+// so callers may keep or modify it; code inside this package that only needs to ask a question
+// about a name uses supportedEvent instead.
 func EventNames() []string {
 	names := make([]string, len(supportedEvents))
 	for index, event := range supportedEvents {
 		names[index] = event.name
 	}
 	return names
+}
+
+func supportedEvent(name string) bool {
+	for _, definition := range supportedEvents {
+		if definition.name == name {
+			return true
+		}
+	}
+	return false
 }
 
 type Observer struct {
@@ -251,15 +262,15 @@ func normalizeEvents(events []string, resolved bool) ([]string, error) {
 			templates = append(templates, event)
 			continue
 		}
-		if !slices.Contains(EventNames(), event) {
+		if !supportedEvent(event) {
 			return nil, fmt.Errorf("events[%d] must be create, modify, rename, or remove", index)
 		}
 		present[event] = true
 	}
 	normalized := make([]string, 0, len(present)+len(templates))
-	for _, event := range EventNames() {
-		if present[event] {
-			normalized = append(normalized, event)
+	for _, definition := range supportedEvents {
+		if present[definition.name] {
+			normalized = append(normalized, definition.name)
 		}
 	}
 	return append(normalized, templates...), nil
