@@ -34,19 +34,23 @@ func (e *Engine) validateCancelOn(ctx context.Context, definition *workflow.Defi
 			return fmt.Errorf("cancel_on collect: %w", err)
 		}
 	}
+	// Every participant validates against the same pre-control state, and a validator that
+	// needs to mutate clones for itself first (see validateTryCatch), so one copy serves them
+	// all: cloning per monitor would deep-copy the whole state once per participant.
+	private := cloneState(state)
 	monitorOptions := options
 	monitorOptions.depth += 2
 	monitorOptions.Interactive = false
 	monitorOptions.Stdin = nil
 	for index, monitor := range group.Monitors {
 		declaration := group.MonitorDeclaration(index)
-		if err := e.validateSteps(ctx, definition, []workflow.Step{declaration}, monitorOptions, cloneState(state)); err != nil {
+		if err := e.validateSteps(ctx, definition, []workflow.Step{declaration}, monitorOptions, private); err != nil {
 			return fmt.Errorf("cancel_on monitor %q: %w", monitor.ID, err)
 		}
 	}
 	bodyOptions := options
 	bodyOptions.depth += 2
-	if err := e.validateSteps(ctx, definition, group.Steps, bodyOptions, cloneState(state)); err != nil {
+	if err := e.validateSteps(ctx, definition, group.Steps, bodyOptions, private); err != nil {
 		return fmt.Errorf("cancel_on body: %w", err)
 	}
 	return nil
@@ -199,10 +203,11 @@ func cancelOnMonitorStepRecords(declaration workflow.Step, state *State, stats R
 		return map[string]any{}
 	}
 	records := make(map[string]any)
+	// Every child sequence is recorded against the same run, so the step index is built once
+	// here rather than rebuilt from the whole step list for each of them.
+	byID := indexStepStats(stats)
 	for _, child := range children {
-		for id, record := range controlStepRecords(child.Steps, state, stats, lostRace) {
-			records[id] = record
-		}
+		collectControlStepRecords(records, child.Steps, state, byID, lostRace)
 	}
 	return records
 }
@@ -228,12 +233,14 @@ func cancelOnParticipantError(err error, lostRace bool) any {
 	return cancelOnErrorValue(err)
 }
 
+// cancellationOnly reports whether err carries nothing but cancellation. Joined errors are
+// walked branch by branch because errors.Is answers "any", not "all": a join of a cancellation
+// and a real failure must stay a failure. Everything else defers to errors.Is at the leaf, so
+// the answer matches statusFromError even for an error that reports cancellation through its
+// own Is method rather than by wrapping the sentinel.
 func cancellationOnly(err error) bool {
 	if err == nil {
 		return false
-	}
-	if err == context.Canceled {
-		return true
 	}
 	if joined, ok := err.(interface{ Unwrap() []error }); ok {
 		children := joined.Unwrap()
@@ -250,7 +257,7 @@ func cancellationOnly(err error) bool {
 	if wrapped := errors.Unwrap(err); wrapped != nil {
 		return cancellationOnly(wrapped)
 	}
-	return false
+	return errors.Is(err, context.Canceled)
 }
 
 func cancelOnDeclarationKind(declaration workflow.Step) string {

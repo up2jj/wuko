@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -430,6 +431,46 @@ func TestCancelOnValidateRejectsInvalidCondition(t *testing.T) {
 	err := New(registry).Validate(t.Context(), definition, Options{})
 	if err == nil || !strings.Contains(err.Error(), `step "deployment_watch": if:`) {
 		t.Fatalf("Validate() error = %v", err)
+	}
+}
+
+// isCanceledError reports cancellation through its own Is method rather than by wrapping the
+// sentinel, which is exactly the shape statusFromError classifies as canceled.
+type isCanceledError struct{}
+
+func (isCanceledError) Error() string { return "canceled by its own Is method" }
+
+func (isCanceledError) Is(target error) bool { return target == context.Canceled }
+
+func TestCancellationOnlyMatchesStatusFromError(t *testing.T) {
+	failure := errors.New("boom")
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "nil", err: nil, want: false},
+		{name: "sentinel", err: context.Canceled, want: true},
+		{name: "wrapped sentinel", err: fmt.Errorf("step: %w", context.Canceled), want: true},
+		{name: "custom is method", err: isCanceledError{}, want: true},
+		{name: "wrapped custom is method", err: fmt.Errorf("step: %w", isCanceledError{}), want: true},
+		{name: "failure", err: failure, want: false},
+		{name: "deadline", err: context.DeadlineExceeded, want: false},
+		{name: "joined cancellations", err: errors.Join(context.Canceled, isCanceledError{}), want: true},
+		{name: "joined with failure", err: errors.Join(context.Canceled, failure), want: false},
+		{name: "wrapped join with failure", err: fmt.Errorf("step: %w", errors.Join(context.Canceled, failure)), want: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := cancellationOnly(test.err); got != test.want {
+				t.Fatalf("cancellationOnly(%v) = %t, want %t", test.err, got, test.want)
+			}
+			// A lost race suppresses an error only when the recorded status is canceled, so the
+			// two classifications must never disagree.
+			if test.err != nil && test.want && statusFromError(test.err) != StatusCanceled {
+				t.Fatalf("statusFromError(%v) = %s, want canceled", test.err, statusFromError(test.err))
+			}
+		})
 	}
 }
 

@@ -6,10 +6,21 @@ import "github.com/up2jj/wuko/workflow"
 // Canceled race losers may suppress cancellation errors without changing their status.
 func controlStepRecords(declarations []workflow.Step, state *State, stats RunStats, suppressCancellation bool) map[string]any {
 	records := make(map[string]any)
+	collectControlStepRecords(records, declarations, state, indexStepStats(stats), suppressCancellation)
+	return records
+}
+
+// indexStepStats indexes a run's steps by ID. Callers that record several declaration lists
+// against the same run build it once instead of once per list.
+func indexStepStats(stats RunStats) map[string]StepStats {
 	byID := make(map[string]StepStats, len(stats.Steps))
 	for _, item := range stats.Steps {
 		byID[item.ID] = item
 	}
+	return byID
+}
+
+func collectControlStepRecords(records map[string]any, declarations []workflow.Step, state *State, byID map[string]StepStats, suppressCancellation bool) {
 	var visit func([]workflow.Step)
 	visit = func(steps []workflow.Step) {
 		for _, declaration := range steps {
@@ -39,7 +50,6 @@ func controlStepRecords(declarations []workflow.Step, state *State, stats RunSta
 		}
 	}
 	visit(declarations)
-	return records
 }
 
 func controlWrittenVars(state *State) map[string]any {
