@@ -210,3 +210,44 @@ func TestAuthenticationTransportValidation(t *testing.T) {
 		})
 	}
 }
+
+func TestClientCertificateIsLoadedOncePerRunner(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	dir := t.TempDir()
+	certPath := filepath.Join(dir, "client.pem")
+	keyPath := filepath.Join(dir, "client-key.pem")
+	writeTLSKeyPair(t, server.TLS.Certificates[0], certPath, keyPath)
+	built, err := New(map[string]any{
+		"url":                server.URL,
+		"client_certificate": map[string]any{"cert_file": "client.pem", "key_file": "client-key.pem"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := built.(*Runner)
+	first, err := runner.transportFor(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Deleting the pair proves the next attempt reuses the parsed certificate
+	// instead of reading it from disk again.
+	if err := os.Remove(certPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(keyPath); err != nil {
+		t.Fatal(err)
+	}
+	second, err := runner.transportFor(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first != second {
+		t.Fatal("transport was rebuilt between attempts")
+	}
+	if _, err := runner.transportFor(t.TempDir()); err == nil || !strings.Contains(err.Error(), "loading client certificate") {
+		t.Fatalf("another workflow directory reused the transport: %v", err)
+	}
+}

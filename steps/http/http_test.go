@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	nethttp "net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -243,5 +245,39 @@ func TestConditionalHeadersAndRevalidatedResult(t *testing.T) {
 	}
 	if _, ok := revalidatedOutputs(nil, current); ok {
 		t.Fatal("304 without a previous representation was reusable")
+	}
+}
+
+func TestRetryAttemptsShareOneConnection(t *testing.T) {
+	var connections atomic.Int64
+	server := httptest.NewUnstartedServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
+		writer.WriteHeader(nethttp.StatusInternalServerError)
+	}))
+	server.Config.ConnState = func(_ net.Conn, state nethttp.ConnState) {
+		if state == nethttp.StateNew {
+			connections.Add(1)
+		}
+	}
+	server.Start()
+	defer server.Close()
+	built, err := New(map[string]any{"url": server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := built.(*Runner)
+	for attempt := 1; attempt <= 3; attempt++ {
+		if _, err := runner.Run(t.Context(), step.Request{RunDir: t.TempDir(), Attempt: attempt, MaxAttempts: 3}); err == nil {
+			t.Fatalf("attempt %d did not report status 500", attempt)
+		}
+	}
+	if got := connections.Load(); got != 1 {
+		t.Fatalf("connections across three attempts = %d, want 1", got)
+	}
+	// The last attempt hands the pool back, so later work dials again.
+	if _, err := runner.Run(t.Context(), step.Request{RunDir: t.TempDir(), Attempt: 1, MaxAttempts: 1}); err == nil {
+		t.Fatal("final run did not report status 500")
+	}
+	if got := connections.Load(); got != 2 {
+		t.Fatalf("connections after the final attempt = %d, want 2", got)
 	}
 }

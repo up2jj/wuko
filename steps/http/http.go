@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/up2jj/wuko/step"
@@ -81,6 +82,10 @@ type Runner struct {
 	hasJSON  bool
 	hasForm  bool
 	hasFiles bool
+
+	transportMu  sync.Mutex
+	transport    *http.Transport
+	transportDir string
 }
 
 type statusError struct {
@@ -205,11 +210,17 @@ func (r *Runner) Run(ctx context.Context, execution step.Request) (result step.R
 		}()
 	}
 
-	transport, err := r.newTransport(execution.WorkflowDir)
+	transport, err := r.transportFor(execution.WorkflowDir)
 	if err != nil {
 		return step.Result{}, err
 	}
-	defer transport.CloseIdleConnections()
+	defer func() {
+		// Attempts of one step share the pool, so connections stay open between them.
+		// Once the step can produce no further attempt, nothing would reuse them.
+		if resultErr == nil || execution.Attempt >= execution.MaxAttempts {
+			transport.CloseIdleConnections()
+		}
+	}()
 	jar, closeJar, err := r.openJar(ctx, execution.RunDir)
 	if err != nil {
 		return step.Result{}, err
@@ -353,6 +364,28 @@ func (r *Runner) openJar(ctx context.Context, runDir string) (http.CookieJar, fu
 		return nil, nil, fmt.Errorf("resolving cookie jar: %w", err)
 	}
 	return openPersistentJar(ctx, path)
+}
+
+// transportFor reuses one transport for the life of the runner, which the engine
+// builds once per step and calls once per attempt. Retries then share a
+// connection pool instead of repeating the handshake, and a client certificate
+// is read and parsed once rather than on every attempt -- at the cost of not
+// noticing a certificate file rewritten between attempts of the same step.
+func (r *Runner) transportFor(workflowDir string) (*http.Transport, error) {
+	r.transportMu.Lock()
+	defer r.transportMu.Unlock()
+	if r.transport != nil && r.transportDir == workflowDir {
+		return r.transport, nil
+	}
+	transport, err := r.newTransport(workflowDir)
+	if err != nil {
+		return nil, err
+	}
+	if r.transport != nil {
+		r.transport.CloseIdleConnections()
+	}
+	r.transport, r.transportDir = transport, workflowDir
+	return transport, nil
 }
 
 func (r *Runner) newTransport(workflowDir string) (*http.Transport, error) {
