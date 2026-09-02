@@ -1,4 +1,4 @@
-// Package git implements read-only Git workflow assertions.
+// Package git implements Git-related workflow checks and message operations.
 package git
 
 import (
@@ -54,7 +54,7 @@ type Runner struct {
 	expectsExist bool
 }
 
-// Register adds all Git assertion steps to a registry.
+// Register adds all Git workflow steps to a registry.
 func Register(registry *step.Registry) error {
 	registrations := []struct {
 		name    string
@@ -65,6 +65,7 @@ func Register(registry *step.Registry) error {
 		{"git_remote_branch", NewRemoteBranch},
 		{"git_branch_name", NewBranchName},
 		{"git_on_branch", NewOnBranch},
+		{"git_conventional_commit", NewConventionalCommit},
 	}
 	for _, registration := range registrations {
 		if err := registry.Register(registration.name, registration.builder); err != nil {

@@ -107,7 +107,7 @@ func schemaForDependencies(values map[string]map[string]any) *referenceSchema {
 // they stop variable validation for everything that follows.
 var (
 	varWriters = map[string]struct{}{
-		"set": {}, "jsonpath": {}, "semver": {}, "key_value": {}, "tui_choice": {}, "tui_confirm": {},
+		"set": {}, "jsonpath": {}, "semver": {}, "git_conventional_commit": {}, "key_value": {}, "tui_choice": {}, "tui_confirm": {},
 		"tui_input": {}, "tui_password": {}, "tui_path": {}, "tui_review": {}, "time": {},
 	}
 	dynamicVarWriters = map[string]struct{}{"lua": {}, "import_vars": {}}

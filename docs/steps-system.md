@@ -5,11 +5,170 @@
 System steps provide portable filesystem, network, cache, temporary-resource, and container
 operations. Relative runtime paths normally resolve from the directory where Wuko was invoked.
 
-## Git assertions
+## Git operations
 
-Git assertions run the installed `git` executable in the workflow run directory. They are
+Repository assertions run the installed `git` executable in the workflow run directory. They are
 read-only, work inside executor blocks, and return no outputs on success. Remote-branch checks
-inspect local remote-tracking references; they do not fetch from a remote.
+inspect local remote-tracking references; they do not fetch from a remote. The
+`git_conventional_commit` step is a pure text operation and does not invoke Git.
+
+## `git_conventional_commit`
+
+Create or validate a Conventional Commit message without invoking `git commit`. The step is a pure
+text operation and does not require a Git repository. Both operations expose `valid`, `value`,
+`message`, `cleaned_message`, `classification`, `type`, `scope`, `subject`, `breaking`, `body`, and
+`task`. A created message may also be assigned to `variable`.
+
+| Field | `create` | `validate` | Meaning and default |
+| --- | --- | --- | --- |
+| `operation` | required | required | `create` or `validate` |
+| `type` | required | rejected | Commit type; creation normalizes it to lowercase |
+| `subject` | required | rejected | Header subject; surrounding whitespace is trimmed |
+| `scope` | optional | rejected | Scope placed in parentheses |
+| `breaking` | optional | rejected | Adds `!`; defaults to `false` |
+| `body` | optional | rejected | Multiline body, separated from the header by one blank line |
+| `task` | optional | rejected | Subject suffix; no regex is required during creation |
+| `task_regex` | optional | optional | Validates a creation task or requires and extracts a validation suffix |
+| `message` | rejected | required | Commit message to validate |
+| `types` | optional | optional | Allowed types; defaults to the standard list below |
+| `scopes` | optional | optional | Allowed scopes; unrestricted when omitted |
+| `force_scope` | optional | optional | Requires a scope; defaults to `false` |
+| `strict` | rejected | optional | Disables merge/autosquash exemptions; defaults to `false` |
+| `variable` | optional | rejected | Variable receiving the generated message |
+
+`valid` is `true` for every successful run. `value` and `message` contain the original validated or
+generated message, while `cleaned_message` has Git comment lines and verbose-diff content removed.
+`classification` is `conventional`, `merge`, or `autosquash`. The `type`, `scope`, `subject`,
+`breaking`, `body`, and `task` outputs contain the parsed components; exempt merge/autosquash
+messages leave the conventional components empty. Validation never writes a workflow variable.
+Failures identify the invalid component, such as the type, scope, separator, subject, body, or task.
+Creation lowercases `type` for canonical messages but preserves the casing of `scope`, `subject`,
+and `task`. Validation remains case-insensitive for types and configured scopes, and parsed outputs
+preserve the casing present in the validated message. Task regexes are case-sensitive unless they
+use an inline RE2 flag such as `(?i)`.
+
+Create a basic message and make it available to later steps as `.vars.commit_message`:
+
+```yaml
+- id: commit
+  type: git_conventional_commit
+  with:
+    operation: create
+    type: feat
+    scope: workflow
+    subject: add conventional commit support
+    variable: commit_message
+```
+
+This produces `feat(workflow): add conventional commit support`. Add `breaking: true` and a body
+to create a breaking change with multiline context:
+
+```yaml
+- id: commit
+  type: git_conventional_commit
+  with:
+    operation: create
+    type: feat
+    scope: api
+    subject: replace authentication protocol
+    breaking: true
+    body: |
+      Clients must now send OAuth 2 access tokens.
+
+      Existing API keys are no longer accepted.
+```
+
+The result is:
+
+```text
+feat(api)!: replace authentication protocol
+
+Clients must now send OAuth 2 access tokens.
+
+Existing API keys are no longer accepted.
+```
+
+`task` is an optional subject suffix and does not require a regex:
+
+```yaml
+- id: commit
+  type: git_conventional_commit
+  with:
+    operation: create
+    type: fix
+    scope: auth
+    subject: prevent expired session reuse
+    task: WUKO-142
+```
+
+This produces `fix(auth): prevent expired session reuse WUKO-142`. Add `task_regex` when creation
+should verify the supplied task. The regex uses Go RE2 syntax and must match the complete task:
+
+```yaml
+- id: commit
+  type: git_conventional_commit
+  with:
+    operation: create
+    type: fix
+    subject: prevent expired session reuse
+    task: WUKO-142
+    task_regex: 'WUKO-[0-9]+'
+```
+
+For validation, `message` is required and an invalid message fails the step. `types` and `scopes`
+restrict the case-insensitive allowlists, while `force_scope` requires a non-empty scope:
+
+```yaml
+- id: validate_commit
+  type: git_conventional_commit
+  with:
+    operation: validate
+    message: "{{ .vars.commit_message }}"
+    types: [feat, fix, docs]
+    scopes: [api, cli, workflow]
+    force_scope: true
+    strict: true
+```
+
+When validation includes `task_regex`, the cleaned first-line header must end with a matching task.
+The pattern is anchored automatically and must start at the header's beginning or follow whitespace,
+so a match inside a longer word is not a task; a body may still follow:
+
+```yaml
+- id: validate_commit
+  type: git_conventional_commit
+  with:
+    operation: validate
+    message: |-
+      fix(auth): prevent expired session reuse WUKO-142
+
+      Clear cached credentials after refresh rejection.
+    task_regex: 'WUKO-[0-9]+'
+```
+
+The `subject` output excludes the matched suffix and `task` contains `WUKO-142`. Invalid regexes,
+patterns that can match an empty task, and missing validation task suffixes fail with an error.
+
+Validation follows `conventional-pre-commit`: the default types are `build`, `chore`, `ci`, `docs`,
+`feat`, `fix`, `perf`, `refactor`, `revert`, `style`, and `test`; types and configured scopes are
+case-insensitive; `!:` marks a breaking change; a body requires a blank separating line; Git comment
+lines and verbose diff sections are ignored during validation, so `create` rejects a `body` whose
+lines start with `#` rather than emit a message Git would silently truncate. Scopes may combine allowed values with `:`, `,`, `-`,
+`/`, `.`, or `#`. Custom `types` preserve the upstream behavior of adding `feat` and `fix` when
+neither is listed.
+
+By default, Git-generated merge and autosquash messages are exempt:
+
+```yaml
+- id: validate_fixup
+  type: git_conventional_commit
+  with:
+    operation: validate
+    message: "fixup! feat(workflow): add commit support"
+```
+
+Set `strict: true` to reject `Merge ...`, `amend! ...`, `fixup! ...`, and `squash! ...` messages.
+If `task_regex` is configured, its task requirement also applies to non-strict exemptions.
 
 ## `git_clean`
 

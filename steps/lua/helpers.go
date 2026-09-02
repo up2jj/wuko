@@ -10,37 +10,39 @@ import (
 
 func helperFunctions() map[string]glua.LGFunction {
 	return map[string]glua.LGFunction{
-		"lower":           helperLower,
-		"upper":           helperUpper,
-		"trim":            helperTrim,
-		"trim_prefix":     helperTrimPrefix,
-		"trim_suffix":     helperTrimSuffix,
-		"contains":        helperContains,
-		"has_prefix":      helperHasPrefix,
-		"has_suffix":      helperHasSuffix,
-		"replace":         helperReplace,
-		"split":           helperSplit,
-		"join":            helperJoin,
-		"slugify":         helperSlugify,
-		"default":         helperDefault,
-		"coalesce":        helperCoalesce,
-		"required":        helperRequired,
-		"indent":          helperIndent,
-		"nindent":         helperNindent,
-		"list":            helperList,
-		"dict":            helperDict,
-		"get":             helperGet,
-		"has_key":         helperHasKey,
-		"keys":            helperKeys,
-		"sort_alpha":      helperSortAlpha,
-		"to_json":         helperToJSON,
-		"to_json_compact": helperToJSONCompact,
-		"to_yaml":         helperToYAML,
-		"parse_time":      helperParseTime,
-		"add_time":        helperAddTime,
-		"format_time":     helperFormatTime,
-		"parse_uri":       helperParseURI,
-		"build_uri":       helperBuildURI,
+		"lower":                     helperLower,
+		"upper":                     helperUpper,
+		"trim":                      helperTrim,
+		"trim_prefix":               helperTrimPrefix,
+		"trim_suffix":               helperTrimSuffix,
+		"contains":                  helperContains,
+		"has_prefix":                helperHasPrefix,
+		"has_suffix":                helperHasSuffix,
+		"replace":                   helperReplace,
+		"split":                     helperSplit,
+		"join":                      helperJoin,
+		"slugify":                   helperSlugify,
+		"default":                   helperDefault,
+		"coalesce":                  helperCoalesce,
+		"required":                  helperRequired,
+		"indent":                    helperIndent,
+		"nindent":                   helperNindent,
+		"list":                      helperList,
+		"dict":                      helperDict,
+		"get":                       helperGet,
+		"has_key":                   helperHasKey,
+		"keys":                      helperKeys,
+		"sort_alpha":                helperSortAlpha,
+		"to_json":                   helperToJSON,
+		"to_json_compact":           helperToJSONCompact,
+		"to_yaml":                   helperToYAML,
+		"parse_time":                helperParseTime,
+		"add_time":                  helperAddTime,
+		"format_time":               helperFormatTime,
+		"parse_uri":                 helperParseURI,
+		"build_uri":                 helperBuildURI,
+		"build_conventional_commit": helperBuildConventionalCommit,
+		"is_conventional_commit":    helperIsConventionalCommit,
 	}
 }
 
@@ -311,6 +313,45 @@ func helperBuildURI(state *glua.LState) int {
 	}
 	result, err := expression.BuildURI(parts)
 	return pushHelperResult(state, "build_uri", result, err)
+}
+
+func helperBuildConventionalCommit(state *glua.LState) int {
+	if state.GetTop() != 1 {
+		state.RaiseError("helpers.build_conventional_commit: expected a configuration object")
+		return 0
+	}
+	value, err := helperValue(state.Get(1))
+	if err != nil {
+		return pushHelperResult(state, "build_conventional_commit", nil, err)
+	}
+	config, ok := value.(map[string]any)
+	if !ok {
+		return pushHelperResult(state, "build_conventional_commit", nil, fmt.Errorf("configuration must be an object, got %T", value))
+	}
+	result, err := expression.BuildConventionalCommit(config)
+	return pushHelperResult(state, "build_conventional_commit", result, err)
+}
+
+func helperIsConventionalCommit(state *glua.LState) int {
+	if state.GetTop() != 1 && state.GetTop() != 2 {
+		state.RaiseError("helpers.is_conventional_commit: expected a message and optional options object")
+		return 0
+	}
+	message := state.CheckString(1)
+	var options map[string]any
+	if state.GetTop() == 2 && state.Get(2) != glua.LNil {
+		value, err := helperValue(state.Get(2))
+		if err != nil {
+			return pushHelperResult(state, "is_conventional_commit", nil, err)
+		}
+		var ok bool
+		options, ok = value.(map[string]any)
+		if !ok {
+			return pushHelperResult(state, "is_conventional_commit", nil, fmt.Errorf("options must be an object, got %T", value))
+		}
+	}
+	result, err := expression.IsConventionalCommit(message, options)
+	return pushHelperResult(state, "is_conventional_commit", result, err)
 }
 
 func helperValues(state *glua.LState, start int) ([]any, error) {

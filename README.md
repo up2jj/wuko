@@ -304,6 +304,7 @@ Each linked guide contains multiple examples for every step.
 | `git_remote_branch` | Assert local remote-tracking branch existence | [System steps](docs/steps-system.md#git_remote_branch) |
 | `git_branch_name` | Assert that a string is a valid Git branch name | [System steps](docs/steps-system.md#git_branch_name) |
 | `git_on_branch` | Assert the repository's current branch | [System steps](docs/steps-system.md#git_on_branch) |
+| `git_conventional_commit` | Create or validate a Conventional Commit message | [System steps](docs/steps-system.md#git_conventional_commit) |
 | `github_pr` | Find an open GitHub pull request from CI metadata or a Git branch | [System steps](docs/steps-system.md#github_pr) |
 | `github_release` | Check GitHub repository drift since the latest stable release | [System steps](docs/steps-system.md#github_release) |
 | `github_actions` | Observe one GitHub Actions run through `gh` | [System steps](docs/steps-system.md#github_actions) |

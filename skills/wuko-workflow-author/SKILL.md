@@ -1,6 +1,6 @@
 ---
 name: wuko-workflow-author
-description: Create or update Wuko version-1 YAML workflows, including cron schedules, explicit time capture and transformation, templates and scaffold trees, conditions, early returns, finally cleanup, cancel-on monitors, foreach and matrix controls, required files, composite actions, waits, polling, retries, concurrency, interactive prompts and path selection, typed and imported variables, structured decoding, JSONPath selection, semantic versions, HTTP, files, managed temporary resources, glob discovery, native filesystem watches, persistent change detectors, persistent key-value stores, content-addressed directory caches, Lua, shell, Docker, and agent steps. Use when designing workflow files, extending existing workflows, or reviewing workflow structure before execution.
+description: Create or update Wuko version-1 YAML workflows, including cron schedules, explicit time capture and transformation, Conventional Commit messages, templates and scaffold trees, conditions, early returns, finally cleanup, cancel-on monitors, foreach and matrix controls, required files, composite actions, waits, polling, retries, concurrency, interactive prompts and path selection, typed and imported variables, structured decoding, JSONPath selection, semantic versions, HTTP, files, managed temporary resources, glob discovery, native filesystem watches, persistent change detectors, persistent key-value stores, content-addressed directory caches, Lua, shell, Docker, and agent steps. Use when designing workflow files, extending existing workflows, or reviewing workflow structure before execution.
 ---
 
 # Wuko Workflow Author
@@ -64,6 +64,11 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
 - Use `semver` for strict semantic-version parsing, precedence comparison, constraint checks, and
   major/minor/patch increments. Read the operation's primary typed result from `value`; remember
   that build metadata does not affect comparison and ordinary constraints exclude prereleases.
+- Use `git_conventional_commit` to create a reusable Conventional Commit message or assert that an
+  existing message matches configured types, scopes, strictness, and an optional task-suffix rule.
+  A create-time `task` works without `task_regex`; the regex is only an optional constraint there.
+  Use `buildConventionalCommit` or `isConventionalCommit` in templates and Expr, or their snake_case
+  Lua equivalents, when the value belongs inside a larger transformation rather than a named step.
 - Use `time` as the only current-time boundary. Its output and default same-named variable are
   recordable and may be supplied with `--var` for reproducible runs. Use `parseTime`, `addTime`, and
   `formatTime` in templates, Expr, or Lua only to transform explicit strings; they never read the

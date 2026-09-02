@@ -464,6 +464,85 @@ Blank or malformed URIs, invalid percent escapes, unknown component names, non-s
 invalid query value types, a password without `username`, and combinations of `opaque` with
 userinfo, `host`, or `path` stop evaluation with an error.
 
+## Conventional Commit functions
+
+`buildConventionalCommit` creates a validated message without running Git. Its object accepts
+`type`, optional `scope`, `subject`, optional `breaking` and `body`, the `types`, `scopes`, and
+`force_scope` validation options, and an optional `task` suffix. `task` works by itself;
+`task_regex` optionally validates it.
+
+| Function | Go template | Expr | Lua | Result |
+| --- | --- | --- | --- | --- |
+| `buildConventionalCommit` | `{{ config \| buildConventionalCommit }}` | `buildConventionalCommit(config)` | `h.build_conventional_commit(config)` | Commit message string |
+| `isConventionalCommit` | `{{ message \| isConventionalCommit options }}` | `isConventionalCommit(message, options)` | `h.is_conventional_commit(message, options)` | Boolean validity |
+
+Build a task-bearing message in a Go template:
+
+```gotemplate
+{{ dict
+    "type" "fix"
+    "scope" "auth"
+    "subject" "prevent expired session reuse"
+    "task" "WUKO-142"
+  | buildConventionalCommit }}
+```
+
+Validate a rendered value with options. Invalid messages return `false`; malformed options and
+regexes stop template evaluation:
+
+```gotemplate
+{{ .vars.commit_message
+   | isConventionalCommit
+       (dict
+         "strict" true
+         "types" (list "feat" "fix")
+         "task_regex" "WUKO-[0-9]+") }}
+```
+
+Expr uses value-first calls and preserves the boolean result:
+
+```expr
+buildConventionalCommit({
+  "type": "fix",
+  "scope": "auth",
+  "subject": "prevent expired session reuse",
+  "task": "WUKO-142"
+})
+```
+
+```expr
+isConventionalCommit(vars.commit_message, {
+  "strict": true,
+  "types": ["feat", "fix"],
+  "task_regex": "WUKO-[0-9]+"
+})
+```
+
+Lua exposes the same operations with snake_case names:
+
+```lua
+local h = wuko.helpers
+
+local message = h.build_conventional_commit({
+  type = "fix",
+  scope = "auth",
+  subject = "prevent expired session reuse",
+  task = "WUKO-142",
+})
+
+if not h.is_conventional_commit(message, {
+  strict = true,
+  task_regex = "WUKO-[0-9]+",
+}) then
+  error("generated commit message is invalid")
+end
+```
+
+The validation options are `types`, `scopes`, `force_scope`, `strict`, and `task_regex`. A configured
+task pattern uses Go RE2, is automatically anchored to the end of the first-line header, must start
+at the header's beginning or follow whitespace, and makes the suffix mandatory. Bodies may follow the
+task-bearing header, but a `body` whose lines start with `#` is rejected because Git strips them.
+
 ## Time functions
 
 Time helpers transform explicit string values. They never read the clock; use the [`time`

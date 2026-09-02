@@ -302,6 +302,48 @@ func TestLuaURIHelperErrors(t *testing.T) {
 	}
 }
 
+func TestLuaConventionalCommitHelpers(t *testing.T) {
+	runner, err := New(map[string]any{"source": `
+local h = wuko.helpers
+local message = h.build_conventional_commit({
+  type = "fix",
+  scope = "auth",
+  subject = "correct sessions",
+  task = "WUKO-12",
+})
+wuko.output("message", message)
+wuko.output("valid", h.is_conventional_commit(message, {task_regex = "WUKO-[0-9]+"}))
+wuko.output("invalid", h.is_conventional_commit("bad message"))
+wuko.output("nil_options", h.is_conventional_commit(message, nil))
+`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runner.Run(t.Context(), step.Request{StepID: "helpers", WorkflowName: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Outputs["message"] != "fix(auth): correct sessions WUKO-12" || result.Outputs["valid"] != true ||
+		result.Outputs["invalid"] != false || result.Outputs["nil_options"] != true {
+		t.Fatalf("outputs = %#v", result.Outputs)
+	}
+}
+
+func TestLuaConventionalCommitHelperErrors(t *testing.T) {
+	for _, source := range []string{
+		`wuko.helpers.build_conventional_commit({type = "feat"})`,
+		`wuko.helpers.is_conventional_commit("feat: message", {task_regex = "("})`,
+	} {
+		runner, err := New(map[string]any{"source": source})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := runner.Run(t.Context(), step.Request{StepID: "helpers"}); err == nil {
+			t.Fatalf("source %q succeeded", source)
+		}
+	}
+}
+
 func TestLuaHelpersExposeNoClockFunction(t *testing.T) {
 	t.Parallel()
 	runner, err := New(map[string]any{"source": `
