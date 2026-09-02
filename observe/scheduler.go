@@ -3,7 +3,6 @@ package observe
 import (
 	"context"
 	"fmt"
-	"runtime/debug"
 	"time"
 
 	"github.com/up2jj/wuko/engine"
@@ -56,7 +55,7 @@ func (scheduler Scheduler) Run(ctx context.Context, runtime engine.BackgroundCon
 	// first so it unwinds last, once the pump is stopped and joined and the body is released:
 	// observation still ends, but it ends the way a source failure does.
 	defer func() {
-		if failure := recoveredPanic(recover()); failure != nil {
+		if failure := engine.RecoveredPanic(recover()); failure != nil {
 			summary = engine.BackgroundControlSummary{Iterations: iterations}
 			runErr = failure
 		}
@@ -83,7 +82,7 @@ func (scheduler Scheduler) Run(ctx context.Context, runtime engine.BackgroundCon
 		// fatal source error takes, so Run reports it and stops the body; it is never paced
 		// and retried, because a source that panics is broken rather than merely failing.
 		defer func() {
-			failure := recoveredPanic(recover())
+			failure := engine.RecoveredPanic(recover())
 			if failure == nil {
 				return
 			}
@@ -168,7 +167,7 @@ func (scheduler Scheduler) Run(ctx context.Context, runtime engine.BackgroundCon
 			// iteration is still reported and the change policy still decides what runs next.
 			var err error
 			defer func() {
-				if failure := recoveredPanic(recover()); failure != nil {
+				if failure := engine.RecoveredPanic(recover()); failure != nil {
 					err = failure
 				}
 				done <- bodyResult{iteration: iteration, err: err, started: started, duration: time.Since(started)}
@@ -303,26 +302,4 @@ func readyTimerChannel() <-chan time.Time {
 	channel := make(chan time.Time, 1)
 	channel <- time.Now()
 	return channel
-}
-
-// panicError carries a panic recovered from a source, a batch, or a body. The stack is kept
-// because a panic crossing this boundary is a bug in the code being observed, and the trace is
-// the only thing that says where.
-type panicError struct {
-	value any
-	stack []byte
-}
-
-func (failure *panicError) Error() string {
-	return fmt.Sprintf("panic: %v\n\n%s", failure.value, failure.stack)
-}
-
-// recoveredPanic converts a recovered value into an error. Call it as recoveredPanic(recover())
-// directly inside a deferred function: recover reports a panic only to the function the runtime
-// defers, so a helper that called recover itself would always see nil.
-func recoveredPanic(recovered any) error {
-	if recovered == nil {
-		return nil
-	}
-	return &panicError{value: recovered, stack: debug.Stack()}
 }

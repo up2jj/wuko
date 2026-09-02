@@ -190,3 +190,55 @@ func TestBackgroundSupervisorCountsOnlyRunningJobs(t *testing.T) {
 		t.Fatalf("count = %d after join, want 0", count)
 	}
 }
+
+// A panicking job must fail the run rather than end the process. Jobs run in their own
+// goroutine, so an escaping panic would kill wuko before the failure was ever recorded.
+func TestBackgroundSupervisorContainsPanickingJob(t *testing.T) {
+	supervisor := newBackgroundSupervisor(t.Context())
+	if err := supervisor.start("boom", "observe", func(context.Context) error {
+		panic("job exploded")
+	}); err != nil {
+		t.Fatal(err)
+	}
+	supervisor.seal()
+	err := supervisor.wait()
+	if err == nil {
+		t.Fatal("wait reported no failure for a panicking job")
+	}
+	for _, want := range []string{"job exploded", `background observe "boom"`} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error = %v, want it to mention %q", err, want)
+		}
+	}
+	// The stack is what locates the bug in the job.
+	if !strings.Contains(err.Error(), "engine.") {
+		t.Fatalf("error carries no stack: %v", err)
+	}
+}
+
+// Fail-fast has to see a panic like any other failure: the scope ends and siblings are stopped.
+func TestBackgroundSupervisorPanicStopsSiblingJobs(t *testing.T) {
+	supervisor := newBackgroundSupervisor(t.Context())
+	stopped := make(chan struct{})
+	if err := supervisor.start("worker", "test", func(ctx context.Context) error {
+		<-ctx.Done()
+		close(stopped)
+		return ctx.Err()
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := supervisor.start("boom", "test", func(context.Context) error {
+		panic("sibling exploded")
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-stopped:
+	case <-time.After(10 * time.Second):
+		t.Fatal("a panicking job did not trigger fail-fast")
+	}
+	supervisor.seal()
+	if err := supervisor.wait(); err == nil || !strings.Contains(err.Error(), "sibling exploded") {
+		t.Fatalf("wait = %v, want the panic surfaced", err)
+	}
+}

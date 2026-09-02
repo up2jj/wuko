@@ -94,7 +94,7 @@ func (supervisor *backgroundSupervisor) StartService(id, kind string, options st
 
 	go func() {
 		defer supervisor.wg.Done()
-		err := run(jobCtx)
+		err := runJob(jobCtx, run)
 		supervisor.mu.Lock()
 		job.err = err
 		job.finished = true
@@ -112,6 +112,20 @@ func (supervisor *backgroundSupervisor) StartService(id, kind string, options st
 		}
 	}()
 	return nil
+}
+
+// runJob calls a background program and turns a panic into its error. Jobs run in their own
+// goroutine, so a panic that escaped would end the process before the job was ever marked
+// finished: the failure would never reach wait, fail-fast would never fire, and the run would
+// die without a diagnosis. Recovering keeps a broken job a failed job, which the caller then
+// reports and joins like any other failure.
+func runJob(ctx context.Context, run func(context.Context) error) (err error) {
+	defer func() {
+		if failure := RecoveredPanic(recover()); failure != nil {
+			err = failure
+		}
+	}()
+	return run(ctx)
 }
 
 func (supervisor *backgroundSupervisor) seal() {
