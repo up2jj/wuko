@@ -57,6 +57,9 @@ type rpcSession struct {
 	protocol chan error
 	done     chan struct{}
 
+	// closed marks a session that has been detached for good, guarded by the registry mutex so
+	// that a late activate cannot publish a session the lifecycle has already torn down.
+	closed    bool
 	outputMu  sync.Mutex
 	output    []byte
 	failOnce  sync.Once
@@ -112,6 +115,9 @@ func (registry *rpcRegistry) forget(id string, cause error) {
 func (registry *rpcRegistry) attach(id string, session *rpcSession) error {
 	registry.mu.Lock()
 	defer registry.mu.Unlock()
+	if session.closed {
+		return errRPCSessionClosed
+	}
 	worker := registry.workers[id]
 	if worker == nil {
 		return fmt.Errorf("process RPC worker %q is not registered", id)
@@ -126,6 +132,7 @@ func (registry *rpcRegistry) attach(id string, session *rpcSession) error {
 
 func (registry *rpcRegistry) detach(session *rpcSession, cause error) {
 	registry.mu.Lock()
+	session.closed = true
 	worker := registry.workers[session.workerID]
 	if worker != nil && worker.session == session {
 		worker.session = nil
@@ -157,7 +164,12 @@ func (registry *rpcRegistry) call(ctx context.Context, workerIDs []string, paylo
 				return nil, "", fmt.Errorf("waiting for an available process RPC worker: %w", ctx.Err())
 			}
 		}
-		value, err := registry.invoke(ctx, worker, call, payload)
+		value, retry, err := registry.invoke(ctx, worker, call, payload)
+		if retry && ctx.Err() == nil {
+			// The request never reached a worker, so nothing has run it. Reserving again lets
+			// an idle or restarted worker take the call within the caller's timeout.
+			continue
+		}
 		return value, worker.id, err
 	}
 }
@@ -216,15 +228,19 @@ func unregisteredWorkersError(workerIDs []string) error {
 	return fmt.Errorf("no process RPC worker in the pool is registered: %s", strings.Join(names, ", "))
 }
 
-func (registry *rpcRegistry) invoke(ctx context.Context, worker *rpcWorker, call *rpcCall, payload any) (any, error) {
+// invoke sends payload to the reserved worker and waits for its response. The second result
+// marks a failure that happened before the request reached the worker: nothing has run the call,
+// so the caller may reserve another worker instead of failing. A request that was written is
+// never sent again, even when its answer never arrives.
+func (registry *rpcRegistry) invoke(ctx context.Context, worker *rpcWorker, call *rpcCall, payload any) (any, bool, error) {
 	request, err := json.Marshal(rpcRequest{ID: call.id, Payload: payload})
 	if err != nil {
 		registry.release(worker, call)
-		return nil, fmt.Errorf("encoding process RPC request: %w", err)
+		return nil, false, fmt.Errorf("encoding process RPC request: %w", err)
 	}
 	if len(request)+1 > maxRPCLineBytes {
 		registry.release(worker, call)
-		return nil, fmt.Errorf("process RPC request exceeds %d bytes", maxRPCLineBytes)
+		return nil, false, fmt.Errorf("process RPC request exceeds %d bytes", maxRPCLineBytes)
 	}
 	request = append(request, '\n')
 
@@ -233,20 +249,22 @@ func (registry *rpcRegistry) invoke(ctx context.Context, worker *rpcWorker, call
 	registry.mu.Unlock()
 	if session == nil {
 		registry.release(worker, call)
-		return nil, errRPCSessionClosed
+		return nil, true, errRPCSessionClosed
 	}
 	if err := session.write(ctx, request); err != nil {
 		session.fail(fmt.Errorf("writing process RPC request: %w", err))
-		return nil, fmt.Errorf("writing process RPC request: %w", err)
+		// A failed write stops before the newline that completes the request line, so no
+		// worker can have acted on what reached the pipe.
+		return nil, true, fmt.Errorf("writing process RPC request: %w", err)
 	}
 
 	select {
 	case response := <-call.response:
-		return response.value, response.err
+		return response.value, false, response.err
 	case <-ctx.Done():
 		// Keep the worker reserved until its matching response arrives or the session
 		// closes. Releasing it here could route that late response to a later call.
-		return nil, fmt.Errorf("waiting for process RPC response: %w", ctx.Err())
+		return nil, false, fmt.Errorf("waiting for process RPC response: %w", ctx.Err())
 	}
 }
 

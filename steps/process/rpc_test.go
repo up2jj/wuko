@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -160,6 +161,145 @@ func TestProcessCallRotatesEachPoolIndependently(t *testing.T) {
 	if !reflect.DeepEqual(selected, want) {
 		t.Fatalf("selected workers = %#v, want %#v", selected, want)
 	}
+}
+
+func TestRPCSessionIsPublishedOnlyAfterReadiness(t *testing.T) {
+	registry := newRPCRegistry()
+	gate := filepath.Join(t.TempDir(), "ready")
+	runnerValue, err := newProcess(map[string]any{
+		"script":    `while [ ! -f "$1" ]; do sleep 0.01; done; printf 'ready\n' >&2; cat > /dev/null`,
+		"args":      []any{gate},
+		"rpc":       "jsonl",
+		"readiness": map[string]any{"log": map[string]any{"pattern": "ready", "timeout": "10s"}},
+		"shutdown":  map[string]any{"timeout": "100ms"},
+	}, registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	worker := runnerValue.(*Runner).workerID
+	services := newTestServices(t)
+	started := make(chan error, 1)
+	go func() {
+		_, runErr := runnerValue.Run(t.Context(), step.Request{
+			StepID: "worker", Services: services, Env: map[string]string{}, Stdout: io.Discard, Stderr: io.Discard,
+		})
+		started <- runErr
+	}()
+	waitForCondition(t, "the worker to be registered", func() bool { return workerRegistered(registry, worker) })
+	time.Sleep(50 * time.Millisecond)
+	if workerSession(registry, worker) != nil {
+		t.Fatal("the session was published while readiness was still pending")
+	}
+	if err := os.WriteFile(gate, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-started; err != nil {
+		t.Fatal(err)
+	}
+	if workerSession(registry, worker) == nil {
+		t.Fatal("the session was not published after readiness")
+	}
+}
+
+func TestRPCCallReachesTheRestartedWorker(t *testing.T) {
+	registry := newRPCRegistry()
+	runnerValue, err := newProcess(map[string]any{
+		"script":    `printf 'ready\n' >&2; read line; id=$(printf '%s' "$line" | sed 's/.*"id":"\([^"]*\)".*/\1/'); printf '{"id":"%s","result":"pong"}\n' "$id"`,
+		"rpc":       "jsonl",
+		"readiness": map[string]any{"log": map[string]any{"pattern": "ready", "timeout": "10s"}},
+		"restart":   map[string]any{"policy": "always", "backoff": "1ms"},
+		"shutdown":  map[string]any{"timeout": "100ms"},
+	}, registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	services := newTestServices(t)
+	result, err := runnerValue.Run(t.Context(), step.Request{
+		StepID: "worker", Services: services, Env: map[string]string{}, Stdout: io.Discard, Stderr: io.Discard,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Every instance answers one call and exits, so each later call has to land on a
+	// replacement that has matched its readiness log again.
+	worker := result.Outputs["worker_id"].(string)
+	call, err := newCall(map[string]any{"worker": worker, "payload": "ping", "timeout": "10s"}, registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for attempt := range 3 {
+		previous := workerSession(registry, worker)
+		if previous == nil {
+			t.Fatalf("call %d: the worker was not callable", attempt)
+		}
+		out, err := call.Run(t.Context(), step.Request{})
+		if err != nil {
+			t.Fatalf("call %d: %v", attempt, err)
+		}
+		if out.Outputs["result"] != "pong" {
+			t.Fatalf("call %d result = %#v", attempt, out.Outputs["result"])
+		}
+		waitForCondition(t, "the replacement worker to become callable", func() bool {
+			session := workerSession(registry, worker)
+			return session != nil && session != previous
+		})
+	}
+}
+
+func TestRPCRequestThatNeverReachedAWorkerIsRetryable(t *testing.T) {
+	registry := newRPCRegistry()
+	if err := registry.declare("worker"); err != nil {
+		t.Fatal(err)
+	}
+	session, err := newRPCSession(registry, "worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := session.activate(); err != nil {
+		t.Fatal(err)
+	}
+	worker, call, _, err := registry.reserve([]string{"worker"})
+	if err != nil || worker == nil {
+		t.Fatalf("reserve = %v, %v", worker, err)
+	}
+	// The instance exits between the reservation and the request.
+	session.close(nil)
+	_, retry, err := registry.invoke(t.Context(), worker, call, "ping")
+	if !errors.Is(err, errRPCSessionClosed) {
+		t.Fatalf("error = %v", err)
+	}
+	if !retry {
+		t.Fatal("a request that never reached a worker must be retryable")
+	}
+	if err := session.activate(); !errors.Is(err, errRPCSessionClosed) {
+		t.Fatalf("a closed session was republished: %v", err)
+	}
+}
+
+func workerRegistered(registry *rpcRegistry, id string) bool {
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	return registry.workers[id] != nil
+}
+
+func workerSession(registry *rpcRegistry, id string) *rpcSession {
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	if worker := registry.workers[id]; worker != nil {
+		return worker.session
+	}
+	return nil
+}
+
+func waitForCondition(t *testing.T, what string, condition func() bool) {
+	t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); {
+		if condition() {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", what)
 }
 
 func TestProcessCallConfigurationValidation(t *testing.T) {

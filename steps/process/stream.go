@@ -12,8 +12,8 @@ const logMatchLimit = 1 << 20
 type logMatcher struct {
 	pattern *regexp.Regexp
 	ready   chan struct{}
-	once    sync.Once
 	mu      sync.Mutex
+	matched bool
 	buffer  []byte
 }
 
@@ -27,12 +27,20 @@ func (matcher *logMatcher) add(data []byte) {
 	}
 	matcher.mu.Lock()
 	defer matcher.mu.Unlock()
+	// Readiness is decided once. Matching every later chunk would scan the whole rolling
+	// window again for as long as the service keeps logging, which for a service that logs
+	// is the entire run.
+	if matcher.matched {
+		return
+	}
 	matcher.buffer = append(matcher.buffer, data...)
 	if len(matcher.buffer) > logMatchLimit {
 		matcher.buffer = matcher.buffer[len(matcher.buffer)-logMatchLimit:]
 	}
 	if matcher.pattern.Match(matcher.buffer) {
-		matcher.once.Do(func() { close(matcher.ready) })
+		matcher.matched = true
+		matcher.buffer = nil
+		close(matcher.ready)
 	}
 }
 

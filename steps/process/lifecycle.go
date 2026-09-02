@@ -23,6 +23,9 @@ type runningProcess struct {
 	exited   chan processExit
 	protocol <-chan error
 	finished *atomic.Bool
+	// activate publishes the instance's RPC session for calls. It runs once readiness has
+	// passed, so a replacement instance cannot be handed a call while it is still starting.
+	activate func() error
 }
 
 type processExit struct {
@@ -37,7 +40,7 @@ func (runner *Runner) runLifecycle(ctx, startupCtx context.Context, request step
 		matcher := newLogMatcher(runner.logPattern)
 		process := runner.launch(ctx, request, label, matcher)
 		if !announced {
-			if err := runner.waitReady(startupCtx, request, process, matcher); err != nil {
+			if err := runner.startInstance(startupCtx, request, process, matcher); err != nil {
 				return errors.Join(err, runner.abortLaunch(ctx, request, label, process))
 			}
 			ready <- nil
@@ -49,6 +52,24 @@ func (runner *Runner) runLifecycle(ctx, startupCtx context.Context, request step
 				return errors.Join(ctx.Err(), runner.abortLaunch(ctx, request, label, process))
 			}
 			announced = true
+		} else if err := runner.startInstance(ctx, request, process, matcher); err != nil {
+			// A replacement instance proves itself the same way the first one did. The scope
+			// ending here is not a failure; anything else is, and enters the restart policy.
+			if ctx.Err() != nil {
+				return runner.shutdown(ctx, request, label, process)
+			}
+			failure := err
+			if shutdownErr := runner.shutdown(ctx, request, label, process); shutdownErr != nil {
+				failure = errors.Join(failure, shutdownErr)
+			}
+			if runner.shouldRestart(failure, restarts) {
+				restarts++
+				if err := waitContext(ctx, duration(runner.config.Restart.Backoff, time.Second)); err != nil {
+					return ctx.Err()
+				}
+				continue
+			}
+			return failure
 		}
 
 		var exit processExit
@@ -80,8 +101,7 @@ func (runner *Runner) runLifecycle(ctx, startupCtx context.Context, request step
 		if failure == nil {
 			failure = runner.exitError(exit)
 		}
-		shouldRestart := runner.config.Restart.Policy == "always" || (runner.config.Restart.Policy == "on_failure" && failure != nil)
-		if shouldRestart && (runner.config.Restart.MaxRestarts == 0 || restarts < runner.config.Restart.MaxRestarts) {
+		if runner.shouldRestart(failure, restarts) {
 			restarts++
 			if err := waitContext(ctx, duration(runner.config.Restart.Backoff, time.Second)); err != nil {
 				return ctx.Err()
@@ -90,6 +110,23 @@ func (runner *Runner) runLifecycle(ctx, startupCtx context.Context, request step
 		}
 		return failure
 	}
+}
+
+// startInstance waits for a launched instance to become ready and then publishes its RPC
+// session. Attaching the session any earlier would let a call reach a worker that is still
+// starting, which no readiness probe would have caught.
+func (runner *Runner) startInstance(ctx context.Context, request step.Request, process runningProcess, matcher *logMatcher) error {
+	if err := runner.waitReady(ctx, request, process, matcher); err != nil {
+		return err
+	}
+	return process.activate()
+}
+
+func (runner *Runner) shouldRestart(failure error, restarts int) bool {
+	if runner.config.Restart.Policy == "never" || (runner.config.Restart.Policy == "on_failure" && failure == nil) {
+		return false
+	}
+	return runner.config.Restart.MaxRestarts == 0 || restarts < runner.config.Restart.MaxRestarts
 }
 
 func (runner *Runner) launch(parent context.Context, request step.Request, label string, matcher *logMatcher) runningProcess {
@@ -115,13 +152,16 @@ func (runner *Runner) launch(parent context.Context, request step.Request, label
 			}()
 		}
 	}
-	startedCallback := func() {
-		if rpc != nil {
+	startedCallback := func() { once.Do(func() { close(started) }) }
+	activate := func() error { return nil }
+	if rpc != nil {
+		activate = func() error {
 			if err := rpc.activate(); err != nil {
 				rpc.fail(err)
+				return fmt.Errorf("publishing process RPC session: %w", err)
 			}
+			return nil
 		}
-		once.Do(func() { close(started) })
 	}
 	options, flush, optionsErr := runner.processOptions(request, label, startedCallback, matcher, rpc)
 	if launchErr == nil {
@@ -154,7 +194,7 @@ func (runner *Runner) launch(parent context.Context, request step.Request, label
 	if rpc != nil {
 		protocol = rpc.protocol
 	}
-	return runningProcess{cancel: cancel, started: started, exited: exited, protocol: protocol, finished: finished}
+	return runningProcess{cancel: cancel, started: started, exited: exited, protocol: protocol, finished: finished, activate: activate}
 }
 
 // abortLaunch stops a service that never committed to its scope. A detached launcher exits

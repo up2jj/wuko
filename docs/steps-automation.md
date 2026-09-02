@@ -387,8 +387,11 @@ A worker returns exactly one of:
 ```
 
 Each line is limited to 10 MiB. IDs must be returned unchanged. Malformed messages and unknown
-IDs are protocol failures and enter the process restart policy. Calls are never replayed after a
-request has been written.
+IDs are protocol failures and enter the process restart policy. A restarted instance keeps its
+`worker_id` but must pass its readiness probe again before it can receive calls, so calls made
+while it restarts wait within their own `timeout`. Calls are never replayed after a request has
+been written: one that was routed to a worker in the instant it exited fails with `process RPC
+session closed` instead of running twice.
 
 Use `worker` when addressing one process:
 
