@@ -18,6 +18,10 @@ import (
 // so callers validate their concurrency bound before reaching here -- see
 // Policy.Validate.
 //
+// FanOut does not contain panics: a task that panics would end the process, and the
+// error has nowhere to go because FanOut reports nothing. Tasks that can panic must
+// recover for themselves and record it as their own error -- see RecoveredPanic.
+//
 // SetLimit may unblock one admission after cancellation, as an already-running
 // task exits and frees its slot. Admission therefore does not imply the task ran:
 // the context is checked before admission and again inside the task, and callers

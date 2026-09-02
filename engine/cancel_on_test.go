@@ -432,3 +432,31 @@ func TestCancelOnValidateRejectsInvalidCondition(t *testing.T) {
 		t.Fatalf("Validate() error = %v", err)
 	}
 }
+
+func TestCancelOnFailsStepWhenParticipantPanics(t *testing.T) {
+	monitorCanceled := make(chan struct{})
+	registry := newTestRegistry(t, map[string]step.Builder{
+		"body": func(map[string]any) (step.Runner, error) {
+			return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+				panic("body step exploded")
+			}), nil
+		},
+		"monitor": func(map[string]any) (step.Runner, error) {
+			return runnerFunc(func(ctx context.Context, _ step.Request) (step.Result, error) {
+				<-ctx.Done()
+				close(monitorCanceled)
+				return step.Result{}, ctx.Err()
+			}), nil
+		},
+	})
+	definition := cancelOnDefinition(t, []workflow.Step{{ID: "deployment_finished", Type: "monitor", With: map[string]any{}}}, []workflow.Step{{ID: "deploy", Type: "body", With: map[string]any{}}}, "")
+	_, err := New(registry).Run(t.Context(), definition, Options{})
+	if err == nil || !strings.Contains(err.Error(), "body step exploded") {
+		t.Fatalf("error = %v, want the recovered panic reported against the step", err)
+	}
+	if !strings.Contains(err.Error(), "deployment_watch") {
+		t.Fatalf("error = %v, want the cancel_on step named", err)
+	}
+	// The panic must cancel and join the losers rather than leave them running.
+	<-monitorCanceled
+}

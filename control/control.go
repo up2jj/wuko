@@ -302,6 +302,18 @@ func Run[T any](ctx context.Context, iterations []Iteration, policy Policy, obse
 		defer observerMu.Unlock()
 		observer(event)
 	}
+	// executeIteration contains a panic from the iteration body. Iterations run in goroutines
+	// of their own, so a panic that escaped would end the process before the outcome was ever
+	// recorded: the failure would never reach the caller, fail-fast would never cancel the
+	// siblings, and the run would die without naming the iteration that broke.
+	executeIteration := func(iterationCtx context.Context, iteration Iteration) (value T, err error) {
+		defer func() {
+			if failure := RecoveredPanic(recover()); failure != nil {
+				err = failure
+			}
+		}()
+		return execute(iterationCtx, iteration)
+	}
 	runOne := func(iterationCtx context.Context, iteration Iteration) error {
 		if err := iterationCtx.Err(); err != nil {
 			return err
@@ -309,7 +321,7 @@ func Run[T any](ctx context.Context, iterations []Iteration, policy Policy, obse
 		started := time.Now()
 		outcomes[iteration.Index] = Outcome[T]{Iteration: iteration, Started: true, StartedAt: started}
 		notify(Event{Kind: IterationStarted, Index: iteration.Index, Started: started})
-		value, err := execute(iterationCtx, iteration)
+		value, err := executeIteration(iterationCtx, iteration)
 		outcome := &outcomes[iteration.Index]
 		outcome.Value = value
 		outcome.Err = err

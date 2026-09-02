@@ -253,3 +253,33 @@ func TestRunCancellationDoesNotStartQueuedIteration(t *testing.T) {
 		t.Fatalf("runs = %d, queued outcome = %#v", runs.Load(), result.outcomes[1])
 	}
 }
+
+func TestRunRecordsPanickingIterationAsFailure(t *testing.T) {
+	iterations, err := Foreach([]int{0, 1, 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outcomes, err := Run(t.Context(), iterations, Policy{MaxConcurrency: 1, FailFast: false}, nil, func(_ context.Context, iteration Iteration) (int, error) {
+		if iteration.Index == 1 {
+			panic("iteration exploded")
+		}
+		return iteration.Index, nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "iteration exploded") {
+		t.Fatalf("error = %v, want the recovered panic", err)
+	}
+	if !strings.Contains(err.Error(), "iteration 1") {
+		t.Fatalf("error = %v, want the panicking iteration named", err)
+	}
+	if len(outcomes) != 3 {
+		t.Fatalf("outcomes = %d, want 3", len(outcomes))
+	}
+	if outcomes[1].Err == nil {
+		t.Fatal("panicking iteration recorded no error")
+	}
+	for _, index := range []int{0, 2} {
+		if outcomes[index].Err != nil || outcomes[index].Value != index {
+			t.Fatalf("outcome %d = %#v, want the sibling to finish normally", index, outcomes[index])
+		}
+	}
+}
