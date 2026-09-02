@@ -341,15 +341,19 @@ steps:
 ```
 
 The parent ID and every monitor ID are required and must be valid and unique. A control must contain
-at least one monitor and one body step. Multiple monitors are ordinary declarations in the
+at least one monitor and one body step, and at most 100 monitors: every monitor races at once from
+its own copy of the state, so the count bounds concurrency and memory the way `max_concurrency`
+does for the fan-out controls. Multiple monitors are ordinary declarations in the
 `monitors` list; all of them race the body and one another. A monitor may be a concrete step, action,
 conditional or working-directory block, worktree, executor, `concurrent`, `batch`, `foreach`,
 `matrix`, or `loop`. The monitor ID also labels declarations such as `concurrent` that are normally
 anonymous. Conditions, retries, timeouts, templates, and owned cleanup retain their ordinary
 behavior. Monitor branches have no shared interactive standard input.
 
-Nested `cancel_on`, `return`, `require`, and declared `defer` are rejected anywhere inside the
-control. The control races its own participants, so it is rejected inside an executor block, where
+Nested `cancel_on`, `return`, `require`, declared `defer`, and `observe` are rejected anywhere
+inside the control. An observer is registered with the run-level background supervisor rather
+than with the participant that declared it, so it would win the race the instant it registered
+as a monitor, and outlive the cancellation that ended the race when used in the body. The control races its own participants, so it is rejected inside an executor block, where
 every branch would share the one open session. Elsewhere its participants keep the restrictions of
 the scope the control sits in: a `cancel_on` inside a `concurrent` group or a `foreach` body may
 contain only what that scope already allows. Child outputs and variables are isolated: they do not become top-level `.steps` or `.vars`

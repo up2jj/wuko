@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -56,6 +57,11 @@ func TestCancelOnStructureValidation(t *testing.T) {
 		{name: "require", step: Step{ID: "watch", CancelOn: &CancelOnGroup{Monitors: []Step{step("monitor")}, Steps: []Step{{Require: stringPointer("steps.yaml")}}}}, want: "require is not supported"},
 		{name: "defer", step: Step{ID: "watch", CancelOn: &CancelOnGroup{Monitors: []Step{step("monitor")}, Steps: []Step{{ID: "body", Type: "shell", Defer: []Step{step("cleanup")}}}}}, want: "defer is not supported"},
 		{name: "nested", step: Step{ID: "watch", CancelOn: &CancelOnGroup{Monitors: []Step{step("monitor")}, Steps: []Step{{ID: "nested", CancelOn: &CancelOnGroup{Monitors: []Step{step("inner_monitor")}, Steps: []Step{step("inner_body")}}}}}}, want: "nested cancel_on"},
+		{name: "observe monitor", step: Step{ID: "watch", CancelOn: &CancelOnGroup{Monitors: []Step{observeStep("watcher")}, Steps: []Step{step("body")}}}, want: "observe is not supported inside cancel_on"},
+		{name: "observe body", step: Step{ID: "watch", CancelOn: &CancelOnGroup{Monitors: []Step{step("monitor")}, Steps: []Step{observeStep("watcher")}}}, want: "observe is not supported inside cancel_on"},
+		{name: "observe nested in body", step: Step{ID: "watch", CancelOn: &CancelOnGroup{Monitors: []Step{step("monitor")}, Steps: []Step{{Concurrent: &ConcurrentGroup{MaxConcurrency: 1, Steps: []Step{observeStep("watcher"), step("sibling")}}}}}}, want: "observe is not supported inside cancel_on"},
+		{name: "too many monitors", step: Step{ID: "watch", CancelOn: &CancelOnGroup{Monitors: manyMonitors(101), Steps: []Step{step("body")}}}, want: "cancel_on supports at most 100 monitors"},
+		{name: "monitor ceiling", step: Step{ID: "watch", CancelOn: &CancelOnGroup{Monitors: manyMonitors(100), Steps: []Step{step("body")}}}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -75,6 +81,21 @@ func TestCancelOnStructureValidation(t *testing.T) {
 }
 
 func stringPointer(value string) *string { return &value }
+
+func observeStep(id string) Step {
+	return Step{ID: id, Observe: &ObserveGroup{
+		Source: ObserveSource{Type: "filesystem", With: map[string]any{"paths": []any{"**"}}},
+		Steps:  []Step{{ID: id + "_body", Type: "shell"}},
+	}}
+}
+
+func manyMonitors(count int) []Step {
+	monitors := make([]Step, count)
+	for index := range monitors {
+		monitors[index] = Step{ID: fmt.Sprintf("monitor_%d", index), Type: "shell"}
+	}
+	return monitors
+}
 
 func TestCancelOnAllowsLabelsOnAnonymousMonitors(t *testing.T) {
 	definition := &Definition{Version: 1, Name: "test", Steps: []Step{{

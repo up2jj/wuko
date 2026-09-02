@@ -7,6 +7,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// maxCancelOnMonitors bounds how many monitors may race one body. It matches the
+// max_concurrency ceiling the fan-out controls enforce.
+const maxCancelOnMonitors = 100
+
 // CancelOnGroup races one body against named monitor branches and records the outcome.
 type CancelOnGroup struct {
 	Monitors []Step `yaml:"monitors"`
@@ -45,6 +49,12 @@ func (group *CancelOnGroup) UnmarshalYAML(node *yaml.Node) error {
 func (group CancelOnGroup) Validate() error {
 	if len(group.Monitors) == 0 {
 		return fmt.Errorf("cancel_on must contain at least one monitor")
+	}
+	// Every monitor races at once against the body, each from its own deep copy of the state,
+	// so the monitor count is an unbounded concurrency and memory multiplier. Bound it the way
+	// the fan-out controls bound max_concurrency.
+	if len(group.Monitors) > maxCancelOnMonitors {
+		return fmt.Errorf("cancel_on supports at most %d monitors", maxCancelOnMonitors)
 	}
 	if len(group.Steps) == 0 {
 		return fmt.Errorf("cancel_on must contain at least one body step")
@@ -91,6 +101,12 @@ func cancelOnContainsForbidden(steps []Step) error {
 			return fmt.Errorf("require is not supported inside cancel_on")
 		case step.Defer != nil:
 			return fmt.Errorf("defer is not supported inside cancel_on")
+		case step.Observe != nil:
+			// An observer is registered with the run-level background supervisor, so its job
+			// context comes from the run and not from the participant. As a monitor it would
+			// win the race the instant it registered; in the body it would outlive the
+			// cancellation that ended the race. Neither can honor the cancel_on contract.
+			return fmt.Errorf("observe is not supported inside cancel_on")
 		}
 		for _, child := range step.ChildSequences() {
 			if err := cancelOnContainsForbidden(child.Steps); err != nil {
