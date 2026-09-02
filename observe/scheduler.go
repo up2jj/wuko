@@ -218,6 +218,12 @@ func (scheduler Scheduler) Run(ctx context.Context, runtime engine.BackgroundCon
 				return engine.BackgroundControlSummary{Iterations: iterations}, observed.err
 			}
 			if scheduler.OnChange == workflow.ObserveSkip && bodyDone != nil {
+				// Dropped for good rather than deferred. A polling source advances its own
+				// change baseline when it produces an observation, and it is not told that
+				// this one went nowhere, so it will not report the same state a second time:
+				// the body can stay on an older state until the source changes again.
+				// on_change: queue is the policy for a body that must converge on the
+				// current state. Documented in docs/workflow-control.md.
 				runtime.Report(engine.BackgroundControlEvent{Kind: engine.BackgroundTriggerHandled, Action: workflow.ObserveSkip})
 				continue
 			}

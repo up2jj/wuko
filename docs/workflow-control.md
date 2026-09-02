@@ -123,7 +123,13 @@ observation, and start from the workflow environment visible where the control w
 
 - `restart` cancels and joins the active body before starting a replacement.
 - `queue` coalesces changes into at most one pending run.
-- `skip` ignores triggers received while the body is active.
+- `skip` ignores triggers received while the body is active. A skipped trigger is dropped, not
+  deferred, and on a polling source with the default `trigger: change` it is never reported again:
+  the source compares each poll against the previous one, and the skipped poll already became that
+  baseline. The body can therefore sit on an older state until the source changes *again* — a
+  status that goes bad during a run and then stays bad triggers nothing further. Choose `queue`
+  when the body has to end up on the current state, or `trigger: always`, which re-reports that
+  state on the next poll.
 
 `on_error` decides what a source failure does:
 
