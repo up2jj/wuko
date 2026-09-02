@@ -319,7 +319,7 @@ func (r *Runner) Run(ctx context.Context, execution step.Request) (result step.R
 	if response.ContentLength > maxResponseSize {
 		return step.Result{}, fmt.Errorf("response body exceeds %d bytes", maxResponseSize)
 	}
-	data, err := io.ReadAll(io.LimitReader(response.Body, maxResponseSize+1))
+	data, err := readResponseBody(response)
 	if err != nil {
 		return step.Result{}, fmt.Errorf("reading response body: %w", err)
 	}
@@ -331,7 +331,10 @@ func (r *Runner) Run(ctx context.Context, execution step.Request) (result step.R
 			return step.Result{Outputs: outputs}, nil
 		}
 	}
-	value := any(string(data))
+	// One conversion, used for both outputs: string(data) twice would hold two
+	// independent copies of the body alongside data itself.
+	text := string(data)
+	value := any(text)
 	if r.config.Response == "json" {
 		value, err = decodeJSON(data)
 		if err != nil {
@@ -341,7 +344,7 @@ func (r *Runner) Run(ctx context.Context, execution step.Request) (result step.R
 	outputs := map[string]any{
 		"status":  response.StatusCode,
 		"headers": responseHeaders(response.Header),
-		"body":    string(data),
+		"body":    text,
 		"value":   value,
 	}
 	result = step.Result{Outputs: outputs}
@@ -352,6 +355,21 @@ func (r *Runner) Run(ctx context.Context, execution step.Request) (result step.R
 		}
 	}
 	return result, nil
+}
+
+// readResponseBody reads at most one byte past the cap, so the caller can still tell
+// an oversized body from one that just fits. A declared length sizes the buffer up
+// front rather than letting ReadAll reallocate its way there.
+func readResponseBody(response *http.Response) ([]byte, error) {
+	limited := io.LimitReader(response.Body, maxResponseSize+1)
+	if response.ContentLength <= 0 {
+		return io.ReadAll(limited)
+	}
+	buffer := bytes.NewBuffer(make([]byte, 0, response.ContentLength+1))
+	if _, err := buffer.ReadFrom(limited); err != nil {
+		return nil, err
+	}
+	return buffer.Bytes(), nil
 }
 
 func (r *Runner) openJar(ctx context.Context, runDir string) (http.CookieJar, func() error, error) {

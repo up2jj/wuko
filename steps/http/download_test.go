@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 
 	"github.com/up2jj/wuko/step"
@@ -218,5 +219,24 @@ func assertNoDownloadTemporaryFiles(t *testing.T, dir string) {
 	}
 	if len(matches) != 0 {
 		t.Fatalf("temporary downloads remain: %#v", matches)
+	}
+}
+
+func TestDirectorySyncToleratesOnlyUnsupportedFilesystems(t *testing.T) {
+	if err := syncDirectory(t.TempDir()); err != nil {
+		t.Fatalf("syncing a directory: %v", err)
+	}
+	if err := syncDirectory(filepath.Join(t.TempDir(), "missing")); err == nil {
+		t.Fatal("syncing a missing directory reported no error")
+	}
+	// A filesystem that cannot sync a directory must not fail a download whose file
+	// is already installed, since a retry would only report the destination exists.
+	for _, unsupported := range []error{syscall.EINVAL, syscall.ENOTSUP, syscall.ENOSYS} {
+		if !directorySyncUnsupported(fmt.Errorf("syncing directory: %w", unsupported)) {
+			t.Errorf("%v is not treated as unsupported", unsupported)
+		}
+	}
+	if directorySyncUnsupported(syscall.EIO) {
+		t.Error("a real I/O error must still fail the write")
 	}
 }

@@ -32,10 +32,14 @@ const (
 	maxJarLineBytes  = 64 * 1024
 )
 
+// persistentJar tracks what this session changed rather than the whole cookie set,
+// so close can merge those changes onto the file as it stands then instead of
+// overwriting whatever another run stored in the meantime.
 type persistentJar struct {
 	mu      sync.Mutex
 	jar     *cookiejar.Jar
-	entries map[string]jarEntry
+	changed map[string]jarEntry
+	removed map[string]bool
 }
 
 type jarEntry struct {
@@ -49,28 +53,34 @@ type jarEntry struct {
 	httpOnly          bool
 }
 
-func openPersistentJar(ctx context.Context, path string) (_ stdhttp.CookieJar, close func() error, resultErr error) {
+// jarLockTimeout bounds how long saving a jar waits for another run to finish its
+// own save. The lock now covers a file read and a file write and nothing else, so
+// waiting on it for longer than this means a holder is stuck rather than busy.
+const jarLockTimeout = 30 * time.Second
+
+// openPersistentJar holds the lock only while it reads the file, and close holds it
+// only for its read-modify-write. Nothing holds it across the request in between, so
+// concurrent steps sharing a jar no longer serialize on each other's network I/O.
+// The cost is that they can miss a cookie the other stored while both were in
+// flight; the merge in write is what still keeps either one from losing an update.
+func openPersistentJar(ctx context.Context, path string) (stdhttp.CookieJar, func() error, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, nil, fmt.Errorf("creating cookie jar directory: %w", err)
 	}
-	lock, err := filelock.Acquire(ctx, path+".lock")
-	if err != nil {
-		return nil, nil, fmt.Errorf("cookie jar %s: %w", path, err)
-	}
-	defer func() {
-		if resultErr != nil {
-			_ = lock.Release()
-		}
-	}()
-
-	jar, err := newPersistentJar(path)
+	jar, err := loadJarUnderLock(ctx, path)
 	if err != nil {
 		return nil, nil, err
 	}
-	// The lock is held for the life of the jar so a concurrent run cannot interleave
-	// with the read-modify-write that close performs. Release is idempotent, so the
-	// deferred error path above stays correct once close has run.
-	close = func() error {
+	close := func() error {
+		// The request context is often already done by the time a jar is saved -- a
+		// cancelled step still earned its cookies -- so the write waits on a deadline
+		// of its own rather than on one that has already expired.
+		writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), jarLockTimeout)
+		defer cancel()
+		lock, err := filelock.Acquire(writeCtx, path+".lock")
+		if err != nil {
+			return fmt.Errorf("cookie jar %s: %w", path, err)
+		}
 		writeErr := jar.write(path)
 		if releaseErr := lock.Release(); writeErr == nil && releaseErr != nil {
 			return fmt.Errorf("cookie jar %s: %w", path, releaseErr)
@@ -80,15 +90,45 @@ func openPersistentJar(ctx context.Context, path string) (_ stdhttp.CookieJar, c
 	return jar, close, nil
 }
 
+func loadJarUnderLock(ctx context.Context, path string) (*persistentJar, error) {
+	lock, err := filelock.Acquire(ctx, path+".lock")
+	if err != nil {
+		return nil, fmt.Errorf("cookie jar %s: %w", path, err)
+	}
+	jar, err := newPersistentJar(path)
+	if err != nil {
+		_ = lock.Release()
+		return nil, err
+	}
+	if err := lock.Release(); err != nil {
+		return nil, fmt.Errorf("cookie jar %s: %w", path, err)
+	}
+	return jar, nil
+}
+
 func newPersistentJar(path string) (*persistentJar, error) {
 	base, err := cookiejar.New(nil)
 	if err != nil {
 		return nil, err
 	}
-	jar := &persistentJar{jar: base, entries: make(map[string]jarEntry)}
+	jar := &persistentJar{jar: base, changed: make(map[string]jarEntry), removed: make(map[string]bool)}
+	stored, err := readJarFile(path)
+	if err != nil {
+		return nil, err
+	}
+	for _, entry := range stored {
+		jar.add(entry)
+	}
+	return jar, nil
+}
+
+// readJarFile returns the unexpired entries the file holds, keyed as write keys them.
+// Callers hold the lock: both loading a jar and saving one read the file this way.
+func readJarFile(path string) (map[string]jarEntry, error) {
+	entries := make(map[string]jarEntry)
 	file, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return jar, nil
+		return entries, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("reading cookie jar %s: %w", path, err)
@@ -102,7 +142,7 @@ func newPersistentJar(path string) (*persistentJar, error) {
 			return nil, fmt.Errorf("reading cookie jar %s: %w", path, err)
 		}
 		if text == "" && errors.Is(err, io.EOF) {
-			return jar, nil
+			return entries, nil
 		}
 		line++
 		if !fits {
@@ -121,7 +161,7 @@ func newPersistentJar(path string) (*persistentJar, error) {
 		if entry.expires > 0 && entry.expires <= time.Now().Unix() {
 			continue
 		}
-		jar.add(entry)
+		entries[entry.key()] = entry
 	}
 }
 
@@ -210,10 +250,12 @@ func (jar *persistentJar) SetCookies(value *url.URL, cookies []*stdhttp.Cookie) 
 		}
 		key := entry.key()
 		if cookie.MaxAge < 0 || (entry.expires > 0 && entry.expires <= time.Now().Unix()) {
-			delete(jar.entries, key)
+			delete(jar.changed, key)
+			jar.removed[key] = true
 			continue
 		}
-		jar.entries[key] = entry
+		delete(jar.removed, key)
+		jar.changed[key] = entry
 	}
 }
 
@@ -268,10 +310,12 @@ func defaultCookiePath(requestPath string) string {
 	return requestPath[:index]
 }
 
+// add seeds the in-memory jar with an entry the file already holds. It records no
+// change, so reloading a jar and saving it back cannot resurrect a cookie another
+// run deleted in between.
 func (jar *persistentJar) add(entry jarEntry) {
 	jar.mu.Lock()
 	defer jar.mu.Unlock()
-	jar.entries[entry.key()] = entry
 	host := entry.domain
 	scheme := "http"
 	if entry.secure {
@@ -315,11 +359,25 @@ func jarBool(value bool) string {
 	return "FALSE"
 }
 
+// write merges this session's changes onto the file and replaces it. The caller
+// holds the lock, so the read and the replacement are one atomic update and a run
+// that overlapped this one keeps whatever it stored that this one did not touch.
 func (jar *persistentJar) write(path string) (resultErr error) {
+	stored, err := readJarFile(path)
+	if err != nil {
+		return err
+	}
 	jar.mu.Lock()
-	lines := make([]string, 0, len(jar.entries))
+	for key := range jar.removed {
+		delete(stored, key)
+	}
+	for key, entry := range jar.changed {
+		stored[key] = entry
+	}
+	jar.mu.Unlock()
+	lines := make([]string, 0, len(stored))
 	now := time.Now().Unix()
-	for _, entry := range jar.entries {
+	for _, entry := range stored {
 		if entry.expires != 0 && entry.expires <= now {
 			continue
 		}
@@ -329,7 +387,6 @@ func (jar *persistentJar) write(path string) (resultErr error) {
 		}
 		lines = append(lines, line)
 	}
-	jar.mu.Unlock()
 	slices.Sort(lines)
 	content := "# Netscape HTTP Cookie File\n# This file was generated by Wuko.\n"
 	if len(lines) > 0 {
@@ -367,13 +424,5 @@ func (jar *persistentJar) write(path string) (resultErr error) {
 	if err := os.Rename(temporaryPath, path); err != nil {
 		return fmt.Errorf("replacing cookie jar %s: %w", path, err)
 	}
-	directoryFile, err := os.Open(directory)
-	if err != nil {
-		return fmt.Errorf("opening cookie jar directory: %w", err)
-	}
-	defer directoryFile.Close()
-	if err := directoryFile.Sync(); err != nil {
-		return fmt.Errorf("syncing cookie jar directory: %w", err)
-	}
-	return nil
+	return syncDirectory(directory)
 }

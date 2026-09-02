@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"syscall"
 )
 
 type downloadTarget struct {
@@ -100,7 +101,7 @@ func (target *downloadTarget) Write(ctx context.Context, source io.Reader) (int6
 		return 0, fmt.Errorf("installing download at %s: %w", target.destination, err)
 	}
 	target.temporaryPath = ""
-	if err := syncDownloadDirectory(filepath.Dir(target.destination)); err != nil {
+	if err := syncDirectory(filepath.Dir(target.destination)); err != nil {
 		return 0, err
 	}
 	return size, nil
@@ -130,14 +131,23 @@ func installDownload(source, destination string, overwrite bool) error {
 	return renameDownloadNoReplace(source, destination)
 }
 
-func syncDownloadDirectory(path string) error {
+// syncDirectory flushes a directory entry so a rename into it survives a crash.
+// Filesystems that cannot do this -- several network ones -- report it rather than
+// silently skipping it, and refusing something the filesystem never offered is not
+// a durability failure. Treating it as one would fail a step whose file is already
+// installed, which a retry cannot then repeat: the destination now exists.
+func syncDirectory(path string) error {
 	directory, err := os.Open(path)
 	if err != nil {
-		return fmt.Errorf("opening download directory: %w", err)
+		return fmt.Errorf("opening directory %s: %w", path, err)
 	}
 	defer directory.Close()
-	if err := directory.Sync(); err != nil {
-		return fmt.Errorf("syncing download directory: %w", err)
+	if err := directory.Sync(); err != nil && !directorySyncUnsupported(err) {
+		return fmt.Errorf("syncing directory %s: %w", path, err)
 	}
 	return nil
+}
+
+func directorySyncUnsupported(err error) bool {
+	return errors.Is(err, syscall.EINVAL) || errors.Is(err, syscall.ENOTSUP) || errors.Is(err, syscall.ENOSYS)
 }

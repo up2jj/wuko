@@ -319,3 +319,72 @@ func TestPersistentJarBoundsCookieLines(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestPersistentJarLockCoversTheFileNotTheSession(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cookies.txt")
+	first, closeFirst, err := openPersistentJar(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A second run must not wait on the first one's request. The deadline is what
+	// makes a jar that still holds the lock across its session fail here rather
+	// than hang.
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	second, closeSecond, err := openPersistentJar(ctx, path)
+	if err != nil {
+		t.Fatalf("opening a second jar while the first is live: %v", err)
+	}
+	target, _ := url.Parse("https://example.test/")
+	first.SetCookies(target, []*http.Cookie{{Name: "first", Value: "one", Path: "/"}})
+	second.SetCookies(target, []*http.Cookie{{Name: "second", Value: "two", Path: "/"}})
+	if err := closeSecond(); err != nil {
+		t.Fatal(err)
+	}
+	if err := closeFirst(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "\tfirst\tone") || !strings.Contains(string(data), "\tsecond\ttwo") {
+		t.Fatalf("overlapping sessions lost an update: %q", data)
+	}
+}
+
+func TestPersistentJarDoesNotResurrectADeletedCookie(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cookies.txt")
+	initial := "# Netscape HTTP Cookie File\n.example.test\tTRUE\t/\tFALSE\t0\tshared\tvalue\n"
+	if err := os.WriteFile(path, []byte(initial), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	deleter, closeDeleter, err := openPersistentJar(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The second session loads the same cookie and never touches it, so saving must
+	// not write back an entry it only ever read.
+	bystander, closeBystander, err := openPersistentJar(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, _ := url.Parse("https://example.test/")
+	if got := cookieValue(bystander.Cookies(target), "shared"); got != "value" {
+		t.Fatalf("shared = %q", got)
+	}
+	deleter.SetCookies(target, []*http.Cookie{{Name: "shared", Value: "", Path: "/", Domain: "example.test", MaxAge: -1}})
+	if err := closeDeleter(); err != nil {
+		t.Fatal(err)
+	}
+	if err := closeBystander(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "\tshared\t") {
+		t.Fatalf("a deleted cookie came back: %q", data)
+	}
+}

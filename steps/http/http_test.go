@@ -281,3 +281,33 @@ func TestRetryAttemptsShareOneConnection(t *testing.T) {
 		t.Fatalf("connections after the final attempt = %d, want 2", got)
 	}
 }
+
+func TestChunkedResponseReadsWithoutADeclaredLength(t *testing.T) {
+	server := httptest.NewServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, _ *nethttp.Request) {
+		// Flushing a partial body sends it chunked, so the response carries no length
+		// for the reader to size itself from.
+		if _, err := writer.Write([]byte(`{"name":`)); err != nil {
+			t.Error(err)
+		}
+		writer.(nethttp.Flusher).Flush()
+		if _, err := writer.Write([]byte(`"wuko"}`)); err != nil {
+			t.Error(err)
+		}
+	}))
+	defer server.Close()
+	built, err := New(map[string]any{"url": server.URL, "response": "json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := built.Run(t.Context(), step.Request{RunDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if body := result.Outputs["body"]; body != `{"name":"wuko"}` {
+		t.Fatalf("body = %q", body)
+	}
+	value, ok := result.Outputs["value"].(map[string]any)
+	if !ok || value["name"] != "wuko" {
+		t.Fatalf("value = %#v", result.Outputs["value"])
+	}
+}
