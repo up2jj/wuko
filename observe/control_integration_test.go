@@ -62,10 +62,17 @@ func TestObserveRerunsWithDeterministicBinding(t *testing.T) {
 	root := t.TempDir()
 	source := newFilesystemTestSource()
 	bindings := make(chan map[string]any, 4)
+	releaseInitial := make(chan struct{})
 	registry := newTestRegistry(t, map[string]step.Builder{
 		"body": func(map[string]any) (step.Runner, error) {
 			return observeRunnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
-				bindings <- workflow.Clone(request.Bindings["observe"]).(map[string]any)
+				binding := workflow.Clone(request.Bindings["observe"]).(map[string]any)
+				bindings <- binding
+				if binding["initial"] == true {
+					// Deliberately outlives its cancellation: the rerun must not start until
+					// both events have been coalesced into the queued batch.
+					<-releaseInitial
+				}
 				return step.Result{}, nil
 			}), nil
 		},
@@ -75,16 +82,31 @@ func TestObserveRerunsWithDeterministicBinding(t *testing.T) {
 	definition := testDefinition(t, "rerun", control)
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
+	triggers := make(chan string, 4)
 	go func() {
-		_, err := engine.New(registry, withFilesystemTestSource(source)).Run(ctx, definition, engine.Options{RunDir: root})
+		_, err := engine.New(registry, withFilesystemTestSource(source)).Run(ctx, definition, engine.Options{
+			RunDir: root,
+			Progress: func(event engine.ProgressEvent) {
+				if event.Kind == engine.BackgroundTriggered {
+					triggers <- event.Action
+				}
+			},
+		})
 		done <- err
 	}()
 	initial := <-bindings
 	if initial["initial"] != true || initial["iteration"] != 1 {
 		t.Fatalf("initial binding = %#v", initial)
 	}
-	source.events <- fsnotify.Event{Name: filepath.Join(root, "b.go"), Op: fsnotify.Write}
-	source.events <- fsnotify.Event{Name: filepath.Join(root, "a.go"), Op: fsnotify.Create | fsnotify.Write}
+	// Coalescing is what this asserts, so both events have to reach the scheduler before the
+	// rerun starts. Holding the first body open and waiting for each event to be handled makes
+	// that ordering explicit; racing two sends against a 1ms debounce did not, and lost
+	// whenever the machine was busy enough to separate them.
+	for _, name := range []string{"b.go", "a.go"} {
+		source.events <- fsnotify.Event{Name: filepath.Join(root, name), Op: fsnotify.Write}
+		receiveObserveTest(t, triggers)
+	}
+	close(releaseInitial)
 	next := <-bindings
 	filesystem := next["filesystem"].(map[string]any)
 	paths := filesystem["paths"].([]any)

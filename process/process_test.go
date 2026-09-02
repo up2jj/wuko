@@ -479,9 +479,14 @@ func TestRunTTYHandsOffImmediatelyWithEmptyInteractionPlan(t *testing.T) {
 }
 
 func TestRunTTYFailsWhenExpectationIsNotMet(t *testing.T) {
-	plan, err := ptyinteract.Compile([]ptyinteract.Spec{{
-		HasExpect: true, Expect: "missing>", Send: "never", TimeoutSet: true, Timeout: 20 * time.Millisecond,
-	}})
+	// Wait for the prompt the command really prints before expecting one it never will.
+	// Output reaches the capture buffer before the matcher is fed, so a first expectation that
+	// matches proves the output was captured. Asserting that after a bare 20ms timeout instead
+	// raced process startup against the timeout, and lost whenever the machine was busy.
+	plan, err := ptyinteract.Compile([]ptyinteract.Spec{
+		{HasExpect: true, Expect: "other>"},
+		{HasExpect: true, Expect: "missing>", Send: "never", TimeoutSet: true, Timeout: 20 * time.Millisecond},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
