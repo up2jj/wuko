@@ -17,6 +17,11 @@ import (
 
 const maxRPCLineBytes = 10 << 20
 
+// rpcBufferRetention bounds the array a session keeps between responses. Slicing consumed lines
+// off the front reuses the array a large response allocated, which would otherwise stay held for
+// the life of the worker.
+const rpcBufferRetention = 64 << 10
+
 var errRPCSessionClosed = errors.New("process RPC session closed")
 
 type rpcRegistry struct {
@@ -352,6 +357,9 @@ func (session *rpcSession) Write(data []byte) (int, error) {
 		}
 		line := bytes.TrimSuffix(session.output[:newline], []byte{'\r'})
 		session.output = session.output[newline+1:]
+		if len(session.output) == 0 && cap(session.output) > rpcBufferRetention {
+			session.output = nil
+		}
 		if err := session.handleLine(line); err != nil {
 			session.fail(err)
 			return 0, err

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"slices"
 	"strings"
@@ -16,6 +17,9 @@ import (
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
 )
+
+// probeDrainLimit bounds the response body an HTTP probe reads before closing it.
+const probeDrainLimit = 64 << 10
 
 type runningProcess struct {
 	cancel   context.CancelFunc
@@ -502,6 +506,9 @@ func (runner *Runner) httpProbe(configured HTTPProbe) func(context.Context) erro
 		if err != nil {
 			return err
 		}
+		// Draining before the close returns the connection to the pool, so a probe that runs
+		// for the life of the service does not open a new one every period.
+		_, _ = io.CopyN(io.Discard, response.Body, probeDrainLimit)
 		response.Body.Close()
 		expected := configured.ExpectedStatus
 		if len(expected) == 0 {

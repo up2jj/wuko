@@ -385,19 +385,22 @@ func (runner *Runner) processOptions(request step.Request, label string, started
 		command, args = argv[0], argv[1:]
 	}
 	dir, environment := runner.executionContext(request)
-	stdout := prefixedWriter(request.Stdout, label, matcher).(*linePrefixWriter)
 	stderr := prefixedWriter(request.Stderr, label, matcher).(*linePrefixWriter)
 	var input io.Reader
-	var output io.Writer = stdout
-	flush := func() error { return errors.Join(stdout.Flush(), stderr.Flush()) }
+	var output io.Writer
+	flush := stderr.Flush
 	// An RPC session owns its request pipe for the whole lifecycle, so it is still open when
 	// the worker exits and the executor must report that exit without draining stdin first.
+	// It also owns stdout, which carries protocol messages rather than printable output.
 	streamingInput := false
 	if rpc != nil {
 		input = rpc.reader
 		output = rpc
-		flush = stderr.Flush
 		streamingInput = true
+	} else {
+		stdout := prefixedWriter(request.Stdout, label, matcher).(*linePrefixWriter)
+		output = stdout
+		flush = func() error { return errors.Join(stdout.Flush(), stderr.Flush()) }
 	}
 	return processpkg.Options{Command: command, Args: args, Dir: dir, Env: environment, User: runner.config.User,
 		Stdin: input, StdinOutlivesProcess: streamingInput,

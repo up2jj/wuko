@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -300,6 +301,49 @@ func waitForCondition(t *testing.T, what string, condition func() bool) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatalf("timed out waiting for %s", what)
+}
+
+func TestProcessCallServesConcurrentCallersFromThePool(t *testing.T) {
+	registry := newRPCRegistry()
+	workers := []any{
+		startRPCWorker(t, registry, "alpha"),
+		startRPCWorker(t, registry, "beta"),
+		startRPCWorker(t, registry, "gamma"),
+	}
+	call, err := newCall(map[string]any{"pool": "vars.workers", "payload_expr": "vars.payload"}, registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const callers, each = 6, 5
+	failures := make(chan error, callers*each)
+	var group sync.WaitGroup
+	for caller := range callers {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			for index := range each {
+				// Every request carries a distinct payload, so a response routed to the wrong
+				// caller shows up as a mismatch rather than passing unnoticed.
+				payload := fmt.Sprintf("caller-%d-call-%d", caller, index)
+				result, err := call.Run(t.Context(), step.Request{
+					Vars: map[string]any{"workers": workers, "payload": payload},
+				})
+				if err != nil {
+					failures <- err
+					return
+				}
+				echoed, _ := result.Outputs["result"].(map[string]any)
+				if echoed["payload"] != payload {
+					failures <- fmt.Errorf("result = %#v, want the payload %q", result.Outputs["result"], payload)
+				}
+			}
+		}()
+	}
+	group.Wait()
+	close(failures)
+	for err := range failures {
+		t.Error(err)
+	}
 }
 
 func TestProcessCallConfigurationValidation(t *testing.T) {
