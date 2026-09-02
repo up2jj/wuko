@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
 )
 
@@ -34,13 +35,13 @@ func TestDocumentedProcessWorkflowsDecodeAndConfigsBuild(t *testing.T) {
 		}
 		checked++
 	}
-	if checked != 20 {
-		t.Fatalf("documented complete process examples = %d, want 20", checked)
+	if checked != 22 {
+		t.Fatalf("documented complete process examples = %d, want 22", checked)
 	}
 }
 
 func TestRunnableProcessExamplesDecodeAndBuild(t *testing.T) {
-	for _, name := range []string{"process-dag.yaml", "process-pool.yaml"} {
+	for _, name := range []string{"process-dag.yaml", "process-pool.yaml", "process-rpc.yaml"} {
 		t.Run(name, func(t *testing.T) {
 			path := filepath.Join("..", "..", "examples", name)
 			definition, err := workflow.NewLoader(nil).Decode(path, workflow.LoadOptions{})
@@ -55,14 +56,22 @@ func TestRunnableProcessExamplesDecodeAndBuild(t *testing.T) {
 }
 
 func buildProcessConfigs(steps []workflow.Step) error {
+	registry := step.NewRegistry()
+	if err := Register(registry); err != nil {
+		return err
+	}
+	return buildRegisteredProcessConfigs(registry, steps)
+}
+
+func buildRegisteredProcessConfigs(registry *step.Registry, steps []workflow.Step) error {
 	for _, workflowStep := range steps {
-		if workflowStep.Type == "process" {
-			if _, err := New(workflowStep.With); err != nil {
+		if workflowStep.Type == "process" || workflowStep.Type == "process_call" {
+			if _, err := registry.Build(workflowStep.Type, workflowStep.With); err != nil {
 				return err
 			}
 		}
 		for _, children := range workflowStep.ChildSequences() {
-			if err := buildProcessConfigs(children.Steps); err != nil {
+			if err := buildRegisteredProcessConfigs(registry, children.Steps); err != nil {
 				return err
 			}
 		}

@@ -33,10 +33,15 @@ type Options struct {
 	Dir     string
 	Env     map[string]string
 	// User is a username or numeric user ID for the child process. Empty inherits the current user.
-	User   string
-	Stdin  io.Reader
-	Stdout io.Writer
-	Stderr io.Writer
+	User  string
+	Stdin io.Reader
+	// StdinOutlivesProcess reports that Stdin stays open past the child's own lifetime, so the
+	// exit must be reported without waiting for a stdin pump to reach EOF. This executor
+	// satisfies it by requiring an *os.File, which os/exec passes to the child as a duplicated
+	// descriptor instead of copying in a goroutine that Cmd.Wait would join forever.
+	StdinOutlivesProcess bool
+	Stdout               io.Writer
+	Stderr               io.Writer
 	// TTY runs the command in a pseudo-terminal. User handoff requires file-backed terminal Stdin.
 	TTY bool
 	// Interactions scripts ordered writes and prompt responses before optional user handoff.
@@ -111,6 +116,9 @@ func (LocalExecutor) Run(ctx context.Context, options Options) (Result, error) {
 	}
 	if options.Interact && options.Interactions == nil {
 		return Result{}, fmt.Errorf("PTY user handoff requires interactions")
+	}
+	if _, isFile := options.Stdin.(*os.File); options.StdinOutlivesProcess && !isFile {
+		return Result{}, fmt.Errorf("stdin that outlives %s must be an *os.File", options.Command)
 	}
 	if err := ctx.Err(); err != nil {
 		return Result{}, err

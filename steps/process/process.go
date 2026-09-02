@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"math"
 	"path/filepath"
@@ -35,6 +36,7 @@ type Config struct {
 	Env              workflow.Environment `yaml:"env,omitempty"`
 	User             string               `yaml:"user,omitempty"`
 	Label            string               `yaml:"label,omitempty"`
+	RPC              string               `yaml:"rpc,omitempty"`
 	Stdout           string               `yaml:"stdout,omitempty"`
 	Stderr           string               `yaml:"stderr,omitempty"`
 	Readiness        *ReadinessConfig     `yaml:"readiness,omitempty"`
@@ -133,13 +135,25 @@ type Runner struct {
 	logPattern   *regexp.Regexp
 	signal       syscall.Signal
 	argvProgram  *vm.Program
+	rpcRegistry  *rpcRegistry
+	workerID     string
 }
 
 func (*Runner) ExecutorAware() {}
 
-func Register(registry *step.Registry) error { return registry.Register("process", New) }
+func Register(registry *step.Registry) error {
+	rpc := newRPCRegistry()
+	if err := registry.Register("process", func(raw map[string]any) (step.Runner, error) { return newProcess(raw, rpc) }); err != nil {
+		return err
+	}
+	return registry.Register("process_call", func(raw map[string]any) (step.Runner, error) { return newCall(raw, rpc) })
+}
 
 func New(raw map[string]any) (step.Runner, error) {
+	return newProcess(raw, nil)
+}
+
+func newProcess(raw map[string]any, rpcRegistry *rpcRegistry) (step.Runner, error) {
 	var config Config
 	if err := step.DecodeConfig(raw, &config); err != nil {
 		return nil, err
@@ -192,6 +206,17 @@ func New(raw map[string]any) (step.Runner, error) {
 	if config.Detached && config.Shutdown.Command == nil {
 		return nil, fmt.Errorf("detached requires shutdown.command")
 	}
+	if config.RPC != "" && config.RPC != "jsonl" {
+		return nil, fmt.Errorf("rpc must be jsonl")
+	}
+	if config.RPC != "" {
+		if config.Detached {
+			return nil, fmt.Errorf("rpc cannot be combined with detached")
+		}
+		if config.Stdout != "" && config.Stdout != "inherit" {
+			return nil, fmt.Errorf("rpc reserves stdout for protocol messages")
+		}
+	}
 	if config.Shutdown.Command != nil {
 		if err := validateCommand(config.Shutdown.Command.Command, config.Shutdown.Command.Script, config.Shutdown.Command.Shell, "shutdown command"); err != nil {
 			return nil, err
@@ -217,7 +242,10 @@ func New(raw map[string]any) (step.Runner, error) {
 			}
 			// A discarded stream never reaches the log matcher, so a readiness log that can
 			// only ever time out is rejected here rather than after its timeout expires.
-			if !stdoutPolicy.Streams() && !stderrPolicy.Streams() {
+			if config.RPC != "" && !stderrPolicy.Streams() {
+				return nil, fmt.Errorf("readiness log for rpc requires stderr to be inherit")
+			}
+			if config.RPC == "" && !stdoutPolicy.Streams() && !stderrPolicy.Streams() {
 				return nil, fmt.Errorf("readiness log requires stdout or stderr to be inherit")
 			}
 		}
@@ -235,7 +263,15 @@ func New(raw map[string]any) (step.Runner, error) {
 			return nil, fmt.Errorf("compiling argv expr: %w", err)
 		}
 	}
-	return &Runner{config: config, stdoutPolicy: stdoutPolicy, stderrPolicy: stderrPolicy, logPattern: pattern, signal: signal, argvProgram: argvProgram}, nil
+	var workerID string
+	if config.RPC != "" {
+		workerID, err = opaqueID("worker")
+		if err != nil {
+			return nil, err
+		}
+	}
+	return &Runner{config: config, stdoutPolicy: stdoutPolicy, stderrPolicy: stderrPolicy, logPattern: pattern, signal: signal, argvProgram: argvProgram,
+		rpcRegistry: rpcRegistry, workerID: workerID}, nil
 }
 
 func (runner *Runner) Run(ctx context.Context, request step.Request) (step.Result, error) {
@@ -256,8 +292,19 @@ func (runner *Runner) Run(ctx context.Context, request step.Request) (step.Resul
 	abandoned := make(chan struct{})
 	var abandonOnce sync.Once
 	abandon := func() { abandonOnce.Do(func() { close(abandoned) }) }
+	if runner.config.RPC != "" {
+		if runner.rpcRegistry == nil {
+			return step.Result{}, fmt.Errorf("process RPC registry is unavailable")
+		}
+		if err := runner.rpcRegistry.declare(runner.workerID); err != nil {
+			return step.Result{}, err
+		}
+	}
 	run := func(serviceCtx context.Context) error {
 		err := runner.runLifecycle(serviceCtx, ctx, request, label, ready, committed, abandoned)
+		if runner.config.RPC != "" {
+			runner.rpcRegistry.forget(runner.workerID, err)
+		}
 		select {
 		case <-committed:
 			return err
@@ -276,6 +323,9 @@ func (runner *Runner) Run(ctx context.Context, request step.Request) (step.Resul
 		KeepAlive: runner.config.KeepAlive, FailFast: runner.config.ExitOnFailure, ExitOnEnd: runner.config.ExitOnEnd,
 	}, run)
 	if err != nil {
+		if runner.config.RPC != "" {
+			runner.rpcRegistry.forget(runner.workerID, err)
+		}
 		return step.Result{}, err
 	}
 	select {
@@ -300,7 +350,11 @@ func (runner *Runner) Run(ctx context.Context, request step.Request) (step.Resul
 			mode = "http"
 		}
 	}
-	return step.Result{Outputs: map[string]any{"ready": true, "label": label, "detached": runner.config.Detached, "readiness": mode}}, nil
+	outputs := map[string]any{"ready": true, "label": label, "detached": runner.config.Detached, "readiness": mode}
+	if runner.config.RPC != "" {
+		outputs["worker_id"] = runner.workerID
+	}
+	return step.Result{Outputs: outputs}, nil
 }
 
 // checkRestartSupport rejects a restart policy the executor cannot honor. Restarting replaces
@@ -317,7 +371,7 @@ func (runner *Runner) checkRestartSupport(request step.Request) error {
 	return fmt.Errorf("restart policy %q requires shutdown.command: this executor cannot stop a running process by cancellation", runner.config.Restart.Policy)
 }
 
-func (runner *Runner) processOptions(request step.Request, label string, started func(), matcher *logMatcher) (processpkg.Options, func() error, error) {
+func (runner *Runner) processOptions(request step.Request, label string, started func(), matcher *logMatcher, rpc *rpcSession) (processpkg.Options, func() error, error) {
 	command, args := buildCommand(runner.config.Command, runner.config.Script, runner.config.Shell, runner.config.Args)
 	if runner.argvProgram != nil {
 		value, err := expr.Run(runner.argvProgram, expressionEnvironmentFor(request))
@@ -333,9 +387,21 @@ func (runner *Runner) processOptions(request step.Request, label string, started
 	dir, environment := runner.executionContext(request)
 	stdout := prefixedWriter(request.Stdout, label, matcher).(*linePrefixWriter)
 	stderr := prefixedWriter(request.Stderr, label, matcher).(*linePrefixWriter)
+	var input io.Reader
+	var output io.Writer = stdout
 	flush := func() error { return errors.Join(stdout.Flush(), stderr.Flush()) }
+	// An RPC session owns its request pipe for the whole lifecycle, so it is still open when
+	// the worker exits and the executor must report that exit without draining stdin first.
+	streamingInput := false
+	if rpc != nil {
+		input = rpc.reader
+		output = rpc
+		flush = stderr.Flush
+		streamingInput = true
+	}
 	return processpkg.Options{Command: command, Args: args, Dir: dir, Env: environment, User: runner.config.User,
-		Stdout: stdout, Stderr: stderr, StdoutPolicy: runner.stdoutPolicy, StderrPolicy: runner.stderrPolicy,
+		Stdin: input, StdinOutlivesProcess: streamingInput,
+		Stdout: output, Stderr: stderr, StdoutPolicy: runner.stdoutPolicy, StderrPolicy: runner.stderrPolicy,
 		Started: started, TerminationSignal: runner.signal, TerminationParentOnly: runner.config.Shutdown.ParentOnly,
 		TerminationGracePeriod: duration(runner.config.Shutdown.Timeout, 10*time.Second)}, flush, nil
 }

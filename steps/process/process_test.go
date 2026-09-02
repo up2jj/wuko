@@ -157,8 +157,14 @@ func TestProcessConfigurationValidation(t *testing.T) {
 		{name: "multiple readiness probes", raw: map[string]any{"command": "true", "readiness": map[string]any{"log": map[string]any{"pattern": "ok"}, "exec": map[string]any{"command": "true"}}}, want: "exactly one"},
 		{name: "detached without shutdown", raw: map[string]any{"command": "true", "detached": true}, want: "shutdown.command"},
 		{name: "capture stream", raw: map[string]any{"command": "true", "stdout": "capture"}, want: "inherit or discard"},
+		{name: "unknown rpc", raw: map[string]any{"command": "true", "rpc": "msgpack"}, want: "rpc must be jsonl"},
+		{name: "rpc detached", raw: map[string]any{"command": "true", "rpc": "jsonl", "detached": true,
+			"shutdown": map[string]any{"command": map[string]any{"command": "true"}}}, want: "cannot be combined"},
+		{name: "rpc discarded stdout", raw: map[string]any{"command": "true", "rpc": "jsonl", "stdout": "discard"}, want: "reserves stdout"},
 		{name: "log readiness without a stream", raw: map[string]any{"command": "true", "stdout": "discard", "stderr": "discard",
 			"readiness": map[string]any{"log": map[string]any{"pattern": "ready"}}}, want: "readiness log requires"},
+		{name: "rpc log readiness requires stderr", raw: map[string]any{"command": "true", "rpc": "jsonl", "stderr": "discard",
+			"readiness": map[string]any{"log": map[string]any{"pattern": "ready"}}}, want: "requires stderr"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

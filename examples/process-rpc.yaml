@@ -1,0 +1,31 @@
+version: 1
+name: process-rpc
+
+vars:
+  worker_slots: [0, 1, 2]
+  render_request:
+    component: ./components/Hello.js
+    props: {name: Wuko}
+
+steps:
+  - id: renderers
+    foreach:
+      items: vars.worker_slots
+      max_concurrency: 3
+      collect: steps.renderer.worker_id
+      steps:
+        - id: renderer
+          type: process
+          with:
+            command: node
+            args: [renderer-worker.js]
+            label: "renderer-{{ .foreach.index }}"
+            rpc: jsonl
+            restart: {policy: on_failure, backoff: 500ms, max_restarts: 3}
+
+  - id: render
+    type: process_call
+    with:
+      pool: steps.renderers.results
+      payload_expr: vars.render_request
+      timeout: 10s

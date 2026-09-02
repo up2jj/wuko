@@ -16,7 +16,7 @@ parts of Process Compose while keeping dependencies and pools in Wuko's existing
 Exactly one of `command`, `script`, or typed `argv.expr` selects the program. `args`, `shell`,
 `working_directory`, `env`, and `user` behave like their `shell` counterparts. `stdout` and
 `stderr` accept `inherit` (the default) or `discard`; unbounded service output is not retained in
-step state. Discarding both streams is rejected together with log readiness, which reads them. The immutable startup result contains `ready`, `label`, `detached`, and `readiness`.
+step state. Discarding both streams is rejected together with log readiness, which reads them. The immutable startup result contains `ready`, `label`, `detached`, and `readiness`; an RPC process also returns `worker_id`.
 
 ### 1. Ready on successful spawn
 
@@ -364,6 +364,99 @@ steps:
 
 All four workers remain active; `max_concurrency: 2` only starts and readies at most two iterations
 at once.
+
+### Calling a process
+
+`rpc: jsonl` turns a managed process into a request/response worker. The worker reads one JSON
+request per line from stdin and writes one correlated response per line to stdout. Stdout is
+reserved for the protocol and is not printed; application logs belong on stderr. RPC cannot be
+combined with `detached` or `stdout: discard`. With log readiness, the readiness message must
+therefore be written to stderr.
+
+Requests have this form:
+
+```json
+{"id":"call_opaque-id","payload":{"component":"Hello","props":{"name":"Wuko"}}}
+```
+
+A worker returns exactly one of:
+
+```json
+{"id":"call_opaque-id","result":{"html":"<p>Hello Wuko</p>"}}
+{"id":"call_opaque-id","error":{"message":"component was not found"}}
+```
+
+Each line is limited to 10 MiB. IDs must be returned unchanged. Malformed messages and unknown
+IDs are protocol failures and enter the process restart policy. Calls are never replayed after a
+request has been written.
+
+Use `worker` when addressing one process:
+
+```yaml
+version: 1
+name: render-one
+steps:
+  - id: renderer
+    type: process
+    with:
+      command: node
+      args: [renderer-worker.js]
+      rpc: jsonl
+      restart: {policy: on_failure, max_restarts: 3}
+  - id: render
+    type: process_call
+    with:
+      worker: "{{ .steps.renderer.worker_id }}"
+      payload:
+        component: ./components/Hello.js
+        props: {name: Wuko}
+      timeout: 10s
+```
+
+`process_call` returns `result` and the selected `worker_id`. `payload` accepts any
+YAML/JSON-compatible value; use `payload_expr` instead when the whole payload must come from a
+typed expression.
+
+For a pool, collect worker IDs from `foreach` and pass the resulting list as the direct `pool`
+expression:
+
+```yaml
+version: 1
+name: render-pool
+vars:
+  worker_slots: [0, 1, 2]
+  render_request:
+    component: ./components/Hello.js
+    props: {name: Wuko}
+steps:
+  - id: renderers
+    foreach:
+      items: vars.worker_slots
+      max_concurrency: 3
+      collect: steps.renderer.worker_id
+      steps:
+        - id: renderer
+          type: process
+          with:
+            command: node
+            args: [renderer-worker.js]
+            label: "renderer-{{ .foreach.index }}"
+            rpc: jsonl
+  - id: render
+    type: process_call
+    with:
+      pool: steps.renderers.results
+      payload_expr: vars.render_request
+```
+
+A pool call fairly selects an available worker and permits one in-flight request per worker. Each
+pool rotates independently of every other pool and of single-worker calls. If all workers are busy
+or restarting, it waits within `timeout` (30 seconds by default). A worker whose service has ended
+leaves the pool, and the remaining workers keep serving calls; the call fails immediately only
+when no worker in the pool is left. A timed-out
+worker remains reserved until the matching late response arrives or the process restarts, so a
+late response cannot satisfy a later call. The opaque `worker_id` remains stable across restarts
+of that process step during the run.
 
 ### 16. Matrix pool
 

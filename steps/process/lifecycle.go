@@ -21,6 +21,7 @@ type runningProcess struct {
 	cancel   context.CancelFunc
 	started  <-chan struct{}
 	exited   chan processExit
+	protocol <-chan error
 	finished *atomic.Bool
 }
 
@@ -97,25 +98,63 @@ func (runner *Runner) launch(parent context.Context, request step.Request, label
 	exited := make(chan processExit, 1)
 	var once sync.Once
 	finished := &atomic.Bool{}
-	options, flush, optionsErr := runner.processOptions(request, label, func() { once.Do(func() { close(started) }) }, matcher)
+	var rpc *rpcSession
+	var launchErr error
+	if runner.config.RPC != "" {
+		session, err := newRPCSession(runner.rpcRegistry, runner.workerID)
+		if err != nil {
+			launchErr = err
+		} else {
+			rpc = session
+			go func() {
+				select {
+				case <-runCtx.Done():
+					rpc.close(runCtx.Err())
+				case <-rpc.done:
+				}
+			}()
+		}
+	}
+	startedCallback := func() {
+		if rpc != nil {
+			if err := rpc.activate(); err != nil {
+				rpc.fail(err)
+			}
+		}
+		once.Do(func() { close(started) })
+	}
+	options, flush, optionsErr := runner.processOptions(request, label, startedCallback, matcher, rpc)
+	if launchErr == nil {
+		launchErr = optionsErr
+	}
 	executor := request.Executor
 	if executor == nil {
 		executor = processpkg.LocalExecutor{}
 	}
 	go func() {
-		if optionsErr != nil {
+		if launchErr != nil {
+			if rpc != nil {
+				rpc.close(launchErr)
+			}
 			finished.Store(true)
-			exited <- processExit{err: optionsErr}
+			exited <- processExit{err: launchErr}
 			return
 		}
 		result, err := executor.Run(runCtx, options)
 		if flushErr := flush(); flushErr != nil {
 			err = errors.Join(err, fmt.Errorf("flushing process output: %w", flushErr))
 		}
+		if rpc != nil {
+			rpc.close(err)
+		}
 		finished.Store(true)
 		exited <- processExit{result: result, err: err}
 	}()
-	return runningProcess{cancel: cancel, started: started, exited: exited, finished: finished}
+	var protocol <-chan error
+	if rpc != nil {
+		protocol = rpc.protocol
+	}
+	return runningProcess{cancel: cancel, started: started, exited: exited, protocol: protocol, finished: finished}
 }
 
 // abortLaunch stops a service that never committed to its scope. A detached launcher exits
@@ -154,6 +193,8 @@ func (runner *Runner) waitReady(ctx context.Context, request step.Request, proce
 		default:
 		}
 		return earlyExitError("process exited before it became ready", runner.exitError(exit))
+	case err := <-process.protocol:
+		return fmt.Errorf("process RPC protocol: %w", err)
 	case <-ctx.Done():
 		return ctx.Err()
 	}
@@ -173,6 +214,8 @@ started:
 			select {
 			case <-matcher.ready:
 				return nil
+			case err := <-process.protocol:
+				return fmt.Errorf("process RPC protocol: %w", err)
 			case <-timer.C:
 				return fmt.Errorf("readiness log did not match %q within %s", log.Pattern, duration(log.Timeout, 30*time.Second))
 			case <-ctx.Done():
@@ -195,6 +238,8 @@ started:
 			default:
 			}
 			return earlyExitError("process exited before readiness log matched", runner.exitError(exit))
+		case err := <-process.protocol:
+			return fmt.Errorf("process RPC protocol: %w", err)
 		case <-timer.C:
 			return fmt.Errorf("readiness log did not match %q within %s", log.Pattern, duration(log.Timeout, 30*time.Second))
 		case <-ctx.Done():
@@ -215,7 +260,7 @@ started:
 	if runner.config.Detached {
 		exited = nil
 	}
-	return runProbeUntil(ctx, timing, probe, exited)
+	return runProbeUntil(ctx, timing, probe, exited, process.protocol)
 }
 
 func (runner *Runner) waitDetached(ctx context.Context, request step.Request) (error, bool) {
@@ -260,6 +305,8 @@ func (runner *Runner) waitRunning(ctx context.Context, request step.Request, pro
 		select {
 		case exit := <-process.exited:
 			return exit, nil, false
+		case err := <-process.protocol:
+			return processExit{}, fmt.Errorf("process RPC protocol: %w", err), false
 		case <-ctx.Done():
 			return processExit{}, nil, true
 		}
@@ -274,14 +321,28 @@ func (runner *Runner) waitRunning(ctx context.Context, request step.Request, pro
 		timing = configured.ProbeTiming
 		probe = runner.httpProbe(*configured)
 	}
-	if err := waitContext(ctx, duration(timing.InitialDelay, 0)); err != nil {
-		return processExit{}, nil, true
+	if delay := duration(timing.InitialDelay, 0); delay > 0 {
+		timer := time.NewTimer(delay)
+		select {
+		case exit := <-process.exited:
+			timer.Stop()
+			return exit, nil, false
+		case err := <-process.protocol:
+			timer.Stop()
+			return processExit{}, fmt.Errorf("process RPC protocol: %w", err), false
+		case <-ctx.Done():
+			timer.Stop()
+			return processExit{}, nil, true
+		case <-timer.C:
+		}
 	}
 	failures := 0
 	for {
 		select {
 		case exit := <-process.exited:
 			return exit, nil, false
+		case err := <-process.protocol:
+			return processExit{}, fmt.Errorf("process RPC protocol: %w", err), false
 		case <-ctx.Done():
 			return processExit{}, nil, true
 		default:
@@ -299,8 +360,18 @@ func (runner *Runner) waitRunning(ctx context.Context, request step.Request, pro
 			// configured shutdown command reaches services signals cannot address.
 			return processExit{}, fmt.Errorf("liveness probe failed %d times: %w", failures, err), false
 		}
-		if err := waitContext(ctx, duration(timing.Period, 10*time.Second)); err != nil {
+		timer := time.NewTimer(duration(timing.Period, 10*time.Second))
+		select {
+		case exit := <-process.exited:
+			timer.Stop()
+			return exit, nil, false
+		case err := <-process.protocol:
+			timer.Stop()
+			return processExit{}, fmt.Errorf("process RPC protocol: %w", err), false
+		case <-ctx.Done():
+			timer.Stop()
 			return processExit{}, nil, true
+		case <-timer.C:
 		}
 	}
 }
@@ -403,9 +474,21 @@ func (runner *Runner) httpProbe(configured HTTPProbe) func(context.Context) erro
 	}
 }
 
-func runProbeUntil(ctx context.Context, timing ProbeTiming, probe func(context.Context) error, exited <-chan processExit) error {
-	if err := waitContext(ctx, duration(timing.InitialDelay, 0)); err != nil {
-		return err
+func runProbeUntil(ctx context.Context, timing ProbeTiming, probe func(context.Context) error, exited <-chan processExit, protocol <-chan error) error {
+	if delay := duration(timing.InitialDelay, 0); delay > 0 {
+		timer := time.NewTimer(delay)
+		select {
+		case exit := <-exited:
+			timer.Stop()
+			return earlyExitError("process exited before it became ready", exit.err)
+		case err := <-protocol:
+			timer.Stop()
+			return fmt.Errorf("process RPC protocol: %w", err)
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
 	}
 	successes, failures := 0, 0
 	for {
@@ -430,6 +513,9 @@ func runProbeUntil(ctx context.Context, timing ProbeTiming, probe func(context.C
 		case exit := <-exited:
 			timer.Stop()
 			return earlyExitError("process exited before it became ready", exit.err)
+		case err := <-protocol:
+			timer.Stop()
+			return fmt.Errorf("process RPC protocol: %w", err)
 		case <-ctx.Done():
 			timer.Stop()
 			return ctx.Err()

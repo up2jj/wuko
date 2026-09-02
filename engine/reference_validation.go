@@ -940,6 +940,11 @@ func (validator *referenceValidator) validateStepConfiguration(stepID, stepType 
 		return validator.validateRawExpression("interactions expr", nestedMap(raw, "interactions"), "expr", scope)
 	case "process":
 		return validator.validateRawExpression("argv expr", nestedMap(raw, "argv"), "expr", scope)
+	case "process_call":
+		if err := validator.validateRawExpression("pool", raw, "pool", scope); err != nil {
+			return err
+		}
+		return validator.validateRawExpression("payload_expr", raw, "payload_expr", scope)
 	case "lua":
 		return validator.validateTypedBindings("argument", nestedMap(raw, "args"), scope)
 	case "tui_choice":

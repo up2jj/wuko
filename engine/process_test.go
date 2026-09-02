@@ -118,3 +118,18 @@ func TestProcessArgvExpressionReferencesAreCheckedBeforeTheRunStarts(t *testing.
 		t.Fatalf("error = %v, want the unknown argv reference", err)
 	}
 }
+
+func TestProcessCallExpressionReferencesAreCheckedBeforeTheRunStarts(t *testing.T) {
+	directory := t.TempDir()
+	registry := step.NewRegistry()
+	if err := processstep.Register(registry); err != nil {
+		t.Fatal(err)
+	}
+	definition := &workflow.Definition{Version: 1, Name: "process-call", Dir: directory, Steps: []workflow.Step{
+		{ID: "call", Type: "process_call", With: map[string]any{"pool": "steps.nosuchstep.results", "payload_expr": "vars.payload"}},
+	}}
+	_, err := New(registry).Run(t.Context(), definition, Options{RunDir: directory, Stdout: io.Discard, Stderr: io.Discard})
+	if err == nil || !strings.Contains(err.Error(), `step "nosuchstep" is not available here`) {
+		t.Fatalf("error = %v, want the unknown pool reference", err)
+	}
+}

@@ -455,16 +455,17 @@ func (session *dockerExecutorSession) Run(ctx context.Context, options process.O
 			cancel()
 		}
 		// Join both stream pumps before returning: attached.Close above unblocks
-		// them, and options.Stdin must not still be read after Run returns.
+		// them, and options.Stdin must not still be read after Run returns. A stdin that
+		// outlives the process is the exception, because only the caller can end it.
 		<-copyDone
-		if options.Stdin != nil {
+		if options.Stdin != nil && !options.StdinOutlivesProcess {
 			<-inputDone
 		}
 		result := executorResult(stdout, stderr, -1)
 		return result, errors.Join(ctx.Err(), removeErr, stopErr)
 	}
 	var inputErr error
-	if options.Stdin != nil {
+	if options.Stdin != nil && !options.StdinOutlivesProcess {
 		inputErr = <-inputDone
 	}
 	if copyErr != nil && !expectedStreamError(copyErr) {
