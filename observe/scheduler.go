@@ -48,6 +48,14 @@ type bodyResult struct {
 }
 
 func (scheduler Scheduler) Run(ctx context.Context, runtime engine.BackgroundControlRuntime) (engine.BackgroundControlSummary, error) {
+	// The first observation is read before the pump exists. Source does not promise that
+	// Initial and Next are safe to call at the same time, and starting the pump first would
+	// call them concurrently on every run.
+	initial := scheduler.Source.NewBatch()
+	if event := scheduler.Source.Initial(); event != nil {
+		initial.Add(event)
+	}
+
 	observations := make(chan observation, 1)
 	pumpDone := make(chan struct{})
 	// The pump reads the source until its own context ends. Cancelling that context on the way
@@ -114,7 +122,10 @@ func (scheduler Scheduler) Run(ctx context.Context, runtime engine.BackgroundCon
 		cancelBody = cancel
 		done := make(chan bodyResult, 1)
 		bodyDone = done
-		binding := cloneMap(batch.Binding())
+		// Binding already hands back a fresh map, and the engine deep-copies it again before
+		// the body can reach it, so copying here only multiplies a payload that can be an
+		// entire JSON response.
+		binding := batch.Binding()
 		if binding == nil {
 			binding = make(map[string]any)
 		}
@@ -146,10 +157,6 @@ func (scheduler Scheduler) Run(ctx context.Context, runtime engine.BackgroundCon
 		}
 	}
 
-	initial := scheduler.Source.NewBatch()
-	if event := scheduler.Source.Initial(); event != nil {
-		initial.Add(event)
-	}
 	startBody(true, initial)
 	for {
 		select {

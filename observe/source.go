@@ -13,6 +13,11 @@ import (
 
 // Batch is bounded source-owned coalescing state. The observe scheduler controls when
 // batches are run but does not inspect or interpret their events.
+//
+// Add and Merge take ownership. The scheduler hands over an observation the source has
+// finished with, or a batch it is about to discard, and never reads either again, so an
+// implementation may retain what it is given instead of copying it. Binding is the boundary
+// in the other direction: it returns a value the caller may keep and modify.
 type Batch interface {
 	Add(any)
 	Merge(Batch)
@@ -20,7 +25,9 @@ type Batch interface {
 	Binding() map[string]any
 }
 
-// Source is an already-ready producer. Initial is delivered to the first body run.
+// Source is an already-ready producer. Initial is delivered to the first body run. It is read
+// once, before the first Next, so an implementation need not make the two safe to call
+// concurrently.
 type Source interface {
 	Initial() any
 	Next(context.Context) (any, error)
@@ -127,11 +134,14 @@ type latestBatch struct {
 	latest map[string]any
 }
 
-func (batch *latestBatch) Add(value any) { batch.latest = cloneMap(value.(map[string]any)) }
+// Add and Merge retain the observation rather than copying it, per the Batch contract. Binding
+// is where the copy happens, so one poll of a large HTTP body is held once here instead of
+// once per coalescing step.
+func (batch *latestBatch) Add(value any) { batch.latest = value.(map[string]any) }
 
 func (batch *latestBatch) Merge(other Batch) {
 	if latest := other.(*latestBatch).latest; latest != nil {
-		batch.latest = cloneMap(latest)
+		batch.latest = latest
 	}
 }
 

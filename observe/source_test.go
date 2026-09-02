@@ -358,3 +358,46 @@ func (source *churningSource) Next(ctx context.Context) (any, error) {
 func (*churningSource) NewBatch() Batch          { return &latestBatch{root: "test"} }
 func (*churningSource) Metadata() map[string]any { return map[string]any{} }
 func (*churningSource) Close() error             { return nil }
+
+// Add and Merge retain what they are given, so Binding is the only copy standing between a
+// source's observation and a body that could mutate it. Pin that: it is what makes dropping the
+// copies in the scheduler and in the coalescing steps safe.
+func TestLatestBatchBindingIsolatesRetainedObservation(t *testing.T) {
+	observation := map[string]any{"value": map[string]any{"version": 1}}
+	batch := &latestBatch{root: "http"}
+	batch.Add(observation)
+
+	binding := batch.Binding()
+	held := binding["http"].(map[string]any)
+	held["value"].(map[string]any)["version"] = 2
+	held["added"] = true
+
+	nested := observation["value"].(map[string]any)
+	if nested["version"] != 1 {
+		t.Fatalf("binding mutation reached the source observation: %#v", observation)
+	}
+	if _, present := observation["added"]; present {
+		t.Fatalf("binding gained a key on the source observation: %#v", observation)
+	}
+	// A second binding is unaffected by what the first caller did to its copy.
+	if again := batch.Binding()["http"].(map[string]any); again["value"].(map[string]any)["version"] != 1 {
+		t.Fatalf("second binding = %#v", again)
+	}
+}
+
+// Merge hands the newer observation over without copying, and the merged-from batch is one the
+// scheduler is about to discard.
+func TestLatestBatchMergeKeepsNewestObservation(t *testing.T) {
+	older, newer := &latestBatch{root: "http"}, &latestBatch{root: "http"}
+	older.Add(map[string]any{"value": "first"})
+	newer.Add(map[string]any{"value": "second"})
+	older.Merge(newer)
+	if got := older.Binding()["http"].(map[string]any)["value"]; got != "second" {
+		t.Fatalf("merged value = %v, want second", got)
+	}
+	empty := &latestBatch{root: "http"}
+	older.Merge(empty)
+	if got := older.Binding()["http"].(map[string]any)["value"]; got != "second" {
+		t.Fatalf("merging an empty batch overwrote the value: %v", got)
+	}
+}
