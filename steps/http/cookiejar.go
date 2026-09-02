@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	stdhttp "net/http"
 	"net/http/cookiejar"
@@ -21,6 +22,15 @@ import (
 )
 
 const httpOnlyPrefix = "#HttpOnly_"
+
+// A jar line is bounded at both ends so one oversized cookie cannot leave behind
+// a file that later runs are unable to read. Entries longer than
+// maxJarEntryBytes are never written, and the larger read bound guarantees that
+// any line write produced reads back.
+const (
+	maxJarEntryBytes = 32 * 1024
+	maxJarLineBytes  = 64 * 1024
+)
 
 type persistentJar struct {
 	mu      sync.Mutex
@@ -84,11 +94,23 @@ func newPersistentJar(path string) (*persistentJar, error) {
 		return nil, fmt.Errorf("reading cookie jar %s: %w", path, err)
 	}
 	defer file.Close()
-	scanner := bufio.NewScanner(file)
+	reader := bufio.NewReader(file)
 	line := 0
-	for scanner.Scan() {
+	for {
+		text, fits, err := readJarLine(reader)
+		if err != nil && !errors.Is(err, io.EOF) {
+			return nil, fmt.Errorf("reading cookie jar %s: %w", path, err)
+		}
+		if text == "" && errors.Is(err, io.EOF) {
+			return jar, nil
+		}
 		line++
-		text := scanner.Text()
+		if !fits {
+			// Nothing this long can have come from write, so skipping keeps the rest of
+			// the jar usable and the next write drops the line for good.
+			continue
+		}
+		text = strings.TrimRight(text, "\r\n")
 		if strings.TrimSpace(text) == "" || (strings.HasPrefix(text, "#") && !strings.HasPrefix(text, httpOnlyPrefix)) {
 			continue
 		}
@@ -101,10 +123,25 @@ func newPersistentJar(path string) (*persistentJar, error) {
 		}
 		jar.add(entry)
 	}
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("reading cookie jar %s: %w", path, err)
+}
+
+// readJarLine reads one line, terminator included, reporting whether it fell
+// within maxJarLineBytes. An over-long line is consumed and discarded rather
+// than failing the read, so a single bad line cannot strand the whole jar.
+func readJarLine(reader *bufio.Reader) (string, bool, error) {
+	var builder strings.Builder
+	total := 0
+	for {
+		chunk, err := reader.ReadSlice('\n')
+		total += len(chunk)
+		if total <= maxJarLineBytes {
+			builder.Write(chunk)
+		}
+		if errors.Is(err, bufio.ErrBufferFull) {
+			continue
+		}
+		return builder.String(), total <= maxJarLineBytes, err
 	}
-	return jar, nil
 }
 
 func parseJarEntry(line string) (jarEntry, error) {
@@ -283,9 +320,14 @@ func (jar *persistentJar) write(path string) (resultErr error) {
 	lines := make([]string, 0, len(jar.entries))
 	now := time.Now().Unix()
 	for _, entry := range jar.entries {
-		if entry.expires == 0 || entry.expires > now {
-			lines = append(lines, entry.line())
+		if entry.expires != 0 && entry.expires <= now {
+			continue
 		}
+		line := entry.line()
+		if len(line) > maxJarEntryBytes {
+			continue
+		}
+		lines = append(lines, line)
 	}
 	jar.mu.Unlock()
 	slices.Sort(lines)

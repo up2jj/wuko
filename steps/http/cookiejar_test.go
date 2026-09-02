@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/up2jj/wuko/step"
 )
@@ -228,5 +229,93 @@ func TestJarEntryValidation(t *testing.T) {
 				t.Fatalf("parseJarEntry(%q) succeeded", line)
 			}
 		})
+	}
+}
+
+func TestCookieJarCloseFailureKeepsStatusError(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
+	runDir := t.TempDir()
+	jarDir := filepath.Join(runDir, "state")
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		// Sealing the directory mid-request makes the jar write fail once the response
+		// has already produced a retryable status.
+		if err := os.Chmod(jarDir, 0o500); err != nil {
+			t.Errorf("chmod: %v", err)
+		}
+		writer.Header().Set("Retry-After", "7")
+		writer.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer server.Close()
+	t.Cleanup(func() { _ = os.Chmod(jarDir, 0o700) })
+	runner, err := New(map[string]any{"url": server.URL, "cookies": map[string]any{"jar": "state/cookies.txt"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runner.Run(t.Context(), step.Request{RunDir: runDir})
+	if err == nil || strings.Contains(err.Error(), "saving cookie jar") {
+		t.Fatalf("error = %v", err)
+	}
+	var retryable interface {
+		HTTPStatusCode() int
+		HTTPRetryAfter() time.Duration
+	}
+	if !errors.As(err, &retryable) {
+		t.Fatalf("error does not carry a status: %T %v", err, err)
+	}
+	if retryable.HTTPStatusCode() != http.StatusTooManyRequests || retryable.HTTPRetryAfter() != 7*time.Second {
+		t.Fatalf("status = %d, retry after = %v", retryable.HTTPStatusCode(), retryable.HTTPRetryAfter())
+	}
+}
+
+func TestPersistentJarBoundsCookieLines(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cookies.txt")
+	initial := "# Netscape HTTP Cookie File\n" +
+		".example.test\tTRUE\t/\tFALSE\t0\tbloated\t" + strings.Repeat("x", maxJarLineBytes) + "\n" +
+		".example.test\tTRUE\t/\tFALSE\t0\tsmall\tvalue\n"
+	if err := os.WriteFile(path, []byte(initial), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	jar, closeJar, err := openPersistentJar(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, _ := url.Parse("https://api.example.test/")
+	if got := cookieValue(jar.Cookies(target), "small"); got != "value" {
+		t.Fatalf("small = %q", got)
+	}
+	if got := cookieValue(jar.Cookies(target), "bloated"); got != "" {
+		t.Fatalf("over-long line was loaded: %d bytes", len(got))
+	}
+	// An oversized cookie stays usable for this run, it just never reaches the file.
+	huge := strings.Repeat("y", maxJarEntryBytes)
+	jar.SetCookies(target, []*http.Cookie{{Name: "fresh", Value: huge, Path: "/"}})
+	if got := cookieValue(jar.Cookies(target), "fresh"); got != huge {
+		t.Fatalf("fresh cookie is not usable in memory: %d bytes", len(got))
+	}
+	if err := closeJar(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if strings.Contains(text, "bloated") || strings.Contains(text, "\tfresh\t") {
+		t.Fatalf("oversized cookies were written: %d bytes", len(text))
+	}
+	if !strings.Contains(text, "\tsmall\tvalue") {
+		t.Fatalf("jar = %q", text)
+	}
+	reopened, closeReopened, err := openPersistentJar(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cookieValue(reopened.Cookies(target), "small"); got != "value" {
+		t.Fatalf("small after reopen = %q", got)
+	}
+	if err := closeReopened(); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -215,7 +215,7 @@ func (r *Runner) Run(ctx context.Context, execution step.Request) (result step.R
 		return step.Result{}, err
 	}
 	defer func() {
-		if err := closeJar(); err != nil {
+		if err := closeJar(); err != nil && resultErr == nil {
 			result = step.Result{}
 			resultErr = fmt.Errorf("saving cookie jar: %w", err)
 		}
