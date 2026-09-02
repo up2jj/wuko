@@ -432,18 +432,25 @@ Wait up to five minutes for Go source activity:
   with:
     root: .
     patterns: ["src/**/*.go"]
+    ignore: ["node_modules", "**/testdata"]
     events: [create, modify, rename, remove]
 ```
 
 `root` defaults to `.` and must already be a directory. `patterns` is required and forms a union.
-`events` defaults to all four supported operations; `modify` means file content was written and
+`ignore` is optional and uses the same pattern syntax; a match on a path or on any directory above
+it excludes that path, so `node_modules` excludes the whole subtree. `events` defaults to all four
+supported operations; `modify` means file content was written and
 does not include permission-only changes. The step returns absolute `root`, slash-normalized
 relative `path`, and an `operations` list. Native notifications may combine operations, so consume
 the list rather than assuming exactly one value.
 
-Wuko watches every existing directory below `root`, adds newly created directory trees, and does
-not follow directory symlinks. Recursive trees consume one or more operating-system watch
-resources per directory, so keep the root narrow. A directory moved into the tree is watched from
+Wuko registers a directory only when some pattern can still match beneath it and no `ignore`
+pattern excludes it, adds newly created directory trees on the same terms, and does not follow
+directory symlinks. Pruning what cannot match is automatic -- `**/*.go` never registers `.git`,
+because a wildcard never matches a hidden component -- but it cannot guess intent: `**/*.go` really
+can match inside `node_modules`, so excluding it needs `ignore`. Recursive trees consume one or
+more operating-system watch resources per directory, and on macOS one file descriptor per file in
+each watched directory, so keep the root narrow and ignore generated trees. A directory moved into the tree is watched from
 that point onward, but native APIs may not report activity that happened within it before Wuko
 registered the new directories.
 

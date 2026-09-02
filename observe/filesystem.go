@@ -17,6 +17,7 @@ func (FilesystemBuilder) Type() string { return "filesystem" }
 type filesystemConfig struct {
 	Root   string   `yaml:"root,omitempty"`
 	Paths  []string `yaml:"paths"`
+	Ignore []string `yaml:"ignore,omitempty"`
 	Events []string `yaml:"events,omitempty"`
 }
 
@@ -44,7 +45,7 @@ func (FilesystemBuilder) normalize(raw map[string]any, resolved bool) (fswatch.C
 	}
 	_, hasRoot := raw["root"]
 	_, hasEvents := raw["events"]
-	return fswatch.Normalize(fswatch.Config{Root: declared.Root, Patterns: declared.Paths, Events: declared.Events}, hasRoot, hasEvents, resolved)
+	return fswatch.Normalize(fswatch.Config{Root: declared.Root, Patterns: declared.Paths, Ignore: declared.Ignore, Events: declared.Events}, hasRoot, hasEvents, resolved)
 }
 
 type filesystemSource struct {
@@ -67,11 +68,15 @@ func (source *filesystemSource) Metadata() map[string]any {
 	for index, value := range source.config.Patterns {
 		paths[index] = value
 	}
+	ignore := make([]any, len(source.config.Ignore))
+	for index, value := range source.config.Ignore {
+		ignore[index] = value
+	}
 	events := make([]any, len(source.config.Events))
 	for index, value := range source.config.Events {
 		events[index] = value
 	}
-	return map[string]any{"root": source.observer.Root(), "paths": paths, "events": events}
+	return map[string]any{"root": source.observer.Root(), "paths": paths, "ignore": ignore, "events": events}
 }
 
 func (source *filesystemSource) Close() error { return source.observer.Close() }

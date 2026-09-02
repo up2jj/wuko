@@ -401,3 +401,30 @@ func TestLatestBatchMergeKeepsNewestObservation(t *testing.T) {
 		t.Fatalf("merging an empty batch overwrote the value: %v", got)
 	}
 }
+
+// The filesystem source passes ignore through to the watcher and reports it as metadata, so a
+// workflow can exclude a tree its paths would otherwise reach.
+func TestFilesystemSourceAcceptsIgnorePatterns(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "node_modules", "pkg"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	builder := FilesystemBuilder{}
+	config := map[string]any{"paths": []any{"**/*.go"}, "ignore": []any{"node_modules"}}
+	if err := builder.Validate(config); err != nil {
+		t.Fatal(err)
+	}
+	source, err := builder.Open(t.Context(), OpenRequest{RunDir: root, Config: config})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer source.Close()
+	ignore, ok := source.Metadata()["ignore"].([]any)
+	if !ok || len(ignore) != 1 || ignore[0] != "node_modules" {
+		t.Fatalf("metadata ignore = %#v", source.Metadata()["ignore"])
+	}
+
+	if err := builder.Validate(map[string]any{"paths": []any{"**/*.go"}, "ignore": []any{"../escape"}}); err == nil {
+		t.Fatal("an escaping ignore pattern was accepted")
+	}
+}

@@ -28,6 +28,7 @@ steps:
         with:
           root: .
           paths: ["**/*.go"]
+          ignore: ["node_modules", "**/testdata"]
           events: [create, modify, rename, remove]
       debounce: 300ms
       on_change: restart
@@ -45,7 +46,10 @@ steps:
 `on_change` defaults to `restart`, and `on_error` defaults to `fail`; an explicit `0s` disables
 debounce. The `filesystem` source requires `paths`, defaults `root` to `.` and events to `create`,
 `modify`, `rename`, and `remove`, and otherwise matches the one-shot
-[`type: watch`](steps-system.md#watch) step.
+[`type: watch`](steps-system.md#watch) step. Optional `ignore` patterns exclude paths that `paths`
+would otherwise reach: a match on a path or on any directory above it excludes that path, so
+`node_modules` excludes the whole subtree. Use it for generated trees, which are watched by
+default because a pattern such as `**/*.go` genuinely can match inside them.
 
 The body runs immediately once, then receives an `.observe` binding on each trigger. Every source
 provides `initial`, the one-based `iteration`, and `source`. Filesystem runs additionally provide

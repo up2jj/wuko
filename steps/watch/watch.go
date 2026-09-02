@@ -15,6 +15,7 @@ import (
 type Config struct {
 	Root     string   `yaml:"root,omitempty"`
 	Patterns []string `yaml:"patterns"`
+	Ignore   []string `yaml:"ignore,omitempty"`
 	Events   []string `yaml:"events,omitempty"`
 }
 
@@ -45,13 +46,13 @@ func New(raw map[string]any) (step.Runner, error) {
 	_, hasRoot := raw["root"]
 	_, hasEvents := raw["events"]
 	normalized, err := fswatch.Normalize(fswatch.Config{
-		Root: config.Root, Patterns: config.Patterns, Events: config.Events,
+		Root: config.Root, Patterns: config.Patterns, Ignore: config.Ignore, Events: config.Events,
 	}, hasRoot, hasEvents, false)
 	if err != nil {
 		return nil, err
 	}
 	return &Runner{
-		config:  Config{Root: normalized.Root, Patterns: normalized.Patterns, Events: normalized.Events},
+		config:  Config{Root: normalized.Root, Patterns: normalized.Patterns, Ignore: normalized.Ignore, Events: normalized.Events},
 		hasRoot: hasRoot, hasEvents: hasEvents, newWatcher: fswatch.NativeFactory,
 	}, nil
 }
@@ -59,7 +60,7 @@ func New(raw map[string]any) (step.Runner, error) {
 // Run blocks until the first matching notification or context cancellation.
 func (runner *Runner) Run(ctx context.Context, request step.Request) (result step.Result, runErr error) {
 	normalized, err := fswatch.Normalize(fswatch.Config{
-		Root: runner.config.Root, Patterns: runner.config.Patterns, Events: runner.config.Events,
+		Root: runner.config.Root, Patterns: runner.config.Patterns, Ignore: runner.config.Ignore, Events: runner.config.Events,
 	}, runner.hasRoot, runner.hasEvents, true)
 	if err != nil {
 		return step.Result{}, err

@@ -39,7 +39,12 @@ var supportedEvents = []eventDefinition{
 type Config struct {
 	Root     string
 	Patterns []string
-	Events   []string
+	// Ignore excludes paths that Patterns would otherwise reach. A directory matching an
+	// ignore pattern is never registered, which is the point: pattern-derived pruning can
+	// only drop what no pattern can match, and "**/*.go" genuinely can match inside
+	// node_modules. Excluding it needs the user to say so.
+	Ignore []string
+	Events []string
 }
 
 type Change struct {
@@ -92,6 +97,14 @@ func Normalize(config Config, hasRoot, hasEvents, resolved bool) (Config, error)
 			return Config{}, fmt.Errorf("patterns[%d]: %w", index, err)
 		}
 	}
+	for index, pattern := range config.Ignore {
+		if resolved && templated(pattern) {
+			return Config{}, fmt.Errorf("watch configuration contains an unresolved template")
+		}
+		if err := validatePattern(pattern); err != nil {
+			return Config{}, fmt.Errorf("ignore[%d]: %w", index, err)
+		}
+	}
 	if hasEvents && len(config.Events) == 0 {
 		return Config{}, fmt.Errorf("events must contain at least one event")
 	}
@@ -121,6 +134,7 @@ type Observer struct {
 	// registration consume. Splitting once keeps the two in step and keeps the per-event path
 	// out of the allocator.
 	patterns  [][]string
+	ignore    [][]string
 	selected  map[string]bool
 	source    Source
 	closeOnce sync.Once
@@ -151,7 +165,8 @@ func Open(ctx context.Context, runDir string, config Config, factory Factory) (*
 		return nil, fmt.Errorf("creating filesystem watcher: %w", err)
 	}
 	patterns := patternComponents(config.Patterns)
-	if err := addTree(ctx, source, patterns, root, root, false); err != nil {
+	ignore := patternComponents(config.Ignore)
+	if err := addTree(ctx, source, patterns, ignore, root, root, false); err != nil {
 		_ = source.Close()
 		return nil, fmt.Errorf("registering watch root %s: %w", root, err)
 	}
@@ -159,7 +174,7 @@ func Open(ctx context.Context, runDir string, config Config, factory Factory) (*
 	for _, event := range config.Events {
 		selected[event] = true
 	}
-	return &Observer{root: root, config: config, patterns: patterns, selected: selected, source: source}, nil
+	return &Observer{root: root, config: config, patterns: patterns, ignore: ignore, selected: selected, source: source}, nil
 }
 
 func (observer *Observer) Root() string { return observer.root }
@@ -174,11 +189,11 @@ func (observer *Observer) Next(ctx context.Context) (Change, error) {
 				return Change{}, fmt.Errorf("filesystem watch event channel closed unexpectedly")
 			}
 			if event.Has(fsnotify.Create) {
-				if err := addCreatedTree(ctx, observer.source, observer.patterns, observer.root, event.Name); err != nil {
+				if err := addCreatedTree(ctx, observer.source, observer.patterns, observer.ignore, observer.root, event.Name); err != nil {
 					return Change{}, fmt.Errorf("registering created directory %s: %w", event.Name, err)
 				}
 			}
-			relative, matches := matchingPath(observer.root, observer.patterns, event.Name)
+			relative, matches := matchingPath(observer.root, observer.patterns, observer.ignore, event.Name)
 			if !matches {
 				continue
 			}
@@ -260,23 +275,52 @@ func matchingOperations(event fsnotify.Event, selected map[string]bool) []string
 	return operations
 }
 
-func matchingPath(root string, patterns [][]string, name string) (string, bool) {
+func matchingPath(root string, patterns, ignore [][]string, name string) (string, bool) {
 	absolute, err := filepath.Abs(name)
 	if err != nil {
 		return "", false
 	}
-	relative, err := filepath.Rel(root, absolute)
-	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+	relative, components, ok := relativeComponents(root, absolute)
+	if !ok || len(components) == 0 || ignored(ignore, components) {
 		return "", false
 	}
-	relative = filepath.ToSlash(relative)
-	components := strings.Split(path.Clean(relative), "/")
 	for _, pattern := range patterns {
 		if matchComponents(pattern, components) {
 			return relative, true
 		}
 	}
 	return "", false
+}
+
+// relativeComponents splits a path into the components below root, reporting false when it
+// escapes root. The root itself yields no components.
+func relativeComponents(root, name string) (string, []string, bool) {
+	relative, err := filepath.Rel(root, name)
+	if err != nil {
+		return "", nil, false
+	}
+	relative = filepath.ToSlash(relative)
+	if relative == ".." || strings.HasPrefix(relative, "../") {
+		return "", nil, false
+	}
+	if relative == "." {
+		return relative, nil, true
+	}
+	return relative, strings.Split(path.Clean(relative), "/"), true
+}
+
+// ignored reports whether a path, or any directory above it, matches an ignore pattern. Testing
+// the ancestors is what lets "node_modules" exclude the subtree rather than only the directory
+// entry itself, which is how anyone writing an ignore list expects it to read.
+func ignored(ignore [][]string, components []string) bool {
+	for depth := 1; depth <= len(components); depth++ {
+		for _, pattern := range ignore {
+			if matchComponents(pattern, components[:depth]) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func patternComponents(patterns []string) [][]string {
@@ -291,15 +335,14 @@ func patternComponents(patterns []string) [][]string {
 // registration follows it so that the tree wuko watches is the tree wuko can match: a directory
 // no pattern can reach produces only events matchingPath throws away, and it is not free to
 // watch, because the kqueue backend opens a descriptor per file in every watched directory.
-func descendable(patterns [][]string, root, directory string) bool {
-	relative, err := filepath.Rel(root, directory)
-	if err != nil {
+func descendable(patterns, ignore [][]string, root, directory string) bool {
+	_, components, ok := relativeComponents(root, directory)
+	if !ok || ignored(ignore, components) {
 		return false
 	}
-	if relative == "." {
+	if len(components) == 0 {
 		return true
 	}
-	components := strings.Split(filepath.ToSlash(relative), "/")
 	for _, pattern := range patterns {
 		if canDescend(pattern, components) {
 			return true
@@ -352,7 +395,7 @@ func matchComponents(pattern, name []string) bool {
 	return err == nil && matched && matchComponents(pattern[1:], name[1:])
 }
 
-func addTree(ctx context.Context, source Source, patterns [][]string, root, start string, allowMissing bool) error {
+func addTree(ctx context.Context, source Source, patterns, ignore [][]string, root, start string, allowMissing bool) error {
 	err := filepath.WalkDir(start, func(current string, entry fs.DirEntry, walkErr error) error {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -366,7 +409,7 @@ func addTree(ctx context.Context, source Source, patterns [][]string, root, star
 		if entry.Type()&os.ModeSymlink != 0 || !entry.IsDir() {
 			return nil
 		}
-		if !descendable(patterns, root, current) {
+		if !descendable(patterns, ignore, root, current) {
 			return fs.SkipDir
 		}
 		if err := source.Add(current); err != nil {
@@ -383,10 +426,10 @@ func addTree(ctx context.Context, source Source, patterns [][]string, root, star
 	return err
 }
 
-func addCreatedTree(ctx context.Context, source Source, patterns [][]string, root, created string) error {
+func addCreatedTree(ctx context.Context, source Source, patterns, ignore [][]string, root, created string) error {
 	// Checked before the Lstat: a build writing into a pruned directory creates faster than
 	// it is worth stat-ing, and nothing under one can be registered anyway.
-	if !descendable(patterns, root, created) {
+	if !descendable(patterns, ignore, root, created) {
 		return nil
 	}
 	info, err := os.Lstat(created)
@@ -399,7 +442,7 @@ func addCreatedTree(ctx context.Context, source Source, patterns [][]string, roo
 	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return nil
 	}
-	return addTree(ctx, source, patterns, root, created, true)
+	return addTree(ctx, source, patterns, ignore, root, created, true)
 }
 
 func resolveRoot(runDir, root string) (string, error) {
