@@ -20,8 +20,8 @@ with typed data and files, call APIs, run scripts or containers, and start codin
   key-value, temporary resource, and Docker steps instead of platform-specific shell commands.
 - **Extensible automation** — run Lua, direct commands, inline shell, or an external agent such as
   Codex.
-- **Reusable definitions** — split steps across files, compose local actions, and consume public
-  remote workflows or pinned remote actions.
+- **Reusable definitions** — split steps across files, compose local actions, consume public remote
+  workflows, and load complete Wuko action packages from public or private GitHub repositories.
 - **Workflow marketplaces** — publish self-contained workflow packages with sidecars and let users
   browse and install one or more packages interactively. See
   [Workflow marketplaces](docs/execution.md#workflow-marketplaces).
@@ -43,6 +43,28 @@ regeneration commands.
 Wuko is not a GitHub Actions runtime. It is designed for local and interactive development
 automation; GitHub Actions is designed for repository-hosted CI/CD. A CI job may invoke Wuko, but
 the two workflow formats are separate.
+
+A GitHub-hosted Wuko action is likewise a Wuko composite action, not a GitHub Actions action. Point
+`uses.github` at a repository directory containing `action.yml` or `action.yaml`; Wuko downloads
+the complete directory, including scripts, templates, and binary files:
+
+```yaml
+- id: build
+  uses:
+    github: acme/private-wuko-actions@main:actions/build
+  with: {target: linux}
+```
+
+A scalar `uses` carries the same locator when no token is needed:
+
+```yaml
+- id: build
+  uses: acme/private-wuko-actions@main:actions/build
+  with: {target: linux}
+```
+
+Authentication may come from an explicit `uses.token`, `GH_TOKEN`, `GITHUB_TOKEN`, or an existing
+`gh auth login` session. See [GitHub-hosted Wuko actions](docs/execution.md#github-hosted-wuko-actions).
 
 ## Install
 

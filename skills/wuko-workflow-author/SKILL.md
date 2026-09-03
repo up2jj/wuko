@@ -124,8 +124,14 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
   `3`. Use `update` whenever the new value derives from the stored one: its `expr` sees `current`
   and `found` under one lock across the read and the write, which a `get` then `set` pair cannot
   hold. Bind a result with `variable`, give `get` a `default` instead of branching on `found`, and
-  narrow `list` with `prefix`. Fetched code -- a remote workflow or a URL action -- has only
-  `global` scope, and the store names `changed`, `once`, and `picker` are reserved for Wuko.
+  narrow `list` with `prefix`. Fetched code -- a remote workflow, a URL action, or a GitHub-hosted
+  Wuko action -- has only `global` scope, and the store names `changed`, `once`, and `picker` are
+  reserved for Wuko. Load a complete public or private GitHub repository directory with
+  `uses: {github: owner/repo[@ref]:path, token: optional-template}`, or scalar
+  `uses: owner/repo[@ref]:path` when no token is needed. The directory must contain one
+  root `action.yml` or `action.yaml`; use `.workflow.dir` for its scripts, templates, and binary
+  sidecars. This is a Wuko action package, not a GitHub Actions action. Prefer a commit ref for
+  immutability; `sha256` is unavailable for GitHub directory sources.
 - Use a named `once` block for bootstrap, fixture, or migration work that is complete after one
   successful persisted key. Set an explicit rendered `key`, choose `scope: local|global`, and keep
   the default `on_busy: error` unless concurrent invocations should wait and replay with

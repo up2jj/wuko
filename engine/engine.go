@@ -1177,12 +1177,12 @@ func makeRequest(definition *workflow.Definition, stepID string, options Options
 	}
 }
 
-// actionLocalValueDir scopes an action's local key-value storage. A remote action is
-// fetched code the caller did not write, so it gets what a remote workflow gets: no store
-// beside the caller's workflow. Path and command actions are workspace content the caller
-// already trusts, and keep the caller's root.
+// actionLocalValueDir scopes an action's local key-value storage. A remotely fetched Wuko action
+// is code the caller did not write, so it gets what a remote workflow gets: no store beside the
+// caller's workflow. Path and command actions are workspace content the caller already trusts,
+// and keep the caller's root.
 func actionLocalValueDir(workflowStep workflow.Step, options Options) string {
-	if workflowStep.Uses.URL != "" {
+	if workflowStep.Uses.URL != "" || workflowStep.Uses.GitHub != "" {
 		return ""
 	}
 	return options.LocalValueDir

@@ -967,6 +967,31 @@ overrides. `wuko uninstall NAME` asks for confirmation. Pass `--yes` for non-int
 without `--global`, it removes the current project’s package, while `--global` removes the
 home-global package. Hook failures leave the installed package in place.
 
+### Marketplace workflow packages and Wuko actions
+
+A marketplace package and a Wuko action can both bundle scripts, templates, binary files, and
+other companion data, but they are consumed at different levels. A marketplace package installs a
+complete workflow that users run. A Wuko action supplies one reusable step-like unit that another
+workflow invokes with `uses`.
+
+| Capability | Marketplace workflow package | Wuko action |
+| --- | --- | --- |
+| Primary purpose | Distribute an independently runnable workflow | Reuse an operation inside a workflow |
+| Root manifest | `wuko.yaml` or `wuko.yml` | `action.yaml` or `action.yml` |
+| How it is consumed | `wuko install`, then normal workflow discovery and execution | A workflow step with `uses` and optional `with` inputs |
+| Interface | Top-level workflow values, targets, dependencies, and steps | Declared typed `inputs` and declared `outputs` |
+| Companion files | Installed with the workflow package | Materialized as the action root and addressed with `.workflow.dir` |
+| Lifecycle | May define package `install` and `uninstall` steps | Runs only when its caller step runs |
+| Persistence | Installed project-locally or globally until updated or removed | Local actions run in place; remote actions are prepared for the current load |
+| Distribution and integrity | Marketplace manifest plus a deterministic `tar.gz` and SHA-256 | Local path, HTTPS payload, command output, or GitHub repository directory; GitHub directories use commit refs instead of `sha256` |
+| Private GitHub access | Marketplace sources currently use the public HTTPS installation path | Native `uses.github` supports explicit, environment, or stored `gh` credentials |
+
+Choose a marketplace package when the reusable thing should appear as its own runnable Wuko
+workflow. Choose an action when callers should embed the behavior in their own step graph and
+exchange values through a small typed interface. Despite containing a complete file tree, a
+GitHub-hosted Wuko action is not an installed marketplace package and is not a GitHub Actions
+action.
+
 ## Composite actions
 
 Invoke a Wuko-native action at a step position. A local reference may name an action directory:
@@ -1028,26 +1053,178 @@ steps:
   - id: package
     type: shell
     with:
-      script: ./scripts/build.sh "$1"
+      command: "{{ .workflow.dir }}/scripts/build.sh"
       args: ["{{ .inputs.target }}"]
+      stdout: capture
 ```
 
 Action inputs may be `string`, `boolean`, `number`, `array`, or `object`. Use `{expr: "..."}` to
 pass a typed runtime expression and `{literal: value}` to disambiguate a literal object. Internal
 IDs and variables are isolated; only declared outputs appear beneath the caller step ID.
 
-Authenticated tooling can fetch an action through a direct command whose stdout is the manifest
-or archive:
+### GitHub-hosted Wuko actions
+
+A Wuko action package may live in a public or private GitHub repository. It remains a Wuko
+composite action: it uses Wuko's `version`, `inputs`, `outputs`, and `steps` schema, not the GitHub
+Actions `runs` schema. It also remains distinct from an installable
+[marketplace workflow package](#marketplace-workflow-packages-and-wuko-actions). Point the locator
+at the action directory rather than its manifest:
+
+```text
+private-wuko-actions/
+└── actions/
+    └── build/
+        ├── action.yaml
+        ├── scripts/
+        │   └── build.sh
+        ├── templates/
+        │   └── message.tmpl
+        └── bin/
+            └── helper
+```
+
+The directory must contain exactly one root `action.yml` or `action.yaml`. Nested files are
+downloaded as raw bytes and materialized as the action root, so packages may include binary files.
+Regular and executable modes are preserved and symlinks are rejected. Wuko downloads the
+repository archive once and keeps only the action directory from it, so the whole load costs a
+single GitHub API request no matter how many files the directory holds. The archive must stay
+under 100 MB, and the retained directory is still bound by the action entry and size limits.
+Git submodule contents are not part of a repository archive, so a submodule inside an action
+directory contributes no files.
+
+```yaml
+# actions/build/action.yaml
+version: 1
+name: build
+description: Build an artifact for one target platform
+
+inputs:
+  target: {type: string, required: true}
+
+outputs:
+  artifact:
+    description: Produced artifact path
+    value: steps.package.stdout
+
+templates:
+  message:
+    file: templates/message.tmpl
+
+steps:
+  - id: package
+    type: shell
+    with:
+      command: "{{ .workflow.dir }}/scripts/build.sh"
+      args: ["{{ .inputs.target }}", "{{ .workflow.dir }}/bin/helper"]
+      env:
+        MESSAGE: '{{ template "message" . }}'
+      stdout: capture
+```
+
+```sh
+#!/bin/sh
+# actions/build/scripts/build.sh
+set -eu
+
+target="$1"
+helper="$2"
+artifact="dist/application-${target}.tar.gz"
+# The bundled helper may itself be a binary file.
+"$helper" "$target"
+printf '%s' "$artifact"
+```
+
+```gotemplate
+{{/* actions/build/templates/message.tmpl */}}
+Building {{ .inputs.target }}
+```
+
+Reference a branch or tag with `owner/repository@ref:directory`:
+
+```yaml
+- id: build
+  uses:
+    github: acme/private-wuko-actions@v2:actions/build
+  with: {target: linux}
+```
+
+Omit `@ref` to use the repository's default branch:
+
+```yaml
+- id: build
+  uses:
+    github: acme/private-wuko-actions:actions/build
+  with: {target: linux}
+```
+
+A scalar `uses` accepts the same locator, so a step that needs no token can skip the object form.
+The `github:` prefix is optional; without it, a value shaped like `owner/repository[@ref]:directory`
+is read as a GitHub locator, and any other scalar stays a relative path. Prefix a local path with
+`./` when its directory name contains a colon:
+
+```yaml
+- id: build
+  uses: acme/private-wuko-actions@v2:actions/build
+  with: {target: linux}
+
+- id: package
+  uses: github:acme/private-wuko-actions@v2:actions/package
+
+- id: verify
+  uses: ./actions/verify:staging
+```
+
+Movable branches and tags are accepted. Use a complete commit SHA when the action must be
+immutable:
+
+```yaml
+- id: build
+  uses:
+    github: acme/private-wuko-actions@0123456789abcdef0123456789abcdef01234567:actions/build
+  with: {target: linux}
+```
+
+For a private repository, Wuko resolves credentials in this order: an explicit rendered `token`,
+`GH_TOKEN`, `GITHUB_TOKEN`, and the active credential returned by `gh auth token --hostname
+github.com`. When none is available, it tries anonymous access so the same form works for public
+repositories. The token needs read access to the repository's contents. Wuko never starts an
+interactive GitHub login.
+
+An explicit token can come from a Wuko secret provider:
+
+```yaml
+- id: build
+  uses:
+    github: acme/private-wuko-actions@main:actions/build
+    token: '{{ secret "op://Engineering/GitHub/token" }}'
+  with: {target: linux}
+```
+
+When `token` is omitted, either export a token or authenticate GitHub CLI before running Wuko:
+
+```sh
+GH_TOKEN="$TOKEN" wuko run release
+GITHUB_TOKEN="$TOKEN" wuko run release
+gh auth login
+wuko run release
+```
+
+The `sha256` field is not supported for a GitHub directory because the action package is rebuilt
+from the repository archive rather than downloaded as one fixed payload. Pin the locator to a
+commit SHA when integrity must not depend on a movable ref.
+
+Before native GitHub directory sources, the equivalent manifest-only form used an action command:
 
 ```yaml
 - id: build
   uses:
     command: gh
-    args: [api, repos/acme/wuko-actions/contents/build/action.yml, --header,
-      "Accept: application/vnd.github.raw+json"]
-  sha256: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
-  with: {target: linux}
+    args: [api, repos/acme/private-wuko-actions/contents/actions/build/action.yml,
+      --header, "Accept: application/vnd.github.raw+json"]
 ```
+
+That command source remains supported, but it returns only the selected manifest unless the
+command constructs an archive. Prefer `uses.github` for complete Wuko action packages.
 
 The available source forms are:
 
@@ -1055,11 +1232,13 @@ The available source forms are:
 | --- | --- | --- | --- |
 | Relative file or directory | Declaring workflow or fragment | Read from the local action root | Rejected |
 | HTTPS URL | Network | Only when the response is an action archive | Optional and recommended |
+| GitHub-hosted Wuko action object | GitHub repository directory | Yes | Rejected; pin a commit ref instead |
 | Command object | Active load-time run directory | Only when stdout is an action archive | Optional and recommended |
 
-Scalar references may use load-time templates based on workflow variables and environment values.
-After rendering they must be either a valid HTTPS URL or a relative local path. Action references
-are resolved before execution and therefore cannot use prior `.steps` values or active
+Scalar references and GitHub locator/token fields may use load-time templates based on workflow
+variables, environment values, and secrets. After rendering, scalar references must be either a
+valid HTTPS URL or a relative local path. Action references are resolved before execution and
+therefore cannot use prior `.steps` values or active
 `.batch`, `.foreach`, or `.matrix` bindings. Composite actions cannot invoke another composite
 action in schema version 1.
 

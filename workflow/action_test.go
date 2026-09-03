@@ -141,6 +141,43 @@ steps:
 	}
 }
 
+func TestLoaderResolvesLocalActionScalarsThatCouldReadAsGitHubLocators(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "actions", "build", "action.yml"), validAction)
+	writeTestFile(t, filepath.Join(dir, "actions", "build:staging", "action.yml"), validAction)
+	writeTestFile(t, filepath.Join(dir, "workflow.yaml"), `version: 1
+name: caller
+steps:
+  - id: bare
+    uses: actions/build
+    with: {target: linux}
+  - id: colon
+    uses: ./actions/build:staging
+    with: {target: darwin}
+`)
+
+	definition, err := NewLoader(nil).Load(t.Context(), filepath.Join(dir, "workflow.yaml"), LoadOptions{RunDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bare, colon := definition.Steps[0], definition.Steps[1]
+	if bare.Uses.Path != "actions/build" || bare.Uses.GitHub != "" {
+		t.Fatalf("bare source = %#v", bare.Uses)
+	}
+	if colon.Uses.Path != "./actions/build:staging" || colon.Uses.GitHub != "" {
+		t.Fatalf("colon source = %#v", colon.Uses)
+	}
+	for _, step := range []Step{bare, colon} {
+		if step.Action == nil || step.Action.Dir == "" {
+			t.Fatalf("local action was not loaded for %s", step.ID)
+		}
+	}
+	if bare.Action == colon.Action {
+		t.Fatal("distinct local action directories shared one cache entry")
+	}
+}
+
 func TestLoaderResolvesLocalActionRelativeToRequiredFragment(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

@@ -140,7 +140,8 @@ func (action *Action) Materialize() (string, func(), error) {
 
 // Loader resolves composite actions while loading a workflow.
 type Loader struct {
-	client *http.Client
+	client              *http.Client
+	githubStoredTokenFn func(context.Context, map[string]string) string
 }
 
 // NewLoader constructs a loader. The supplied client's transport is retained, while remote
@@ -161,9 +162,12 @@ func NewLoader(client *http.Client) *Loader {
 		if len(via) >= 10 {
 			return fmt.Errorf("too many redirects")
 		}
+		if !strings.EqualFold(request.URL.Hostname(), "api.github.com") {
+			request.Header.Del("Authorization")
+		}
 		return nil
 	}
-	return &Loader{client: &copy}
+	return &Loader{client: &copy, githubStoredTokenFn: githubStoredToken}
 }
 
 // Decode reads and validates a local workflow without resolving composite actions. Call Prepare
@@ -252,16 +256,17 @@ func (loader *Loader) Prepare(ctx context.Context, definition *Definition, optio
 		return err
 	}
 	cache := make(map[string]*Action)
-	if err := loader.resolveActions(ctx, definition.Name, definition.Steps, renderer, data, environment, options.RunDir, true, definition.Path, options.sourceRoot, options.sourceLabel, cache, options.Diagnostics); err != nil {
+	credentials := newGitHubCredentials(environment, loader.githubStoredTokenFn)
+	if err := loader.resolveActions(ctx, definition.Name, definition.Steps, renderer, data, environment, options.RunDir, true, definition.Path, options.sourceRoot, options.sourceLabel, cache, credentials, options.Diagnostics); err != nil {
 		return err
 	}
-	if err := loader.resolveActions(ctx, definition.Name, definition.Finally, renderer, data, environment, options.RunDir, true, definition.Path, options.sourceRoot, options.sourceLabel, cache, options.Diagnostics); err != nil {
+	if err := loader.resolveActions(ctx, definition.Name, definition.Finally, renderer, data, environment, options.RunDir, true, definition.Path, options.sourceRoot, options.sourceLabel, cache, credentials, options.Diagnostics); err != nil {
 		return err
 	}
-	if err := loader.resolveActions(ctx, definition.Name, definition.Install, renderer, data, environment, options.RunDir, true, definition.Path, options.sourceRoot, options.sourceLabel, cache, options.Diagnostics); err != nil {
+	if err := loader.resolveActions(ctx, definition.Name, definition.Install, renderer, data, environment, options.RunDir, true, definition.Path, options.sourceRoot, options.sourceLabel, cache, credentials, options.Diagnostics); err != nil {
 		return err
 	}
-	if err := loader.resolveActions(ctx, definition.Name, definition.Uninstall, renderer, data, environment, options.RunDir, true, definition.Path, options.sourceRoot, options.sourceLabel, cache, options.Diagnostics); err != nil {
+	if err := loader.resolveActions(ctx, definition.Name, definition.Uninstall, renderer, data, environment, options.RunDir, true, definition.Path, options.sourceRoot, options.sourceLabel, cache, credentials, options.Diagnostics); err != nil {
 		return err
 	}
 	return nil
@@ -297,19 +302,19 @@ func (loader *Loader) Load(ctx context.Context, filename string, options LoadOpt
 	return definition, nil
 }
 
-func (loader *Loader) resolveActions(ctx context.Context, workflowName string, steps []Step, renderer *Renderer, data map[string]any, environment map[string]string, runDir string, runDirKnown bool, definitionPath, sourceRoot, sourceLabel string, cache map[string]*Action, reporter diagnostic.Reporter) error {
+func (loader *Loader) resolveActions(ctx context.Context, workflowName string, steps []Step, renderer *Renderer, data map[string]any, environment map[string]string, runDir string, runDirKnown bool, definitionPath, sourceRoot, sourceLabel string, cache map[string]*Action, credentials *githubCredentials, reporter diagnostic.Reporter) error {
 	for i := range steps {
 		workflowStep := &steps[i]
 		if !workflowStep.IsExecutorBlock() && workflowStep.IsWorkingDirectoryBlock() {
 			childData, childRunDir, childRunDirKnown := actionWorkingDirectoryScope(renderer, data, runDir, runDirKnown, workflowStep.WorkingDirectory)
-			if err := loader.resolveActions(ctx, workflowName, workflowStep.Steps, renderer, childData, environment, childRunDir, childRunDirKnown, definitionPath, sourceRoot, sourceLabel, cache, reporter); err != nil {
+			if err := loader.resolveActions(ctx, workflowName, workflowStep.Steps, renderer, childData, environment, childRunDir, childRunDirKnown, definitionPath, sourceRoot, sourceLabel, cache, credentials, reporter); err != nil {
 				return err
 			}
 			continue
 		}
 		if children := workflowStep.ChildSequences(); len(children) > 0 {
 			for _, child := range children {
-				if err := loader.resolveActions(ctx, workflowName, child.Steps, renderer, data, environment, runDir, runDirKnown, definitionPath, sourceRoot, sourceLabel, cache, reporter); err != nil {
+				if err := loader.resolveActions(ctx, workflowName, child.Steps, renderer, data, environment, runDir, runDirKnown, definitionPath, sourceRoot, sourceLabel, cache, credentials, reporter); err != nil {
 					return err
 				}
 			}
@@ -325,7 +330,12 @@ func (loader *Loader) resolveActions(ctx context.Context, workflowName string, s
 		if declarationPath == "" {
 			declarationPath = definitionPath
 		}
-		resolution, err := loader.resolveSource(ctx, workflowStep.Uses, renderer, data, environment, runDir, runDirKnown, declarationPath, sourceRoot, sourceLabel)
+		if workflowStep.Uses.GitHub != "" && workflowStep.SHA256 != "" {
+			err := fmt.Errorf("sha256 is not supported for GitHub-hosted Wuko action directories; use an immutable commit ref")
+			traceFinish(reporter, started, diagnostic.PhaseActionResolve, diagnostic.StatusFailed, workflowStep.Location, workflowName, workflowStep.ID, "uses", "", err)
+			return fmt.Errorf("step %q: %w", workflowStep.ID, err)
+		}
+		resolution, err := loader.resolveSource(ctx, workflowStep.Uses, renderer, data, environment, runDir, runDirKnown, declarationPath, sourceRoot, sourceLabel, credentials)
 		if err != nil {
 			traceFinish(reporter, started, diagnostic.PhaseActionResolve, diagnostic.StatusFailed, workflowStep.Location, workflowName, workflowStep.ID, "uses", "", err)
 			return fmt.Errorf("step %q uses: %w", workflowStep.ID, err)
@@ -425,7 +435,40 @@ type actionSourceResolution struct {
 	local       bool
 }
 
-func (loader *Loader) resolveSource(ctx context.Context, source ActionSource, renderer *Renderer, data map[string]any, environment map[string]string, runDir string, runDirKnown bool, declarationPath, sourceRoot, sourceLabel string) (actionSourceResolution, error) {
+func (loader *Loader) resolveSource(ctx context.Context, source ActionSource, renderer *Renderer, data map[string]any, environment map[string]string, runDir string, runDirKnown bool, declarationPath, sourceRoot, sourceLabel string, credentials *githubCredentials) (actionSourceResolution, error) {
+	if source.GitHub != "" {
+		locator, err := renderer.Render(source.GitHub, data)
+		if err != nil {
+			return actionSourceResolution{}, fmt.Errorf("rendering GitHub-hosted Wuko action source: %w", err)
+		}
+		var explicitToken string
+		if source.Token != "" {
+			explicitToken, err = renderer.Render(source.Token, data)
+			if err != nil {
+				return actionSourceResolution{}, fmt.Errorf("rendering GitHub-hosted Wuko action token: %w", err)
+			}
+			explicitToken = strings.TrimSpace(explicitToken)
+			if explicitToken == "" || strings.Contains(explicitToken, "<no value>") {
+				return actionSourceResolution{}, fmt.Errorf("rendered GitHub-hosted Wuko action token is empty")
+			}
+		}
+		if strings.TrimSpace(locator) == "" || strings.Contains(locator, "<no value>") {
+			return actionSourceResolution{}, fmt.Errorf("rendered GitHub-hosted Wuko action source is empty")
+		}
+		if !runDirKnown && strings.Contains(locator, dynamicRunDir) {
+			return actionSourceResolution{}, fmt.Errorf("action source depends on a working_directory that is resolved at runtime")
+		}
+		parsed, err := parseGitHubWukoActionLocator(locator)
+		if err != nil {
+			return actionSourceResolution{}, err
+		}
+		token := credentials.token(ctx, explicitToken)
+		description := "github:" + parsed.String()
+		return actionSourceResolution{
+			source: ActionSource{GitHub: parsed.String()}, key: "github\x00" + parsed.String(), description: description,
+			fetch: func() ([]byte, error) { return loader.fetchGitHubWukoAction(ctx, parsed, token) },
+		}, nil
+	}
 	if source.URL != "" || source.Path != "" {
 		reference := source.URL
 		if reference == "" {
@@ -612,9 +655,32 @@ func (loader *Loader) fetchWithHeaders(ctx context.Context, remoteURL *url.URL, 
 }
 
 func (loader *Loader) fetchWithHeadersStatus(ctx context.Context, remoteURL *url.URL, headers http.Header, kind string) ([]byte, int, error) {
+	response, err := loader.open(ctx, remoteURL, headers, kind)
+	if err != nil {
+		status := 0
+		if response != nil {
+			status = response.StatusCode
+		}
+		return nil, status, err
+	}
+	defer response.Body.Close()
+	payload, err := io.ReadAll(io.LimitReader(response.Body, maxArchiveSize+1))
+	if err != nil {
+		return nil, response.StatusCode, fmt.Errorf("reading %s %s: %w", kind, safeURL(remoteURL), err)
+	}
+	if len(payload) > maxArchiveSize {
+		return nil, response.StatusCode, fmt.Errorf("%s %s exceeds %d-byte download limit", kind, safeURL(remoteURL), maxArchiveSize)
+	}
+	return payload, response.StatusCode, nil
+}
+
+// open sends the request and returns a successful response whose body the caller must close. A
+// response rejected for its status is returned with its body already closed so callers can still
+// read the status and headers; a transport failure returns no response at all.
+func (loader *Loader) open(ctx context.Context, remoteURL *url.URL, headers http.Header, kind string) (*http.Response, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, remoteURL.String(), nil)
 	if err != nil {
-		return nil, 0, fmt.Errorf("creating %s request for %s: %w", kind, safeURL(remoteURL), err)
+		return nil, fmt.Errorf("creating %s request for %s: %w", kind, safeURL(remoteURL), err)
 	}
 	for key, values := range headers {
 		for _, value := range values {
@@ -625,20 +691,13 @@ func (loader *Loader) fetchWithHeadersStatus(ctx context.Context, remoteURL *url
 	if err != nil {
 		message := strings.ReplaceAll(err.Error(), remoteURL.String(), safeURL(remoteURL))
 		message = queryInErrorPattern.ReplaceAllString(message, "")
-		return nil, 0, fmt.Errorf("fetching %s %s: %s", kind, safeURL(remoteURL), message)
+		return nil, fmt.Errorf("fetching %s %s: %s", kind, safeURL(remoteURL), message)
 	}
-	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, response.StatusCode, fmt.Errorf("fetching %s %s: unexpected HTTP status %s", kind, safeURL(remoteURL), response.Status)
+		response.Body.Close()
+		return response, fmt.Errorf("fetching %s %s: unexpected HTTP status %s", kind, safeURL(remoteURL), response.Status)
 	}
-	payload, err := io.ReadAll(io.LimitReader(response.Body, maxArchiveSize+1))
-	if err != nil {
-		return nil, response.StatusCode, fmt.Errorf("reading %s %s: %w", kind, safeURL(remoteURL), err)
-	}
-	if len(payload) > maxArchiveSize {
-		return nil, response.StatusCode, fmt.Errorf("%s %s exceeds %d-byte download limit", kind, safeURL(remoteURL), maxArchiveSize)
-	}
-	return payload, response.StatusCode, nil
+	return response, nil
 }
 
 func safeURL(remoteURL *url.URL) string {

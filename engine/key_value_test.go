@@ -70,22 +70,30 @@ func TestRemoteActionIsDeniedTheCallerLocalStore(t *testing.T) {
 		t.Fatal(err)
 	}
 	localRoot := t.TempDir()
-	run := func(scope string) error {
+	run := func(scope string, source workflow.ActionSource) error {
 		action := testAction(t, "store-action",
 			workflow.Step{ID: "save", Type: "key_value", With: map[string]any{
 				"operation": "set", "scope": scope, "store": "shared", "key": "from_remote", "value": true,
 			}},
 		)
 		definition := testDefinition(t, "caller", workflow.Step{
-			ID: "call", Uses: workflow.ActionSource{URL: "https://actions.example.test/store"}, Action: action,
+			ID: "call", Uses: source, Action: action,
 		})
 		_, err := New(registry).Run(t.Context(), definition, Options{
 			LocalValueDir: localRoot, GlobalValueDir: t.TempDir(), Stdout: io.Discard, Stderr: io.Discard,
 		})
 		return err
 	}
-	if err := run("local"); err == nil || !strings.Contains(err.Error(), "local key-value storage is unavailable") {
-		t.Fatalf("local scope error = %v", err)
+	remoteSources := map[string]workflow.ActionSource{
+		"HTTPS":         {URL: "https://actions.example.test/store"},
+		"GitHub-hosted": {GitHub: "acme/private-wuko-actions:actions/store"},
+	}
+	for name, source := range remoteSources {
+		t.Run(name, func(t *testing.T) {
+			if err := run("local", source); err == nil || !strings.Contains(err.Error(), "local key-value storage is unavailable") {
+				t.Fatalf("local scope error = %v", err)
+			}
+		})
 	}
 	if _, err := os.Stat(localRoot); err != nil {
 		t.Fatalf("caller value root: %v", err)
@@ -93,7 +101,7 @@ func TestRemoteActionIsDeniedTheCallerLocalStore(t *testing.T) {
 	if entries, err := os.ReadDir(localRoot); err != nil || len(entries) != 0 {
 		t.Fatalf("remote action wrote %#v (%v) into the caller store", entries, err)
 	}
-	if err := run("global"); err != nil {
+	if err := run("global", workflow.ActionSource{GitHub: "acme/private-wuko-actions:actions/store"}); err != nil {
 		t.Fatalf("global scope: %v", err)
 	}
 }

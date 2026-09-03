@@ -144,6 +144,8 @@ func stepDependencyReferences(steps []Step) []dependencyOutputReference {
 			}
 		}
 		references = append(references, templateDependencyReferences(workflowStep.Uses.URL)...)
+		references = append(references, templateDependencyReferences(workflowStep.Uses.GitHub)...)
+		references = append(references, templateDependencyReferences(workflowStep.Uses.Token)...)
 		references = append(references, templateDependencyReferences(workflowStep.Uses.Command)...)
 		if workflowStep.Once != nil {
 			references = append(references, templateDependencyReferences(workflowStep.Once.Key)...)
