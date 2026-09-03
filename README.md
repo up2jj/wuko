@@ -410,6 +410,8 @@ Each linked guide contains multiple examples for every step.
 | `once` | Run a named block once per successful persisted key | [Execution and composition](docs/execution.md#idempotency-across-runs) |
 | `require_tool` | Require an executable and optionally validate its version | [System steps](docs/steps-system.md#require_tool) |
 | `multiplexer` | Label and annotate the current tmux, cmux, or Herdr context | [System steps](docs/steps-system.md#multiplexer) |
+| `git_revision` | Read the current or a selected Git commit as structured data | [System steps](docs/steps-system.md#git_revision) |
+| `git_log` | Read bounded, structured Git history for automation | [System steps](docs/steps-system.md#git_log) |
 | `git_clean` | Assert that a Git working tree is clean | [System steps](docs/steps-system.md#git_clean) |
 | `git_branch` | Assert local branch existence with an extensible operation schema | [System steps](docs/steps-system.md#git_branch) |
 | `git_remote_branch` | Assert local remote-tracking branch existence | [System steps](docs/steps-system.md#git_remote_branch) |

@@ -67,6 +67,8 @@ func Register(registry *step.Registry) error {
 		{"git_on_branch", NewOnBranch},
 		{"git_conventional_commit", NewConventionalCommit},
 		{"git_commit", NewCommit},
+		{"git_revision", NewRevision},
+		{"git_log", NewLog},
 	}
 	for _, registration := range registrations {
 		if err := registry.Register(registration.name, registration.builder); err != nil {

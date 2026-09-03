@@ -69,6 +69,11 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
   A create-time `task` works without `task_regex`; the regex is only an optional constraint there.
   Use `buildConventionalCommit` or `isConventionalCommit` in templates and Expr, or their snake_case
   Lua equivalents, when the value belongs inside a larger transformation rather than a named step.
+- Use `git_revision` to read `HEAD` or a selected tag, branch, or commit into direct structured
+  outputs. Use `git_log` for bounded newest-first history between an exclusive `after` boundary and
+  inclusive `through` endpoint. Choose `ancestry: first_parent` for the mainline story, independently
+  choose whether merges are included, excluded, or selected exclusively, and check `has_more` before
+  treating a limited result as complete release history.
 - Use `git_commit` to commit the current index or stage explicit `paths` first. It commits the whole
   resulting index and skips an unchanged index by default. Prefer structured `author` and optional
   `committer` identities in fresh CI environments, ordered trailers for duplicate tokens, `signoff`

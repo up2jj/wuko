@@ -13,6 +13,259 @@ inspect local remote-tracking references; they do not fetch from a remote. `git_
 operation here that changes the repository, while `git_conventional_commit` is a pure text operation
 that does not invoke Git.
 
+## `git_revision`
+
+Read one commit as structured workflow data. Omit `revision` to inspect the current `HEAD`, or
+provide any commit, branch, or tag accepted by Git. Branches and tags are peeled to their commit,
+and the resolved full object ID is returned as `sha`.
+
+```yaml
+- id: current
+  type: git_revision
+```
+
+The step exposes `found`, `sha`, `short_sha`, `subject`, `body`, `message`, `parents`, `is_merge`,
+`author`, `committer`, and `conventional`. Author and committer objects contain mailmap-aware
+`name`, `email`, and RFC 3339 `date` values. `short_sha` uses Git's unambiguous abbreviation.
+Trailing line endings are removed from `body` and `message`. See [`git_log`](#git_log) for the
+shared commit shape.
+
+Use the direct outputs without indexing a history list:
+
+```yaml
+- id: current
+  type: git_revision
+
+- id: print_commit
+  type: shell
+  with:
+    command: printf
+    args:
+      - "%s %s\n"
+      - "{{ .steps.current.short_sha }}"
+      - "{{ .steps.current.subject }}"
+```
+
+Inspect a tag, branch, or commit selected at runtime:
+
+```yaml
+- id: release_commit
+  type: git_revision
+  with:
+    revision: "{{ .vars.release_tag }}"
+```
+
+An omitted `revision` defaults to `HEAD`. In an unborn repository that default succeeds with
+`found: false`, empty strings and identity fields, empty `parents`, `is_merge: false`, and an
+invalid `other` conventional classification. An explicitly configured revision that does not
+resolve fails, including an explicit `revision: HEAD` in an unborn repository. This distinction
+lets a workflow probe a new repository while still treating a requested tag or commit as required.
+
+Require a current commit when an empty repository is not meaningful:
+
+```yaml
+- id: current
+  type: git_revision
+
+- id: require_commit
+  type: assert
+  with:
+    expr: steps.current.found
+    message: The repository must contain at least one commit
+```
+
+## `git_log`
+
+Read a useful, bounded slice of repository history as structured workflow data. The step is
+designed for release automation, changelog inputs, and workflow decisions rather than as a YAML
+copy of every `git log` flag.
+
+```yaml
+- id: changes
+  type: git_log
+  with:
+    after: v1.4.0
+    through: HEAD
+```
+
+`after` is an optional exclusive boundary and must be an ancestor of the inclusive `through`
+revision. `through` defaults to `HEAD`. Equal boundaries return an empty successful result. With
+no `after`, history begins at `through` and walks toward the repository roots.
+
+| Field | Required | Meaning and default |
+| --- | --- | --- |
+| `after` | no | Exclusive ancestor boundary |
+| `through` | no | Inclusive endpoint; defaults to `HEAD` |
+| `paths` | no | Non-empty Git pathspec list used to filter history |
+| `ancestry` | no | `all` or `first_parent`; defaults to `all` |
+| `merges` | no | `include`, `exclude`, or `only`; defaults to `include` |
+| `limit` | no | Maximum returned commits from 1 through 1000; defaults to 100 |
+
+The result contains resolved `after` and `through` commit IDs, `count`, `has_more`, and `commits`.
+Commits are newest first. Wuko asks Git for one record beyond `limit`; that probe is not returned,
+but sets `has_more: true` so release automation can refuse incomplete input or deliberately raise
+the limit.
+
+```yaml
+- id: release_history
+  type: git_log
+  with:
+    after: "{{ .vars.previous_tag }}"
+    merges: exclude
+    limit: 500
+
+- id: complete_history
+  type: assert
+  with:
+    expr: "!steps.release_history.has_more"
+    message: Release history exceeds 500 commits; increase the git_log limit
+```
+
+### Choosing ancestry and merge filtering
+
+`ancestry` decides which path through the commit graph is walked. `merges` independently decides
+which commits from that path are returned. Consider this history:
+
+```text
+A──B────────M──D   main
+    \      /
+     C1──C2        feature
+```
+
+Normal `ancestry: all` traversal after `B` can return `D`, `M`, `C2`, and `C1`. With
+`ancestry: first_parent`, traversal follows the primary parent of each merge and returns `D` and
+`M`, skipping the feature branch's internal commits.
+
+First-parent traversal is useful when merge commits represent pull requests, their subjects are
+polished release-note entries, or the release should describe what landed on the main branch. It
+is less useful with squash merging, where normal history already contains one squashed commit per
+pull request, and it can hide meaningful work when merge messages are generic.
+
+Use the two fields together according to the history the workflow needs:
+
+```yaml
+# Mainline merge commits, often one entry per merged pull request.
+- id: merged_pull_requests
+  type: git_log
+  with:
+    after: v2.3.0
+    ancestry: first_parent
+    merges: only
+```
+
+- `ancestry: first_parent` with `merges: only` returns mainline merge commits.
+- `ancestry: first_parent` with `merges: exclude` returns direct non-merge mainline commits.
+- `ancestry: all` with `merges: include` returns every reachable commit in the selected range.
+
+### Paths and commit records
+
+Use `paths` for a component in a monorepo. Entries use native Git pathspec semantics and are passed
+after `--`. They filter which commits appear; the step does not return changed-file details.
+
+```yaml
+- id: api_changes
+  type: git_log
+  with:
+    after: v2.3.0
+    paths:
+      - services/api
+      - packages/contracts/**/*.proto
+    merges: exclude
+```
+
+Every item in `commits` has the same fields as a found `git_revision` result except `found`:
+
+```yaml
+sha: 8f7261f98125641e7ad37a809165034b758a9d12
+short_sha: 8f7261f
+subject: "feat(cli): add JSON output"
+body: "Expose structured results for automation."
+message: |-
+  feat(cli): add JSON output
+
+  Expose structured results for automation.
+parents: [e763826ac4310ef947fb082fedde710f24076a31]
+is_merge: false
+author:
+  name: Jane Developer
+  email: jane@example.com
+  date: "2026-09-03T10:42:11+02:00"
+committer:
+  name: Jane Developer
+  email: jane@example.com
+  date: "2026-09-03T10:45:02+02:00"
+conventional:
+  valid: true
+  classification: conventional
+  type: feat
+  scope: cli
+  subject: add JSON output
+  breaking: false
+  body: "Expose structured results for automation."
+```
+
+`conventional` is best-effort metadata. A recognized Conventional Commit has `valid: true`.
+Merge and autosquash messages use their corresponding `classification` with `valid: false`, and
+other messages use `classification: other`. A non-conventional message never fails the history
+step.
+
+Browse the records directly in a terminal table:
+
+```yaml
+- id: history
+  type: git_log
+  with:
+    after: v2.3.0
+
+- id: review_history
+  type: tui_table
+  with:
+    message: Commits since v2.3.0
+    from: steps.history.commits
+    columns:
+      - {header: Commit, field: short_sha, width: 12}
+      - {header: Type, field: conventional.type, width: 10}
+      - {header: Scope, field: conventional.scope, width: 14}
+      - {header: Subject, field: subject}
+      - {header: Author, field: author.name, width: 20}
+```
+
+Or process each commit and collect a smaller release-oriented record:
+
+```yaml
+- id: history
+  type: git_log
+  with:
+    after: v2.3.0
+    merges: exclude
+
+- id: entries
+  foreach:
+    items: steps.history.commits
+    collect: |
+      {
+        "sha": foreach.item.sha,
+        "type": foreach.item.conventional.type,
+        "scope": foreach.item.conventional.scope,
+        "subject": foreach.item.conventional.subject,
+        "breaking": foreach.item.conventional.breaking
+      }
+    steps:
+      - id: print
+        type: shell
+        if: foreach.item.conventional.valid
+        with:
+          command: printf
+          args:
+            - "%s: %s\n"
+            - "{{ .foreach.item.conventional.type }}"
+            - "{{ .foreach.item.conventional.subject }}"
+```
+
+Git output is captured rather than printed. Wuko fails instead of returning partial or malformed
+history if the internal 16 MiB capture bound is exceeded. The step never fetches remotes; callers
+must fetch any remote-tracking references before using them.
+
 ## `git_conventional_commit`
 
 Create or validate a Conventional Commit message without invoking `git commit`. The step is a pure
