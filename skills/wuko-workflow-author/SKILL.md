@@ -69,6 +69,10 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
   A create-time `task` works without `task_regex`; the regex is only an optional constraint there.
   Use `buildConventionalCommit` or `isConventionalCommit` in templates and Expr, or their snake_case
   Lua equivalents, when the value belongs inside a larger transformation rather than a named step.
+- Use `git_commit` to commit the current index or stage explicit `paths` first. It commits the whole
+  resulting index and skips an unchanged index by default. Prefer structured `author` and optional
+  `committer` identities in fresh CI environments, ordered trailers for duplicate tokens, `signoff`
+  for DCO workflows, and leave `verify` enabled unless bypassing hooks is deliberate.
 - Use `time` as the only current-time boundary. Its output and default same-named variable are
   recordable and may be supplied with `--var` for reproducible runs. Use `parseTime`, `addTime`, and
   `formatTime` in templates, Expr, or Lua only to transform explicit strings; they never read the

@@ -168,6 +168,29 @@ func TestExecutorScopeSupportsGitAssertions(t *testing.T) {
 	}
 }
 
+func TestExecutorScopeSupportsGitCommit(t *testing.T) {
+	scoped := &recordingExecutor{}
+	definition := testDefinition(t, "git-commit", workflow.Step{
+		Executor: &workflow.ExecutorScope{Type: "recording", With: map[string]any{}},
+		Steps: []workflow.Step{{ID: "commit", Type: "git_commit", With: map[string]any{
+			"message": "automated commit", "on_empty": "commit", "verify": false,
+		}}},
+	})
+	state, err := executorTestEngine(t, scoped).Run(t.Context(), definition, Options{
+		RunDir: t.TempDir(), Stdout: io.Discard, Stderr: io.Discard,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(scoped.commands, ","); got != "git diff --cached --quiet --exit-code --,git commit --allow-empty --no-verify -m automated commit,git rev-parse --verify --quiet HEAD^{commit}" {
+		t.Fatalf("scoped commands = %q", got)
+	}
+	outputs := state.Steps["commit"].(map[string]any)
+	if outputs["created"] != true || outputs["commit"] != "git-output" {
+		t.Fatalf("commit outputs = %#v", outputs)
+	}
+}
+
 func TestExecutorScopeRestoresParentAndSharesOutputs(t *testing.T) {
 	scoped := &recordingExecutor{}
 	local := &recordingExecutor{}

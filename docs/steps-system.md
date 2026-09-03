@@ -7,10 +7,11 @@ operations. Relative runtime paths normally resolve from the directory where Wuk
 
 ## Git operations
 
-Repository assertions run the installed `git` executable in the workflow run directory. They are
-read-only, work inside executor blocks, and return no outputs on success. Remote-branch checks
-inspect local remote-tracking references; they do not fetch from a remote. The
-`git_conventional_commit` step is a pure text operation and does not invoke Git.
+Git steps run the installed `git` executable in the workflow run directory and work inside executor
+blocks. Repository assertions are read-only and return no outputs on success. Remote-branch checks
+inspect local remote-tracking references; they do not fetch from a remote. `git_commit` is the only
+operation here that changes the repository, while `git_conventional_commit` is a pure text operation
+that does not invoke Git.
 
 ## `git_conventional_commit`
 
@@ -169,6 +170,116 @@ By default, Git-generated merge and autosquash messages are exempt:
 
 Set `strict: true` to reject `Merge ...`, `amend! ...`, `fixup! ...`, and `squash! ...` messages.
 If `task_regex` is configured, its task requirement also applies to non-strict exemptions.
+
+## `git_commit`
+
+Create a Git commit from the repository index. The step can first stage selected pathspecs, but it
+always commits the complete resulting index, including changes staged before the step. Omit `paths`
+to commit only what is already staged. A pathspec that matches no file stages nothing instead of
+failing, so `on_empty` still decides the outcome when a build or generator produced no output.
+
+```yaml
+- id: commit
+  type: git_commit
+  with:
+    message: "feat(workflow): add commit support"
+    paths: [steps/git, docs]
+```
+
+| Field | Required | Meaning and default |
+| --- | --- | --- |
+| `message` | yes | Main commit message; may be multiline |
+| `body` | no | Additional message paragraph |
+| `trailers` | no | Ordered `{token, value}` entries appended by Git; repeated tokens are allowed, but Git collapses identical neighbors |
+| `paths` | no | Pathspecs staged with `git add -A --`; must not be an empty list; unmatched pathspecs stage nothing |
+| `author` | no | `{name, email}` author identity; also supplies the committer unless overridden |
+| `committer` | no | `{name, email}` committer identity override |
+| `signoff` | no | Add Git's `Signed-off-by` trailer; defaults to `false` |
+| `verify` | no | Run pre-commit and commit-msg hooks; defaults to `true` |
+| `on_empty` | no | `skip`, `fail`, or `commit`; defaults to `skip` |
+
+`on_empty: commit` is the one policy that is not idempotent: retrying the step after a commit
+succeeded but its `HEAD` lookup failed appends a second, empty commit.
+
+`created` reports whether the step created a commit. `commit` contains the resulting full `HEAD`
+object ID. A skipped step returns the current `HEAD`; it returns an empty string only when the
+repository does not yet have a commit.
+
+Use `body` and ordered trailers without manually managing message separators:
+
+```yaml
+- id: commit
+  type: git_commit
+  with:
+    message: "fix(auth): prevent expired session reuse"
+    body: |
+      Clear cached credentials after refresh rejection.
+    trailers:
+      - token: Refs
+        value: WUKO-142
+      - token: Co-authored-by
+        value: Jane Doe <jane@example.com>
+      - token: Co-authored-by
+        value: John Doe <john@example.com>
+    signoff: true
+```
+
+`signoff` uses the effective committer identity. By default both identities come from Git
+configuration. An explicit author supplies both identities so a fresh CI environment can commit
+without persistent configuration; an explicit committer replaces only the committer:
+
+```yaml
+- id: commit
+  type: git_commit
+  with:
+    message: "chore: update generated files"
+    paths: [generated]
+    author:
+      name: Wuko Automation
+      email: wuko@example.com
+    committer:
+      name: Release Bot
+      email: releases@example.com
+    signoff: true
+```
+
+Identity overrides are passed only to `git commit` through Git's environment variables. The step
+never writes repository or global Git configuration. Existing request environment values remain
+available, and explicitly configured identities take precedence over them.
+
+When the index has no changes, `on_empty: skip` makes repeated automation idempotent. Use
+`on_empty: fail` when an unchanged index is an error, or `on_empty: commit` to pass `--allow-empty`:
+
+```yaml
+- id: heartbeat
+  type: git_commit
+  with:
+    message: "chore: record automation run"
+    on_empty: commit
+```
+
+Git hooks run normally. Set `verify: false` only when the workflow deliberately needs Git's
+`--no-verify` behavior. Configured commit signing and message cleanup remain under Git's control.
+If staging succeeds but a hook or commit fails, the index remains staged; the step does not reset
+repository state.
+
+Compose with `git_conventional_commit` when the message should be built and validated separately:
+
+```yaml
+- id: message
+  type: git_conventional_commit
+  with:
+    operation: create
+    type: feat
+    scope: workflow
+    subject: add commit support
+
+- id: commit
+  type: git_commit
+  with:
+    message: "{{ .steps.message.value }}"
+    paths: [steps/git]
+```
 
 ## `git_clean`
 

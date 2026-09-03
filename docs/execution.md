@@ -491,10 +491,11 @@ of the repository containing the active `.run.dir`:
         type: shell
         with: {command: ./apply-fix.sh}
       - id: commit
-        type: shell
+        type: git_commit
         with:
-          command: sh
-          args: [-c, "git add -A && git commit -m 'Apply automated fix'"]
+          message: Apply automated fix
+          paths: [.]
+          on_empty: fail
 ```
 
 The block runs `git worktree add --detach` from the repository discovered through `.run.dir`. Its

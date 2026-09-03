@@ -132,7 +132,7 @@ func TestConventionalCommitDocumentationExamples(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	section := regexp.MustCompile(`(?s)## \x60git_conventional_commit\x60\n(.*?)\n## \x60git_clean\x60`).FindSubmatch(data)
+	section := regexp.MustCompile(`(?s)## \x60git_conventional_commit\x60\n(.*?)\n## \x60git_commit\x60`).FindSubmatch(data)
 	if section == nil {
 		t.Fatal("git_conventional_commit documentation section not found")
 	}

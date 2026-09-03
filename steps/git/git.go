@@ -1,4 +1,4 @@
-// Package git implements Git-related workflow checks and message operations.
+// Package git implements Git-related workflow checks, commits, and message operations.
 package git
 
 import (
@@ -66,6 +66,7 @@ func Register(registry *step.Registry) error {
 		{"git_branch_name", NewBranchName},
 		{"git_on_branch", NewOnBranch},
 		{"git_conventional_commit", NewConventionalCommit},
+		{"git_commit", NewCommit},
 	}
 	for _, registration := range registrations {
 		if err := registry.Register(registration.name, registration.builder); err != nil {
