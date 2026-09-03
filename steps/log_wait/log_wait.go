@@ -17,7 +17,9 @@ import (
 	"github.com/up2jj/wuko/step"
 )
 
-const defaultMaxBytes int64 = 1 << 20
+const defaultMaxBytes = "1MiB"
+
+const readBufferSize = 32 * 1024
 
 type Config struct {
 	Path     string `yaml:"path"`
@@ -53,7 +55,7 @@ func (w nativeWatcher) Errors() <-chan error          { return w.Watcher.Errors 
 func Register(registry *step.Registry) error { return registry.Register("log_wait", New) }
 
 func New(raw map[string]any) (step.Runner, error) {
-	config := Config{MaxBytes: "1MiB"}
+	config := Config{MaxBytes: defaultMaxBytes}
 	if err := step.DecodeConfig(raw, &config); err != nil {
 		return nil, err
 	}
@@ -124,13 +126,16 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (result step.Res
 			if !ok {
 				return step.Result{}, fmt.Errorf("log_wait watcher event channel closed unexpectedly")
 			}
-			forceRescan = eventTargetsFile(event, path)
+			forceRescan = eventRequiresRescan(event, path)
 		case watchErr, ok := <-watcher.Errors():
 			if !ok {
 				return step.Result{}, fmt.Errorf("log_wait watcher error channel closed unexpectedly")
 			}
 			if watchErr != nil {
-				return step.Result{}, fmt.Errorf("watching log_wait file: %w", watchErr)
+				if !errors.Is(watchErr, fsnotify.ErrEventOverflow) {
+					return step.Result{}, fmt.Errorf("watching log_wait file: %w", watchErr)
+				}
+				forceRescan = true
 			}
 		}
 	}
@@ -139,9 +144,6 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (result step.Res
 func (r *Runner) validate(resolved bool) error {
 	if strings.TrimSpace(r.config.Path) == "" {
 		return fmt.Errorf("path is required")
-	}
-	if !resolved && templated(r.config.Path) {
-		return nil
 	}
 	if resolved && templated(r.config.Path) {
 		return fmt.Errorf("log_wait configuration contains an unresolved template")
@@ -214,6 +216,7 @@ type fileFollower struct {
 	identity os.FileInfo
 	offset   int64
 	content  []byte
+	buffer   []byte
 }
 
 func (f *fileFollower) readAvailable(ctx context.Context, forceRescan bool) (bool, step.Result, error) {
@@ -239,8 +242,14 @@ func (f *fileFollower) readAvailable(ctx context.Context, forceRescan bool) (boo
 			return false, step.Result{}, err
 		}
 	}
+	if f.file == nil {
+		return false, step.Result{}, nil
+	}
 
-	buffer := make([]byte, 32*1024)
+	if f.buffer == nil {
+		f.buffer = make([]byte, readBufferSize)
+	}
+	buffer := f.buffer
 	for {
 		if err := ctx.Err(); err != nil {
 			return false, step.Result{}, err
@@ -280,11 +289,14 @@ func (f *fileFollower) readAvailable(ctx context.Context, forceRescan bool) (boo
 	}
 }
 
-func eventTargetsFile(event fsnotify.Event, path string) bool {
+// eventRequiresRescan reports whether the event replaced the file underneath us.
+// Appends are read incrementally, and a truncate in place is caught by the size
+// check in readAvailable, so only lifecycle events discard the buffered content.
+func eventRequiresRescan(event fsnotify.Event, path string) bool {
 	if filepath.Clean(event.Name) != path {
 		return false
 	}
-	return event.Has(fsnotify.Write) || event.Has(fsnotify.Create) || event.Has(fsnotify.Rename) || event.Has(fsnotify.Remove)
+	return event.Has(fsnotify.Create) || event.Has(fsnotify.Rename) || event.Has(fsnotify.Remove)
 }
 
 func (f *fileFollower) open(info os.FileInfo) error {
@@ -304,18 +316,18 @@ func (f *fileFollower) open(info os.FileInfo) error {
 }
 
 func (f *fileFollower) match() (bool, step.Result) {
-	values := f.pattern.FindStringSubmatch(string(f.content))
+	values := f.pattern.FindSubmatch(f.content)
 	if values == nil {
 		return false, step.Result{}
 	}
 	captures := make(map[string]string, len(f.captures))
 	for _, capture := range f.captures {
 		if capture.index < len(values) {
-			captures[capture.name] = values[capture.index]
+			captures[capture.name] = string(values[capture.index])
 		}
 	}
 	return true, step.Result{Outputs: map[string]any{
-		"path": f.path, "match": values[0], "captures": captures,
+		"path": f.path, "match": string(values[0]), "captures": captures,
 	}}
 }
 

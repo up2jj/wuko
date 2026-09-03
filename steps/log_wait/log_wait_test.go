@@ -24,6 +24,16 @@ func TestNewValidatesConfiguration(t *testing.T) {
 		{name: "invalid pattern", raw: map[string]any{"path": "app.log", "pattern": "["}, want: "compiling pattern"},
 		{name: "duplicate capture", raw: map[string]any{"path": "app.log", "pattern": `(?P<value>a)(?P<value>b)`}, want: "duplicate named capture"},
 		{name: "invalid max bytes", raw: map[string]any{"path": "app.log", "pattern": "ready", "max_bytes": "0B"}, want: "positive size"},
+		{
+			name: "templated path with invalid pattern",
+			raw:  map[string]any{"path": "{{ .steps.workspace.path }}/app.log", "pattern": "["},
+			want: "compiling pattern",
+		},
+		{
+			name: "templated path with invalid max bytes",
+			raw:  map[string]any{"path": "{{ .steps.workspace.path }}/app.log", "pattern": "ready", "max_bytes": "abc"},
+			want: "max_bytes",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -32,6 +42,37 @@ func TestNewValidatesConfiguration(t *testing.T) {
 				t.Fatalf("New() error = %v, want substring %q", err, tt.want)
 			}
 		})
+	}
+}
+
+func TestNewAcceptsTemplatedConfiguration(t *testing.T) {
+	raw := map[string]any{
+		"path": "{{ .steps.workspace.path }}/app.log", "pattern": "ready", "max_bytes": "{{ .inputs.size }}",
+	}
+	if _, err := New(raw); err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+}
+
+func TestLogWaitContinuesAfterEventOverflow(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "app.log")
+	if err := os.WriteFile(path, []byte("starting\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runner, watcher := newRunnerWithFakeWatcher(t, map[string]any{"path": path, "pattern": "ready"})
+	resultCh := runAsync(t, runner, request(root))
+	<-watcher.added
+
+	// The unbuffered send only completes once Run consumed the error, which it
+	// cannot do if the overflow aborts the step.
+	watcher.errs <- fsnotify.ErrEventOverflow
+	appendFile(t, path, "ready\n")
+	watcher.events <- fsnotify.Event{Name: path, Op: fsnotify.Write}
+
+	result := receiveResult(t, resultCh)
+	if result.Outputs["match"] != "ready" {
+		t.Fatalf("match = %#v", result.Outputs["match"])
 	}
 }
 
@@ -201,6 +242,33 @@ func newRunnerWithReadyWatcher(t *testing.T, raw map[string]any) (*Runner, <-cha
 	}
 	return concrete, ready
 }
+
+func newRunnerWithFakeWatcher(t *testing.T, raw map[string]any) (*Runner, *fakeWatcher) {
+	t.Helper()
+	runner, err := New(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	concrete := runner.(*Runner)
+	watcher := &fakeWatcher{
+		events: make(chan fsnotify.Event, 1),
+		errs:   make(chan error),
+		added:  make(chan struct{}),
+	}
+	concrete.newWatcher = func() (eventWatcher, error) { return watcher, nil }
+	return concrete, watcher
+}
+
+type fakeWatcher struct {
+	events chan fsnotify.Event
+	errs   chan error
+	added  chan struct{}
+}
+
+func (w *fakeWatcher) Add(string) error              { close(w.added); return nil }
+func (w *fakeWatcher) Close() error                  { return nil }
+func (w *fakeWatcher) Events() <-chan fsnotify.Event { return w.events }
+func (w *fakeWatcher) Errors() <-chan error          { return w.errs }
 
 type readyWatcher struct {
 	eventWatcher
