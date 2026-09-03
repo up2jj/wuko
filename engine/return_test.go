@@ -165,17 +165,17 @@ func TestCompositeActionReturnSuppliesDeclaredOutputsWithoutRetry(t *testing.T) 
 	action.Outputs = map[string]workflow.ActionOutput{
 		"result": {Value: `"fallback"`}, "cached": {Value: "false"},
 	}
-	definition := testDefinition(t, "caller", workflow.Step{
-		ID: "call", Uses: workflow.ActionSource{URL: "https://example.test/action"}, Action: action,
-		With: map[string]any{"result": "returned"}, Retry: immediateRetry(3),
-	})
+	definition := testDefinition(t, "caller", attemptStep("call", immediateRetry(3), workflow.Step{
+		Uses: workflow.ActionSource{URL: "https://example.test/action"}, Action: action,
+		With: map[string]any{"result": "returned"},
+	}))
 
 	state, err := New(registry).Run(t.Context(), definition, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := map[string]any{"result": "returned", "cached": true}
-	if got := state.Steps["call"].(map[string]any); !reflect.DeepEqual(got, want) || runs != 0 {
+	if got := attemptBody(state, "call", "call_body"); !reflect.DeepEqual(got, want) || runs != 0 {
 		t.Fatalf("outputs = %#v, runs = %d", got, runs)
 	}
 	if attempts := len(state.Stats.Steps[0].Attempts); attempts != 1 {

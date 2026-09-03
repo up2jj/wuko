@@ -352,12 +352,15 @@ func TestRootCommandRegistersWatchStepWithoutWaiting(t *testing.T) {
 name: watch
 steps:
   - id: source_changed
-    type: watch
-    timeout: 5m
-    with:
-      root: .
-      patterns: ["src/**/*.go"]
-      events: [create, modify, rename, remove]
+    attempt:
+      timeout: 5m
+      steps:
+        - id: watcher
+          type: watch
+          with:
+            root: .
+            patterns: ["src/**/*.go"]
+            events: [create, modify, rename, remove]
 `
 	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
 		t.Fatal(err)
@@ -490,9 +493,7 @@ func TestRootCommandRunsBuiltInWaitStep(t *testing.T) {
 name: wait
 steps:
   - id: pause
-    type: wait
-    with:
-      duration: 1ns
+    attempt: {duration: 1ns}
 `
 	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
 		t.Fatal(err)
@@ -693,13 +694,15 @@ func TestRunDebugReportsLuaRuntimeAttempts(t *testing.T) {
 name: runtime-lua
 steps:
   - id: prepare
-    type: lua
-    retry:
+    attempt:
       max_attempts: 2
       initial_delay: 0s
       max_delay: 0s
-    with:
-      source: error("lua boom")
+      steps:
+        - id: run_lua
+          type: lua
+          with:
+            source: error("lua boom")
 `
 	if err := os.WriteFile(filepath.Join(workflowDir, "runtime-lua.yaml"), []byte(data), 0o644); err != nil {
 		t.Fatal(err)
@@ -720,7 +723,7 @@ steps:
 		t.Fatalf("error = %v", err)
 	}
 	trace := diagnostics.String()
-	for _, want := range []string{"step prepare (lua)", "attempt failed", "attempt=1/2", "attempt=2/2", "lua boom"} {
+	for _, want := range []string{"step run_lua (lua)", "attempt failed", "attempt=1/2", "attempt=2/2", "lua boom"} {
 		if !strings.Contains(trace, want) {
 			t.Fatalf("diagnostics = %q, want %q", trace, want)
 		}

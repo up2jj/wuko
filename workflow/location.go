@@ -122,6 +122,10 @@ func annotateSteps(steps []Step, sequence *yaml.Node, source string) {
 			group := mappingValue(node, "once")
 			annotateSteps(steps[i].Once.Steps, mappingValue(group, "steps"), source)
 		}
+		if steps[i].Attempt != nil {
+			group := mappingValue(node, "attempt")
+			annotateSteps(steps[i].Attempt.Steps, mappingValue(group, "steps"), source)
+		}
 	}
 }
 

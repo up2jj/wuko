@@ -77,7 +77,12 @@ func TestDefinitionValidateStructure(t *testing.T) {
 			want: "nested matrix",
 		},
 		{name: "return in finally", steps: []Step{step("run")}, finally: []Step{{Return: &ReturnControl{Outputs: map[string]string{}}}}, want: "not supported inside finally"},
-		{name: "invalid execution policy", steps: []Step{{ID: "run", Type: "shell", Timeout: &zeroTimeout}}, want: "timeout must be greater than zero"},
+		{name: "invalid execution policy", steps: []Step{{ID: "run", Attempt: &AttemptControl{
+			Timeout:           LiteralDuration(zeroTimeout),
+			MaxAttempts:       LiteralCount(1),
+			BackoffMultiplier: LiteralFactor(1),
+			Steps:             []Step{step("work")},
+		}}}, want: "timeout must be greater than zero"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

@@ -74,6 +74,15 @@ func writeDryRun(writer io.Writer, steps []workflow.Step, indent string, parent 
 			}
 			continue
 		}
+		if workflowStep.IsAttempt() {
+			if _, err := fmt.Fprintf(writer, "%s%s %s (attempt)%s%s%s\n", indent, index, workflowStep.ID, executionPolicySuffix(workflowStep), dryRunCondition(workflowStep), needs); err != nil {
+				return err
+			}
+			if err := writeDryRun(writer, workflowStep.Attempt.Steps, indent+"   ", path); err != nil {
+				return err
+			}
+			continue
+		}
 		if workflowStep.IsExecutorBlock() {
 			label := fmt.Sprintf("executor: %s", workflowStep.Executor.Type)
 			if workflowStep.ID != "" {

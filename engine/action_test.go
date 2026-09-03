@@ -135,10 +135,10 @@ func TestCompositeActionRetryKeepsInnerOperationIDsStable(t *testing.T) {
 		workflow.Step{ID: "finish", Type: "action_retry", With: map[string]any{"kind": "fail"}},
 	)
 	action.Outputs = map[string]workflow.ActionOutput{"result": {Value: "steps.finish.value"}}
-	definition := testDefinition(t, "caller", workflow.Step{
-		ID: "remote", Uses: workflow.ActionSource{URL: "https://example.test/action"}, Action: action,
-		Retry: immediateRetry(2), With: map[string]any{},
-	})
+	definition := testDefinition(t, "caller", attemptStep("remote", immediateRetry(2), workflow.Step{
+		Uses: workflow.ActionSource{URL: "https://example.test/action"}, Action: action,
+		With: map[string]any{},
+	}))
 
 	state, err := New(registry).Run(t.Context(), definition, Options{RunDir: t.TempDir(), Stdout: io.Discard, Stderr: io.Discard})
 	if err != nil {
@@ -147,7 +147,7 @@ func TestCompositeActionRetryKeepsInnerOperationIDsStable(t *testing.T) {
 	if len(recordKeys) != 2 || recordKeys[0] == "" || recordKeys[0] != recordKeys[1] {
 		t.Fatalf("inner operation IDs = %#v", recordKeys)
 	}
-	if state.Steps["remote"].(map[string]any)["result"] != "done" {
+	if attemptBody(state, "remote", "remote_body")["result"] != "done" {
 		t.Fatalf("state = %#v", state)
 	}
 }

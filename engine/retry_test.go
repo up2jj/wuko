@@ -31,9 +31,10 @@ func TestRunRetriesAndCommitsOnlySuccessfulAttempt(t *testing.T) {
 	registry := newTestRegistry(t, map[string]step.Builder{"retry": func(map[string]any) (step.Runner, error) {
 		return retryTestRunner{failures: 2, requests: &requests}, nil
 	}})
-	definition := testDefinition(t, "retry", workflow.Step{ID: "publish", Type: "retry", Retry: immediateRetry(3)})
+	policy := immediateRetry(3)
+	policy.OperationID = "{{ .vars.operation }}"
+	definition := testDefinition(t, "retry", attemptStep("publish", policy, workflow.Step{Type: "retry"}))
 	definition.Vars = map[string]any{"operation": "release-42"}
-	definition.Steps[0].Retry.OperationID = "{{ .vars.operation }}"
 	var diagnostics strings.Builder
 	state, err := New(registry).Run(t.Context(), definition, Options{RunDir: t.TempDir(), Stdout: io.Discard, Stderr: &diagnostics})
 	if err != nil {
@@ -53,11 +54,11 @@ func TestRunRetriesAndCommitsOnlySuccessfulAttempt(t *testing.T) {
 			t.Fatalf("request %d previous attempt = %#v", i+1, request.PreviousAttempt)
 		}
 	}
-	if _, exists := state.Vars["leaked"]; exists {
+	if _, exists := attemptVars(state, "publish")["leaked"]; exists {
 		t.Fatal("failed-attempt variable was committed")
 	}
-	if state.Vars["committed"] != true || state.Steps["publish"].(map[string]any)["attempt"] != 3 {
-		t.Fatalf("state = %#v", state)
+	if attemptVars(state, "publish")["committed"] != true || attemptBody(state, "publish", "publish_body")["attempt"] != 3 {
+		t.Fatalf("state = %#v", state.Steps)
 	}
 	if got := diagnostics.String(); !strings.Contains(got, "attempt 1/3 failed") || !strings.Contains(got, "retrying in 0s") {
 		t.Fatalf("diagnostics = %q", got)
@@ -90,20 +91,18 @@ func TestRetryWhenUsesStructuredFailureAndNormalRoots(t *testing.T) {
 		"conditional": func(map[string]any) (step.Runner, error) { return runner, nil },
 	})
 	policy := immediateRetry(2)
-	policy.When = `vars.retry && error.exit_code == 75 && error.stderr contains "rate limit" && error.status == "failed" && error.message == "temporary failure" && error.step == "run" && error.type == "conditional" && error.outputs.status == 503 && error.outputs.message == "output message" && error.outputs.errors == "output errors" && error.outputs.outputs == "output outputs" && len(error.errors) == 1`
-	definition := testDefinition(t, "conditional", workflow.Step{
-		ID: "run", Type: "conditional", Retry: policy, With: map[string]any{},
-	})
+	policy.When = `vars.retry && error.exit_code == 75 && error.stderr contains "rate limit" && error.status == "failed" && error.message contains "temporary failure" && error.step == "run" && error.type == "attempt" && error.outputs.status == 503 && error.outputs.message == "output message" && error.outputs.errors == "output errors" && error.outputs.outputs == "output outputs" && len(error.errors) == 1`
+	definition := testDefinition(t, "conditional", attemptStep("run", policy, workflow.Step{Type: "conditional", With: map[string]any{}}))
 	definition.Vars = map[string]any{"retry": true}
 
 	state, err := New(registry).Run(t.Context(), definition, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if runner.attempts != 2 || state.Steps["run"].(map[string]any)["attempt"] != 2 {
+	if runner.attempts != 2 || attemptBody(state, "run", "run_body")["attempt"] != 2 {
 		t.Fatalf("attempts = %d, state = %#v", runner.attempts, state.Steps)
 	}
-	if _, exists := state.Vars["leaked"]; exists {
+	if _, exists := attemptVars(state, "run")["leaked"]; exists {
 		t.Fatal("failed-attempt variable was committed")
 	}
 }
@@ -115,10 +114,10 @@ func TestRetryWhenFalseReturnsOriginalFailure(t *testing.T) {
 	})
 	policy := immediateRetry(3)
 	policy.When = "false"
-	definition := testDefinition(t, "conditional", workflow.Step{ID: "run", Type: "conditional", Retry: policy, With: map[string]any{}})
+	definition := testDefinition(t, "conditional", attemptStep("run", policy, workflow.Step{Type: "conditional", With: map[string]any{}}))
 
 	_, err := New(registry).Run(t.Context(), definition, Options{})
-	if err == nil || !strings.Contains(err.Error(), "permanent failure") || strings.Contains(err.Error(), "evaluating retry when") {
+	if err == nil || !strings.Contains(err.Error(), "permanent failure") || strings.Contains(err.Error(), "evaluating attempt when") {
 		t.Fatalf("error = %v", err)
 	}
 	if runner.attempts != 1 {
@@ -133,10 +132,10 @@ func TestRetryWhenEvaluationFailureIsTerminal(t *testing.T) {
 	})
 	policy := immediateRetry(3)
 	policy.When = `error.outputs.values[2] == 1`
-	definition := testDefinition(t, "conditional", workflow.Step{ID: "run", Type: "conditional", Retry: policy, With: map[string]any{}})
+	definition := testDefinition(t, "conditional", attemptStep("run", policy, workflow.Step{Type: "conditional", With: map[string]any{}}))
 
 	_, err := New(registry).Run(t.Context(), definition, Options{})
-	if err == nil || !strings.Contains(err.Error(), "evaluating retry when after attempt failure") {
+	if err == nil || !strings.Contains(err.Error(), "evaluating attempt when after") {
 		t.Fatalf("error = %v", err)
 	}
 	if runner.attempts != 1 {
@@ -164,10 +163,10 @@ func TestRetryWhenValidationRejectsInvalidOrNonBooleanExpression(t *testing.T) {
 			})
 			policy := immediateRetry(2)
 			policy.When = test.when
-			definition := testDefinition(t, "invalid", workflow.Step{ID: "run", Type: "conditional", Retry: policy, With: map[string]any{}})
+			definition := testDefinition(t, "invalid", attemptStep("run", policy, workflow.Step{Type: "conditional", With: map[string]any{}}))
 
 			_, err := New(registry).Run(t.Context(), definition, Options{})
-			if err == nil || !strings.Contains(err.Error(), "retry when") {
+			if err == nil || !strings.Contains(err.Error(), "attempt when") {
 				t.Fatalf("error = %v", err)
 			}
 		})
@@ -185,10 +184,10 @@ func TestRetryWhenShadowsOuterCatchError(t *testing.T) {
 		"inner_flaky": func(map[string]any) (step.Runner, error) { return inner, nil },
 	})
 	policy := immediateRetry(2)
-	policy.When = `error.message == "inner failure" && error.step == "recover"`
+	policy.When = `error.message contains "inner failure" && error.step == "recover"`
 	definition := testDefinition(t, "shadow", tryCatchStep(
 		[]workflow.Step{{ID: "deploy", Type: "outer_fail", With: map[string]any{}}},
-		[]workflow.Step{{ID: "recover", Type: "inner_flaky", Retry: policy, With: map[string]any{}}},
+		[]workflow.Step{attemptStep("recover", policy, workflow.Step{Type: "inner_flaky", With: map[string]any{}})},
 	))
 
 	state, err := New(registry).Run(t.Context(), definition, Options{})
@@ -219,9 +218,7 @@ func TestRunRetriesAttemptTimeout(t *testing.T) {
 			t.Fatal(err)
 		}
 		timeout := workflow.Duration(time.Second)
-		definition := testDefinition(t, "timeout", workflow.Step{
-			ID: "run", Type: "timeout", Timeout: &timeout, Retry: immediateRetry(2), With: map[string]any{},
-		})
+		definition := testDefinition(t, "timeout", attemptStep("run", attemptTimeout(immediateRetry(2), &timeout), workflow.Step{Type: "timeout", With: map[string]any{}}))
 
 		state, err := New(registry).Run(t.Context(), definition, Options{})
 		if err != nil {
@@ -230,7 +227,7 @@ func TestRunRetriesAttemptTimeout(t *testing.T) {
 		if runner.attempts != 2 {
 			t.Fatalf("attempts = %d", runner.attempts)
 		}
-		if state.Stats.TimedOut != 1 || state.Stats.Retries != 1 {
+		if state.Stats.TimedOut != 2 || state.Stats.Retries != 1 {
 			t.Fatalf("stats = %#v", state.Stats)
 		}
 	})
@@ -252,15 +249,13 @@ func TestRunRetriesRunnerCancellationWhileWorkflowActive(t *testing.T) {
 	if err := registry.Register("local_cancel", func(map[string]any) (step.Runner, error) { return runner, nil }); err != nil {
 		t.Fatal(err)
 	}
-	definition := testDefinition(t, "local-cancel", workflow.Step{
-		ID: "run", Type: "local_cancel", Retry: immediateRetry(2), With: map[string]any{},
-	})
+	definition := testDefinition(t, "local-cancel", attemptStep("run", immediateRetry(2), workflow.Step{Type: "local_cancel", With: map[string]any{}}))
 
 	state, err := New(registry).Run(t.Context(), definition, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if runner.attempts != 2 || state.Steps["run"].(map[string]any)["ok"] != true {
+	if runner.attempts != 2 || attemptBody(state, "run", "run_body")["ok"] != true {
 		t.Fatalf("attempts = %d, state = %#v", runner.attempts, state)
 	}
 }
@@ -281,8 +276,8 @@ func TestRunStopsAtMaxElapsedTime(t *testing.T) {
 			t.Fatal(err)
 		}
 		policy := immediateRetry(3)
-		policy.MaxElapsedTime = workflow.Duration(2 * time.Second)
-		definition := testDefinition(t, "budget", workflow.Step{ID: "wait", Type: "blocking", Retry: policy, With: map[string]any{}})
+		policy.MaxElapsedTime = workflow.LiteralDuration(workflow.Duration(2 * time.Second))
+		definition := testDefinition(t, "budget", attemptStep("wait", policy, workflow.Step{Type: "blocking", With: map[string]any{}}))
 		_, err := New(registry).Run(t.Context(), definition, Options{})
 		if err == nil || !strings.Contains(err.Error(), "max_elapsed_time 2s exceeded") {
 			t.Fatalf("error = %v", err)
@@ -301,7 +296,7 @@ func TestRunDoesNotRetryParentCancellation(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	definition := testDefinition(t, "cancel", workflow.Step{ID: "run", Type: "retry", Retry: immediateRetry(3), With: map[string]any{}})
+	definition := testDefinition(t, "cancel", attemptStep("run", immediateRetry(3), workflow.Step{Type: "retry", With: map[string]any{}}))
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	_, err := New(registry).Run(ctx, definition, Options{})
@@ -324,7 +319,7 @@ func (err retryHTTPError) HTTPRetryAfter() time.Duration { return err.retryAfter
 func TestHTTPRetryEligibility(t *testing.T) {
 	tests := []struct {
 		name   string
-		policy *workflow.RetryPolicy
+		policy workflow.AttemptControl
 		err    error
 		want   bool
 	}{
@@ -332,15 +327,15 @@ func TestHTTPRetryEligibility(t *testing.T) {
 		{name: "default GET transient status", policy: immediateRetry(2), err: retryHTTPError{method: "GET", status: 503}, want: true},
 		{name: "default GET permanent status", policy: immediateRetry(2), err: retryHTTPError{method: "GET", status: 404}},
 		{name: "default POST", policy: immediateRetry(2), err: retryHTTPError{method: "POST", status: 503}},
-		{name: "POST override", policy: &workflow.RetryPolicy{MaxAttempts: 2, Methods: []string{"POST"}, Statuses: []workflow.StatusRange{{From: 500, To: 504}}}, err: retryHTTPError{method: "POST", status: 502}, want: true},
+		{name: "POST override", policy: workflow.AttemptControl{MaxAttempts: workflow.LiteralCount(2), Methods: []string{"POST"}, Statuses: []workflow.StatusRange{{From: 500, To: 504}}}, err: retryHTTPError{method: "POST", status: 502}, want: true},
 		{name: "wrapped GET timeout", policy: immediateRetry(2), err: attemptTimeoutError{duration: time.Second, cause: retryHTTPError{method: "GET"}}, want: true},
-		{name: "terminal HTTP error", policy: immediateRetry(2), err: errors.New("decoding response")},
+		{name: "non-HTTP failure is eligible", policy: immediateRetry(2), err: errors.New("decoding response"), want: true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			workflowStep := workflow.Step{Type: "http", Retry: test.policy}
-			if got := shouldRetry(workflowStep, test.err); got != test.want {
-				t.Fatalf("shouldRetry() = %v, want %v", got, test.want)
+			control := test.policy
+			if got := retryableError(&control, test.err); got != test.want {
+				t.Fatalf("retryableError() = %v, want %v", got, test.want)
 			}
 		})
 	}
@@ -370,14 +365,14 @@ func TestRetryWhenOverridesHTTPFailureEligibility(t *testing.T) {
 			})
 			policy := immediateRetry(2)
 			policy.When = test.when
-			definition := testDefinition(t, "http", workflow.Step{ID: "request", Type: "http", Retry: policy, With: map[string]any{}})
+			definition := testDefinition(t, "http", attemptStep("request", policy, workflow.Step{Type: "http", With: map[string]any{}}))
 
 			state, err := New(registry).Run(t.Context(), definition, Options{})
 			if test.wantSuccess {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if runner.attempts != 2 || state.Steps["request"].(map[string]any)["attempt"] != 2 {
+				if runner.attempts != 2 || attemptBody(state, "request", "request_body")["attempt"] != 2 {
 					t.Fatalf("attempts = %d, state = %#v", runner.attempts, state.Steps)
 				}
 				return
@@ -414,20 +409,20 @@ func TestRetryWhenReportsTransportFailureAsZeroStatus(t *testing.T) {
 	})
 	policy := immediateRetry(2)
 	policy.When = "error.outputs.status >= 500 || error.outputs.status == 0"
-	definition := testDefinition(t, "http", workflow.Step{ID: "request", Type: "http", Retry: policy, With: map[string]any{}})
+	definition := testDefinition(t, "http", attemptStep("request", policy, workflow.Step{Type: "http", With: map[string]any{}}))
 
 	state, err := New(registry).Run(t.Context(), definition, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if runner.attempts != 2 || state.Steps["request"].(map[string]any)["attempt"] != 2 {
+	if runner.attempts != 2 || attemptBody(state, "request", "request_body")["attempt"] != 2 {
 		t.Fatalf("attempts = %d, state = %#v", runner.attempts, state.Steps)
 	}
 }
 
 func TestRetryAfterExtendsBackoffWithinMaxDelay(t *testing.T) {
-	policy := &workflow.RetryPolicy{
-		InitialDelay: workflow.Duration(time.Second), BackoffMultiplier: 1, MaxDelay: workflow.Duration(5 * time.Second),
+	policy := workflow.ResolvedAttempt{
+		InitialDelay: time.Second, BackoffMultiplier: 1, MaxDelay: 5 * time.Second,
 	}
 	if got := retryDelayForError(policy, 1, retryHTTPError{retryAfter: 3 * time.Second}); got != 3*time.Second {
 		t.Fatalf("delay = %s, want 3s", got)

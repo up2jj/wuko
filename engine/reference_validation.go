@@ -468,6 +468,8 @@ func (validator *referenceValidator) validateStep(step workflow.Step, scope *ref
 		return validator.validateFanout(step, scope)
 	case step.Loop != nil:
 		return validator.validateLoop(step, scope)
+	case step.Attempt != nil:
+		return validator.validateAttempt(step, scope)
 	case step.Return != nil:
 		if err := validator.validateExpression("if", string(step.If), scope); err != nil {
 			return nil, nil, err
@@ -500,19 +502,71 @@ func (validator *referenceValidator) validateOnce(step workflow.Step, scope *ref
 	return result, nil, nil
 }
 
-func (validator *referenceValidator) validateOrdinaryStep(step workflow.Step, scope *referenceScope) (*referenceScope, []deferredReferences, error) {
+// validateAttempt validates an attempt like a once: the body resolves in its own scope because it
+// publishes only through the control's output, so only the control id reaches the parent scope.
+// until and when read that body scope -- until after a successful pass, when after a failed one.
+func (validator *referenceValidator) validateAttempt(step workflow.Step, scope *referenceScope) (*referenceScope, []deferredReferences, error) {
+	control := step.Attempt
 	if err := validator.validateExpression("if", string(step.If), scope); err != nil {
 		return nil, nil, err
 	}
-	if step.Retry != nil {
-		if err := validator.validateTemplate("retry operation_id", step.Retry.OperationID, scope); err != nil {
+	if err := validator.validateTemplate("attempt operation_id", control.OperationID, scope); err != nil {
+		return nil, nil, err
+	}
+	for label, expression := range attemptOptionExpressions(control) {
+		if err := validator.validateExpression("attempt "+label, expression, scope); err != nil {
 			return nil, nil, err
 		}
-		retryScope := scope.clone()
-		retryScope.roots["error"] = openReference
-		if err := validator.validateExpression("retry when", string(step.Retry.When), retryScope); err != nil {
+	}
+	private, _, err := validator.validateSteps(control.Steps, scope.clone())
+	if err != nil {
+		return nil, nil, fmt.Errorf("attempt body: %w", err)
+	}
+	if control.Until != "" {
+		untilScope := private.clone()
+		untilScope.roots["poll"] = leafReference
+		if err := validator.validateExpression("attempt until", string(control.Until), untilScope); err != nil {
 			return nil, nil, err
 		}
+	}
+	if control.When != "" {
+		whenScope := private.clone()
+		whenScope.roots["error"] = openReference
+		if err := validator.validateExpression("attempt when", string(control.When), whenScope); err != nil {
+			return nil, nil, err
+		}
+	}
+	result := scope.clone()
+	result.addStep(step.ID)
+	return result, nil, nil
+}
+
+// attemptOptionExpressions lists the option expressions to validate, keyed by field name.
+func attemptOptionExpressions(control *workflow.AttemptControl) map[string]string {
+	expressions := make(map[string]string, 9)
+	for label, option := range map[string]workflow.AttemptDuration{
+		"duration": control.Duration, "timeout": control.Timeout, "initial_delay": control.InitialDelay,
+		"max_delay": control.MaxDelay, "interval": control.Interval, "max_elapsed_time": control.MaxElapsedTime,
+	} {
+		if option.Expression != "" {
+			expressions[label] = option.Expression
+		}
+	}
+	if control.MaxAttempts.Expression != "" {
+		expressions["max_attempts"] = control.MaxAttempts.Expression
+	}
+	if control.BackoffMultiplier.Expression != "" {
+		expressions["backoff_multiplier"] = control.BackoffMultiplier.Expression
+	}
+	if control.Jitter.Expression != "" {
+		expressions["jitter"] = control.Jitter.Expression
+	}
+	return expressions
+}
+
+func (validator *referenceValidator) validateOrdinaryStep(step workflow.Step, scope *referenceScope) (*referenceScope, []deferredReferences, error) {
+	if err := validator.validateExpression("if", string(step.If), scope); err != nil {
+		return nil, nil, err
 	}
 	if err := validator.validateActionSource(step, scope); err != nil {
 		return nil, nil, err
@@ -898,29 +952,6 @@ func (validator *referenceValidator) validateAction(action *workflow.Action, cal
 }
 
 func (validator *referenceValidator) validateStepConfiguration(stepID, stepType string, raw map[string]any, scope *referenceScope) error {
-	if stepType == "wait" {
-		for _, key := range slices.Sorted(maps.Keys(raw)) {
-			if key == "step" || key == "until" {
-				continue
-			}
-			if err := validator.validateTemplateValue("with field "+key, raw[key], scope, false); err != nil {
-				return err
-			}
-		}
-		if nested := nestedMap(raw, "step"); nested != nil {
-			nestedType, _ := nested["type"].(string)
-			if err := validator.validateStepConfiguration(stepID, nestedType, nestedMap(nested, "with"), scope); err != nil {
-				return fmt.Errorf("nested step: %w", err)
-			}
-			scope.addWrittenVariables(nestedType, stepID, nestedMap(nested, "with"))
-			waitScope := scope.clone()
-			waitScope.roots["result"] = openReference
-			waitScope.roots["error"] = openReference
-			waitScope.roots["poll"] = leafReference
-			return validator.validateRawExpression("until", raw, "until", waitScope)
-		}
-		return nil
-	}
 	if err := validator.validateTemplateValue("with", raw, scope, stepType == "lua"); err != nil {
 		return err
 	}

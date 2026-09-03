@@ -180,16 +180,16 @@ func TestCompositeActionFinallyRunsPerAttemptAndFeedsOutputs(t *testing.T) {
 	action.Finally = []workflow.Step{{ID: "cleanup", Type: "action_cleanup"}}
 	definition := testDefinition(
 		t, "caller",
-		workflow.Step{
-			ID: "call", Uses: workflow.ActionSource{URL: "https://example.test/action"}, Action: action,
-			Retry: immediateRetry(2), With: map[string]any{},
-		})
+		attemptStep("call", immediateRetry(2), workflow.Step{
+			Uses: workflow.ActionSource{URL: "https://example.test/action"}, Action: action,
+			With: map[string]any{},
+		}))
 
 	state, err := New(registry).Run(t.Context(), definition, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if mainRuns != 2 || cleanupRuns != 2 || state.Steps["call"].(map[string]any)["result"] != "clean" {
+	if mainRuns != 2 || cleanupRuns != 2 || attemptBody(state, "call", "call_body")["result"] != "clean" {
 		t.Fatalf("main runs = %d, cleanup runs = %d, state = %#v", mainRuns, cleanupRuns, state)
 	}
 }

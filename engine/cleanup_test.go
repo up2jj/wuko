@@ -222,9 +222,14 @@ func TestManagedCleanupRegistersEverySuccessfulPoll(t *testing.T) {
 	}
 	timeout := workflow.Duration(1_000_000_000)
 	definition := testDefinition(t, "poll-cleanup", workflow.Step{
-		ID: "wait", Type: "wait", Timeout: &timeout, With: map[string]any{
-			"step":  map[string]any{"type": "managed_poll", "with": map[string]any{}},
-			"until": "result.poll == 3", "interval": "1ns",
+		ID: "wait",
+		Attempt: &workflow.AttemptControl{
+			Interval:          workflow.LiteralDuration(workflow.Duration(1)),
+			MaxElapsedTime:    workflow.LiteralDuration(timeout),
+			Until:             "poll == 3",
+			MaxAttempts:       workflow.LiteralCount(1),
+			BackoffMultiplier: workflow.LiteralFactor(1),
+			Steps:             []workflow.Step{{ID: "poll", Type: "managed_poll", With: map[string]any{}}},
 		},
 	})
 
@@ -242,9 +247,9 @@ func TestManagedCleanupRegistersOnlySuccessfulRetry(t *testing.T) {
 	if err := registry.Register("managed_retry", func(map[string]any) (step.Runner, error) { return runner, nil }); err != nil {
 		t.Fatal(err)
 	}
-	definition := testDefinition(t, "retry-cleanup", workflow.Step{
-		ID: "retry", Type: "managed_retry", Retry: &workflow.RetryPolicy{MaxAttempts: 2, BackoffMultiplier: 1}, With: map[string]any{},
-	})
+	definition := testDefinition(t, "retry-cleanup", attemptStep("retry", immediateRetry(2), workflow.Step{
+		Type: "managed_retry", With: map[string]any{},
+	}))
 
 	if _, err := New(registry).Run(t.Context(), definition, Options{}); err != nil {
 		t.Fatal(err)

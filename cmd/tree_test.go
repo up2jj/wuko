@@ -182,14 +182,20 @@ func TestTreeCommandRejectsMissingOrConflictingWorkflowSelector(t *testing.T) {
 func TestWorkflowTreeDisplaysExecutionPolicy(t *testing.T) {
 	timeout := workflow.Duration(2 * time.Minute)
 	definition := &workflow.Definition{Name: "release", Steps: []workflow.Step{{
-		ID: "publish", Type: "shell", Timeout: &timeout,
-		Retry: &workflow.RetryPolicy{MaxAttempts: 4, BackoffMultiplier: 1, MaxElapsedTime: workflow.Duration(6 * time.Minute)},
+		ID: "publish",
+		Attempt: &workflow.AttemptControl{
+			Timeout:           workflow.LiteralDuration(timeout),
+			MaxAttempts:       workflow.LiteralCount(4),
+			BackoffMultiplier: workflow.LiteralFactor(1),
+			MaxElapsedTime:    workflow.LiteralDuration(workflow.Duration(6 * time.Minute)),
+			Steps:             []workflow.Step{{ID: "run", Type: "shell"}},
+		},
 	}}}
 	var output bytes.Buffer
 	if err := writeWorkflowTree(&output, definition); err != nil {
 		t.Fatal(err)
 	}
-	if want := "release\n└── publish (shell) [timeout 2m0s, 4 attempts within 6m0s]\n"; output.String() != want {
+	if want := "release\n└── publish (attempt) [timeout 2m0s, 4 attempts, within 6m0s]\n    └── run (shell)\n"; output.String() != want {
 		t.Fatalf("output = %q, want %q", output.String(), want)
 	}
 }

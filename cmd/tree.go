@@ -239,6 +239,15 @@ func writeTreeStepsWithFollowing(writer io.Writer, steps []workflow.Step, prefix
 			}
 			continue
 		}
+		if workflowStep.IsAttempt() {
+			if _, err := fmt.Fprintf(writer, "%s%s%s (attempt)%s%s%s\n", prefix, branch, workflowStep.ID, treeExecutionPolicy(workflowStep), treeCondition(workflowStep), needs); err != nil {
+				return err
+			}
+			if err := writeTreeSteps(writer, workflowStep.Attempt.Steps, childPrefix); err != nil {
+				return err
+			}
+			continue
+		}
 		if workflowStep.IsCancelOn() {
 			collect := ""
 			if workflowStep.CancelOn.Collect != "" {
@@ -495,19 +504,38 @@ func treeConcurrentPolicy(group *workflow.ConcurrentGroup) string {
 }
 
 func treeExecutionPolicy(workflowStep workflow.Step) string {
-	var parts []string
-	if workflowStep.Timeout != nil {
-		parts = append(parts, "timeout "+workflowStep.Timeout.String())
+	control := workflowStep.Attempt
+	if control == nil {
+		return ""
 	}
-	if workflowStep.Retry != nil {
-		retry := fmt.Sprintf("%d attempts", workflowStep.Retry.MaxAttempts)
-		if workflowStep.Retry.MaxElapsedTime.Value() > 0 {
-			retry += " within " + workflowStep.Retry.MaxElapsedTime.String()
-		}
-		parts = append(parts, retry)
+	if control.IsDelay() {
+		return " [duration " + attemptOptionText(control.Duration) + "]"
+	}
+	var parts []string
+	if control.Timeout.Set() {
+		parts = append(parts, "timeout "+attemptOptionText(control.Timeout))
+	}
+	if control.MaxAttempts.Expression != "" {
+		parts = append(parts, control.MaxAttempts.Expression+" attempts")
+	} else if control.MaxAttempts.Literal > 1 {
+		parts = append(parts, fmt.Sprintf("%d attempts", control.MaxAttempts.Literal))
+	}
+	if control.Until != "" {
+		parts = append(parts, "poll every "+attemptOptionText(control.Interval))
+	}
+	if control.MaxElapsedTime.Set() {
+		parts = append(parts, "within "+attemptOptionText(control.MaxElapsedTime))
 	}
 	if len(parts) == 0 {
 		return ""
 	}
 	return " [" + strings.Join(parts, ", ") + "]"
+}
+
+// attemptOptionText renders a declared option, showing an expression-backed one as its expression.
+func attemptOptionText(option workflow.AttemptDuration) string {
+	if option.Expression != "" {
+		return option.Expression
+	}
+	return option.Literal.String()
 }

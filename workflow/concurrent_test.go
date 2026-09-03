@@ -21,8 +21,11 @@ steps:
         - id: lint
           type: shell
         - id: test
-          type: shell
-          retry: {max_attempts: 2}
+          attempt:
+            max_attempts: 2
+            steps:
+              - id: run_tests
+                type: shell
 `)
 	definition, err := Load(path)
 	if err != nil {
@@ -35,8 +38,8 @@ steps:
 	if group.Timeout == nil || group.Timeout.Value() != 5*time.Minute {
 		t.Fatalf("timeout = %v", group.Timeout)
 	}
-	if group.Steps[1].Retry == nil || group.Steps[1].Retry.MaxAttempts != 2 {
-		t.Fatalf("child retry = %#v", group.Steps[1].Retry)
+	if group.Steps[1].Attempt == nil || group.Steps[1].Attempt.MaxAttempts.Literal != 2 {
+		t.Fatalf("child attempt = %#v", group.Steps[1].Attempt)
 	}
 }
 

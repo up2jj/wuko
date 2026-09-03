@@ -23,7 +23,7 @@ func TestRunCorrelationPropagatesThroughRetriesAndStats(t *testing.T) {
 			return step.Result{}, nil
 		}), nil
 	}})
-	definition := testDefinition(t, "correlated", workflow.Step{ID: "run", Type: "flaky", Retry: immediateRetry(2), With: map[string]any{}})
+	definition := testDefinition(t, "correlated", attemptStep("run", immediateRetry(2), workflow.Step{Type: "flaky", With: map[string]any{}}))
 	var events []ProgressEvent
 	state, err := New(registry).Run(t.Context(), definition, Options{InvocationID: invocationID, Progress: func(event ProgressEvent) {
 		events = append(events, event)

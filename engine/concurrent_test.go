@@ -101,22 +101,22 @@ func TestRunConcurrentGroupRespectsRetriesPerChild(t *testing.T) {
 			mu.Lock()
 			attempts[request.StepID]++
 			mu.Unlock()
-			if request.StepID == "flaky" && request.Attempt == 1 {
+			if request.StepID == "flaky_body" && request.Attempt == 1 {
 				return step.Result{}, errors.New("temporary")
 			}
 			return step.Result{Outputs: map[string]any{"attempt": request.Attempt}}, nil
 		}), nil
 	}})
-	policy := &workflow.RetryPolicy{MaxAttempts: 2, BackoffMultiplier: 1}
+	policy := immediateRetry(2)
 	steps := []workflow.Step{
-		{ID: "stable", Type: "retry_child", Retry: policy, With: map[string]any{}},
-		{ID: "flaky", Type: "retry_child", Retry: policy, With: map[string]any{}},
+		attemptStep("stable", policy, workflow.Step{Type: "retry_child", With: map[string]any{}}),
+		attemptStep("flaky", policy, workflow.Step{Type: "retry_child", With: map[string]any{}}),
 	}
 	state, err := New(registry).Run(t.Context(), concurrentDefinition(t, &workflow.ConcurrentGroup{Steps: steps, MaxConcurrency: 2, FailFast: true}), Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if attempts["stable"] != 1 || attempts["flaky"] != 2 {
+	if attempts["stable_body"] != 1 || attempts["flaky_body"] != 2 {
 		t.Fatalf("attempts = %#v", attempts)
 	}
 	if state.Stats.Attempts != 3 || state.Stats.Retries != 1 {
@@ -498,7 +498,11 @@ func TestConcurrentGroupDryRunShowsChildrenAndPolicies(t *testing.T) {
 	timeout := workflow.Duration(5 * time.Minute)
 	steps := []workflow.Step{
 		{ID: "lint", Type: "noop", With: map[string]any{}},
-		{ID: "test", Type: "noop", Needs: []string{"lint"}, Retry: immediateRetry(2), With: map[string]any{}},
+		func() workflow.Step {
+			wrapped := attemptStep("test", immediateRetry(2), workflow.Step{Type: "noop", With: map[string]any{}})
+			wrapped.Needs = []string{"lint"}
+			return wrapped
+		}(),
 	}
 	var output bytes.Buffer
 	_, err := New(registry).Run(t.Context(), concurrentDefinition(t, &workflow.ConcurrentGroup{
@@ -509,7 +513,8 @@ func TestConcurrentGroupDryRunShowsChildrenAndPolicies(t *testing.T) {
 	}
 	want := `1. concurrent [max 2, timeout 5m0s, wait for all]
    1.1 lint (noop)
-   1.2 test (noop) [2 attempts] [needs: lint]
+   1.2 test (attempt) [2 attempts] [needs: lint]
+      1.2.1 test_body (noop)
 `
 	if output.String() != want {
 		t.Fatalf("output = %q, want %q", output.String(), want)

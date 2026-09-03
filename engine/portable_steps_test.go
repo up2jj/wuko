@@ -74,8 +74,14 @@ func TestHTTPRetriesAndCommitsSuccessfulResponse(t *testing.T) {
 	defer server.Close()
 
 	definition := testDefinition(t, "retry", workflow.Step{
-		ID: "request", Type: "http", With: map[string]any{"url": server.URL},
-		Retry: &workflow.RetryPolicy{MaxAttempts: 2, BackoffMultiplier: 1},
+		ID: "fetch",
+		Attempt: &workflow.AttemptControl{
+			MaxAttempts:       workflow.LiteralCount(2),
+			BackoffMultiplier: workflow.LiteralFactor(1),
+			Steps: []workflow.Step{
+				{ID: "request", Type: "http", With: map[string]any{"url": server.URL}},
+			},
+		},
 	})
 
 	registry := newTestRegistry(t, nil)
@@ -86,7 +92,7 @@ func TestHTTPRetriesAndCommitsSuccessfulResponse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if attempts.Load() != 2 || state.Steps["request"].(map[string]any)["value"] != "ok" {
+	if attempts.Load() != 2 || state.Steps["fetch"].(map[string]any)["steps"].(map[string]any)["request"].(map[string]any)["value"] != "ok" {
 		t.Fatalf("attempts = %d, state = %#v", attempts.Load(), state)
 	}
 }
@@ -116,9 +122,15 @@ func TestHTTPRetryRevalidatesPreviousResponse(t *testing.T) {
 	}))
 	defer server.Close()
 
-	policy := &workflow.RetryPolicy{MaxAttempts: 2, BackoffMultiplier: 1}
 	definition := testDefinition(t, "revalidate", workflow.Step{
-		ID: "request", Type: "http", With: map[string]any{"url": server.URL}, Retry: policy,
+		ID: "revalidate",
+		Attempt: &workflow.AttemptControl{
+			MaxAttempts:       workflow.LiteralCount(2),
+			BackoffMultiplier: workflow.LiteralFactor(1),
+			Steps: []workflow.Step{
+				{ID: "request", Type: "http", With: map[string]any{"url": server.URL}},
+			},
+		},
 	})
 
 	registry := newTestRegistry(t, nil)
@@ -129,7 +141,8 @@ func TestHTTPRetryRevalidatesPreviousResponse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	outputs := state.Steps["request"].(map[string]any)
+	// The body is isolated, so the request's outputs are read through the control.
+	outputs := state.Steps["revalidate"].(map[string]any)["steps"].(map[string]any)["request"].(map[string]any)
 	if attempts.Load() != 2 || outputs["status"] != http.StatusNotModified || outputs["body"] != "cached body" || outputs["value"] != "cached body" {
 		t.Fatalf("attempts = %d, outputs = %#v", attempts.Load(), outputs)
 	}

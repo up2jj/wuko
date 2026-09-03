@@ -15,8 +15,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/expr-lang/expr/vm"
-	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
 )
@@ -69,133 +67,6 @@ var defaultHTTPRetryStatuses = []workflow.StatusRange{
 	{From: 500, To: 599},
 }
 
-func (e *Engine) runWithRetry(ctx context.Context, definition *workflow.Definition, workflowStep workflow.Step, options Options, state *State, execute stepExecutor) stepExecution {
-	var execution stepExecution
-	var previousAttempt *step.Result
-	var retryWhen *vm.Program
-	if workflowStep.Retry != nil && workflowStep.Retry.When != "" {
-		var err error
-		retryWhen, err = e.compileCondition(workflowStep.Retry.When)
-		if err != nil {
-			execution.err = fmt.Errorf("compiling retry when: %w", err)
-			return execution
-		}
-	}
-	operationID, err := executionOperationID(definition, workflowStep, options, state)
-	if err != nil {
-		traceStep(options, definition, workflowStep, diagnostic.PhaseAttempt, diagnostic.StatusFailed, time.Time{}, "preparing operation", err)
-		execution.err = err
-		return execution
-	}
-	maximum := maxAttempts(workflowStep)
-	runCtx := ctx
-	cancelRun := func() {}
-	if workflowStep.Retry != nil && workflowStep.Retry.MaxElapsedTime.Value() > 0 {
-		runCtx, cancelRun = context.WithTimeout(ctx, workflowStep.Retry.MaxElapsedTime.Value())
-	}
-	defer cancelRun()
-
-	for attempt := 1; attempt <= maximum; attempt++ {
-		if err := executionContextError(ctx, runCtx, workflowStep); err != nil {
-			execution.err = err
-			return execution
-		}
-		attemptCtx := runCtx
-		cancelAttempt := func() {}
-		if workflowStep.Timeout != nil {
-			attemptCtx, cancelAttempt = context.WithTimeout(runCtx, workflowStep.Timeout.Value())
-		}
-		attemptStartedAt := time.Now()
-		traceStep(options, definition, workflowStep, diagnostic.PhaseAttempt, diagnostic.StatusStarted, time.Time{}, "executing step", nil, attemptAttr(attempt, maximum))
-		report(options, ProgressEvent{
-			Kind: AttemptStarted, Status: StatusRunning, Time: attemptStartedAt,
-			WorkflowName: definition.Name, Depth: options.depth, StepID: workflowStep.ID,
-			StepType: executionKind(workflowStep), Attempt: attempt, MaxAttempts: maximum,
-		})
-		request := makeRequest(definition, workflowStep.ID, options, state, attempt, maximum, operationID)
-		request.PreviousAttempt = previousAttempt
-		result, runErr := execute(attemptCtx, request)
-		attemptContextErr := attemptCtx.Err()
-		cancelAttempt()
-
-		if contextErr := executionContextError(ctx, runCtx, workflowStep); contextErr != nil {
-			runErr = contextErr
-		} else if attemptContextErr == context.DeadlineExceeded && workflowStep.Timeout != nil {
-			runErr = attemptTimeoutError{duration: workflowStep.Timeout.Value(), cause: runErr}
-		}
-		attemptStats := AttemptStats{
-			Number: attempt, Status: statusFromError(runErr), StartedAt: attemptStartedAt,
-			Duration: time.Since(attemptStartedAt), Error: runErr,
-		}
-		execution.attempts = append(execution.attempts, attemptStats)
-		diagnosticStatus := diagnostic.StatusSucceeded
-		if runErr != nil {
-			diagnosticStatus = diagnostic.StatusFailed
-		}
-		traceStep(options, definition, workflowStep, diagnostic.PhaseAttempt, diagnosticStatus, attemptStartedAt, "", runErr, attemptAttr(attempt, maximum))
-		report(options, ProgressEvent{
-			Kind: AttemptFinished, Status: attemptStats.Status, Time: attemptStartedAt.Add(attemptStats.Duration),
-			WorkflowName: definition.Name, Depth: options.depth, StepID: workflowStep.ID,
-			StepType: executionKind(workflowStep), Attempt: attempt, MaxAttempts: maximum,
-			Duration: attemptStats.Duration, Error: runErr,
-		})
-		if runErr == nil {
-			execution.result = result
-			return execution
-		}
-		if ctx.Err() != nil || runCtx.Err() != nil {
-			execution.err = runErr
-			return execution
-		}
-		if attempt == maximum {
-			execution.err = fmt.Errorf("attempt %d/%d failed: %w", attempt, maximum, runErr)
-			return execution
-		}
-		if retryWhen != nil {
-			environment := makeConditionEnvironment(definition, options.RunDir, state)
-			environment["error"] = retryErrorValue(attemptStats.Status, workflowStep.ID, executionKind(workflowStep), runErr, retryConditionOutputs(runErr, result.Outputs))
-			retry, err := evaluateConditionProgram(retryWhen, environment)
-			if err != nil {
-				execution.err = fmt.Errorf("evaluating retry when after %v: %w", runErr, err)
-				return execution
-			}
-			if !retry {
-				execution.err = runErr
-				return execution
-			}
-		} else if !shouldRetry(workflowStep, runErr) {
-			execution.err = runErr
-			return execution
-		}
-		if result.Outputs != nil {
-			completed := result
-			previousAttempt = &completed
-		}
-
-		delay := retryDelayForError(workflowStep.Retry, attempt, runErr)
-		traceStep(options, definition, workflowStep, diagnostic.PhaseRetry, diagnostic.StatusDetail, time.Time{}, "retry scheduled", nil,
-			attemptAttr(attempt+1, maximum), diagnostic.Attr("delay", delay.String()))
-		report(options, ProgressEvent{
-			Kind: RetryScheduled, Status: StatusRunning, Time: time.Now(),
-			WorkflowName: definition.Name, Depth: options.depth, StepID: workflowStep.ID,
-			StepType: executionKind(workflowStep), Attempt: attempt + 1, MaxAttempts: maximum,
-			RetryDelay: delay, Error: runErr,
-		})
-		waitStartedAt := time.Now()
-		if err := waitForRetry(runCtx, delay); err != nil {
-			execution.retryWait += time.Since(waitStartedAt)
-			if contextErr := executionContextError(ctx, runCtx, workflowStep); contextErr != nil {
-				execution.err = contextErr
-				return execution
-			}
-			execution.err = err
-			return execution
-		}
-		execution.retryWait += time.Since(waitStartedAt)
-	}
-	panic("unreachable")
-}
-
 // retryConditionOutputs exposes a failed attempt's outputs to a retry condition. A failure that
 // produces no outputs at all can still describe itself through retryOutputProvider, so conditions
 // see the same shape whether or not the step got far enough to report anything. Reported outputs
@@ -215,15 +86,16 @@ func retryConditionOutputs(err error, outputs map[string]any) map[string]any {
 	return merged
 }
 
-func shouldRetry(workflowStep workflow.Step, err error) bool {
-	if workflowStep.Type != "http" {
-		return true
-	}
+// retryableError decides whether a failed pass is worth repeating. Classification comes from the
+// error rather than from a declared step type: an attempt body is a sequence, so there is no one
+// step whose type could gate this. A failure that carries HTTP request metadata is filtered by
+// method and status; every other failure is eligible, which is what the old non-http default did.
+func retryableError(control *workflow.AttemptControl, err error) bool {
 	var retryErr httpRetryError
 	if !errors.As(err, &retryErr) {
-		return false
+		return true
 	}
-	methods := workflowStep.Retry.Methods
+	methods := control.Methods
 	if len(methods) == 0 {
 		methods = defaultHTTPRetryMethods
 	}
@@ -236,7 +108,7 @@ func shouldRetry(workflowStep workflow.Step, err error) bool {
 	if retryErr.HTTPStatusCode() == 0 {
 		return true
 	}
-	statuses := workflowStep.Retry.Statuses
+	statuses := control.Statuses
 	if len(statuses) == 0 {
 		statuses = defaultHTTPRetryStatuses
 	}
@@ -245,48 +117,41 @@ func shouldRetry(workflowStep workflow.Step, err error) bool {
 	})
 }
 
-func retryDelayForError(policy *workflow.RetryPolicy, failedAttempt int, err error) time.Duration {
+func retryDelayForError(policy workflow.ResolvedAttempt, failedAttempt int, err error) time.Duration {
 	delay := retryDelay(policy, failedAttempt)
 	var retryErr httpRetryError
 	if errors.As(err, &retryErr) {
 		delay = max(delay, retryErr.HTTPRetryAfter())
 	}
-	if policy != nil {
-		delay = min(delay, policy.MaxDelay.Value())
-	}
+	delay = min(delay, policy.MaxDelay)
 	return max(0, delay)
 }
 
-func maxAttempts(workflowStep workflow.Step) int {
-	if workflowStep.Retry == nil {
-		return 1
-	}
-	return workflowStep.Retry.MaxAttempts
-}
-
-func executionContextError(parent, runCtx context.Context, workflowStep workflow.Step) error {
+// executionContextError keeps parent cancellation ahead of the control's own budget, so a
+// Ctrl-C is never reported as an exhausted max_elapsed_time.
+func executionContextError(parent, runCtx context.Context, maxElapsed time.Duration) error {
 	if err := parent.Err(); err != nil {
 		return err
 	}
 	if err := runCtx.Err(); err != nil {
-		if workflowStep.Retry != nil && workflowStep.Retry.MaxElapsedTime.Value() > 0 {
-			return fmt.Errorf("retry max_elapsed_time %s exceeded: %w", workflowStep.Retry.MaxElapsedTime, err)
+		if maxElapsed > 0 {
+			return fmt.Errorf("attempt max_elapsed_time %s exceeded: %w", maxElapsed, err)
 		}
 		return err
 	}
 	return nil
 }
 
-func retryDelay(policy *workflow.RetryPolicy, failedAttempt int) time.Duration {
-	if policy == nil || policy.InitialDelay.Value() == 0 {
+func retryDelay(policy workflow.ResolvedAttempt, failedAttempt int) time.Duration {
+	if policy.InitialDelay == 0 {
 		return 0
 	}
-	delay := float64(policy.InitialDelay.Value()) * math.Pow(policy.BackoffMultiplier, float64(failedAttempt-1))
-	delay = min(delay, float64(policy.MaxDelay.Value()))
+	delay := float64(policy.InitialDelay) * math.Pow(policy.BackoffMultiplier, float64(failedAttempt-1))
+	delay = min(delay, float64(policy.MaxDelay))
 	if policy.Jitter > 0 {
 		delay *= 1 + ((randv2.Float64()*2)-1)*policy.Jitter
 	}
-	delay = min(delay, float64(policy.MaxDelay.Value()))
+	delay = min(delay, float64(policy.MaxDelay))
 	return max(0, time.Duration(delay))
 }
 
@@ -304,19 +169,22 @@ func waitForRetry(ctx context.Context, delay time.Duration) error {
 	}
 }
 
-func executionOperationID(definition *workflow.Definition, workflowStep workflow.Step, options Options, state *State) (string, error) {
-	if workflowStep.Retry != nil && workflowStep.Retry.OperationID != "" {
-		operationID, err := options.renderer.Render(workflowStep.Retry.OperationID, templateData(definition, options.RunDir, state))
+// executionOperationID derives the idempotency key a step or attempt exposes as
+// WUKO_STEP_OPERATION_ID. An explicit template wins; inside an action the key is derived so it is
+// stable across the caller's passes; otherwise it is random.
+func executionOperationID(definition *workflow.Definition, stepID, template string, options Options, state *State) (string, error) {
+	if template != "" {
+		operationID, err := options.renderer.Render(template, templateData(definition, options.RunDir, state))
 		if err != nil {
-			return "", fmt.Errorf("rendering retry operation_id: %w", err)
+			return "", fmt.Errorf("rendering attempt operation_id: %w", err)
 		}
 		if strings.TrimSpace(operationID) == "" {
-			return "", fmt.Errorf("rendered retry operation_id is empty")
+			return "", fmt.Errorf("rendered attempt operation_id is empty")
 		}
 		return operationID, nil
 	}
 	if options.operationPrefix != "" {
-		digest := sha256.Sum256([]byte(options.operationPrefix + "\x00" + definition.Name + "\x00" + workflowStep.ID))
+		digest := sha256.Sum256([]byte(options.operationPrefix + "\x00" + definition.Name + "\x00" + stepID))
 		return hex.EncodeToString(digest[:]), nil
 	}
 	random := make([]byte, 16)
@@ -326,25 +194,12 @@ func executionOperationID(definition *workflow.Definition, workflowStep workflow
 	return hex.EncodeToString(random), nil
 }
 
+// executionPolicySuffix renders a step's execution policy for dry runs and the tree view. Only an
+// attempt control carries one now.
 func executionPolicySuffix(workflowStep workflow.Step) string {
-	var parts []string
-	if workflowStep.Type == "wait" {
-		if description := waitPolicyDescription(workflowStep); description != "" {
-			parts = append(parts, description)
-		}
-	}
-	if workflowStep.Timeout != nil {
-		parts = append(parts, "timeout "+workflowStep.Timeout.String())
-	}
-	if workflowStep.Retry != nil {
-		retry := fmt.Sprintf("%d attempts", workflowStep.Retry.MaxAttempts)
-		if workflowStep.Retry.MaxElapsedTime.Value() > 0 {
-			retry += " within " + workflowStep.Retry.MaxElapsedTime.String()
-		}
-		parts = append(parts, retry)
-	}
-	if len(parts) == 0 {
+	description := attemptPolicyDescription(workflowStep.Attempt)
+	if description == "" {
 		return ""
 	}
-	return " [" + strings.Join(parts, ", ") + "]"
+	return " [" + description + "]"
 }

@@ -231,10 +231,9 @@ func TestDryRunPrintsButDoesNotEvaluateCondition(t *testing.T) {
 		return countingRunner{}, nil
 	}})
 	timeout := workflow.Duration(2 * time.Second)
-	definition := testDefinition(t, "dry-run", workflow.Step{
-		ID: "run", Type: "capture", If: "vars.missing",
-		Timeout: &timeout, Retry: immediateRetry(2), With: map[string]any{"value": "{{ .vars.also_missing }}"},
-	})
+	definition := testDefinition(t, "dry-run", attemptStep("run", attemptTimeout(immediateRetry(2), &timeout), workflow.Step{
+		Type: "capture", If: "vars.missing", With: map[string]any{"value": "{{ .vars.also_missing }}"},
+	}))
 	definition.Vars = map[string]any{"missing": false, "also_missing": ""}
 	var output bytes.Buffer
 	if _, err := New(registry).Run(t.Context(), definition, Options{
@@ -242,7 +241,7 @@ func TestDryRunPrintsButDoesNotEvaluateCondition(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if got := output.String(); !strings.Contains(got, "[timeout 2s, 2 attempts] if: vars.missing") {
+	if got := output.String(); !strings.Contains(got, "run (attempt) [timeout 2s, 2 attempts]") || !strings.Contains(got, "run_body (capture) if: vars.missing") {
 		t.Fatalf("output = %q", got)
 	}
 }

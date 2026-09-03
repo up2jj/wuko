@@ -165,7 +165,7 @@ func TestTryCatchRecoversChildTimeout(t *testing.T) {
 	})
 	timeout := workflow.Duration(10 * time.Millisecond)
 	definition := testDefinition(t, "timeout", tryCatchStep(
-		[]workflow.Step{{ID: "deploy", Type: "block", Timeout: &timeout, With: map[string]any{}}},
+		[]workflow.Step{attemptStep("deploy", attemptTimeout(workflow.AttemptControl{}, &timeout), workflow.Step{Type: "block", With: map[string]any{}})},
 		[]workflow.Step{{ID: "rollback", Type: "capture", With: map[string]any{}}},
 	))
 	state, err := New(registry).Run(t.Context(), definition, Options{})

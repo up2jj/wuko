@@ -47,7 +47,7 @@ func TestRunReportsProgressAndCollectsStats(t *testing.T) {
 		return retryTestRunner{failures: 1, requests: &requests}, nil
 	}})
 	definition := testDefinition(t, "progress",
-		workflow.Step{ID: "publish", Type: "retry", Retry: immediateRetry(2)},
+		attemptStep("publish", immediateRetry(2), workflow.Step{Type: "retry"}),
 		workflow.Step{ID: "deploy", Type: "retry", If: "vars.run"},
 	)
 	definition.Vars = map[string]any{"run": false}
@@ -67,8 +67,9 @@ func TestRunReportsProgressAndCollectsStats(t *testing.T) {
 		t.Fatalf("step stats = %#v", stats.Steps)
 	}
 	wantKinds := []ProgressKind{
-		WorkflowStarted, StepStarted, AttemptStarted, AttemptFinished, RetryScheduled,
-		AttemptStarted, AttemptFinished, StepFinished, StepFinished, WorkflowFinished,
+		WorkflowStarted, StepStarted, AttemptStarted, StepStarted, StepFinished, AttemptFinished,
+		RetryScheduled, AttemptStarted, StepStarted, StepFinished, AttemptFinished, StepFinished,
+		StepFinished, WorkflowFinished,
 	}
 	if len(events) != len(wantKinds) {
 		t.Fatalf("event count = %d, want %d: %#v", len(events), len(wantKinds), events)
@@ -78,7 +79,7 @@ func TestRunReportsProgressAndCollectsStats(t *testing.T) {
 			t.Fatalf("event %d kind = %q, want %q", i, events[i].Kind, want)
 		}
 	}
-	if events[3].Status != StatusFailed || events[5].Attempt != 2 || events[9].Stats.Attempts != 2 {
+	if events[5].Status != StatusFailed || events[7].Attempt != 2 || events[13].Stats.Attempts != 2 {
 		t.Fatalf("events = %#v", events)
 	}
 }
@@ -117,7 +118,6 @@ func TestRunReportsDiagnosticFailurePhaseAndLocation(t *testing.T) {
 		diagnostic.PhaseCondition: diagnostic.StatusSucceeded,
 		diagnostic.PhaseRender:    diagnostic.StatusSucceeded,
 		diagnostic.PhaseRunner:    diagnostic.StatusSucceeded,
-		diagnostic.PhaseAttempt:   diagnostic.StatusFailed,
 	}
 	for _, event := range events {
 		if want, ok := wants[event.Phase]; ok && event.Status == want {

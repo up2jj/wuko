@@ -150,6 +150,11 @@ func stepDependencyReferences(steps []Step) []dependencyOutputReference {
 		if workflowStep.Once != nil {
 			references = append(references, templateDependencyReferences(workflowStep.Once.Key)...)
 		}
+		if workflowStep.Attempt != nil {
+			references = append(references, expressionDependencyReferences(string(workflowStep.Attempt.Until))...)
+			references = append(references, expressionDependencyReferences(string(workflowStep.Attempt.When))...)
+			references = append(references, templateDependencyReferences(workflowStep.Attempt.OperationID)...)
+		}
 		for _, argument := range workflowStep.Uses.Args {
 			references = append(references, templateDependencyReferences(argument)...)
 		}
@@ -194,10 +199,6 @@ func stepDependencyReferences(steps []Step) []dependencyOutputReference {
 		case "lua":
 			if args, ok := workflowStep.With["args"].(map[string]any); ok {
 				references = append(references, typedBindingDependencyReferences(args)...)
-			}
-		case "wait":
-			if expression, ok := workflowStep.With["until"].(string); ok {
-				references = append(references, expressionDependencyReferences(expression)...)
 			}
 		}
 		if workflowStep.Action != nil {

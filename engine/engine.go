@@ -79,6 +79,16 @@ type Options struct {
 	// cleanups scopes managed-resource cleanup to a background control iteration, whose
 	// resources must be released when the iteration ends rather than accumulating for
 	// the life of the run. Nil everywhere else, meaning the run-level scope.
+	// attempt, maxAttempts, operationID and previousPass are the ambient properties of the
+	// innermost enclosing attempt control. A pass is the unit being repeated, so every step in
+	// one body shares them. Outside an attempt they are zero, and executeStep supplies the
+	// standalone defaults.
+	attempt      int
+	maxAttempts  int
+	operationID  string
+	previousPass map[string]step.Result
+	// passFailure captures the partial result of the step that ends an attempt pass.
+	passFailure   *passFailure
 	cleanups      *cleanupScope
 	secretSession *secret.Session
 	// scopedEnv captures the active transparent env block for deferred cleanup, which may
@@ -271,6 +281,12 @@ func (e *Engine) validateSteps(ctx context.Context, definition *workflow.Definit
 			}
 			continue
 		}
+		if workflowStep.IsAttempt() {
+			if err := e.validateAttempt(ctx, definition, workflowStep, options, state); err != nil {
+				return fmt.Errorf("step %q: %w", workflowStep.ID, err)
+			}
+			continue
+		}
 		if workflowStep.Batch != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil {
 			if err := e.validateControl(ctx, definition, workflowStep, options, state); err != nil {
 				return fmt.Errorf("step %q: %w", workflowStep.ID, err)
@@ -311,18 +327,6 @@ func (e *Engine) validateSteps(ctx context.Context, definition *workflow.Definit
 				return fmt.Errorf("step %q if: %w", workflowStep.ID, err)
 			}
 		}
-		if workflowStep.Retry != nil && workflowStep.Retry.When != "" {
-			if _, err := e.compileCondition(workflowStep.Retry.When); err != nil {
-				traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusFailed, started, "compiling retry condition", err)
-				return fmt.Errorf("step %q retry when: %w", workflowStep.ID, err)
-			}
-		}
-		if workflowStep.Retry != nil && workflowStep.Retry.OperationID != "" {
-			if err := validateTemplates(options.renderer, workflowStep.Retry.OperationID, false); err != nil {
-				traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusFailed, started, "validating retry operation ID", err)
-				return fmt.Errorf("step %q retry operation_id: %w", workflowStep.ID, err)
-			}
-		}
 		if err := e.validateDeferredSteps(ctx, definition, workflowStep, options, state); err != nil {
 			traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusFailed, started, "validating defer", err)
 			return err
@@ -334,19 +338,6 @@ func (e *Engine) validateSteps(ctx context.Context, definition *workflow.Definit
 			}
 			if err := e.validateAction(ctx, definition, workflowStep, options, state); err != nil {
 				traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusFailed, started, "validating action", err)
-				return fmt.Errorf("step %q: %w", workflowStep.ID, err)
-			}
-			traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusSucceeded, started, "", nil)
-			continue
-		}
-		if workflowStep.Type == "wait" {
-			if options.insideExecutor {
-				err := fmt.Errorf("step type %q is not supported inside executor blocks", workflowStep.Type)
-				traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusFailed, started, "validating executor support", err)
-				return fmt.Errorf("step %q: %w", workflowStep.ID, err)
-			}
-			if err := e.validateWaitStep(ctx, definition, workflowStep, options, state, !options.deferContextValidation); err != nil {
-				traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusFailed, started, "validating wait", err)
 				return fmt.Errorf("step %q: %w", workflowStep.ID, err)
 			}
 			traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusSucceeded, started, "", nil)
@@ -373,7 +364,7 @@ func (e *Engine) validateSteps(ctx context.Context, definition *workflow.Definit
 			traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusSucceeded, started, "", nil)
 			continue
 		}
-		request := makeRequest(definition, workflowStep.ID, options, state, 1, maxAttempts(workflowStep), "validation")
+		request := makeRequest(definition, workflowStep.ID, options, state, 1, 1, "validation")
 		if err := validator.Validate(ctx, request); err != nil {
 			traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusFailed, started, "validating runner", err)
 			return fmt.Errorf("step %q: %w", workflowStep.ID, err)
@@ -707,6 +698,8 @@ func (e *Engine) executeSequence(ctx context.Context, definition *workflow.Defin
 			outcome = e.executeOnce(ctx, definition, workflowStep, stepOptions, state, index, total)
 		} else if workflowStep.Batch != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil {
 			outcome = e.executeControl(ctx, definition, workflowStep, stepOptions, state, index, total)
+		} else if workflowStep.IsAttempt() {
+			outcome = e.executeAttempt(ctx, definition, workflowStep, stepOptions, state, index, total)
 		} else if workflowStep.Loop != nil {
 			outcome = e.executeLoop(ctx, definition, workflowStep, stepOptions, state, index, total)
 		} else {
@@ -834,13 +827,11 @@ func (e *Engine) executeStep(ctx context.Context, definition *workflow.Definitio
 	kind := executionKind(workflowStep)
 	stepStartedAt := time.Now()
 	outcome := stepOutcome{started: true}
-	metrics := waitMetrics{}
 	finishStep := func(status ExecutionStatus, stepErr error, attempts []AttemptStats, retryWait time.Duration) {
 		outcome.stats = StepStats{
 			StepRunID: options.stepRunID, ID: workflowStep.ID, Type: kind, Index: index, Status: status,
 			StartedAt: stepStartedAt, Duration: time.Since(stepStartedAt),
-			RetryWait: retryWait, Polls: metrics.polls, PollWait: metrics.pollWait,
-			Attempts: attempts, Error: stepErr,
+			RetryWait: retryWait, Attempts: attempts, Error: stepErr,
 		}
 		reportStepFinished(options, definition.Name, workflowStep.ID, kind, index, total, outcome.stats)
 	}
@@ -864,8 +855,7 @@ func (e *Engine) executeStep(ctx context.Context, definition *workflow.Definitio
 	report(options, ProgressEvent{
 		Kind: StepStarted, Status: StatusRunning, Time: stepStartedAt,
 		WorkflowName: definition.Name, Depth: options.depth, StepID: workflowStep.ID,
-		StepType: kind, Index: index, Total: total, MaxAttempts: maxAttempts(workflowStep),
-		Timeout: stepTimeout(workflowStep),
+		StepType: kind, Index: index, Total: total,
 	})
 	var execute stepExecutor
 	cleanup := func() {}
@@ -881,18 +871,6 @@ func (e *Engine) executeStep(ctx context.Context, definition *workflow.Definitio
 			return outcome
 		}
 		traceStep(options, definition, workflowStep, diagnostic.PhaseActionInputs, diagnostic.StatusSucceeded, prepareStarted, "", nil)
-	} else if workflowStep.Type == "wait" {
-		prepareStarted := time.Now()
-		traceStep(options, definition, workflowStep, diagnostic.PhaseRunner, diagnostic.StatusStarted, time.Time{}, "preparing wait", nil)
-		execute, err = e.prepareWaitExecutor(definition, workflowStep, options, state, &metrics)
-		if err != nil {
-			traceStep(options, definition, workflowStep, diagnostic.PhaseRunner, diagnostic.StatusFailed, prepareStarted, "preparing wait", err)
-			stepErr := fmt.Errorf("workflow %q step %q (%s): %w", definition.Name, workflowStep.ID, kind, err)
-			finishStep(StatusFailed, stepErr, nil, 0)
-			outcome.err = stepErr
-			return outcome
-		}
-		traceStep(options, definition, workflowStep, diagnostic.PhaseRunner, diagnostic.StatusSucceeded, prepareStarted, "prepared wait", nil)
 	} else {
 		renderStarted := time.Now()
 		traceStep(options, definition, workflowStep, diagnostic.PhaseRender, diagnostic.StatusStarted, time.Time{}, "rendering step configuration", nil)
@@ -934,13 +912,47 @@ func (e *Engine) executeStep(ctx context.Context, definition *workflow.Definitio
 		traceStep(options, definition, workflowStep, diagnostic.PhaseRunner, diagnostic.StatusSucceeded, runnerStarted, "", nil)
 		execute = managedExecutor(options, workflowStep.ID, runner)
 	}
-	execution := e.runWithRetry(ctx, definition, workflowStep, options, state, execute)
-	cleanup()
-	finishStep(statusFromError(execution.err), execution.err, execution.attempts, execution.retryWait)
-	if execution.err != nil {
-		outcome.err = fmt.Errorf("workflow %q step %q (%s): %w", definition.Name, workflowStep.ID, kind, execution.err)
+	operationID := options.operationID
+	if operationID == "" {
+		// Every step carries an operation ID whether or not an attempt encloses it: nested
+		// action runs hash it into their own, so an empty one would break their determinism.
+		operationID, err = executionOperationID(definition, workflowStep.ID, "", options, state)
+		if err != nil {
+			cleanup()
+			stepErr := fmt.Errorf("workflow %q step %q (%s): %w", definition.Name, workflowStep.ID, kind, err)
+			finishStep(StatusFailed, stepErr, nil, 0)
+			outcome.err = stepErr
+			return outcome
+		}
 	}
-	outcome.result = execution.result
+	attempt, maximum := max(options.attempt, 1), max(options.maxAttempts, 1)
+	request := makeRequest(definition, workflowStep.ID, options, state, attempt, max(maximum, attempt), operationID)
+	if previous, ok := options.previousPass[workflowStep.ID]; ok {
+		request.PreviousAttempt = &previous
+	}
+	runStartedAt := time.Now()
+	result, runErr := execute(ctx, request)
+	cleanup()
+	// Only the outermost executor of a pass counts it. Inside an attempt body the control
+	// already reports one AttemptStats per pass, so a leaf that reported its own would double
+	// count every execution in the run summary.
+	var stats []AttemptStats
+	if options.maxAttempts == 0 {
+		stats = []AttemptStats{{
+			Number: attempt, Status: statusFromError(runErr), StartedAt: runStartedAt,
+			Duration: time.Since(runStartedAt), Error: runErr,
+		}}
+	}
+	finishStep(statusFromError(runErr), runErr, stats, 0)
+	if runErr != nil {
+		// The partial result travels two ways: on the outcome, and into the enclosing attempt's
+		// recorder, because a failed step never commits and executeSequence returns only an error.
+		options.passFailure.record(workflowStep.ID, result.Outputs)
+		outcome.result = result
+		outcome.err = fmt.Errorf("workflow %q step %q (%s): %w", definition.Name, workflowStep.ID, kind, runErr)
+		return outcome
+	}
+	outcome.result = result
 	return outcome
 }
 
@@ -1064,17 +1076,13 @@ func executionKind(workflowStep workflow.Step) string {
 	if workflowStep.IsOnce() {
 		return "once"
 	}
+	if workflowStep.IsAttempt() {
+		return "attempt"
+	}
 	if workflowStep.Action != nil {
 		return "uses"
 	}
 	return workflowStep.Type
-}
-
-func stepTimeout(workflowStep workflow.Step) time.Duration {
-	if workflowStep.Timeout == nil {
-		return 0
-	}
-	return workflowStep.Timeout.Value()
 }
 
 func reportStepFinished(options Options, workflowName, stepID, stepType string, index, total int, stats StepStats) {

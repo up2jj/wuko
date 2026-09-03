@@ -274,15 +274,22 @@ func TestExecutorScopeRejectsNonAwareRunner(t *testing.T) {
 	}
 }
 
-func TestExecutorScopeRejectsWait(t *testing.T) {
-	definition := testDefinition(t, "invalid-wait", workflow.Step{
+// An attempt is a control, not a step, so it is legal inside an executor block and its body steps
+// are checked for executor support one by one. The old wait pseudo-step was rejected outright
+// because its polling executor was engine-native, so polling inside an executor is new.
+func TestExecutorScopeAllowsAttempt(t *testing.T) {
+	definition := testDefinition(t, "attempt-in-executor", workflow.Step{
 		Executor: &workflow.ExecutorScope{Type: "recording", With: map[string]any{}},
 		Steps: []workflow.Step{{
-			ID: "pause", Type: "wait", With: map[string]any{"duration": "1s"},
+			ID: "pause",
+			Attempt: &workflow.AttemptControl{
+				MaxAttempts:       workflow.LiteralCount(1),
+				BackoffMultiplier: workflow.LiteralFactor(1),
+				Steps:             []workflow.Step{{ID: "unsupported", Type: "git_clean", With: map[string]any{}}},
+			},
 		}},
 	})
-	err := executorTestEngine(t, &recordingExecutor{}).Validate(t.Context(), definition, Options{RunDir: t.TempDir()})
-	if err == nil || !strings.Contains(err.Error(), `step type "wait" is not supported inside executor blocks`) {
-		t.Fatalf("error = %v", err)
+	if err := executorTestEngine(t, &recordingExecutor{}).Validate(t.Context(), definition, Options{RunDir: t.TempDir()}); err != nil {
+		t.Fatalf("attempt was rejected inside an executor block: %v", err)
 	}
 }
