@@ -208,27 +208,106 @@ current project’s workflow copy.
 
 ## GitHub Actions
 
-Wuko can report a run through GitHub Actions without changing the workflow format. Reporters are
-explicit and repeatable: `plain` keeps the normal progress log, `github` adds error annotations, a
-job summary, and step outputs, and `multiplexer` animates the current tmux, cmux, or Herdr title.
-GitHub supplies the output and summary files to every run step.
+Use the repository's composite action to install a pinned Wuko release and run a workflow with
+GitHub error annotations, a job summary, and typed outputs:
+
+```yaml
+- uses: actions/checkout@v6
+
+- name: Run Wuko checks
+  uses: up2jj/wuko@v0.13.0
+  with:
+    workflow: check
+    vars: |
+      package=./cmd/...
+      race=true
+  env:
+    API_TOKEN: ${{ secrets.API_TOKEN }}
+```
+
+The `outputs` output carries the workflow's complete return map as JSON, so a later step can read a
+single value. Wuko writes it only for a successful run whose workflow ends in a `return`; any other
+run leaves the output empty, and `fromJSON('')` fails the job. Guard the consuming step when the
+return is conditional:
+
+```yaml
+- name: Build the release archive
+  id: wuko
+  uses: up2jj/wuko@v0.13.0
+  with:
+    workflow: build
+
+- uses: actions/upload-artifact@v4
+  if: steps.wuko.outputs.outputs != ''
+  with:
+    path: ${{ fromJSON(steps.wuko.outputs.outputs).artifact }}
+```
+
+`workflow` accepts a discovered name, a local file, an HTTPS URL, or a `github:` locator. Use
+`target` to select a workflow target and `working-directory` to change the run directory. The
+optional `vars` input accepts one `key=value` assignment per line. Wuko preserves JSON values
+such as booleans, numbers, arrays, and objects; unquoted values are strings:
+
+```yaml
+vars: |
+  package=./cmd/...
+  race=true
+  retries=3
+  platforms=["linux","darwin"]
+```
+
+For generated or deeply nested values, pass one JSON object instead. A value whose first
+non-whitespace character is `{` is loaded as a typed variable file:
+
+```yaml
+vars: |
+  {
+    "revision": ${{ toJSON(github.sha) }},
+    "matrix": {"os":["linux","darwin"]}
+  }
+```
+
+Pass secrets through the action's `env` block rather than interpolating them into variables or the
+workflow definition.
+
+For a small workflow constructed by the GitHub workflow itself, provide an inline definition:
+
+```yaml
+- name: Run inline Wuko workflow
+  id: wuko
+  uses: up2jj/wuko@v0.13.0
+  with:
+    definition: |
+      version: 1
+      name: checks
+      steps:
+        - id: tests
+          type: shell
+          with:
+            command: go
+            args: [test, ./...]
+        - return:
+            outputs:
+              revision: 'vars.revision'
+    vars: |
+      revision=${{ toJSON(github.sha) }}
+```
+
+Exactly one of `workflow` and `definition` is required. Inline definitions use the working
+directory as the base for relative `require` entries, templates, and local actions. The action runs
+once even when the definition declares `cron`. Pin the action to a release tag or full commit SHA;
+`version` can override the Wuko binary version recorded by that action revision.
+
+When Wuko is already installed, the equivalent lower-level invocation remains available:
 
 ```yaml
 - name: Run Wuko checks
   id: wuko
   run: wuko run check --once --reporter plain --reporter github
-  env:
-    API_TOKEN: ${{ secrets.API_TOKEN }}
-
-- uses: actions/upload-artifact@v4
-  with:
-    path: ${{ steps.wuko.outputs.artifact }}
 ```
 
-`--once` runs a workflow immediately even when it declares `cron`, leaving GitHub responsible for
-the schedule. Values produced by a successful workflow `return` are exported by name. Wuko also
-exports the complete typed output map as JSON under `wuko_outputs`. The GitHub reporter is never
-enabled automatically; omit all `--reporter` flags to use only the default plain reporter.
+The `github` reporter is never enabled automatically outside the composite action. With no
+`--reporter` flags, `wuko run` uses only the default plain reporter.
 
 ## Workflow building blocks
 

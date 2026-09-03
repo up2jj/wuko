@@ -67,3 +67,88 @@ jobs:
           distribution: goreleaser
           version: "~> v2"
           args: build --snapshot --clean
+
+  action:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
+          cache: true
+      - name: build action test binary
+        run: go build -o "$RUNNER_TEMP/wuko-action-test" .
+      - name: run file workflow through action
+        id: file
+        uses: ./
+        with:
+          workflow: .github/fixtures/ci-smoke.yaml
+        env:
+          WUKO_ACTION_TEST_BINARY: ${{ runner.temp }}/wuko-action-test
+      - name: run inline workflow through action
+        id: inline
+        uses: ./
+        with:
+          definition: |
+            version: 1
+            name: inline-action-smoke
+            targets:
+              smoke:
+                steps:
+                  - require: fragments/return.yaml
+          target: smoke
+          working-directory: .github/fixtures/action-inline
+          vars: |
+            result=inline-ready
+            enabled=true
+        env:
+          WUKO_ACTION_TEST_BINARY: ${{ runner.temp }}/wuko-action-test
+      - name: verify action outputs
+        env:
+          FILE_OUTPUTS: ${{ steps.file.outputs.outputs }}
+          INLINE_OUTPUTS: ${{ steps.inline.outputs.outputs }}
+        run: |
+          test "$FILE_OUTPUTS" = '{"result":"ready"}'
+          test "$INLINE_OUTPUTS" = '{"enabled":true,"result":"inline-ready"}'
+      - name: reject both workflow sources
+        id: invalid-both
+        continue-on-error: true
+        uses: ./
+        with:
+          workflow: check
+          definition: "version: 1"
+        env:
+          WUKO_ACTION_TEST_BINARY: ${{ runner.temp }}/wuko-action-test
+      - name: reject a missing workflow source
+        id: invalid-neither
+        continue-on-error: true
+        uses: ./
+        env:
+          WUKO_ACTION_TEST_BINARY: ${{ runner.temp }}/wuko-action-test
+      - name: reject invalid variables
+        id: invalid-vars
+        continue-on-error: true
+        uses: ./
+        with:
+          workflow: .github/fixtures/ci-smoke.yaml
+          vars: "["
+        env:
+          WUKO_ACTION_TEST_BINARY: ${{ runner.temp }}/wuko-action-test
+      - name: require validation failures
+        env:
+          BOTH_OUTCOME: ${{ steps.invalid-both.outcome }}
+          NEITHER_OUTCOME: ${{ steps.invalid-neither.outcome }}
+          VARS_OUTCOME: ${{ steps.invalid-vars.outcome }}
+        run: |
+          test "$BOTH_OUTCOME" = failure
+          test "$NEITHER_OUTCOME" = failure
+          test "$VARS_OUTCOME" = failure
+      - name: exercise release download
+        if: runner.os == 'Linux'
+        uses: ./
+        with:
+          workflow: .github/fixtures/ci-smoke.yaml
+          version: 0.12.0

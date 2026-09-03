@@ -1,0 +1,4 @@
+- return:
+    outputs:
+      enabled: vars.enabled
+      result: vars.result

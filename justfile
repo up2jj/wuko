@@ -70,6 +70,11 @@ release version:
     version="{{ version }}"
     version="${version#v}"
     tag="v${version}"
+    action_version="$(tr -d '[:space:]' < action/version)"
+    if [ "$action_version" != "$version" ]; then
+        echo "error: action/version is $action_version; expected $version" >&2
+        exit 1
+    fi
     if [ -n "$(git status --porcelain)" ]; then
         echo "error: working tree is not clean; commit or stash changes first" >&2
         exit 1

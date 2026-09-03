@@ -1,0 +1,62 @@
+name: Run Wuko
+description: Run a trusted Wuko workflow with GitHub annotations, summaries, and outputs
+author: up2jj
+
+inputs:
+  workflow:
+    description: "Workflow name, local file path, HTTPS URL, or github: locator"
+    required: false
+    default: ""
+  definition:
+    description: Inline Wuko workflow definition
+    required: false
+    default: ""
+  target:
+    description: Optional workflow target
+    required: false
+    default: ""
+  working-directory:
+    description: Directory from which to run the workflow
+    required: false
+    default: "."
+  vars:
+    description: Workflow variables as newline-delimited key=value assignments or a JSON object
+    required: false
+    default: ""
+  version:
+    description: Wuko version; defaults to the version pinned by this action revision
+    required: false
+    default: ""
+
+outputs:
+  outputs:
+    description: Complete workflow return values as a JSON object
+    value: ${{ steps.run.outputs.wuko_outputs }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install Wuko
+      id: install
+      shell: bash
+      env:
+        INPUT_VERSION: ${{ inputs.version }}
+        WUKO_ACTION_PATH: ${{ github.action_path }}
+      run: bash "$WUKO_ACTION_PATH/action/install.sh"
+
+    - name: Run Wuko workflow
+      id: run
+      shell: bash
+      env:
+        INPUT_WORKFLOW: ${{ inputs.workflow }}
+        INPUT_DEFINITION: ${{ inputs.definition }}
+        INPUT_TARGET: ${{ inputs.target }}
+        INPUT_WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        INPUT_VARS: ${{ inputs.vars }}
+        WUKO_BINARY: ${{ steps.install.outputs.path }}
+        WUKO_ACTION_PATH: ${{ github.action_path }}
+      run: bash "$WUKO_ACTION_PATH/action/run.sh"
+
+branding:
+  icon: play-circle
+  color: purple
