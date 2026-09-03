@@ -176,6 +176,33 @@ func (loader *Loader) Decode(filename string, options LoadOptions) (*Definition,
 	return definition, nil
 }
 
+// DecodeStdin reads and validates a workflow supplied on standard input without resolving
+// composite actions. Relative workflow resources are resolved from baseDir. Call Prepare before
+// execution.
+func (loader *Loader) DecodeStdin(reader io.Reader, baseDir string, options LoadOptions) (*Definition, error) {
+	const sourceLabel = "stdin"
+	started := traceStart(options.Diagnostics, diagnostic.PhaseDecode, diagnostic.Location{Source: sourceLabel}, "", "", "", "decoding workflow")
+	if reader == nil {
+		err := fmt.Errorf("standard input is required")
+		traceFinish(options.Diagnostics, started, diagnostic.PhaseDecode, diagnostic.StatusFailed, diagnostic.Location{Source: sourceLabel}, "", "", "", "", err)
+		return nil, fmt.Errorf("reading workflow from stdin: %w", err)
+	}
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		traceFinish(options.Diagnostics, started, diagnostic.PhaseDecode, diagnostic.StatusFailed, diagnostic.Location{Source: sourceLabel}, "", "", "", "", err)
+		return nil, fmt.Errorf("reading workflow from stdin: %w", err)
+	}
+	absBaseDir, err := filepath.Abs(baseDir)
+	if err != nil {
+		traceFinish(options.Diagnostics, started, diagnostic.PhaseDecode, diagnostic.StatusFailed, diagnostic.Location{Source: sourceLabel}, "", "", "", "", err)
+		return nil, fmt.Errorf("resolving stdin workflow base directory %s: %w", baseDir, err)
+	}
+	return decodeWorkflowData(data, workflowDecodeSource{
+		path: filepath.Join(absBaseDir, "-"), display: sourceLabel,
+		sourceRoot: absBaseDir, sourceLabel: sourceLabel, virtual: true,
+	}, options.Diagnostics, started)
+}
+
 // Prepare resolves value-dependent workflow environment and composite actions in a decoded definition.
 func (loader *Loader) Prepare(ctx context.Context, definition *Definition, options LoadOptions) (err error) {
 	if definition.secretSession == nil {

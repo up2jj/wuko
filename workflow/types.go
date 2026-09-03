@@ -667,27 +667,47 @@ func loadLocalWithDiagnostics(path string, reporter diagnostic.Reporter, sourceR
 		traceFinish(reporter, loadStarted, diagnostic.PhaseDecode, diagnostic.StatusFailed, diagnostic.Location{Source: displaySource}, "", "", "", "", err)
 		return nil, fmt.Errorf("reading workflow %s: %w", path, err)
 	}
+	return decodeWorkflowData(data, workflowDecodeSource{
+		path: path, display: displaySource, sourceRoot: sourceRoot, sourceLabel: sourceLabel,
+		allowedRoot: sourceRoot,
+	}, reporter, loadStarted)
+}
+
+type workflowDecodeSource struct {
+	path        string
+	display     string
+	sourceRoot  string
+	sourceLabel string
+	allowedRoot string
+	virtual     bool
+}
+
+func decodeWorkflowData(data []byte, source workflowDecodeSource, reporter diagnostic.Reporter, loadStarted time.Time) (*Definition, error) {
+	path := source.path
+	displaySource := source.display
+	sourceRoot := source.sourceRoot
+	sourceLabel := source.sourceLabel
 
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	decoder.KnownFields(true)
 	var definition Definition
 	if err := decoder.Decode(&definition); err != nil {
 		traceFinish(reporter, loadStarted, diagnostic.PhaseDecode, diagnostic.StatusFailed, diagnostic.Location{Source: displaySource}, "", "", "", "", err)
-		return nil, fmt.Errorf("decoding workflow %s: %w", path, err)
+		return nil, fmt.Errorf("decoding workflow %s: %w", displaySource, err)
 	}
 	var extra any
 	if err := decoder.Decode(&extra); err != io.EOF {
 		if err == nil {
 			multipleErr := fmt.Errorf("multiple YAML documents are not supported")
 			traceFinish(reporter, loadStarted, diagnostic.PhaseDecode, diagnostic.StatusFailed, diagnostic.Location{Source: displaySource}, "", "", "", "", multipleErr)
-			return nil, fmt.Errorf("decoding workflow %s: multiple YAML documents are not supported", path)
+			return nil, fmt.Errorf("decoding workflow %s: multiple YAML documents are not supported", displaySource)
 		}
 		traceFinish(reporter, loadStarted, diagnostic.PhaseDecode, diagnostic.StatusFailed, diagnostic.Location{Source: displaySource}, "", "", "", "", err)
-		return nil, fmt.Errorf("decoding workflow %s: %w", path, err)
+		return nil, fmt.Errorf("decoding workflow %s: %w", displaySource, err)
 	}
 	if err := validateDefinitionHeader(&definition); err != nil {
 		traceFinish(reporter, loadStarted, diagnostic.PhaseDecode, diagnostic.StatusFailed, diagnostic.Location{Source: displaySource}, definition.Name, "", "", "", err)
-		return nil, fmt.Errorf("validating workflow %s: %w", path, err)
+		return nil, fmt.Errorf("validating workflow %s: %w", displaySource, err)
 	}
 	abs, err := filepath.Abs(path)
 	if err != nil {
@@ -697,7 +717,7 @@ func loadLocalWithDiagnostics(path string, reporter diagnostic.Reporter, sourceR
 	definition.Dir = filepath.Dir(abs)
 	definition.sourceRoot = sourceRoot
 	definition.sourceLabel = sourceLabel
-	if err := resolveTemplateFiles(definition.Templates, definition.Dir, nil, sourceRoot); err != nil {
+	if err := resolveTemplateFiles(definition.Templates, definition.Dir, nil, source.allowedRoot); err != nil {
 		return nil, fmt.Errorf("loading workflow templates from %s: %w", displaySource, err)
 	}
 	annotateDefinitionLocations(data, &definition, abs)
@@ -705,39 +725,45 @@ func loadLocalWithDiagnostics(path string, reporter diagnostic.Reporter, sourceR
 		definition.Location.Source = remapSource(definition.Location.Source, sourceRoot, sourceLabel)
 	}
 	traceFinish(reporter, loadStarted, diagnostic.PhaseDecode, diagnostic.StatusSucceeded, definition.Location, definition.Name, "", "", "", nil, countAttr("steps", len(definition.Steps)))
-	requireStarted := traceStart(reporter, diagnostic.PhaseRequire, definition.Location, definition.Name, "", "", "expanding required step files")
-	definition.Steps, err = expandRequiredSteps(definition.Steps, abs, nil)
-	if err != nil {
-		traceFinish(reporter, requireStarted, diagnostic.PhaseRequire, diagnostic.StatusFailed, definition.Location, definition.Name, "", "", "", err)
-		return nil, fmt.Errorf("loading workflow %s: %w", path, err)
+	// A virtual workflow has no file at abs, so require entries must name the logical source
+	// rather than the placeholder path they are resolved from.
+	requireDisplay := abs
+	if source.virtual {
+		requireDisplay = displaySource
 	}
-	definition.Finally, err = expandRequiredSteps(definition.Finally, abs, nil)
+	requireStarted := traceStart(reporter, diagnostic.PhaseRequire, definition.Location, definition.Name, "", "", "expanding required step files")
+	definition.Steps, err = expandWorkflowRequiredSteps(definition.Steps, abs, requireDisplay, source.virtual)
 	if err != nil {
 		traceFinish(reporter, requireStarted, diagnostic.PhaseRequire, diagnostic.StatusFailed, definition.Location, definition.Name, "", "", "", err)
-		return nil, fmt.Errorf("loading workflow %s finally: %w", path, err)
+		return nil, fmt.Errorf("loading workflow %s: %w", displaySource, err)
+	}
+	definition.Finally, err = expandWorkflowRequiredSteps(definition.Finally, abs, requireDisplay, source.virtual)
+	if err != nil {
+		traceFinish(reporter, requireStarted, diagnostic.PhaseRequire, diagnostic.StatusFailed, definition.Location, definition.Name, "", "", "", err)
+		return nil, fmt.Errorf("loading workflow %s finally: %w", displaySource, err)
 	}
 	for name, target := range definition.Targets {
-		target.Steps, err = expandRequiredSteps(target.Steps, abs, nil)
+		target.Steps, err = expandWorkflowRequiredSteps(target.Steps, abs, requireDisplay, source.virtual)
 		if err != nil {
 			traceFinish(reporter, requireStarted, diagnostic.PhaseRequire, diagnostic.StatusFailed, definition.Location, definition.Name, "", "", "", err)
-			return nil, fmt.Errorf("loading workflow %s target %s: %w", path, name, err)
+			return nil, fmt.Errorf("loading workflow %s target %s: %w", displaySource, name, err)
 		}
-		target.Finally, err = expandRequiredSteps(target.Finally, abs, nil)
+		target.Finally, err = expandWorkflowRequiredSteps(target.Finally, abs, requireDisplay, source.virtual)
 		if err != nil {
 			traceFinish(reporter, requireStarted, diagnostic.PhaseRequire, diagnostic.StatusFailed, definition.Location, definition.Name, "", "", "", err)
-			return nil, fmt.Errorf("loading workflow %s target %s finally: %w", path, name, err)
+			return nil, fmt.Errorf("loading workflow %s target %s finally: %w", displaySource, name, err)
 		}
 		definition.Targets[name] = target
 	}
-	definition.Install, err = expandRequiredSteps(definition.Install, abs, nil)
+	definition.Install, err = expandWorkflowRequiredSteps(definition.Install, abs, requireDisplay, source.virtual)
 	if err != nil {
 		traceFinish(reporter, requireStarted, diagnostic.PhaseRequire, diagnostic.StatusFailed, definition.Location, definition.Name, "", "", "", err)
-		return nil, fmt.Errorf("loading workflow %s install: %w", path, err)
+		return nil, fmt.Errorf("loading workflow %s install: %w", displaySource, err)
 	}
-	definition.Uninstall, err = expandRequiredSteps(definition.Uninstall, abs, nil)
+	definition.Uninstall, err = expandWorkflowRequiredSteps(definition.Uninstall, abs, requireDisplay, source.virtual)
 	if err != nil {
 		traceFinish(reporter, requireStarted, diagnostic.PhaseRequire, diagnostic.StatusFailed, definition.Location, definition.Name, "", "", "", err)
-		return nil, fmt.Errorf("loading workflow %s uninstall: %w", path, err)
+		return nil, fmt.Errorf("loading workflow %s uninstall: %w", displaySource, err)
 	}
 	if sourceLabel != "" {
 		remapStepLocations(definition.Steps, sourceRoot, sourceLabel)
@@ -753,11 +779,11 @@ func loadLocalWithDiagnostics(path string, reporter diagnostic.Reporter, sourceR
 	validationStarted := traceStart(reporter, diagnostic.PhaseValidation, definition.Location, definition.Name, "", "", "validating workflow schema")
 	if err := definition.ValidateStructure(); err != nil {
 		traceFinish(reporter, validationStarted, diagnostic.PhaseValidation, diagnostic.StatusFailed, validationLocation(&definition, err), definition.Name, "", "", "", err)
-		return nil, fmt.Errorf("validating workflow %s: %w", path, err)
+		return nil, fmt.Errorf("validating workflow %s: %w", displaySource, err)
 	}
 	if _, err := NewRenderer(definition.Templates); err != nil {
 		traceFinish(reporter, validationStarted, diagnostic.PhaseValidation, diagnostic.StatusFailed, validationLocation(&definition, err), definition.Name, "", "", "", err)
-		return nil, fmt.Errorf("validating workflow %s: %w", path, err)
+		return nil, fmt.Errorf("validating workflow %s: %w", displaySource, err)
 	}
 	traceFinish(reporter, validationStarted, diagnostic.PhaseValidation, diagnostic.StatusSucceeded, definition.Location, definition.Name, "", "", "", nil)
 	if definition.Vars == nil {

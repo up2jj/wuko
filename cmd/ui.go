@@ -221,14 +221,6 @@ func resolveUIRunTarget(cwd, home, configDir string, args []string, filename str
 	return target, nil
 }
 
-func (target workflowRunTarget) decode(ctx context.Context, loader *workflow.Loader, options workflow.LoadOptions) (*workflow.Definition, func(), error) {
-	if target.remote {
-		return loader.DecodeRemote(ctx, target.locator, options)
-	}
-	definition, err := loader.Decode(target.path, options)
-	return definition, func() {}, err
-}
-
 func formLoadFunc(command *cobra.Command, deps dependencies, loader *workflow.Loader, owner *workflow.Definition, declaration *form.Definition, options workflow.LoadOptions, reporters *runReporters, cwd, configDir string, remote bool) webui.LoadFunc {
 	if declaration.Load == nil {
 		return nil

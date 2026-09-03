@@ -114,8 +114,11 @@ affects display order, not which definition wins.
   manifest, while `wuko marketplace build` discovers package directories and incrementally rebuilds
   deterministic archives. `wuko uninstall NAME` removes a complete installed package directory,
   runs its uninstall hook first, and accepts `--yes` for non-interactive use.
-- `wuko run --file PATH [TARGET]` bypasses discovery. HTTP and `github:` locators also bypass local
-  discovery and use the remote workflow loader, but none bypass `invokable: false`.
+- `wuko run --file PATH [TARGET]` bypasses discovery. The exact path `-` reads one workflow snapshot
+  from standard input, uses the invocation's current directory as the base for relative resources,
+  and makes the complete run non-interactive. Scheduled occurrences reload the same snapshot. Use
+  `--file ./-` for a literal file named `-`. HTTP and `github:` locators also bypass local discovery
+  and use the remote workflow loader, but none bypass `invokable: false`.
 
 ## Implementation
 

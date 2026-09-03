@@ -128,6 +128,16 @@ path:
 wuko run --file ./workflows/release.yaml
 ```
 
+Use `-` to read a generated workflow from standard input:
+
+```sh
+./generate-workflow | wuko run --file -
+```
+
+Stdin workflows resolve `require` entries, template files, and local actions from the current
+working directory. They are always non-interactive, and a scheduled stdin workflow reuses the
+YAML snapshot read at startup. Use `--file ./-` to select a literal file named `-`.
+
 See [Workflow discovery](docs/workflow-discovery.md) for search order, shadowing, and
 non-interactive behavior.
 

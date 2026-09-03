@@ -1,9 +1,11 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"path/filepath"
 	"time"
 
@@ -29,7 +31,7 @@ func newRunCmd(deps dependencies) *cobra.Command {
 	command.Flags().BoolVar(&config.dryRun, "dry-run", false, "validate and print steps without running them")
 	command.Flags().BoolVar(&config.once, "once", false, "run immediately once, ignoring a declared cron schedule")
 	addReporterFlag(command, &config.reporters)
-	command.Flags().StringVar(&config.workflowFile, "file", "", "run a workflow from a file path")
+	command.Flags().StringVar(&config.workflowFile, "file", "", "run a workflow from a file path, or - for stdin")
 	command.ValidArgsFunction = workflowCompletion(deps, true)
 	return command
 }
@@ -83,12 +85,22 @@ func runWorkflow(command *cobra.Command, deps dependencies, args []string, confi
 	baseEnv, environmentLoaders := environmentValues(invocationEnv)
 	var target workflowRunTarget
 	if config.workflowFile != "" {
-		path, err := filepath.Abs(config.workflowFile)
-		if err != nil {
-			return fmt.Errorf("resolving workflow file %s: %w", config.workflowFile, err)
-		}
-		target.path = path
 		target.targetName = config.targetName
+		if config.workflowFile == "-" {
+			data, err := io.ReadAll(command.InOrStdin())
+			if err != nil {
+				return fmt.Errorf("reading workflow from stdin: %w", err)
+			}
+			target.stdinData = data
+			target.stdinBaseDir = cwd
+			target.fromStdin = true
+		} else {
+			path, err := filepath.Abs(config.workflowFile)
+			if err != nil {
+				return fmt.Errorf("resolving workflow file %s: %w", config.workflowFile, err)
+			}
+			target.path = path
+		}
 		if len(args) == 1 {
 			target.targetName = args[0]
 		}
@@ -115,8 +127,14 @@ func runWorkflow(command *cobra.Command, deps dependencies, args []string, confi
 	if loader == nil {
 		loader = workflow.NewLoader(nil)
 	}
+	stdin := command.InOrStdin()
+	isInteractive := interactive(stdin)
+	if target.fromStdin {
+		stdin = nil
+		isInteractive = false
+	}
 	loadOptions := workflow.LoadOptions{Vars: vars, Env: env, BaseEnv: baseEnv, EnvironmentLoaders: environmentLoaders, RunDir: cwd, Diagnostics: reporters.Diagnostic,
-		Stdin: command.InOrStdin(), Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(), Interactive: interactive(command.InOrStdin()),
+		Stdin: stdin, Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(), Interactive: isInteractive,
 		EnsureSecretAuth: true}
 	definition, cleanup, err := target.load(command.Context(), loader, loadOptions)
 	if err != nil {
@@ -138,15 +156,15 @@ func runWorkflow(command *cobra.Command, deps dependencies, args []string, confi
 			localValueDir = filepath.Join(definition.Dir, ".wuko", "values")
 		}
 		if config.dryRun {
-			fmt.Fprintf(command.OutOrStdout(), "Workflow %s (%s)\n", definition.Name, definition.Path)
+			fmt.Fprintf(command.OutOrStdout(), "Workflow %s (%s)\n", definition.Name, workflowDisplaySource(definition))
 		}
 		return engine.Options{
 			InvocationID: reporters.InvocationID(),
-			Vars:         vars, Env: env, BaseEnv: baseEnv, EnvironmentLoaders: environmentLoaders, RunDir: cwd, Stdin: command.InOrStdin(),
+			Vars:         vars, Env: env, BaseEnv: baseEnv, EnvironmentLoaders: environmentLoaders, RunDir: cwd, Stdin: stdin,
 			Dependencies:  dependencies,
 			LocalValueDir: localValueDir, GlobalValueDir: filepath.Join(configDir, "wuko", "values"),
 			Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(),
-			Interactive: interactive(command.InOrStdin()), DryRun: config.dryRun, Progress: reporters.Progress,
+			Interactive: isInteractive, DryRun: config.dryRun, Progress: reporters.Progress,
 			Diagnostics: reporters.Diagnostic,
 		}
 	}
@@ -226,10 +244,25 @@ func releaseDependencyPlan(plans map[*workflow.Definition]*workflow.DependencyPl
 }
 
 type workflowRunTarget struct {
-	path       string
-	locator    string
-	remote     bool
-	targetName string
+	path         string
+	locator      string
+	stdinData    []byte
+	stdinBaseDir string
+	remote       bool
+	fromStdin    bool
+	targetName   string
+}
+
+func (target workflowRunTarget) decode(ctx context.Context, loader *workflow.Loader, options workflow.LoadOptions) (*workflow.Definition, func(), error) {
+	if target.remote {
+		return loader.DecodeRemote(ctx, target.locator, options)
+	}
+	if target.fromStdin {
+		definition, err := loader.DecodeStdin(bytes.NewReader(target.stdinData), target.stdinBaseDir, options)
+		return definition, func() {}, err
+	}
+	definition, err := loader.Decode(target.path, options)
+	return definition, func() {}, err
 }
 
 func (target workflowRunTarget) load(ctx context.Context, loader *workflow.Loader, options workflow.LoadOptions) (*workflow.Definition, func(), error) {
@@ -251,6 +284,15 @@ func (target workflowRunTarget) load(ctx context.Context, loader *workflow.Loade
 		return nil, func() {}, err
 	}
 	return definition, cleanup, nil
+}
+
+// workflowDisplaySource names the workflow the way its diagnostics do. A workflow read from
+// standard input has no file, so its declaration path is a placeholder that must not be printed.
+func workflowDisplaySource(definition *workflow.Definition) string {
+	if definition.Location.Source != "" {
+		return definition.Location.Source
+	}
+	return definition.Path
 }
 
 func requireDirectlyInvokable(definition *workflow.Definition) error {

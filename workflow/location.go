@@ -173,7 +173,7 @@ func remapSource(source, root, logical string) string {
 	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
 		return source
 	}
-	if filepath.ToSlash(relative) == defaultRemoteWorkflowFile {
+	if relative == "-" || filepath.ToSlash(relative) == defaultRemoteWorkflowFile {
 		return logical
 	}
 	return logical + "::" + filepath.ToSlash(relative)

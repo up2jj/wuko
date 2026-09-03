@@ -15,6 +15,17 @@ type stepFragment struct {
 	Steps []Step `yaml:"steps"`
 }
 
+// expandWorkflowRequiredSteps expands the require entries of a decoded workflow. A virtual
+// workflow has no file of its own on disk - one read from standard input, say - so it is resolved
+// from the directory in source, reported against the logical display name, and left off the cycle
+// stack because no fragment can require a file that does not exist.
+func expandWorkflowRequiredSteps(steps []Step, source, display string, virtual bool) ([]Step, error) {
+	if virtual {
+		return expandRequiredStepsInSource(steps, source, display, nil)
+	}
+	return expandRequiredSteps(steps, source, nil)
+}
+
 // expandRequiredSteps replaces require entries with the steps from their local YAML files.
 // Paths are relative to the file containing the require entry, including for nested fragments.
 func expandRequiredSteps(steps []Step, source string, stack []string) ([]Step, error) {
@@ -32,25 +43,27 @@ func expandRequiredSteps(steps []Step, source string, stack []string) ([]Step, e
 		}
 	}
 	stack = append(stack, canonicalSource)
-	return expandRequiredStepsInSource(steps, source, stack)
+	return expandRequiredStepsInSource(steps, source, source, stack)
 }
 
-func expandRequiredStepsInSource(steps []Step, source string, stack []string) ([]Step, error) {
+// expandRequiredStepsInSource resolves relative require paths from source and names source in its
+// errors as display, which differs only for a workflow whose source path is virtual.
+func expandRequiredStepsInSource(steps []Step, source, display string, stack []string) ([]Step, error) {
 	expanded := make([]Step, 0, len(steps))
 	for i, workflowStep := range steps {
 		if workflowStep.IsCancelOn() {
 			if err := cancelOnContainsForbidden(workflowStep.CancelOn.Monitors); err != nil {
-				return nil, fmt.Errorf("cancel_on monitors at step %d in %s: %w", i+1, source, err)
+				return nil, fmt.Errorf("cancel_on monitors at step %d in %s: %w", i+1, display, err)
 			}
 			if err := cancelOnContainsForbidden(workflowStep.CancelOn.Steps); err != nil {
-				return nil, fmt.Errorf("cancel_on body at step %d in %s: %w", i+1, source, err)
+				return nil, fmt.Errorf("cancel_on body at step %d in %s: %w", i+1, display, err)
 			}
 		}
 		if len(workflowStep.childSequenceRefs()) > 0 {
 			err := workflowStep.transformChildSequences(func(role ChildRole, children []Step) ([]Step, error) {
-				expandedChildren, err := expandRequiredStepsInSource(children, source, stack)
+				expandedChildren, err := expandRequiredStepsInSource(children, source, display, stack)
 				if err != nil {
-					return nil, fmt.Errorf("%s at step %d in %s: %w", requiredChildContext(workflowStep, role), i+1, source, err)
+					return nil, fmt.Errorf("%s at step %d in %s: %w", requiredChildContext(workflowStep, role), i+1, display, err)
 				}
 				return expandedChildren, nil
 			})
@@ -65,24 +78,24 @@ func expandRequiredStepsInSource(steps []Step, source string, stack []string) ([
 			continue
 		}
 		if err := validateRequireEntry(workflowStep); err != nil {
-			return nil, fmt.Errorf("step %d in %s: %w", i+1, source, err)
+			return nil, fmt.Errorf("step %d in %s: %w", i+1, display, err)
 		}
 
 		requiredPath := *workflowStep.Require
 		if strings.TrimSpace(requiredPath) == "" {
-			return nil, fmt.Errorf("step %d in %s: require must be a non-empty local file path", i+1, source)
+			return nil, fmt.Errorf("step %d in %s: require must be a non-empty local file path", i+1, display)
 		}
 		if filepath.IsAbs(requiredPath) {
-			return nil, fmt.Errorf("step %d in %s: require path %q must be relative", i+1, source, requiredPath)
+			return nil, fmt.Errorf("step %d in %s: require path %q must be relative", i+1, display, requiredPath)
 		}
 		requiredPath = filepath.Join(filepath.Dir(source), filepath.FromSlash(requiredPath))
 		required, err := loadStepFragment(requiredPath)
 		if err != nil {
-			return nil, fmt.Errorf("step %d in %s requires %q: %w", i+1, source, *workflowStep.Require, err)
+			return nil, fmt.Errorf("step %d in %s requires %q: %w", i+1, display, *workflowStep.Require, err)
 		}
 		required, err = expandRequiredSteps(required, requiredPath, stack)
 		if err != nil {
-			return nil, fmt.Errorf("step %d in %s requires %q: %w", i+1, source, *workflowStep.Require, err)
+			return nil, fmt.Errorf("step %d in %s requires %q: %w", i+1, display, *workflowStep.Require, err)
 		}
 		expanded = append(expanded, required...)
 	}
