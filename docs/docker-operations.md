@@ -85,8 +85,8 @@ It succeeds only when the container is running with health status `healthy`. It 
 when Docker reports `unhealthy`, the container is not running, or the container has no configured
 healthcheck. A missing container or inspection failure also fails the step.
 
-Use the standard top-level `timeout` to bound the wait. Without one, Wuko waits until Docker
-reports a terminal state or the workflow context is canceled. Normal step-level `retry` can start
+Wrap the step in an `attempt` with a `timeout` to bound the wait. Without one, Wuko waits until Docker
+reports a terminal state or the workflow context is canceled. An enclosing `attempt` can start
 a new wait after an unhealthy result.
 
 Successful results contain the same structured snapshot attached to health-related failure

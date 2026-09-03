@@ -220,8 +220,9 @@ been attempted. A catch whose entries are all skipped by their own `if:` recover
 `error` contains `status`, `message`, `step`, `type`, and an ordered `errors` list. Each list entry
 contains the same four fields. Prefer `status`, `step`, and `type` in conditions; `message` is
 informational and may change. Templates and the typed expression environments of steps such as
-`assert`, `set`, `shell`, and Lua expose the same root. A `wait` step's `until` expression retains
-its existing local `error` meaning for the most recent poll.
+`assert`, `set`, `shell`, and Lua expose the same root. An `attempt` control's `when` expression
+replaces this root with its own pass-local `error` for the duration of the expression; its `until`
+expression has no `error` root at all, because `until` only ever inspects a pass that succeeded.
 
 Parent cancellation and an expired parent deadline bypass `catch`; they are not recoverable
 failures. Registered defers owned by successful try or catch children still run on a detached
@@ -317,15 +318,15 @@ steps:
     cancel_on:
       monitors:
         - id: deployment_finished
-          type: wait
-          timeout: 30m
-          with:
+          attempt:
             interval: 5s
-            step:
-              type: http
-              with:
-                url: https://example.com/status
-            until: result.status == 200
+            max_elapsed_time: 30m
+            until: steps.status_check.status == 200
+            steps:
+              - id: status_check
+                type: http
+                with:
+                  url: https://example.com/status
 
       steps:
         - id: prepare
@@ -472,7 +473,7 @@ steps.deployment_watch:
 ```
 
 `winner.monitor` is empty when the body wins and is the required monitor ID otherwise.
-`winner.kind` is `body` or the winning monitor's executable kind, such as `wait`, `foreach`, or
+`winner.kind` is `body` or the winning monitor's executable kind, such as `attempt`, `foreach`, or
 `concurrent`. `triggered` is equivalent to `winner.monitor != ""`. The top-level `ok`, `status`, and
 `error` describe the winner, not every participant. Body declarations are under `steps`, body
 variables are under `vars`, and monitor records are keyed by ID under `monitors`. Each step record
@@ -511,8 +512,7 @@ Add `collect` when a later step needs a smaller typed summary:
   cancel_on:
     monitors:
       - id: deployment_finished
-        type: wait
-        with: {duration: 5s}
+        attempt: {duration: 5s}
     steps:
       - id: prepare
         type: lua
@@ -534,6 +534,43 @@ Collection runs once after every participant stops. Its Expr environment exposes
 `steps`, `vars`, `monitors`, and `cancel_on` outcome roots plus ordinary workflow roots. The typed
 value is stored at `steps.deployment_watch.result`. Without `collect`, `result` is always null; the
 full body and monitor records remain available either way.
+
+## Attempt
+
+`attempt` bounds, repeats, and polls one sequential body. It is the only spelling for an execution
+policy: `timeout` bounds one pass, the retry fields repeat a failing pass, and `until` repeats a
+succeeding-but-not-ready one. See [Attempts](execution.md#attempts) for the full reference.
+
+```yaml
+- id: publish
+  attempt:
+    timeout: 2m
+    max_attempts: 4
+    when: 'error.exit_code == 75'
+    steps:
+      - {id: package, type: shell, with: {command: ./package}}
+      - {id: upload,  type: shell, with: {command: ./upload}}
+```
+
+Every pass runs on a private copy of the state that existed before the control, and only the winning
+pass publishes — under the control's own id, never as top-level `steps` or `vars` entries. Read the
+body at `steps.publish.steps.upload` and its variable writes at `steps.publish.vars`. An `id` is
+required. A body may not contain `defer` or `return`, and its step ids may not shadow enclosing ids.
+
+### Attempt vs loop
+
+Both repeat a `steps` body until a condition holds, and both read that body through `steps.<id>` in
+`until`. They differ in what a repeat means:
+
+| | `loop` | `attempt` |
+|---|---|---|
+| Iterations | each one is progress | each one is an interchangeable try |
+| State | every iteration commits | only the winning pass commits |
+| A failing body | fails the loop | consumes an attempt and repeats |
+| `timeout` | bounds the whole loop | bounds one pass |
+
+Reach for `loop` when the body advances something, and for `attempt` when the repeats are attempts
+at the same work.
 
 ## Loop
 

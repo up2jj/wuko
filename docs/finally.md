@@ -189,7 +189,8 @@ resource.
 
 ## Timeouts, controls, and inspection
 
-Every cleanup step retains its ordinary `timeout` and `retry` behavior. Concurrent, batch, foreach,
+A cleanup step may be wrapped in an `attempt` control, which also gives cleanup a bound it did not
+have before. Concurrent, batch, foreach,
 and matrix cleanup entries retain their existing group timeout, `fail_fast`, concurrency, interaction,
 nesting, and iteration limits. A failed concurrent or fan-out cleanup entry does not commit its
 aggregate result, but Wuko continues to the next top-level cleanup entry.

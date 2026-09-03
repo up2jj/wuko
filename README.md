@@ -13,7 +13,7 @@ with typed data and files, call APIs, run scripts or containers, and start codin
   and render explicit workflow results without changing standard runs.
 - **Typed workflow state** — use variables, step outputs, JSON/TOML imports, JSONPath, semantic
   versions, templates, and expressions without converting everything to strings.
-- **Useful execution controls** — conditions, early successful returns, retries, timeouts, polling,
+- **Useful execution controls** — conditions, early successful returns, bounded and repeating attempts, polling,
   concurrency, batch, foreach and matrix expansion, scoped working-directory blocks, scheduled runs, dry
   runs, execution trees, and guaranteed cleanup.
 - **Portable operations** — use built-in HTTP, filesystem, glob, native watches, cache, change detection,
@@ -329,14 +329,16 @@ env:
 
 steps:
   - id: build
-    type: shell
-    timeout: 5m
-    retry:
+    attempt:
+      timeout: 5m
       max_attempts: 3
       when: 'error.exit_code == 75 || error.stderr contains "rate limit"'
-    with:
-      command: ./build
-      args: ["{{ .vars.target }}"]
+      steps:
+        - id: build_command
+          type: shell
+          with:
+            command: ./build
+            args: ["{{ .vars.target }}"]
     defer:
       - id: remove_build
         type: shell
@@ -344,10 +346,10 @@ steps:
 
   - id: publish
     type: shell
-    if: steps.build.exit_code == 0
+    if: steps.build.steps.build_command.exit_code == 0
     with:
       command: ./publish
-      args: ["{{ .steps.build.stdout }}"]
+      args: ["{{ .steps.build.steps.build_command.stdout }}"]
 
 finally:
   - id: cleanup
@@ -436,7 +438,6 @@ Each linked guide contains multiple examples for every step.
 | `process_call` | Send a correlated JSONL request to one process or a process pool | [Automation steps](docs/steps-automation.md#calling-a-process) |
 | `agent` | Start an external coding agent with a prompt | [Automation steps](docs/steps-automation.md#agent) |
 | `lua` | Run typed in-process automation | [Automation steps](docs/steps-automation.md#lua) |
-| `wait` | Delay or poll another step | [Automation steps](docs/steps-automation.md#wait) |
 
 ## Workflow controls
 
@@ -454,8 +455,7 @@ Use controls to run independent work or repeat a block over runtime data.
 | `loop` | Repeat a sequential block until an expression is true | [Workflow controls](docs/workflow-control.md#loop) |
 | `try` / `catch` | Recover from a failed or timed-out sequential block | [Workflow controls](docs/workflow-control.md#try-and-catch) |
 | `cancel_on` | Race a sequential body against one or more named monitors and record the winner | [Workflow controls](docs/workflow-control.md#cancel-on) |
-| `timeout` | Bound how long a step or control may run | [Execution and composition](docs/execution.md#timeouts-and-retries) |
-| `retry` | Retry failed operations with backoff | [Execution and composition](docs/execution.md#timeouts-and-retries) |
+| `attempt` | Bound, repeat, or poll a body of steps | [Execution and composition](docs/execution.md#attempts) |
 | `return` | Finish successfully early and publish explicit outputs | [Early successful return](docs/return.md) |
 | `defer` | Attach cleanup to a successful step | [Finally cleanup](docs/finally.md) |
 | `finally` | Run workflow-level cleanup after the main phase | [Finally cleanup](docs/finally.md) |

@@ -2,8 +2,8 @@
 
 [Back to the available steps](../README.md#available-steps)
 
-Automation steps run local programs, coding agents, in-process Lua, or cancellation-aware waits.
-Use `timeout` and `retry` on ordinary steps when an operation can hang or fail transiently.
+Automation steps run local programs, coding agents, or in-process Lua.
+Wrap a step in an `attempt` control when an operation can hang or fail transiently.
 
 ## `process`
 
@@ -1016,49 +1016,3 @@ key-value stores, HTTP, filesystem operations, and direct command execution. It 
 snapshot tables for `wuko.inputs`, `wuko.steps`, `wuko.dependencies`, `wuko.workflow`, and
 `wuko.run`. Changing these Lua tables does not change workflow state. Outputs may be nil, booleans,
 strings, numbers, arrays, or string-keyed objects; cyclic and mixed-key tables are rejected.
-
-## `wait`
-
-Pause for a duration or poll one embedded step until an Expr condition becomes true.
-
-Use a fixed cancellation-aware delay:
-
-```yaml
-- id: settle
-  type: wait
-  with: {duration: 30s}
-```
-
-Poll an API immediately and then every five seconds:
-
-```yaml
-- id: await_release
-  type: wait
-  timeout: 5m
-  with:
-    interval: 5s
-    step:
-      type: http
-      with:
-        url: https://api.example.com/releases/42
-        response: json
-    until: 'error == nil && result.value.status == "ready"'
-```
-
-Poll a local command with a different interval:
-
-```yaml
-- id: await_socket
-  type: wait
-  timeout: 1m
-  with:
-    interval: 1s
-    step:
-      type: shell
-      with: {command: test, args: [-S, /tmp/app.sock]}
-    until: error == nil
-```
-
-A polling wait requires a top-level timeout. Its expression can use the normal workflow roots plus
-`result`, nullable `error`, and the one-based `poll` number. The embedded step accepts only `type`
-and `with`; its final successful outputs are published under the wait step's ID.

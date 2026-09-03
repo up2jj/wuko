@@ -1,6 +1,6 @@
 ---
 name: wuko-workflow-author
-description: Create or update Wuko version-1 YAML workflows, including cron schedules, explicit time capture and transformation, Conventional Commit messages, templates and scaffold trees, conditions, early returns, finally cleanup, cancel-on monitors, foreach and matrix controls, required files, composite actions, waits, polling, retries, concurrency, interactive prompts and path selection, typed and imported variables, structured decoding, JSONPath selection, semantic versions, HTTP, files, managed temporary resources, glob discovery, native filesystem watches, persistent change detectors, persistent key-value stores, content-addressed directory caches, Lua, shell, Docker, and agent steps. Use when designing workflow files, extending existing workflows, or reviewing workflow structure before execution.
+description: Create or update Wuko version-1 YAML workflows, including cron schedules, explicit time capture and transformation, Conventional Commit messages, templates and scaffold trees, conditions, early returns, finally cleanup, cancel-on monitors, foreach and matrix controls, required files, composite actions, bounded and repeating attempts, polling, concurrency, interactive prompts and path selection, typed and imported variables, structured decoding, JSONPath selection, semantic versions, HTTP, files, managed temporary resources, glob discovery, native filesystem watches, persistent change detectors, persistent key-value stores, content-addressed directory caches, Lua, shell, Docker, and agent steps. Use when designing workflow files, extending existing workflows, or reviewing workflow structure before execution.
 ---
 
 # Wuko Workflow Author
@@ -87,8 +87,9 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
   `version` output only after the guard succeeds.
 - Use `http` for structured API calls with typed JSON responses, status validation, retries, and
   timeouts. Keep authorization values in environment-backed headers.
-- Use `wait` with `duration` for a fixed delay, or embed a `type`/`with` step and an Expr `until`
-  predicate for polling. Give every poll a top-level timeout and prefer read-only probes.
+- Use `attempt` with `duration` for a fixed delay, or give it a `steps` body and an Expr `until`
+  predicate for polling. A poll requires `max_elapsed_time`; prefer read-only probes. Readiness
+  expressed by a command succeeding needs no `until` -- that is `max_attempts` with a fixed cadence.
 - Use `file` for auditable reads, atomic writes and directory swaps, copying, moving, removal,
   directory creation, listing and filtered discovery, metadata and disk-usage inspection, links,
   truncation, bounded tails, permissions, and timestamps. Consult
@@ -112,7 +113,7 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
   patterns. Keep patterns relative to its `root` and consume the sorted metadata from `files`.
 - Use `watch` to block until the first selected create, modify, rename, or remove notification below
   an existing local root. Prefer it over polling a shell probe, keep recursive roots narrow, give
-  bounded waits a top-level timeout, and consume the relative `path` plus `operations` list.
+  bounded waits an enclosing `attempt` timeout, and consume the relative `path` plus `operations` list.
 - Use the named `observe:` control for a supervised background loop. Select a `filesystem`,
   `http`, or `shell` source under `source.type`; the `shell` source polls a command every `every`
   and triggers on a changed stdout or exit code, exposing `.observe.shell.value` and `exit_code`.
@@ -121,7 +122,7 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
   active, and `on_error: continue` when a transient source failure should not end the run. Body runs read `.observe` and start from the declaration-time state snapshot. The workflow
   joins observers before `finally` on Ctrl-C or `return`.
 - Use `log_wait` to follow an existing or newly created regular log file until a regex matches.
-  Scan existing content first, set a top-level timeout and an appropriate `max_bytes`, and consume
+  Scan existing content first, wrap it in an `attempt` with a timeout, set an appropriate `max_bytes`, and consume
   its `match` plus named `captures` outputs.
 - Use `key_value` to persist JSON-compatible values between runs with `get`, `set`, `update`,
   `delete`, `list`, and `clear` against a named `local` or `global` store. Prefer `expr` over
@@ -214,7 +215,10 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
   removal has been attempted.
 - Supply invocation-time JSON or TOML variables with repeatable `--var-file`; later files replace
   earlier top-level values and explicit `--var` entries take final initial-state precedence.
-- Use `timeout` and `retry` deliberately. Retries have at-least-once effects; do not assume commands, requests, writes, containers, or agents can be rolled back.
+- Use `attempt` deliberately: `timeout` bounds one pass, `max_attempts` repeats a failing pass, and
+  `until` repeats a succeeding-but-not-ready one. Repeats have at-least-once effects; do not assume
+  commands, requests, writes, containers, or agents can be rolled back. The body is isolated, so read
+  its results at `steps.<attempt-id>.steps.<body-id>` and its variables at `steps.<attempt-id>.vars`.
 - Use top-level `cron` only when `wuko run` should remain alive and execute repeatedly. Write five
   conventional cron fields or six fields with seconds first. Set an IANA `timezone` whenever
   schedule or calendar operations must not use the machine-local default. Scheduled attempts are serial, skip missed occurrences,
@@ -251,7 +255,7 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
   the prior environment on exit. A child's `defer` retains its scoped environment, while workflow
   `finally` does not. `uses` sources resolve before runtime scopes, but the resolved action's
   execution receives the overlay. Tree and dry-run output show names only, never values.
-- A multi-step conditional uses `- if: EXPR` with a sibling `steps` list. Its condition is evaluated once, its children retain their surrounding IDs and sequential state flow, and the wrapper has no ID, outputs, timeout, or retry policy. It may contain `concurrent`, `foreach`, or `matrix` subject to their normal nesting rules, but cannot be directly nested or placed directly inside `concurrent`.
+- A multi-step conditional uses `- if: EXPR` with a sibling `steps` list. Its condition is evaluated once, its children retain their surrounding IDs and sequential state flow, and the wrapper has no ID, outputs, or attempt policy. It may contain `concurrent`, `foreach`, or `matrix` subject to their normal nesting rules, but cannot be directly nested or placed directly inside `concurrent`.
 - A successful `changed` detector advances its local snapshot immediately, even if later guarded
   work fails. It is unavailable to direct remote workflows and does not react to file timestamps
   or permissions.

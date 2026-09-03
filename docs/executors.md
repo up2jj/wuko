@@ -34,7 +34,7 @@ An executor block is an anonymous sequential scope:
 
 The block has no `id` and publishes no block result. Its child IDs and outputs remain directly in
 the surrounding `.steps` namespace. An executor block cannot also declare `type`, `uses`,
-`working_directory`, `if`, `timeout`, `retry`, `batch`, `foreach`, `matrix`, `concurrent`, or `with` at the
+`working_directory`, `if`, `attempt`, `batch`, `foreach`, `matrix`, `concurrent`, or `with` at the
 block level. Put those controls inside the block where supported.
 
 `executor.type` is static. String values beneath `executor.with` may use templates and are rendered

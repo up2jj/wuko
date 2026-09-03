@@ -950,13 +950,16 @@ Wait up to five minutes for Go source activity:
 
 ```yaml
 - id: source_changed
-  type: watch
-  timeout: 5m
-  with:
-    root: .
-    patterns: ["src/**/*.go"]
-    ignore: ["node_modules", "**/testdata"]
-    events: [create, modify, rename, remove]
+  attempt:
+    timeout: 5m
+    steps:
+      - id: watcher
+        type: watch
+        with:
+          root: .
+          patterns: ["src/**/*.go"]
+          ignore: ["node_modules", "**/testdata"]
+          events: [create, modify, rename, remove]
 ```
 
 `root` defaults to `.` and must already be a directory. `patterns` is required and forms a union.
@@ -981,7 +984,7 @@ A rename reports the old path. When both locations are watched, the destination 
 as a separate create notification; because version 1 returns the first match, that later event is
 not included. Native notifications require filesystem support and are unavailable or unreliable on
 NFS, SMB, FUSE, `/proc`, and `/sys`; there is no polling fallback. The step may wait indefinitely,
-so use a top-level `timeout` unless an unbounded workflow is intentional. `watch` observes the local
+so wrap it in an `attempt` with a `timeout` unless an unbounded workflow is intentional. `watch` observes the local
 host filesystem and is rejected inside executor blocks.
 
 ## `log_wait`
@@ -993,12 +996,15 @@ Wait for a service to report readiness:
 
 ```yaml
 - id: await_service
-  type: log_wait
-  timeout: 2m
-  with:
-    path: logs/service.log
-    pattern: 'ready on port (?P<port>[0-9]+)'
-    max_bytes: 2MiB
+  attempt:
+    timeout: 2m
+    steps:
+      - id: follow_log
+        type: log_wait
+        with:
+          path: logs/service.log
+          pattern: 'ready on port (?P<port>[0-9]+)'
+          max_bytes: 2MiB
 ```
 
 `path` is resolved from the workflow run directory. The containing directory must already exist,
@@ -1008,7 +1014,8 @@ file is an error. `max_bytes` defaults to `1MiB` and bounds unmatched content re
 
 Successful output contains the resolved `path`, the full matched `match`, and a `captures` object
 containing named regular-expression captures. Unnamed expressions are supported and produce an
-empty captures object. Use a top-level `timeout` because the step waits indefinitely until a match,
+empty captures object. Wrap it in an `attempt` with a `timeout` because the step waits
+indefinitely until a match,
 timeout, or cancellation. `log_wait` observes the host filesystem and is rejected inside executor
 blocks.
 
@@ -1172,17 +1179,19 @@ Fetch JSON with retries and bearer authentication:
 
 ```yaml
 - id: release
-  type: http
-  timeout: 30s
-  retry:
+  attempt:
+    timeout: 30s
     max_attempts: 3
     statuses: [408, 429, "500-599"]
-  with:
-    url: https://api.example.com/releases/latest
-    query: {channel: stable}
-    auth: {bearer_token: "{{ .env.API_TOKEN }}"}
-    response: json
-    success_statuses: [200]
+    steps:
+      - id: request
+        type: http
+        with:
+          url: https://api.example.com/releases/latest
+          query: {channel: stable}
+          auth: {bearer_token: "{{ .env.API_TOKEN }}"}
+          response: json
+          success_statuses: [200]
 ```
 
 Post JSON with Basic authentication and persistent cookies:
@@ -1279,8 +1288,8 @@ Buffered response bodies are limited to 10 MiB. Dedicated bearer/Basic auth is m
 with a raw `Authorization` header. The step also supports explicit proxies, cookie values/jars,
 and mutual-TLS certificate files.
 
-HTTP retries use the ordinary step-level `retry` timing and attempt limits. Unless overridden with
-`retry.methods`, only idempotent methods (`GET`, `HEAD`, `OPTIONS`, `PUT`, `DELETE`, and `TRACE`)
+HTTP retries use the enclosing `attempt` control's timing and attempt limits. Unless overridden with
+`attempt.methods`, only idempotent methods (`GET`, `HEAD`, `OPTIONS`, `PUT`, `DELETE`, and `TRACE`)
 are retried. The default retryable statuses are `408`, `425`, `429`, and `500-599`; individual
 codes and inclusive quoted ranges can be supplied with `retry.statuses`. Include `POST` or `PATCH`
 explicitly when the endpoint makes those requests safe to repeat.
@@ -1293,14 +1302,16 @@ entirely, retry those transport failures explicitly:
 
 ```yaml
 - id: publish
-  type: http
-  retry:
+  attempt:
     max_attempts: 4
     when: 'error.outputs.status == 0 || error.outputs.status >= 500'
-  with: {method: POST, url: "{{ .vars.endpoint }}"}
+    steps:
+      - id: request
+        type: http
+        with: {method: POST, url: "{{ .vars.endpoint }}"}
 ```
 
-`when` cannot be combined with explicit `retry.methods` or `retry.statuses`; encode the complete
+`when` cannot be combined with explicit `attempt.methods` or `attempt.statuses`; encode the complete
 eligibility decision in the expression instead. HTTP `Retry-After` handling still applies after the
 expression permits a retry.
 

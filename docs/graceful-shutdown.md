@@ -127,7 +127,7 @@ runner that ignores cancellation can wait indefinitely until process shutdown is
 The earliest applicable deadline wins:
 
 - a step timeout covers one attempt;
-- retry `max_elapsed_time` covers attempts and retry delays;
+- `attempt` `timeout` covers one pass of its body, and `max_elapsed_time` covers every pass, backoff delay, and poll interval;
 - a concurrent timeout covers queueing and all children;
 - a batch, foreach, or matrix timeout starts after expression evaluation and expansion, then covers
   queueing, iterations, retries, polling, and nested concurrent groups;
@@ -147,7 +147,7 @@ Terminal progress identifies the partial-work boundary, for example:
 ```
 
 Design externally visible operations to be idempotent when they can run concurrently, be retried,
-or be interrupted after taking effect. Use a stable retry `operation_id` as an idempotency key when
+or be interrupted after taking effect. Use a stable `attempt` `operation_id` as an idempotency key when
 the receiving system supports deduplication.
 
 ## Runner checklist

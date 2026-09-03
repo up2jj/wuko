@@ -655,11 +655,12 @@ some children consume others:
         needs: [deps]
         with: {command: golangci-lint, args: [run]}
       - id: test
-        type: shell
         needs: [deps]
-        timeout: 3m
-        retry: {max_attempts: 3}
-        with: {command: go, args: [test, ./...]}
+        attempt:
+          timeout: 3m
+          max_attempts: 3
+          steps:
+            - {id: go_test, type: shell, with: {command: go, args: [test, ./...]}}
       - id: build
         type: shell
         needs: [lint, test]
@@ -683,15 +684,15 @@ supported. A group without `needs` retains the original independent fan-out beha
 
 For repeated blocks, use [batch, foreach, and matrix controls](workflow-control.md).
 
-## Timeouts and retries
+## Attempts
 
-`timeout` limits each attempt. `retry` repeats failures with exponential backoff:
+`attempt` is the single control for bounding, repeating, and polling work. It governs a `steps:`
+body, so it works over one step or a whole group:
 
 ```yaml
 - id: publish
-  type: shell
-  timeout: 2m
-  retry:
+  attempt:
+    timeout: 2m
     max_attempts: 4
     initial_delay: 500ms
     backoff_multiplier: 2
@@ -700,32 +701,181 @@ For repeated blocks, use [batch, foreach, and matrix controls](workflow-control.
     max_elapsed_time: 6m
     operation_id: "{{ .vars.release_id }}:publish"
     when: 'error.exit_code == 75 || error.stderr contains "rate limit"'
-  with: {command: ./publish}
+    steps:
+      - {id: package, type: shell, with: {command: ./package}}
+      - {id: upload,  type: shell, with: {command: ./upload}}
 ```
 
-Defaults are 3 total attempts, a 1-second initial delay, multiplier 2, 30-second maximum delay, and
-20% jitter. `max_elapsed_time` covers attempts and retry delays. Workflow cancellation stops
-immediately. Retried operations have at-least-once semantics: Wuko commits state only after success,
-but cannot roll back external effects.
+### One loop, two reasons to repeat
 
-By default, non-HTTP failures are eligible for retry. Add `when` to make eligibility conditional.
-It is a boolean Expr expression evaluated after each failed attempt except the last, using the normal
-runtime roots plus a retry-local `error` value describing that attempt. Inside a `catch` block the
-retry-local value replaces the enclosing handler's `error` for the duration of the expression, so
-`when` always inspects the attempt that just failed. `false` returns the original failure immediately;
-an expression evaluation error is terminal. Failed-attempt variables are not committed.
+| Pass outcome | Consumes an attempt | Waits |
+|---|---|---|
+| fails | yes | the backoff delay |
+| succeeds, `until` false | no | `interval` |
+| succeeds, `until` true or unset | — | the control succeeds |
 
-`error` contains `status`, `message`, `step`, `type`, `errors`, and `outputs`. The complete failed
-step output map is available under `error.outputs`. Output names that do not conflict with those
-reserved fields are also available directly, so shell retries can use `error.exit_code` and
-`error.stderr`. A conflicting output remains available only in `error.outputs`; for example, an
-HTTP response code is `error.outputs.status` while `error.status` remains the execution status.
+`timeout` bounds **one pass** of the body. `max_elapsed_time` bounds the whole control: every pass,
+backoff delay, and poll interval together.
 
-Process steps and Lua environment access receive `WUKO_STEP_ATTEMPT`,
-`WUKO_STEP_MAX_ATTEMPTS`, and `WUKO_STEP_OPERATION_ID`. Use the operation ID as a receiving
-service's idempotency key when supported.
+The two predicates never overlap. **`when` asks "is this failure worth another try?"; `until` asks
+"is this success good enough?"** `until` is only ever evaluated after a pass has already succeeded,
+so it has no `error` root.
 
-For fixed delays and polling, see the [`wait` step](steps-automation.md#wait).
+Defaults are 1 attempt, a 1-second initial delay, multiplier 2, 30-second maximum delay, and 20%
+jitter. `max_attempts` defaults to 1 because `attempt` is also the spelling for a bare timeout:
+declaring the control must not silently start repeating. Workflow cancellation stops immediately.
+Repeated operations have at-least-once semantics: Wuko commits state only after success, but cannot
+roll back external effects.
+
+### The body is isolated
+
+Every pass runs on a private copy of the state that existed before the control. A pass that fails,
+or that succeeds while `until` is false, is discarded whole — including any body step that had
+already succeeded within it. Only the winning pass publishes, atomically, and only through the
+control's own output:
+
+```yaml
+steps.publish:
+  attempts: 2        # which failure-budget pass won; 1 = succeeded first try
+  polls: 0           # until evaluations; 0 when until is unset
+  steps:
+    package: {...}   # the winning pass's body outputs, by body step id
+    upload:  {...}
+  vars:
+    artifact: dist/app.tar   # variables the winning pass wrote
+```
+
+Body outputs and variable writes therefore never become top-level `steps.<id>` or `vars.<name>`
+entries. Read them as `steps.publish.steps.upload.stdout` and `steps.publish.vars.artifact`. An
+`id` is required, since the output is the only way to reach the body. Name the control for the goal
+and the body step for the action.
+
+If the control fails, it publishes nothing at all — no counters, no partial body outputs, no
+variable writes.
+
+Body step ids are still checked against the enclosing scope, exactly as `once`, `try`/`catch`, and
+`cancel_on` bodies are, so a body step may not shadow an enclosing id.
+
+### Polling
+
+Set `until` to repeat a *successful* body until it reports readiness:
+
+```yaml
+- id: await_release
+  attempt:
+    interval: 5s
+    max_elapsed_time: 5m
+    timeout: 10s
+    until: steps.release.value.status == "ready"
+    steps:
+      - id: release
+        type: http
+        with: {url: https://api.example.com/releases/42, response: json}
+```
+
+`until` is a boolean Expr expression over the normal runtime roots — with `steps` scoped to the body
+that just ran — plus the one-based `poll` counter. Because `timeout` bounds one pass rather than the
+loop, `until` requires `max_elapsed_time`.
+
+Readiness that is expressed by a command *succeeding* needs no `until` at all — that is a bounded
+retry:
+
+```yaml
+- id: await_socket
+  attempt:
+    max_attempts: 60
+    initial_delay: 1s
+    backoff_multiplier: 1      # 1 = fixed cadence
+    jitter: 0
+    max_elapsed_time: 1m
+    steps:
+      - {id: probe, type: shell, with: {command: test, args: [-S, /tmp/app.sock]}}
+```
+
+For a reachable-but-not-ready HTTP probe, make not-ready a success with `success_statuses` so it
+costs no attempt:
+
+```yaml
+until: steps.probe.status == 200
+steps:
+  - {id: probe, type: http, with: {url: ..., success_statuses: [200, 503]}}
+```
+
+A fixed delay is the body-less form:
+
+```yaml
+- id: settle
+  attempt: {duration: 30s}
+```
+
+### Retry eligibility
+
+By default every failure is eligible. A failure carrying HTTP request metadata is filtered by
+`methods` and `statuses`, which default to `GET HEAD OPTIONS PUT DELETE TRACE` and
+`408, 425, 429, 500-599` — so a failing `POST` is not retried unless you say so. Eligibility is
+decided from the error, not from a declared step type, because a body is a sequence.
+
+Add `when` to decide conditionally. It is evaluated after each failed pass except the last, using
+the normal runtime roots plus a pass-local `error`. Inside a `catch` block it replaces the enclosing
+handler's `error` for the duration of the expression. `false` returns the original failure
+immediately; an evaluation error is terminal. `when` cannot be combined with `methods` or
+`statuses`.
+
+`error` contains `status`, `message`, `step`, `type`, `errors`, and `outputs`, plus `failed_step`,
+`steps`, `vars`, `attempts`, and `polls` describing the pass. `step` is the attempt's id and
+`failed_step` names the body step that failed. The failing step's outputs are available under
+`error.outputs` and, where the name does not collide with a reserved field, directly — so shell
+bodies can use `error.exit_code` and `error.stderr`. A conflicting output remains reachable only in
+`error.outputs`; an HTTP response code is `error.outputs.status` while `error.status` is the
+execution status.
+
+### Dynamic options
+
+Every scalar option accepts either a literal or an Expr expression, resolved once when execution
+reaches the control — the same literal-or-expression form `loop.delay` and `batch.size` use:
+
+```yaml
+- id: deploy
+  attempt:
+    timeout: vars.deploy_timeout
+    max_attempts: vars.retries
+    steps:
+      - {id: apply, type: shell, with: {command: ./deploy}}
+```
+
+Numeric rules for a literal are checked by `wuko validate`; for an expression they are checked when
+the control runs.
+
+### Attempt metadata
+
+Process steps and Lua environment access receive `WUKO_STEP_ATTEMPT`, `WUKO_STEP_MAX_ATTEMPTS`, and
+`WUKO_STEP_OPERATION_ID`. The pass is the unit being repeated, so every step in one body sees the
+same values, and the operation ID is stable across passes. Use it as a receiving service's
+idempotency key when supported.
+
+### What `timeout` bounds
+
+| Where | Bounds |
+|---|---|
+| `attempt.timeout` | one pass of the body |
+| `attempt.max_elapsed_time` | all passes, backoff delays, and poll intervals |
+| `concurrent.timeout` | queueing and all children |
+| `batch`/`foreach`/`matrix.timeout` | post-expansion: queueing, iterations, nested work |
+| `loop.timeout` | the whole loop |
+
+### Attempt and loop
+
+`loop` repeats a body until a condition holds and commits every iteration; `attempt` repeats a body
+and commits only the winning pass. Reach for `loop` when each iteration is real progress, and for
+`attempt` when the repeats are interchangeable tries at the same work.
+
+### Known limits
+
+- `max_attempts` is a cumulative budget, not a consecutive one. Over a long poll, failures spread
+  anywhere across the run add up and can end the wait.
+- A `temp` or `docker` step in a repeated body registers its cleanup with the enclosing scope, so
+  resources from discarded passes are released when that scope ends rather than when the pass is
+  discarded.
 
 ## Scheduled runs
 
