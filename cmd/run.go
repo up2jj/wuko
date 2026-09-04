@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/engine"
+	reporterpkg "github.com/up2jj/wuko/reporter"
 	"github.com/up2jj/wuko/workflow"
 )
 
@@ -31,6 +32,7 @@ func newRunCmd(deps dependencies) *cobra.Command {
 	command.Flags().BoolVar(&config.dryRun, "dry-run", false, "validate and print steps without running them")
 	command.Flags().BoolVar(&config.once, "once", false, "run immediately once, ignoring a declared cron schedule")
 	addReporterFlag(command, &config.reporters)
+	command.Flags().StringVar(&config.reportJSON, "report-json", "", "write the final execution report as JSON")
 	command.Flags().StringVar(&config.workflowFile, "file", "", "run a workflow from a file path, or - for stdin")
 	command.ValidArgsFunction = workflowCompletion(deps, true)
 	return command
@@ -41,6 +43,7 @@ type runWorkflowConfig struct {
 	variableFiles []string
 	environment   []string
 	reporters     []string
+	reportJSON    string
 	dryRun        bool
 	once          bool
 	workflowFile  string
@@ -52,7 +55,19 @@ func runWorkflow(command *cobra.Command, deps dependencies, args []string, confi
 	if err != nil {
 		return err
 	}
-	reporters, err := newRunReporters(command, deps, cwd, config.reporters)
+	var additionalReporters []reporterpkg.Reporter
+	if config.reportJSON != "" {
+		path := config.reportJSON
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(cwd, path)
+		}
+		fileReporter, err := reporterpkg.NewJSONFile(path)
+		if err != nil {
+			return err
+		}
+		additionalReporters = append(additionalReporters, fileReporter)
+	}
+	reporters, err := newRunReporters(command, deps, cwd, config.reporters, additionalReporters...)
 	if err != nil {
 		return err
 	}

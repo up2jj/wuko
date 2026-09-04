@@ -2,6 +2,7 @@
 package githubactions
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -20,7 +21,23 @@ import (
 	reporterpkg "github.com/up2jj/wuko/reporter"
 )
 
-const aggregateOutput = "wuko_outputs"
+const (
+	aggregateOutput   = "wuko_outputs"
+	statusOutput      = "wuko_status"
+	executionIDOutput = "wuko_execution_id"
+	durationMSOutput  = "wuko_duration_ms"
+	failedStepOutput  = "wuko_failed_step"
+	reportOutput      = "wuko_report"
+)
+
+var reservedOutputs = []string{
+	aggregateOutput,
+	statusOutput,
+	executionIDOutput,
+	durationMSOutput,
+	failedStepOutput,
+	reportOutput,
+}
 
 // Options identifies the GitHub-owned files and streams used by a workflow step.
 type Options struct {
@@ -115,16 +132,16 @@ func (reporter *Reporter) Finish(_ context.Context, outcome reporterpkg.Outcome)
 		reporter.annotated = true
 	}
 
-	var finishErrors []error
-	if outcome.Outputs != nil && outcome.Err == nil && !outcome.DryRun {
-		if err := reporter.writeOutputs(outcome.Outputs); err != nil {
-			finishErrors = append(finishErrors, err)
-		}
-	}
 	stats := outcome.Stats
 	redacted := reporter.finishedMatches(outcome)
 	if redacted {
 		stats = reporter.finished.Stats
+	}
+	reportedOutcome := outcome
+	reportedOutcome.Stats = stats
+	var finishErrors []error
+	if err := reporter.writeOutputs(reportedOutcome); err != nil {
+		finishErrors = append(finishErrors, err)
 	}
 	if err := reporter.writeSummary(outcome, stats, redacted); err != nil {
 		finishErrors = append(finishErrors, err)
@@ -198,39 +215,83 @@ func (reporter *Reporter) writeCommand(command string) {
 	}
 }
 
-func (reporter *Reporter) writeOutputs(outputs map[string]any) error {
-	if _, exists := outputs[aggregateOutput]; exists {
-		return fmt.Errorf("workflow output %q is reserved by the github reporter", aggregateOutput)
+func (reporter *Reporter) writeOutputs(outcome reporterpkg.Outcome) error {
+	report := reporterpkg.NewExecutionReport(outcome)
+	var content bytes.Buffer
+	metadata := []struct {
+		name  string
+		value string
+	}{
+		{name: statusOutput, value: string(report.Status)},
+		{name: executionIDOutput, value: string(report.InvocationID)},
+		{name: durationMSOutput, value: fmt.Sprint(report.DurationMS)},
+		{name: failedStepOutput, value: report.FailedStep},
 	}
-	file, err := os.OpenFile(reporter.outputPath, os.O_WRONLY|os.O_APPEND, 0)
-	if err != nil {
-		return fmt.Errorf("opening GITHUB_OUTPUT file %s: %w", reporter.outputPath, err)
+	for _, output := range metadata {
+		_ = writeEnvironmentValue(&content, output.name, output.value)
 	}
 
-	names := mapsKeys(outputs)
-	slices.Sort(names)
-	for _, name := range names {
-		value, err := outputValue(outputs[name])
-		if err != nil {
-			_ = file.Close()
-			return fmt.Errorf("encoding GitHub output %s: %w", name, err)
-		}
-		if err := writeEnvironmentValue(file, name, value); err != nil {
-			_ = file.Close()
-			return fmt.Errorf("writing GitHub output %s: %w", name, err)
-		}
-	}
-	aggregate, err := json.Marshal(outputs)
+	var outputErrors []error
+	reportData, err := json.Marshal(report)
 	if err != nil {
-		_ = file.Close()
-		return fmt.Errorf("encoding aggregate GitHub outputs: %w", err)
+		outputErrors = append(outputErrors, fmt.Errorf("encoding GitHub execution report: %w", err))
+	} else {
+		_ = writeEnvironmentValue(&content, reportOutput, string(reportData))
 	}
-	if err := writeEnvironmentValue(file, aggregateOutput, string(aggregate)); err != nil {
-		_ = file.Close()
-		return fmt.Errorf("writing aggregate GitHub outputs: %w", err)
+
+	// The report decides when declared outputs are safe to publish; deriving the flat and
+	// aggregate exports from that same decision keeps wuko_outputs and the report's outputs
+	// from disagreeing about an outcome the report treats as unsuccessful.
+	exportWorkflowOutputs := report.Outputs != nil && outcome.Outputs != nil
+	if exportWorkflowOutputs {
+		if err := validateWorkflowOutputNames(outcome.Outputs); err != nil {
+			outputErrors = append(outputErrors, err)
+			exportWorkflowOutputs = false
+		}
+	}
+	if exportWorkflowOutputs {
+		var workflowContent bytes.Buffer
+		names := mapsKeys(outcome.Outputs)
+		slices.Sort(names)
+		for _, name := range names {
+			value, err := outputValue(outcome.Outputs[name])
+			if err != nil {
+				outputErrors = append(outputErrors, fmt.Errorf("encoding GitHub output %s: %w", name, err))
+				exportWorkflowOutputs = false
+				break
+			}
+			_ = writeEnvironmentValue(&workflowContent, name, value)
+		}
+		if exportWorkflowOutputs {
+			aggregate, err := json.Marshal(outcome.Outputs)
+			if err != nil {
+				outputErrors = append(outputErrors, fmt.Errorf("encoding aggregate GitHub outputs: %w", err))
+			} else {
+				_ = writeEnvironmentValue(&workflowContent, aggregateOutput, string(aggregate))
+				_, _ = workflowContent.WriteTo(&content)
+			}
+		}
+	}
+
+	file, err := os.OpenFile(reporter.outputPath, os.O_WRONLY|os.O_APPEND, 0)
+	if err != nil {
+		outputErrors = append(outputErrors, fmt.Errorf("opening GITHUB_OUTPUT file %s: %w", reporter.outputPath, err))
+		return errors.Join(outputErrors...)
+	}
+	if _, err := content.WriteTo(file); err != nil {
+		outputErrors = append(outputErrors, fmt.Errorf("writing GITHUB_OUTPUT file %s: %w", reporter.outputPath, err))
 	}
 	if err := file.Close(); err != nil {
-		return fmt.Errorf("closing GITHUB_OUTPUT file %s: %w", reporter.outputPath, err)
+		outputErrors = append(outputErrors, fmt.Errorf("closing GITHUB_OUTPUT file %s: %w", reporter.outputPath, err))
+	}
+	return errors.Join(outputErrors...)
+}
+
+func validateWorkflowOutputNames(outputs map[string]any) error {
+	for _, reserved := range reservedOutputs {
+		if _, exists := outputs[reserved]; exists {
+			return fmt.Errorf("workflow output %q is reserved by the github reporter", reserved)
+		}
 	}
 	return nil
 }

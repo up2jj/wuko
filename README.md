@@ -275,6 +275,46 @@ return is conditional:
     path: ${{ fromJSON(steps.wuko.outputs.outputs).artifact }}
 ```
 
+Execution metadata is separate from workflow return values. The action writes `status`,
+`execution-id`, `duration-ms`, `failed-step`, and a versioned JSON `report` before a failed Wuko
+invocation exits. `execution-id` identifies the complete invocation, including failures during
+discovery, loading, or validation. `status` is `succeeded`, `failed`, `timed_out`, or `canceled`.
+`failed-step` is empty unless an unsuccessful top-level step with an ID was recorded.
+
+The metadata describes the Wuko invocation, not the action step. It is empty when the action fails
+before Wuko starts - a failed install, both or neither of `workflow` and `definition`, or a missing
+`working-directory` - and `status` can still read `succeeded` when the invocation itself succeeded
+but the run reporters failed to publish their results. Treat a non-empty `status` other than
+`succeeded` as a Wuko failure, and `steps.<id>.outcome` as the authoritative step result.
+
+Use `continue-on-error` when later steps should inspect a failed run without failing the job at
+that point:
+
+```yaml
+- name: Run Wuko checks
+  id: wuko
+  continue-on-error: true
+  uses: up2jj/wuko@v0.13.0
+  with:
+    workflow: check
+
+- name: Inspect the failure
+  if: steps.wuko.outcome == 'failure' && steps.wuko.outputs.status != ''
+  env:
+    WUKO_REPORT: ${{ steps.wuko.outputs.report }}
+    WUKO_FAILED_STEP: ${{ steps.wuko.outputs.failed-step }}
+  run: |
+    echo "Failed step: $WUKO_FAILED_STEP"
+    jq . <<<"$WUKO_REPORT"
+```
+
+Guarding on `outcome` rather than `status == 'failed'` also covers a timed-out or canceled
+invocation, and the `status != ''` test skips the step when the action failed before Wuko produced
+any metadata.
+
+Without `continue-on-error`, use `if: failure()` on a following diagnostic step. Workflow outputs
+remain empty on failure even though execution metadata is available.
+
 `workflow` accepts a discovered name, a local file, an HTTPS URL, or a `github:` locator. Use
 `target` to select a workflow target and `working-directory` to change the run directory. The
 optional `vars` input accepts one `key=value` assignment per line. Wuko preserves JSON values
@@ -336,6 +376,14 @@ When Wuko is already installed, the equivalent lower-level invocation remains av
 - name: Run Wuko checks
   id: wuko
   run: wuko run check --once --reporter plain --reporter github
+```
+
+Write the same canonical report to a local file with `--report-json`. Wuko atomically replaces the
+file when the invocation finishes, including failure paths; the parent directory must already
+exist:
+
+```sh
+wuko run check --once --report-json ./wuko-report.json
 ```
 
 The `github` reporter is never enabled automatically outside the composite action. With no

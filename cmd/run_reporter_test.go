@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/up2jj/wuko/reporter"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/steps/shell"
 )
@@ -118,6 +120,123 @@ func TestRunCommandGitHubReporterRequiresEnvironmentFiles(t *testing.T) {
 	}
 }
 
+func TestRunCommandWritesRelativeExecutionReportOnSuccess(t *testing.T) {
+	root := t.TempDir()
+	workflowPath := filepath.Join(root, "check.yaml")
+	writeWorkflowData(t, workflowPath, `version: 1
+name: check
+steps:
+  - return:
+      outputs:
+        artifact: '"dist/app.tar.gz"'
+`)
+	reportDirectory := filepath.Join(root, "reports")
+	if err := os.Mkdir(reportDirectory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	now := sequenceClock(
+		time.Date(2026, time.September, 4, 10, 0, 0, 0, time.UTC),
+		time.Date(2026, time.September, 4, 10, 0, 2, 0, time.UTC),
+	)
+	command := newRootCmd(dependencies{
+		stdin: bytes.NewReader(nil), stdout: new(bytes.Buffer), stderr: new(bytes.Buffer),
+		cwd: func() (string, error) { return root, nil }, homeDir: func() (string, error) { return root, nil },
+		configDir: func() (string, error) { return root, nil }, registry: step.NewRegistry(), now: now,
+	})
+	command.SetArgs([]string{"run", "--file", workflowPath, "--report-json", filepath.Join("reports", "execution.json")})
+	if err := command.ExecuteContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	report := readExecutionReport(t, filepath.Join(reportDirectory, "execution.json"))
+	if report.InvocationID == "" || report.RunID == "" || report.Workflow != "check" || report.Status != "succeeded" || report.DurationMS != 2000 {
+		t.Fatalf("report = %#v", report)
+	}
+	if report.Outputs == nil || (*report.Outputs)["artifact"] != "dist/app.tar.gz" {
+		t.Fatalf("report outputs = %#v", report.Outputs)
+	}
+}
+
+func TestRunCommandWritesExecutionReportBeforeEngineStarts(t *testing.T) {
+	root := t.TempDir()
+	workflowPath := filepath.Join(root, "check.yaml")
+	writeWorkflowData(t, workflowPath, "version: 1\nname: check\nsteps: []\n")
+	reportPath := filepath.Join(root, "report.json")
+	command := newRootCmd(dependencies{
+		stdin: bytes.NewReader(nil), stdout: new(bytes.Buffer), stderr: new(bytes.Buffer),
+		cwd: func() (string, error) { return root, nil }, homeDir: func() (string, error) { return root, nil },
+		configDir: func() (string, error) { return root, nil }, registry: step.NewRegistry(),
+	})
+	command.SetArgs([]string{"run", "--file", workflowPath, "--var", "invalid", "--report-json", reportPath})
+	err := command.ExecuteContext(t.Context())
+	if err == nil || !strings.Contains(err.Error(), "expected key=value") {
+		t.Fatalf("run error = %v, want variable parse failure", err)
+	}
+	report := readExecutionReport(t, reportPath)
+	if report.InvocationID == "" || report.RunID != "" || report.Workflow != "" || report.Status != "failed" || report.Outputs != nil {
+		t.Fatalf("report = %#v, want pre-engine failure", report)
+	}
+}
+
+func TestRunCommandReportsFirstFailedStep(t *testing.T) {
+	root := t.TempDir()
+	workflowPath := filepath.Join(root, "check.yaml")
+	writeWorkflowData(t, workflowPath, `version: 1
+name: check
+steps:
+  - id: explode
+    type: shell
+    with: {script: "exit 7"}
+`)
+	reportPath := filepath.Join(root, "report.json")
+	registry := step.NewRegistry()
+	if err := shell.Register(registry); err != nil {
+		t.Fatal(err)
+	}
+	command := newRootCmd(dependencies{
+		stdin: bytes.NewReader(nil), stdout: new(bytes.Buffer), stderr: new(bytes.Buffer),
+		cwd: func() (string, error) { return root, nil }, homeDir: func() (string, error) { return root, nil },
+		configDir: func() (string, error) { return root, nil }, registry: registry,
+	})
+	command.SetArgs([]string{"run", "--file", workflowPath, "--report-json", reportPath})
+	if err := command.ExecuteContext(t.Context()); err == nil {
+		t.Fatal("run succeeded, want failed workflow")
+	}
+	report := readExecutionReport(t, reportPath)
+	if report.RunID == "" || report.Status != "failed" || report.FailedStep != "explode" || report.Stats.Steps.Failed != 1 {
+		t.Fatalf("report = %#v, want failed explode step", report)
+	}
+}
+
+func TestRunCommandJoinsWorkflowAndReportDeliveryFailures(t *testing.T) {
+	root := t.TempDir()
+	workflowPath := filepath.Join(root, "check.yaml")
+	writeWorkflowData(t, workflowPath, `version: 1
+name: check
+steps:
+  - id: explode
+    type: shell
+    with: {script: "exit 7"}
+`)
+	reportPath := filepath.Join(root, "report.json")
+	if err := os.Mkdir(reportPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	registry := step.NewRegistry()
+	if err := shell.Register(registry); err != nil {
+		t.Fatal(err)
+	}
+	command := newRootCmd(dependencies{
+		stdin: bytes.NewReader(nil), stdout: new(bytes.Buffer), stderr: new(bytes.Buffer),
+		cwd: func() (string, error) { return root, nil }, homeDir: func() (string, error) { return root, nil },
+		configDir: func() (string, error) { return root, nil }, registry: registry,
+	})
+	command.SetArgs([]string{"run", "--file", workflowPath, "--report-json", reportPath})
+	err := command.ExecuteContext(t.Context())
+	if err == nil || !strings.Contains(err.Error(), `step "explode"`) || !strings.Contains(err.Error(), "replacing execution report") {
+		t.Fatalf("run error = %v, want workflow and report failures", err)
+	}
+}
+
 func TestRunCommandDiscardsEarlierAttemptStateWhenSchedulingFails(t *testing.T) {
 	root := t.TempDir()
 	workflowPath := filepath.Join(root, "check.yaml")
@@ -185,5 +304,27 @@ func writeWorkflowData(t *testing.T, path, data string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func readExecutionReport(t *testing.T, path string) reporter.ExecutionReport {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var report reporter.ExecutionReport
+	if err := json.Unmarshal(data, &report); err != nil {
+		t.Fatalf("decoding execution report %s: %v", path, err)
+	}
+	return report
+}
+
+func sequenceClock(instants ...time.Time) func() time.Time {
+	index := 0
+	return func() time.Time {
+		instant := instants[min(index, len(instants)-1)]
+		index++
+		return instant
 	}
 }

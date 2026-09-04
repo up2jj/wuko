@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/up2jj/wuko/correlation"
@@ -48,6 +49,8 @@ var runReporterCatalog = []runReporterDefinition{
 type runReporters struct {
 	group   reporterpkg.Group
 	session *reporterpkg.Session
+	now     func() time.Time
+	started time.Time
 
 	mu       sync.Mutex
 	finished *engine.ProgressEvent
@@ -124,9 +127,18 @@ func (reporters *runReporters) activeSession() *reporterpkg.Session {
 }
 
 func (reporters *runReporters) complete(ctx context.Context, workflowName string, state *engine.State, runErr error, dryRun bool) error {
+	finished := time.Now()
+	if reporters.now != nil {
+		finished = reporters.now()
+	}
+	started := reporters.started
+	if started.IsZero() || finished.Before(started) {
+		started = finished
+	}
 	outcome := reporterpkg.Outcome{
 		WorkflowName: workflowName,
 		Status:       outcomeStatus(runErr),
+		Duration:     finished.Sub(started),
 		Err:          runErr,
 		DryRun:       dryRun,
 	}
@@ -136,13 +148,13 @@ func (reporters *runReporters) complete(ctx context.Context, workflowName string
 		applyStatsIdentity(&outcome, state.Stats)
 	}
 	reporters.mu.Lock()
-	finished := reporters.finished
+	terminal := reporters.finished
 	latest := reporters.latest
 	reporters.mu.Unlock()
 	switch {
-	case adoptableFinish(finished, workflowName, outcome.Status, state):
-		outcome.Stats = finished.Stats
-		applyProgressIdentity(&outcome, *finished)
+	case adoptableFinish(terminal, workflowName, outcome.Status, state):
+		outcome.Stats = terminal.Stats
+		applyProgressIdentity(&outcome, *terminal)
 	case outcome.RunID == "":
 		applyRunIdentity(&outcome, latest)
 	}
@@ -235,11 +247,11 @@ func runReporterNames() []string {
 	return names
 }
 
-func newRunReporters(command *cobra.Command, deps dependencies, runDir string, names []string) (*runReporters, error) {
+func newRunReporters(command *cobra.Command, deps dependencies, runDir string, names []string, additional ...reporterpkg.Reporter) (*runReporters, error) {
 	if len(names) == 0 {
 		names = []string{"plain"}
 	}
-	group := make(reporterpkg.Group, 0, len(names))
+	group := make(reporterpkg.Group, 0, len(names)+len(additional))
 	seen := make(map[string]struct{}, len(names))
 	for _, name := range names {
 		if _, exists := seen[name]; exists {
@@ -256,7 +268,12 @@ func newRunReporters(command *cobra.Command, deps dependencies, runDir string, n
 		}
 		group = append(group, created)
 	}
-	return &runReporters{group: group, session: reporterpkg.NewSession("", group...)}, nil
+	group = append(group, additional...)
+	now := deps.now
+	if now == nil {
+		now = time.Now
+	}
+	return &runReporters{group: group, session: reporterpkg.NewSession("", group...), now: now, started: now()}, nil
 }
 
 func runReporterFactoryFor(name string) (runReporterFactory, bool) {

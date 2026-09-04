@@ -6,15 +6,16 @@ import (
 	"errors"
 	"slices"
 	"sync"
+	"time"
 
 	"github.com/up2jj/wuko/correlation"
 	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/engine"
 )
 
-// Outcome is the safe, final result exposed to reporters. Outputs contains a deep copy of the
-// workflow's declared outputs; execution inputs, variables, environment, and intermediate state
-// are deliberately excluded.
+// Outcome is the safe, final result exposed to reporters. Duration covers the whole reporting
+// invocation. Outputs contains a deep copy of the workflow's declared outputs; execution inputs,
+// variables, environment, and intermediate state are deliberately excluded.
 type Outcome struct {
 	InvocationID    correlation.InvocationID
 	RunID           correlation.RunID
@@ -22,6 +23,7 @@ type Outcome struct {
 	ParentStepRunID correlation.StepRunID
 	WorkflowName    string
 	Status          engine.ExecutionStatus
+	Duration        time.Duration
 	Stats           engine.RunStats
 	Outputs         map[string]any
 	Err             error

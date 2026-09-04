@@ -122,9 +122,21 @@ jobs:
       - name: verify action outputs
         env:
           FILE_OUTPUTS: ${{ steps.file.outputs.outputs }}
+          FILE_STATUS: ${{ steps.file.outputs.status }}
+          FILE_EXECUTION_ID: ${{ steps.file.outputs.execution-id }}
+          FILE_DURATION_MS: ${{ steps.file.outputs.duration-ms }}
+          FILE_FAILED_STEP: ${{ steps.file.outputs.failed-step }}
+          FILE_REPORT: ${{ steps.file.outputs.report }}
           INLINE_OUTPUTS: ${{ steps.inline.outputs.outputs }}
         run: |
           test "$FILE_OUTPUTS" = '{"result":"ready"}'
+          test "$FILE_STATUS" = succeeded
+          test -n "$FILE_EXECUTION_ID"
+          [[ "$FILE_DURATION_MS" =~ ^[0-9]+$ ]]
+          test -z "$FILE_FAILED_STEP"
+          test "$(jq -r .invocation_id <<<"$FILE_REPORT")" = "$FILE_EXECUTION_ID"
+          test "$(jq -r .status <<<"$FILE_REPORT")" = succeeded
+          test "$(jq -r .outputs.result <<<"$FILE_REPORT")" = ready
           test "$INLINE_OUTPUTS" = '{"enabled":true,"result":"inline-ready"}'
       - name: prefer token input over caller environment
         uses: ./
@@ -165,15 +177,50 @@ jobs:
           vars: "["
         env:
           WUKO_ACTION_TEST_BINARY: ${{ runner.temp }}/wuko-action-test
+      - name: report a failed workflow
+        id: failed-workflow
+        continue-on-error: true
+        uses: ./
+        with:
+          definition: |
+            version: 1
+            name: failed-action-smoke
+            steps:
+              - id: explode
+                type: shell
+                with: {script: "exit 7"}
+        env:
+          WUKO_ACTION_TEST_BINARY: ${{ runner.temp }}/wuko-action-test
       - name: require validation failures
         env:
           BOTH_OUTCOME: ${{ steps.invalid-both.outcome }}
           NEITHER_OUTCOME: ${{ steps.invalid-neither.outcome }}
           VARS_OUTCOME: ${{ steps.invalid-vars.outcome }}
+          VARS_STATUS: ${{ steps.invalid-vars.outputs.status }}
+          VARS_EXECUTION_ID: ${{ steps.invalid-vars.outputs.execution-id }}
+          VARS_REPORT: ${{ steps.invalid-vars.outputs.report }}
+          FAILED_OUTCOME: ${{ steps.failed-workflow.outcome }}
+          FAILED_OUTPUTS: ${{ steps.failed-workflow.outputs.outputs }}
+          FAILED_STATUS: ${{ steps.failed-workflow.outputs.status }}
+          FAILED_EXECUTION_ID: ${{ steps.failed-workflow.outputs.execution-id }}
+          FAILED_DURATION_MS: ${{ steps.failed-workflow.outputs.duration-ms }}
+          FAILED_STEP: ${{ steps.failed-workflow.outputs.failed-step }}
+          FAILED_REPORT: ${{ steps.failed-workflow.outputs.report }}
         run: |
           test "$BOTH_OUTCOME" = failure
           test "$NEITHER_OUTCOME" = failure
           test "$VARS_OUTCOME" = failure
+          test "$VARS_STATUS" = failed
+          test -n "$VARS_EXECUTION_ID"
+          jq -e '.status == "failed" and (has("run_id") | not) and (has("outputs") | not)' <<<"$VARS_REPORT"
+          test "$FAILED_OUTCOME" = failure
+          test -z "$FAILED_OUTPUTS"
+          test "$FAILED_STATUS" = failed
+          test -n "$FAILED_EXECUTION_ID"
+          [[ "$FAILED_DURATION_MS" =~ ^[0-9]+$ ]]
+          test "$FAILED_STEP" = explode
+          test "$(jq -r .failed_step <<<"$FAILED_REPORT")" = explode
+          jq -e '.status == "failed" and (has("outputs") | not)' <<<"$FAILED_REPORT"
       - name: exercise release download
         if: runner.os == 'Linux'
         uses: ./

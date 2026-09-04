@@ -36,6 +36,21 @@ outputs:
   outputs:
     description: Complete workflow return values as a JSON object
     value: ${{ steps.run.outputs.wuko_outputs }}
+  status:
+    description: Wuko invocation status
+    value: ${{ steps.run.outputs.wuko_status }}
+  execution-id:
+    description: Wuko invocation identifier
+    value: ${{ steps.run.outputs.wuko_execution_id }}
+  duration-ms:
+    description: Total Wuko invocation duration in milliseconds
+    value: ${{ steps.run.outputs.wuko_duration_ms }}
+  failed-step:
+    description: First unsuccessful top-level workflow step ID
+    value: ${{ steps.run.outputs.wuko_failed_step }}
+  report:
+    description: Canonical Wuko execution report as JSON
+    value: ${{ steps.run.outputs.wuko_report }}
 
 runs:
   using: composite

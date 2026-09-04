@@ -2,7 +2,9 @@ package githubactions
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -48,7 +50,7 @@ func TestReporterAnnotatesDiagnosticsOnceAndWritesSummary(t *testing.T) {
 		Stats: engine.RunStats{Total: 2, Succeeded: 1, Failed: 1},
 	})
 	if err := reporter.Finish(t.Context(), reporterpkg.Outcome{
-		WorkflowName: "check", Status: engine.StatusFailed,
+		InvocationID: "invocation", WorkflowName: "check", Status: engine.StatusFailed, Duration: 2 * time.Second,
 		Stats: engine.RunStats{Duration: 1500 * time.Millisecond, Total: 2, Succeeded: 1, Failed: 1},
 		Err:   errors.New("bad value"),
 	}); err != nil {
@@ -64,8 +66,19 @@ func TestReporterAnnotatesDiagnosticsOnceAndWritesSummary(t *testing.T) {
 			t.Errorf("commands = %q, want %q", annotation, want)
 		}
 	}
-	if data, err := os.ReadFile(output); err != nil || len(data) != 0 {
-		t.Fatalf("output = %q, err = %v; failed run must not export outputs", data, err)
+	values := readGitHubOutputs(t, output)
+	if values[statusOutput] != "failed" || values[executionIDOutput] != "invocation" || values[durationMSOutput] != "2000" {
+		t.Fatalf("metadata outputs = %#v", values)
+	}
+	if _, exists := values[aggregateOutput]; exists {
+		t.Fatalf("outputs = %#v, failed run must not export workflow outputs", values)
+	}
+	var executionReport reporterpkg.ExecutionReport
+	if err := json.Unmarshal([]byte(values[reportOutput]), &executionReport); err != nil {
+		t.Fatalf("decoding execution report %q: %v", values[reportOutput], err)
+	}
+	if executionReport.Status != engine.StatusFailed || executionReport.Outputs != nil || executionReport.Stats.Steps.Failed != 1 {
+		t.Fatalf("execution report = %#v", executionReport)
 	}
 	summaryData, err := os.ReadFile(summary)
 	if err != nil {
@@ -260,11 +273,13 @@ func TestReporterIgnoresUnrelatedTerminalProgress(t *testing.T) {
 func TestReporterExportsNamedAndAggregateOutputs(t *testing.T) {
 	root := t.TempDir()
 	reporter, output, _, _ := newTestReporter(t, root)
-	outcome := reporterpkg.Outcome{WorkflowName: "check", Status: engine.StatusSucceeded, Outputs: map[string]any{
-		"artifact": "first\nWUKO_EOF\nlast",
-		"count":    3,
-		"metadata": map[string]any{"ok": true},
-	}}
+	outcome := reporterpkg.Outcome{
+		InvocationID: "invocation", RunID: "run", WorkflowName: "check",
+		Status: engine.StatusSucceeded, Duration: 2500 * time.Millisecond, Outputs: map[string]any{
+			"artifact": "first\nWUKO_EOF\nlast",
+			"count":    3,
+			"metadata": map[string]any{"ok": true},
+		}}
 	if err := reporter.Finish(t.Context(), outcome); err != nil {
 		t.Fatal(err)
 	}
@@ -283,23 +298,41 @@ func TestReporterExportsNamedAndAggregateOutputs(t *testing.T) {
 			t.Errorf("GITHUB_OUTPUT = %q, want %q", text, want)
 		}
 	}
+	values := readGitHubOutputs(t, output)
+	if values[statusOutput] != "succeeded" || values[executionIDOutput] != "invocation" || values[durationMSOutput] != "2500" || values[failedStepOutput] != "" {
+		t.Fatalf("metadata outputs = %#v", values)
+	}
+	var executionReport reporterpkg.ExecutionReport
+	if err := json.Unmarshal([]byte(values[reportOutput]), &executionReport); err != nil {
+		t.Fatal(err)
+	}
+	if executionReport.RunID != "run" || executionReport.Outputs == nil || (*executionReport.Outputs)["count"] != float64(3) {
+		t.Fatalf("execution report = %#v", executionReport)
+	}
 }
 
-func TestReporterRejectsReservedAggregateOutputWithoutWriting(t *testing.T) {
-	reporter, output, _, _ := newTestReporter(t, t.TempDir())
-	err := reporter.Finish(t.Context(), reporterpkg.Outcome{WorkflowName: "check", Status: engine.StatusSucceeded, Outputs: map[string]any{
-		"artifact":     "dist/app.tar.gz",
-		"wuko_outputs": "workflow value",
-	}})
-	if err == nil || !strings.Contains(err.Error(), `workflow output "wuko_outputs" is reserved`) {
-		t.Fatalf("Finish() error = %v, want reserved output error", err)
-	}
-	data, readErr := os.ReadFile(output)
-	if readErr != nil {
-		t.Fatal(readErr)
-	}
-	if len(data) != 0 {
-		t.Fatalf("GITHUB_OUTPUT = %q, reserved output error must not write partial data", data)
+func TestReporterRejectsReservedOutputsAfterWritingMetadata(t *testing.T) {
+	for _, reserved := range reservedOutputs {
+		t.Run(reserved, func(t *testing.T) {
+			reporter, output, _, _ := newTestReporter(t, t.TempDir())
+			err := reporter.Finish(t.Context(), reporterpkg.Outcome{
+				InvocationID: "invocation", WorkflowName: "check", Status: engine.StatusSucceeded,
+				Outputs: map[string]any{"artifact": "dist/app.tar.gz", reserved: "workflow value"},
+			})
+			if err == nil || !strings.Contains(err.Error(), fmt.Sprintf(`workflow output %q is reserved`, reserved)) {
+				t.Fatalf("Finish() error = %v, want reserved output error", err)
+			}
+			values := readGitHubOutputs(t, output)
+			if values[statusOutput] != "succeeded" || values[executionIDOutput] != "invocation" || values[reportOutput] == "" {
+				t.Fatalf("metadata outputs = %#v", values)
+			}
+			if _, exists := values["artifact"]; exists {
+				t.Fatalf("outputs = %#v, reserved output error must omit all workflow outputs", values)
+			}
+			if _, exists := values[aggregateOutput]; exists {
+				t.Fatalf("outputs = %#v, reserved output error must omit aggregate workflow output", values)
+			}
+		})
 	}
 }
 
@@ -337,6 +370,30 @@ func TestReporterOmitsOutsideWorkspaceLocation(t *testing.T) {
 	}
 }
 
+func TestReporterWithholdsOutputsFromAnUnsuccessfulOutcomeWithoutError(t *testing.T) {
+	for _, status := range []engine.ExecutionStatus{engine.StatusCanceled, engine.StatusTimedOut, engine.StatusFailed} {
+		t.Run(string(status), func(t *testing.T) {
+			reporter, output, _, _ := newTestReporter(t, t.TempDir())
+			if err := reporter.Finish(t.Context(), reporterpkg.Outcome{
+				InvocationID: "invocation", WorkflowName: "check", Status: status,
+				Outputs: map[string]any{"artifact": "dist/app.tar.gz"},
+			}); err != nil {
+				t.Fatal(err)
+			}
+			values := readGitHubOutputs(t, output)
+			if values[statusOutput] != string(status) {
+				t.Fatalf("metadata outputs = %#v", values)
+			}
+			if _, exists := values[aggregateOutput]; exists {
+				t.Fatalf("outputs = %#v, %q must not export workflow outputs", values, status)
+			}
+			if _, exists := values["artifact"]; exists {
+				t.Fatalf("outputs = %#v, %q must not export workflow outputs", values, status)
+			}
+		})
+	}
+}
+
 func TestReporterDryRunWritesSummaryWithoutOutputs(t *testing.T) {
 	reporter, output, summary, _ := newTestReporter(t, t.TempDir())
 	outcome := reporterpkg.Outcome{
@@ -346,12 +403,19 @@ func TestReporterDryRunWritesSummaryWithoutOutputs(t *testing.T) {
 	if err := reporter.Finish(t.Context(), outcome); err != nil {
 		t.Fatal(err)
 	}
-	outputData, err := os.ReadFile(output)
-	if err != nil {
+	values := readGitHubOutputs(t, output)
+	if values[statusOutput] != "succeeded" || values[reportOutput] == "" {
+		t.Fatalf("metadata outputs = %#v", values)
+	}
+	if _, exists := values[aggregateOutput]; exists {
+		t.Fatalf("outputs = %#v, dry run must not export workflow outputs", values)
+	}
+	var executionReport reporterpkg.ExecutionReport
+	if err := json.Unmarshal([]byte(values[reportOutput]), &executionReport); err != nil {
 		t.Fatal(err)
 	}
-	if len(outputData) != 0 {
-		t.Fatalf("GITHUB_OUTPUT = %q, dry run must not export outputs", outputData)
+	if !executionReport.DryRun || executionReport.Outputs != nil {
+		t.Fatalf("execution report = %#v, want dry run without outputs", executionReport)
 	}
 	summaryData, err := os.ReadFile(summary)
 	if err != nil {
@@ -380,4 +444,35 @@ func newTestReporter(t *testing.T, workspace string) (*Reporter, string, string,
 		t.Fatal(err)
 	}
 	return reporter, output, summary, commands
+}
+
+func readGitHubOutputs(t *testing.T, path string) map[string]string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(string(data), "\n")
+	values := make(map[string]string)
+	for index := 0; index < len(lines); {
+		name, delimiter, found := strings.Cut(lines[index], "<<")
+		if !found {
+			if lines[index] != "" {
+				t.Fatalf("invalid GITHUB_OUTPUT line %q", lines[index])
+			}
+			index++
+			continue
+		}
+		index++
+		start := index
+		for index < len(lines) && lines[index] != delimiter {
+			index++
+		}
+		if index == len(lines) {
+			t.Fatalf("unterminated GITHUB_OUTPUT value %q", name)
+		}
+		values[name] = strings.Join(lines[start:index], "\n")
+		index++
+	}
+	return values
 }

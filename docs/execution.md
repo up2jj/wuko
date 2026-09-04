@@ -921,6 +921,64 @@ more reporters explicitly by repeating `--reporter`; events are delivered in dec
 wuko run check --reporter plain --reporter github
 ```
 
+Use `--report-json PATH` independently of the selected reporters to write the canonical execution
+report when the invocation finishes. Relative paths are resolved from the invocation directory,
+the parent directory must exist, and the destination is atomically replaced with a private
+mode-`0600` file. A report is attempted for successful runs and for discovery, loading, validation,
+execution, timeout, and graceful-cancellation failures:
+
+```sh
+wuko run check --once --report-json ./wuko-report.json
+```
+
+The version 1 report is a compact, safe projection. It contains no error messages, environment,
+inputs, variables, or intermediate step outputs:
+
+```json
+{
+  "schema_version": 1,
+  "invocation_id": "01K...",
+  "run_id": "01K...",
+  "workflow": "check",
+  "status": "failed",
+  "dry_run": false,
+  "duration_ms": 42381,
+  "failed_step": "integration-tests",
+  "stats": {
+    "run_duration_ms": 41002,
+    "steps": {
+      "total": 8,
+      "succeeded": 6,
+      "failed": 1,
+      "skipped": 1,
+      "canceled": 0,
+      "timed_out": 0
+    },
+    "attempts": 9,
+    "retries": 2,
+    "retry_wait_ms": 1000,
+    "polls": 14,
+    "poll_wait_ms": 7000
+  }
+}
+```
+
+`invocation_id`, `status`, `dry_run`, `duration_ms`, and `stats` are always present. `run_id`,
+`workflow`, and `failed_step` are omitted when unavailable. `failed_step` is the declared ID of the
+first recorded unsuccessful top-level step and is omitted when that step has no ID. Successful non-dry runs also contain `outputs`,
+including an empty object when the workflow declares none; failed and dry runs omit it. The
+top-level duration covers the whole invocation, while `stats.run_duration_ms` covers only the
+engine run. Scheduled commands write one final report when the scheduler exits; use `--once` for
+one report per workflow run.
+
+The `stats.steps` counters are not a partition. `total` is the planned leaf step count, so steps
+that never started are counted nowhere else, and the remaining fields do not sum to it. `succeeded`,
+`skipped`, and `canceled` count terminal steps, `failed` counts every step that ended unsuccessfully
+including one that timed out, and `timed_out` counts timed-out *attempts*, so it overlaps `failed`
+and can exceed the number of steps when a retried step timed out more than once. `failed_step`
+likewise names the first step that ended failed, timed out, or canceled, so a canceled invocation
+reports one even though `stats.steps.failed` is zero.
+
 Use the opt-in `multiplexer` reporter to animate root workflow progress in the detected tmux,
 cmux, or Herdr title while retaining the ordinary terminal log:
 
@@ -943,11 +1001,12 @@ repository-relative workflow location when one is available. Named controls appe
 transparent blocks expose their recorded child steps, while composite-action internals are not
 expanded.
 
-The reporter also exports successful workflow return values. String values are preserved; other
-values are compact JSON. Each value is available under its declared return name, and the complete
-typed map is available as JSON under `wuko_outputs`. Output values are not written for failed or dry
-runs. The name `wuko_outputs` is reserved by the GitHub reporter; rename a workflow return value
-with that name before enabling the reporter.
+The reporter always exports `wuko_status`, `wuko_execution_id`, `wuko_duration_ms`,
+`wuko_failed_step`, and the compact versioned report under `wuko_report`. It also exports successful
+workflow return values: strings are preserved, other values are compact JSON, and the complete
+typed map is available under `wuko_outputs`. Workflow output values are not written for failed or
+dry runs. These six `wuko_*` names are reserved by the GitHub reporter; rename a workflow return
+value with one of those names before enabling the reporter.
 
 Reporters do not change workflow execution, interactivity, or scheduling. A reporter initialization
 or finalization failure does fail the Wuko command, while leaving the recorded workflow outcome
@@ -957,9 +1016,10 @@ reporters implicitly.
 
 Go integrations can implement the public `reporter.Reporter` interface. Progress and diagnostic
 events are delivered synchronously and in order, followed by a safe final outcome containing only
-the workflow name, status, statistics, declared outputs, error, dry-run state, and correlation
-identity. Reporters never receive the workflow's full engine state, environment, inputs, variables,
-or intermediate values.
+the workflow name, status, invocation duration, statistics, declared outputs, error, dry-run state,
+and correlation identity. `reporter.NewExecutionReport` projects that outcome into the public JSON
+schema without error text. Reporters never receive the workflow's full engine state, environment,
+inputs, variables, or intermediate values.
 
 Use `reporter.Session` when wiring reporters outside the CLI. It supplies one opaque invocation ID
 and a shared sequence across progress and diagnostic events. Every `Engine.Run` attempt has a run
@@ -970,7 +1030,9 @@ occurrences receive distinct step-run IDs. Treat ID encodings as opaque.
 
 The existing step operation ID remains separate: it is an idempotency key that may be user-defined,
 shared by retries, and repeated across workflow runs. It is never reused as reporter correlation
-identity. Correlation IDs are not added to workflow templates, step environments, or GitHub output.
+identity. Correlation IDs are not added to workflow templates or step environments. The GitHub
+reporter exports the invocation ID directly and includes the root run ID in `wuko_report` when one
+was created; step-run IDs remain reporter-internal.
 
 ## Splitting a workflow across files
 
