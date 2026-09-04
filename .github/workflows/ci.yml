@@ -69,6 +69,9 @@ jobs:
           args: build --snapshot --clean
 
   action:
+    permissions:
+      contents: read
+      pull-requests: read
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
@@ -98,6 +101,16 @@ jobs:
             targets:
               smoke:
                 steps:
+                  - id: github_token
+                    type: shell
+                    with:
+                      script: test -n "$GH_TOKEN"
+                  - id: github_pull_request
+                    type: github_pr
+                    with:
+                      operation: find
+                      repository: "{{ .env.GITHUB_REPOSITORY }}"
+                      branch: wuko-action-token-smoke
                   - require: fragments/return.yaml
           target: smoke
           working-directory: .github/fixtures/action-inline
@@ -113,6 +126,21 @@ jobs:
         run: |
           test "$FILE_OUTPUTS" = '{"result":"ready"}'
           test "$INLINE_OUTPUTS" = '{"enabled":true,"result":"inline-ready"}'
+      - name: prefer token input over caller environment
+        uses: ./
+        with:
+          definition: |
+            version: 1
+            name: action-token-override
+            steps:
+              - id: verify_token
+                type: shell
+                with:
+                  script: test "$GH_TOKEN" = "token-from-input"
+          token: token-from-input
+        env:
+          GH_TOKEN: token-from-environment
+          WUKO_ACTION_TEST_BINARY: ${{ runner.temp }}/wuko-action-test
       - name: reject both workflow sources
         id: invalid-both
         continue-on-error: true

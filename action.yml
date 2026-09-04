@@ -23,6 +23,10 @@ inputs:
     description: Workflow variables as newline-delimited key=value assignments or a JSON object
     required: false
     default: ""
+  token:
+    description: GitHub token exported as GH_TOKEN while Wuko runs; may be overridden with a PAT or GitHub App token
+    required: false
+    default: ${{ github.token }}
   version:
     description: Wuko version; defaults to the version pinned by this action revision
     required: false
@@ -53,6 +57,7 @@ runs:
         INPUT_TARGET: ${{ inputs.target }}
         INPUT_WORKING_DIRECTORY: ${{ inputs.working-directory }}
         INPUT_VARS: ${{ inputs.vars }}
+        GH_TOKEN: ${{ inputs.token }}
         WUKO_BINARY: ${{ steps.install.outputs.path }}
         WUKO_ACTION_PATH: ${{ github.action_path }}
       run: bash "$WUKO_ACTION_PATH/action/run.sh"

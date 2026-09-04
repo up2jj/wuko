@@ -212,17 +212,49 @@ Use the repository's composite action to install a pinned Wuko release and run a
 GitHub error annotations, a job summary, and typed outputs:
 
 ```yaml
-- uses: actions/checkout@v6
+permissions:
+  contents: read
+  pull-requests: read
+  actions: read
 
-- name: Run Wuko checks
+steps:
+  - uses: actions/checkout@v6
+
+  - name: Run Wuko checks
+    uses: up2jj/wuko@v0.13.0
+    with:
+      workflow: check
+      vars: |
+        package=./cmd/...
+        race=true
+    env:
+      API_TOKEN: ${{ secrets.API_TOKEN }}
+```
+
+The action automatically exports the job's `github.token` as `GH_TOKEN` while Wuko runs, so
+GitHub-backed steps and direct `gh` commands work without repeating token wiring. The token keeps
+exactly the access granted to the job through `permissions`; the action does not broaden it. For
+example, a workflow can discover its pull request without declaring authentication:
+
+```yaml
+version: 1
+name: check
+steps:
+  - id: pull_request
+    type: github_pr
+    with:
+      operation: find
+```
+
+Override the job token when an integration needs different credentials, such as access to another
+repository:
+
+```yaml
+- name: Run cross-repository release workflow
   uses: up2jj/wuko@v0.13.0
   with:
-    workflow: check
-    vars: |
-      package=./cmd/...
-      race=true
-  env:
-    API_TOKEN: ${{ secrets.API_TOKEN }}
+    workflow: release
+    token: ${{ secrets.WUKO_GITHUB_TOKEN }}
 ```
 
 The `outputs` output carries the workflow's complete return map as JSON, so a later step can read a
