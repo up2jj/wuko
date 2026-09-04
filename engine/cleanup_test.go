@@ -214,30 +214,111 @@ func TestManagedCleanupRunsInReverseAndJoinsErrors(t *testing.T) {
 	}
 }
 
-func TestManagedCleanupRegistersEverySuccessfulPoll(t *testing.T) {
+// An attempt gives every pass its own cleanup scope. A pass that is discarded -- because it failed,
+// or because until was still false -- releases its own resources immediately, so a long poll does
+// not accumulate a container or temporary directory per iteration. Only the winning pass promotes
+// its resources to the scope that owns the attempt, where they live until that scope ends.
+func TestManagedCleanupReleasesDiscardedPassesAndPromotesTheWinner(t *testing.T) {
 	registry := newTestRegistry(t, nil)
 	runner := &pollCleanupRunner{}
 	if err := registry.Register("managed_poll", func(map[string]any) (step.Runner, error) { return runner, nil }); err != nil {
 		t.Fatal(err)
 	}
+	var duringRun int
+	if err := registry.Register("observe_cleanup", func(map[string]any) (step.Runner, error) {
+		return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+			runner.mu.Lock()
+			defer runner.mu.Unlock()
+			duringRun = len(runner.cleaned)
+			return step.Result{}, nil
+		}), nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 	timeout := workflow.Duration(1_000_000_000)
-	definition := testDefinition(t, "poll-cleanup", workflow.Step{
-		ID: "wait",
-		Attempt: &workflow.AttemptControl{
-			Interval:          workflow.LiteralDuration(workflow.Duration(1)),
-			MaxElapsedTime:    workflow.LiteralDuration(timeout),
-			Until:             "poll == 3",
-			MaxAttempts:       workflow.LiteralCount(1),
-			BackoffMultiplier: workflow.LiteralFactor(1),
-			Steps:             []workflow.Step{{ID: "poll", Type: "managed_poll", With: map[string]any{}}},
+	definition := testDefinition(t,
+		"poll-cleanup",
+		workflow.Step{
+			ID: "wait",
+			Attempt: &workflow.AttemptControl{
+				Interval:          workflow.LiteralDuration(workflow.Duration(1)),
+				MaxElapsedTime:    workflow.LiteralDuration(timeout),
+				Until:             "poll == 3",
+				MaxAttempts:       workflow.LiteralCount(1),
+				BackoffMultiplier: workflow.LiteralFactor(1),
+				Steps:             []workflow.Step{{ID: "poll", Type: "managed_poll", With: map[string]any{}}},
+			},
 		},
-	})
+		workflow.Step{ID: "after", Type: "observe_cleanup", With: map[string]any{}},
+	)
 
 	if _, err := New(registry).Run(t.Context(), definition, Options{}); err != nil {
 		t.Fatal(err)
 	}
-	if want := []int{3, 2, 1}; !reflect.DeepEqual(runner.cleaned, want) {
+	// The two discarded polls are released as the loop goes; the winner is still live when the
+	// next step runs.
+	if duringRun != 2 {
+		t.Fatalf("cleaned during run = %d, want 2", duringRun)
+	}
+	if want := []int{1, 2, 3}; !reflect.DeepEqual(runner.cleaned, want) {
 		t.Fatalf("cleaned polls = %#v, want %#v", runner.cleaned, want)
+	}
+}
+
+// The leak block retry introduces that leaf retry could not: a body step that succeeds inside a
+// pass that later fails. Its resource belongs to the discarded pass, not to the workflow.
+func TestManagedCleanupReleasesSucceededStepsOfAFailedPass(t *testing.T) {
+	registry := newTestRegistry(t, nil)
+	runner := &pollCleanupRunner{}
+	if err := registry.Register("managed_poll", func(map[string]any) (step.Runner, error) { return runner, nil }); err != nil {
+		t.Fatal(err)
+	}
+	attempts := 0
+	if err := registry.Register("flaky_tail", func(map[string]any) (step.Runner, error) {
+		return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+			attempts++
+			if attempts == 1 {
+				return step.Result{}, errors.New("tail failure")
+			}
+			return step.Result{}, nil
+		}), nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var duringRun int
+	if err := registry.Register("observe_cleanup", func(map[string]any) (step.Runner, error) {
+		return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+			runner.mu.Lock()
+			defer runner.mu.Unlock()
+			duringRun = len(runner.cleaned)
+			return step.Result{}, nil
+		}), nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	definition := testDefinition(t,
+		"failed-pass-cleanup",
+		attemptStep("guarded", immediateRetry(2), workflow.Step{
+			ID:    "body",
+			Steps: nil,
+		}),
+		workflow.Step{ID: "after", Type: "observe_cleanup", With: map[string]any{}},
+	)
+	definition.Steps[0].Attempt.Steps = []workflow.Step{
+		{ID: "resource", Type: "managed_poll", With: map[string]any{}},
+		{ID: "tail", Type: "flaky_tail", With: map[string]any{}},
+	}
+
+	if _, err := New(registry).Run(t.Context(), definition, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	// Pass 1 created resource 1 and then failed, so that resource is gone before pass 2 starts.
+	// Pass 2 won, so its resource is still live when the next step runs.
+	if duringRun != 1 {
+		t.Fatalf("cleaned during run = %d, want 1", duringRun)
+	}
+	if want := []int{1, 2}; !reflect.DeepEqual(runner.cleaned, want) {
+		t.Fatalf("cleaned = %#v, want %#v", runner.cleaned, want)
 	}
 }
 

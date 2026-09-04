@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -149,6 +150,9 @@ func (e *Engine) executeAttempt(ctx context.Context, definition *workflow.Defini
 	}
 	defer cancelRun()
 
+	// Resources belong to the pass that created them. A discarded pass releases its own; only
+	// the winning pass promotes them to the scope that owns the attempt.
+	parentScope := options.cleanupScope()
 	bodyTotal := leafStepCount(control.Steps)
 	nested := RunStats{StartedAt: startedAt, Total: bodyTotal, Steps: make([]StepStats, 0, bodyTotal)}
 	childOptions := options
@@ -173,6 +177,12 @@ func (e *Engine) executeAttempt(ctx context.Context, definition *workflow.Defini
 		passOptions.previousPass = previousPass
 		failure := &passFailure{}
 		passOptions.passFailure = failure
+		passScope := &cleanupScope{}
+		passOptions.cleanups = passScope
+		// Cleanup must still run after Ctrl-C, so it is detached from the pass context.
+		releasePass := func() error {
+			return errors.Join(passScope.run(context.WithoutCancel(ctx))...)
+		}
 
 		private := cloneState(state)
 		private.writtenVars = make(map[string]struct{})
@@ -216,9 +226,16 @@ func (e *Engine) executeAttempt(ctx context.Context, definition *workflow.Defini
 			Attempt: attempt, MaxAttempts: policy.MaxAttempts, Duration: stats.Duration, Error: passErr,
 		})
 
+		if passErr != nil {
+			if releaseErr := releasePass(); releaseErr != nil {
+				passErr = errors.Join(passErr, releaseErr)
+			}
+		}
+
 		if passErr == nil {
 			if untilProgram == nil {
 				recordAttempt()
+				passScope.adopt(parentScope)
 				outcome.result = attemptResult(control, private, attempt, polls)
 				finish(StatusSucceeded, nil, nested)
 				return outcome
@@ -237,6 +254,9 @@ func (e *Engine) executeAttempt(ctx context.Context, definition *workflow.Defini
 					Depth: options.depth, StepID: workflowStep.ID, StepType: "attempt", Poll: polls, Error: err,
 				})
 				recordAttempt()
+				if releaseErr := releasePass(); releaseErr != nil {
+					err = errors.Join(err, releaseErr)
+				}
 				return fail(fmt.Errorf("evaluating attempt until: %w", err), nested)
 			}
 			pollStatus := StatusRunning
@@ -251,11 +271,18 @@ func (e *Engine) executeAttempt(ctx context.Context, definition *workflow.Defini
 				attemptPollMessage(matched), nil, diagnostic.Attr("poll", fmt.Sprint(polls)))
 			if matched {
 				recordAttempt()
+				passScope.adopt(parentScope)
 				outcome.result = attemptResult(control, private, attempt, polls)
 				finish(StatusSucceeded, nil, nested)
 				return outcome
 			}
-			// A pass that succeeded without reaching readiness costs no attempt.
+			// A pass that succeeded without reaching readiness costs no attempt, but its
+			// resources are still discarded with it. A leaked release is not recoverable, so
+			// it ends the control rather than polling on.
+			if releaseErr := releasePass(); releaseErr != nil {
+				recordAttempt()
+				return fail(releaseErr, nested)
+			}
 			previousPass = passResults(control.Steps, private, failure)
 			report(options, ProgressEvent{
 				Kind: PollScheduled, Status: StatusRunning, Time: time.Now(), WorkflowName: definition.Name,

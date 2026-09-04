@@ -230,6 +230,22 @@ func (scope *cleanupScope) register(cleanup func(context.Context) error) {
 	scope.cleanups = append(scope.cleanups, cleanup)
 }
 
+// adopt moves this scope's pending resources onto target, preserving registration order so the
+// combined scope still releases everything in reverse completion order. A nested scope uses it
+// when its resources must outlive it -- an attempt promotes its winning pass this way.
+func (scope *cleanupScope) adopt(target *cleanupScope) {
+	scope.mu.Lock()
+	cleanups := scope.cleanups
+	scope.cleanups = nil
+	scope.mu.Unlock()
+	if len(cleanups) == 0 || target == nil {
+		return
+	}
+	target.mu.Lock()
+	defer target.mu.Unlock()
+	target.cleanups = append(target.cleanups, cleanups...)
+}
+
 // run releases the scope's resources in reverse completion order. ctx should be
 // detached from the run's cancellation so managed resources are still released after
 // Ctrl-C; see step.Cleaner for why it carries no overall deadline.
