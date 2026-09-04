@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"os"
 	"path/filepath"
@@ -40,6 +41,7 @@ type Reporter struct {
 	annotations map[string]struct{}
 	annotated   bool
 	commandErr  error
+	finished    *engine.ProgressEvent
 }
 
 // New validates the GitHub environment files before workflow execution begins.
@@ -80,8 +82,18 @@ func New(options Options) (*Reporter, error) {
 	}, nil
 }
 
-// Progress receives execution progress. GitHub reporting currently uses the final Outcome instead.
-func (*Reporter) Progress(engine.ProgressEvent) {}
+// Progress retains the latest root workflow result. The engine redacts this copy before delivery,
+// so Finish prefers it when it describes the same outcome that is being finalized.
+func (reporter *Reporter) Progress(event engine.ProgressEvent) {
+	if event.Kind != engine.WorkflowFinished || event.Depth != 0 {
+		return
+	}
+	copy := event
+	copy.Stats = cloneRunStats(event.Stats)
+	reporter.mu.Lock()
+	reporter.finished = &copy
+	reporter.mu.Unlock()
+}
 
 // Diagnostic emits one deduplicated GitHub error annotation for a failed diagnostic.
 func (reporter *Reporter) Diagnostic(event diagnostic.Event) {
@@ -109,7 +121,12 @@ func (reporter *Reporter) Finish(_ context.Context, outcome reporterpkg.Outcome)
 			finishErrors = append(finishErrors, err)
 		}
 	}
-	if err := reporter.writeSummary(outcome); err != nil {
+	stats := outcome.Stats
+	redacted := reporter.finishedMatches(outcome)
+	if redacted {
+		stats = reporter.finished.Stats
+	}
+	if err := reporter.writeSummary(outcome, stats, redacted); err != nil {
 		finishErrors = append(finishErrors, err)
 	}
 	if reporter.commandErr != nil {
@@ -218,7 +235,14 @@ func (reporter *Reporter) writeOutputs(outputs map[string]any) error {
 	return nil
 }
 
-func (reporter *Reporter) writeSummary(outcome reporterpkg.Outcome) error {
+func (reporter *Reporter) finishedMatches(outcome reporterpkg.Outcome) bool {
+	return reporter.finished != nil && outcome.RunID != "" &&
+		reporter.finished.RunID == outcome.RunID &&
+		reporter.finished.WorkflowName == outcome.WorkflowName &&
+		reporter.finished.Status == outcome.Status
+}
+
+func (reporter *Reporter) writeSummary(outcome reporterpkg.Outcome, stats engine.RunStats, redacted bool) error {
 	status := string(outcome.Status)
 	if outcome.DryRun {
 		status = "validated"
@@ -234,8 +258,11 @@ func (reporter *Reporter) writeSummary(outcome reporterpkg.Outcome) error {
 	}
 	summary := fmt.Sprintf(
 		"### Wuko: `%s`\n\n| Status | Duration | Steps | Succeeded | Failed | Skipped |\n| --- | ---: | ---: | ---: | ---: | ---: |\n| %s | %s | %d | %d | %d | %d |\n\n",
-		name, status, formatDuration(outcome.Stats.Duration), outcome.Stats.Total, outcome.Stats.Succeeded, outcome.Stats.Failed, outcome.Stats.Skipped,
+		name, status, formatDuration(stats.Duration), stats.Total, stats.Succeeded, stats.Failed, stats.Skipped,
 	)
+	if len(stats.Steps) > 0 {
+		summary += reporter.stepSummary(stats, redacted)
+	}
 	file, err := os.OpenFile(reporter.summaryPath, os.O_WRONLY|os.O_APPEND, 0)
 	if err != nil {
 		return fmt.Errorf("opening GITHUB_STEP_SUMMARY file %s: %w", reporter.summaryPath, err)
@@ -248,6 +275,145 @@ func (reporter *Reporter) writeSummary(outcome reporterpkg.Outcome) error {
 		return fmt.Errorf("closing GITHUB_STEP_SUMMARY file %s: %w", reporter.summaryPath, err)
 	}
 	return nil
+}
+
+// stepSummary renders the recorded steps. Redacted reports whether stats came from the engine's
+// redacted progress copy; step error text is only rendered when it did.
+func (reporter *Reporter) stepSummary(stats engine.RunStats, redacted bool) string {
+	var summary strings.Builder
+	summary.WriteString("#### Steps\n\n")
+	summary.WriteString("_Rows list the top-level steps the run recorded. The header counts every planned step, and the execution statistics below include the steps nested inside controls._\n\n")
+	summary.WriteString("| Step | Status | Duration | Attempts | Retries | Polls |\n")
+	summary.WriteString("| --- | --- | ---: | ---: | ---: | ---: |\n")
+	for _, step := range stats.Steps {
+		attempts := len(step.Attempts)
+		fmt.Fprintf(&summary, "| %s | %s | %s | %s | %s | %s |\n",
+			markdownCell(html.EscapeString(stepSummaryName(step))), statusLabel(step.Status), formatDuration(step.Duration),
+			stepCount(attempts), retryCount(attempts), stepCount(step.Polls))
+	}
+	summary.WriteString("\n")
+
+	failed := false
+	for _, step := range stats.Steps {
+		if !unsuccessful(step.Status) {
+			continue
+		}
+		if !failed {
+			summary.WriteString("#### Failure details\n\n")
+			failed = true
+		}
+		fmt.Fprintf(&summary, "##### <code>%s</code>\n\n", html.EscapeString(stepSummaryName(step)))
+		fmt.Fprintf(&summary, "- Status: %s\n", statusLabel(step.Status))
+		fmt.Fprintf(&summary, "- Duration: %s\n", formatDuration(step.Duration))
+		if len(step.Attempts) == 0 {
+			summary.WriteString("- Attempts: —\n")
+			summary.WriteString("- Retries: —\n")
+		} else {
+			fmt.Fprintf(&summary, "- Attempts: %d\n", len(step.Attempts))
+			fmt.Fprintf(&summary, "- Retries: %d\n", max(0, len(step.Attempts)-1))
+		}
+		if location := reporter.summaryLocation(step.Location); location != "" {
+			fmt.Fprintf(&summary, "- Source: <code>%s</code>\n", html.EscapeString(location))
+		}
+		if step.Error != nil && strings.TrimSpace(step.Error.Error()) != "" {
+			if redacted {
+				fmt.Fprintf(&summary, "\n<pre>%s</pre>\n", html.EscapeString(step.Error.Error()))
+			} else {
+				summary.WriteString("- Error: withheld, no redacted progress copy for this run\n")
+			}
+		}
+		summary.WriteString("\n")
+	}
+
+	longest := stats.Steps[0]
+	for _, step := range stats.Steps[1:] {
+		if step.Duration > longest.Duration {
+			longest = step
+		}
+	}
+	summary.WriteString("#### Execution statistics\n\n")
+	fmt.Fprintf(&summary, "- Attempts: %d\n", stats.Attempts)
+	fmt.Fprintf(&summary, "- Retries: %d\n", stats.Retries)
+	fmt.Fprintf(&summary, "- Retry wait: %s\n", formatDuration(stats.RetryWait))
+	fmt.Fprintf(&summary, "- Polls: %d\n", stats.Polls)
+	fmt.Fprintf(&summary, "- Poll wait: %s\n", formatDuration(stats.PollWait))
+	fmt.Fprintf(&summary, "- Timeouts: %d\n", stats.TimedOut)
+	fmt.Fprintf(&summary, "- Longest step: <code>%s</code> (%s)\n\n", html.EscapeString(stepSummaryName(longest)), formatDuration(longest.Duration))
+	return summary.String()
+}
+
+func (reporter *Reporter) summaryLocation(location diagnostic.Location) string {
+	path, ok := reporter.repositoryPath(location.Source)
+	if !ok {
+		return ""
+	}
+	if location.Line > 0 {
+		return fmt.Sprintf("%s:%d", path, location.Line)
+	}
+	return path
+}
+
+func stepSummaryName(step engine.StepStats) string {
+	if step.ID != "" {
+		return step.ID
+	}
+	if step.Type != "" {
+		return step.Type
+	}
+	return fmt.Sprintf("step %d", step.Index)
+}
+
+func statusLabel(status engine.ExecutionStatus) string {
+	switch status {
+	case engine.StatusSucceeded:
+		return "✓ succeeded"
+	case engine.StatusTimedOut:
+		return "⏱ timed out"
+	case engine.StatusCanceled:
+		return "■ canceled"
+	case engine.StatusSkipped:
+		return "⊘ skipped"
+	default:
+		return "✗ failed"
+	}
+}
+
+func unsuccessful(status engine.ExecutionStatus) bool {
+	return status == engine.StatusFailed || status == engine.StatusTimedOut || status == engine.StatusCanceled
+}
+
+func stepCount(value int) string {
+	if value == 0 {
+		return "—"
+	}
+	return fmt.Sprint(value)
+}
+
+func retryCount(attempts int) string {
+	if attempts == 0 {
+		return "—"
+	}
+	return fmt.Sprint(max(0, attempts-1))
+}
+
+func cloneRunStats(stats engine.RunStats) engine.RunStats {
+	stats.Steps = append([]engine.StepStats(nil), stats.Steps...)
+	for index := range stats.Steps {
+		stats.Steps[index] = cloneStepStats(stats.Steps[index])
+	}
+	return stats
+}
+
+func cloneStepStats(stats engine.StepStats) engine.StepStats {
+	stats.Attempts = append([]engine.AttemptStats(nil), stats.Attempts...)
+	stats.Iterations = append([]engine.IterationStats(nil), stats.Iterations...)
+	for index := range stats.Iterations {
+		stats.Iterations[index].Steps = append([]engine.StepStats(nil), stats.Iterations[index].Steps...)
+		for stepIndex := range stats.Iterations[index].Steps {
+			stats.Iterations[index].Steps[stepIndex] = cloneStepStats(stats.Iterations[index].Steps[stepIndex])
+		}
+	}
+	return stats
 }
 
 func outputValue(value any) (string, error) {

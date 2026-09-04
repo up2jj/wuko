@@ -936,12 +936,18 @@ and best effort, so display failures never change the workflow result. While ena
 reporter owns the title: a `multiplexer` title step may be replaced by its next frame.
 
 The `github` reporter requires the `GITHUB_OUTPUT` and `GITHUB_STEP_SUMMARY` files provided to a
-GitHub Actions run step. It emits error annotations for located workflow diagnostics, appends a
-run-statistics summary, and exports successful workflow return values. String values are preserved;
-other values are compact JSON. Each value is available under its declared return name, and the
-complete typed map is available as JSON under `wuko_outputs`. Output values are not written for
-failed or dry runs. The name `wuko_outputs` is reserved by the GitHub reporter; rename a workflow
-return value with that name before enabling the reporter.
+GitHub Actions run step. It emits error annotations for located workflow diagnostics and appends a
+job summary containing aggregate run statistics, one row per recorded step, focused failure
+details, and retry, polling, timeout, and longest-step statistics. Failure details include a
+repository-relative workflow location when one is available. Named controls appear as one row;
+transparent blocks expose their recorded child steps, while composite-action internals are not
+expanded.
+
+The reporter also exports successful workflow return values. String values are preserved; other
+values are compact JSON. Each value is available under its declared return name, and the complete
+typed map is available as JSON under `wuko_outputs`. Output values are not written for failed or dry
+runs. The name `wuko_outputs` is reserved by the GitHub reporter; rename a workflow return value
+with that name before enabling the reporter.
 
 Reporters do not change workflow execution, interactivity, or scheduling. A reporter initialization
 or finalization failure does fail the Wuko command, while leaving the recorded workflow outcome

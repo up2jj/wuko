@@ -21,6 +21,9 @@ func TestRunCommandComposesPlainAndGitHubReporters(t *testing.T) {
 name: check
 cron: "0 0 * * *"
 steps:
+  - id: build
+    type: shell
+    with: {script: "printf done"}
   - return:
       outputs:
         artifact: '"dist/app.tar.gz"'
@@ -36,11 +39,15 @@ steps:
 	values := map[string]string{
 		"GITHUB_OUTPUT": outputPath, "GITHUB_STEP_SUMMARY": summaryPath, "GITHUB_WORKSPACE": root,
 	}
+	registry := step.NewRegistry()
+	if err := shell.Register(registry); err != nil {
+		t.Fatal(err)
+	}
 	var terminal bytes.Buffer
 	command := newRootCmd(dependencies{
 		stdin: bytes.NewReader(nil), stdout: &terminal, stderr: &terminal,
 		cwd: func() (string, error) { return root, nil }, homeDir: func() (string, error) { return root, nil },
-		configDir: func() (string, error) { return root, nil }, registry: step.NewRegistry(),
+		configDir: func() (string, error) { return root, nil }, registry: registry,
 		getenv: func(name string) string { return values[name] },
 		waitUntil: func(context.Context, time.Time) error {
 			t.Fatal("--once unexpectedly waited for the workflow schedule")
@@ -71,7 +78,9 @@ steps:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(summary), "### Wuko: `check`") || !strings.Contains(string(summary), "| succeeded |") {
+	if !strings.Contains(string(summary), "### Wuko: `check`") || !strings.Contains(string(summary), "| succeeded |") ||
+		!strings.Contains(string(summary), "#### Steps") || !strings.Contains(string(summary), "| build | ✓ succeeded |") ||
+		!strings.Contains(string(summary), "#### Execution statistics") {
 		t.Fatalf("summary = %q", summary)
 	}
 }

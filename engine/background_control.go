@@ -117,7 +117,7 @@ func (e *Engine) executeBackgroundControl(ctx context.Context, definition *workf
 	kind := control.Kind()
 	outcome := stepOutcome{started: true}
 	finish := func(status ExecutionStatus, err error) {
-		outcome.stats = StepStats{StepRunID: options.stepRunID, ID: workflowStep.ID, Type: kind, Index: index, Status: status, StartedAt: started, Duration: time.Since(started), Error: err}
+		outcome.stats = StepStats{StepRunID: options.stepRunID, ID: workflowStep.ID, Type: kind, Location: workflowStep.Location, Index: index, Status: status, StartedAt: started, Duration: time.Since(started), Error: err}
 		reportStepFinished(options, definition.Name, workflowStep.ID, kind, index, total, outcome.stats)
 	}
 	fail := func(cause error) stepOutcome {

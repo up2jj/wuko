@@ -794,7 +794,7 @@ func recordSkippedSteps(definition *workflow.Definition, steps []workflow.Step, 
 		stepOptions := withStepRun(options)
 		stepStats := StepStats{
 			StepRunID: stepOptions.stepRunID, ID: workflowStep.ID, Type: skippedStepKind(workflowStep), Index: index,
-			Status: StatusSkipped, StartedAt: started,
+			Location: workflowStep.Location, Status: StatusSkipped, StartedAt: started,
 		}
 		reportStepFinished(stepOptions, definition.Name, workflowStep.ID, stepStats.Type, index, total, stepStats)
 		recordStep(stats, stepStats)
@@ -836,7 +836,7 @@ func (e *Engine) executeStep(ctx context.Context, definition *workflow.Definitio
 	finishStep := func(status ExecutionStatus, stepErr error, attempts []AttemptStats, retryWait time.Duration) {
 		outcome.stats = StepStats{
 			StepRunID: options.stepRunID, ID: workflowStep.ID, Type: kind, Index: index, Status: status,
-			StartedAt: stepStartedAt, Duration: time.Since(stepStartedAt),
+			Location: workflowStep.Location, StartedAt: stepStartedAt, Duration: time.Since(stepStartedAt),
 			RetryWait: retryWait, Attempts: attempts, Error: stepErr,
 		}
 		reportStepFinished(options, definition.Name, workflowStep.ID, kind, index, total, outcome.stats)

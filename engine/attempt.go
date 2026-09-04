@@ -71,7 +71,7 @@ func (e *Engine) executeAttempt(ctx context.Context, definition *workflow.Defini
 	finish := func(status ExecutionStatus, err error, nested RunStats) {
 		outcome.stats = StepStats{
 			StepRunID: options.stepRunID, ID: workflowStep.ID, Type: "attempt", Index: index,
-			Status: status, StartedAt: startedAt, Duration: time.Since(startedAt), Error: err,
+			Location: workflowStep.Location, Status: status, StartedAt: startedAt, Duration: time.Since(startedAt), Error: err,
 			Attempts: attemptStats, RetryWait: retryWait, Polls: polls, PollWait: pollWait,
 		}
 		outcome.nested = &nested

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/up2jj/wuko/correlation"
+	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/process"
 )
 
@@ -61,11 +62,13 @@ type AttemptStats struct {
 	Error     error
 }
 
-// StepStats records the terminal outcome, retries, and polling activity of one workflow step.
+// StepStats records the source location, terminal outcome, retries, and polling activity of one
+// workflow step.
 type StepStats struct {
 	StepRunID  correlation.StepRunID
 	ID         string
 	Type       string
+	Location   diagnostic.Location
 	Index      int
 	Status     ExecutionStatus
 	StartedAt  time.Time

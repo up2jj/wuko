@@ -43,7 +43,7 @@ func (e *Engine) executeTryCatch(ctx context.Context, definition *workflow.Defin
 	finish := func(status ExecutionStatus, err error, phases []IterationStats, nested RunStats) {
 		outcome.stats = StepStats{
 			StepRunID: options.stepRunID, ID: workflowStep.ID, Type: "try", Index: index,
-			Status: status, StartedAt: startedAt, Duration: time.Since(startedAt), Error: err,
+			Location: workflowStep.Location, Status: status, StartedAt: startedAt, Duration: time.Since(startedAt), Error: err,
 			Iterations: phases,
 		}
 		outcome.nested = &nested

@@ -50,10 +50,12 @@ func TestRunReportsProgressAndCollectsStats(t *testing.T) {
 	policy := immediateRetry(2)
 	policy.InitialDelay = workflow.LiteralDuration(workflow.Duration(time.Nanosecond))
 	policy.MaxDelay = workflow.LiteralDuration(workflow.Duration(time.Nanosecond))
-	definition := testDefinition(t, "progress",
-		attemptStep("publish", policy, workflow.Step{Type: "retry"}),
-		workflow.Step{ID: "deploy", Type: "retry", If: "vars.run"},
-	)
+	attemptLocation := diagnostic.Location{Source: "/project/workflow.yaml", Line: 4, Column: 3}
+	skippedLocation := diagnostic.Location{Source: "/project/workflow.yaml", Line: 8, Column: 3}
+	publish := attemptStep("publish", policy, workflow.Step{Type: "retry"})
+	publish.Location = attemptLocation
+	definition := testDefinition(t, "progress", publish,
+		workflow.Step{ID: "deploy", Type: "retry", If: "vars.run", Location: skippedLocation})
 	definition.Vars = map[string]any{"run": false}
 	var events []ProgressEvent
 	state, err := New(registry).Run(t.Context(), definition, Options{
@@ -69,6 +71,9 @@ func TestRunReportsProgressAndCollectsStats(t *testing.T) {
 	}
 	if len(stats.Steps) != 2 || len(stats.Steps[0].Attempts) != 2 || stats.Steps[1].Status != StatusSkipped {
 		t.Fatalf("step stats = %#v", stats.Steps)
+	}
+	if stats.Steps[0].Location != attemptLocation || stats.Steps[1].Location != skippedLocation {
+		t.Fatalf("step locations = %#v, want %#v and %#v", stats.Steps, attemptLocation, skippedLocation)
 	}
 	wantKinds := []ProgressKind{
 		WorkflowStarted, StepStarted, AttemptStarted, StepStarted, StepFinished, AttemptFinished,
@@ -99,7 +104,8 @@ func (alwaysFailRunner) Run(context.Context, step.Request) (step.Result, error) 
 
 func TestRunReportsTerminalFailure(t *testing.T) {
 	registry := newTestRegistry(t, map[string]step.Builder{"fail": func(map[string]any) (step.Runner, error) { return alwaysFailRunner{}, nil }})
-	definition := testDefinition(t, "failure", workflow.Step{ID: "break", Type: "fail"})
+	location := diagnostic.Location{Source: "/project/workflow.yaml", Line: 5, Column: 3}
+	definition := testDefinition(t, "failure", workflow.Step{ID: "break", Type: "fail", Location: location})
 	var events []ProgressEvent
 	_, err := New(registry).Run(t.Context(), definition, Options{Progress: func(event ProgressEvent) { events = append(events, event) }})
 	if err == nil {
@@ -108,6 +114,9 @@ func TestRunReportsTerminalFailure(t *testing.T) {
 	last := events[len(events)-1]
 	if last.Kind != WorkflowFinished || last.Status != StatusFailed || last.Stats.Failed != 1 || last.Stats.Attempts != 1 {
 		t.Fatalf("last event = %#v", last)
+	}
+	if last.Stats.Steps[0].Location != location {
+		t.Fatalf("step location = %#v, want %#v", last.Stats.Steps[0].Location, location)
 	}
 }
 

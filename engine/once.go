@@ -52,7 +52,7 @@ func (e *Engine) executeOnce(ctx context.Context, definition *workflow.Definitio
 	finish := func(status ExecutionStatus, err error, nested RunStats) {
 		outcome.stats = StepStats{
 			StepRunID: options.stepRunID, ID: workflowStep.ID, Type: "once", Index: index,
-			Status: status, StartedAt: startedAt, Duration: time.Since(startedAt), Error: err,
+			Location: workflowStep.Location, Status: status, StartedAt: startedAt, Duration: time.Since(startedAt), Error: err,
 		}
 		outcome.nested = &nested
 		reportStepFinished(options, definition.Name, workflowStep.ID, "once", index, total, outcome.stats)

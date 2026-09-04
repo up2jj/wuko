@@ -66,7 +66,7 @@ func (e *Engine) executeCancelOn(ctx context.Context, definition *workflow.Defin
 	finish := func(status ExecutionStatus, err error, participants []IterationStats, nested RunStats) {
 		outcome.stats = StepStats{
 			StepRunID: options.stepRunID, ID: workflowStep.ID, Type: "cancel_on", Index: index,
-			Status: status, StartedAt: startedAt, Duration: time.Since(startedAt), Error: err,
+			Location: workflowStep.Location, Status: status, StartedAt: startedAt, Duration: time.Since(startedAt), Error: err,
 			Iterations: participants,
 		}
 		outcome.nested = &nested
