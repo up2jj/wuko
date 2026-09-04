@@ -211,7 +211,7 @@ never execute cleanup.
   before that list and before the session closes. There is no recursive defer, ordinary per-step
   `finally`, multiple-clause selection, or `catch` construct.
 - Error messages are unstable informational text and should not be used as condition keys.
-- There is no block-level cleanup timeout. Bound cleanup with step and control timeouts. CLI cleanup
+- Bound cleanup by wrapping it in an `attempt` with a `timeout`. CLI cleanup
   may still be forcibly terminated by the shutdown budget or a second signal.
 - External effects are not transactional and are not rolled back automatically.
 - Action cleanup runs per caller attempt, so retrying after cleanup failure can repeat successful

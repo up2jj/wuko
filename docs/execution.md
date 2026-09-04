@@ -753,6 +753,11 @@ and the body step for the action.
 If the control fails, it publishes nothing at all — no counters, no partial body outputs, no
 variable writes.
 
+Managed resources follow the same rule. A `temp` directory or `docker` container created inside a
+discarded pass is released as that pass is discarded, so a long poll does not accumulate one per
+iteration. Only the winning pass's resources are promoted to the scope that owns the attempt, where
+they live until that scope ends. A release failure ends the control rather than being swallowed.
+
 Body step ids are still checked against the enclosing scope, exactly as `once`, `try`/`catch`, and
 `cancel_on` bodies are, so a body step may not shadow an enclosing id.
 
@@ -873,9 +878,6 @@ and commits only the winning pass. Reach for `loop` when each iteration is real 
 
 - `max_attempts` is a cumulative budget, not a consecutive one. Over a long poll, failures spread
   anywhere across the run add up and can end the wait.
-- A `temp` or `docker` step in a repeated body registers its cleanup with the enclosing scope, so
-  resources from discarded passes are released when that scope ends rather than when the pass is
-  discarded.
 
 ## Scheduled runs
 
