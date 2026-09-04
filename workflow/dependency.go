@@ -151,6 +151,19 @@ func stepDependencyReferences(steps []Step) []dependencyOutputReference {
 			references = append(references, templateDependencyReferences(workflowStep.Once.Key)...)
 		}
 		if workflowStep.Attempt != nil {
+			for _, option := range []AttemptDuration{
+				workflowStep.Attempt.Duration,
+				workflowStep.Attempt.Timeout,
+				workflowStep.Attempt.InitialDelay,
+				workflowStep.Attempt.MaxDelay,
+				workflowStep.Attempt.Interval,
+				workflowStep.Attempt.MaxElapsedTime,
+			} {
+				references = append(references, expressionDependencyReferences(option.Expression)...)
+			}
+			references = append(references, expressionDependencyReferences(workflowStep.Attempt.MaxAttempts.Expression)...)
+			references = append(references, expressionDependencyReferences(workflowStep.Attempt.BackoffMultiplier.Expression)...)
+			references = append(references, expressionDependencyReferences(workflowStep.Attempt.Jitter.Expression)...)
 			references = append(references, expressionDependencyReferences(string(workflowStep.Attempt.Until))...)
 			references = append(references, expressionDependencyReferences(string(workflowStep.Attempt.When))...)
 			references = append(references, templateDependencyReferences(workflowStep.Attempt.OperationID)...)

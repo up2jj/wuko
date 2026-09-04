@@ -192,9 +192,9 @@ func (control *AttemptControl) UnmarshalYAML(node *yaml.Node) error {
 		// through max_attempts.
 		MaxAttempts:       AttemptCount{Literal: 1},
 		InitialDelay:      AttemptDuration{Literal: Duration(time.Second)},
-		BackoffMultiplier: AttemptFactor{Literal: 2, declared: true},
+		BackoffMultiplier: AttemptFactor{Literal: 2},
 		MaxDelay:          AttemptDuration{Literal: Duration(30 * time.Second)},
-		Jitter:            AttemptFactor{Literal: 0.2, declared: true},
+		Jitter:            AttemptFactor{Literal: 0.2},
 	}
 	if err := node.Decode(&decoded); err != nil {
 		return err
@@ -220,13 +220,15 @@ func (control *AttemptControl) UnmarshalYAML(node *yaml.Node) error {
 }
 
 // IsDelay reports whether the control is the body-less fixed delay form.
-func (control AttemptControl) IsDelay() bool { return control.hasDuration }
+func (control AttemptControl) IsDelay() bool {
+	return control.hasDuration || control.Duration.Set()
+}
 
 // Validate checks the attempt declaration's shape, and any option written as a literal. Options
 // written as expressions are resolved when execution reaches the control, so their numeric rules
 // are enforced by ResolvedAttempt.Validate instead -- the same split batch size already lives with.
 func (control AttemptControl) Validate() error {
-	if control.hasDuration {
+	if control.IsDelay() {
 		return control.validateDelay()
 	}
 	if control.Duration.Set() {
@@ -265,8 +267,10 @@ func (control AttemptControl) Validate() error {
 func (control AttemptControl) validateDelay() error {
 	// Length, not nil-ness: require expansion writes an empty non-nil slice back through
 	// transformChildSequences, so a body-less control still reaches here with Steps allocated.
-	if len(control.Steps) > 0 || control.Timeout.Set() || control.Until != "" || control.Interval.Set() ||
-		control.When != "" || len(control.Methods) > 0 || len(control.Statuses) > 0 ||
+	if len(control.Steps) > 0 || control.Timeout.Set() || control.MaxAttempts.Set() ||
+		control.InitialDelay.Set() || control.BackoffMultiplier.Set() || control.MaxDelay.Set() ||
+		control.Jitter.Set() || control.Until != "" || control.Interval.Set() || control.When != "" ||
+		control.hasMethods || control.hasStatuses || len(control.Methods) > 0 || len(control.Statuses) > 0 ||
 		control.MaxElapsedTime.Set() || control.OperationID != "" {
 		return fmt.Errorf("attempt duration cannot be combined with other attempt fields")
 	}
@@ -468,7 +472,7 @@ func (values ResolvedAttempt) validate(control AttemptControl, resolved bool) er
 	// An option backed by an expression is still zero until Resolve has run, so its numeric
 	// rule can only be enforced once every expression has been evaluated.
 	known := func(expression string) bool { return resolved || expression == "" }
-	if control.hasDuration {
+	if control.IsDelay() {
 		if known(control.Duration.Expression) && values.Duration <= 0 {
 			return fmt.Errorf("attempt duration must be greater than zero")
 		}
@@ -497,6 +501,9 @@ func (values ResolvedAttempt) validate(control AttemptControl, resolved bool) er
 	if known(control.Jitter.Expression) &&
 		(math.IsNaN(values.Jitter) || math.IsInf(values.Jitter, 0) || values.Jitter < 0 || values.Jitter > 1) {
 		return fmt.Errorf("attempt jitter must be between 0 and 1")
+	}
+	if control.Until != "" && known(control.MaxElapsedTime.Expression) && values.MaxElapsedTime <= 0 {
+		return fmt.Errorf("attempt max_elapsed_time must be greater than zero when until is set")
 	}
 	if known(control.MaxElapsedTime.Expression) && values.MaxElapsedTime < 0 {
 		return fmt.Errorf("attempt max_elapsed_time cannot be negative")

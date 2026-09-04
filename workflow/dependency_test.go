@@ -172,6 +172,41 @@ func TestResolveDependencyPlanValidatesChoiceExpressions(t *testing.T) {
 	}
 }
 
+func TestResolveDependencyPlanValidatesAttemptOptionExpressions(t *testing.T) {
+	t.Parallel()
+	producer := dependencyDefinition("producer", "/producer.yaml")
+	consumer := dependencyDefinition("consumer", "/consumer.yaml")
+	consumer.DependsOn = map[string]string{"build": "producer"}
+	resolve := func(context.Context, string) (*Definition, error) { return producer, nil }
+	expression := "dependencies.build.missing"
+
+	tests := []struct {
+		name string
+		set  func(*AttemptControl)
+	}{
+		{name: "duration", set: func(control *AttemptControl) { control.Duration.Expression = expression }},
+		{name: "timeout", set: func(control *AttemptControl) { control.Timeout.Expression = expression }},
+		{name: "max attempts", set: func(control *AttemptControl) { control.MaxAttempts.Expression = expression }},
+		{name: "initial delay", set: func(control *AttemptControl) { control.InitialDelay.Expression = expression }},
+		{name: "backoff multiplier", set: func(control *AttemptControl) { control.BackoffMultiplier.Expression = expression }},
+		{name: "max delay", set: func(control *AttemptControl) { control.MaxDelay.Expression = expression }},
+		{name: "jitter", set: func(control *AttemptControl) { control.Jitter.Expression = expression }},
+		{name: "interval", set: func(control *AttemptControl) { control.Interval.Expression = expression }},
+		{name: "max elapsed time", set: func(control *AttemptControl) { control.MaxElapsedTime.Expression = expression }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			control := &AttemptControl{}
+			test.set(control)
+			consumer.Steps = []Step{{ID: "run", Attempt: control}}
+			_, err := ResolveDependencyPlan(t.Context(), consumer, resolve)
+			if err == nil || !strings.Contains(err.Error(), `does not declare output "missing"`) {
+				t.Fatalf("dependency reference error = %v", err)
+			}
+		})
+	}
+}
+
 func TestResolveDependencyPlanChecksOnlySemanticDependencyReferences(t *testing.T) {
 	t.Parallel()
 	producer := dependencyDefinition("producer", "/producer.yaml")

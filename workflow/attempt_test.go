@@ -146,6 +146,38 @@ func TestResolveAttemptEvaluatesAndValidates(t *testing.T) {
 	}
 }
 
+func TestResolveAttemptRejectsZeroElapsedTimeForReadinessLoop(t *testing.T) {
+	t.Parallel()
+	control := AttemptControl{
+		Until:             "true",
+		MaxElapsedTime:    AttemptDuration{Expression: "budget"},
+		MaxAttempts:       LiteralCount(1),
+		BackoffMultiplier: LiteralFactor(1),
+	}
+	_, err := control.Resolve(func(string) (any, error) { return "0s", nil })
+	if err == nil || !strings.Contains(err.Error(), "max_elapsed_time must be greater than zero") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestProgrammaticAttemptDelayUsesDeclaredDuration(t *testing.T) {
+	t.Parallel()
+	control := AttemptControl{Duration: LiteralDuration(Duration(time.Second))}
+	if !control.IsDelay() {
+		t.Fatal("LiteralDuration did not select the delay form")
+	}
+	if err := control.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+	resolved, err := control.Resolve(func(string) (any, error) { return nil, nil })
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+	if resolved.Duration != time.Second {
+		t.Fatalf("duration = %v, want 1s", resolved.Duration)
+	}
+}
+
 func TestLoadAttemptHTTPFilters(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -197,6 +229,7 @@ func TestLoadRejectsInvalidAttemptPolicy(t *testing.T) {
 		{name: "max delay", fields: "      initial_delay: 2s\n      max_delay: 1s\n", want: "max_delay"},
 		{name: "jitter", fields: "      jitter: 1.1\n", want: "jitter"},
 		{name: "elapsed", fields: "      max_elapsed_time: -1s\n", want: "max_elapsed_time"},
+		{name: "zero elapsed readiness budget", fields: "      until: steps.work.done\n      max_elapsed_time: 0s\n", want: "max_elapsed_time must be greater than zero"},
 		{name: "blank when", fields: "      when: ''\n", want: "attempt when must not be empty"},
 		{name: "non-scalar when", fields: "      when: [true]\n", want: "attempt when must be a boolean expression"},
 		{name: "unknown", fields: "      unknown: true\n", want: "field unknown"},
@@ -237,6 +270,31 @@ func TestLoadRejectsInvalidAttemptShape(t *testing.T) {
 			name:     "zero duration",
 			workflow: "version: 1\nname: invalid\nsteps:\n  - id: run\n    attempt: {duration: 0s}\n",
 			want:     "duration must be greater than zero",
+		},
+		{
+			name:     "duration with max attempts",
+			workflow: "version: 1\nname: invalid\nsteps:\n  - id: run\n    attempt: {duration: 1s, max_attempts: 5}\n",
+			want:     "duration cannot be combined with other attempt fields",
+		},
+		{
+			name:     "duration with initial delay",
+			workflow: "version: 1\nname: invalid\nsteps:\n  - id: run\n    attempt: {duration: 1s, initial_delay: 2s}\n",
+			want:     "duration cannot be combined with other attempt fields",
+		},
+		{
+			name:     "duration with backoff multiplier",
+			workflow: "version: 1\nname: invalid\nsteps:\n  - id: run\n    attempt: {duration: 1s, backoff_multiplier: 3}\n",
+			want:     "duration cannot be combined with other attempt fields",
+		},
+		{
+			name:     "duration with max delay",
+			workflow: "version: 1\nname: invalid\nsteps:\n  - id: run\n    attempt: {duration: 1s, max_delay: 2s}\n",
+			want:     "duration cannot be combined with other attempt fields",
+		},
+		{
+			name:     "duration with jitter",
+			workflow: "version: 1\nname: invalid\nsteps:\n  - id: run\n    attempt: {duration: 1s, jitter: 0.5}\n",
+			want:     "duration cannot be combined with other attempt fields",
 		},
 		{
 			name:     "missing id",

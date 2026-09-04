@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/step"
@@ -46,8 +47,11 @@ func TestRunReportsProgressAndCollectsStats(t *testing.T) {
 	registry := newTestRegistry(t, map[string]step.Builder{"retry": func(map[string]any) (step.Runner, error) {
 		return retryTestRunner{failures: 1, requests: &requests}, nil
 	}})
+	policy := immediateRetry(2)
+	policy.InitialDelay = workflow.LiteralDuration(workflow.Duration(time.Nanosecond))
+	policy.MaxDelay = workflow.LiteralDuration(workflow.Duration(time.Nanosecond))
 	definition := testDefinition(t, "progress",
-		attemptStep("publish", immediateRetry(2), workflow.Step{Type: "retry"}),
+		attemptStep("publish", policy, workflow.Step{Type: "retry"}),
 		workflow.Step{ID: "deploy", Type: "retry", If: "vars.run"},
 	)
 	definition.Vars = map[string]any{"run": false}
@@ -81,6 +85,9 @@ func TestRunReportsProgressAndCollectsStats(t *testing.T) {
 	}
 	if events[5].Status != StatusFailed || events[7].Attempt != 2 || events[13].Stats.Attempts != 2 {
 		t.Fatalf("events = %#v", events)
+	}
+	if events[6].RetryDelay != time.Nanosecond || events[6].PollDelay != 0 {
+		t.Fatalf("retry event delays = retry %v, poll %v", events[6].RetryDelay, events[6].PollDelay)
 	}
 }
 

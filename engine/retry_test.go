@@ -227,7 +227,7 @@ func TestRunRetriesAttemptTimeout(t *testing.T) {
 		if runner.attempts != 2 {
 			t.Fatalf("attempts = %d", runner.attempts)
 		}
-		if state.Stats.TimedOut != 2 || state.Stats.Retries != 1 {
+		if state.Stats.TimedOut != 1 || state.Stats.Retries != 1 {
 			t.Fatalf("stats = %#v", state.Stats)
 		}
 	})

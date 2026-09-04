@@ -709,6 +709,12 @@ func (e *Engine) executeSequence(ctx context.Context, definition *workflow.Defin
 			recordStep(stats, outcome.stats)
 			if outcome.nested != nil {
 				rollupNestedMetrics(stats, *outcome.nested)
+				if workflowStep.IsAttempt() {
+					// A timed-out attempt is present both in the control's AttemptStats and in
+					// the child stats for the pass that hit the same deadline. Count the
+					// timeout once while preserving any additional nested timeouts.
+					stats.TimedOut -= min(stepTimeoutCount(outcome.stats), outcome.nested.TimedOut)
+				}
 			}
 		}
 		index++
@@ -1111,16 +1117,20 @@ func recordStep(stats *RunStats, stepStats StepStats) {
 	stats.RetryWait += stepStats.RetryWait
 	stats.Polls += stepStats.Polls
 	stats.PollWait += stepStats.PollWait
-	timedOutAttempts := 0
+	stats.TimedOut += stepTimeoutCount(stepStats)
+}
+
+func stepTimeoutCount(stepStats StepStats) int {
+	timedOut := 0
 	for _, attempt := range stepStats.Attempts {
 		if attempt.Status == StatusTimedOut {
-			timedOutAttempts++
+			timedOut++
 		}
 	}
-	stats.TimedOut += timedOutAttempts
-	if stepStats.Status == StatusTimedOut && timedOutAttempts == 0 {
-		stats.TimedOut++
+	if stepStats.Status == StatusTimedOut && timedOut == 0 {
+		return 1
 	}
+	return timedOut
 }
 
 func statusFromError(err error) ExecutionStatus {

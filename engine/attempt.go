@@ -326,7 +326,7 @@ func (e *Engine) executeAttempt(ctx context.Context, definition *workflow.Defini
 		report(options, ProgressEvent{
 			Kind: RetryScheduled, Status: StatusRunning, Time: time.Now(), WorkflowName: definition.Name,
 			Depth: options.depth, StepID: workflowStep.ID, StepType: "attempt",
-			Attempt: attempt + 1, MaxAttempts: policy.MaxAttempts, PollDelay: delay, Error: passErr,
+			Attempt: attempt + 1, MaxAttempts: policy.MaxAttempts, RetryDelay: delay, Error: passErr,
 		})
 		waitStarted := time.Now()
 		if err := waitForRetry(runCtx, delay); err != nil {
