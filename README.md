@@ -135,6 +135,8 @@ wuko uninstall release
 wuko uninstall --global --yes release
 ```
 
+Executable plugins can add language-neutral namespaced steps and executors. See [Executable plugins](docs/plugins.md) for discovery, pinned remote manifests, lifecycle hooks, installation, and the Go authoring initializer.
+
 Bare `wuko` opens a searchable picker in a terminal and shows each workflow's direct prerequisites.
 Press Enter to run the selected workflow, `u` to open a declared browser form, `m` to open the
 marketplace it came from, `r` to reinstall it from that marketplace, `e` to open it in the

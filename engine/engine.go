@@ -144,6 +144,7 @@ func New(registry *step.Registry, options ...Option) *Engine {
 }
 
 func (e *Engine) Validate(ctx context.Context, definition *workflow.Definition, options Options) error {
+	ctx = workflow.ContextWithPlugins(ctx, definition.Plugins)
 	options.secretSession = definition.SecretSession()
 	started := time.Now()
 	trace(options, diagnostic.Event{Phase: diagnostic.PhaseValidation, Status: diagnostic.StatusStarted, Time: started, WorkflowName: definition.Name, Location: definition.Location, Message: "validating workflow"})
@@ -360,7 +361,7 @@ func (e *Engine) validateSteps(ctx context.Context, definition *workflow.Definit
 			traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusFailed, started, "validating templates", err)
 			return fmt.Errorf("step %q template: %w", workflowStep.ID, err)
 		}
-		runner, err := e.registry.Build(workflowStep.Type, workflowStep.With)
+		runner, err := e.registry.BuildContext(ctx, workflowStep.Type, workflowStep.With)
 		if err != nil {
 			traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusFailed, started, "building runner", err)
 			return fmt.Errorf("step %q: %w", workflowStep.ID, err)
@@ -388,6 +389,7 @@ func (e *Engine) validateSteps(ctx context.Context, definition *workflow.Definit
 }
 
 func (e *Engine) Run(ctx context.Context, definition *workflow.Definition, options Options) (runState *State, runErr error) {
+	ctx = workflow.ContextWithPlugins(ctx, definition.Plugins)
 	options.secretSession = definition.SecretSession()
 	if session := definition.SecretSession(); session != nil {
 		defer func() { runErr = session.RedactError(runErr) }()
@@ -502,6 +504,7 @@ func (e *Engine) RunSteps(ctx context.Context, definition *workflow.Definition, 
 	if definition == nil {
 		return nil, fmt.Errorf("workflow definition is required")
 	}
+	ctx = workflow.ContextWithPlugins(ctx, definition.Plugins)
 	if len(steps) == 0 {
 		return nil, nil
 	}
@@ -920,7 +923,7 @@ func (e *Engine) executeStep(ctx context.Context, definition *workflow.Definitio
 		}
 		runnerStarted := time.Now()
 		traceStep(options, definition, workflowStep, diagnostic.PhaseRunner, diagnostic.StatusStarted, time.Time{}, "building step runner", nil)
-		runner, err := e.registry.Build(workflowStep.Type, raw)
+		runner, err := e.registry.BuildContext(ctx, workflowStep.Type, raw)
 		if err != nil {
 			traceStep(options, definition, workflowStep, diagnostic.PhaseRunner, diagnostic.StatusFailed, runnerStarted, "", err)
 			stepErr := fmt.Errorf("workflow %q step %q (%s): %w", definition.Name, workflowStep.ID, workflowStep.Type, err)
@@ -1240,7 +1243,7 @@ func (e *Engine) validateAction(ctx context.Context, definition *workflow.Defini
 	}
 	defer cleanup()
 	inputs := actionValidationInputs(workflowStep.Action)
-	inner := &workflow.Definition{Version: 1, Name: workflowStep.Action.Name, Timezone: definition.Timezone, Templates: workflowStep.Action.Templates, Dir: dir, DirBorrowed: workflowStep.Action.DirBorrowed, Steps: workflowStep.Action.Steps, Finally: workflowStep.Action.Finally, Vars: map[string]any{}, Env: workflow.Environment{}, Location: workflowStep.Action.Location}
+	inner := &workflow.Definition{Version: 1, Name: workflowStep.Action.Name, Timezone: definition.Timezone, Templates: workflowStep.Action.Templates, Plugins: definition.Plugins, Dir: dir, DirBorrowed: workflowStep.Action.DirBorrowed, Steps: workflowStep.Action.Steps, Finally: workflowStep.Action.Finally, Vars: map[string]any{}, Env: workflow.Environment{}, Location: workflowStep.Action.Location}
 	inner.InheritSecretSession(definition)
 	return e.Validate(ctx, inner, Options{
 		InvocationID: options.InvocationID,
@@ -1269,7 +1272,7 @@ func (e *Engine) prepareActionExecutor(definition *workflow.Definition, workflow
 	if err != nil {
 		return nil, nil, err
 	}
-	inner := &workflow.Definition{Version: 1, Name: workflowStep.Action.Name, Timezone: definition.Timezone, Templates: workflowStep.Action.Templates, Dir: dir, DirBorrowed: workflowStep.Action.DirBorrowed, Steps: workflowStep.Action.Steps, Finally: workflowStep.Action.Finally, Vars: map[string]any{}, Env: workflow.Environment{}, Location: workflowStep.Action.Location}
+	inner := &workflow.Definition{Version: 1, Name: workflowStep.Action.Name, Timezone: definition.Timezone, Templates: workflowStep.Action.Templates, Plugins: definition.Plugins, Dir: dir, DirBorrowed: workflowStep.Action.DirBorrowed, Steps: workflowStep.Action.Steps, Finally: workflowStep.Action.Finally, Vars: map[string]any{}, Env: workflow.Environment{}, Location: workflowStep.Action.Location}
 	inner.InheritSecretSession(definition)
 	execute := func(ctx context.Context, request step.Request) (step.Result, error) {
 		innerState, err := e.Run(ctx, inner, Options{

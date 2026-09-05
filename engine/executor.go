@@ -24,7 +24,7 @@ func (e *Engine) validateExecutorBlock(ctx context.Context, definition *workflow
 	if err := validateTemplates(options.renderer, block.Executor.With, false); err != nil {
 		return fail(fmt.Errorf("template: %w", err))
 	}
-	provider, err := e.executors.Build(block.Executor.Type, block.Executor.With)
+	provider, err := e.executors.BuildContext(ctx, block.Executor.Type, block.Executor.With)
 	if err != nil {
 		return fail(err)
 	}
@@ -58,7 +58,7 @@ func (e *Engine) executeExecutorBlock(ctx context.Context, definition *workflow.
 	if !ok {
 		return fmt.Errorf("workflow %q executor %q: configuration is not an object", definition.Name, block.Executor.Type)
 	}
-	provider, err := e.executors.Build(block.Executor.Type, raw)
+	provider, err := e.executors.BuildContext(ctx, block.Executor.Type, raw)
 	if err != nil {
 		return fmt.Errorf("workflow %q executor %q: %w", definition.Name, block.Executor.Type, err)
 	}

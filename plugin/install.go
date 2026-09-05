@@ -1,0 +1,131 @@
+package plugin
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"runtime"
+	"time"
+)
+
+const MarkerName = ".wuko-plugin.json"
+
+type InstallationMarker struct {
+	ManifestVersion int    `json:"manifest_version"`
+	Namespace       string `json:"namespace"`
+	PluginVersion   string `json:"plugin_version"`
+	Source          string `json:"source"`
+	ManifestDigest  string `json:"manifest_digest"`
+	ArtifactDigest  string `json:"artifact_digest"`
+	OS              string `json:"os"`
+	Arch            string `json:"arch"`
+}
+
+func Install(ctx context.Context, source, destinationRoot string, reinstall bool, clientHTTP *http.Client, stderr io.Writer) (InstallationMarker, error) {
+	release, err := FetchRelease(ctx, source, "", clientHTTP)
+	if err != nil {
+		return InstallationMarker{}, err
+	}
+	destination := filepath.Join(destinationRoot, release.Manifest.Namespace)
+	if _, err := os.Stat(destination); err == nil && !reinstall {
+		return InstallationMarker{}, fmt.Errorf("plugin %q is already installed; use --reinstall", release.Manifest.Namespace)
+	} else if err != nil && !os.IsNotExist(err) {
+		return InstallationMarker{}, err
+	}
+	if err := os.MkdirAll(destinationRoot, 0700); err != nil {
+		return InstallationMarker{}, err
+	}
+	stage, err := os.MkdirTemp(destinationRoot, ".plugin-stage-")
+	if err != nil {
+		return InstallationMarker{}, err
+	}
+	defer os.RemoveAll(stage)
+	executable, err := Extract(release, stage)
+	if err != nil {
+		return InstallationMarker{}, err
+	}
+	if err := verifyExecutable(ctx, executable, release.Manifest.Namespace, stderr); err != nil {
+		return InstallationMarker{}, err
+	}
+	marker := InstallationMarker{ManifestVersion: release.Manifest.Version, Namespace: release.Manifest.Namespace, PluginVersion: release.Manifest.PluginVersion, Source: release.CanonicalSource, ManifestDigest: release.ManifestDigest, ArtifactDigest: release.Artifact.SHA256, OS: runtime.GOOS, Arch: runtime.GOARCH}
+	data, _ := json.MarshalIndent(marker, "", "  ")
+	data = append(data, '\n')
+	if err := os.WriteFile(filepath.Join(stage, MarkerName), data, 0600); err != nil {
+		return InstallationMarker{}, err
+	}
+	backup := ""
+	if reinstall {
+		if _, err := os.Stat(destination); err == nil {
+			backupDirectory, err := os.MkdirTemp(destinationRoot, ".plugin-backup-")
+			if err != nil {
+				return InstallationMarker{}, err
+			}
+			if err := os.Remove(backupDirectory); err != nil {
+				return InstallationMarker{}, err
+			}
+			backup = backupDirectory
+			if err := os.Rename(destination, backup); err != nil {
+				return InstallationMarker{}, err
+			}
+		}
+	}
+	if err := os.Rename(stage, destination); err != nil {
+		if backup != "" {
+			_ = os.Rename(backup, destination)
+		}
+		return InstallationMarker{}, err
+	}
+	if backup != "" {
+		_ = os.RemoveAll(backup)
+	}
+	return marker, nil
+}
+
+func verifyExecutable(ctx context.Context, path, namespace string, stderr io.Writer) error {
+	client, err := launch(ctx, path, stderr)
+	if err != nil {
+		return err
+	}
+	var initialized initializeResult
+	callErr := client.call(ctx, "initialize", map[string]any{"protocol": Protocol}, &initialized, nil)
+	closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	closeErr := client.close(closeCtx)
+	if callErr != nil {
+		return callErr
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	if initialized.Protocol != Protocol || initialized.Namespace != namespace {
+		return fmt.Errorf("plugin handshake namespace or protocol mismatch")
+	}
+	return nil
+}
+
+func ValidateInstallation(directory, namespace string) (InstallationMarker, error) {
+	data, err := os.ReadFile(filepath.Join(directory, MarkerName))
+	if err != nil {
+		return InstallationMarker{}, fmt.Errorf("reading plugin marker: %w", err)
+	}
+	var marker InstallationMarker
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&marker); err != nil {
+		return InstallationMarker{}, fmt.Errorf("invalid plugin marker: %w", err)
+	}
+	if marker.ManifestVersion != 1 || marker.Namespace != namespace || marker.PluginVersion == "" || marker.Source == "" || marker.OS == "" || marker.Arch == "" || !validDigest(marker.ManifestDigest) || !validDigest(marker.ArtifactDigest) {
+		return InstallationMarker{}, fmt.Errorf("invalid plugin marker")
+	}
+	expected := filepath.Join(directory, "wuko-plugin-"+namespace)
+	info, err := os.Stat(expected)
+	if err != nil || !info.Mode().IsRegular() || info.Mode()&0111 == 0 {
+		return InstallationMarker{}, fmt.Errorf("invalid plugin installation")
+	}
+	return marker, nil
+}

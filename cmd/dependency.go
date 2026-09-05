@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"reflect"
 
 	"github.com/up2jj/wuko/engine"
 	"github.com/up2jj/wuko/workflow"
@@ -70,6 +71,9 @@ func dependencyValues(node *workflow.DependencyNode, states map[*workflow.Depend
 }
 
 func validateDependencyPlan(ctx context.Context, plan *workflow.DependencyPlan, engineFor func() *engine.Engine, optionsFor func(*workflow.Definition, map[string]map[string]any) engine.Options) error {
+	if err := validatePluginDeclarations(plan); err != nil {
+		return err
+	}
 	for _, node := range plan.Order {
 		options := optionsFor(node.Definition, node.PlaceholderDependencies())
 		if err := engineFor().Validate(ctx, node.Definition, options); err != nil {
@@ -80,6 +84,9 @@ func validateDependencyPlan(ctx context.Context, plan *workflow.DependencyPlan, 
 }
 
 func executeDependencyPlan(ctx context.Context, plan *workflow.DependencyPlan, engineFor func() *engine.Engine, optionsFor func(*workflow.Definition, map[string]map[string]any) engine.Options) (*engine.State, error) {
+	if err := validatePluginDeclarations(plan); err != nil {
+		return nil, err
+	}
 	states := make(map[*workflow.DependencyNode]*engine.State, len(plan.Order))
 	for _, node := range plan.Order {
 		options := optionsFor(node.Definition, nil)
@@ -91,4 +98,22 @@ func executeDependencyPlan(ctx context.Context, plan *workflow.DependencyPlan, e
 		states[node] = state
 	}
 	return states[plan.Root], nil
+}
+
+func validatePluginDeclarations(plan *workflow.DependencyPlan) error {
+	declarations := make(map[string]workflow.PluginSource)
+	for _, node := range plan.Order {
+		for namespace, source := range node.Definition.Plugins {
+			canonical, err := source.CanonicalSource()
+			if err != nil {
+				return fmt.Errorf("plugin %q: %w", namespace, err)
+			}
+			source.Source = canonical
+			if previous, exists := declarations[namespace]; exists && !reflect.DeepEqual(previous, source) {
+				return fmt.Errorf("plugin %q has conflicting declarations in dependency plan", namespace)
+			}
+			declarations[namespace] = source
+		}
+	}
+	return nil
 }

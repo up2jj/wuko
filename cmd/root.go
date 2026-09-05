@@ -21,6 +21,7 @@ import (
 	envload "github.com/up2jj/wuko/environment"
 	"github.com/up2jj/wuko/executor"
 	"github.com/up2jj/wuko/observe"
+	"github.com/up2jj/wuko/plugin"
 	"github.com/up2jj/wuko/provider"
 	workflowschedule "github.com/up2jj/wuko/schedule"
 	"github.com/up2jj/wuko/step"
@@ -123,6 +124,7 @@ type dependencies struct {
 	executable    func() (string, error)
 	registry      *step.Registry
 	executors     *executor.Registry
+	plugins       *plugin.Manager
 	providers     *provider.Registry
 	loader        *workflow.Loader
 	isInteractive func(io.Reader) bool
@@ -173,6 +175,9 @@ func executeWithSignals(signals <-chan os.Signal, gracePeriod time.Duration, exe
 func NewRootCmd() *cobra.Command {
 	registry := step.NewRegistry()
 	executors := executor.NewRegistry()
+	plugins := plugin.NewManager(plugin.Config{CWD: os.Getwd, HomeDir: os.UserHomeDir, ConfigDir: os.UserConfigDir, LookPath: exec.LookPath, Stderr: os.Stderr, HostVersion: version})
+	registry.SetResolver(plugins.ResolveStep)
+	executors.SetResolver(plugins.ResolveExecutor)
 	for _, register := range []func(*step.Registry) error{
 		inputstep.Register, passwordstep.Register, choice.Register, pathstep.Register, review.Register, tablestep.Register,
 		confirm.Register, assertstep.Register, setstep.Register, importvarsstep.Register, decodestep.Register, jsonpathstep.Register, editstep.Register, extractstep.Register, semverstep.Register, httpstep.Register, filestep.Register, scaffoldstep.Register, tempstep.Register, globstep.Register, watchstep.Register, cachestep.Register, changedstep.Register, requiretoolstep.Register,
@@ -192,7 +197,7 @@ func NewRootCmd() *cobra.Command {
 	return newRootCmd(dependencies{
 		stdin: os.Stdin, stdout: os.Stdout, stderr: os.Stderr,
 		cwd: os.Getwd, environment: environments,
-		homeDir: os.UserHomeDir, configDir: os.UserConfigDir, registry: registry, executors: executors,
+		homeDir: os.UserHomeDir, configDir: os.UserConfigDir, registry: registry, executors: executors, plugins: plugins,
 		agentLookPath: exec.LookPath,
 		executable:    os.Executable,
 		loader:        workflow.NewLoader(nil), providers: defaultProviderRegistry(), isInteractive: interactive,
@@ -213,6 +218,17 @@ func workflowEngine(deps dependencies) *engine.Engine {
 }
 
 func newRootCmd(deps dependencies) *cobra.Command {
+	if deps.registry == nil {
+		deps.registry = step.NewRegistry()
+	}
+	if deps.executors == nil {
+		deps.executors = executor.NewRegistry()
+	}
+	if deps.plugins == nil {
+		deps.plugins = plugin.NewManager(plugin.Config{CWD: deps.cwd, HomeDir: deps.homeDir, ConfigDir: deps.configDir, LookPath: deps.agentLookPath, Stderr: deps.stderr, HostVersion: version})
+		deps.registry.SetResolver(deps.plugins.ResolveStep)
+		deps.executors.SetResolver(deps.plugins.ResolveExecutor)
+	}
 	if deps.providers == nil {
 		deps.providers = defaultProviderRegistry()
 	}
@@ -264,8 +280,32 @@ func newRootCmd(deps dependencies) *cobra.Command {
 	_ = root.RegisterFlagCompletionFunc("env-loader", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 		return []string{envload.LoaderAuto, envload.LoaderNone, envload.LoaderMise, envload.LoaderASDF, envload.LoaderDirenv}, cobra.ShellCompDirectiveNoFileComp
 	})
-	root.AddCommand(newRunCmd(deps), newUICmd(deps), newListCmd(deps), newTreeCmd(deps), newValidateCmd(deps), newAgentCmd(deps), newGitCmd(deps), newInstallCmd(deps), newUninstallCmd(deps), newMarketplaceCmd(deps), newCompletionCmd())
+	root.AddCommand(newRunCmd(deps), newUICmd(deps), newListCmd(deps), newTreeCmd(deps), newValidateCmd(deps), newAgentCmd(deps), newGitCmd(deps), newInstallCmd(deps), newUninstallCmd(deps), newMarketplaceCmd(deps), newPluginCmd(deps), newCompletionCmd())
+	wrapPluginTeardown(root, deps.plugins)
 	return root
+}
+
+func wrapPluginTeardown(command *cobra.Command, manager *plugin.Manager) {
+	if command.RunE != nil {
+		run := command.RunE
+		command.RunE = func(command *cobra.Command, args []string) (runErr error) {
+			defer func() {
+				reason := "completed"
+				if errors.Is(runErr, context.Canceled) {
+					reason = "canceled"
+				} else if runErr != nil {
+					reason = "failed"
+				}
+				teardownCtx, cancel := context.WithTimeout(context.WithoutCancel(command.Context()), 10*time.Second)
+				defer cancel()
+				runErr = errors.Join(runErr, manager.Close(teardownCtx, reason))
+			}()
+			return run(command, args)
+		}
+	}
+	for _, child := range command.Commands() {
+		wrapPluginTeardown(child, manager)
+	}
 }
 
 func defaultProviderRegistry() *provider.Registry {

@@ -256,11 +256,32 @@ func ApplyAttemptEnvironment(environment map[string]string, request Request) map
 // Builder strictly decodes and validates one step configuration.
 type Builder func(raw map[string]any) (Runner, error)
 
+// Resolver lazily resolves an otherwise unknown step type. Registries always prefer
+// explicitly registered builders, which keeps built-in behavior authoritative.
+type Resolver func(context.Context, string, map[string]any) (Runner, error)
+
 type Registry struct {
 	builders map[string]Builder
+	resolver Resolver
 }
 
-func NewRegistry() *Registry { return &Registry{builders: make(map[string]Builder)} }
+type RegistryOption func(*Registry)
+
+// WithResolver adds a context-aware fallback for unknown types.
+func WithResolver(resolver Resolver) RegistryOption {
+	return func(registry *Registry) { registry.resolver = resolver }
+}
+
+func NewRegistry(options ...RegistryOption) *Registry {
+	registry := &Registry{builders: make(map[string]Builder)}
+	for _, option := range options {
+		option(registry)
+	}
+	return registry
+}
+
+// SetResolver replaces the unknown-type fallback.
+func (r *Registry) SetResolver(resolver Resolver) { r.resolver = resolver }
 
 func (r *Registry) Register(name string, builder Builder) error {
 	if name == "" || builder == nil {
@@ -274,8 +295,19 @@ func (r *Registry) Register(name string, builder Builder) error {
 }
 
 func (r *Registry) Build(name string, raw map[string]any) (Runner, error) {
+	return r.BuildContext(context.Background(), name, raw)
+}
+
+// BuildContext builds a registered step or delegates an unknown type to the resolver.
+func (r *Registry) BuildContext(ctx context.Context, name string, raw map[string]any) (Runner, error) {
+	if r == nil {
+		return nil, fmt.Errorf("unknown step type %q", name)
+	}
 	builder, ok := r.builders[name]
 	if !ok {
+		if r.resolver != nil {
+			return r.resolver(ctx, name, raw)
+		}
 		return nil, fmt.Errorf("unknown step type %q", name)
 	}
 	runner, err := builder(raw)

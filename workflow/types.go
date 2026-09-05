@@ -36,6 +36,7 @@ type Definition struct {
 	Description    string                    `yaml:"description,omitempty"`
 	Invokable      *bool                     `yaml:"invokable,omitempty"`
 	DependsOn      map[string]string         `yaml:"depends_on,omitempty"`
+	Plugins        map[string]PluginSource   `yaml:"plugins,omitempty"`
 	Outputs        map[string]WorkflowOutput `yaml:"outputs,omitempty"`
 	// Form is intentionally opaque to core workflow execution. The optional browser UI decodes it.
 	Form      yaml.Node                     `yaml:"form,omitempty"`
@@ -1620,6 +1621,11 @@ func validateDefinitionHeader(definition *Definition) error {
 	}
 	if definition.Version != 1 {
 		return fmt.Errorf("unsupported version %d (want 1)", definition.Version)
+	}
+	for namespace := range definition.Plugins {
+		if !ValidPluginNamespace(namespace) {
+			return fmt.Errorf("invalid plugin namespace %q", namespace)
+		}
 	}
 	if strings.TrimSpace(definition.PackageVersion) != definition.PackageVersion {
 		return fmt.Errorf("package_version must not have leading or trailing whitespace")
