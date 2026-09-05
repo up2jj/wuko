@@ -591,10 +591,9 @@ func (runner *diffCheckRunner) checkPushed(ctx context.Context, request step.Req
 				continue
 			}
 			seen[commit] = struct{}{}
-			comparison, resolveErr := resolveDiffComparison(ctx, request, diffSourceCommit, "", commit, false, runner.config.Paths)
-			if resolveErr != nil {
-				return resolveErr
-			}
+			// rev-list already yielded a full object id, and --root lets diff-tree derive the
+			// first parent itself, so the check stays at one subprocess per commit.
+			comparison := diffComparison{source: diffSourceCommit, through: commit, root: true, paths: runner.config.Paths}
 			if checkErr := checkDiff(ctx, request, comparison); checkErr != nil {
 				return fmt.Errorf("pushed commit %s: %w", commit, checkErr)
 			}

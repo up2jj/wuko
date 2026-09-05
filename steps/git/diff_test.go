@@ -348,6 +348,56 @@ func TestGitDiffCheckPushedAcceptsExplicitUpdatesExpression(t *testing.T) {
 	}
 }
 
+type recordingGitExecutor struct {
+	calls []process.Options
+}
+
+func (executor *recordingGitExecutor) Run(ctx context.Context, options process.Options) (process.Result, error) {
+	options.Args = slices.Clone(options.Args)
+	executor.calls = append(executor.calls, options)
+	return process.LocalExecutor{}.Run(ctx, options)
+}
+
+func TestGitDiffCheckPushedRunsOneCommandPerCommit(t *testing.T) {
+	dir := initGitRepository(t)
+	base := strings.TrimSpace(runGitTest(t, dir, "rev-parse", "HEAD"))
+	for _, content := range []string{"one\n", "two\n", "three\n"} {
+		writeHistoryFile(t, dir, "clean.txt", content)
+		runGitTest(t, dir, "add", "clean.txt")
+		runGitTest(t, dir, "commit", "-qm", "clean commit")
+	}
+	head := strings.TrimSpace(runGitTest(t, dir, "rev-parse", "HEAD"))
+	runner, err := NewDiffCheck(map[string]any{"source": "pushed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	executor := &recordingGitExecutor{}
+	request := step.Request{RunDir: dir, Executor: executor, Providers: gitHookProviders([]any{map[string]any{
+		"local_ref": "refs/heads/main", "local_oid": head,
+		"remote_ref": "refs/heads/main", "remote_oid": base,
+	}})}
+	if _, err := runner.Run(t.Context(), request); err != nil {
+		t.Fatal(err)
+	}
+	// Commit ids come from rev-list already resolved, so a pre-push hook over a long branch must
+	// spawn one enumeration plus one diff-tree per commit, not re-resolve or re-parent each one.
+	if len(executor.calls) != 4 {
+		commands := make([][]string, len(executor.calls))
+		for index, call := range executor.calls {
+			commands[index] = call.Args
+		}
+		t.Fatalf("git invocations = %d, want 4: %v", len(commands), commands)
+	}
+	if executor.calls[0].Args[0] != "rev-list" {
+		t.Fatalf("enumeration command = %v", executor.calls[0].Args)
+	}
+	for _, call := range executor.calls[1:] {
+		if call.Args[0] != "diff-tree" || !slices.Contains(call.Args, "--check") || !slices.Contains(call.Args, "--root") {
+			t.Fatalf("check command = %v", call.Args)
+		}
+	}
+}
+
 func TestGitDiffCheckPushedHandlesNewBranch(t *testing.T) {
 	dir := initGitRepository(t)
 	base := strings.TrimSpace(runGitTest(t, dir, "rev-parse", "HEAD"))
