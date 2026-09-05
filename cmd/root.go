@@ -21,6 +21,7 @@ import (
 	envload "github.com/up2jj/wuko/environment"
 	"github.com/up2jj/wuko/executor"
 	"github.com/up2jj/wuko/observe"
+	"github.com/up2jj/wuko/provider"
 	workflowschedule "github.com/up2jj/wuko/schedule"
 	"github.com/up2jj/wuko/step"
 	agentstep "github.com/up2jj/wuko/steps/agent"
@@ -121,6 +122,7 @@ type dependencies struct {
 	agentLookPath func(string) (string, error)
 	registry      *step.Registry
 	executors     *executor.Registry
+	providers     *provider.Registry
 	loader        *workflow.Loader
 	isInteractive func(io.Reader) bool
 	now           func() time.Time
@@ -191,7 +193,7 @@ func NewRootCmd() *cobra.Command {
 		cwd: os.Getwd, environment: environments,
 		homeDir: os.UserHomeDir, configDir: os.UserConfigDir, registry: registry, executors: executors,
 		agentLookPath: exec.LookPath,
-		loader:        workflow.NewLoader(nil), isInteractive: interactive,
+		loader:        workflow.NewLoader(nil), providers: defaultProviderRegistry(), isInteractive: interactive,
 		now: time.Now, waitUntil: workflowschedule.Wait,
 		getenv:     os.Getenv,
 		openEditor: openWorkflowEditor(os.Getenv),
@@ -209,6 +211,9 @@ func workflowEngine(deps dependencies) *engine.Engine {
 }
 
 func newRootCmd(deps dependencies) *cobra.Command {
+	if deps.providers == nil {
+		deps.providers = defaultProviderRegistry()
+	}
 	if deps.isInteractive == nil {
 		deps.isInteractive = interactive
 	}
@@ -256,6 +261,14 @@ func newRootCmd(deps dependencies) *cobra.Command {
 	})
 	root.AddCommand(newRunCmd(deps), newUICmd(deps), newListCmd(deps), newTreeCmd(deps), newValidateCmd(deps), newAgentCmd(deps), newInstallCmd(deps), newUninstallCmd(deps), newMarketplaceCmd(deps), newCompletionCmd())
 	return root
+}
+
+func defaultProviderRegistry() *provider.Registry {
+	registry := &provider.Registry{}
+	if err := registry.Register(provider.NewGitHub()); err != nil {
+		panic(err)
+	}
+	return registry
 }
 
 func runWorkflowPicker(command *cobra.Command, deps dependencies) error {

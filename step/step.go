@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/up2jj/wuko/process"
+	"github.com/up2jj/wuko/provider"
 	"gopkg.in/yaml.v3"
 )
 
@@ -55,6 +56,8 @@ type Request struct {
 	Steps      map[string]any
 	// Dependencies contains outputs from direct prerequisite workflows keyed by alias.
 	Dependencies map[string]map[string]any
+	// Providers contains registered execution-provider schemas and active read-only values.
+	Providers provider.Set
 	// Bindings contains active lifecycle and workflow-control roots such as batch, error, finally, foreach, and matrix.
 	Bindings    map[string]any
 	Stdin       io.Reader
@@ -132,6 +135,52 @@ func (request Request) RunValue() RunValue {
 // WorkflowValue returns the request's workflow metadata in evaluator form.
 func (request Request) WorkflowValue() WorkflowValue {
 	return WorkflowValue{Name: request.WorkflowName, Dir: request.WorkflowDir, Timezone: request.WorkflowTimezone}
+}
+
+// ExpressionEnvironment returns the common Expr roots for this request. Extra values add
+// step-local roots such as item or current. Provider roots are inserted dynamically so adding a
+// provider does not require changing every expression-bearing step.
+func (request Request) ExpressionEnvironment(extra map[string]any) map[string]any {
+	environment := map[string]any{
+		"inputs": request.Inputs, "vars": request.Vars, "env": request.Env,
+		"steps": request.Steps, "dependencies": request.Dependencies,
+		"batch": map[string]any{}, "foreach": map[string]any{}, "matrix": map[string]any{},
+		"observe": map[string]any{}, "finally": map[string]any{}, "error": map[string]any{},
+		"workflow": request.WorkflowValue(), "run": request.RunValue(),
+		"secret": request.ResolveSecret,
+	}
+	for name, value := range request.Bindings {
+		environment[name] = value
+	}
+	// Providers is already a per-request clone made by the engine, and expression evaluation
+	// never writes to its roots, so this hands over the same values every other root uses.
+	// Cloning here would deep-copy the whole provider context on every expression evaluation,
+	// which a choice step repeats six times per source item.
+	for name, value := range request.Providers.Values {
+		environment[name] = value
+	}
+	for name, value := range extra {
+		environment[name] = value
+	}
+	return environment
+}
+
+// ExpressionEnvironmentShape returns the statically typed standard roots used while compiling a
+// step expression. Provider identifiers are admitted by expr.AllowUndefinedVariables and checked
+// against provider schemas by the engine's reference validator.
+func ExpressionEnvironmentShape(extra map[string]any) map[string]any {
+	shape := map[string]any{
+		"inputs": map[string]any{}, "vars": map[string]any{}, "env": map[string]string{},
+		"steps": map[string]any{}, "dependencies": map[string]map[string]any{},
+		"batch": map[string]any{}, "foreach": map[string]any{}, "matrix": map[string]any{},
+		"observe": map[string]any{}, "finally": map[string]any{}, "error": map[string]any{},
+		"workflow": WorkflowValue{}, "run": RunValue{},
+		"secret": func(string) (string, error) { return "", fmt.Errorf("secret resolver is unavailable") },
+	}
+	for name, value := range extra {
+		shape[name] = value
+	}
+	return shape
 }
 
 // Result carries a step's outputs and the workflow variables it writes. Both are cloned

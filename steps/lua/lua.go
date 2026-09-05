@@ -37,23 +37,6 @@ type Runner struct {
 	doHTTP      func(*http.Request, time.Duration) (*http.Response, error)
 }
 
-type expressionEnvironment struct {
-	Inputs       map[string]any               `expr:"inputs"`
-	Vars         map[string]any               `expr:"vars"`
-	Env          map[string]string            `expr:"env"`
-	Steps        map[string]any               `expr:"steps"`
-	Dependencies map[string]map[string]any    `expr:"dependencies"`
-	Batch        map[string]any               `expr:"batch"`
-	Foreach      map[string]any               `expr:"foreach"`
-	Matrix       map[string]any               `expr:"matrix"`
-	Observe      map[string]any               `expr:"observe"`
-	Finally      map[string]any               `expr:"finally"`
-	Error        map[string]any               `expr:"error"`
-	Workflow     step.WorkflowValue           `expr:"workflow"`
-	Run          step.RunValue                `expr:"run"`
-	Secret       func(string) (string, error) `expr:"secret"`
-}
-
 type runtime struct {
 	request   step.Request
 	args      map[string]any
@@ -101,7 +84,7 @@ func compileArgExpressions(args map[string]any) (map[string]*vm.Program, error) 
 		if !ok || strings.TrimSpace(text) == "" {
 			return nil, fmt.Errorf("argument %q expr must be a non-empty string", name)
 		}
-		program, err := wukoexpr.Compile(text, expr.Env(expressionEnvironment{}))
+		program, err := wukoexpr.Compile(text, expr.Env(step.ExpressionEnvironmentShape(nil)), expr.AllowUndefinedVariables())
 		if err != nil {
 			return nil, fmt.Errorf("compiling argument %q expr: %w", name, err)
 		}
@@ -161,36 +144,13 @@ func (r *Runner) resolveArgs(ctx context.Context, request step.Request) (map[str
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		value, err := expr.Run(program, expressionEnvironment{
-			Inputs:       request.Inputs,
-			Vars:         request.Vars,
-			Env:          request.Env,
-			Steps:        request.Steps,
-			Dependencies: request.Dependencies,
-			Batch:        bindingRoot(request.Bindings, "batch"),
-			Foreach:      bindingRoot(request.Bindings, "foreach"),
-			Matrix:       bindingRoot(request.Bindings, "matrix"),
-			Observe:      bindingRoot(request.Bindings, "observe"),
-			Finally:      bindingRoot(request.Bindings, "finally"),
-			Error:        bindingRoot(request.Bindings, "error"),
-			Workflow:     request.WorkflowValue(),
-			Run:          request.RunValue(),
-			Secret:       request.ResolveSecret,
-		})
+		value, err := expr.Run(program, request.ExpressionEnvironment(nil))
 		if err != nil {
 			return nil, fmt.Errorf("evaluating argument %q expr: %w", name, err)
 		}
 		args[name] = value
 	}
 	return args, nil
-}
-
-func bindingRoot(bindings map[string]any, name string) map[string]any {
-	value, _ := bindings[name].(map[string]any)
-	if value == nil {
-		return map[string]any{}
-	}
-	return value
 }
 
 func (r *Runner) source(request step.Request) (string, string, error) {
@@ -235,6 +195,13 @@ func (r *runtime) module(state *glua.LState) (*glua.LTable, error) {
 		converted, err := toLua(state, value)
 		if err != nil {
 			return nil, fmt.Errorf("converting %s root: %w", name, err)
+		}
+		module.RawSetString(name, converted)
+	}
+	for name, value := range r.request.Providers.Values {
+		converted, err := toLua(state, value)
+		if err != nil {
+			return nil, fmt.Errorf("converting %s provider root: %w", name, err)
 		}
 		module.RawSetString(name, converted)
 	}

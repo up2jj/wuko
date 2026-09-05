@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/expr-lang/expr"
+	"github.com/expr-lang/expr/ast"
+	"github.com/expr-lang/expr/parser"
 	"github.com/expr-lang/expr/vm"
 	wukoexpr "github.com/up2jj/wuko/expression"
 	"github.com/up2jj/wuko/step"
@@ -55,53 +57,6 @@ type resolvedChoice struct {
 	hasItem bool
 }
 
-type expressionRoots struct {
-	Inputs       map[string]any               `expr:"inputs"`
-	Vars         map[string]any               `expr:"vars"`
-	Env          map[string]string            `expr:"env"`
-	Steps        map[string]any               `expr:"steps"`
-	Dependencies map[string]map[string]any    `expr:"dependencies"`
-	Batch        map[string]any               `expr:"batch"`
-	Foreach      map[string]any               `expr:"foreach"`
-	Matrix       map[string]any               `expr:"matrix"`
-	Observe      map[string]any               `expr:"observe"`
-	Finally      map[string]any               `expr:"finally"`
-	Error        map[string]any               `expr:"error"`
-	Workflow     step.WorkflowValue           `expr:"workflow"`
-	Run          step.RunValue                `expr:"run"`
-	Secret       func(string) (string, error) `expr:"secret"`
-}
-
-type itemExpressionEnvironment struct {
-	expressionRoots
-	Item any `expr:"item"`
-}
-
-type labelExpressionEnvironment struct {
-	itemExpressionEnvironment
-	Label string `expr:"label"`
-}
-
-type valueExpressionEnvironment struct {
-	labelExpressionEnvironment
-	Value any `expr:"value"`
-}
-
-type descriptionExpressionEnvironment struct {
-	valueExpressionEnvironment
-	Description string `expr:"description"`
-}
-
-type disabledExpressionEnvironment struct {
-	descriptionExpressionEnvironment
-	Disabled bool `expr:"disabled"`
-}
-
-type reasonExpressionEnvironment struct {
-	disabledExpressionEnvironment
-	Reason string `expr:"reason"`
-}
-
 type expressionPrograms struct {
 	label       *vm.Program
 	value       *vm.Program
@@ -147,20 +102,20 @@ func New(raw map[string]any) (step.Runner, error) {
 
 func compileExpressions(raw map[string]any, config Config) (expressionPrograms, error) {
 	type declaration struct {
-		name        string
-		field       string
-		expression  string
-		environment any
-		target      **vm.Program
+		name       string
+		field      string
+		expression string
+		locals     []string
+		target     **vm.Program
 	}
 	var programs expressionPrograms
 	declarations := []declaration{
-		{name: "label", field: config.LabelField, expression: config.LabelExpr, environment: itemExpressionEnvironment{}, target: &programs.label},
-		{name: "value", field: config.ValueField, expression: config.ValueExpr, environment: labelExpressionEnvironment{}, target: &programs.value},
-		{name: "description", field: config.DescriptionField, expression: config.DescriptionExpr, environment: valueExpressionEnvironment{}, target: &programs.description},
-		{name: "disabled", field: config.DisabledField, expression: config.DisabledExpr, environment: descriptionExpressionEnvironment{}, target: &programs.disabled},
-		{name: "reason", field: config.ReasonField, expression: config.ReasonExpr, environment: disabledExpressionEnvironment{}, target: &programs.reason},
-		{name: "default", field: config.DefaultField, expression: config.DefaultExpr, environment: reasonExpressionEnvironment{}, target: &programs.defaultItem},
+		{name: "label", field: config.LabelField, expression: config.LabelExpr, locals: []string{"item"}, target: &programs.label},
+		{name: "value", field: config.ValueField, expression: config.ValueExpr, locals: []string{"item", "label"}, target: &programs.value},
+		{name: "description", field: config.DescriptionField, expression: config.DescriptionExpr, locals: []string{"item", "label", "value"}, target: &programs.description},
+		{name: "disabled", field: config.DisabledField, expression: config.DisabledExpr, locals: []string{"item", "label", "value", "description"}, target: &programs.disabled},
+		{name: "reason", field: config.ReasonField, expression: config.ReasonExpr, locals: []string{"item", "label", "value", "description", "disabled"}, target: &programs.reason},
+		{name: "default", field: config.DefaultField, expression: config.DefaultExpr, locals: []string{"item", "label", "value", "description", "disabled", "reason"}, target: &programs.defaultItem},
 	}
 	for _, declaration := range declarations {
 		key := declaration.name + "_expr"
@@ -176,13 +131,91 @@ func compileExpressions(raw map[string]any, config Config) (expressionPrograms, 
 		if declaration.field != "" {
 			return expressionPrograms{}, fmt.Errorf("%s_field and %s are mutually exclusive", declaration.name, key)
 		}
-		program, err := wukoexpr.Compile(declaration.expression, expr.Env(declaration.environment))
+		if err := validateChoiceLocalOrder(declaration.expression, declaration.locals); err != nil {
+			return expressionPrograms{}, fmt.Errorf("compiling %s: %w", key, err)
+		}
+		program, err := wukoexpr.Compile(
+			declaration.expression,
+			expr.Env(step.ExpressionEnvironmentShape(choiceExpressionShape(declaration.locals...))),
+			expr.AllowUndefinedVariables(),
+		)
 		if err != nil {
 			return expressionPrograms{}, fmt.Errorf("compiling %s: %w", key, err)
 		}
 		*declaration.target = program
 	}
 	return programs, nil
+}
+
+var choiceLocalNames = map[string]struct{}{
+	"item": {}, "label": {}, "value": {}, "description": {}, "disabled": {}, "reason": {},
+}
+
+func validateChoiceLocalOrder(source string, allowedNames []string) error {
+	tree, err := parser.Parse(source)
+	if err != nil {
+		return nil
+	}
+	allowed := make(map[string]struct{}, len(allowedNames))
+	for _, name := range allowedNames {
+		allowed[name] = struct{}{}
+	}
+	metadata := choiceExpressionMetadata{locals: make(map[string]struct{})}
+	ast.Walk(&tree.Node, &metadata)
+	visitor := choiceLocalOrderVisitor{allowed: allowed, declared: metadata.locals}
+	ast.Walk(&tree.Node, &visitor)
+	if visitor.name != "" {
+		return fmt.Errorf("unknown name %s", visitor.name)
+	}
+	return nil
+}
+
+type choiceExpressionMetadata struct{ locals map[string]struct{} }
+
+func (metadata *choiceExpressionMetadata) Visit(node *ast.Node) {
+	if declaration, ok := (*node).(*ast.VariableDeclaratorNode); ok {
+		metadata.locals[declaration.Name] = struct{}{}
+	}
+}
+
+type choiceLocalOrderVisitor struct {
+	allowed  map[string]struct{}
+	declared map[string]struct{}
+	name     string
+}
+
+func (visitor *choiceLocalOrderVisitor) Visit(node *ast.Node) {
+	if visitor.name != "" {
+		return
+	}
+	identifier, ok := (*node).(*ast.IdentifierNode)
+	if !ok {
+		return
+	}
+	if _, choiceLocal := choiceLocalNames[identifier.Value]; !choiceLocal {
+		return
+	}
+	if _, allowed := visitor.allowed[identifier.Value]; allowed {
+		return
+	}
+	if _, declared := visitor.declared[identifier.Value]; declared {
+		return
+	}
+	visitor.name = identifier.Value
+}
+
+func choiceExpressionShape(names ...string) map[string]any {
+	values := map[string]any{
+		"label":       "",
+		"description": "", "disabled": false, "reason": "",
+	}
+	result := make(map[string]any, len(names))
+	for _, name := range names {
+		if value, typed := values[name]; typed {
+			result[name] = value
+		}
+	}
+	return result
 }
 
 func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, error) {
@@ -266,7 +299,7 @@ func (r *Runner) options(request step.Request) ([]resolvedChoice, error) {
 }
 
 func (r *Runner) resolveDynamicChoice(request step.Request, item any, index int) (tui.Option, error) {
-	itemEnvironment := itemExpressionEnvironment{expressionRoots: expressionRootsFor(request), Item: item}
+	locals := map[string]any{"item": item}
 
 	label := fmt.Sprint(item)
 	if !scalar(item) {
@@ -277,14 +310,14 @@ func (r *Runner) resolveDynamicChoice(request step.Request, item any, index int)
 		label = fmt.Sprint(resolved)
 	}
 	if r.programs.label != nil {
-		resolved, err := runExpression(r.programs.label, itemEnvironment, index, "label")
+		resolved, err := runExpression(r.programs.label, request.ExpressionEnvironment(locals), index, "label")
 		if err != nil {
 			return tui.Option{}, err
 		}
 		label = fmt.Sprint(resolved)
 	}
 
-	labelEnvironment := labelExpressionEnvironment{itemExpressionEnvironment: itemEnvironment, Label: label}
+	locals["label"] = label
 	value := item
 	if !scalar(item) {
 		resolved, err := step.LookupValue(item, r.config.ValueField)
@@ -294,7 +327,7 @@ func (r *Runner) resolveDynamicChoice(request step.Request, item any, index int)
 		value = resolved
 	}
 	if r.programs.value != nil {
-		resolved, err := runExpression(r.programs.value, labelEnvironment, index, "value")
+		resolved, err := runExpression(r.programs.value, request.ExpressionEnvironment(locals), index, "value")
 		if err != nil {
 			return tui.Option{}, err
 		}
@@ -304,7 +337,7 @@ func (r *Runner) resolveDynamicChoice(request step.Request, item any, index int)
 		return tui.Option{}, fmt.Errorf("choice source item %d value must be a scalar", index)
 	}
 
-	valueEnvironment := valueExpressionEnvironment{labelExpressionEnvironment: labelEnvironment, Value: value}
+	locals["value"] = value
 	description := ""
 	if !scalar(item) && r.config.DescriptionField != "" {
 		resolved, err := step.LookupValue(item, r.config.DescriptionField)
@@ -314,14 +347,14 @@ func (r *Runner) resolveDynamicChoice(request step.Request, item any, index int)
 		description = fmt.Sprint(resolved)
 	}
 	if r.programs.description != nil {
-		resolved, err := runExpression(r.programs.description, valueEnvironment, index, "description")
+		resolved, err := runExpression(r.programs.description, request.ExpressionEnvironment(locals), index, "description")
 		if err != nil {
 			return tui.Option{}, err
 		}
 		description = fmt.Sprint(resolved)
 	}
 
-	descriptionEnvironment := descriptionExpressionEnvironment{valueExpressionEnvironment: valueEnvironment, Description: description}
+	locals["description"] = description
 	disabled := false
 	if !scalar(item) {
 		var err error
@@ -331,14 +364,14 @@ func (r *Runner) resolveDynamicChoice(request step.Request, item any, index int)
 		}
 	}
 	if r.programs.disabled != nil {
-		resolved, err := runBoolExpression(r.programs.disabled, descriptionEnvironment, index, "disabled")
+		resolved, err := runBoolExpression(r.programs.disabled, request.ExpressionEnvironment(locals), index, "disabled")
 		if err != nil {
 			return tui.Option{}, err
 		}
 		disabled = resolved
 	}
 
-	disabledEnvironment := disabledExpressionEnvironment{descriptionExpressionEnvironment: descriptionEnvironment, Disabled: disabled}
+	locals["disabled"] = disabled
 	reason := ""
 	if disabled {
 		if r.config.ReasonField == "" && r.programs.reason == nil {
@@ -347,7 +380,7 @@ func (r *Runner) resolveDynamicChoice(request step.Request, item any, index int)
 		var resolved any
 		var err error
 		if r.programs.reason != nil {
-			resolved, err = runExpression(r.programs.reason, disabledEnvironment, index, "reason")
+			resolved, err = runExpression(r.programs.reason, request.ExpressionEnvironment(locals), index, "reason")
 		} else {
 			resolved, err = step.LookupValue(item, r.config.ReasonField)
 			if err != nil {
@@ -364,7 +397,7 @@ func (r *Runner) resolveDynamicChoice(request step.Request, item any, index int)
 		}
 	}
 
-	reasonEnvironment := reasonExpressionEnvironment{disabledExpressionEnvironment: disabledEnvironment, Reason: reason}
+	locals["reason"] = reason
 	defaultChoice := false
 	if !scalar(item) {
 		var err error
@@ -374,7 +407,7 @@ func (r *Runner) resolveDynamicChoice(request step.Request, item any, index int)
 		}
 	}
 	if r.programs.defaultItem != nil {
-		resolved, err := runBoolExpression(r.programs.defaultItem, reasonEnvironment, index, "default")
+		resolved, err := runBoolExpression(r.programs.defaultItem, request.ExpressionEnvironment(locals), index, "default")
 		if err != nil {
 			return tui.Option{}, err
 		}
@@ -385,33 +418,6 @@ func (r *Runner) resolveDynamicChoice(request step.Request, item any, index int)
 		Label: label, Description: description, Value: value,
 		Disabled: disabled, DisabledReason: reason, Default: defaultChoice,
 	}, nil
-}
-
-func expressionRootsFor(request step.Request) expressionRoots {
-	return expressionRoots{
-		Inputs:       request.Inputs,
-		Vars:         request.Vars,
-		Env:          request.Env,
-		Steps:        request.Steps,
-		Dependencies: request.Dependencies,
-		Batch:        bindingRoot(request.Bindings, "batch"),
-		Foreach:      bindingRoot(request.Bindings, "foreach"),
-		Matrix:       bindingRoot(request.Bindings, "matrix"),
-		Observe:      bindingRoot(request.Bindings, "observe"),
-		Finally:      bindingRoot(request.Bindings, "finally"),
-		Error:        bindingRoot(request.Bindings, "error"),
-		Workflow:     request.WorkflowValue(),
-		Run:          request.RunValue(),
-		Secret:       request.ResolveSecret,
-	}
-}
-
-func bindingRoot(bindings map[string]any, name string) map[string]any {
-	value, _ := bindings[name].(map[string]any)
-	if value == nil {
-		return map[string]any{}
-	}
-	return value
 }
 
 func runExpression(program *vm.Program, environment any, index int, property string) (any, error) {

@@ -23,7 +23,7 @@ import (
 func (e *Engine) compileAttemptCondition(condition workflow.Condition) (*vm.Program, error) {
 	shape := e.conditionEnvironmentShape()
 	shape["poll"] = 0
-	program, err := wukoexpr.Compile(string(condition), expr.Env(shape), expr.AsBool())
+	program, err := wukoexpr.Compile(string(condition), expr.Env(shape), expr.AsBool(), expr.AllowUndefinedVariables())
 	if err != nil {
 		return nil, fmt.Errorf("compiling until: %w", err)
 	}

@@ -61,23 +61,6 @@ func (expression *ArgvExpression) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
-type expressionEnvironment struct {
-	Inputs       map[string]any               `expr:"inputs"`
-	Vars         map[string]any               `expr:"vars"`
-	Env          map[string]string            `expr:"env"`
-	Steps        map[string]any               `expr:"steps"`
-	Dependencies map[string]map[string]any    `expr:"dependencies"`
-	Batch        map[string]any               `expr:"batch"`
-	Foreach      map[string]any               `expr:"foreach"`
-	Matrix       map[string]any               `expr:"matrix"`
-	Observe      map[string]any               `expr:"observe"`
-	Finally      map[string]any               `expr:"finally"`
-	Error        map[string]any               `expr:"error"`
-	Workflow     step.WorkflowValue           `expr:"workflow"`
-	Run          step.RunValue                `expr:"run"`
-	Secret       func(string) (string, error) `expr:"secret"`
-}
-
 type Runner struct {
 	config          Config
 	stdoutPolicy    process.OutputPolicy
@@ -174,7 +157,7 @@ func New(raw map[string]any) (step.Runner, error) {
 	}
 	var argvProgram *vm.Program
 	if config.Argv != nil {
-		argvProgram, err = wukoexpr.Compile(config.Argv.Expr, expr.Env(expressionEnvironment{}))
+		argvProgram, err = wukoexpr.Compile(config.Argv.Expr, expr.Env(step.ExpressionEnvironmentShape(nil)), expr.AllowUndefinedVariables())
 		if err != nil {
 			return nil, fmt.Errorf("compiling argv expr: %w", err)
 		}
@@ -182,7 +165,7 @@ func New(raw map[string]any) (step.Runner, error) {
 	var interactions *ptyinteract.Plan
 	var interactionExpr *vm.Program
 	if config.Interactions.Expr != "" {
-		interactionExpr, err = wukoexpr.Compile(config.Interactions.Expr, expr.Env(expressionEnvironment{}))
+		interactionExpr, err = wukoexpr.Compile(config.Interactions.Expr, expr.Env(step.ExpressionEnvironmentShape(nil)), expr.AllowUndefinedVariables())
 		if err != nil {
 			return nil, fmt.Errorf("compiling interactions expr: %w", err)
 		}
@@ -333,23 +316,8 @@ func (r *Runner) interactionPlan(request step.Request) (*ptyinteract.Plan, error
 	return plan, nil
 }
 
-func expressionEnvironmentFor(request step.Request) expressionEnvironment {
-	return expressionEnvironment{
-		Inputs:       request.Inputs,
-		Vars:         request.Vars,
-		Env:          request.Env,
-		Steps:        request.Steps,
-		Dependencies: request.Dependencies,
-		Batch:        bindingRoot(request.Bindings, "batch"),
-		Foreach:      bindingRoot(request.Bindings, "foreach"),
-		Matrix:       bindingRoot(request.Bindings, "matrix"),
-		Observe:      bindingRoot(request.Bindings, "observe"),
-		Finally:      bindingRoot(request.Bindings, "finally"),
-		Error:        bindingRoot(request.Bindings, "error"),
-		Workflow:     request.WorkflowValue(),
-		Run:          request.RunValue(),
-		Secret:       request.ResolveSecret,
-	}
+func expressionEnvironmentFor(request step.Request) map[string]any {
+	return request.ExpressionEnvironment(nil)
 }
 
 func argvStrings(value any) ([]string, error) {
@@ -405,12 +373,4 @@ func argvScalar(value reflect.Value) (string, error) {
 	default:
 		return "", fmt.Errorf("%s is not a scalar argument", value.Kind())
 	}
-}
-
-func bindingRoot(bindings map[string]any, name string) map[string]any {
-	value, _ := bindings[name].(map[string]any)
-	if value == nil {
-		return map[string]any{}
-	}
-	return value
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/up2jj/wuko/diagnostic"
 	envload "github.com/up2jj/wuko/environment"
+	"github.com/up2jj/wuko/provider"
 )
 
 func invocationEnvironment(command *cobra.Command, deps dependencies, cwd string) (envload.InvocationEnvironment, error) {
@@ -75,4 +76,11 @@ func processEnvironment() map[string]string {
 
 func environmentValues(result envload.InvocationEnvironment) (map[string]string, []string) {
 	return result.Values, slices.Clone(result.Loaders)
+}
+
+func invocationProviders(command *cobra.Command, deps dependencies, environment map[string]string) (provider.Set, error) {
+	if deps.providers == nil {
+		return provider.Set{}, nil
+	}
+	return deps.providers.Load(command.Context(), environment)
 }

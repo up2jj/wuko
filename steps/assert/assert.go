@@ -17,23 +17,6 @@ type Config struct {
 	Message string `yaml:"message"`
 }
 
-type expressionEnvironment struct {
-	Inputs       map[string]any               `expr:"inputs"`
-	Vars         map[string]any               `expr:"vars"`
-	Env          map[string]string            `expr:"env"`
-	Steps        map[string]any               `expr:"steps"`
-	Dependencies map[string]map[string]any    `expr:"dependencies"`
-	Batch        map[string]any               `expr:"batch"`
-	Foreach      map[string]any               `expr:"foreach"`
-	Matrix       map[string]any               `expr:"matrix"`
-	Observe      map[string]any               `expr:"observe"`
-	Finally      map[string]any               `expr:"finally"`
-	Error        map[string]any               `expr:"error"`
-	Workflow     step.WorkflowValue           `expr:"workflow"`
-	Run          step.RunValue                `expr:"run"`
-	Secret       func(string) (string, error) `expr:"secret"`
-}
-
 type Runner struct {
 	config  Config
 	program *vm.Program
@@ -52,7 +35,7 @@ func New(raw map[string]any) (step.Runner, error) {
 	if strings.TrimSpace(config.Message) == "" {
 		return nil, fmt.Errorf("message is required")
 	}
-	program, err := wukoexpr.Compile(config.Expr, expr.Env(expressionEnvironment{}), expr.AsBool())
+	program, err := wukoexpr.Compile(config.Expr, expr.Env(step.ExpressionEnvironmentShape(nil)), expr.AllowUndefinedVariables(), expr.AsBool())
 	if err != nil {
 		return nil, fmt.Errorf("compiling expr: %w", err)
 	}
@@ -63,22 +46,7 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 	if err := ctx.Err(); err != nil {
 		return step.Result{}, err
 	}
-	value, err := expr.Run(r.program, expressionEnvironment{
-		Inputs:       request.Inputs,
-		Vars:         request.Vars,
-		Env:          request.Env,
-		Steps:        request.Steps,
-		Dependencies: request.Dependencies,
-		Batch:        bindingRoot(request.Bindings, "batch"),
-		Foreach:      bindingRoot(request.Bindings, "foreach"),
-		Matrix:       bindingRoot(request.Bindings, "matrix"),
-		Observe:      bindingRoot(request.Bindings, "observe"),
-		Finally:      bindingRoot(request.Bindings, "finally"),
-		Error:        bindingRoot(request.Bindings, "error"),
-		Workflow:     request.WorkflowValue(),
-		Run:          request.RunValue(),
-		Secret:       request.ResolveSecret,
-	})
+	value, err := expr.Run(r.program, request.ExpressionEnvironment(nil))
 	if err != nil {
 		return step.Result{}, fmt.Errorf("evaluating expr: %w", err)
 	}
@@ -90,12 +58,4 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 		return step.Result{}, fmt.Errorf("assertion failed: %s", r.config.Message)
 	}
 	return step.Result{}, nil
-}
-
-func bindingRoot(bindings map[string]any, name string) map[string]any {
-	value, _ := bindings[name].(map[string]any)
-	if value == nil {
-		return map[string]any{}
-	}
-	return value
 }

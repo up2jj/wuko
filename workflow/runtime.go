@@ -10,8 +10,24 @@ import (
 	"strings"
 
 	"github.com/up2jj/wuko/diagnostic"
+	"github.com/up2jj/wuko/provider"
 	"github.com/up2jj/wuko/secret"
 )
+
+// providerReservedRoots lists every identifier a provider context must not occupy. It covers the
+// template and expression roots, the step-local roots, and the members the Lua step publishes on
+// the wuko module: a provider sharing one of those names would silently clobber wuko.args or be
+// clobbered by wuko.http, leaving the root present in templates but missing or wrong in Lua.
+var providerReservedRoots = map[string]struct{}{
+	"inputs": {}, "vars": {}, "env": {}, "steps": {}, "dependencies": {},
+	"workflow": {}, "run": {}, "secret": {},
+	"batch": {}, "foreach": {}, "matrix": {}, "observe": {}, "finally": {}, "error": {},
+	"cancel_on": {}, "monitors": {}, "result": {}, "poll": {}, "current": {}, "found": {},
+	"path": {}, "index": {}, "item": {}, "label": {}, "value": {}, "description": {},
+	"disabled": {}, "reason": {},
+	"args": {}, "json": {}, "helpers": {}, "kv": {}, "http": {}, "fs": {}, "exec": {},
+	"var": {}, "set_var": {}, "output": {},
+}
 
 // LoadOptions supplies the pre-run values used to resolve composite action references.
 type LoadOptions struct {
@@ -42,6 +58,9 @@ type LoadOptions struct {
 	Stdout           io.Writer
 	Stderr           io.Writer
 	Interactive      bool
+	// Providers contains registered execution-provider schemas and the values of providers
+	// active for this invocation.
+	Providers provider.Set
 	// RejectRemoteArchives prevents remote workflow loading from accepting archive payloads.
 	RejectRemoteArchives bool
 	sourceRoot           string
@@ -50,6 +69,9 @@ type LoadOptions struct {
 
 // PrepareValues applies workflow and caller overrides using the same precedence as execution.
 func PrepareValues(definition *Definition, options LoadOptions) (map[string]any, map[string]string, error) {
+	if err := options.Providers.ValidateNames(providerReservedRoots); err != nil {
+		return nil, nil, err
+	}
 	session := options.SecretSession
 	if session == nil {
 		session = definition.SecretSession()
@@ -67,7 +89,7 @@ func PrepareValues(definition *Definition, options LoadOptions) (map[string]any,
 		host = maps.Clone(options.BaseEnv)
 	}
 	wfEnv := make(map[string]string, len(definition.Env))
-	root := TemplateDataWithRun(definition, options.RunDir, options.EnvironmentLoaders, nil, vars, host, nil)
+	root := TemplateDataWithProviders(definition, options.RunDir, options.EnvironmentLoaders, nil, vars, host, nil, nil, nil, options.Providers)
 	keys := slices.Sorted(maps.Keys(definition.Env))
 	for _, key := range keys {
 		value, err := renderer.Render(definition.Env[key], root)
@@ -89,15 +111,21 @@ func TemplateData(definition *Definition, runDir string, inputs, vars map[string
 
 // TemplateDataWithRun constructs template roots with invocation environment provenance.
 func TemplateDataWithRun(definition *Definition, runDir string, environmentLoaders []string, inputs, vars map[string]any, environment map[string]string, steps map[string]any) map[string]any {
-	return templateData(definition, runDir, environmentLoaders, inputs, vars, environment, steps, nil, nil)
+	return templateData(definition, runDir, environmentLoaders, inputs, vars, environment, steps, nil, nil, provider.Set{})
 }
 
 // TemplateDataWithRunDependencies includes invocation provenance and dependency outputs.
 func TemplateDataWithRunDependencies(definition *Definition, runDir string, environmentLoaders []string, inputs, vars map[string]any, environment map[string]string, steps map[string]any, dependencies map[string]map[string]any, bindings map[string]any) map[string]any {
-	return templateData(definition, runDir, environmentLoaders, inputs, vars, environment, steps, dependencies, bindings)
+	return templateData(definition, runDir, environmentLoaders, inputs, vars, environment, steps, dependencies, bindings, provider.Set{})
 }
 
-func templateData(definition *Definition, runDir string, environmentLoaders []string, inputs, vars map[string]any, environment map[string]string, steps map[string]any, dependencies map[string]map[string]any, bindings map[string]any) map[string]any {
+// TemplateDataWithProviders constructs every workflow template root, including active execution
+// provider contexts. Registered but inactive providers remain absent.
+func TemplateDataWithProviders(definition *Definition, runDir string, environmentLoaders []string, inputs, vars map[string]any, environment map[string]string, steps map[string]any, dependencies map[string]map[string]any, bindings map[string]any, providers provider.Set) map[string]any {
+	return templateData(definition, runDir, environmentLoaders, inputs, vars, environment, steps, dependencies, bindings, providers)
+}
+
+func templateData(definition *Definition, runDir string, environmentLoaders []string, inputs, vars map[string]any, environment map[string]string, steps map[string]any, dependencies map[string]map[string]any, bindings map[string]any, providers provider.Set) map[string]any {
 	if inputs == nil {
 		inputs = map[string]any{}
 	}
@@ -125,6 +153,9 @@ func templateData(definition *Definition, runDir string, environmentLoaders []st
 	}
 	for key, value := range bindings {
 		result[key] = Clone(value)
+	}
+	for name, value := range providers.Values {
+		result[name] = CloneMap(value)
 	}
 	return result
 }

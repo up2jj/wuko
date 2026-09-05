@@ -17,6 +17,7 @@ import (
 	wukoexpr "github.com/up2jj/wuko/expression"
 	storepkg "github.com/up2jj/wuko/keyvalue"
 	"github.com/up2jj/wuko/process"
+	"github.com/up2jj/wuko/provider"
 	"github.com/up2jj/wuko/secret"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
@@ -42,6 +43,8 @@ type Options struct {
 	Env          map[string]string
 	// Dependencies contains outputs from direct prerequisite workflows keyed by alias.
 	Dependencies map[string]map[string]any
+	// Providers contains registered execution-provider schemas and active values.
+	Providers provider.Set
 	// BaseEnv overrides the current process environment when non-nil.
 	BaseEnv            map[string]string
 	EnvironmentLoaders []string
@@ -119,6 +122,8 @@ type State struct {
 	Outputs map[string]any
 	// Dependencies contains immutable outputs from direct prerequisite workflows.
 	Dependencies map[string]map[string]any
+	// Providers contains registered execution-provider schemas and active read-only values.
+	Providers provider.Set
 	// Bindings contains lifecycle and iteration-local roots such as batch, error, finally, foreach, and matrix.
 	Bindings map[string]any
 	Stats    RunStats
@@ -161,6 +166,14 @@ func (e *Engine) Validate(ctx context.Context, definition *workflow.Definition, 
 	if err != nil {
 		trace(options, diagnostic.Event{Phase: diagnostic.PhaseValues, Status: diagnostic.StatusFailed, WorkflowName: definition.Name, Location: definition.Location, Error: err})
 		trace(options, diagnostic.Event{Phase: diagnostic.PhaseValidation, Status: diagnostic.StatusFailed, WorkflowName: definition.Name, Location: definition.Location, Duration: time.Since(started)})
+		return err
+	}
+	providerBindings := make(map[string]struct{}, len(e.backgroundControls))
+	for _, control := range e.backgroundControls {
+		providerBindings[control.BindingRoot()] = struct{}{}
+	}
+	if err := state.Providers.ValidateNames(providerBindings); err != nil {
+		trace(options, diagnostic.Event{Phase: diagnostic.PhaseValidation, Status: diagnostic.StatusFailed, WorkflowName: definition.Name, Location: definition.Location, Duration: time.Since(started), Error: err})
 		return err
 	}
 	if err := e.validateDataReferences(definition, options, state); err != nil {
@@ -1159,18 +1172,18 @@ func runStatsIdentity(options Options) RunStats {
 }
 
 func initialState(definition *workflow.Definition, options Options) (*State, error) {
-	vars, environment, err := workflow.PrepareValues(definition, workflow.LoadOptions{Vars: options.Vars, Env: options.Env, BaseEnv: options.BaseEnv, EnvironmentLoaders: options.EnvironmentLoaders, RunDir: options.RunDir, SecretSession: definition.SecretSession()})
+	vars, environment, err := workflow.PrepareValues(definition, workflow.LoadOptions{Vars: options.Vars, Env: options.Env, BaseEnv: options.BaseEnv, EnvironmentLoaders: options.EnvironmentLoaders, RunDir: options.RunDir, SecretSession: definition.SecretSession(), Providers: options.Providers})
 	if err != nil {
 		return nil, err
 	}
 	return &State{
 		Inputs: cloneMap(options.inputs), Vars: vars, Env: environment, EnvironmentLoaders: slices.Clone(options.EnvironmentLoaders), Steps: make(map[string]any), Outputs: make(map[string]any),
-		Dependencies: cloneDependencies(options.Dependencies), presetVars: cloneMap(vars),
+		Dependencies: cloneDependencies(options.Dependencies), Providers: options.Providers.Clone(), presetVars: cloneMap(vars),
 	}, nil
 }
 
 func templateData(definition *workflow.Definition, runDir string, state *State) map[string]any {
-	return workflow.TemplateDataWithRunDependencies(definition, runDir, state.EnvironmentLoaders, state.Inputs, state.Vars, state.Env, state.Steps, state.Dependencies, state.Bindings)
+	return workflow.TemplateDataWithProviders(definition, runDir, state.EnvironmentLoaders, state.Inputs, state.Vars, state.Env, state.Steps, state.Dependencies, state.Bindings, state.Providers)
 }
 
 func makeRequest(definition *workflow.Definition, stepID string, options Options, state *State, attempt, maxAttempts int, operationID string) step.Request {
@@ -1183,7 +1196,7 @@ func makeRequest(definition *workflow.Definition, stepID string, options Options
 		WorkflowDirBorrowed: definition.DirBorrowed, WorkflowTimezone: definition.Timezone,
 		RunDir: options.RunDir, EnvironmentLoaders: slices.Clone(state.EnvironmentLoaders), LocalValueDir: options.LocalValueDir, GlobalValueDir: options.GlobalValueDir,
 		Inputs: cloneMap(state.Inputs), Vars: cloneMap(state.Vars), PresetVars: cloneMap(state.presetVars), Env: maps.Clone(state.Env),
-		Steps: cloneMap(state.Steps), Dependencies: cloneDependencies(state.Dependencies), Bindings: cloneMap(state.Bindings), Stdin: options.Stdin, Stdout: options.Stdout,
+		Steps: cloneMap(state.Steps), Dependencies: cloneDependencies(state.Dependencies), Providers: state.Providers.Clone(), Bindings: cloneMap(state.Bindings), Stdin: options.Stdin, Stdout: options.Stdout,
 		Stderr: options.Stderr, Interactive: options.Interactive,
 		Attempt: attempt, MaxAttempts: maxAttempts, OperationID: operationID,
 		TemplateRenderer: newBoundTemplateRenderer(options.renderer, func() map[string]any {
@@ -1231,7 +1244,7 @@ func (e *Engine) validateAction(ctx context.Context, definition *workflow.Defini
 	inner.InheritSecretSession(definition)
 	return e.Validate(ctx, inner, Options{
 		InvocationID: options.InvocationID,
-		inputs:       inputs, BaseEnv: state.Env, EnvironmentLoaders: slices.Clone(state.EnvironmentLoaders), RunDir: options.RunDir,
+		inputs:       inputs, BaseEnv: state.Env, EnvironmentLoaders: slices.Clone(state.EnvironmentLoaders), RunDir: options.RunDir, Providers: state.Providers.Clone(),
 		LocalValueDir: actionLocalValueDir(workflowStep, options), GlobalValueDir: options.GlobalValueDir,
 		Stdin: options.Stdin, Stdout: options.Stdout, Stderr: options.Stderr, Interactive: options.Interactive,
 		Diagnostics: options.Diagnostics, runID: options.runID, parentRunID: options.parentRunID,
@@ -1261,7 +1274,7 @@ func (e *Engine) prepareActionExecutor(definition *workflow.Definition, workflow
 	execute := func(ctx context.Context, request step.Request) (step.Result, error) {
 		innerState, err := e.Run(ctx, inner, Options{
 			InvocationID: options.InvocationID,
-			inputs:       inputs, BaseEnv: state.Env, EnvironmentLoaders: slices.Clone(state.EnvironmentLoaders), RunDir: options.RunDir,
+			inputs:       inputs, BaseEnv: state.Env, EnvironmentLoaders: slices.Clone(state.EnvironmentLoaders), RunDir: options.RunDir, Providers: state.Providers.Clone(),
 			LocalValueDir: actionLocalValueDir(workflowStep, options), GlobalValueDir: options.GlobalValueDir,
 			Stdin: options.Stdin, Stdout: options.Stdout, Stderr: options.Stderr,
 			Interactive: options.Interactive, Progress: options.Progress,
@@ -1278,6 +1291,9 @@ func (e *Engine) prepareActionExecutor(definition *workflow.Definition, workflow
 			return step.Result{Outputs: cloneMap(innerState.Outputs)}, nil
 		}
 		environment := map[string]any{"inputs": innerState.Inputs, "vars": innerState.Vars, "steps": innerState.Steps, "env": innerState.Env, "workflow": map[string]any{"name": inner.Name, "dir": inner.Dir, "timezone": inner.Timezone}, "run": map[string]any{"dir": options.RunDir, "environment_loaders": slices.Clone(state.EnvironmentLoaders)}}
+		for name, value := range innerState.Providers.Values {
+			environment[name] = cloneMap(value)
+		}
 		outputs := make(map[string]any, len(workflowStep.Action.Outputs))
 		outputsStarted := time.Now()
 		traceStep(options, definition, workflowStep, diagnostic.PhaseActionOutputs, diagnostic.StatusStarted, time.Time{}, "evaluating action outputs", nil)

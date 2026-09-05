@@ -127,14 +127,17 @@ func (r *Runner) planMutations(ctx context.Context, request step.Request, origin
 	return mutations, nil
 }
 
-func (r *Runner) replacement(base expressionEnvironment, match *spec.LocatedNode, index int) (any, error) {
+func (r *Runner) replacement(base map[string]any, match *spec.LocatedNode, index int) (any, error) {
 	if r.hasValue {
 		return clone(r.config.Value), nil
 	}
-	environment := base
-	environment.Current = exprValue(match.Node)
-	environment.Path = match.Path.String()
-	environment.Index = index
+	environment := make(map[string]any, len(base)+3)
+	for name, value := range base {
+		environment[name] = value
+	}
+	environment["current"] = exprValue(match.Node)
+	environment["path"] = match.Path.String()
+	environment["index"] = index
 	replacement, err := expr.Run(r.replaceExpr, environment)
 	if err != nil {
 		return nil, fmt.Errorf("evaluating expr for %s: %w", match.Path, err)

@@ -85,6 +85,10 @@ func runWorkflowUI(command *cobra.Command, deps dependencies, args []string, con
 		return err
 	}
 	baseEnv, environmentLoaders := environmentValues(invocationEnv)
+	providers, err := invocationProviders(command, deps, baseEnv)
+	if err != nil {
+		return err
+	}
 	target, err := resolveUIRunTarget(cwd, home, configDir, args, config.workflowFile)
 	if err != nil {
 		return err
@@ -96,7 +100,7 @@ func runWorkflowUI(command *cobra.Command, deps dependencies, args []string, con
 	if loader == nil {
 		loader = workflow.NewLoader(nil)
 	}
-	loadOptions := workflow.LoadOptions{Vars: vars, Env: env, BaseEnv: baseEnv, EnvironmentLoaders: environmentLoaders, RunDir: cwd, Diagnostics: reporters.Diagnostic,
+	loadOptions := workflow.LoadOptions{Vars: vars, Env: env, BaseEnv: baseEnv, EnvironmentLoaders: environmentLoaders, RunDir: cwd, Diagnostics: reporters.Diagnostic, Providers: providers,
 		Stdin: command.InOrStdin(), Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(), Interactive: interactive(command.InOrStdin()),
 		EnsureSecretAuth: true}
 	definition, cleanup, err := target.decode(command.Context(), loader, loadOptions)
@@ -152,7 +156,7 @@ func runWorkflowUI(command *cobra.Command, deps dependencies, args []string, con
 			}
 			return engine.Options{
 				InvocationID: reporters.InvocationID(),
-				Vars:         activeVars, Env: env, BaseEnv: baseEnv, EnvironmentLoaders: environmentLoaders, Dependencies: dependencies, RunDir: cwd,
+				Vars:         activeVars, Env: env, BaseEnv: baseEnv, EnvironmentLoaders: environmentLoaders, Dependencies: dependencies, RunDir: cwd, Providers: providers,
 				Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(),
 				Interactive: false, Progress: activeReporters.Progress, Diagnostics: activeReporters.Diagnostic,
 				LocalValueDir: localValueDir, GlobalValueDir: filepath.Join(configDir, "wuko", "values"),
@@ -245,7 +249,7 @@ func formLoadFunc(command *cobra.Command, deps dependencies, loader *workflow.Lo
 		}
 		state, err := workflowEngine(deps).Run(ctx, definition, engine.Options{
 			InvocationID: reporters.InvocationID(),
-			Vars:         options.Vars, Env: options.Env, BaseEnv: options.BaseEnv, EnvironmentLoaders: options.EnvironmentLoaders, RunDir: cwd,
+			Vars:         options.Vars, Env: options.Env, BaseEnv: options.BaseEnv, EnvironmentLoaders: options.EnvironmentLoaders, RunDir: cwd, Providers: options.Providers,
 			Stdin: command.InOrStdin(), Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(),
 			Interactive: false, Progress: activeReporters.Progress, Diagnostics: activeReporters.Diagnostic,
 			LocalValueDir: localValueDir, GlobalValueDir: filepath.Join(configDir, "wuko", "values"),

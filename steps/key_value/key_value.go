@@ -62,27 +62,6 @@ type Config struct {
 	Prefix    string `yaml:"prefix,omitempty"`
 }
 
-type expressionEnvironment struct {
-	Inputs       map[string]any               `expr:"inputs"`
-	Vars         map[string]any               `expr:"vars"`
-	Env          map[string]string            `expr:"env"`
-	Steps        map[string]any               `expr:"steps"`
-	Dependencies map[string]map[string]any    `expr:"dependencies"`
-	Batch        map[string]any               `expr:"batch"`
-	Foreach      map[string]any               `expr:"foreach"`
-	Matrix       map[string]any               `expr:"matrix"`
-	Observe      map[string]any               `expr:"observe"`
-	Finally      map[string]any               `expr:"finally"`
-	Error        map[string]any               `expr:"error"`
-	Workflow     step.WorkflowValue           `expr:"workflow"`
-	Run          step.RunValue                `expr:"run"`
-	Secret       func(string) (string, error) `expr:"secret"`
-	// Current and Found describe the stored value an update replaces. They are nil and
-	// false for every other operation.
-	Current any  `expr:"current"`
-	Found   bool `expr:"found"`
-}
-
 // Runner executes a key-value operation.
 type Runner struct {
 	config   Config
@@ -123,7 +102,11 @@ func (r *Runner) compileValueExpression() error {
 	if !r.hasExpr || templated(r.config.Expr) {
 		return nil
 	}
-	program, err := wukoexpr.Compile(r.config.Expr, expr.Env(expressionEnvironment{}))
+	program, err := wukoexpr.Compile(
+		r.config.Expr,
+		expr.Env(step.ExpressionEnvironmentShape(map[string]any{"found": false})),
+		expr.AllowUndefinedVariables(),
+	)
 	if err != nil {
 		return fmt.Errorf("compiling expr: %w", err)
 	}
@@ -365,7 +348,7 @@ func (r *Runner) storedValue(request step.Request) (any, error) {
 	if r.program == nil {
 		return nil, fmt.Errorf("expr contains an unresolved template")
 	}
-	value, err := expr.Run(r.program, environment(request))
+	value, err := expr.Run(r.program, request.ExpressionEnvironment(map[string]any{"current": nil, "found": false}))
 	if err != nil {
 		return nil, fmt.Errorf("evaluating expr: %w", err)
 	}
@@ -382,9 +365,7 @@ func (r *Runner) updatedValue(request step.Request, current any, found bool) (an
 	if r.program == nil {
 		return nil, fmt.Errorf("expr contains an unresolved template")
 	}
-	value := environment(request)
-	value.Current = runtimeValue(current)
-	value.Found = found
+	value := request.ExpressionEnvironment(map[string]any{"current": runtimeValue(current), "found": found})
 	updated, err := expr.Run(r.program, value)
 	if err != nil {
 		return nil, fmt.Errorf("evaluating expr: %w", err)
@@ -394,26 +375,6 @@ func (r *Runner) updatedValue(request step.Request, current any, found bool) (an
 		return nil, fmt.Errorf("expr result is not JSON-compatible: %w", err)
 	}
 	return normalized, nil
-}
-
-func environment(request step.Request) expressionEnvironment {
-	return expressionEnvironment{
-		Inputs: request.Inputs, Vars: request.Vars, Env: request.Env, Steps: request.Steps,
-		Dependencies: request.Dependencies, Batch: binding(request.Bindings, "batch"),
-		Foreach: binding(request.Bindings, "foreach"), Matrix: binding(request.Bindings, "matrix"), Observe: binding(request.Bindings, "observe"),
-		Finally: binding(request.Bindings, "finally"), Error: binding(request.Bindings, "error"),
-		Workflow: request.WorkflowValue(),
-		Run:      request.RunValue(),
-		Secret:   request.ResolveSecret,
-	}
-}
-
-func binding(bindings map[string]any, name string) map[string]any {
-	value, _ := bindings[name].(map[string]any)
-	if value == nil {
-		return map[string]any{}
-	}
-	return value
 }
 
 func templated(value string) bool { return strings.Contains(value, "{{") }

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/provider"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/steps/decode"
 	"github.com/up2jj/wuko/steps/extract"
@@ -23,6 +24,88 @@ func referenceTestRegistry(t *testing.T, runs *int) *step.Registry {
 			return step.Result{Outputs: map[string]any{"value": raw["value"]}}, nil
 		}), nil
 	}})
+}
+
+func TestReferenceValidationUsesProviderSchemas(t *testing.T) {
+	registry := referenceTestRegistry(t, nil)
+	schema := provider.Object(map[string]provider.Schema{
+		"region":  provider.Scalar(),
+		"payload": provider.OpenObject(),
+	})
+	active := provider.Set{
+		Schemas: map[string]provider.Schema{"acme": schema},
+		Values:  map[string]map[string]any{"acme": {"region": "eu", "payload": map[string]any{}}},
+	}
+	inactive := provider.Set{Schemas: map[string]provider.Schema{"acme": schema}}
+	tests := []struct {
+		name      string
+		providers provider.Set
+		value     string
+		condition workflow.Condition
+		want      string
+	}{
+		{name: "closed template field", providers: active, value: `{{ .acme.regoin }}`, want: `field "regoin" is not available in acme`},
+		{name: "closed expression field", providers: active, condition: `acme.regoin == "eu"`, want: `field "regoin" is not available in acme`},
+		{name: "open payload template", providers: active, value: `{{ .acme.payload.any.future.field }}`},
+		{name: "open payload expression", providers: active, condition: `acme.payload.any.future == nil`},
+		{name: "inactive template root", providers: inactive, value: `{{ .acme.region }}`, want: `data root "acme" is not available here`},
+		{name: "inactive expression root", providers: inactive, condition: `acme.region == "eu"`, want: `data root "acme" is not available here`},
+		{name: "provider typo", providers: active, condition: `amce.region == "eu"`, want: `data root "amce" is not available here`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			definition := testDefinition(t, tt.name, workflow.Step{
+				ID: "use", Type: "capture", If: tt.condition, With: map[string]any{"value": tt.value},
+			})
+			err := New(registry).Validate(t.Context(), definition, Options{Providers: tt.providers})
+			if tt.want == "" {
+				if err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("Validate error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestProviderNamesCannotCollideWithRuntimeRoots(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		root   string
+		engine *Engine
+	}{
+		{name: "built-in", root: "vars", engine: New(referenceTestRegistry(t, nil))},
+		{name: "active control", root: "custom_context", engine: New(referenceTestRegistry(t, nil), WithBackgroundControl(providerCollisionControl{}))},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			definition := testDefinition(t, "collision", workflow.Step{ID: "use", Type: "capture"})
+			providers := provider.Set{
+				Schemas: map[string]provider.Schema{test.root: provider.OpenObject()},
+				Values:  map[string]map[string]any{test.root: {}},
+			}
+			err := test.engine.Validate(t.Context(), definition, Options{Providers: providers})
+			if err == nil || !strings.Contains(err.Error(), `provider name "`+test.root+`" conflicts with a runtime root`) {
+				t.Fatalf("Validate error = %v", err)
+			}
+		})
+	}
+}
+
+type providerCollisionControl struct{}
+
+func (providerCollisionControl) Kind() string                       { return "custom" }
+func (providerCollisionControl) Matches(workflow.Step) bool         { return false }
+func (providerCollisionControl) Body(workflow.Step) []workflow.Step { return nil }
+func (providerCollisionControl) BindingRoot() string                { return "custom_context" }
+func (providerCollisionControl) Configuration(workflow.Step) any    { return nil }
+func (providerCollisionControl) Validate(context.Context, workflow.Step) error {
+	return nil
+}
+func (providerCollisionControl) Launch(context.Context, BackgroundControlRequest) (BackgroundControlProgram, error) {
+	return BackgroundControlProgram{}, nil
 }
 
 func TestReferenceValidationFailsBeforeAnyStepRuns(t *testing.T) {

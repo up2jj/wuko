@@ -18,6 +18,7 @@ func (e *Engine) compileCondition(condition workflow.Condition) (*vm.Program, er
 		string(condition),
 		expr.Env(e.conditionEnvironmentShape()),
 		expr.AsBool(),
+		expr.AllowUndefinedVariables(),
 	)
 	if err != nil {
 		return nil, err
@@ -85,6 +86,11 @@ func makeConditionEnvironment(definition *workflow.Definition, runDir string, st
 		},
 	}
 	for name, value := range state.Bindings {
+		environment[name] = value
+	}
+	// State owns a private provider clone and condition evaluation only reads, so these roots
+	// are shared like inputs, vars, and steps above instead of deep-copied per condition.
+	for name, value := range state.Providers.Values {
 		environment[name] = value
 	}
 	return environment

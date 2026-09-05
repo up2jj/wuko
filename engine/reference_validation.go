@@ -8,6 +8,7 @@ import (
 
 	"github.com/expr-lang/expr/ast"
 	"github.com/expr-lang/expr/parser"
+	"github.com/up2jj/wuko/provider"
 	"github.com/up2jj/wuko/workflow"
 )
 
@@ -50,7 +51,7 @@ var (
 		"inputs": {}, "vars": {}, "env": {}, "steps": {}, "dependencies": {},
 		"batch": {}, "foreach": {}, "matrix": {}, "finally": {}, "error": {},
 		"workflow": {}, "run": {}, "cancel_on": {}, "monitors": {},
-		"result": {}, "poll": {}, "current": {}, "path": {}, "index": {},
+		"result": {}, "poll": {}, "current": {}, "found": {}, "path": {}, "index": {},
 		"item": {}, "label": {}, "value": {}, "description": {}, "disabled": {}, "reason": {},
 	}
 )
@@ -64,6 +65,10 @@ func (e *Engine) validateDataReferences(definition *workflow.Definition, options
 	for _, control := range validator.controls {
 		validator.templateRoots[control.BindingRoot()] = struct{}{}
 		validator.expressionRoots[control.BindingRoot()] = struct{}{}
+	}
+	for name := range state.Providers.Schemas {
+		validator.templateRoots[name] = struct{}{}
+		validator.expressionRoots[name] = struct{}{}
 	}
 	validator.initial = newReferenceScope(state)
 	return validator.validateDefinition()
@@ -79,10 +84,27 @@ func newReferenceScope(state *State) *referenceScope {
 		"workflow":     closedReference("name", "dir", "timezone"),
 		"run":          closedReference("dir", "environment_loaders"),
 	}}
+	for name := range state.Providers.Values {
+		scope.roots[name] = schemaForProvider(state.Providers.Schemas[name])
+	}
 	for name, value := range state.Bindings {
 		scope.addBinding(name, value)
 	}
 	return scope
+}
+
+func schemaForProvider(schema provider.Schema) *referenceSchema {
+	if schema.Open {
+		return openReference
+	}
+	if schema.Fields == nil {
+		return leafReference
+	}
+	fields := make(map[string]*referenceSchema, len(schema.Fields))
+	for name, child := range schema.Fields {
+		fields[name] = schemaForProvider(child)
+	}
+	return &referenceSchema{fields: fields}
 }
 
 func schemaForAnyMap(values map[string]any) *referenceSchema {
@@ -958,6 +980,11 @@ func (validator *referenceValidator) validateStepConfiguration(stepID, stepType 
 	switch stepType {
 	case "assert", "set":
 		return validator.validateRawExpression("expr", raw, "expr", scope)
+	case "key_value":
+		locals := scope.clone()
+		locals.roots["current"] = openReference
+		locals.roots["found"] = leafReference
+		return validator.validateRawExpression("expr", raw, "expr", locals)
 	case "edit":
 		if err := validator.validateRawExpression("from.expr", nestedMap(raw, "from"), "expr", scope); err != nil {
 			return err
@@ -989,12 +1016,13 @@ func (validator *referenceValidator) validateStepConfiguration(stepID, stepType 
 			return err
 		}
 		locals := scope.clone()
-		for _, field := range []string{"item", "label", "value", "description", "disabled", "reason"} {
-			locals.roots[field] = openReference
-		}
-		for _, field := range []string{"label_expr", "value_expr", "description_expr", "disabled_expr", "reason_expr", "default_expr"} {
+		locals.roots["item"] = openReference
+		for index, field := range []string{"label_expr", "value_expr", "description_expr", "disabled_expr", "reason_expr", "default_expr"} {
 			if err := validator.validateRawExpression(field, raw, field, locals); err != nil {
 				return err
+			}
+			if index < 5 {
+				locals.roots[[]string{"label", "value", "description", "disabled", "reason"}[index]] = openReference
 			}
 		}
 	case "extract", "decode", "jsonpath", "table":

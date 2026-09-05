@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	envload "github.com/up2jj/wuko/environment"
+	"github.com/up2jj/wuko/provider"
 	"github.com/up2jj/wuko/step"
 	setstep "github.com/up2jj/wuko/steps/set"
 	"github.com/up2jj/wuko/workflow"
@@ -62,6 +63,76 @@ steps:
 	}
 	if !strings.Contains(string(data), "dist/app.tar.gz") {
 		t.Fatalf("GITHUB_OUTPUT = %q", data)
+	}
+}
+
+type dependencyExecutionProvider struct{ loads *int }
+
+func (dependencyExecutionProvider) Name() string { return "acme" }
+func (dependencyExecutionProvider) Schema() provider.Schema {
+	return provider.Object(map[string]provider.Schema{"region": provider.Scalar()})
+}
+
+func (executionProvider dependencyExecutionProvider) Load(context.Context, map[string]string) (map[string]any, bool, error) {
+	if executionProvider.loads != nil {
+		*executionProvider.loads++
+	}
+	return map[string]any{"region": "eu-central"}, true, nil
+}
+
+func TestRunCommandPropagatesRegisteredProviderIntoDependencies(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, ".wuko", "workflows")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeWorkflowData(t, filepath.Join(dir, "build.yaml"), `version: 1
+name: build
+invokable: false
+outputs:
+  region: {type: string, value: steps.capture.value}
+steps:
+  - id: capture
+    type: provider_capture
+    with: {value: '{{ .acme.region }}'}
+`)
+	writeWorkflowData(t, filepath.Join(dir, "release.yaml"), `version: 1
+name: release
+depends_on: {build: build}
+steps:
+  - id: capture
+    type: provider_capture
+    with: {value: '{{ .dependencies.build.region }}:{{ .acme.region }}'}
+`)
+	var values []string
+	steps := step.NewRegistry()
+	if err := steps.Register("provider_capture", func(raw map[string]any) (step.Runner, error) {
+		return providerDependencyRunner{value: raw["value"].(string), seen: &values}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	providers := &provider.Registry{}
+	loads := 0
+	if err := providers.Register(dependencyExecutionProvider{loads: &loads}); err != nil {
+		t.Fatal(err)
+	}
+	command := newRootCmd(dependencies{
+		stdin: bytes.NewReader(nil), stdout: io.Discard, stderr: io.Discard,
+		cwd: func() (string, error) { return root, nil }, homeDir: func() (string, error) { return filepath.Join(root, "home"), nil },
+		configDir: func() (string, error) { return filepath.Join(root, "config"), nil }, registry: steps, providers: providers,
+		getenv: func(string) string { return "" }, environment: envload.InvocationLoaderFunc(func(context.Context, string, map[string]string, envload.Policy) (envload.InvocationEnvironment, error) {
+			return envload.InvocationEnvironment{Values: map[string]string{}}, nil
+		}),
+	})
+	command.SetArgs([]string{"run", "release"})
+	if err := command.ExecuteContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(values, ","); got != "eu-central,eu-central:eu-central" {
+		t.Fatalf("provider values = %q", got)
+	}
+	if loads != 1 {
+		t.Fatalf("provider loads = %d, want 1", loads)
 	}
 }
 
@@ -118,6 +189,16 @@ func TestReleaseDependencyPlanRemovesRetainedGraph(t *testing.T) {
 	if !released {
 		t.Fatal("underlying release was not called")
 	}
+}
+
+type providerDependencyRunner struct {
+	value string
+	seen  *[]string
+}
+
+func (runner providerDependencyRunner) Run(context.Context, step.Request) (step.Result, error) {
+	*runner.seen = append(*runner.seen, runner.value)
+	return step.Result{Outputs: map[string]any{"value": runner.value}}, nil
 }
 
 type dependencyRecordRunner struct {

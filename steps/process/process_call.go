@@ -55,14 +55,14 @@ func newCall(raw map[string]any, registry *rpcRegistry) (step.Runner, error) {
 	var poolProgram *vm.Program
 	var err error
 	if hasPool {
-		poolProgram, err = wukoexpr.Compile(config.Pool, expr.Env(expressionEnvironment{}))
+		poolProgram, err = wukoexpr.Compile(config.Pool, expr.Env(step.ExpressionEnvironmentShape(nil)), expr.AllowUndefinedVariables())
 		if err != nil {
 			return nil, fmt.Errorf("compiling pool expression: %w", err)
 		}
 	}
 	var payloadProgram *vm.Program
 	if strings.TrimSpace(config.PayloadExpr) != "" {
-		payloadProgram, err = wukoexpr.Compile(config.PayloadExpr, expr.Env(expressionEnvironment{}))
+		payloadProgram, err = wukoexpr.Compile(config.PayloadExpr, expr.Env(step.ExpressionEnvironmentShape(nil)), expr.AllowUndefinedVariables())
 		if err != nil {
 			return nil, fmt.Errorf("compiling payload expression: %w", err)
 		}

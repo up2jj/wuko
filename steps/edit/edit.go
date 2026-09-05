@@ -48,26 +48,6 @@ type Config struct {
 	MaxBytes  string `yaml:"max_bytes,omitempty"`
 }
 
-type expressionEnvironment struct {
-	Inputs       map[string]any               `expr:"inputs"`
-	Vars         map[string]any               `expr:"vars"`
-	Env          map[string]string            `expr:"env"`
-	Steps        map[string]any               `expr:"steps"`
-	Dependencies map[string]map[string]any    `expr:"dependencies"`
-	Batch        map[string]any               `expr:"batch"`
-	Foreach      map[string]any               `expr:"foreach"`
-	Matrix       map[string]any               `expr:"matrix"`
-	Observe      map[string]any               `expr:"observe"`
-	Finally      map[string]any               `expr:"finally"`
-	Error        map[string]any               `expr:"error"`
-	Workflow     step.WorkflowValue           `expr:"workflow"`
-	Run          step.RunValue                `expr:"run"`
-	Current      any                          `expr:"current"`
-	Path         string                       `expr:"path"`
-	Index        int                          `expr:"index"`
-	Secret       func(string) (string, error) `expr:"secret"`
-}
-
 type Runner struct {
 	config      Config
 	hasValue    bool
@@ -154,7 +134,7 @@ func New(raw map[string]any) (step.Runner, error) {
 		runner.path = path
 	}
 	if config.From.Expr != "" && !templated(config.From.Expr) {
-		program, err := wukoexpr.Compile(config.From.Expr, expr.Env(expressionEnvironment{}))
+		program, err := wukoexpr.Compile(config.From.Expr, expr.Env(step.ExpressionEnvironmentShape(nil)), expr.AllowUndefinedVariables())
 		if err != nil {
 			return nil, fmt.Errorf("compiling from.expr: %w", err)
 		}
@@ -165,7 +145,7 @@ func New(raw map[string]any) (step.Runner, error) {
 			return nil, fmt.Errorf("expr must not be empty")
 		}
 		if !templated(config.Expr) {
-			program, err := wukoexpr.Compile(config.Expr, expr.Env(expressionEnvironment{}))
+			program, err := wukoexpr.Compile(config.Expr, expr.Env(step.ExpressionEnvironmentShape(map[string]any{"path": "", "index": 0})), expr.AllowUndefinedVariables())
 			if err != nil {
 				return nil, fmt.Errorf("compiling expr: %w", err)
 			}
@@ -307,24 +287,12 @@ func (r *Runner) resolveSource(ctx context.Context, request step.Request) (any, 
 
 // baseEnvironment holds the roots shared by every match; only current, path,
 // and index change from one match to the next.
-func (r *Runner) baseEnvironment(request step.Request) expressionEnvironment {
-	return expressionEnvironment{
-		Inputs: request.Inputs, Vars: request.Vars, Env: request.Env, Steps: request.Steps,
-		Dependencies: request.Dependencies, Batch: binding(request.Bindings, "batch"),
-		Foreach: binding(request.Bindings, "foreach"), Matrix: binding(request.Bindings, "matrix"), Observe: binding(request.Bindings, "observe"),
-		Finally: binding(request.Bindings, "finally"), Error: binding(request.Bindings, "error"),
-		Workflow: request.WorkflowValue(),
-		Run:      request.RunValue(),
-		Secret:   request.ResolveSecret,
-	}
+func (r *Runner) baseEnvironment(request step.Request) map[string]any {
+	return request.ExpressionEnvironment(nil)
 }
 
-func (r *Runner) environment(request step.Request, current any, path string, index int) expressionEnvironment {
-	environment := r.baseEnvironment(request)
-	environment.Current = exprValue(current)
-	environment.Path = path
-	environment.Index = index
-	return environment
+func (r *Runner) environment(request step.Request, current any, path string, index int) map[string]any {
+	return request.ExpressionEnvironment(map[string]any{"current": exprValue(current), "path": path, "index": index})
 }
 
 // result takes ownership of value and replacements: both are documents this
@@ -662,14 +630,6 @@ func validateJSON(value any) error {
 	}
 	_, err := json.Marshal(value)
 	return err
-}
-
-func binding(bindings map[string]any, name string) map[string]any {
-	value, _ := bindings[name].(map[string]any)
-	if value == nil {
-		return map[string]any{}
-	}
-	return value
 }
 
 func templated(value string) bool { return strings.Contains(value, "{{") }

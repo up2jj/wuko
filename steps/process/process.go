@@ -112,22 +112,6 @@ type ArgvExpression struct {
 	Expr string `yaml:"expr"`
 }
 
-type expressionEnvironment struct {
-	Inputs       map[string]any            `expr:"inputs"`
-	Vars         map[string]any            `expr:"vars"`
-	Env          map[string]string         `expr:"env"`
-	Steps        map[string]any            `expr:"steps"`
-	Dependencies map[string]map[string]any `expr:"dependencies"`
-	Batch        map[string]any            `expr:"batch"`
-	Foreach      map[string]any            `expr:"foreach"`
-	Matrix       map[string]any            `expr:"matrix"`
-	Workflow     step.WorkflowValue        `expr:"workflow"`
-	Run          struct {
-		Dir string `expr:"dir"`
-	} `expr:"run"`
-	Secret func(string) (string, error) `expr:"secret"`
-}
-
 type Runner struct {
 	config       Config
 	stdoutPolicy processpkg.OutputPolicy
@@ -258,7 +242,7 @@ func newProcess(raw map[string]any, rpcRegistry *rpcRegistry) (step.Runner, erro
 	}
 	var argvProgram *vm.Program
 	if config.Argv != nil {
-		argvProgram, err = wukoexpr.Compile(config.Argv.Expr, expr.Env(expressionEnvironment{}))
+		argvProgram, err = wukoexpr.Compile(config.Argv.Expr, expr.Env(step.ExpressionEnvironmentShape(nil)), expr.AllowUndefinedVariables())
 		if err != nil {
 			return nil, fmt.Errorf("compiling argv expr: %w", err)
 		}
@@ -462,19 +446,8 @@ func boolInt(value bool) int {
 	return 0
 }
 
-func expressionEnvironmentFor(request step.Request) expressionEnvironment {
-	value := expressionEnvironment{Inputs: request.Inputs, Vars: request.Vars, Env: request.Env, Steps: request.Steps, Dependencies: request.Dependencies, Secret: request.ResolveSecret,
-		Batch: binding(request.Bindings, "batch"), Foreach: binding(request.Bindings, "foreach"), Matrix: binding(request.Bindings, "matrix"), Workflow: request.WorkflowValue()}
-	value.Run.Dir = request.RunDir
-	return value
-}
-
-func binding(bindings map[string]any, name string) map[string]any {
-	value, _ := bindings[name].(map[string]any)
-	if value == nil {
-		return map[string]any{}
-	}
-	return value
+func expressionEnvironmentFor(request step.Request) map[string]any {
+	return request.ExpressionEnvironment(nil)
 }
 
 func argvStrings(value any) ([]string, error) {

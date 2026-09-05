@@ -443,6 +443,10 @@ templates and `steps.<id>` for expressions. Variables live under `.vars`/`vars`.
 stops ordinary execution. Cleanup attached with `defer` is registered after its owner succeeds,
 then runs in reverse owner order before `finally`.
 
+Execution providers can add read-only roots across templates, expressions, Lua, actions, and
+dependencies. Under GitHub Actions, Wuko automatically exposes `.github`; see
+[Templates and execution provider contexts](docs/templates.md#execution-provider-contexts).
+
 A workflow can require other discovered workflows and consume their declared typed outputs:
 
 ```yaml

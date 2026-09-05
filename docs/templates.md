@@ -22,6 +22,7 @@ Every rendered string can access these roots:
 | `.batch` | Active zero-based batch index and current item chunk; available only inside a batch body. |
 | `.foreach` | Active foreach item and zero-based index; available only inside a foreach body. |
 | `.matrix` | Active named axis values; available only inside a matrix body. |
+| `.github` | GitHub Actions execution context; available only when `GITHUB_ACTIONS=true`. |
 
 Strings can use standard template actions and built-in functions such as `if`, `range`, `with`,
 `index`, `len`, and `printf`:
@@ -39,6 +40,66 @@ and equivalent syntax in each language.
 
 Lua `source` is deliberately not rendered. Pass dynamic values through the Lua step's typed
 `args` instead.
+
+## Execution provider contexts
+
+Wuko can add read-only top-level contexts for the system executing the workflow. A provider root
+is available consistently in workflow environment rendering, inline and named templates, `if` and
+other Expr expressions, Lua as `wuko.<provider>`, composite actions, dependency workflows,
+retries, scheduled runs, and lifecycle steps. More than one provider may be active at once. A
+registered provider that is not active is absent, and static validation reports references to it
+as unavailable rather than substituting an empty object.
+
+GitHub Actions is the built-in provider. It activates only when `GITHUB_ACTIONS` is exactly
+`true`, then exposes this stable `.github` contract:
+
+```yaml
+github:
+  repository:
+    owner: up2jj
+    name: wuko
+    full_name: up2jj/wuko
+  actor: up2jj
+  event:
+    name: pull_request
+    action: synchronize
+  pull_request: # present only when the event contains a pull request
+    number: 123
+    head: {sha: abc123, ref: feature/foo}
+    base: {sha: def456, ref: main}
+  sha: abc123
+  ref: refs/pull/123/merge
+  run:
+    id: 123456789
+    number: 42
+    attempt: 1
+  server_url: https://github.com
+  api_url: https://api.github.com
+  payload: {}
+```
+
+Use `.github.sha` for the runner's `GITHUB_SHA`. For pull-request events, the source revision is
+separate at `.github.pull_request.head.sha`. `ref` may be an empty string. The `pull_request` key
+is optional, so test for it before reading nested fields:
+
+```gotemplate
+{{- if hasKey "pull_request" .github -}}
+PR #{{ (index .github "pull_request").number }}
+{{- end -}}
+```
+
+The equivalent Expr guard is `hasKey(github, "pull_request")`; Lua can compare
+`wuko.github.pull_request` with `nil`.
+
+`.github.payload` contains the complete event JSON object with native boolean, string, number,
+list, object, and null values. Its subtree is intentionally open for static validation because
+GitHub event schemas evolve. Treat every payload value as untrusted input: validate it before using
+it in a command, path, URL, generated configuration, or log message. Curated fields outside
+`payload` are closed and misspellings fail validation.
+
+Wuko reads and validates the event file before loading the workflow. An active GitHub context
+therefore fails immediately when required runner metadata or the event file is missing, malformed,
+not a regular file, or larger than 25 MiB. No command-line context override is provided.
 
 ## Named templates
 
