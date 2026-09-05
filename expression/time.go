@@ -135,6 +135,13 @@ func loadTimeLocation(name string, fallback *time.Location) (*time.Location, err
 }
 
 func timeAdjustmentInt(name string, value any) (int, error) {
+	return integerArgument(fmt.Sprintf("time adjustment %q", name), value)
+}
+
+// integerArgument coerces a template, Expr, or Lua value to a Go int. subject names the
+// argument in error messages and must already read as a noun phrase, such as
+// `time adjustment "days"` or `random integer minimum`.
+func integerArgument(subject string, value any) (int, error) {
 	var number int64
 	switch typed := value.(type) {
 	case int:
@@ -149,7 +156,7 @@ func timeAdjustmentInt(name string, value any) (int, error) {
 		number = typed
 	case uint:
 		if uint64(typed) > math.MaxInt64 {
-			return 0, fmt.Errorf("time adjustment %q is out of range", name)
+			return 0, fmt.Errorf("%s is out of range", subject)
 		}
 		number = int64(typed)
 	case uint8:
@@ -160,29 +167,29 @@ func timeAdjustmentInt(name string, value any) (int, error) {
 		number = int64(typed)
 	case uint64:
 		if typed > math.MaxInt64 {
-			return 0, fmt.Errorf("time adjustment %q is out of range", name)
+			return 0, fmt.Errorf("%s is out of range", subject)
 		}
 		number = int64(typed)
 	case float64:
 		if math.Trunc(typed) != typed || typed < math.MinInt64 || typed > math.MaxInt64 {
-			return 0, fmt.Errorf("time adjustment %q must be an integer", name)
+			return 0, fmt.Errorf("%s must be an integer", subject)
 		}
 		number = int64(typed)
 	case json.Number:
 		parsed, err := typed.Int64()
 		if err != nil {
-			return 0, fmt.Errorf("time adjustment %q must be an integer", name)
+			return 0, fmt.Errorf("%s must be an integer", subject)
 		}
 		number = parsed
 	default:
 		kind := reflect.TypeOf(value)
 		if kind == nil {
-			return 0, fmt.Errorf("time adjustment %q must be an integer, got <nil>", name)
+			return 0, fmt.Errorf("%s must be an integer, got <nil>", subject)
 		}
-		return 0, fmt.Errorf("time adjustment %q must be an integer, got %s", name, kind)
+		return 0, fmt.Errorf("%s must be an integer, got %s", subject, kind)
 	}
 	if int64(int(number)) != number {
-		return 0, fmt.Errorf("time adjustment %q is out of range", name)
+		return 0, fmt.Errorf("%s is out of range", subject)
 	}
 	return int(number), nil
 }

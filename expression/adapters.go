@@ -82,6 +82,36 @@ func TemplateFuncsWithSecret(resolver SecretResolver) template.FuncMap {
 		"formatTime":              templateFormatTime,
 		"parseURI":                ParseURI,
 		"buildURI":                BuildURI,
+		"base64Encode":            templateBase64Encode,
+		"base64Decode":            templateBase64Decode,
+		"hexEncode":               templateHexEncode,
+		"hexDecode":               HexDecode,
+		"urlEncode":               URLEncode,
+		"urlDecode":               URLDecode,
+		"htmlEncode":              HTMLEncode,
+		"htmlDecode":              HTMLDecode,
+		"md5":                     func(values ...any) (string, error) { return templateDigest("md5", MD5, values...) },
+		"sha1":                    func(values ...any) (string, error) { return templateDigest("sha1", SHA1, values...) },
+		"sha256":                  func(values ...any) (string, error) { return templateDigest("sha256", SHA256, values...) },
+		"sha512":                  func(values ...any) (string, error) { return templateDigest("sha512", SHA512, values...) },
+		"hmacSHA256":              func(values ...any) (string, error) { return templateHMAC("hmacSHA256", HMACSHA256, values...) },
+		"hmacSHA512":              func(values ...any) (string, error) { return templateHMAC("hmacSHA512", HMACSHA512, values...) },
+		"baseConvert":             templateBaseConvert,
+		"romanEncode":             templateRomanEncode,
+		"romanDecode":             RomanDecode,
+		"ordinal":                 templateOrdinal,
+		"countBytes":              CountBytes,
+		"countRunes":              CountRunes,
+		"countGraphemes":          CountGraphemes,
+		"countWords":              CountWords,
+		"countLines":              CountLines,
+		"uuid":                    adapterUUID,
+		"randomString":            adapterRandomString,
+		"randomInt":               adapterRandomInt,
+		"randomToken":             adapterRandomToken,
+		"password":                adapterPassword,
+		"currentTime":             CurrentTime,
+		"unixTimestamp":           adapterUnixTimestamp,
 		"buildConventionalCommit": BuildConventionalCommit,
 		"isConventionalCommit":    templateIsConventionalCommit,
 	}
@@ -104,9 +134,11 @@ func Eval(source string, environment any) (any, error) {
 
 func exprOptions() []expr.Option {
 	return []expr.Option{
-		// Expr's now() would let any expression read the clock, which would defeat the
-		// time step's recordable, --var-overridable capture. Disabling it fails such an
-		// expression at compile time with "unknown name now".
+		// Expr's implicit now() would let any expression read the clock without saying so.
+		// Wuko keeps the clock behind explicitly named boundaries instead: the recordable,
+		// --var-overridable time step, and the documented currentTime() and unixTimestamp()
+		// helpers. Disabling the builtin fails such an expression at compile time with
+		// "unknown name now".
 		expr.DisableBuiltin("now"),
 		expr.Function("default", func(values ...any) (any, error) {
 			return defaultValue(values[1], values[0]), nil
@@ -212,6 +244,54 @@ func exprOptions() []expr.Option {
 		expr.Function("buildURI", func(values ...any) (any, error) {
 			return BuildURI(values[0].(map[string]any))
 		}, new(func(map[string]any) string)),
+		expr.Function("base64Encode", exprBase64Encode, new(func(...any) string)),
+		expr.Function("base64Decode", exprBase64Decode, new(func(...any) string)),
+		expr.Function("hexEncode", exprHexEncode, new(func(...any) string)),
+		expr.Function("hexDecode", exprText("hexDecode", HexDecode), new(func(string) string)),
+		expr.Function("urlEncode", exprText("urlEncode", URLEncode), new(func(string) string)),
+		expr.Function("urlDecode", exprText("urlDecode", URLDecode), new(func(string) string)),
+		expr.Function("htmlEncode", exprText("htmlEncode", HTMLEncode), new(func(string) string)),
+		expr.Function("htmlDecode", exprText("htmlDecode", HTMLDecode), new(func(string) string)),
+		expr.Function("md5", func(values ...any) (any, error) { return exprDigest("md5", MD5, values...) }, new(func(...any) string)),
+		expr.Function("sha1", func(values ...any) (any, error) { return exprDigest("sha1", SHA1, values...) }, new(func(...any) string)),
+		expr.Function("sha256", func(values ...any) (any, error) { return exprDigest("sha256", SHA256, values...) }, new(func(...any) string)),
+		expr.Function("sha512", func(values ...any) (any, error) { return exprDigest("sha512", SHA512, values...) }, new(func(...any) string)),
+		expr.Function("hmacSHA256", func(values ...any) (any, error) { return exprHMAC("hmacSHA256", HMACSHA256, values...) }, new(func(...any) string)),
+		expr.Function("hmacSHA512", func(values ...any) (any, error) { return exprHMAC("hmacSHA512", HMACSHA512, values...) }, new(func(...any) string)),
+		expr.Function("baseConvert", exprBaseConvert, new(func(...any) string)),
+		expr.Function("romanEncode", func(values ...any) (any, error) {
+			value, err := utilityInt("Roman numeral value", values[0])
+			if err != nil {
+				return nil, err
+			}
+			return RomanEncode(value)
+		}, new(func(any) string)),
+		expr.Function("romanDecode", func(values ...any) (any, error) {
+			text, err := utilityString("romanDecode value", values[0])
+			if err != nil {
+				return nil, err
+			}
+			return RomanDecode(text)
+		}, new(func(string) int)),
+		expr.Function("ordinal", func(values ...any) (any, error) {
+			value, err := utilityInt64("ordinal value", values[0])
+			if err != nil {
+				return nil, err
+			}
+			return Ordinal(value), nil
+		}, new(func(any) string)),
+		expr.Function("countBytes", exprCount("countBytes", CountBytes), new(func(string) int)),
+		expr.Function("countRunes", exprCount("countRunes", CountRunes), new(func(string) int)),
+		expr.Function("countGraphemes", exprCount("countGraphemes", CountGraphemes), new(func(string) int)),
+		expr.Function("countWords", exprCount("countWords", CountWords), new(func(string) int)),
+		expr.Function("countLines", exprCount("countLines", CountLines), new(func(string) int)),
+		expr.Function("uuid", adapterUUID, new(func(...any) string)),
+		expr.Function("randomString", adapterRandomString, new(func(...any) string)),
+		expr.Function("randomInt", adapterRandomInt, new(func(...any) int64)),
+		expr.Function("randomToken", adapterRandomToken, new(func(...any) string)),
+		expr.Function("password", adapterPassword, new(func(...any) string)),
+		expr.Function("currentTime", func(...any) (any, error) { return CurrentTime(), nil }, new(func() string)),
+		expr.Function("unixTimestamp", adapterUnixTimestamp, new(func(...any) int64)),
 		expr.Function("buildConventionalCommit", func(values ...any) (any, error) {
 			return BuildConventionalCommit(values[0].(map[string]any))
 		}, new(func(map[string]any) string)),

@@ -114,12 +114,18 @@ func TestTimeHelpersValidateInputs(t *testing.T) {
 	}
 }
 
-func TestEvaluatorsExposeNoClockFunction(t *testing.T) {
+func TestEvaluatorsExposeOnlyExplicitClockFunctions(t *testing.T) {
 	t.Parallel()
 	if _, exists := TemplateFuncs()["now"]; exists {
-		t.Fatal("templates expose a clock function")
+		t.Fatal("templates expose the implicit now function")
 	}
 	if _, err := Eval(`now()`, map[string]any{}); err == nil {
-		t.Fatal("Expr exposes a clock function")
+		t.Fatal("Expr exposes the implicit now function")
+	}
+	if _, exists := TemplateFuncs()["currentTime"]; !exists {
+		t.Fatal("templates do not expose currentTime")
+	}
+	if _, err := Eval(`currentTime()`, map[string]any{}); err != nil {
+		t.Fatalf("Expr currentTime: %v", err)
 	}
 }

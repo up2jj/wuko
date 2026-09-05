@@ -4,9 +4,10 @@ The `secret(reference)` helper is available to Go templates and Expr expressions
 1Password (`op://...`) and Bitwarden (`bw://selector/item`) references lazily; see
 [Secrets](secrets.md) for provider and authentication configuration.
 
-Wuko exposes the same deterministic, side-effect-free helpers to Go templates, Expr, and Lua.
-Go templates always render strings, while Expr and Lua preserve typed results such as booleans,
-numbers, lists, and objects.
+Wuko exposes the same named helpers to Go templates, Expr, and Lua. Most are deterministic and
+side-effect-free; the explicitly named generation and current-time helpers use secure randomness
+or the host clock. Go templates always render strings, while Expr and Lua preserve typed results
+such as booleans, numbers, lists, and objects.
 
 Go template pipelines pass the value as the final function argument:
 
@@ -651,18 +652,105 @@ wuko.output("next_week", h.format_time(next_week, "2006-01-02", "UTC"))
 `formatTime` consume RFC3339 or RFC3339Nano strings, so custom source text must be parsed first.
 Offset-bearing inputs retain their instant before an explicit timezone conversion.
 
+## Encoding and decoding
+
+| Function | Go template | Expr | Lua | Result |
+| --- | --- | --- | --- | --- |
+| `base64Encode` | `{{ value \| base64Encode options }}` | `base64Encode(value, options)` | `h.base64_encode(value, options)` | Base64 text |
+| `base64Decode` | `{{ value \| base64Decode options }}` | `base64Decode(value, options)` | `h.base64_decode(value, options)` | Decoded UTF-8 text |
+| `hexEncode` | `{{ value \| hexEncode uppercase }}` | `hexEncode(value, uppercase)` | `h.hex_encode(value, uppercase)` | Hexadecimal text |
+| `hexDecode` | `{{ value \| hexDecode }}` | `hexDecode(value)` | `h.hex_decode(value)` | Decoded UTF-8 text |
+| `urlEncode` | `{{ value \| urlEncode }}` | `urlEncode(value)` | `h.url_encode(value)` | RFC 3986 component encoding |
+| `urlDecode` | `{{ value \| urlDecode }}` | `urlDecode(value)` | `h.url_decode(value)` | Decoded URI component |
+| `htmlEncode` | `{{ value \| htmlEncode }}` | `htmlEncode(value)` | `h.html_encode(value)` | Escaped HTML text |
+| `htmlDecode` | `{{ value \| htmlDecode }}` | `htmlDecode(value)` | `h.html_decode(value)` | Text with entities resolved |
+
+The options argument is optional. Base64 options are `alphabet` (`standard` or `url`) and
+`padding` (default `true`). Decoding uses the selected alphabet and padding mode strictly and
+rejects binary results that are not valid UTF-8. URL encoding is for one URI component: it keeps
+only RFC 3986 unreserved bytes, represents spaces as `%20`, and preserves a literal `+` during
+decoding. Use `buildURI` when constructing a complete URI.
+
+## Hashing and authentication codes
+
+| Function | Go template | Expr | Lua |
+| --- | --- | --- | --- |
+| `md5` | `{{ value \| md5 options }}` | `md5(value, options)` | `h.md5(value, options)` |
+| `sha1` | `{{ value \| sha1 options }}` | `sha1(value, options)` | `h.sha1(value, options)` |
+| `sha256` | `{{ value \| sha256 options }}` | `sha256(value, options)` | `h.sha256(value, options)` |
+| `sha512` | `{{ value \| sha512 options }}` | `sha512(value, options)` | `h.sha512(value, options)` |
+| `hmacSHA256` | `{{ value \| hmacSHA256 key options }}` | `hmacSHA256(value, key, options)` | `h.hmac_sha256(value, key, options)` |
+| `hmacSHA512` | `{{ value \| hmacSHA512 key options }}` | `hmacSHA512(value, key, options)` | `h.hmac_sha512(value, key, options)` |
+
+Options are optional: `encoding` is `hex` (the default) or `base64`, and `uppercase` applies only
+to hex output; combining it with `base64` is rejected rather than ignored. MD5 and SHA-1 are compatibility checksums and must not be used for security. Use
+SHA-256 or SHA-512 for digests and HMAC for keyed authentication. Resolve HMAC keys with `secret`
+or pass them through protected Lua arguments; never place them directly in workflow source.
+
+## Numbers and inspection
+
+| Function | Go template | Expr | Lua | Result |
+| --- | --- | --- | --- | --- |
+| `baseConvert` | `{{ value \| baseConvert from to uppercase }}` | `baseConvert(value, from, to, uppercase)` | `h.base_convert(value, from, to, uppercase)` | Signed integer in another base |
+| `romanEncode` | `{{ value \| romanEncode }}` | `romanEncode(value)` | `h.roman_encode(value)` | Canonical Roman numeral |
+| `romanDecode` | `{{ value \| romanDecode }}` | `romanDecode(value)` | `h.roman_decode(value)` | Integer |
+| `ordinal` | `{{ value \| ordinal }}` | `ordinal(value)` | `h.ordinal(value)` | English ordinal such as `22nd` |
+| `countBytes` | `{{ value \| countBytes }}` | `countBytes(value)` | `h.count_bytes(value)` | UTF-8 byte count |
+| `countRunes` | `{{ value \| countRunes }}` | `countRunes(value)` | `h.count_runes(value)` | Unicode code-point count |
+| `countGraphemes` | `{{ value \| countGraphemes }}` | `countGraphemes(value)` | `h.count_graphemes(value)` | User-perceived character count |
+| `countWords` | `{{ value \| countWords }}` | `countWords(value)` | `h.count_words(value)` | Whitespace-separated word count |
+| `countLines` | `{{ value \| countLines }}` | `countLines(value)` | `h.count_lines(value)` | Logical line count |
+
+`baseConvert` supports bases 2 through 36 and arbitrary-size integers; `uppercase` is optional and
+defaults to `false`. Roman numerals cover 1 through 3999 and decoding rejects non-canonical forms.
+Empty text has zero lines, and a terminal newline does not add another empty line.
+
+## Secure generators and current time
+
+| Function | Go template | Expr | Lua | Result |
+| --- | --- | --- | --- | --- |
+| `uuid` | `{{ uuid options }}` | `uuid(options)` | `h.uuid(options)` | UUID v4 or v7 string |
+| `randomString` | `{{ randomString length charset }}` | `randomString(length, charset)` | `h.random_string(length, charset)` | Secure random characters |
+| `randomInt` | `{{ randomInt min max }}` | `randomInt(min, max)` | `h.random_int(min, max)` | Inclusive secure random integer |
+| `randomToken` | `{{ randomToken bytes encoding }}` | `randomToken(bytes, encoding)` | `h.random_token(bytes, encoding)` | Secure random token |
+| `password` | `{{ password length options }}` | `password(length, options)` | `h.password(length, options)` | Secure random password |
+| `currentTime` | `{{ currentTime }}` | `currentTime()` | `h.current_time()` | Current UTC RFC3339Nano time |
+| `unixTimestamp` | `{{ unixTimestamp unit }}` | `unixTimestamp(unit)` | `h.unix_timestamp(unit)` | Current Unix timestamp |
+
+Every argument shown after the function name is optional except both `randomInt` bounds.
+Defaults are UUID v4, a 16-character alphanumeric string, a 32-byte hexadecimal token, a
+20-character password, and Unix seconds. UUID options are `version` (`4` or `7`), `uppercase`, and
+`compact`. Token encodings are `hex`, padded `base64`, and unpadded `base64url`.
+
+Password groups `lower`, `upper`, `digits`, and `symbols` default to enabled. Set a group to
+`false` to omit it or set `exclude_ambiguous` to `true`; at least one group must remain, the length
+must accommodate every enabled group, and every enabled group is guaranteed to occur.
+
+Each generator call and each clock call is evaluated independently. Capture a value once when it
+must be reused:
+
+```yaml
+- id: identity
+  type: set
+  with:
+    variable: run_id
+    expr: 'uuid({"version": 7})'
+```
+
+For reproducible or `--var`-overridable time, continue to use the `time` step. Expr's implicit
+`now()` builtin remains disabled; `currentTime()` and `unixTimestamp()` are the explicit,
+documented nondeterministic boundaries.
+
 ## Availability and safety
 
 Helpers are available in named and inline Go templates, in every Wuko Expr surface, and in Lua as
 `wuko.helpers`. Expr surfaces include step conditions, polling `until` expressions, batch, foreach,
 and matrix expressions, composite-action inputs and outputs, and the `set` and `assert` steps.
 
-Wuko intentionally keeps these helpers side-effect-free. They cannot read the process environment
-or filesystem, execute commands, access the network, obtain the current time, generate random
-values, perform cryptography, or quote shell commands. Time helpers parse and transform only their
-explicit arguments; current time enters state only through the `time` step. Expr's own `now()`
-builtin is disabled for the same reason, so an expression that calls it fails to compile with
-`unknown name now`: capture the instant in a [`time` step](steps-data.md#time) and read
-`.vars.<id>`, which keeps the run recordable and overridable. JSON and YAML serialization does not
-make a value safe to interpolate into executable shell source. Lua's existing `wuko.json.encode`
-remains the compact JSON encoder; `wuko.helpers.to_json` adds the shared indented form.
+Helpers cannot read the process environment or filesystem, execute commands, access the network,
+or quote shell commands. Hashes are deterministic; generator and current-time helpers are the only
+nondeterministic functions. They use the operating system's cryptographic random source or clock
+and may change whenever an expression or template is evaluated again. JSON and YAML serialization
+does not make a value safe to interpolate into executable shell source. Lua's existing
+`wuko.json.encode` remains the compact JSON encoder; `wuko.helpers.to_json` adds the shared indented
+form.

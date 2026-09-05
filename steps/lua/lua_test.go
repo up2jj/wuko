@@ -222,6 +222,74 @@ wuko.output("helpers", {
 	}
 }
 
+func TestLuaUtilityHelpers(t *testing.T) {
+	runner, err := New(map[string]any{"source": `
+local h = wuko.helpers
+local generated_uuid = h.uuid({version = 4})
+local generated_password = h.password(12)
+wuko.output("helpers", {
+  base64 = h.base64_encode("wuko ✓"),
+  base64_round_trip = h.base64_decode(h.base64_encode("wuko ✓")),
+  hex = h.hex_encode("Wuko", true),
+  hex_round_trip = h.hex_decode(h.hex_encode("🚀")),
+  url = h.url_encode("a+b /✓"),
+  url_round_trip = h.url_decode(h.url_encode("a+b /✓")),
+  html = h.html_encode("<wuko>&"),
+  html_round_trip = h.html_decode(h.html_encode("<wuko>&")),
+  sha256 = h.sha256("hello"),
+  hmac = h.hmac_sha256("payload", "secret"),
+  base = h.base_convert("255", 10, 16, true),
+  roman = h.roman_encode(2024),
+  unroman = h.roman_decode("MMXXIV"),
+  ordinal = h.ordinal(22),
+  bytes = h.count_bytes("é"),
+  runes = h.count_runes("é"),
+  graphemes = h.count_graphemes("é"),
+  words = h.count_words("one  two"),
+  lines = h.count_lines("one\ntwo\n"),
+  uuid_length = h.count_bytes(generated_uuid),
+  token_length = h.count_bytes(h.random_token(4)),
+  random_fixed = h.random_int(7, 7),
+  random_string_length = h.count_runes(h.random_string(8, "abc")),
+  password_length = h.count_bytes(generated_password),
+  current_time = h.current_time(),
+  timestamp = h.unix_timestamp(),
+})
+`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runner.Run(t.Context(), step.Request{StepID: "helpers", WorkflowName: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := result.Outputs["helpers"].(map[string]any)
+	wants := map[string]any{
+		"base64": "d3VrbyDinJM=", "base64_round_trip": "wuko ✓",
+		"hex": "57756B6F", "hex_round_trip": "🚀",
+		"url": "a%2Bb%20%2F%E2%9C%93", "url_round_trip": "a+b /✓",
+		"html": "&lt;wuko&gt;&amp;", "html_round_trip": "<wuko>&",
+		"sha256": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+		"hmac":   "b82fcb791acec57859b989b430a826488ce2e479fdf92326bd0a2e8375a42ba4",
+		"base":   "FF", "roman": "MMXXIV", "unroman": float64(2024), "ordinal": "22nd",
+		"bytes": float64(2), "runes": float64(1), "graphemes": float64(1),
+		"words": float64(2), "lines": float64(2), "uuid_length": float64(36),
+		"token_length": float64(8), "random_fixed": float64(7),
+		"random_string_length": float64(8), "password_length": float64(12),
+	}
+	for key, want := range wants {
+		if got := output[key]; got != want {
+			t.Errorf("%s = %#v, want %#v", key, got, want)
+		}
+	}
+	if current, ok := output["current_time"].(string); !ok || current == "" {
+		t.Fatalf("current_time = %#v", output["current_time"])
+	}
+	if timestamp, ok := output["timestamp"].(float64); !ok || timestamp <= 0 {
+		t.Fatalf("timestamp = %#v", output["timestamp"])
+	}
+}
+
 func TestLuaTimeHelpersAndWorkflowTimezone(t *testing.T) {
 	t.Parallel()
 	runner, err := New(map[string]any{"source": `

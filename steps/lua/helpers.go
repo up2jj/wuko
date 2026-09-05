@@ -59,6 +59,36 @@ func helperFunctions() map[string]glua.LGFunction {
 		"format_time":               helperFormatTime,
 		"parse_uri":                 helperParseURI,
 		"build_uri":                 helperBuildURI,
+		"base64_encode":             helperBase64Encode,
+		"base64_decode":             helperBase64Decode,
+		"hex_encode":                helperHexEncode,
+		"hex_decode":                helperHexDecode,
+		"url_encode":                helperURLEncode,
+		"url_decode":                helperURLDecode,
+		"html_encode":               helperHTMLEncode,
+		"html_decode":               helperHTMLDecode,
+		"md5":                       helperMD5,
+		"sha1":                      helperSHA1,
+		"sha256":                    helperSHA256,
+		"sha512":                    helperSHA512,
+		"hmac_sha256":               helperHMACSHA256,
+		"hmac_sha512":               helperHMACSHA512,
+		"base_convert":              helperBaseConvert,
+		"roman_encode":              helperRomanEncode,
+		"roman_decode":              helperRomanDecode,
+		"ordinal":                   helperOrdinal,
+		"count_bytes":               helperCountBytes,
+		"count_runes":               helperCountRunes,
+		"count_graphemes":           helperCountGraphemes,
+		"count_words":               helperCountWords,
+		"count_lines":               helperCountLines,
+		"uuid":                      helperUUID,
+		"random_string":             helperRandomString,
+		"random_int":                helperRandomInt,
+		"random_token":              helperRandomToken,
+		"password":                  helperPassword,
+		"current_time":              helperCurrentTime,
+		"unix_timestamp":            helperUnixTimestamp,
 		"build_conventional_commit": helperBuildConventionalCommit,
 		"is_conventional_commit":    helperIsConventionalCommit,
 	}
@@ -485,6 +515,348 @@ func helperBuildURI(state *glua.LState) int {
 	}
 	result, err := expression.BuildURI(parts)
 	return pushHelperResult(state, "build_uri", result, err)
+}
+
+func luaOptions(state *glua.LState, index int, name string) (map[string]any, error) {
+	if state.Get(index) == glua.LNil {
+		return nil, nil
+	}
+	value, err := helperValue(state.Get(index))
+	if err != nil {
+		return nil, err
+	}
+	options, ok := value.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("%s options must be an object, got %T", name, value)
+	}
+	return options, nil
+}
+
+func helperBase64Encode(state *glua.LState) int {
+	if state.GetTop() < 1 || state.GetTop() > 2 {
+		state.RaiseError("helpers.base64_encode: expected a value and optional options object")
+		return 0
+	}
+	var options map[string]any
+	var err error
+	if state.GetTop() == 2 {
+		options, err = luaOptions(state, 2, "base64_encode")
+	}
+	if err != nil {
+		return pushHelperResult(state, "base64_encode", nil, err)
+	}
+	result, err := expression.Base64Encode(state.CheckString(1), options)
+	return pushHelperResult(state, "base64_encode", result, err)
+}
+
+func helperBase64Decode(state *glua.LState) int {
+	if state.GetTop() < 1 || state.GetTop() > 2 {
+		state.RaiseError("helpers.base64_decode: expected a value and optional options object")
+		return 0
+	}
+	var options map[string]any
+	var err error
+	if state.GetTop() == 2 {
+		options, err = luaOptions(state, 2, "base64_decode")
+	}
+	if err != nil {
+		return pushHelperResult(state, "base64_decode", nil, err)
+	}
+	result, err := expression.Base64Decode(state.CheckString(1), options)
+	return pushHelperResult(state, "base64_decode", result, err)
+}
+
+func helperHexEncode(state *glua.LState) int {
+	if state.GetTop() < 1 || state.GetTop() > 2 {
+		state.RaiseError("helpers.hex_encode: expected a value and optional uppercase boolean")
+		return 0
+	}
+	uppercase := false
+	if state.GetTop() == 2 {
+		uppercase = state.CheckBool(2)
+	}
+	result, err := expression.HexEncode(state.CheckString(1), uppercase)
+	return pushHelperResult(state, "hex_encode", result, err)
+}
+
+func helperHexDecode(state *glua.LState) int {
+	if state.GetTop() != 1 {
+		state.RaiseError("helpers.hex_decode: expected one value")
+		return 0
+	}
+	result, err := expression.HexDecode(state.CheckString(1))
+	return pushHelperResult(state, "hex_decode", result, err)
+}
+
+func helperURLEncode(state *glua.LState) int {
+	if state.GetTop() != 1 {
+		state.RaiseError("helpers.url_encode: expected one value")
+		return 0
+	}
+	result, err := expression.URLEncode(state.CheckString(1))
+	return pushHelperResult(state, "url_encode", result, err)
+}
+
+func helperURLDecode(state *glua.LState) int {
+	if state.GetTop() != 1 {
+		state.RaiseError("helpers.url_decode: expected one value")
+		return 0
+	}
+	result, err := expression.URLDecode(state.CheckString(1))
+	return pushHelperResult(state, "url_decode", result, err)
+}
+
+func helperHTMLEncode(state *glua.LState) int {
+	if state.GetTop() != 1 {
+		state.RaiseError("helpers.html_encode: expected one value")
+		return 0
+	}
+	result, err := expression.HTMLEncode(state.CheckString(1))
+	return pushHelperResult(state, "html_encode", result, err)
+}
+
+func helperHTMLDecode(state *glua.LState) int {
+	if state.GetTop() != 1 {
+		state.RaiseError("helpers.html_decode: expected one value")
+		return 0
+	}
+	result, err := expression.HTMLDecode(state.CheckString(1))
+	return pushHelperResult(state, "html_decode", result, err)
+}
+
+func luaDigest(state *glua.LState, name string, run func(string, map[string]any) (string, error)) int {
+	if state.GetTop() < 1 || state.GetTop() > 2 {
+		state.RaiseError("helpers.%s: expected a value and optional options object", name)
+		return 0
+	}
+	var options map[string]any
+	var err error
+	if state.GetTop() == 2 {
+		options, err = luaOptions(state, 2, name)
+	}
+	if err != nil {
+		return pushHelperResult(state, name, nil, err)
+	}
+	result, err := run(state.CheckString(1), options)
+	return pushHelperResult(state, name, result, err)
+}
+
+func helperMD5(state *glua.LState) int    { return luaDigest(state, "md5", expression.MD5) }
+func helperSHA1(state *glua.LState) int   { return luaDigest(state, "sha1", expression.SHA1) }
+func helperSHA256(state *glua.LState) int { return luaDigest(state, "sha256", expression.SHA256) }
+func helperSHA512(state *glua.LState) int { return luaDigest(state, "sha512", expression.SHA512) }
+
+func luaHMAC(state *glua.LState, name string, run func(string, string, map[string]any) (string, error)) int {
+	if state.GetTop() < 2 || state.GetTop() > 3 {
+		state.RaiseError("helpers.%s: expected a value, key, and optional options object", name)
+		return 0
+	}
+	var options map[string]any
+	var err error
+	if state.GetTop() == 3 {
+		options, err = luaOptions(state, 3, name)
+	}
+	if err != nil {
+		return pushHelperResult(state, name, nil, err)
+	}
+	result, err := run(state.CheckString(1), state.CheckString(2), options)
+	return pushHelperResult(state, name, result, err)
+}
+
+func helperHMACSHA256(state *glua.LState) int {
+	return luaHMAC(state, "hmac_sha256", expression.HMACSHA256)
+}
+
+func helperHMACSHA512(state *glua.LState) int {
+	return luaHMAC(state, "hmac_sha512", expression.HMACSHA512)
+}
+
+func helperBaseConvert(state *glua.LState) int {
+	if state.GetTop() < 3 || state.GetTop() > 4 {
+		state.RaiseError("helpers.base_convert: expected a value, source base, target base, and optional uppercase")
+		return 0
+	}
+	uppercase := false
+	if state.GetTop() == 4 {
+		uppercase = state.CheckBool(4)
+	}
+	result, err := expression.BaseConvert(state.CheckString(1), state.CheckInt(2), state.CheckInt(3), uppercase)
+	return pushHelperResult(state, "base_convert", result, err)
+}
+
+func helperRomanEncode(state *glua.LState) int {
+	if state.GetTop() != 1 {
+		state.RaiseError("helpers.roman_encode: expected one integer")
+		return 0
+	}
+	result, err := expression.RomanEncode(state.CheckInt(1))
+	return pushHelperResult(state, "roman_encode", result, err)
+}
+
+func helperRomanDecode(state *glua.LState) int {
+	if state.GetTop() != 1 {
+		state.RaiseError("helpers.roman_decode: expected one value")
+		return 0
+	}
+	result, err := expression.RomanDecode(state.CheckString(1))
+	return pushHelperResult(state, "roman_decode", result, err)
+}
+
+func helperOrdinal(state *glua.LState) int {
+	if state.GetTop() != 1 {
+		state.RaiseError("helpers.ordinal: expected one integer")
+		return 0
+	}
+	state.Push(glua.LString(expression.Ordinal(int64(state.CheckInt(1)))))
+	return 1
+}
+
+func helperCountBytes(state *glua.LState) int {
+	if state.GetTop() != 1 {
+		state.RaiseError("helpers.count_bytes: expected one value")
+		return 0
+	}
+	state.Push(glua.LNumber(expression.CountBytes(state.CheckString(1))))
+	return 1
+}
+
+func helperCountRunes(state *glua.LState) int {
+	if state.GetTop() != 1 {
+		state.RaiseError("helpers.count_runes: expected one value")
+		return 0
+	}
+	state.Push(glua.LNumber(expression.CountRunes(state.CheckString(1))))
+	return 1
+}
+
+func helperCountGraphemes(state *glua.LState) int {
+	if state.GetTop() != 1 {
+		state.RaiseError("helpers.count_graphemes: expected one value")
+		return 0
+	}
+	state.Push(glua.LNumber(expression.CountGraphemes(state.CheckString(1))))
+	return 1
+}
+
+func helperCountWords(state *glua.LState) int {
+	if state.GetTop() != 1 {
+		state.RaiseError("helpers.count_words: expected one value")
+		return 0
+	}
+	state.Push(glua.LNumber(expression.CountWords(state.CheckString(1))))
+	return 1
+}
+
+func helperCountLines(state *glua.LState) int {
+	if state.GetTop() != 1 {
+		state.RaiseError("helpers.count_lines: expected one value")
+		return 0
+	}
+	state.Push(glua.LNumber(expression.CountLines(state.CheckString(1))))
+	return 1
+}
+
+func helperUUID(state *glua.LState) int {
+	if state.GetTop() > 1 {
+		state.RaiseError("helpers.uuid: expected an optional options object")
+		return 0
+	}
+	var options map[string]any
+	var err error
+	if state.GetTop() == 1 {
+		options, err = luaOptions(state, 1, "uuid")
+	}
+	if err != nil {
+		return pushHelperResult(state, "uuid", nil, err)
+	}
+	result, err := expression.UUID(options)
+	return pushHelperResult(state, "uuid", result, err)
+}
+
+func helperRandomString(state *glua.LState) int {
+	if state.GetTop() > 2 {
+		state.RaiseError("helpers.random_string: expected optional length and charset")
+		return 0
+	}
+	length := 16
+	charset := "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	if state.GetTop() >= 1 {
+		length = state.CheckInt(1)
+	}
+	if state.GetTop() == 2 {
+		charset = state.CheckString(2)
+	}
+	result, err := expression.RandomString(length, charset)
+	return pushHelperResult(state, "random_string", result, err)
+}
+
+func helperRandomInt(state *glua.LState) int {
+	if state.GetTop() != 2 {
+		state.RaiseError("helpers.random_int: expected minimum and maximum")
+		return 0
+	}
+	result, err := expression.RandomInt(int64(state.CheckInt(1)), int64(state.CheckInt(2)))
+	return pushHelperResult(state, "random_int", result, err)
+}
+
+func helperRandomToken(state *glua.LState) int {
+	if state.GetTop() > 2 {
+		state.RaiseError("helpers.random_token: expected optional byte count and encoding")
+		return 0
+	}
+	byteCount := 32
+	encoding := "hex"
+	if state.GetTop() >= 1 {
+		byteCount = state.CheckInt(1)
+	}
+	if state.GetTop() == 2 {
+		encoding = state.CheckString(2)
+	}
+	result, err := expression.RandomToken(byteCount, encoding)
+	return pushHelperResult(state, "random_token", result, err)
+}
+
+func helperPassword(state *glua.LState) int {
+	if state.GetTop() > 2 {
+		state.RaiseError("helpers.password: expected optional length and options object")
+		return 0
+	}
+	length := 20
+	var options map[string]any
+	var err error
+	if state.GetTop() >= 1 {
+		length = state.CheckInt(1)
+	}
+	if state.GetTop() == 2 {
+		options, err = luaOptions(state, 2, "password")
+	}
+	if err != nil {
+		return pushHelperResult(state, "password", nil, err)
+	}
+	result, err := expression.Password(length, options)
+	return pushHelperResult(state, "password", result, err)
+}
+
+func helperCurrentTime(state *glua.LState) int {
+	if state.GetTop() != 0 {
+		state.RaiseError("helpers.current_time: expected no arguments")
+		return 0
+	}
+	state.Push(glua.LString(expression.CurrentTime()))
+	return 1
+}
+
+func helperUnixTimestamp(state *glua.LState) int {
+	if state.GetTop() > 1 {
+		state.RaiseError("helpers.unix_timestamp: expected an optional unit")
+		return 0
+	}
+	unit := ""
+	if state.GetTop() == 1 {
+		unit = state.CheckString(1)
+	}
+	result, err := expression.UnixTimestamp(unit)
+	return pushHelperResult(state, "unix_timestamp", result, err)
 }
 
 func helperBuildConventionalCommit(state *glua.LState) int {

@@ -78,10 +78,14 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
   resulting index and skips an unchanged index by default. Prefer structured `author` and optional
   `committer` identities in fresh CI environments, ordered trailers for duplicate tokens, `signoff`
   for DCO workflows, and leave `verify` enabled unless bypassing hooks is deliberate.
-- Use `time` as the only current-time boundary. Its output and default same-named variable are
-  recordable and may be supplied with `--var` for reproducible runs. Use `parseTime`, `addTime`, and
-  `formatTime` in templates, Expr, or Lua only to transform explicit strings; they never read the
-  clock. Top-level `timezone` supplies the workflow default even without `cron`.
+- Prefer `time` as the recordable, `--var`-overridable current-time boundary. Use `parseTime`,
+  `addTime`, and `formatTime` to transform explicit strings. `currentTime`, `unixTimestamp`, UUID,
+  token, password, and random helpers are available when nondeterminism is intentional; capture
+  their result once with `set` or a Lua variable before reuse. Top-level `timezone` supplies the
+  workflow default even without `cron`.
+- Use the shared encoding, hash/HMAC, number, and inspection helpers for small inline
+  transformations across templates, Expr, and Lua. Treat MD5 and SHA-1 as compatibility checksums,
+  use SHA-256/SHA-512 or HMAC for security, and keep HMAC keys in secret-backed values.
 - Use `require_tool` before external commands that need an executable or supported tool version.
   Configure nonstandard version flags with `version_args`, and consume its `path` or checked
   `version` output only after the guard succeeds.

@@ -34,8 +34,8 @@ with:
     - "{{ index .vars.regions 0 }}"
 ```
 
-Wuko also provides deterministic string, defaulting, collection, indentation, JSON, and YAML
-helpers. See [Template, Expr, and Lua functions](template-functions.md) for the complete reference
+Wuko also provides string, defaulting, collection, indentation, JSON, YAML, encoding, hashing,
+number, and inspection helpers, plus explicitly named clock and secure-generator helpers. See [Template, Expr, and Lua functions](template-functions.md) for the complete reference
 and equivalent syntax in each language.
 
 Lua `source` is deliberately not rendered. Pass dynamic values through the Lua step's typed
@@ -309,7 +309,8 @@ therefore cannot depend on `.steps`, `.batch`, `.foreach`, or `.matrix`.
 Templates do not provide shell or HTML escaping automatically. Use the documented JSON or YAML
 serialization helpers where appropriate, quote values for their destination format, and avoid
 treating untrusted values as executable shell source. Wuko does not add filesystem,
-command-execution, network, live-clock, random, or environment-lookup functions; templates receive
-only the documented data roots and [side-effect-free helpers](template-functions.md). Capture time
-explicitly with the recordable [`time` step](steps-data.md#time), then use pure time helpers on its
-output or variable.
+command-execution, or environment-lookup functions; templates receive only the documented data
+roots and [helpers](template-functions.md). The clock and secure randomness are reachable only
+through the explicitly named `currentTime`, `unixTimestamp`, and generator helpers; every other
+helper is deterministic. Prefer capturing time with the recordable, `--var`-overridable
+[`time` step](steps-data.md#time), then use the pure time helpers on its output or variable.
