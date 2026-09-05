@@ -15,6 +15,7 @@ import (
 	"github.com/up2jj/wuko/engine"
 	"github.com/up2jj/wuko/githook"
 	"github.com/up2jj/wuko/step"
+	filestep "github.com/up2jj/wuko/steps/file"
 	gitstep "github.com/up2jj/wuko/steps/git"
 	"github.com/up2jj/wuko/steps/shell"
 )
@@ -373,7 +374,7 @@ func strconvQuote(value string) string {
 func gitHookTestDependencies(t *testing.T, root string, stdout, stderr io.Writer, getenv func(string) string) dependencies {
 	t.Helper()
 	registry := step.NewRegistry()
-	for _, register := range []func(*step.Registry) error{shell.Register, gitstep.Register} {
+	for _, register := range []func(*step.Registry) error{shell.Register, filestep.Register, gitstep.Register} {
 		if err := register(registry); err != nil {
 			t.Fatal(err)
 		}

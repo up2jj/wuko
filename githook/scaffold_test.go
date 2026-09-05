@@ -32,6 +32,13 @@ func TestScaffoldCreatesStarterManifestAndWorkflows(t *testing.T) {
 			t.Fatalf("mode for %s = %o, want 644", relative, info.Mode().Perm())
 		}
 	}
+	commitWorkflow, err := os.ReadFile(filepath.Join(root, ".wuko", "workflows", "git-commit-message.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(commitWorkflow), "type: file") || !strings.Contains(string(commitWorkflow), ".steps.read_message.content") || strings.Contains(string(commitWorkflow), "type: shell") {
+		t.Fatalf("commit-message workflow did not compose file reading with validation:\n%s", commitWorkflow)
+	}
 }
 
 func TestScaffoldRefusesCollisionBeforeCreatingFiles(t *testing.T) {

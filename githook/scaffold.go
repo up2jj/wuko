@@ -60,18 +60,16 @@ description: Validate a Conventional Commit message
 
 steps:
   - id: read_message
-    type: shell
+    type: file
     with:
-      script: |
-        git stripspace --strip-comments < "$1"
-      args: ["{{ .git.hook.payload.message_file }}"]
-      stdout: capture
+      operation: read
+      path: "{{ .git.hook.payload.message_file }}"
 
   - id: conventional
     type: git_conventional_commit
     with:
       operation: validate
-      message: "{{ .steps.read_message.stdout }}"
+      message: "{{ .steps.read_message.content }}"
 `
 
 type scaffoldFile struct {
