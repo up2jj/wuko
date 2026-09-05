@@ -20,7 +20,10 @@ func disableEcho(terminal *os.File) (func() error, error) {
 		return nil, fmt.Errorf("disabling PTY echo: %w", err)
 	}
 	return func() error {
-		if err := unix.IoctlSetTermios(int(terminal.Fd()), unix.TCSETS, state); err != nil {
+		// A write to a PTY master may return before the slave line discipline has
+		// finished processing and echoing its input. Restore only after that output
+		// drains, or ECHO can be re-enabled in time to expose the sensitive bytes.
+		if err := unix.IoctlSetTermios(int(terminal.Fd()), unix.TCSETSW, state); err != nil {
 			return fmt.Errorf("restoring PTY echo: %w", err)
 		}
 		return nil
