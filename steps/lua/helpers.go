@@ -21,6 +21,24 @@ func helperFunctions() map[string]glua.LGFunction {
 		"replace":                   helperReplace,
 		"split":                     helperSplit,
 		"join":                      helperJoin,
+		"reverse_text":              helperReverseText,
+		"reverse_words":             helperReverseWords,
+		"repeat_text":               helperRepeat,
+		"truncate":                  helperTruncate,
+		"squeeze":                   helperSqueeze,
+		"remove_whitespace":         helperRemoveWhitespace,
+		"remove_punctuation":        helperRemovePunctuation,
+		"remove_accents":            helperRemoveAccents,
+		"remove_non_ascii":          helperRemoveNonASCII,
+		"strip_html":                helperStripHTML,
+		"tabs_to_spaces":            helperTabsToSpaces,
+		"spaces_to_tabs":            helperSpacesToTabs,
+		"newlines_to_spaces":        helperNewlinesToSpaces,
+		"spaces_to_newlines":        helperSpacesToNewlines,
+		"rotate":                    helperRotate,
+		"quote":                     helperQuote,
+		"escape_regex":              helperEscapeRegex,
+		"normalize_unicode":         helperNormalizeUnicode,
 		"slugify":                   helperSlugify,
 		"default":                   helperDefault,
 		"coalesce":                  helperCoalesce,
@@ -102,6 +120,160 @@ func helperJoin(state *glua.LState) int {
 	}
 	result, err := expression.Join(value, state.CheckString(2))
 	return pushHelperResult(state, "join", result, err)
+}
+
+func helperReverseText(state *glua.LState) int {
+	state.Push(glua.LString(expression.ReverseText(state.CheckString(1))))
+	return 1
+}
+
+func helperReverseWords(state *glua.LState) int {
+	state.Push(glua.LString(expression.ReverseWords(state.CheckString(1))))
+	return 1
+}
+
+func helperRepeat(state *glua.LState) int {
+	if state.GetTop() < 1 || state.GetTop() > 3 {
+		state.RaiseError("helpers.repeat_text: expected a value, optional count, and optional separator")
+		return 0
+	}
+	count := 2
+	if state.GetTop() >= 2 {
+		count = state.CheckInt(2)
+	}
+	separator := ""
+	if state.GetTop() == 3 {
+		separator = state.CheckString(3)
+	}
+	result, err := expression.Repeat(state.CheckString(1), count, separator)
+	return pushHelperResult(state, "repeat_text", result, err)
+}
+
+func helperTruncate(state *glua.LState) int {
+	if state.GetTop() < 1 || state.GetTop() > 3 {
+		state.RaiseError("helpers.truncate: expected a value, optional length, and optional suffix")
+		return 0
+	}
+	length := 80
+	if state.GetTop() >= 2 {
+		length = state.CheckInt(2)
+	}
+	suffix := ""
+	if state.GetTop() == 3 {
+		suffix = state.CheckString(3)
+	}
+	result, err := expression.Truncate(state.CheckString(1), length, suffix)
+	return pushHelperResult(state, "truncate", result, err)
+}
+
+func helperSqueeze(state *glua.LState) int {
+	state.Push(glua.LString(expression.Squeeze(state.CheckString(1))))
+	return 1
+}
+
+func helperRemoveWhitespace(state *glua.LState) int {
+	state.Push(glua.LString(expression.RemoveWhitespace(state.CheckString(1))))
+	return 1
+}
+
+func helperRemovePunctuation(state *glua.LState) int {
+	state.Push(glua.LString(expression.RemovePunctuation(state.CheckString(1))))
+	return 1
+}
+
+func helperRemoveAccents(state *glua.LState) int {
+	state.Push(glua.LString(expression.RemoveAccents(state.CheckString(1))))
+	return 1
+}
+
+func helperRemoveNonASCII(state *glua.LState) int {
+	state.Push(glua.LString(expression.RemoveNonASCII(state.CheckString(1))))
+	return 1
+}
+
+func helperStripHTML(state *glua.LState) int {
+	state.Push(glua.LString(expression.StripHTML(state.CheckString(1))))
+	return 1
+}
+
+func helperTabsToSpaces(state *glua.LState) int {
+	if state.GetTop() < 1 || state.GetTop() > 2 {
+		state.RaiseError("helpers.tabs_to_spaces: expected a value and optional width")
+		return 0
+	}
+	width := 4
+	if state.GetTop() == 2 {
+		width = state.CheckInt(2)
+	}
+	result, err := expression.TabsToSpaces(state.CheckString(1), width)
+	return pushHelperResult(state, "tabs_to_spaces", result, err)
+}
+
+func helperSpacesToTabs(state *glua.LState) int {
+	if state.GetTop() < 1 || state.GetTop() > 2 {
+		state.RaiseError("helpers.spaces_to_tabs: expected a value and optional width")
+		return 0
+	}
+	width := 4
+	if state.GetTop() == 2 {
+		width = state.CheckInt(2)
+	}
+	result, err := expression.SpacesToTabs(state.CheckString(1), width)
+	return pushHelperResult(state, "spaces_to_tabs", result, err)
+}
+
+func helperNewlinesToSpaces(state *glua.LState) int {
+	state.Push(glua.LString(expression.NewlinesToSpaces(state.CheckString(1))))
+	return 1
+}
+
+func helperSpacesToNewlines(state *glua.LState) int {
+	state.Push(glua.LString(expression.SpacesToNewlines(state.CheckString(1))))
+	return 1
+}
+
+func helperRotate(state *glua.LState) int {
+	if state.GetTop() < 1 || state.GetTop() > 2 {
+		state.RaiseError("helpers.rotate: expected a value and optional count")
+		return 0
+	}
+	count := 1
+	if state.GetTop() == 2 {
+		count = state.CheckInt(2)
+	}
+	state.Push(glua.LString(expression.Rotate(state.CheckString(1), count)))
+	return 1
+}
+
+func helperQuote(state *glua.LState) int {
+	if state.GetTop() < 1 || state.GetTop() > 2 {
+		state.RaiseError("helpers.quote: expected a value and optional delimiter")
+		return 0
+	}
+	delimiter := "\""
+	if state.GetTop() == 2 {
+		delimiter = state.CheckString(2)
+	}
+	result, err := expression.Quote(state.CheckString(1), delimiter)
+	return pushHelperResult(state, "quote", result, err)
+}
+
+func helperEscapeRegex(state *glua.LState) int {
+	state.Push(glua.LString(expression.EscapeRegex(state.CheckString(1))))
+	return 1
+}
+
+func helperNormalizeUnicode(state *glua.LState) int {
+	if state.GetTop() < 1 || state.GetTop() > 2 {
+		state.RaiseError("helpers.normalize_unicode: expected a value and optional form")
+		return 0
+	}
+	form := "nfc"
+	if state.GetTop() == 2 {
+		form = state.CheckString(2)
+	}
+	result, err := expression.NormalizeUnicode(state.CheckString(1), form)
+	return pushHelperResult(state, "normalize_unicode", result, err)
 }
 
 func helperSlugify(state *glua.LState) int {

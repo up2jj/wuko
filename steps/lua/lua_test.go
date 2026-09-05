@@ -374,6 +374,12 @@ func TestLuaHelpersRejectInvalidArguments(t *testing.T) {
 		{name: "non-string dict key", source: `wuko.helpers.dict(true, "value")`, want: "want string"},
 		{name: "non-string sort item", source: `wuko.helpers.sort_alpha({"value", 1})`, want: "want string"},
 		{name: "get from list", source: `wuko.helpers.get({"value"}, "key")`, want: "map with string keys"},
+		{name: "negative repeat", source: `wuko.helpers.repeat_text("x", -1)`, want: "must not be negative"},
+		{name: "truncate suffix", source: `wuko.helpers.truncate("value", 1, "...")`, want: "suffix"},
+		{name: "tabs width", source: `wuko.helpers.tabs_to_spaces("x", 0)`, want: "at least 1"},
+		{name: "spaces width", source: `wuko.helpers.spaces_to_tabs("x", 0)`, want: "at least 1"},
+		{name: "empty quote", source: `wuko.helpers.quote("x", "")`, want: "must not be empty"},
+		{name: "normalization form", source: `wuko.helpers.normalize_unicode("x", "other")`, want: "normalization form"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -386,6 +392,72 @@ func TestLuaHelpersRejectInvalidArguments(t *testing.T) {
 				t.Fatalf("error = %v, want %q", err, tt.want)
 			}
 		})
+	}
+}
+
+func TestLuaTextHelpers(t *testing.T) {
+	runner, err := New(map[string]any{
+		"source": `
+local h = wuko.helpers
+wuko.output("reverse_text", h.reverse_text("A👩‍❤️‍💋‍👩B"))
+wuko.output("reverse_words", h.reverse_words("one two"))
+wuko.output("repeat_default", h.repeat_text("ha"))
+wuko.output("repeat", h.repeat_text("ha", 3, "-"))
+wuko.output("truncate", h.truncate("A👩‍❤️‍💋‍👩BC", 3, "…"))
+wuko.output("squeeze", h.squeeze(" too   many "))
+wuko.output("remove_whitespace", h.remove_whitespace(" a b "))
+wuko.output("remove_punctuation", h.remove_punctuation("hi, there!"))
+wuko.output("remove_accents", h.remove_accents("crème"))
+wuko.output("remove_non_ascii", h.remove_non_ascii("café"))
+wuko.output("strip_html", h.strip_html("<b>hi</b> &amp; bye"))
+wuko.output("tabs_to_spaces", h.tabs_to_spaces("a\tb", 2))
+wuko.output("tabs_to_spaces_default", h.tabs_to_spaces("a\tb"))
+wuko.output("spaces_to_tabs", h.spaces_to_tabs("a  b", 2))
+wuko.output("spaces_to_tabs_default", h.spaces_to_tabs("a    b"))
+wuko.output("newlines_to_spaces", h.newlines_to_spaces("a\nb"))
+wuko.output("spaces_to_newlines", h.spaces_to_newlines("a b"))
+wuko.output("rotate", h.rotate("abcd", -1))
+wuko.output("rotate_default", h.rotate("abcd"))
+wuko.output("quote", h.quote("hi"))
+wuko.output("escape_regex", h.escape_regex("a.b"))
+wuko.output("normalize_unicode", h.normalize_unicode("é", "nfc"))
+wuko.output("normalize_unicode_default", h.normalize_unicode("é"))
+`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runner.Run(t.Context(), step.Request{StepID: "text-helpers", WorkflowName: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{
+		"reverse_text":              "B👩‍❤️‍💋‍👩A",
+		"reverse_words":             "two one",
+		"repeat_default":            "haha",
+		"repeat":                    "ha-ha-ha",
+		"truncate":                  "A👩‍❤️‍💋‍👩…",
+		"squeeze":                   "too many",
+		"remove_whitespace":         "ab",
+		"remove_punctuation":        "hi there",
+		"remove_accents":            "creme",
+		"remove_non_ascii":          "caf",
+		"strip_html":                "hi & bye",
+		"tabs_to_spaces":            "a  b",
+		"tabs_to_spaces_default":    "a    b",
+		"spaces_to_tabs":            "a\tb",
+		"spaces_to_tabs_default":    "a\tb",
+		"newlines_to_spaces":        "a b",
+		"spaces_to_newlines":        "a\nb",
+		"rotate":                    "dabc",
+		"rotate_default":            "bcda",
+		"quote":                     `"hi"`,
+		"escape_regex":              `a\.b`,
+		"normalize_unicode":         "é",
+		"normalize_unicode_default": "é",
+	}
+	if !reflect.DeepEqual(result.Outputs, want) {
+		t.Fatalf("outputs = %#v, want %#v", result.Outputs, want)
 	}
 }
 

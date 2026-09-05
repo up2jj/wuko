@@ -42,6 +42,24 @@ func TemplateFuncsWithSecret(resolver SecretResolver) template.FuncMap {
 		"replace":                 func(old, replacement, value string) string { return strings.ReplaceAll(value, old, replacement) },
 		"split":                   func(separator, value string) []string { return strings.Split(value, separator) },
 		"join":                    join,
+		"reverseText":             reverseText,
+		"reverseWords":            reverseWords,
+		"repeat":                  templateRepeat,
+		"truncate":                templateTruncate,
+		"squeeze":                 squeeze,
+		"removeWhitespace":        removeWhitespace,
+		"removePunctuation":       removePunctuation,
+		"removeAccents":           removeAccents,
+		"removeNonASCII":          removeNonASCII,
+		"stripHTML":               stripHTML,
+		"tabsToSpaces":            templateTabsToSpaces,
+		"spacesToTabs":            templateSpacesToTabs,
+		"newlinesToSpaces":        newlinesToSpaces,
+		"spacesToNewlines":        spacesToNewlines,
+		"rotate":                  templateRotate,
+		"quote":                   templateQuote,
+		"escapeRegex":             escapeRegex,
+		"normalizeUnicode":        templateNormalizeUnicode,
 		"slugify":                 templateSlugify,
 		"default":                 defaultValue,
 		"coalesce":                coalesce,
@@ -96,6 +114,46 @@ func exprOptions() []expr.Option {
 		expr.Function("coalesce", func(values ...any) (any, error) {
 			return coalesce(values...), nil
 		}, new(func(...any) any)),
+		expr.Function("reverseText", func(values ...any) (any, error) {
+			return reverseText(values[0].(string)), nil
+		}, new(func(string) string)),
+		expr.Function("reverseWords", func(values ...any) (any, error) {
+			return reverseWords(values[0].(string)), nil
+		}, new(func(string) string)),
+		expr.Function("repeat", exprRepeat, new(func(...any) string)),
+		expr.Function("truncate", exprTruncate, new(func(...any) string)),
+		expr.Function("squeeze", func(values ...any) (any, error) {
+			return squeeze(values[0].(string)), nil
+		}, new(func(string) string)),
+		expr.Function("removeWhitespace", func(values ...any) (any, error) {
+			return removeWhitespace(values[0].(string)), nil
+		}, new(func(string) string)),
+		expr.Function("removePunctuation", func(values ...any) (any, error) {
+			return removePunctuation(values[0].(string)), nil
+		}, new(func(string) string)),
+		expr.Function("removeAccents", func(values ...any) (any, error) {
+			return removeAccents(values[0].(string)), nil
+		}, new(func(string) string)),
+		expr.Function("removeNonASCII", func(values ...any) (any, error) {
+			return removeNonASCII(values[0].(string)), nil
+		}, new(func(string) string)),
+		expr.Function("stripHTML", func(values ...any) (any, error) {
+			return stripHTML(values[0].(string)), nil
+		}, new(func(string) string)),
+		expr.Function("tabsToSpaces", exprTabsToSpaces, new(func(...any) string)),
+		expr.Function("spacesToTabs", exprSpacesToTabs, new(func(...any) string)),
+		expr.Function("newlinesToSpaces", func(values ...any) (any, error) {
+			return newlinesToSpaces(values[0].(string)), nil
+		}, new(func(string) string)),
+		expr.Function("spacesToNewlines", func(values ...any) (any, error) {
+			return spacesToNewlines(values[0].(string)), nil
+		}, new(func(string) string)),
+		expr.Function("rotate", exprRotate, new(func(...any) string)),
+		expr.Function("quote", exprQuote, new(func(...any) string)),
+		expr.Function("escapeRegex", func(values ...any) (any, error) {
+			return escapeRegex(values[0].(string)), nil
+		}, new(func(string) string)),
+		expr.Function("normalizeUnicode", exprNormalizeUnicode, new(func(...any) string)),
 		expr.Function("slugify", exprSlugify, new(func(...any) string)),
 		expr.Function("required", func(values ...any) (any, error) {
 			return required(values[1].(string), values[0])

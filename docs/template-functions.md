@@ -95,6 +95,71 @@ Git mode preserves slash-separated hierarchy by default, producing values such a
 avoid Git-invalid trailing-dot and `.lock` components. Empty results and invalid option names or
 types stop evaluation.
 
+## Text transformations
+
+These deterministic helpers cover common text cleanup and reshaping operations. Functions marked
+as line-oriented transform each line independently and preserve the original `\n` or `\r\n`
+separators, including a terminal newline. `reverseText`, `truncate`, and `rotate` count Unicode
+grapheme clusters, so combining marks and joined emoji stay together.
+
+| Function | Go template | Expr | Lua | Result |
+| --- | --- | --- | --- | --- |
+| `reverseText` | `{{ value \| reverseText }}` | `reverseText(value)` | `h.reverse_text(value)` | Reverse each line by grapheme cluster |
+| `reverseWords` | `{{ value \| reverseWords }}` | `reverseWords(value)` | `h.reverse_words(value)` | Reverse the words on each line and normalize spacing |
+| `repeat` | `{{ value \| repeat count separator }}` | `repeat(value, count, separator)` | `h.repeat_text(value, count, separator)` | Repeat the complete value with an optional separator |
+| `truncate` | `{{ value \| truncate length suffix }}` | `truncate(value, length, suffix)` | `h.truncate(value, length, suffix)` | Limit each line to a grapheme length, including the suffix |
+| `squeeze` | `{{ value \| squeeze }}` | `squeeze(value)` | `h.squeeze(value)` | Collapse whitespace runs on each line to one space |
+| `removeWhitespace` | `{{ value \| removeWhitespace }}` | `removeWhitespace(value)` | `h.remove_whitespace(value)` | Remove every Unicode whitespace character |
+| `removePunctuation` | `{{ value \| removePunctuation }}` | `removePunctuation(value)` | `h.remove_punctuation(value)` | Keep only Unicode letters, numbers, and whitespace |
+| `removeAccents` | `{{ value \| removeAccents }}` | `removeAccents(value)` | `h.remove_accents(value)` | Remove Unicode combining marks after decomposition |
+| `removeNonASCII` | `{{ value \| removeNonASCII }}` | `removeNonASCII(value)` | `h.remove_non_ascii(value)` | Remove every non-ASCII character |
+| `stripHTML` | `{{ value \| stripHTML }}` | `stripHTML(value)` | `h.strip_html(value)` | Remove angle-bracketed tags and decode HTML entities |
+| `tabsToSpaces` | `{{ value \| tabsToSpaces width }}` | `tabsToSpaces(value, width)` | `h.tabs_to_spaces(value, width)` | Replace each tab with `width` spaces |
+| `spacesToTabs` | `{{ value \| spacesToTabs width }}` | `spacesToTabs(value, width)` | `h.spaces_to_tabs(value, width)` | Replace each run of `width` spaces with a tab |
+| `newlinesToSpaces` | `{{ value \| newlinesToSpaces }}` | `newlinesToSpaces(value)` | `h.newlines_to_spaces(value)` | Join lines with one space |
+| `spacesToNewlines` | `{{ value \| spacesToNewlines }}` | `spacesToNewlines(value)` | `h.spaces_to_newlines(value)` | Put each whitespace-separated word on its own line |
+| `rotate` | `{{ value \| rotate count }}` | `rotate(value, count)` | `h.rotate(value, count)` | Rotate each line left; a negative count rotates right |
+| `quote` | `{{ value \| quote delimiter }}` | `quote(value, delimiter)` | `h.quote(value, delimiter)` | Wrap each line with a delimiter |
+| `escapeRegex` | `{{ value \| escapeRegex }}` | `escapeRegex(value)` | `h.escape_regex(value)` | Escape text for literal use in a Go RE2 pattern |
+| `normalizeUnicode` | `{{ value \| normalizeUnicode form }}` | `normalizeUnicode(value, form)` | `h.normalize_unicode(value, form)` | Apply NFC, NFD, NFKC, or NFKD normalization |
+
+The optional arguments use these defaults: `repeat` uses count `2` and an empty separator;
+`truncate` uses length `80` and an empty suffix; tab conversion uses width `4`; `rotate` uses count
+`1`; `quote` uses `"`; and `normalizeUnicode` uses NFC. Lua calls the repeat helper
+`repeat_text` because `repeat` is a Lua keyword. Arguments may be omitted from the right:
+
+```gotemplate
+{{ .vars.message | truncate 72 "..." }}
+{{ .vars.pattern_literal | escapeRegex }}
+{{ .vars.label | normalizeUnicode "nfkc" }}
+```
+
+```expr
+repeat(reverseWords(vars.words), 3, " | ")
+rotate(vars.token, -1)
+```
+
+```lua
+local h = wuko.helpers
+local summary = h.truncate(h.squeeze(wuko.args.message), 72, "...")
+wuko.output("summary", summary)
+wuko.output("literal_pattern", h.escape_regex(wuko.args.pattern_literal))
+```
+
+Expr already provides `reverse(list)` for collections. Wuko leaves that builtin unchanged and
+uses `reverseText(string)` for text, so both operations remain type-specific and unambiguous.
+Counts and lengths must be non-negative, tab widths must be positive, a truncation suffix must fit
+inside the requested length, and quote delimiters must not be empty. Invalid normalization forms
+stop evaluation, as do expansions whose result would exceed the 64 MiB memory budget: `repeat` caps
+both its count and its total output size, and `tabsToSpaces` caps its total output size. Numeric
+arguments accept any integer type, so counts and lengths read from `parseJSON` output work the same
+as literals.
+
+`stripHTML` removes only real tags: a `<` is markup only when a name, `/`, `!`, or `?` follows it,
+so `5 > 3 and 2 < 4` survives unchanged, and `>` inside a quoted attribute value does not end the
+tag early. Because it decodes entities after removing tags, `&lt;b&gt;` becomes literal `<b>` — the
+result is plain text for humans and logs, not sanitized HTML, so never inject it back into a page.
+
 ## Defaults and validation
 
 `default`, `coalesce`, and `required` use Go template truth rules. These values are empty:
