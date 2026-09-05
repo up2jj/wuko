@@ -475,15 +475,18 @@ func TestCancellationOnlyMatchesStatusFromError(t *testing.T) {
 }
 
 func TestCancelOnFailsStepWhenParticipantPanics(t *testing.T) {
+	monitorStarted := make(chan struct{})
 	monitorCanceled := make(chan struct{})
 	registry := newTestRegistry(t, map[string]step.Builder{
 		"body": func(map[string]any) (step.Runner, error) {
 			return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+				<-monitorStarted
 				panic("body step exploded")
 			}), nil
 		},
 		"monitor": func(map[string]any) (step.Runner, error) {
 			return runnerFunc(func(ctx context.Context, _ step.Request) (step.Result, error) {
+				close(monitorStarted)
 				<-ctx.Done()
 				close(monitorCanceled)
 				return step.Result{}, ctx.Err()
