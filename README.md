@@ -561,6 +561,41 @@ Use controls to run independent work or repeat a block over runtime data.
 See [Choosing a composition mechanism](docs/execution.md#choosing-a-composition-mechanism) for a
 side-by-side comparison and examples.
 
+## Git hooks
+
+Wuko can install project workflows as client-side Git hooks. Generate and review a starter
+manifest with example workflows, then install the local dispatchers explicitly:
+
+```sh
+wuko git hook init
+wuko git hook install
+```
+
+Or commit hook bindings directly in `.wuko/git-hooks.yaml`:
+
+```yaml
+version: 1
+hooks:
+  pre-commit:
+    - workflow: git-check
+      target: staged
+  commit-msg:
+    - workflow: git-commit-message
+  pre-push:
+    - workflow: git-check
+      target: pushed
+```
+
+```sh
+wuko git hook install
+wuko git hook status
+```
+
+Existing hooks are never replaced implicitly. Use `wuko git hook install --chain` to preserve an
+existing hook and run it before Wuko, or add `wuko git hook run HOOK -- "$@"` to an existing hook
+manually. See [Git hooks](docs/git-hooks.md) for the execution context, supported hooks, worktree
+behavior, and uninstall recovery.
+
 ## Agent skills
 
 Wuko can install its bundled skills for supported coding-agent CLIs found on `PATH`:
@@ -587,6 +622,7 @@ Claude skills are installed under `~/.claude/skills/`; Codex skills are installe
 - [Workflow controls](docs/workflow-control.md)
 - [Early successful return](docs/return.md)
 - [Workflow discovery](docs/workflow-discovery.md)
+- [Git hooks](docs/git-hooks.md)
 - [Templates](docs/templates.md)
 - [Template, Expr, and Lua functions](docs/template-functions.md)
 - [Secrets](docs/secrets.md)

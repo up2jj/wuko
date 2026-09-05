@@ -120,6 +120,7 @@ type dependencies struct {
 	homeDir       func() (string, error)
 	configDir     func() (string, error)
 	agentLookPath func(string) (string, error)
+	executable    func() (string, error)
 	registry      *step.Registry
 	executors     *executor.Registry
 	providers     *provider.Registry
@@ -193,6 +194,7 @@ func NewRootCmd() *cobra.Command {
 		cwd: os.Getwd, environment: environments,
 		homeDir: os.UserHomeDir, configDir: os.UserConfigDir, registry: registry, executors: executors,
 		agentLookPath: exec.LookPath,
+		executable:    os.Executable,
 		loader:        workflow.NewLoader(nil), providers: defaultProviderRegistry(), isInteractive: interactive,
 		now: time.Now, waitUntil: workflowschedule.Wait,
 		getenv:     os.Getenv,
@@ -219,6 +221,9 @@ func newRootCmd(deps dependencies) *cobra.Command {
 	}
 	if deps.agentLookPath == nil {
 		deps.agentLookPath = exec.LookPath
+	}
+	if deps.executable == nil {
+		deps.executable = os.Executable
 	}
 	if deps.now == nil {
 		deps.now = time.Now
@@ -259,14 +264,16 @@ func newRootCmd(deps dependencies) *cobra.Command {
 	_ = root.RegisterFlagCompletionFunc("env-loader", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 		return []string{envload.LoaderAuto, envload.LoaderNone, envload.LoaderMise, envload.LoaderASDF, envload.LoaderDirenv}, cobra.ShellCompDirectiveNoFileComp
 	})
-	root.AddCommand(newRunCmd(deps), newUICmd(deps), newListCmd(deps), newTreeCmd(deps), newValidateCmd(deps), newAgentCmd(deps), newInstallCmd(deps), newUninstallCmd(deps), newMarketplaceCmd(deps), newCompletionCmd())
+	root.AddCommand(newRunCmd(deps), newUICmd(deps), newListCmd(deps), newTreeCmd(deps), newValidateCmd(deps), newAgentCmd(deps), newGitCmd(deps), newInstallCmd(deps), newUninstallCmd(deps), newMarketplaceCmd(deps), newCompletionCmd())
 	return root
 }
 
 func defaultProviderRegistry() *provider.Registry {
 	registry := &provider.Registry{}
-	if err := registry.Register(provider.NewGitHub()); err != nil {
-		panic(err)
+	for _, item := range []provider.Provider{provider.NewGitHub(), provider.NewGit()} {
+		if err := registry.Register(item); err != nil {
+			panic(err)
+		}
 	}
 	return registry
 }

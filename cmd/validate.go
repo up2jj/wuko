@@ -2,12 +2,14 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/engine"
+	"github.com/up2jj/wuko/githook"
 	"github.com/up2jj/wuko/workflow"
 )
 
@@ -40,6 +42,20 @@ func newValidateCmd(deps dependencies) *cobra.Command {
 			providers, err := invocationProviders(command, deps, baseEnv)
 			if err != nil {
 				return err
+			}
+			if providers.Values == nil {
+				providers.Values = make(map[string]map[string]any)
+			}
+			validationRepository, validationRepositoryErr := githook.Discover(command.Context(), cwd)
+			if _, registered := providers.Schemas["git"]; registered {
+				repositoryRoot, gitDir, commonDir := cwd, "", ""
+				if validationRepositoryErr == nil {
+					repositoryRoot, gitDir, commonDir = validationRepository.Root, validationRepository.GitDir, validationRepository.CommonDir
+				}
+				providers.Values["git"] = map[string]any{
+					"repository": map[string]any{"root": repositoryRoot, "git_dir": gitDir, "common_dir": commonDir},
+					"hook":       map[string]any{"name": "", "args": []any{}, "stdin": "", "payload": map[string]any{}},
+				}
 			}
 			var sources []workflow.Source
 			discoveryStarted := time.Now()
@@ -96,6 +112,23 @@ func newValidateCmd(deps dependencies) *cobra.Command {
 					label += " (" + loadOptions.Target + ")"
 				}
 				fmt.Fprintf(command.OutOrStdout(), "%s: valid\n", label)
+			}
+			if len(args) == 0 {
+				if validationRepositoryErr == nil {
+					manifestPath := filepath.Join(validationRepository.Root, ".wuko", "git-hooks.yaml")
+					if _, statErr := os.Stat(manifestPath); statErr == nil {
+						manifest, err := githook.LoadManifest(validationRepository.Root)
+						if err != nil {
+							return err
+						}
+						if err := validateGitHookBindings(command, deps, validationRepository, manifest); err != nil {
+							return err
+						}
+						fmt.Fprintln(command.OutOrStdout(), ".wuko/git-hooks.yaml: valid")
+					} else if !os.IsNotExist(statErr) {
+						return fmt.Errorf("checking Git hook manifest %s: %w", manifestPath, statErr)
+					}
+				}
 			}
 			return nil
 		},

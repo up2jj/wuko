@@ -248,10 +248,18 @@ func runReporterNames() []string {
 }
 
 func newRunReporters(command *cobra.Command, deps dependencies, runDir string, names []string, additional ...reporterpkg.Reporter) (*runReporters, error) {
+	return newRunReportersWithDefault(command, deps, runDir, names, nil, additional...)
+}
+
+func newRunReportersWithDefault(command *cobra.Command, deps dependencies, runDir string, names []string, fallback reporterpkg.Reporter, additional ...reporterpkg.Reporter) (*runReporters, error) {
+	group := make(reporterpkg.Group, 0, len(names)+len(additional)+1)
 	if len(names) == 0 {
-		names = []string{"plain"}
+		if fallback != nil {
+			group = append(group, fallback)
+		} else {
+			names = []string{"plain"}
+		}
 	}
-	group := make(reporterpkg.Group, 0, len(names)+len(additional))
 	seen := make(map[string]struct{}, len(names))
 	for _, name := range names {
 		if _, exists := seen[name]; exists {

@@ -39,15 +39,18 @@ func newRunCmd(deps dependencies) *cobra.Command {
 }
 
 type runWorkflowConfig struct {
-	variables     []string
-	variableFiles []string
-	environment   []string
-	reporters     []string
-	reportJSON    string
-	dryRun        bool
-	once          bool
-	workflowFile  string
-	targetName    string
+	variables       []string
+	variableFiles   []string
+	environment     []string
+	reporters       []string
+	reportJSON      string
+	dryRun          bool
+	once            bool
+	workflowFile    string
+	targetName      string
+	providerValues  map[string]map[string]any
+	nonInteractive  bool
+	defaultReporter reporterpkg.Reporter
 }
 
 func runWorkflow(command *cobra.Command, deps dependencies, args []string, config runWorkflowConfig) (runErr error) {
@@ -67,7 +70,7 @@ func runWorkflow(command *cobra.Command, deps dependencies, args []string, confi
 		}
 		additionalReporters = append(additionalReporters, fileReporter)
 	}
-	reporters, err := newRunReporters(command, deps, cwd, config.reporters, additionalReporters...)
+	reporters, err := newRunReportersWithDefault(command, deps, cwd, config.reporters, config.defaultReporter, additionalReporters...)
 	if err != nil {
 		return err
 	}
@@ -101,6 +104,12 @@ func runWorkflow(command *cobra.Command, deps dependencies, args []string, confi
 	providers, err := invocationProviders(command, deps, baseEnv)
 	if err != nil {
 		return err
+	}
+	if providers.Values == nil {
+		providers.Values = make(map[string]map[string]any)
+	}
+	for name, value := range config.providerValues {
+		providers.Values[name] = value
 	}
 	var target workflowRunTarget
 	if config.workflowFile != "" {
@@ -148,6 +157,10 @@ func runWorkflow(command *cobra.Command, deps dependencies, args []string, confi
 	}
 	stdin := command.InOrStdin()
 	isInteractive := interactive(stdin)
+	if config.nonInteractive {
+		stdin = bytes.NewReader(nil)
+		isInteractive = false
+	}
 	if target.fromStdin {
 		stdin = nil
 		isInteractive = false
