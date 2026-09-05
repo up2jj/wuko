@@ -231,6 +231,22 @@ func TestHistoryRejectsUnresolvedTemplatesAndDivergentBoundary(t *testing.T) {
 	}
 }
 
+func TestHistoryTruncationKeepsExitError(t *testing.T) {
+	executor := &scriptedGitExecutor{results: []scriptedGitResult{
+		{result: process.Result{StdoutTruncated: true}, err: &process.ExitError{Command: "git", Code: 1}},
+	}}
+	_, err := runGitCapture(t.Context(), step.Request{Executor: executor}, "rev-parse", "--verify", "HEAD")
+	var exitErr *process.ExitError
+	if err == nil || !strings.Contains(err.Error(), "output exceeded 16 MiB") {
+		t.Fatalf("truncation error = %v", err)
+	}
+	// resolveCommit and requireAncestor classify expected failures by exit code, so a command
+	// that both fails and truncates must still expose its exit error.
+	if !errors.As(err, &exitErr) || exitErr.Code != 1 {
+		t.Fatalf("truncation error does not wrap the exit error: %v", err)
+	}
+}
+
 func TestHistoryUsesCaptureOnlyExecutorAndRejectsTruncation(t *testing.T) {
 	executor := &scriptedGitExecutor{results: []scriptedGitResult{
 		{result: process.Result{Stdout: "commit-id\n"}},

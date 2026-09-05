@@ -312,7 +312,13 @@ func runGitCapture(ctx context.Context, request step.Request, args ...string) (p
 	if result.StdoutTruncated || result.StderrTruncated {
 		result.Stdout = ""
 		result.Stderr = ""
-		return result, fmt.Errorf("git %s: output exceeded %d MiB", strings.Join(args, " "), historyCaptureLimit>>20)
+		truncation := fmt.Errorf("git %s: output exceeded %d MiB", strings.Join(args, " "), historyCaptureLimit>>20)
+		if err != nil {
+			// Callers classify expected failures with errors.As on *process.ExitError, so a
+			// command that both fails and truncates must still carry its exit error.
+			return result, fmt.Errorf("%w: %w", truncation, err)
+		}
+		return result, truncation
 	}
 	if err != nil {
 		return result, fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
