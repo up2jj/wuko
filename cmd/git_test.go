@@ -212,6 +212,25 @@ func TestGitHookInitCreatesValidStarterConfiguration(t *testing.T) {
 			t.Fatalf("validate output = %q, want %q", output.String(), want)
 		}
 	}
+	badPath := filepath.Join(root, "bad.txt")
+	if err := os.WriteFile(badPath, []byte("trailing whitespace \n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGitHookTest(t, root, "add", "bad.txt")
+	command = newRootCmd(deps)
+	command.SetArgs([]string{"git", "hook", "run", "pre-commit"})
+	if err := command.ExecuteContext(t.Context()); err == nil || !strings.Contains(err.Error(), "bad.txt:1") {
+		t.Fatalf("generated pre-commit workflow error = %v", err)
+	}
+	if err := os.WriteFile(badPath, []byte("clean\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGitHookTest(t, root, "add", "bad.txt")
+	command = newRootCmd(deps)
+	command.SetArgs([]string{"git", "hook", "run", "pre-commit"})
+	if err := command.ExecuteContext(t.Context()); err != nil {
+		t.Fatalf("generated pre-commit workflow rejected clean changes: %v", err)
+	}
 
 	messagePath := filepath.Join(root, "COMMIT_EDITMSG")
 	if err := os.WriteFile(messagePath, []byte("feat(cli): initialize Git hooks\n"), 0o600); err != nil {
@@ -335,6 +354,15 @@ func initGitHookRepository(t *testing.T) string {
 		t.Fatalf("git init: %v: %s", err, output)
 	}
 	return root
+}
+
+func runGitHookTest(t *testing.T, root string, args ...string) {
+	t.Helper()
+	command := exec.Command("git", args...)
+	command.Dir = root
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("git %s: %v: %s", strings.Join(args, " "), err, output)
+	}
 }
 
 func writeGitHookManifest(t *testing.T, root, hooks string) {

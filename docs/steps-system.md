@@ -266,6 +266,99 @@ Git output is captured rather than printed. Wuko fails instead of returning part
 history if the internal 16 MiB capture bound is exceeded. The step never fetches remotes; callers
 must fetch any remote-tracking references before using them.
 
+## `git_diff`
+
+Read committed, staged, or unstaged Git changes as structured workflow data. This step is designed
+for path policy, selective testing, release scope, and review summaries rather than as a YAML copy
+of every `git diff-tree` flag.
+
+```yaml
+- id: changes
+  type: git_diff
+  with:
+    source: commit
+    from: origin/main
+    through: HEAD
+    paths: [src, go.mod]
+    renames: true
+    copies: false
+```
+
+| Field | Required | Meaning and default |
+| --- | --- | --- |
+| `source` | no | `commit`, `staged`, or `unstaged`; defaults to `commit` |
+| `from` | no | Commit comparison base; only valid for `commit` |
+| `through` | no | Commit comparison endpoint; defaults to `HEAD` |
+| `paths` | no | Non-empty Git pathspec list |
+| `renames` | no | Detect renames; defaults to `true` |
+| `copies` | no | Detect copies; defaults to `false` and requires renames |
+
+With no `from`, a commit is compared with its first parent. A root commit is compared with the
+empty tree. Explicit endpoints compare two trees and do not need to be ancestors. `staged`
+compares the index with `HEAD` and works in an unborn repository. `unstaged` compares tracked
+worktree files with the index; it does not include untracked files.
+
+The result contains `source`, resolved `from` and `through` commit IDs where applicable,
+`changed`, `count`, `additions`, `deletions`, `binary_files`, and `files`. Every file has `status`,
+`path`, `previous_path`, `old_mode`, `new_mode`, `old_oid`, `new_oid`, `additions`, `deletions`,
+`binary`, and `score`. Status is one of `added`, `copied`, `deleted`, `modified`, `renamed`,
+`type_changed`, `unmerged`, or `unknown`. Binary files have zero line counts and are counted by
+`binary_files`.
+
+Wuko enables deterministic rename detection by default and disables it explicitly when `renames`
+is `false`, so the repository's `diff.renames` setting never changes the result. Copy detection is
+opt-in. `git_diff_check` always detects renames so that a pure move is not reported as a
+whole-file addition. Names are read
+from NUL-delimited Git output, so whitespace and Unicode in paths remain unambiguous. The step
+fails rather than returning partial data if either internal capture exceeds 16 MiB. It never
+fetches a remote. See [Git changes and policy recipes](git-changes.md) for task-oriented examples.
+
+## `git_diff_check`
+
+Fail when a Git diff introduces whitespace errors or conflict markers.
+
+```yaml
+- id: whitespace
+  type: git_diff_check
+  with:
+    source: staged
+```
+
+`source` is required and accepts `commit`, `staged`, `unstaged`, or `pushed`. Commit comparisons
+accept the same `from`, `through`, and `paths` fields and semantics as `git_diff`; staged and
+unstaged checks accept `paths`. The step returns no outputs on success and includes Git's path and
+line diagnostics in its error.
+
+Inside a `pre-push` workflow, `pushed` uses `.git.hook.payload.updates` automatically:
+
+```yaml
+- id: outgoing_whitespace
+  type: git_diff_check
+  with:
+    source: pushed
+```
+
+Deleted refs are skipped. Existing refs contribute commits reachable from the local object but not
+the reported remote object. New refs contribute commits not already reachable from local
+remote-tracking refs. Merge commits are skipped because they introduce no changes of their own;
+checking one against a parent would report problems that belong to the merged branch. Wuko
+deduplicates commits shared by several updates, compares each remaining commit with its first
+parent (or the empty tree), and stops on the first violation.
+
+Outside a hook, provide the same four-field update records with an expression:
+
+```yaml
+- id: outgoing_whitespace
+  type: git_diff_check
+  with:
+    source: pushed
+    updates:
+      expr: vars.push_updates
+```
+
+Each item must contain non-empty `local_ref`, `local_oid`, `remote_ref`, and `remote_oid` strings.
+An all-zero local object denotes deletion regardless of the repository's object format.
+
 ## `git_conventional_commit`
 
 Create or validate a Conventional Commit message without invoking `git commit`. The step is a pure

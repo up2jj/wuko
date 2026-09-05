@@ -498,6 +498,8 @@ Each linked guide contains multiple examples for every step.
 | `multiplexer` | Label and annotate the current tmux, cmux, or Herdr context | [System steps](docs/steps-system.md#multiplexer) |
 | `git_revision` | Read the current or a selected Git commit as structured data | [System steps](docs/steps-system.md#git_revision) |
 | `git_log` | Read bounded, structured Git history for automation | [System steps](docs/steps-system.md#git_log) |
+| `git_diff` | Inspect committed, staged, or unstaged changes as structured data | [System steps](docs/steps-system.md#git_diff) |
+| `git_diff_check` | Reject Git whitespace errors and conflict markers, including pushed commits | [System steps](docs/steps-system.md#git_diff_check) |
 | `git_clean` | Assert that a Git working tree is clean | [System steps](docs/steps-system.md#git_clean) |
 | `git_branch` | Assert local branch existence with an extensible operation schema | [System steps](docs/steps-system.md#git_branch) |
 | `git_remote_branch` | Assert local remote-tracking branch existence | [System steps](docs/steps-system.md#git_remote_branch) |
@@ -616,6 +618,7 @@ Claude skills are installed under `~/.claude/skills/`; Codex skills are installe
 - [Interactive steps](docs/steps-interactive.md)
 - [Data steps](docs/steps-data.md)
 - [System steps](docs/steps-system.md)
+- [Git changes and policy recipes](docs/git-changes.md)
 - [Automation steps](docs/steps-automation.md)
 - [Filesystem operation reference](docs/filesystem-operations.md)
 - [Docker operation reference](docs/docker-operations.md)

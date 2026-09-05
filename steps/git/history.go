@@ -306,16 +306,16 @@ func runGitCapture(ctx context.Context, request step.Request, args ...string) (p
 		Env:          step.ApplyAttemptEnvironment(maps.Clone(request.Env), request),
 		CaptureLimit: historyCaptureLimit, StdoutPolicy: process.OutputCapture, StderrPolicy: process.OutputCapture,
 	})
-	if err != nil {
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return result, ctxErr
-		}
-		return result, fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+	if ctxErr := ctx.Err(); err != nil && ctxErr != nil {
+		return result, ctxErr
 	}
 	if result.StdoutTruncated || result.StderrTruncated {
 		result.Stdout = ""
 		result.Stderr = ""
 		return result, fmt.Errorf("git %s: output exceeded %d MiB", strings.Join(args, " "), historyCaptureLimit>>20)
+	}
+	if err != nil {
+		return result, fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
 	}
 	return result, nil
 }

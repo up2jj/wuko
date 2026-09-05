@@ -13,10 +13,12 @@ wuko git hook init
 ```
 
 This creates `.wuko/git-hooks.yaml`, `.wuko/workflows/git-check.yaml`, and
-`.wuko/workflows/git-commit-message.yaml`. The examples check staged and outgoing commits for
-whitespace errors and compose the `file` and `git_conventional_commit` steps to validate commit
-messages without a shell script. `init` refuses to overwrite any existing scaffold file and does
-not install hooks. Review and adapt the workflows, then run `wuko git hook install`.
+`.wuko/workflows/git-commit-message.yaml`. The examples use `git_diff_check` to check staged and
+outgoing commits for whitespace errors, then compose the `file` and `git_conventional_commit`
+steps to validate commit messages. All generated checks are shell-free. `init` refuses to
+overwrite any existing scaffold file and does not install hooks. Review and adapt the workflows,
+then run `wuko git hook install`. See [Git changes and policy recipes](git-changes.md) for ways to
+extend these checks.
 
 The generated manifest uses the same format as a hand-written `.wuko/git-hooks.yaml`:
 

@@ -39,6 +39,13 @@ func TestScaffoldCreatesStarterManifestAndWorkflows(t *testing.T) {
 	if !strings.Contains(string(commitWorkflow), "type: file") || !strings.Contains(string(commitWorkflow), ".steps.read_message.content") || strings.Contains(string(commitWorkflow), "type: shell") {
 		t.Fatalf("commit-message workflow did not compose file reading with validation:\n%s", commitWorkflow)
 	}
+	checkWorkflow, err := os.ReadFile(filepath.Join(root, ".wuko", "workflows", "git-check.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(checkWorkflow), "type: git_diff_check") != 2 || strings.Contains(string(checkWorkflow), "type: shell") {
+		t.Fatalf("Git check workflow is not shell-free:\n%s", checkWorkflow)
+	}
 }
 
 func TestScaffoldRefusesCollisionBeforeCreatingFiles(t *testing.T) {

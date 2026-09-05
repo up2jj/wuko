@@ -333,7 +333,7 @@ func TestHistoryDocumentationExamples(t *testing.T) {
 
 func historyDocumentationSection(data []byte) []byte {
 	start := []byte("## `git_revision`")
-	end := []byte("## `git_conventional_commit`")
+	end := []byte("## `git_diff`")
 	startIndex := strings.Index(string(data), string(start))
 	endIndex := strings.Index(string(data), string(end))
 	if startIndex < 0 || endIndex <= startIndex {

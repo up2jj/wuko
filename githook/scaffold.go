@@ -26,32 +26,16 @@ targets:
   staged:
     steps:
       - id: whitespace
-        type: shell
+        type: git_diff_check
         with:
-          command: git
-          args: [diff, --cached, --check]
+          source: staged
 
   pushed:
     steps:
       - id: whitespace
-        type: shell
+        type: git_diff_check
         with:
-          script: |
-            set -eu
-            zero=0000000000000000000000000000000000000000
-            while read -r local_ref local_oid remote_ref remote_oid; do
-              [ -n "${local_oid:-}" ] || continue
-              [ "$local_oid" = "$zero" ] && continue
-              if [ "$remote_oid" = "$zero" ]; then
-                commits=$(git rev-list "$local_oid" --not --remotes)
-              else
-                commits=$(git rev-list "$remote_oid..$local_oid")
-              fi
-              for commit in $commits; do
-                git diff-tree --check --root -r "$commit"
-              done
-            done
-          stdin: "{{ .git.hook.stdin }}"
+          source: pushed
 `
 
 const starterCommitMessageWorkflow = `version: 1
