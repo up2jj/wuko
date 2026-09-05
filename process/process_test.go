@@ -360,7 +360,7 @@ func TestRunTTYSensitiveInteractionSuppressesEcho(t *testing.T) {
 	}
 	var streamed bytes.Buffer
 	result, err := Run(t.Context(), Options{
-		Command: "sh", Args: []string{"-c", "printf 'Password:'; IFS= read -r value; test \"$value\" = '" + secret + "'; printf '\\nok\\n'"},
+		Command: "sh", Args: []string{"-c", "printf 'Password:'; IFS= read -r value; test \"$value\" = '" + secret + "'; printf '\\n%s\\nok\\n' \"$value\""},
 		Env: testEnvironment(), Stdout: &streamed, TTY: true, Interactions: plan, CaptureLimit: 1 << 20,
 	})
 	if err != nil {
@@ -371,6 +371,40 @@ func TestRunTTYSensitiveInteractionSuppressesEcho(t *testing.T) {
 	}
 	if !strings.Contains(result.Stdout, "ok") {
 		t.Fatalf("TTY output = %q", result.Stdout)
+	}
+}
+
+func TestSensitiveOutputWriterRedactsAcrossWrites(t *testing.T) {
+	var output bytes.Buffer
+	writer := newSensitiveOutputWriter(&output)
+	writer.Redact([]byte("never-show-this"))
+	for _, chunk := range []string{"Password:never-", "show-this\r", "\n\r\nok\r\n"} {
+		if _, err := writer.Write([]byte(chunk)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := output.String(), "Password:\r\n\r\nok\r\n"; got != want {
+		t.Fatalf("redacted output = %q, want %q", got, want)
+	}
+}
+
+func TestSensitiveOutputWriterPreservesNearMatch(t *testing.T) {
+	var output bytes.Buffer
+	writer := newSensitiveOutputWriter(&output)
+	writer.Redact([]byte("sensitive"))
+	for _, chunk := range []string{"ordinary sen", "tence"} {
+		if _, err := writer.Write([]byte(chunk)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := output.String(), "ordinary sentence"; got != want {
+		t.Fatalf("output = %q, want %q", got, want)
 	}
 }
 

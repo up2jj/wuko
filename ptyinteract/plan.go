@@ -29,6 +29,7 @@ type interaction struct {
 	expect    string
 	pattern   *regexp.Regexp
 	send      []byte
+	redact    []byte
 	timeout   time.Duration
 	sensitive bool
 }
@@ -43,6 +44,9 @@ func Compile(specs []Spec) (*Plan, error) {
 	compiled := make([]interaction, len(specs))
 	for i, spec := range specs {
 		item := interaction{send: []byte(spec.Send), sensitive: spec.Sensitive}
+		if spec.Sensitive {
+			item.redact = []byte(spec.Send)
+		}
 		if spec.Newline {
 			item.send = append(item.send, '\r')
 		}

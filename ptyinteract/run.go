@@ -1,6 +1,7 @@
 package ptyinteract
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -17,6 +18,10 @@ type Sink interface {
 type Stream struct {
 	Output   <-chan []byte
 	Overflow <-chan struct{}
+	// Redact registers sensitive input before it is written. Implementations that expose PTY
+	// output should remove registered values because terminal echo suppression is inherently
+	// racy on platforms whose line discipline consumes master writes asynchronously.
+	Redact func([]byte)
 }
 
 // Run executes the plan. Stream.Output must contain the single ordered stream read from the PTY.
@@ -35,7 +40,7 @@ func (p *Plan) Run(ctx context.Context, stream Stream, exited <-chan struct{}, s
 			}
 			pending = remaining
 		}
-		if err := write(ctx, sink, item.send, item.sensitive); err != nil {
+		if err := write(ctx, stream.Redact, sink, item.send, item.redact, item.sensitive); err != nil {
 			return &Error{Index: index + 1, Expect: item.expect, Kind: FailureWrite, Err: err}
 		}
 	}
@@ -73,11 +78,14 @@ func waitForMatch(ctx context.Context, stream Stream, exited <-chan struct{}, pe
 	}
 }
 
-func write(ctx context.Context, sink Sink, data []byte, sensitive bool) error {
+func write(ctx context.Context, redact func([]byte), sink Sink, data, sensitiveValue []byte, sensitive bool) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if sensitive {
+		if redact != nil && len(sensitiveValue) > 0 {
+			redact(bytes.Clone(sensitiveValue))
+		}
 		return sink.WriteSensitive(data)
 	}
 	for len(data) > 0 {

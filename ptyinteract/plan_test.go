@@ -88,11 +88,12 @@ func TestRunUsesSensitiveSink(t *testing.T) {
 		t.Fatal(err)
 	}
 	sink := newRecordingSink()
-	if err := plan.Run(t.Context(), Stream{}, nil, sink); err != nil {
+	var redacted string
+	if err := plan.Run(t.Context(), Stream{Redact: func(value []byte) { redacted = string(value) }}, nil, sink); err != nil {
 		t.Fatal(err)
 	}
-	if len(sink.sensitive) != 1 || sink.sensitive[0] != "secret" || len(sink.writes) != 0 {
-		t.Fatalf("sensitive = %#v, writes = %#v", sink.sensitive, sink.writes)
+	if len(sink.sensitive) != 1 || sink.sensitive[0] != "secret" || len(sink.writes) != 0 || redacted != "secret" {
+		t.Fatalf("sensitive = %#v, writes = %#v, redacted = %q", sink.sensitive, sink.writes, redacted)
 	}
 }
 

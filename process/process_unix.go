@@ -222,8 +222,9 @@ func runTTY(ctx context.Context, options Options, credential *syscall.Credential
 		interactionOutput = newInteractionOutputBuffer(interactionDone, ptyinteract.MaxUnmatchedBytes)
 	}
 	outputDone := make(chan error, 1)
+	sensitiveOutput := newSensitiveOutputWriter(outputWriter(options.StdoutPolicy, options.Stdout, &stdout))
 	go func() {
-		writer := outputWriter(options.StdoutPolicy, options.Stdout, &stdout)
+		var writer io.Writer = sensitiveOutput
 		if interactionOutput != nil {
 			writer = &interactionOutputWriter{writer: writer, output: interactionOutput, done: interactionDone}
 		}
@@ -231,7 +232,7 @@ func runTTY(ctx context.Context, options Options, credential *syscall.Credential
 		if interactionOutput != nil {
 			interactionOutput.Close()
 		}
-		outputDone <- copyErr
+		outputDone <- errors.Join(copyErr, sensitiveOutput.Close())
 	}()
 	wait := make(chan error, 1)
 	go func() { wait <- command.Wait() }()
@@ -295,7 +296,9 @@ func runTTY(ctx context.Context, options Options, credential *syscall.Credential
 		interactionResult := make(chan error, 1)
 		go func() {
 			defer close(interactionDone)
-			interactionResult <- options.Interactions.Run(ctx, interactionOutput.Stream(), processExited, ptyinteract.NewSink(ptmx))
+			stream := interactionOutput.Stream()
+			stream.Redact = sensitiveOutput.Redact
+			interactionResult <- options.Interactions.Run(ctx, stream, processExited, ptyinteract.NewSink(ptmx))
 		}()
 		select {
 		case interactionErr = <-interactionResult:
