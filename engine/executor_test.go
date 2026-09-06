@@ -76,11 +76,16 @@ func (executor *recordingExecutor) Close(context.Context) error {
 	return nil
 }
 
-type recordingProvider struct{ session *recordingExecutor }
+type recordingProvider struct {
+	session    *recordingExecutor
+	filesystem bool
+}
 
 func (provider recordingProvider) Open(context.Context, executor.Request) (executor.Session, error) {
 	return provider.session, nil
 }
+
+func (provider recordingProvider) SupportsFileSystem() bool { return provider.filesystem }
 
 func executorTestEngine(t *testing.T, session *recordingExecutor) *Engine {
 	t.Helper()
@@ -271,6 +276,48 @@ func TestExecutorScopeRejectsNonAwareRunner(t *testing.T) {
 	err := New(steps, WithExecutors(executors)).Validate(t.Context(), definition, Options{RunDir: t.TempDir()})
 	if err == nil || !strings.Contains(err.Error(), "not supported inside executor blocks") {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+type executorFileSystemRunner struct{}
+
+func (executorFileSystemRunner) Run(context.Context, step.Request) (step.Result, error) {
+	return step.Result{}, nil
+}
+func (executorFileSystemRunner) ExecutorAware()      {}
+func (executorFileSystemRunner) ExecutorFileSystem() {}
+
+func TestExecutorScopeValidatesFileSystemCapability(t *testing.T) {
+	steps := newTestRegistry(t, map[string]step.Builder{"filesystem": func(map[string]any) (step.Runner, error) {
+		return executorFileSystemRunner{}, nil
+	}})
+	definition := testDefinition(t, "filesystem", workflow.Step{
+		Executor: &workflow.ExecutorScope{Type: "recording", With: map[string]any{}},
+		Steps:    []workflow.Step{{ID: "read", Type: "filesystem", With: map[string]any{}}},
+	})
+	for _, test := range []struct {
+		name       string
+		filesystem bool
+		wantErr    bool
+	}{
+		{name: "unsupported", wantErr: true},
+		{name: "supported", filesystem: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			executors := executor.NewRegistry()
+			if err := executors.Register("recording", func(map[string]any) (executor.Provider, error) {
+				return recordingProvider{session: &recordingExecutor{}, filesystem: test.filesystem}, nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			err := New(steps, WithExecutors(executors)).Validate(t.Context(), definition, Options{RunDir: t.TempDir()})
+			if (err != nil) != test.wantErr {
+				t.Fatalf("Validate() error = %v, wantErr %v", err, test.wantErr)
+			}
+			if err != nil && !strings.Contains(err.Error(), "requires an executor that exposes a filesystem") {
+				t.Fatalf("Validate() error = %v", err)
+			}
+		})
 	}
 }
 

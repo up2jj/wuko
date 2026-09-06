@@ -168,6 +168,8 @@ matches; `one` requires exactly one match. Results also include `count` and norm
 Mutate structured values selected with [RFC 9535 JSONPath](https://www.rfc-editor.org/rfc/rfc9535.html).
 File edits preserve unrelated comments and formatting and are installed atomically. The format is
 inferred from `.json`, `.yaml`, `.yml`, or `.toml`; use `format` when a file has another extension.
+Inside an [executor scope](executors.md#reading-and-writing-files), the document is read from and
+written back to the execution target rather than the host.
 
 Bump a version in place:
 

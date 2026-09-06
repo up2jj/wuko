@@ -21,6 +21,7 @@ import (
 	toml "github.com/pelletier/go-toml/v2"
 	theoryjsonpath "github.com/theory/jsonpath"
 	"github.com/theory/jsonpath/spec"
+	"github.com/up2jj/wuko/executor"
 	wukoexpr "github.com/up2jj/wuko/expression"
 	"github.com/up2jj/wuko/step"
 	"gopkg.in/yaml.v3"
@@ -56,6 +57,11 @@ type Runner struct {
 	replaceExpr *vm.Program
 	maxBytes    int64
 }
+
+// ExecutorAware marks edit as usable inside executor scopes: it reads and writes through
+// the session filesystem, so the document it edits is the one on the execution target.
+func (*Runner) ExecutorAware()      {}
+func (*Runner) ExecutorFileSystem() {}
 
 func Register(registry *step.Registry) error { return registry.Register("edit", New) }
 
@@ -216,18 +222,19 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 		if !sameValue(verified, updated) {
 			return step.Result{}, fmt.Errorf("verifying edited %s: document differs from requested value", file.path)
 		}
-		if err := atomicReplace(ctx, file.path, patched, file.mode); err != nil {
-			return step.Result{}, err
+		if err := file.filesystem.WriteFile(ctx, file.path, patched, executor.WriteOptions{Mode: file.mode, Replace: true}); err != nil {
+			return step.Result{}, fmt.Errorf("installing edited file %s: %w", file.path, err)
 		}
 	}
 	return r.result(updated, file, matches, replacements, changedCount), nil
 }
 
 type fileSource struct {
-	path   string
-	format string
-	data   []byte
-	mode   os.FileMode
+	path       string
+	format     string
+	data       []byte
+	mode       os.FileMode
+	filesystem executor.FileSystem
 }
 
 func (r *Runner) resolveSource(ctx context.Context, request step.Request) (any, *fileSource, error) {
@@ -259,17 +266,21 @@ func (r *Runner) resolveSource(ctx context.Context, request step.Request) (any, 
 		if err != nil {
 			return nil, nil, fmt.Errorf("resolving edit file: %w", err)
 		}
-		info, err := os.Lstat(path)
+		filesystem, err := executor.FileSystemFor(request.Executor)
+		if err != nil {
+			return nil, nil, fmt.Errorf("editing %s: %w", path, err)
+		}
+		info, err := filesystem.Stat(ctx, path)
 		if err != nil {
 			return nil, nil, fmt.Errorf("inspecting edit file %s: %w", path, err)
 		}
-		if !info.Mode().IsRegular() {
+		if !info.Mode.IsRegular() {
 			return nil, nil, fmt.Errorf("edit file %s must be a regular file", path)
 		}
-		if info.Size() > r.maxBytes {
+		if info.Size > r.maxBytes {
 			return nil, nil, fmt.Errorf("edit file %s exceeds max_bytes", path)
 		}
-		data, err := readFile(ctx, path, r.maxBytes)
+		data, err := readFile(ctx, filesystem, path, r.maxBytes)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -281,7 +292,7 @@ func (r *Runner) resolveSource(ctx context.Context, request step.Request) (any, 
 		if err != nil {
 			return nil, nil, fmt.Errorf("decoding edit file %s as %s: %w", path, format, err)
 		}
-		return value, &fileSource{path: path, format: format, data: data, mode: info.Mode().Perm()}, nil
+		return value, &fileSource{path: path, format: format, data: data, mode: info.Mode.Perm(), filesystem: filesystem}, nil
 	}
 }
 
@@ -669,14 +680,10 @@ func parseSize(value string) (int64, error) {
 	return 0, fmt.Errorf("size must use B, KiB, MiB, or GiB")
 }
 
-func readFile(ctx context.Context, path string, maximum int64) ([]byte, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("opening edit file %s: %w", path, err)
-	}
-	defer file.Close()
-	reader := io.LimitReader(file, maximum+1)
-	data, err := io.ReadAll(reader)
+// readFile re-checks the size after reading: the stat that admitted the file happened
+// before the read, and the document may have grown in between.
+func readFile(ctx context.Context, filesystem executor.FileSystem, path string, maximum int64) ([]byte, error) {
+	data, err := filesystem.ReadFile(ctx, path, maximum)
 	if err != nil {
 		return nil, fmt.Errorf("reading edit file %s: %w", path, err)
 	}
@@ -687,50 +694,4 @@ func readFile(ctx context.Context, path string, maximum int64) ([]byte, error) {
 		return nil, err
 	}
 	return data, nil
-}
-
-func atomicReplace(ctx context.Context, path string, data []byte, mode os.FileMode) (resultErr error) {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	temporary, err := os.CreateTemp(filepath.Dir(path), ".wuko-edit-*")
-	if err != nil {
-		return fmt.Errorf("creating temporary file for %s: %w", path, err)
-	}
-	name := temporary.Name()
-	open := true
-	defer func() {
-		_ = os.Remove(name)
-		if open {
-			_ = temporary.Close()
-		}
-	}()
-	if err := temporary.Chmod(mode); err != nil {
-		return fmt.Errorf("setting temporary file mode: %w", err)
-	}
-	if _, err := temporary.Write(data); err != nil {
-		return fmt.Errorf("writing temporary file: %w", err)
-	}
-	if err := temporary.Sync(); err != nil {
-		return fmt.Errorf("syncing temporary file: %w", err)
-	}
-	if err := temporary.Close(); err != nil {
-		return fmt.Errorf("closing temporary file: %w", err)
-	}
-	open = false
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if err := os.Rename(name, path); err != nil {
-		return fmt.Errorf("installing edited file %s: %w", path, err)
-	}
-	directory, err := os.Open(filepath.Dir(path))
-	if err != nil {
-		return fmt.Errorf("opening edit directory: %w", err)
-	}
-	defer directory.Close()
-	if err := directory.Sync(); err != nil {
-		return fmt.Errorf("syncing edit directory: %w", err)
-	}
-	return nil
 }

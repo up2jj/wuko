@@ -17,6 +17,10 @@ workflows are trusted code, so paths are not confined to the run directory.
   mutations may already have changed earlier entries when cancellation or another error occurs.
 - `replace` is explicit: `never` rejects any existing destination, `file` permits replacement of a
   non-directory entry, and `any` also permits removal of a directory tree.
+- Inside an [executor scope](executors.md#reading-and-writing-files), only `read`, `write`, `mkdir`,
+  and `stat` are available, and they act on the execution target rather than the host. The other
+  operations rely on host semantics the session filesystem does not carry and are rejected during
+  validation.
 
 ## Quick reference
 

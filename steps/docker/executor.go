@@ -70,6 +70,14 @@ type ExecutorProvider struct {
 	newClient func() (dockerClient, error)
 }
 
+// SupportsFileSystem reports whether this configuration has the shell needed to
+// install files atomically as the executor user.
+func (provider *ExecutorProvider) SupportsFileSystem() bool {
+	command := executorInit(provider.config).Command
+	_, ok := serviceShell(provider.config)
+	return ok || templated(command)
+}
+
 func RegisterExecutor(registry *executor.Registry) error {
 	return registry.Register("docker", NewExecutor)
 }
@@ -543,10 +551,21 @@ func (session *dockerExecutorSession) translatePath(value string) (string, error
 		}
 		return "/", nil
 	}
+	translated, ok := session.mapPath(value)
+	if !ok {
+		return "", fmt.Errorf("Docker executor working directory %q is not covered by a bind mount", value)
+	}
+	return translated, nil
+}
+
+// mapPath rewrites one host path into the container path it is mounted at. An absolute
+// path outside every mount is passed through, since it names a location inside the image
+// itself; anything else has no container counterpart.
+func (session *dockerExecutorSession) mapPath(value string) (string, bool) {
 	cleaned := filepath.Clean(value)
 	workspace := executorWorkspace(session.config)
 	if !workspace.Enabled && cleaned == filepath.Clean(session.request.RunDir) {
-		return "/", nil
+		return "/", true
 	}
 	for _, mapping := range session.mappings {
 		relative, err := filepath.Rel(mapping.source, cleaned)
@@ -554,23 +573,23 @@ func (session *dockerExecutorSession) translatePath(value string) (string, error
 			continue
 		}
 		if relative == "." {
-			return filepath.ToSlash(mapping.target), nil
+			return filepath.ToSlash(mapping.target), true
 		}
-		return filepath.ToSlash(filepath.Join(mapping.target, relative)), nil
+		return filepath.ToSlash(filepath.Join(mapping.target, relative)), true
 	}
 	for _, mapping := range session.mappings {
 		relative, err := filepath.Rel(mapping.target, cleaned)
 		if err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-			return filepath.ToSlash(cleaned), nil
+			return filepath.ToSlash(cleaned), true
 		}
 	}
 	if pathWithin(session.request.RunDir, cleaned) {
-		return "", fmt.Errorf("Docker executor working directory %q is not covered by a bind mount", value)
+		return "", false
 	}
 	if filepath.IsAbs(cleaned) {
-		return filepath.ToSlash(cleaned), nil
+		return filepath.ToSlash(cleaned), true
 	}
-	return "", fmt.Errorf("Docker executor working directory %q is not covered by a bind mount", value)
+	return "", false
 }
 
 func pathWithin(parent, child string) bool {

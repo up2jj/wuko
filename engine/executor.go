@@ -14,6 +14,10 @@ import (
 
 const executorCleanupTimeout = 5 * time.Second
 
+type fileSystemProvider interface {
+	SupportsFileSystem() bool
+}
+
 func (e *Engine) validateExecutorBlock(ctx context.Context, definition *workflow.Definition, block workflow.Step, options Options, state *State) error {
 	started := time.Now()
 	fail := func(err error) error {
@@ -36,6 +40,8 @@ func (e *Engine) validateExecutorBlock(ctx context.Context, definition *workflow
 	}
 	childOptions := options
 	childOptions.insideExecutor = true
+	filesystem, ok := provider.(fileSystemProvider)
+	childOptions.executorFileSystem = ok && filesystem.SupportsFileSystem()
 	if err := e.validateSteps(ctx, definition, block.Steps, childOptions, state); err != nil {
 		return fail(fmt.Errorf("steps: %w", err))
 	}

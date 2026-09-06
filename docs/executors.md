@@ -85,7 +85,8 @@ nested in version 1, that currently means returning to the local executor. A roo
 container.
 
 Version 1 executor scopes support shell and lifecycle-managed
-[`process`](steps-automation.md#process) steps, working-directory and conditional blocks, early
+[`process`](steps-automation.md#process) steps, the file steps listed under
+[Reading and writing files](#reading-and-writing-files), working-directory and conditional blocks, early
 return, and sequential batch, foreach, or matrix controls. Other leaf steps, actions, waits, concurrent
 groups, parallel fan-out, and nested executor blocks are rejected instead of running unexpectedly
 on the host.
@@ -107,8 +108,9 @@ cannot do this, and there a `process` step configuring `restart` is rejected unl
 ## devenv executor
 
 The devenv executor runs process-backed steps in a reproducible devenv environment. It supports
-`shell`, `require_tool`, and `devenv_task`; HTTP, filesystem, persistence, TUI, and Lua steps remain
-host-side. Devenv must be version 2.2 or newer.
+`shell`, `require_tool`, `devenv_task`, and the file steps below; HTTP, persistence, TUI, and Lua
+steps remain host-side. A devenv shell runs on the host, so `file` and `edit` inside the block act on
+the host filesystem. Devenv must be version 2.2 or newer.
 
 ```yaml
 - executor:
@@ -227,6 +229,45 @@ command or shell named by the shell step must exist in the image. Workflow and s
 values, retry metadata, stdin, stdout, stderr, exit codes, timeouts, and shell output capture retain
 their normal shell-step behavior. Interactive `shell.with.tty` is local-only and is rejected inside
 Docker executor blocks.
+
+## Reading and writing files
+
+A command is not the only way to touch a file, so an executor session can also expose its own
+filesystem. Where it does, [`edit`](steps-data.md#edit) and the `read`, `write`, `mkdir`, and `stat`
+operations of [`file`](filesystem-operations.md) run inside the block and act on the target rather
+than on the host:
+
+```yaml
+- executor:
+    type: docker
+    with: {image: golang:1.26}
+  steps:
+    - id: pin_version
+      type: edit
+      with:
+        operation: set
+        from: {file: config.json}
+        path: $.version
+        value: "{{ .vars.release }}"
+
+    - id: record
+      type: file
+      with: {operation: write, path: build/stamp.txt, content: "{{ .vars.release }}", mode: "0640"}
+```
+
+Paths resolve against the run directory and are then translated through the same bind mounts as a
+command's working directory, so a path with no counterpart inside the container is rejected rather
+than redirected to the host. Docker file writes stage a same-directory temporary file as the
+executor's configured or image user and install it atomically, including a race-safe refusal when
+`overwrite` is false. Directory creation also preserves that executor user. These operations need
+the executor's init command to be a recognized shell; a Docker executor configured with a non-shell
+init rejects filesystem steps during validation.
+
+The remaining `file` operations -- `copy`, `move`, `remove`, `list`, `chmod`, `find`, `link`,
+`truncate`, `tail`, `disk_usage`, `atomic_swap`, `permissions`, and `touch` -- depend on host
+semantics such as links, renames, and directory walks that the session filesystem does not carry,
+and are rejected during validation. An executor that runs commands but exposes no filesystem at all,
+as [plugin executors](plugins.md) do, rejects every file step in its scope.
 
 ## Sharing files with local steps
 

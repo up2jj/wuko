@@ -226,6 +226,12 @@ type ExecutorAware interface {
 	ExecutorAware()
 }
 
+// ExecutorFileSystem marks an executor-aware runner that also requires the selected
+// executor provider to expose its target filesystem.
+type ExecutorFileSystem interface {
+	ExecutorFileSystem()
+}
+
 // ObservationError reports that a failed runner still produced a complete, usable observation.
 // Control steps such as wait may evaluate the accompanying Result instead of failing immediately.
 type ObservationError interface {

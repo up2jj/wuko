@@ -23,6 +23,32 @@ import (
 	"github.com/up2jj/wuko/process"
 )
 
+func TestDockerExecutorFileSystemRequiresShellInit(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		raw       map[string]any
+		supported bool
+	}{
+		{name: "default shell", raw: map[string]any{"image": "alpine"}, supported: true},
+		{name: "configured shell", raw: map[string]any{"image": "alpine", "init": map[string]any{"command": "/bin/bash"}}, supported: true},
+		{name: "non-shell init", raw: map[string]any{"image": "app", "init": map[string]any{"command": "/app/server"}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			provider, err := NewExecutor(test.raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			filesystem, ok := provider.(interface{ SupportsFileSystem() bool })
+			if !ok {
+				t.Fatal("Docker executor provider does not declare filesystem support")
+			}
+			if got := filesystem.SupportsFileSystem(); got != test.supported {
+				t.Fatalf("SupportsFileSystem() = %v, want %v", got, test.supported)
+			}
+		})
+	}
+}
+
 func TestDockerExecutorSharesWorkspaceAndRunsCommands(t *testing.T) {
 	runDir := t.TempDir()
 	client := &fakeClient{output: multiplexedOutput("built\n", "warning\n")}

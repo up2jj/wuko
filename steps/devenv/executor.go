@@ -45,6 +45,8 @@ type ExecutorProvider struct {
 	processState processStateReader
 }
 
+func (*ExecutorProvider) SupportsFileSystem() bool { return true }
+
 func RegisterExecutor(registry *executor.Registry) error {
 	return registry.Register("devenv", NewExecutor)
 }
@@ -98,6 +100,9 @@ func localCommand(ctx context.Context, options process.Options) (process.Result,
 }
 
 type session struct {
+	// A devenv shell runs on the host, so its filesystem is the host's and file steps
+	// inside the scope act on it directly.
+	executor.LocalFileSystem
 	config       ExecutorConfig
 	request      executor.Request
 	command      commandRunner
@@ -529,3 +534,4 @@ func (reader cliProcessStateReader) Status(ctx context.Context, root string, nam
 var _ executor.Provider = (*ExecutorProvider)(nil)
 var _ executor.Session = (*session)(nil)
 var _ executor.TaskRunner = (*session)(nil)
+var _ executor.FileSystem = (*session)(nil)

@@ -78,6 +78,7 @@ type Options struct {
 	renderer               *workflow.Renderer
 	deferContextValidation bool
 	insideExecutor         bool
+	executorFileSystem     bool
 	services               step.ServiceLauncher
 	// cleanups scopes managed-resource cleanup to a background control iteration, whose
 	// resources must be released when the iteration ends rather than accumulating for
@@ -370,6 +371,11 @@ func (e *Engine) validateSteps(ctx context.Context, definition *workflow.Definit
 			if _, ok := runner.(step.ExecutorAware); !ok {
 				err := fmt.Errorf("step type %q is not supported inside executor blocks", workflowStep.Type)
 				traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusFailed, started, "validating executor support", err)
+				return fmt.Errorf("step %q: %w", workflowStep.ID, err)
+			}
+			if _, required := runner.(step.ExecutorFileSystem); required && !options.executorFileSystem {
+				err := fmt.Errorf("step type %q requires an executor that exposes a filesystem", workflowStep.Type)
+				traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusFailed, started, "validating executor filesystem support", err)
 				return fmt.Errorf("step %q: %w", workflowStep.ID, err)
 			}
 		}

@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/up2jj/wuko/executor"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -92,6 +93,11 @@ func New(raw map[string]any) (step.Runner, error) {
 	if err := runner.validate(false); err != nil {
 		return nil, err
 	}
+	// An operation that is still a template cannot be shown to be remote-capable, so the
+	// step stays host-only rather than being admitted into an executor scope on a guess.
+	if remoteCapable(config.Operation) {
+		return &executorAwareRunner{Runner: runner}, nil
+	}
 	return runner, nil
 }
 
@@ -105,6 +111,13 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 	path, err := resolvePath(request.RunDir, r.config.Path)
 	if err != nil {
 		return step.Result{}, err
+	}
+	target, err := executor.FileSystemFor(request.Executor)
+	if err != nil {
+		return step.Result{}, fmt.Errorf("file %s: %w", r.config.Operation, err)
+	}
+	if !executor.IsLocal(target) {
+		return r.runRemote(ctx, target, path)
 	}
 	switch r.config.Operation {
 	case operationRead:
@@ -800,9 +813,13 @@ func formatMode(mode os.FileMode) string { return fmt.Sprintf("%04o", mode.Perm(
 func rootPath(path string) bool { return filepath.Dir(filepath.Clean(path)) == filepath.Clean(path) }
 
 func fileEntry(path string, info os.FileInfo) map[string]any {
+	return entryOutputs(path, info.Size(), info.Mode(), info.ModTime())
+}
+
+func entryOutputs(path string, size int64, mode os.FileMode, modified time.Time) map[string]any {
 	return map[string]any{
-		"name": filepath.Base(path), "path": filepath.ToSlash(path), "type": fileType(info.Mode()),
-		"size": info.Size(), "mode": formatMode(info.Mode()), "modified_at": info.ModTime().UTC().Format(time.RFC3339Nano),
+		"name": filepath.Base(path), "path": filepath.ToSlash(path), "type": fileType(mode),
+		"size": size, "mode": formatMode(mode), "modified_at": modified.UTC().Format(time.RFC3339Nano),
 	}
 }
 
