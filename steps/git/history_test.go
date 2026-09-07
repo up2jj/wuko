@@ -43,9 +43,43 @@ func TestRegisterIncludesHistorySteps(t *testing.T) {
 	if err := Register(registry); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"git_revision", "git_log"} {
-		if _, err := registry.Build(name, map[string]any{}); err != nil {
+	for name, raw := range map[string]map[string]any{
+		"git_revision":   {},
+		"git_merge_base": {"from": "main"},
+		"git_log":        {},
+	} {
+		if _, err := registry.Build(name, raw); err != nil {
 			t.Fatalf("building %s: %v", name, err)
+		}
+	}
+}
+
+func TestNewMergeBaseValidatesConfiguration(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		raw  map[string]any
+		want string
+	}{
+		{name: "missing from", raw: map[string]any{}, want: "from is required"},
+		{name: "blank from", raw: map[string]any{"from": "  "}, want: "from is required"},
+		{name: "from NUL", raw: map[string]any{"from": "main\x00"}, want: "from must not contain NUL"},
+		{name: "blank through", raw: map[string]any{"from": "main", "through": "  "}, want: "through must not be blank"},
+		{name: "through NUL", raw: map[string]any{"from": "main", "through": "HEAD\x00"}, want: "through must not contain NUL"},
+		{name: "unknown", raw: map[string]any{"from": "main", "head": "HEAD"}, want: "field head"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := NewMergeBase(test.raw)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("NewMergeBase(%#v) error = %v, want %q", test.raw, err, test.want)
+			}
+		})
+	}
+	for _, raw := range []map[string]any{
+		{"from": "main"},
+		{"from": "{{ .vars.base }}", "through": "{{ .vars.head }}"},
+	} {
+		if _, err := NewMergeBase(raw); err != nil {
+			t.Fatalf("NewMergeBase(%#v) error = %v", raw, err)
 		}
 	}
 }
@@ -154,6 +188,82 @@ func TestRevisionAndLogAgainstRepository(t *testing.T) {
 	empty := runLog(t, dir, map[string]any{"after": "HEAD", "through": "HEAD"})
 	if empty["count"] != 0 || empty["has_more"] != false || len(outputCommits(t, empty)) != 0 {
 		t.Fatalf("empty outputs = %#v", empty)
+	}
+}
+
+func TestMergeBaseAgainstDivergedRepository(t *testing.T) {
+	dir := initGitRepository(t)
+	base := strings.TrimSpace(runGitTest(t, dir, "rev-parse", "HEAD"))
+	mainBranch := strings.TrimSpace(runGitTest(t, dir, "branch", "--show-current"))
+
+	runGitTest(t, dir, "checkout", "-q", "-b", "feature/merge-base")
+	writeHistoryFile(t, dir, "feature.txt", "feature\n")
+	runGitTest(t, dir, "add", "feature.txt")
+	runGitTest(t, dir, "commit", "-q", "-m", "feat: add feature")
+	feature := strings.TrimSpace(runGitTest(t, dir, "rev-parse", "HEAD"))
+
+	runGitTest(t, dir, "checkout", "-q", mainBranch)
+	writeHistoryFile(t, dir, "main.txt", "main\n")
+	runGitTest(t, dir, "add", "main.txt")
+	runGitTest(t, dir, "commit", "-q", "-m", "feat: advance main")
+	main := strings.TrimSpace(runGitTest(t, dir, "rev-parse", "HEAD"))
+
+	outputs := runMergeBase(t, dir, map[string]any{"from": main, "through": feature})
+	if outputs["from"] != main || outputs["through"] != feature || outputs["sha"] != base {
+		t.Fatalf("outputs = %#v", outputs)
+	}
+	short := outputs["short_sha"].(string)
+	if short == "" || !strings.HasPrefix(base, short) {
+		t.Fatalf("short_sha = %q, want prefix of %q", short, base)
+	}
+
+	same := runMergeBase(t, dir, map[string]any{"from": "HEAD"})
+	if same["from"] != main || same["through"] != main || same["sha"] != main {
+		t.Fatalf("same revision outputs = %#v", same)
+	}
+}
+
+func TestMergeBaseRejectsUnresolvedMissingAndAmbiguousHistory(t *testing.T) {
+	runner, err := NewMergeBase(map[string]any{"from": "{{ .vars.base }}"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runner.Run(t.Context(), step.Request{}); err == nil || !strings.Contains(err.Error(), "unresolved template") {
+		t.Fatalf("unresolved error = %v", err)
+	}
+
+	missing := &scriptedGitExecutor{results: []scriptedGitResult{
+		{err: &process.ExitError{Command: "git", Code: 1}},
+	}}
+	runner, err = NewMergeBase(map[string]any{"from": "missing"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runner.Run(t.Context(), step.Request{Executor: missing}); err == nil || !strings.Contains(err.Error(), `resolving Git revision "missing"`) {
+		t.Fatalf("missing revision error = %v", err)
+	}
+
+	noBase := &scriptedGitExecutor{results: []scriptedGitResult{
+		{result: process.Result{Stdout: "from-id\n"}},
+		{result: process.Result{Stdout: "through-id\n"}},
+		{err: &process.ExitError{Command: "git", Code: 1}},
+	}}
+	runner, err = NewMergeBase(map[string]any{"from": "main", "through": "feature"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runner.Run(t.Context(), step.Request{Executor: noBase}); err == nil || !strings.Contains(err.Error(), "no common ancestor") || !strings.Contains(err.Error(), "shallow") {
+		t.Fatalf("no common ancestor error = %v", err)
+	}
+
+	multiple := &scriptedGitExecutor{results: []scriptedGitResult{
+		{result: process.Result{Stdout: "from-id\n"}},
+		{result: process.Result{Stdout: "through-id\n"}},
+		{result: process.Result{Stdout: "base-one\nbase-two\n"}},
+	}}
+	if _, err := runner.Run(t.Context(), step.Request{Executor: multiple}); err == nil ||
+		!strings.Contains(err.Error(), "multiple merge bases") || !strings.Contains(err.Error(), "base-one, base-two") {
+		t.Fatalf("multiple merge bases error = %v", err)
 	}
 }
 
@@ -271,6 +381,40 @@ func TestHistoryUsesCaptureOnlyExecutorAndRejectsTruncation(t *testing.T) {
 	if _, ok := runner.(step.ExecutorAware); !ok {
 		t.Fatal("git_revision is not executor-aware")
 	}
+	mergeExecutor := &scriptedGitExecutor{results: []scriptedGitResult{
+		{result: process.Result{Stdout: "from-id\n"}},
+		{result: process.Result{Stdout: "through-id\n"}},
+		{result: process.Result{Stdout: "base-id\n"}},
+		{result: process.Result{Stdout: "base\n"}},
+	}}
+	mergeBase, err := NewMergeBase(map[string]any{"from": "main", "through": "feature"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := mergeBase.Run(t.Context(), step.Request{
+		Executor: mergeExecutor, RunDir: "/workspace", Env: map[string]string{"MODE": "test"},
+		Attempt: 2, MaxAttempts: 3, OperationID: "merge-base",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Outputs["from"] != "from-id" || result.Outputs["through"] != "through-id" || result.Outputs["sha"] != "base-id" || result.Outputs["short_sha"] != "base" {
+		t.Fatalf("merge-base outputs = %#v", result.Outputs)
+	}
+	if !slices.Equal(mergeExecutor.calls[2].Args, []string{"merge-base", "--all", "from-id", "through-id"}) {
+		t.Fatalf("merge-base args = %#v", mergeExecutor.calls[2].Args)
+	}
+	for _, call := range mergeExecutor.calls {
+		if call.Command != "git" || call.Dir != "/workspace" || call.StdoutPolicy != process.OutputCapture || call.StderrPolicy != process.OutputCapture || call.CaptureLimit != historyCaptureLimit {
+			t.Fatalf("merge-base process options = %#v", call)
+		}
+		if call.Env["MODE"] != "test" || call.Env[step.AttemptEnv] != "2" || call.Env[step.OperationIDEnv] != "merge-base" {
+			t.Fatalf("merge-base environment = %#v", call.Env)
+		}
+	}
+	if _, ok := mergeBase.(step.ExecutorAware); !ok {
+		t.Fatal("git_merge_base is not executor-aware")
+	}
 	log, err := NewLog(map[string]any{})
 	if err != nil {
 		t.Fatal(err)
@@ -283,8 +427,11 @@ func TestHistoryUsesCaptureOnlyExecutorAndRejectsTruncation(t *testing.T) {
 func TestHistoryCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	for _, builder := range []step.Builder{NewRevision, NewLog} {
-		runner, err := builder(map[string]any{})
+	for _, test := range []struct {
+		builder step.Builder
+		raw     map[string]any
+	}{{NewRevision, map[string]any{}}, {NewMergeBase, map[string]any{"from": "main"}}, {NewLog, map[string]any{}}} {
+		runner, err := test.builder(test.raw)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -329,8 +476,14 @@ func TestHistoryDocumentationExamples(t *testing.T) {
 			case "git_revision":
 				_, buildErr = NewRevision(documented.With)
 				built++
+			case "git_merge_base":
+				_, buildErr = NewMergeBase(documented.With)
+				built++
 			case "git_log":
 				_, buildErr = NewLog(documented.With)
+				built++
+			case "git_diff":
+				_, buildErr = NewDiff(documented.With)
 				built++
 			case "", "assert", "shell", "tui_table":
 				continue
@@ -373,6 +526,19 @@ func regexpYAMLBlocks(section []byte) [][]byte {
 func runRevision(t *testing.T, dir string, raw map[string]any) map[string]any {
 	t.Helper()
 	runner, err := NewRevision(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runner.Run(t.Context(), step.Request{RunDir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return result.Outputs
+}
+
+func runMergeBase(t *testing.T, dir string, raw map[string]any) map[string]any {
+	t.Helper()
+	runner, err := NewMergeBase(raw)
 	if err != nil {
 		t.Fatal(err)
 	}

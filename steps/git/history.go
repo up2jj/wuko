@@ -33,6 +33,11 @@ type revisionConfig struct {
 	Revision string `yaml:"revision,omitempty"`
 }
 
+type mergeBaseConfig struct {
+	From    string `yaml:"from"`
+	Through string `yaml:"through,omitempty"`
+}
+
 type logConfig struct {
 	After    string   `yaml:"after,omitempty"`
 	Through  string   `yaml:"through,omitempty"`
@@ -45,6 +50,10 @@ type logConfig struct {
 type revisionRunner struct {
 	config      revisionConfig
 	hasRevision bool
+}
+
+type mergeBaseRunner struct {
+	config mergeBaseConfig
 }
 
 type logRunner struct {
@@ -71,6 +80,29 @@ func NewRevision(raw map[string]any) (step.Runner, error) {
 		config.Revision = "HEAD"
 	}
 	return &revisionRunner{config: config, hasRevision: configured}, nil
+}
+
+// NewMergeBase builds a git_merge_base step.
+func NewMergeBase(raw map[string]any) (step.Runner, error) {
+	var config mergeBaseConfig
+	if err := step.DecodeConfig(raw, &config); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(config.From) == "" {
+		return nil, fmt.Errorf("from is required")
+	}
+	if strings.ContainsRune(config.From, '\x00') {
+		return nil, fmt.Errorf("from must not contain NUL")
+	}
+	if _, configured := raw["through"]; !configured {
+		config.Through = "HEAD"
+	} else if strings.TrimSpace(config.Through) == "" {
+		return nil, fmt.Errorf("through must not be blank")
+	}
+	if strings.ContainsRune(config.Through, '\x00') {
+		return nil, fmt.Errorf("through must not contain NUL")
+	}
+	return &mergeBaseRunner{config: config}, nil
 }
 
 // NewLog builds a git_log step.
@@ -137,8 +169,9 @@ func NewLog(raw map[string]any) (step.Runner, error) {
 	return runner, nil
 }
 
-func (*revisionRunner) ExecutorAware() {}
-func (*logRunner) ExecutorAware()      {}
+func (*revisionRunner) ExecutorAware()  {}
+func (*mergeBaseRunner) ExecutorAware() {}
+func (*logRunner) ExecutorAware()       {}
 
 func (r *revisionRunner) Run(ctx context.Context, request step.Request) (step.Result, error) {
 	if err := ctx.Err(); err != nil {
@@ -167,6 +200,65 @@ func (r *revisionRunner) Run(ctx context.Context, request step.Request) (step.Re
 	outputs := maps.Clone(records[0])
 	outputs["found"] = true
 	return step.Result{Outputs: outputs}, nil
+}
+
+func (r *mergeBaseRunner) Run(ctx context.Context, request step.Request) (step.Result, error) {
+	if err := ctx.Err(); err != nil {
+		return step.Result{}, err
+	}
+	if unresolvedHistoryValue(r.config.From) || unresolvedHistoryValue(r.config.Through) {
+		return step.Result{}, fmt.Errorf("git_merge_base configuration contains an unresolved template")
+	}
+	for _, value := range []struct {
+		name  string
+		value string
+	}{{"from", r.config.From}, {"through", r.config.Through}} {
+		if strings.TrimSpace(value.value) == "" {
+			return step.Result{}, fmt.Errorf("%s must not be blank", value.name)
+		}
+		if strings.ContainsRune(value.value, '\x00') {
+			return step.Result{}, fmt.Errorf("%s must not contain NUL", value.name)
+		}
+	}
+
+	fromID, _, err := resolveCommit(ctx, request, r.config.From, false)
+	if err != nil {
+		return step.Result{}, err
+	}
+	throughID, _, err := resolveCommit(ctx, request, r.config.Through, false)
+	if err != nil {
+		return step.Result{}, err
+	}
+	result, err := runGitCapture(ctx, request, "merge-base", "--all", fromID, throughID)
+	if err != nil {
+		var exitErr *process.ExitError
+		if errors.As(err, &exitErr) && exitErr.Code == 1 {
+			return step.Result{}, fmt.Errorf("Git revisions %q and %q have no common ancestor; history may be shallow", r.config.From, r.config.Through)
+		}
+		return step.Result{}, gitCommandError("finding Git merge base", result, err)
+	}
+	bases := strings.Fields(result.Stdout)
+	if len(bases) == 0 {
+		return step.Result{}, fmt.Errorf("finding Git merge base: Git returned no object ID")
+	}
+	if len(bases) > 1 {
+		return step.Result{}, fmt.Errorf("Git revisions %q and %q have multiple merge bases (%s); pick one explicitly", r.config.From, r.config.Through, strings.Join(bases, ", "))
+	}
+	baseID := bases[0]
+	if strings.ContainsRune(baseID, '\x00') {
+		return step.Result{}, fmt.Errorf("finding Git merge base: Git returned an invalid object ID")
+	}
+	shortResult, err := runGitCapture(ctx, request, "rev-parse", "--short", baseID)
+	if err != nil {
+		return step.Result{}, gitCommandError("abbreviating Git merge base", shortResult, err)
+	}
+	shortID := strings.TrimSpace(shortResult.Stdout)
+	if shortID == "" || strings.ContainsAny(shortID, "\r\n\x00") {
+		return step.Result{}, fmt.Errorf("abbreviating Git merge base: Git returned an invalid object ID")
+	}
+	return step.Result{Outputs: map[string]any{
+		"from": fromID, "through": throughID, "sha": baseID, "short_sha": shortID,
+	}}, nil
 }
 
 func (r *logRunner) Run(ctx context.Context, request step.Request) (step.Result, error) {

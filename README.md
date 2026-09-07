@@ -499,6 +499,7 @@ Each linked guide contains multiple examples for every step.
 | `require_tool` | Require an executable and optionally validate its version | [System steps](docs/steps-system.md#require_tool) |
 | `multiplexer` | Label and annotate the current tmux, cmux, or Herdr context | [System steps](docs/steps-system.md#multiplexer) |
 | `git_revision` | Read the current or a selected Git commit as structured data | [System steps](docs/steps-system.md#git_revision) |
+| `git_merge_base` | Find the unambiguous common ancestor of two Git revisions | [System steps](docs/steps-system.md#git_merge_base) |
 | `git_log` | Read bounded, structured Git history for automation | [System steps](docs/steps-system.md#git_log) |
 | `git_diff` | Inspect committed, staged, or unstaged changes as structured data | [System steps](docs/steps-system.md#git_diff) |
 | `git_diff_check` | Reject Git whitespace errors and conflict markers, including pushed commits | [System steps](docs/steps-system.md#git_diff_check) |

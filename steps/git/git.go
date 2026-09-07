@@ -68,6 +68,7 @@ func Register(registry *step.Registry) error {
 		{"git_conventional_commit", NewConventionalCommit},
 		{"git_commit", NewCommit},
 		{"git_revision", NewRevision},
+		{"git_merge_base", NewMergeBase},
 		{"git_log", NewLog},
 		{"git_diff", NewDiff},
 		{"git_diff_check", NewDiffCheck},

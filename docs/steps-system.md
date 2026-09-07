@@ -74,6 +74,53 @@ Require a current commit when an empty repository is not meaningful:
     message: The repository must contain at least one commit
 ```
 
+## `git_merge_base`
+
+Find the best common ancestor of two Git revisions without parsing command output. `from` is
+required and `through` defaults to `HEAD`, matching the endpoint vocabulary used by `git_diff`.
+Both inputs accept commits, branches, or tags and are resolved to full commit IDs before the graph
+query runs:
+
+```yaml
+- id: branch_point
+  type: git_merge_base
+  with:
+    from: origin/main
+    through: HEAD
+```
+
+| Field | Required | Meaning and default |
+| --- | --- | --- |
+| `from` | yes | First revision to compare |
+| `through` | no | Second revision; defaults to `HEAD` |
+
+The step exposes `from`, `through`, `sha`, and `short_sha`. The endpoint outputs are their resolved
+full commit IDs, `sha` is the common ancestor, and `short_sha` is Git's unambiguous abbreviation.
+Use the result as a stable boundary for branch-only diffs and history:
+
+```yaml
+- id: branch_point
+  type: git_merge_base
+  with: {from: origin/main}
+
+- id: branch_files
+  type: git_diff
+  with:
+    from: "{{ .steps.branch_point.sha }}"
+    through: HEAD
+
+- id: branch_commits
+  type: git_log
+  with:
+    after: "{{ .steps.branch_point.sha }}"
+    through: HEAD
+```
+
+Missing revisions and histories with no common ancestor fail. The latter error notes that shallow
+history may be responsible. Wuko asks Git for every best common ancestor and fails if a rare
+criss-cross history produces more than one, rather than silently choosing an unstable boundary.
+The step never fetches commits; CI must check out enough history for both revisions.
+
 ## `git_log`
 
 Read a useful, bounded slice of repository history as structured workflow data. The step is

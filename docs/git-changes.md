@@ -15,6 +15,7 @@ conditions, assertions, fan-out controls, and reporting steps.
 | What tracked work have I not staged? | `git_diff` with `source: unstaged` |
 | What differs from the main branch or a release? | `git_diff` with `source: commit` |
 | Does every outgoing commit pass Git checks? | `git_diff_check` with `source: pushed` |
+| Where did two branches diverge? | [`git_merge_base`](steps-system.md#git_merge_base) |
 | Which commits produced the change? | [`git_log`](steps-system.md#git_log) |
 | What metadata belongs to one commit? | [`git_revision`](steps-system.md#git_revision) |
 
@@ -263,8 +264,8 @@ and `score` when moves affect ownership or package-boundary rules.
 ```
 
 The same endpoint comparison can determine affected pull-request components, decide which release
-artifacts to package, verify a maintenance backport, or drive component-specific versioning. CI
-should supply its verified base or merge-base revision explicitly.
+artifacts to package, verify a maintenance backport, or drive component-specific versioning. Use
+`git_merge_base` when CI supplies two branch tips rather than an already verified boundary.
 
 Use `git_diff` for the final repository state and `git_log` when release notes also need the commits
 and their Conventional Commit classifications:
@@ -277,6 +278,90 @@ and their Conventional Commit classifications:
 - id: commits
   type: git_log
   with: {after: v2.3.0, through: HEAD, merges: exclude}
+```
+
+### Require Conventional Commits on pull requests
+
+Keep the policy in `.wuko/workflows/conventional-pr-commits.yaml`. Declared revision variables make
+the same workflow valid and runnable locally instead of coupling it to the GitHub execution
+context:
+
+```yaml
+version: 1
+name: conventional-pr-commits
+description: Require Conventional Commit messages on pull requests
+vars:
+  base: ""
+  head: ""
+steps:
+  - id: branch_point
+    type: git_merge_base
+    with:
+      from: "{{ .vars.base }}"
+      through: "{{ .vars.head }}"
+
+  - id: commits
+    type: git_log
+    with:
+      after: "{{ .steps.branch_point.sha }}"
+      through: "{{ .vars.head }}"
+      merges: exclude
+      limit: 1000
+
+  - id: complete_history
+    type: assert
+    with:
+      expr: "!steps.commits.has_more"
+      message: Pull request contains more than 1000 commits
+
+  - id: validate_commits
+    foreach:
+      items: steps.commits.commits
+      max_iterations: 1000
+      steps:
+        - id: conventional
+          type: assert
+          with:
+            expr: foreach.item.conventional.valid
+            message: 'Commit {{ .foreach.item.short_sha }} is not conventional: {{ .foreach.item.subject }}'
+```
+
+Wire it to `.github/workflows/conventional-commits.yml`. Replace `<VERSION>` with a pinned Wuko
+release that contains `git_merge_base`:
+
+```yaml
+name: Conventional commits
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  conventional-commits:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Validate PR commits
+        uses: up2jj/wuko@<VERSION>
+        with:
+          workflow: conventional-pr-commits
+          vars: |
+            {
+              "base": ${{ toJSON(github.event.pull_request.base.sha) }},
+              "head": ${{ toJSON(github.event.pull_request.head.sha) }}
+            }
+```
+
+The merge base prevents commits added only to a moving base branch from entering the PR range.
+Merge commits are excluded, while autosquash and other non-conventional subjects fail with the
+offending commit ID. Run the identical policy locally before pushing:
+
+```sh
+wuko run conventional-pr-commits --once --var base=origin/main --var head=HEAD
 ```
 
 ### Inspect every commit independently
