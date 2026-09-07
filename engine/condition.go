@@ -93,5 +93,8 @@ func makeConditionEnvironment(definition *workflow.Definition, runDir string, st
 	for name, value := range state.Providers.Values {
 		environment[name] = value
 	}
+	for name, function := range definition.Helpers().Functions(definition.HelperContext()) {
+		environment[name] = function
+	}
 	return environment
 }

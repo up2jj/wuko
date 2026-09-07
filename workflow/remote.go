@@ -53,7 +53,7 @@ func (loader *Loader) DecodeRemote(ctx context.Context, locator string, options 
 	}()
 	options.sourceRoot = filepath.Dir(path)
 	options.sourceLabel = description
-	definition, err := loader.Decode(path, options)
+	definition, err := loader.decode(ctx, path, options)
 	if err != nil {
 		return nil, func() {}, err
 	}

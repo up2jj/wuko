@@ -159,7 +159,7 @@ func (e *Engine) Validate(ctx context.Context, definition *workflow.Definition, 
 	}
 	if options.renderer == nil {
 		var err error
-		options.renderer, err = workflow.NewRendererWithSecrets(definition.Templates, definition.SecretSession())
+		options.renderer, err = workflow.NewRendererWithHelpers(ctx, definition.Templates, definition.SecretSession(), definition.Helpers())
 		if err != nil {
 			return err
 		}
@@ -384,7 +384,7 @@ func (e *Engine) validateSteps(ctx context.Context, definition *workflow.Definit
 			traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusSucceeded, started, "", nil)
 			continue
 		}
-		request := makeRequest(definition, workflowStep.ID, options, state, 1, 1, "validation")
+		request := makeRequest(ctx, definition, workflowStep.ID, options, state, 1, 1, "validation")
 		if err := validator.Validate(ctx, request); err != nil {
 			traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusFailed, started, "validating runner", err)
 			return fmt.Errorf("step %q: %w", workflowStep.ID, err)
@@ -413,7 +413,7 @@ func (e *Engine) Run(ctx context.Context, definition *workflow.Definition, optio
 	options.runID = correlation.NewRunID()
 	options.stepRunID = ""
 	if options.renderer == nil {
-		options.renderer, runErr = workflow.NewRendererWithSecrets(definition.Templates, definition.SecretSession())
+		options.renderer, runErr = workflow.NewRendererWithHelpers(ctx, definition.Templates, definition.SecretSession(), definition.Helpers())
 		if runErr != nil {
 			return nil, runErr
 		}
@@ -954,7 +954,7 @@ func (e *Engine) executeStep(ctx context.Context, definition *workflow.Definitio
 		}
 	}
 	attempt, maximum := max(options.attempt, 1), max(options.maxAttempts, 1)
-	request := makeRequest(definition, workflowStep.ID, options, state, attempt, max(maximum, attempt), operationID)
+	request := makeRequest(ctx, definition, workflowStep.ID, options, state, attempt, max(maximum, attempt), operationID)
 	if previous, ok := options.previousPass[workflowStep.ID]; ok {
 		request.PreviousAttempt = &previous
 	}
@@ -1192,10 +1192,14 @@ func initialState(definition *workflow.Definition, options Options) (*State, err
 }
 
 func templateData(definition *workflow.Definition, runDir string, state *State) map[string]any {
-	return workflow.TemplateDataWithProviders(definition, runDir, state.EnvironmentLoaders, state.Inputs, state.Vars, state.Env, state.Steps, state.Dependencies, state.Bindings, state.Providers)
+	data := workflow.TemplateDataWithProviders(definition, runDir, state.EnvironmentLoaders, state.Inputs, state.Vars, state.Env, state.Steps, state.Dependencies, state.Bindings, state.Providers)
+	for name, function := range definition.Helpers().Functions(definition.HelperContext()) {
+		data[name] = function
+	}
+	return data
 }
 
-func makeRequest(definition *workflow.Definition, stepID string, options Options, state *State, attempt, maxAttempts int, operationID string) step.Request {
+func makeRequest(ctx context.Context, definition *workflow.Definition, stepID string, options Options, state *State, attempt, maxAttempts int, operationID string) step.Request {
 	var resolveSecret func(string) (string, error)
 	if session := definition.SecretSession(); session != nil {
 		resolveSecret = session.Resolve
@@ -1213,7 +1217,7 @@ func makeRequest(definition *workflow.Definition, stepID string, options Options
 		}),
 		Executor: options.Executor,
 		Services: reportingServiceLauncher{launcher: options.services, options: options, workflowName: definition.Name},
-		Secret:   resolveSecret,
+		Secret:   resolveSecret, Helpers: definition.Helpers(), HelperContext: ctx,
 	}
 }
 
@@ -1251,6 +1255,7 @@ func (e *Engine) validateAction(ctx context.Context, definition *workflow.Defini
 	inputs := actionValidationInputs(workflowStep.Action)
 	inner := &workflow.Definition{Version: 1, Name: workflowStep.Action.Name, Timezone: definition.Timezone, Templates: workflowStep.Action.Templates, Plugins: definition.Plugins, Dir: dir, DirBorrowed: workflowStep.Action.DirBorrowed, Steps: workflowStep.Action.Steps, Finally: workflowStep.Action.Finally, Vars: map[string]any{}, Env: workflow.Environment{}, Location: workflowStep.Action.Location}
 	inner.InheritSecretSession(definition)
+	inner.InheritHelpers(definition)
 	return e.Validate(ctx, inner, Options{
 		InvocationID: options.InvocationID,
 		inputs:       inputs, BaseEnv: state.Env, EnvironmentLoaders: slices.Clone(state.EnvironmentLoaders), RunDir: options.RunDir, Providers: state.Providers.Clone(),
@@ -1280,6 +1285,7 @@ func (e *Engine) prepareActionExecutor(definition *workflow.Definition, workflow
 	}
 	inner := &workflow.Definition{Version: 1, Name: workflowStep.Action.Name, Timezone: definition.Timezone, Templates: workflowStep.Action.Templates, Plugins: definition.Plugins, Dir: dir, DirBorrowed: workflowStep.Action.DirBorrowed, Steps: workflowStep.Action.Steps, Finally: workflowStep.Action.Finally, Vars: map[string]any{}, Env: workflow.Environment{}, Location: workflowStep.Action.Location}
 	inner.InheritSecretSession(definition)
+	inner.InheritHelpers(definition)
 	execute := func(ctx context.Context, request step.Request) (step.Result, error) {
 		innerState, err := e.Run(ctx, inner, Options{
 			InvocationID: options.InvocationID,
@@ -1302,6 +1308,9 @@ func (e *Engine) prepareActionExecutor(definition *workflow.Definition, workflow
 		environment := map[string]any{"inputs": innerState.Inputs, "vars": innerState.Vars, "steps": innerState.Steps, "env": innerState.Env, "workflow": map[string]any{"name": inner.Name, "dir": inner.Dir, "timezone": inner.Timezone}, "run": map[string]any{"dir": options.RunDir, "environment_loaders": slices.Clone(state.EnvironmentLoaders)}}
 		for name, value := range innerState.Providers.Values {
 			environment[name] = cloneMap(value)
+		}
+		for name, function := range definition.Helpers().Functions(definition.HelperContext()) {
+			environment[name] = function
 		}
 		outputs := make(map[string]any, len(workflowStep.Action.Outputs))
 		outputsStarted := time.Now()

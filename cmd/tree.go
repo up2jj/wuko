@@ -55,7 +55,7 @@ func newTreeCmd(deps dependencies) *cobra.Command {
 
 			loader := deps.loader
 			if loader == nil {
-				loader = workflow.NewLoader(nil)
+				loader = defaultWorkflowLoader(deps.plugins)
 			}
 			options := workflow.LoadOptions{Vars: vars, Env: env, BaseEnv: baseEnv, EnvironmentLoaders: environmentLoaders, RunDir: cwd, Diagnostics: reporter, Providers: providers,
 				Stdin: command.InOrStdin(), Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(), Interactive: interactive(command.InOrStdin())}

@@ -256,7 +256,7 @@ func validateGitHookBindings(command *cobra.Command, deps dependencies, reposito
 	}
 	loader := deps.loader
 	if loader == nil {
-		loader = workflow.NewLoader(nil)
+		loader = defaultWorkflowLoader(deps.plugins)
 	}
 	hookDeps := deps
 	hookDeps.environment = nil

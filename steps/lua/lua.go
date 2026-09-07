@@ -227,7 +227,41 @@ func (r *runtime) module(state *glua.LState) (*glua.LTable, error) {
 	state.SetFuncs(jsonModule, map[string]glua.LGFunction{"encode": r.jsonEncode, "decode": r.jsonDecode})
 	module.RawSetString("json", jsonModule)
 	helpers := state.NewTable()
-	state.SetFuncs(helpers, helperFunctions())
+	functions := helperFunctions()
+	for name, call := range r.request.Helpers {
+		if _, exists := functions[name]; exists {
+			return nil, fmt.Errorf("plugin helper %q conflicts with a built-in Lua helper", name)
+		}
+		name, call := name, call
+		functions[name] = func(state *glua.LState) int {
+			args := make([]any, state.GetTop())
+			for index := range args {
+				value, err := fromLua(state.Get(index+1), make(map[*glua.LTable]bool))
+				if err != nil {
+					state.RaiseError("helper %s argument %d: %v", name, index+1, err)
+					return 0
+				}
+				args[index] = value
+			}
+			callContext := r.request.HelperContext
+			if callContext == nil {
+				callContext = state.Context()
+			}
+			value, err := call(callContext, args)
+			if err != nil {
+				state.RaiseError("helper %s: %v", name, err)
+				return 0
+			}
+			converted, err := toLua(state, value)
+			if err != nil {
+				state.RaiseError("helper %s result: %v", name, err)
+				return 0
+			}
+			state.Push(converted)
+			return 1
+		}
+	}
+	state.SetFuncs(helpers, functions)
 	module.RawSetString("helpers", helpers)
 	kvModule := state.NewTable()
 	state.SetFuncs(kvModule, map[string]glua.LGFunction{

@@ -2,6 +2,7 @@ package lua
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"net/http"
 	"os"
@@ -11,8 +12,27 @@ import (
 	"testing"
 	"time"
 
+	"github.com/up2jj/wuko/helper"
 	"github.com/up2jj/wuko/step"
 )
+
+func TestLuaExposesPluginHelpers(t *testing.T) {
+	runner, err := New(map[string]any{"source": `wuko.output("value", wuko.helpers.acme_slug("Hello World"))`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runner.Run(t.Context(), step.Request{HelperContext: t.Context(), Helpers: helper.Set{
+		"acme_slug": func(_ context.Context, args []any) (any, error) {
+			return strings.ToLower(strings.ReplaceAll(args[0].(string), " ", "-")), nil
+		},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Outputs["value"] != "hello-world" {
+		t.Fatalf("plugin helper output = %#v", result.Outputs["value"])
+	}
+}
 
 func TestInlineLuaStateAndEnvironment(t *testing.T) {
 	runner, err := New(map[string]any{

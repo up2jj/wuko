@@ -152,7 +152,7 @@ type rpcError struct { Message string ` + "`json:\"message\"`" + ` }
 
 func main(){scanner:=bufio.NewScanner(os.Stdin);scanner.Buffer(make([]byte,64<<10),10<<20);encoder:=json.NewEncoder(os.Stdout);for scanner.Scan(){var req request;if err:=json.Unmarshal(scanner.Bytes(),&req);err!=nil{fmt.Fprintln(os.Stderr,err);return};if req.ID==""&&req.Method=="cancel"{continue};result,err:=dispatch(context.Background(),req,encoder);reply:=response{ID:req.ID,Result:result};if err!=nil{reply.Result=nil;reply.Error=&rpcError{Message:err.Error()}};if err:=encoder.Encode(reply);err!=nil{return};if req.Method=="shutdown"{return}}}
 
-func dispatch(ctx context.Context,req request,encoder *json.Encoder)(any,error){switch req.Method{case "initialize":return map[string]any{"protocol":protocolVersion,"namespace":"{{NS}}","lifecycle":true,"steps":[]any{map[string]any{"type":"{{NS}}.uppercase"}},"executors":[]any{map[string]any{"type":"{{NS}}.local","cancel_stops_process":true}}},nil;case "plugin.start":var p struct{With map[string]any ` + "`json:\"with\"`" + `};_ = json.Unmarshal(req.Params,&p);return map[string]any{},Start(ctx,p.With);case "plugin.stop":var p struct{Reason string ` + "`json:\"reason\"`" + `};_ = json.Unmarshal(req.Params,&p);return map[string]any{},Stop(ctx,p.Reason);case "step.validate","executor.validate","executor.close":return map[string]any{},nil;case "step.run":return runUppercase(req.Params);case "executor.open":return map[string]any{"session":"local"},nil;case "executor.run":return runLocal(ctx,req,encoder);case "shutdown":return map[string]any{},nil;default:return nil,fmt.Errorf("unknown method %s",req.Method)}}
+func dispatch(ctx context.Context,req request,encoder *json.Encoder)(any,error){switch req.Method{case "initialize":return map[string]any{"protocol":protocolVersion,"namespace":"{{NS}}","lifecycle":true,"helpers":[]any{map[string]any{"name":"slug"}},"steps":[]any{map[string]any{"type":"{{NS}}.uppercase"}},"executors":[]any{map[string]any{"type":"{{NS}}.local","cancel_stops_process":true}}},nil;case "plugin.start":var p struct{With map[string]any ` + "`json:\"with\"`" + `};_ = json.Unmarshal(req.Params,&p);return map[string]any{},Start(ctx,p.With);case "plugin.stop":var p struct{Reason string ` + "`json:\"reason\"`" + `};_ = json.Unmarshal(req.Params,&p);return map[string]any{},Stop(ctx,p.Reason);case "helper.call":return callHelper(req.Params);case "step.validate","executor.validate","executor.close":return map[string]any{},nil;case "step.run":return runUppercase(req.Params);case "executor.open":return map[string]any{"session":"local"},nil;case "executor.run":return runLocal(ctx,req,encoder);case "shutdown":return map[string]any{},nil;default:return nil,fmt.Errorf("unknown method %s",req.Method)}}
 func event(encoder *json.Encoder,id,kind string,data []byte){_ = encoder.Encode(map[string]any{"id":id,"event":kind,"data":base64.StdEncoding.EncodeToString(data)})}
 `,
 		"protocol.go": `package main
@@ -171,6 +171,11 @@ func Stop(context.Context,string)error{return nil}
 import("encoding/json";"fmt";"strings")
 func runUppercase(raw json.RawMessage)(any,error){var p struct{With struct{Value string ` + "`json:\"value\"`" + `} ` + "`json:\"with\"`" + `};if err:=json.Unmarshal(raw,&p);err!=nil{return nil,err};if p.With.Value==""{return nil,fmt.Errorf("value is required")};return map[string]any{"outputs":map[string]any{"value":strings.ToUpper(p.With.Value)}},nil}
 `,
+		"helpers.go": `package main
+import("encoding/json";"fmt";"regexp";"strings")
+var nonSlug=regexp.MustCompile(` + "`[^a-z0-9]+`" + `)
+func callHelper(raw json.RawMessage)(any,error){var p struct{Name string ` + "`json:\"name\"`" + `;Args []any ` + "`json:\"args\"`" + `};if err:=json.Unmarshal(raw,&p);err!=nil{return nil,err};if p.Name!="slug"{return nil,fmt.Errorf("unknown helper %q",p.Name)};if len(p.Args)!=1{return nil,fmt.Errorf("slug requires one argument")};value,ok:=p.Args[0].(string);if !ok{return nil,fmt.Errorf("slug argument must be a string")};value=strings.ToLower(strings.TrimSpace(value));return map[string]any{"value":strings.Trim(nonSlug.ReplaceAllString(value,"-"),"-")},nil}
+`,
 		"local_executor.go": `package main
 import("bytes";"context";"encoding/base64";"encoding/json";"os";"os/exec")
 func runLocal(ctx context.Context,req request,encoder *json.Encoder)(any,error){var p struct{Command string ` + "`json:\"command\"`" + `;Args []string ` + "`json:\"args\"`" + `;Dir string ` + "`json:\"dir\"`" + `;Env map[string]string ` + "`json:\"env\"`" + `;Stdin string ` + "`json:\"stdin\"`" + `};if err:=json.Unmarshal(req.Params,&p);err!=nil{return nil,err};cmd:=exec.CommandContext(ctx,p.Command,p.Args...);cmd.Dir=p.Dir;cmd.Env=os.Environ();for k,v:=range p.Env{cmd.Env=append(cmd.Env,k+"="+v)};input,_:=base64.StdEncoding.DecodeString(p.Stdin);cmd.Stdin=bytes.NewReader(input);var stdout,stderr bytes.Buffer;cmd.Stdout=&stdout;cmd.Stderr=&stderr;event(encoder,req.ID,"started",nil);err:=cmd.Run();event(encoder,req.ID,"stdout",stdout.Bytes());event(encoder,req.ID,"stderr",stderr.Bytes());code:=0;if cmd.ProcessState!=nil{code=cmd.ProcessState.ExitCode();err=nil};return map[string]any{"stdout":stdout.String(),"stderr":stderr.String(),"exit_code":code},err}
@@ -178,6 +183,7 @@ func runLocal(ctx context.Context,req request,encoder *json.Encoder)(any,error){
 		"plugin_test.go": `package main
 import("encoding/json";"testing")
 func TestUppercase(t *testing.T){result,err:=runUppercase(json.RawMessage(` + "`{\"with\":{\"value\":\"hello\"}}`" + `));if err!=nil{t.Fatal(err)};if result.(map[string]any)["outputs"].(map[string]any)["value"]!="HELLO"{t.Fatal(result)}}
+func TestSlug(t *testing.T){result,err:=callHelper(json.RawMessage(` + "`{\"name\":\"slug\",\"args\":[\"Hello World\"]}`" + `));if err!=nil{t.Fatal(err)};if result.(map[string]any)["value"]!="hello-world"{t.Fatal(result)}}
 `,
 		"justfile": `build:
 	go build -o wuko-plugin-{{NS}} .
@@ -202,6 +208,11 @@ plugins:
     with:
       example: value
 steps:
+  - id: slug
+    type: set
+    with:
+      variable: slug
+      expr: {{NS}}_slug("Hello World")
   - id: uppercase
     type: {{NS}}.uppercase
     with:
@@ -209,7 +220,7 @@ steps:
 `,
 		"README.md": `# wuko-plugin-{{NS}}
 
-A standard-library-only Wuko JSONL plugin. Run **just check** and **just build**.
+A standard-library-only Wuko JSONL plugin with a shared ` + "`{{NS}}_slug`" + ` helper. Run **just check** and **just build**.
 
 The executable keeps stdin/stdout exclusively for protocol frames; diagnostics go to stderr. Start and Stop are command-wide hooks. Edit lifecycle.go to use values from plugins.{{NS}}.with.
 

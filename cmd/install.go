@@ -90,7 +90,7 @@ func installWorkflow(command *cobra.Command, deps dependencies, source string, c
 	}
 	loader := deps.loader
 	if loader == nil {
-		loader = workflow.NewLoader(nil)
+		loader = defaultWorkflowLoader(deps.plugins)
 	}
 	invocation := installInvocation{cwd: cwd, home: home, configDir: configDir, storageDir: config.storageDir, vars: vars, env: env, baseEnv: baseEnv, environmentLoaders: environmentLoaders, providers: providers, loader: loader}
 	if isHTTPSURL(source) {
@@ -514,7 +514,7 @@ func uninstallWorkflow(command *cobra.Command, deps dependencies, name string, c
 	workflowDir := workflowStorageDir(cwd, home, config.global)
 	loader := deps.loader
 	if loader == nil {
-		loader = workflow.NewLoader(nil)
+		loader = defaultWorkflowLoader(deps.plugins)
 	}
 	source, err := workflow.FindInDirectory(workflowDir, name)
 	if err != nil {

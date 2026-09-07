@@ -105,7 +105,7 @@ func verifyExecutable(ctx context.Context, path, namespace string, stderr io.Wri
 	if initialized.Protocol != Protocol || initialized.Namespace != namespace {
 		return fmt.Errorf("plugin handshake namespace or protocol mismatch")
 	}
-	return nil
+	return validateInitializeDeclarations(namespace, initialized)
 }
 
 func ValidateInstallation(directory, namespace string) (InstallationMarker, error) {

@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/up2jj/wuko/helper"
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/provider"
 	"gopkg.in/yaml.v3"
@@ -81,6 +82,10 @@ type Request struct {
 	// Secret resolves provider references through the current workflow occurrence. Provider
 	// session variables remain private and are never added to Env.
 	Secret func(string) (string, error)
+	// Helpers contains plugin functions scoped to the current workflow.
+	Helpers helper.Set
+	// HelperContext cancels helper RPCs with the current operation.
+	HelperContext context.Context
 }
 
 // ResolveSecret resolves a secret or reports missing engine wiring.
@@ -158,6 +163,13 @@ func (request Request) ExpressionEnvironment(extra map[string]any) map[string]an
 	// which a choice step repeats six times per source item.
 	for name, value := range request.Providers.Values {
 		environment[name] = value
+	}
+	helperContext := request.HelperContext
+	if helperContext == nil {
+		helperContext = context.Background()
+	}
+	for name, function := range request.Helpers.Functions(helperContext) {
+		environment[name] = function
 	}
 	for name, value := range extra {
 		environment[name] = value

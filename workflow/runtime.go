@@ -76,7 +76,7 @@ func PrepareValues(definition *Definition, options LoadOptions) (map[string]any,
 	if session == nil {
 		session = definition.SecretSession()
 	}
-	renderer, err := NewRendererWithSecrets(definition.Templates, session)
+	renderer, err := NewRendererWithHelpers(definition.HelperContext(), definition.Templates, session, definition.helpers)
 	if err != nil {
 		return nil, nil, err
 	}

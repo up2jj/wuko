@@ -7,18 +7,23 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/up2jj/wuko/executor"
+	"github.com/up2jj/wuko/helper"
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/step"
+	luastep "github.com/up2jj/wuko/steps/lua"
 	"github.com/up2jj/wuko/workflow"
 )
 
@@ -48,6 +53,10 @@ type initializeResult struct {
 	Lifecycle bool                  `json:"lifecycle,omitempty"`
 	Steps     []stepDeclaration     `json:"steps"`
 	Executors []executorDeclaration `json:"executors"`
+	Helpers   []helperDeclaration   `json:"helpers,omitempty"`
+}
+type helperDeclaration struct {
+	Name string `json:"name"`
 }
 type stepDeclaration struct {
 	Type    string `json:"type"`
@@ -133,6 +142,49 @@ func (m *Manager) ResolveExecutor(ctx context.Context, name string, raw map[stri
 		}
 	}
 	return nil, fmt.Errorf("plugin %q does not declare executor type %q", namespace, name)
+}
+
+var helperNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+
+// LoadHelpers initializes every explicitly declared plugin and returns its immutable helper set.
+func (m *Manager) LoadHelpers(ctx context.Context, sources map[string]workflow.PluginSource) (helper.Set, error) {
+	if err := m.configureSources(sources); err != nil {
+		return nil, err
+	}
+	result := make(helper.Set)
+	for _, namespace := range slices.Sorted(maps.Keys(sources)) {
+		loaded, err := m.load(ctx, namespace)
+		if err != nil {
+			return nil, err
+		}
+		for _, declaration := range loaded.initialized.Helpers {
+			exposed := exposedHelperName(namespace, declaration.Name)
+			if !helperNamePattern.MatchString(declaration.Name) {
+				return nil, fmt.Errorf("plugin %q has invalid helper declaration %q", namespace, declaration.Name)
+			}
+			if _, exists := result[exposed]; exists {
+				return nil, fmt.Errorf("plugin helper name %q is declared more than once", exposed)
+			}
+			plugin, localName := loaded, declaration.Name
+			result[exposed] = func(callCtx context.Context, args []any) (any, error) {
+				if err := plugin.start(callCtx); err != nil {
+					return nil, err
+				}
+				var response struct {
+					Value any `json:"value"`
+				}
+				if err := plugin.client.call(callCtx, "helper.call", map[string]any{"name": localName, "args": args}, &response, nil); err != nil {
+					return nil, err
+				}
+				return response.Value, nil
+			}
+		}
+	}
+	return result, nil
+}
+
+func exposedHelperName(namespace, name string) string {
+	return strings.ReplaceAll(namespace, "-", "_") + "_" + name
 }
 
 func (m *Manager) configureSources(sources map[string]workflow.PluginSource) error {
@@ -231,24 +283,42 @@ func (m *Manager) load(ctx context.Context, namespace string) (result *runningPl
 		closeClient(c)
 		return nil, fmt.Errorf("plugin %q handshake namespace or protocol mismatch", namespace)
 	}
+	if err := validateInitializeDeclarations(namespace, initialized); err != nil {
+		closeClient(c)
+		return nil, err
+	}
+	plugin := &runningPlugin{namespace: namespace, client: c, initialized: initialized, startWith: startWith}
+	m.plugins[namespace] = plugin
+	return plugin, nil
+}
+
+func validateInitializeDeclarations(namespace string, initialized initializeResult) error {
 	seen := make(map[string]bool)
 	for _, item := range initialized.Steps {
 		if seen[item.Type] || !strings.HasPrefix(item.Type, namespace+".") {
-			closeClient(c)
-			return nil, fmt.Errorf("plugin %q has invalid or duplicate declaration %q", namespace, item.Type)
+			return fmt.Errorf("plugin %q has invalid or duplicate declaration %q", namespace, item.Type)
 		}
 		seen[item.Type] = true
 	}
 	for _, item := range initialized.Executors {
 		if seen[item.Type] || !strings.HasPrefix(item.Type, namespace+".") {
-			closeClient(c)
-			return nil, fmt.Errorf("plugin %q has invalid or duplicate declaration %q", namespace, item.Type)
+			return fmt.Errorf("plugin %q has invalid or duplicate declaration %q", namespace, item.Type)
 		}
 		seen[item.Type] = true
 	}
-	plugin := &runningPlugin{namespace: namespace, client: c, initialized: initialized, startWith: startWith}
-	m.plugins[namespace] = plugin
-	return plugin, nil
+	seenHelpers := make(map[string]bool)
+	reservedHelpers := luastep.BuiltinHelperNames()
+	for _, item := range initialized.Helpers {
+		if seenHelpers[item.Name] || !helperNamePattern.MatchString(item.Name) {
+			return fmt.Errorf("plugin %q has invalid or duplicate helper declaration %q", namespace, item.Name)
+		}
+		exposed := exposedHelperName(namespace, item.Name)
+		if _, reserved := reservedHelpers[exposed]; reserved {
+			return fmt.Errorf("plugin %q helper %q conflicts with built-in helper %q", namespace, item.Name, exposed)
+		}
+		seenHelpers[item.Name] = true
+	}
+	return nil
 }
 
 func (m *Manager) findLocal(namespace string) (string, error) {

@@ -200,7 +200,7 @@ func NewRootCmd() *cobra.Command {
 		homeDir: os.UserHomeDir, configDir: os.UserConfigDir, registry: registry, executors: executors, plugins: plugins,
 		agentLookPath: exec.LookPath,
 		executable:    os.Executable,
-		loader:        workflow.NewLoader(nil), providers: defaultProviderRegistry(), isInteractive: interactive,
+		loader:        defaultWorkflowLoader(plugins), providers: defaultProviderRegistry(), isInteractive: interactive,
 		now: time.Now, waitUntil: workflowschedule.Wait,
 		getenv:     os.Getenv,
 		openEditor: openWorkflowEditor(os.Getenv),
@@ -228,6 +228,9 @@ func newRootCmd(deps dependencies) *cobra.Command {
 		deps.plugins = plugin.NewManager(plugin.Config{CWD: deps.cwd, HomeDir: deps.homeDir, ConfigDir: deps.configDir, LookPath: deps.agentLookPath, Stderr: deps.stderr, HostVersion: version})
 		deps.registry.SetResolver(deps.plugins.ResolveStep)
 		deps.executors.SetResolver(deps.plugins.ResolveExecutor)
+	}
+	if deps.loader == nil {
+		deps.loader = defaultWorkflowLoader(deps.plugins)
 	}
 	if deps.providers == nil {
 		deps.providers = defaultProviderRegistry()
@@ -283,6 +286,13 @@ func newRootCmd(deps dependencies) *cobra.Command {
 	root.AddCommand(newRunCmd(deps), newUICmd(deps), newListCmd(deps), newTreeCmd(deps), newValidateCmd(deps), newAgentCmd(deps), newGitCmd(deps), newInstallCmd(deps), newUninstallCmd(deps), newMarketplaceCmd(deps), newPluginCmd(deps), newCompletionCmd())
 	wrapPluginTeardown(root, deps.plugins)
 	return root
+}
+
+func defaultWorkflowLoader(plugins *plugin.Manager) *workflow.Loader {
+	if plugins == nil {
+		return workflow.NewLoader(nil)
+	}
+	return workflow.NewLoader(nil, workflow.WithPluginHelpers(plugins))
 }
 
 func wrapPluginTeardown(command *cobra.Command, manager *plugin.Manager) {

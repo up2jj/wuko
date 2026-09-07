@@ -153,7 +153,7 @@ func runWorkflow(command *cobra.Command, deps dependencies, args []string, confi
 	}
 	loader := deps.loader
 	if loader == nil {
-		loader = workflow.NewLoader(nil)
+		loader = defaultWorkflowLoader(deps.plugins)
 	}
 	stdin := command.InOrStdin()
 	isInteractive := interactive(stdin)
@@ -290,10 +290,10 @@ func (target workflowRunTarget) decode(ctx context.Context, loader *workflow.Loa
 		return loader.DecodeRemote(ctx, target.locator, options)
 	}
 	if target.fromStdin {
-		definition, err := loader.DecodeStdin(bytes.NewReader(target.stdinData), target.stdinBaseDir, options)
+		definition, err := loader.DecodeStdinContext(ctx, bytes.NewReader(target.stdinData), target.stdinBaseDir, options)
 		return definition, func() {}, err
 	}
-	definition, err := loader.Decode(target.path, options)
+	definition, err := loader.DecodeContext(ctx, target.path, options)
 	return definition, func() {}, err
 }
 

@@ -41,7 +41,7 @@ func runProtocolHelper() {
 		var result any = map[string]any{}
 		switch request.Method {
 		case "initialize":
-			result = initializeResult{Protocol: Protocol, Namespace: "acme", Lifecycle: true, Steps: []stepDeclaration{{Type: "acme.uppercase"}}}
+			result = initializeResult{Protocol: Protocol, Namespace: "acme", Lifecycle: true, Steps: []stepDeclaration{{Type: "acme.uppercase"}}, Helpers: []helperDeclaration{{Name: "slug"}, {Name: "nullable"}}}
 		case "plugin.start":
 			parameters, _ := request.Params.(map[string]any)
 			with, _ := parameters["with"].(map[string]any)
@@ -50,12 +50,79 @@ func runProtocolHelper() {
 			fmt.Fprintln(os.Stderr, "stopped")
 		case "step.run":
 			result = step.Result{Outputs: map[string]any{"value": "HELLO"}}
+		case "helper.call":
+			parameters, _ := request.Params.(map[string]any)
+			if parameters["name"] == "nullable" {
+				result = map[string]any{"value": nil}
+				break
+			}
+			arguments, _ := parameters["args"].([]any)
+			result = map[string]any{"value": strings.ToLower(strings.ReplaceAll(arguments[0].(string), " ", "-"))}
 		case "shutdown":
 			_ = encoder.Encode(responseFrame{ID: request.ID, Result: json.RawMessage(`{}`)})
 			return
 		}
 		data, _ := json.Marshal(result)
 		_ = encoder.Encode(responseFrame{ID: request.ID, Result: data})
+	}
+}
+
+func TestWorkflowPluginHelpersStartAndCall(t *testing.T) {
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := []byte("#!/bin/sh\nWUKO_PLUGIN_TEST_HELPER=1 exec \"" + executable + "\"\n")
+	archive := makeArchive(t, "wuko-plugin-acme", 0755, script)
+	manifestData, _ := json.Marshal(Manifest{Version: 1, Namespace: "acme", PluginVersion: "1.0.0", Protocol: Protocol, Artifacts: []Artifact{{OS: runtime.GOOS, Arch: runtime.GOARCH, Path: "plugin.tar.gz", Format: "tar.gz", Entry: "wuko-plugin-acme", SHA256: digest(archive)}}})
+	var diagnostics synchronizedBuffer
+	manager := NewManager(Config{HTTPClient: &http.Client{Transport: memoryTransport{manifest: manifestData, archive: archive}}, Stderr: &diagnostics})
+	sources := map[string]workflow.PluginSource{"acme": {Source: "https://plugins.test/plugin.json", SHA256: digest(manifestData), With: map[string]any{"mode": "helpers"}}}
+	helpers, err := manager.LoadHelpers(t.Context(), sources)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(diagnostics.String(), "started") {
+		t.Fatal("loading declarations called plugin.start")
+	}
+	value, err := helpers["acme_slug"](t.Context(), []any{"Hello World"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value != "hello-world" {
+		t.Fatalf("helper value = %#v", value)
+	}
+	value, err = helpers["acme_nullable"](t.Context(), nil)
+	if err != nil || value != nil {
+		t.Fatalf("nullable helper value = %#v, error = %v", value, err)
+	}
+	if err := manager.Close(t.Context(), "completed"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(diagnostics.String(), "started:helpers") != 1 || strings.Count(diagnostics.String(), "stopped") != 1 {
+		t.Fatalf("lifecycle diagnostics: %q", diagnostics.String())
+	}
+}
+
+func TestPluginHelperDeclarations(t *testing.T) {
+	if got := exposedHelperName("acme-tools", "slug"); got != "acme_tools_slug" {
+		t.Fatalf("exposed helper name = %q", got)
+	}
+	for _, test := range []struct {
+		name      string
+		namespace string
+		helpers   []helperDeclaration
+	}{
+		{name: "invalid", namespace: "acme", helpers: []helperDeclaration{{Name: "Bad-Name"}}},
+		{name: "duplicate", namespace: "acme", helpers: []helperDeclaration{{Name: "slug"}, {Name: "slug"}}},
+		{name: "built-in collision", namespace: "parse", helpers: []helperDeclaration{{Name: "time"}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			err := validateInitializeDeclarations(test.namespace, initializeResult{Helpers: test.helpers})
+			if err == nil {
+				t.Fatal("expected invalid helper declaration")
+			}
+		})
 	}
 }
 

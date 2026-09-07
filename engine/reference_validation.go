@@ -922,7 +922,7 @@ func (validator *referenceValidator) validateAction(action *workflow.Action, cal
 		return nil
 	}
 	validator.actions[action] = struct{}{}
-	renderer, err := workflow.NewRenderer(action.Templates)
+	renderer, err := validator.renderer.Derive(action.Templates)
 	if err != nil {
 		return err
 	}
@@ -943,6 +943,7 @@ func (validator *referenceValidator) validateAction(action *workflow.Action, cal
 	}
 	inner := &workflow.Definition{Version: 1, Name: action.Name, Templates: action.Templates, Dir: action.Dir, Steps: action.Steps, Finally: action.Finally, Vars: map[string]any{}, Env: workflow.Environment{}, Location: action.Location}
 	inner.InheritSecretSession(validator.definition)
+	inner.InheritHelpers(validator.definition)
 	child := &referenceValidator{
 		definition: inner, renderer: renderer, initial: scope, actions: validator.actions,
 		controls: validator.controls, templateRoots: validator.templateRoots, expressionRoots: validator.expressionRoots,

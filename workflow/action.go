@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/up2jj/wuko/diagnostic"
+	"github.com/up2jj/wuko/helper"
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/secret"
 	"gopkg.in/yaml.v3"
@@ -142,11 +143,25 @@ func (action *Action) Materialize() (string, func(), error) {
 type Loader struct {
 	client              *http.Client
 	githubStoredTokenFn func(context.Context, map[string]string) string
+	pluginHelpers       PluginHelperLoader
+}
+
+// PluginHelperLoader initializes helpers declared by one workflow.
+type PluginHelperLoader interface {
+	LoadHelpers(context.Context, map[string]PluginSource) (helper.Set, error)
+}
+
+// LoaderOption customizes workflow loading.
+type LoaderOption func(*Loader)
+
+// WithPluginHelpers enables helpers from explicitly declared plugins.
+func WithPluginHelpers(loader PluginHelperLoader) LoaderOption {
+	return func(workflowLoader *Loader) { workflowLoader.pluginHelpers = loader }
 }
 
 // NewLoader constructs a loader. The supplied client's transport is retained, while remote
 // action timeouts and redirect policy are enforced by the loader.
-func NewLoader(client *http.Client) *Loader {
+func NewLoader(client *http.Client, options ...LoaderOption) *Loader {
 	if client == nil {
 		client = &http.Client{}
 	}
@@ -167,13 +182,26 @@ func NewLoader(client *http.Client) *Loader {
 		}
 		return nil
 	}
-	return &Loader{client: &copy, githubStoredTokenFn: githubStoredToken}
+	loader := &Loader{client: &copy, githubStoredTokenFn: githubStoredToken}
+	for _, option := range options {
+		option(loader)
+	}
+	return loader
 }
 
 // Decode reads and validates a local workflow without resolving composite actions. Call Prepare
 // before execution. This split lets callers collect values from optional adapters first.
 func (loader *Loader) Decode(filename string, options LoadOptions) (*Definition, error) {
-	definition, err := loadLocalWithDiagnostics(filename, options.Diagnostics, options.sourceRoot, options.sourceLabel)
+	return loader.decode(context.Background(), filename, options)
+}
+
+// DecodeContext reads and validates a local workflow, initializing declared helpers with ctx.
+func (loader *Loader) DecodeContext(ctx context.Context, filename string, options LoadOptions) (*Definition, error) {
+	return loader.decode(ctx, filename, options)
+}
+
+func (loader *Loader) decode(ctx context.Context, filename string, options LoadOptions) (*Definition, error) {
+	definition, err := loadLocalWithDiagnosticsAndHelpers(ctx, filename, options.Diagnostics, options.sourceRoot, options.sourceLabel, loader.pluginHelpers)
 	if err != nil {
 		return nil, err
 	}
@@ -184,6 +212,11 @@ func (loader *Loader) Decode(filename string, options LoadOptions) (*Definition,
 // composite actions. Relative workflow resources are resolved from baseDir. Call Prepare before
 // execution.
 func (loader *Loader) DecodeStdin(reader io.Reader, baseDir string, options LoadOptions) (*Definition, error) {
+	return loader.DecodeStdinContext(context.Background(), reader, baseDir, options)
+}
+
+// DecodeStdinContext decodes stdin and initializes declared plugin helpers with ctx.
+func (loader *Loader) DecodeStdinContext(ctx context.Context, reader io.Reader, baseDir string, options LoadOptions) (*Definition, error) {
 	const sourceLabel = "stdin"
 	started := traceStart(options.Diagnostics, diagnostic.PhaseDecode, diagnostic.Location{Source: sourceLabel}, "", "", "", "decoding workflow")
 	if reader == nil {
@@ -204,11 +237,14 @@ func (loader *Loader) DecodeStdin(reader io.Reader, baseDir string, options Load
 	return decodeWorkflowData(data, workflowDecodeSource{
 		path: filepath.Join(absBaseDir, "-"), display: sourceLabel,
 		sourceRoot: absBaseDir, sourceLabel: sourceLabel, virtual: true,
-	}, options.Diagnostics, started)
+	}, options.Diagnostics, started, ctx, loader.pluginHelpers)
 }
 
 // Prepare resolves value-dependent workflow environment and composite actions in a decoded definition.
 func (loader *Loader) Prepare(ctx context.Context, definition *Definition, options LoadOptions) (err error) {
+	if len(definition.helpers) > 0 {
+		definition.setHelpers(ctx, definition.helpers)
+	}
 	if definition.secretSession == nil {
 		definition.secretSession = options.SecretSession
 	}
@@ -251,7 +287,7 @@ func (loader *Loader) Prepare(ctx context.Context, definition *Definition, optio
 	}
 	traceFinish(options.Diagnostics, valuesStarted, diagnostic.PhaseValues, diagnostic.StatusSucceeded, definition.Location, definition.Name, "", "", "", nil, countAttr("variables", len(vars)), countAttr("environment", len(environment)))
 	data := TemplateDataWithProviders(definition, options.RunDir, options.EnvironmentLoaders, nil, vars, environment, nil, nil, nil, options.Providers)
-	renderer, err := NewRendererWithSecrets(definition.Templates, session)
+	renderer, err := NewRendererWithHelpers(definition.HelperContext(), definition.Templates, session, definition.helpers)
 	if err != nil {
 		return err
 	}
@@ -279,7 +315,7 @@ func (loader *Loader) Load(ctx context.Context, filename string, options LoadOpt
 		displaySource = remapSource(filename, options.sourceRoot, options.sourceLabel)
 	}
 	started := traceStart(options.Diagnostics, diagnostic.PhaseLoad, diagnostic.Location{Source: displaySource}, "", "", "", "loading workflow")
-	definition, err := loader.Decode(filename, options)
+	definition, err := loader.decode(ctx, filename, options)
 	if err != nil {
 		traceFinish(options.Diagnostics, started, diagnostic.PhaseLoad, diagnostic.StatusFailed, diagnostic.Location{Source: displaySource}, "", "", "", "", nil)
 		return nil, err
@@ -375,10 +411,10 @@ func (loader *Loader) resolveActions(ctx context.Context, workflowName string, s
 				if isZIP(payload) || len(payload) >= 2 && payload[0] == 0x1f && payload[1] == 0x8b {
 					err = fmt.Errorf("local action path must reference a YAML manifest; archives are not supported")
 				} else {
-					action, err = decodeAction(payload, "local action manifest", resolution.actionDir, nil, resolution.description, resolution.actionDir)
+					action, err = decodeActionWithRenderer(payload, "local action manifest", resolution.actionDir, nil, resolution.description, resolution.actionDir, renderer)
 				}
 			} else {
-				action, err = decodeActionPayload(payload, filepath.Dir(definitionPath), resolution.description)
+				action, err = decodeActionPayloadWithRenderer(payload, filepath.Dir(definitionPath), resolution.description, renderer)
 			}
 			if err != nil {
 				traceFinish(reporter, decodeStarted, diagnostic.PhaseActionDecode, diagnostic.StatusFailed, workflowStep.Location, workflowName, workflowStep.ID, "uses", "", err)
@@ -719,24 +755,28 @@ func verifyChecksum(payload []byte, expected string) error {
 }
 
 func decodeActionPayload(payload []byte, callerDir, source string) (*Action, error) {
+	return decodeActionPayloadWithRenderer(payload, callerDir, source, nil)
+}
+
+func decodeActionPayloadWithRenderer(payload []byte, callerDir, source string, renderer *Renderer) (*Action, error) {
 	switch {
 	case isZIP(payload):
 		manifest, files, err := unpackZIP(payload)
 		if err != nil {
 			return nil, err
 		}
-		return decodeAction(manifest, "archived action", "", files, archivedActionSource(source, files), "")
+		return decodeActionWithRenderer(manifest, "archived action", "", files, archivedActionSource(source, files), "", renderer)
 	case len(payload) >= 2 && payload[0] == 0x1f && payload[1] == 0x8b:
 		manifest, files, err := unpackTarGzip(payload)
 		if err != nil {
 			return nil, err
 		}
-		return decodeAction(manifest, "archived action", "", files, archivedActionSource(source, files), "")
+		return decodeActionWithRenderer(manifest, "archived action", "", files, archivedActionSource(source, files), "", renderer)
 	default:
 		if len(payload) > maxManifestSize {
 			return nil, fmt.Errorf("manifest exceeds %d-byte limit", maxManifestSize)
 		}
-		return decodeAction(payload, "action manifest", callerDir, nil, source, "")
+		return decodeActionWithRenderer(payload, "action manifest", callerDir, nil, source, "", renderer)
 	}
 }
 
@@ -748,6 +788,10 @@ func archivedActionSource(source string, files map[string]ActionFile) string {
 }
 
 func decodeAction(data []byte, description, dir string, files map[string]ActionFile, logicalSource, localFileRoot string) (*Action, error) {
+	return decodeActionWithRenderer(data, description, dir, files, logicalSource, localFileRoot, nil)
+}
+
+func decodeActionWithRenderer(data []byte, description, dir string, files map[string]ActionFile, logicalSource, localFileRoot string, renderer *Renderer) (*Action, error) {
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	decoder.KnownFields(true)
 	var action Action
@@ -775,13 +819,13 @@ func decodeAction(data []byte, description, dir string, files map[string]ActionF
 		return nil, fmt.Errorf("loading %s templates: %w", description, err)
 	}
 	annotateActionLocations(data, &action, logicalSource)
-	if err := validateAction(&action); err != nil {
+	if err := validateAction(&action, renderer); err != nil {
 		return nil, fmt.Errorf("validating %s: %w", description, err)
 	}
 	return &action, nil
 }
 
-func validateAction(action *Action) error {
+func validateAction(action *Action, parentRenderer *Renderer) error {
 	if action.Version != 1 {
 		return fmt.Errorf("unsupported version %d (want 1)", action.Version)
 	}
@@ -791,7 +835,13 @@ func validateAction(action *Action) error {
 	if len(action.Steps) == 0 {
 		return fmt.Errorf("at least one step is required")
 	}
-	if _, err := NewRenderer(action.Templates); err != nil {
+	var err error
+	if parentRenderer == nil {
+		_, err = NewRenderer(action.Templates)
+	} else {
+		_, err = parentRenderer.Derive(action.Templates)
+	}
+	if err != nil {
 		return err
 	}
 	for name, input := range action.Inputs {

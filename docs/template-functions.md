@@ -32,6 +32,12 @@ The tables below abbreviate `wuko.helpers` as `h`.
 Invalid argument types, invalid encodings, and explicit validation failures stop template
 rendering, Expr evaluation, or Lua execution.
 
+Executable plugins may add workflow-scoped helpers. A plugin namespace `acme` declaring helper
+`slug` exposes `acme_slug(value)` in Expr, `{{ acme_slug value }}` in templates, and
+`wuko.helpers.acme_slug(value)` in Lua. Plugin helpers exchange only JSON-compatible arguments and
+results and are available only when the workflow explicitly declares the pinned plugin. See
+[Executable plugins](plugins.md#helpers) for the wire contract and lifecycle rules.
+
 ## String functions
 
 All string functions require string arguments. `split` returns a string list; `join` accepts a

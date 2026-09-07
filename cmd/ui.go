@@ -98,7 +98,7 @@ func runWorkflowUI(command *cobra.Command, deps dependencies, args []string, con
 	}
 	loader := deps.loader
 	if loader == nil {
-		loader = workflow.NewLoader(nil)
+		loader = defaultWorkflowLoader(deps.plugins)
 	}
 	loadOptions := workflow.LoadOptions{Vars: vars, Env: env, BaseEnv: baseEnv, EnvironmentLoaders: environmentLoaders, RunDir: cwd, Diagnostics: reporters.Diagnostic, Providers: providers,
 		Stdin: command.InOrStdin(), Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(), Interactive: interactive(command.InOrStdin()),

@@ -16,6 +16,7 @@ import (
 
 	controlpkg "github.com/up2jj/wuko/control"
 	"github.com/up2jj/wuko/diagnostic"
+	"github.com/up2jj/wuko/helper"
 	workflowschedule "github.com/up2jj/wuko/schedule"
 	"github.com/up2jj/wuko/secret"
 	"gopkg.in/yaml.v3"
@@ -59,8 +60,38 @@ type Definition struct {
 	Location      diagnostic.Location `yaml:"-"`
 	Secrets       secret.Config       `yaml:"secrets,omitempty"`
 	secretSession *secret.Session
+	helperContext context.Context
+	helpers       helper.Set
 	sourceRoot    string
 	sourceLabel   string
+}
+
+// Helpers returns the helper set bound while this workflow was loaded.
+func (definition *Definition) Helpers() helper.Set {
+	if definition == nil {
+		return nil
+	}
+	return definition.helpers.Clone()
+}
+
+// HelperContext returns the context used by workflow preparation helpers.
+func (definition *Definition) HelperContext() context.Context {
+	if definition == nil || definition.helperContext == nil {
+		return context.Background()
+	}
+	return definition.helperContext
+}
+
+func (definition *Definition) setHelpers(ctx context.Context, helpers helper.Set) {
+	definition.helperContext = ctx
+	definition.helpers = helpers.Clone()
+}
+
+// InheritHelpers binds a composite action definition to its calling workflow's helpers.
+func (definition *Definition) InheritHelpers(parent *Definition) {
+	if parent != nil {
+		definition.setHelpers(parent.HelperContext(), parent.helpers)
+	}
 }
 
 // SecretSession returns the resolver bound to this loaded workflow occurrence.
@@ -643,6 +674,10 @@ func loadLocal(path string) (*Definition, error) {
 }
 
 func loadLocalWithDiagnostics(path string, reporter diagnostic.Reporter, sourceRoot, sourceLabel string) (*Definition, error) {
+	return loadLocalWithDiagnosticsAndHelpers(context.Background(), path, reporter, sourceRoot, sourceLabel, nil)
+}
+
+func loadLocalWithDiagnosticsAndHelpers(ctx context.Context, path string, reporter diagnostic.Reporter, sourceRoot, sourceLabel string, pluginHelpers PluginHelperLoader) (*Definition, error) {
 	displaySource := path
 	if sourceLabel != "" {
 		displaySource = remapSource(path, sourceRoot, sourceLabel)
@@ -656,7 +691,7 @@ func loadLocalWithDiagnostics(path string, reporter diagnostic.Reporter, sourceR
 	return decodeWorkflowData(data, workflowDecodeSource{
 		path: path, display: displaySource, sourceRoot: sourceRoot, sourceLabel: sourceLabel,
 		allowedRoot: sourceRoot,
-	}, reporter, loadStarted)
+	}, reporter, loadStarted, ctx, pluginHelpers)
 }
 
 type workflowDecodeSource struct {
@@ -668,7 +703,7 @@ type workflowDecodeSource struct {
 	virtual     bool
 }
 
-func decodeWorkflowData(data []byte, source workflowDecodeSource, reporter diagnostic.Reporter, loadStarted time.Time) (*Definition, error) {
+func decodeWorkflowData(data []byte, source workflowDecodeSource, reporter diagnostic.Reporter, loadStarted time.Time, ctx context.Context, pluginHelpers PluginHelperLoader) (*Definition, error) {
 	path := source.path
 	displaySource := source.display
 	sourceRoot := source.sourceRoot
@@ -767,9 +802,23 @@ func decodeWorkflowData(data []byte, source workflowDecodeSource, reporter diagn
 		traceFinish(reporter, validationStarted, diagnostic.PhaseValidation, diagnostic.StatusFailed, validationLocation(&definition, err), definition.Name, "", "", "", err)
 		return nil, fmt.Errorf("validating workflow %s: %w", displaySource, err)
 	}
-	if _, err := NewRenderer(definition.Templates); err != nil {
-		traceFinish(reporter, validationStarted, diagnostic.PhaseValidation, diagnostic.StatusFailed, validationLocation(&definition, err), definition.Name, "", "", "", err)
-		return nil, fmt.Errorf("validating workflow %s: %w", displaySource, err)
+	// Plugin namespaces are only trustworthy once the schema has accepted them, so declared
+	// helpers are initialized after structural validation and before templates are parsed.
+	if pluginHelpers != nil && len(definition.Plugins) > 0 {
+		helpers, err := pluginHelpers.LoadHelpers(ctx, definition.Plugins)
+		if err != nil {
+			return nil, fmt.Errorf("loading workflow plugin helpers: %w", err)
+		}
+		definition.setHelpers(ctx, helpers)
+	}
+	// Without a helper loader the names a declared plugin contributes are unknown, so strict
+	// named-template parsing would reject valid workflows. Discovery only needs the header;
+	// Prepare and engine validation re-parse these templates with the real helper set.
+	if pluginHelpers != nil || len(definition.Plugins) == 0 {
+		if _, err := NewRendererWithHelpers(definition.HelperContext(), definition.Templates, nil, definition.helpers); err != nil {
+			traceFinish(reporter, validationStarted, diagnostic.PhaseValidation, diagnostic.StatusFailed, validationLocation(&definition, err), definition.Name, "", "", "", err)
+			return nil, fmt.Errorf("validating workflow %s: %w", displaySource, err)
+		}
 	}
 	traceFinish(reporter, validationStarted, diagnostic.PhaseValidation, diagnostic.StatusSucceeded, definition.Location, definition.Name, "", "", "", nil)
 	if definition.Vars == nil {

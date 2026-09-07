@@ -629,7 +629,7 @@ Claude skills are installed under `~/.claude/skills/`; Codex skills are installe
 - [Workflow discovery](docs/workflow-discovery.md)
 - [Git hooks](docs/git-hooks.md)
 - [Templates](docs/templates.md)
-- [Template, Expr, and Lua functions](docs/template-functions.md)
+- [Template, Expr, Lua, and plugin-defined functions](docs/template-functions.md)
 - [Secrets](docs/secrets.md)
 - [Variable imports](docs/variable-imports.md)
 - [Finally cleanup](docs/finally.md)

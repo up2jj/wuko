@@ -94,6 +94,15 @@ func helperFunctions() map[string]glua.LGFunction {
 	}
 }
 
+// BuiltinHelperNames returns the names reserved in wuko.helpers.
+func BuiltinHelperNames() map[string]struct{} {
+	result := make(map[string]struct{})
+	for name := range helperFunctions() {
+		result[name] = struct{}{}
+	}
+	return result
+}
+
 func helperLower(state *glua.LState) int {
 	state.Push(glua.LString(strings.ToLower(state.CheckString(1))))
 	return 1
