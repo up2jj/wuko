@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/up2jj/wuko/ptyinteract"
+	"github.com/up2jj/wuko/step"
 	"gopkg.in/yaml.v3"
 )
 
@@ -127,7 +128,7 @@ func decodeInteractionExpressionResult(value any) ([]interactionConfig, error) {
 	if !list.IsValid() || (list.Kind() != reflect.Array && list.Kind() != reflect.Slice) {
 		return nil, fmt.Errorf("interactions expr returned %T, want a list", value)
 	}
-	data, err := yaml.Marshal(value)
+	data, err := yaml.Marshal(step.Encodable(value))
 	if err != nil {
 		return nil, fmt.Errorf("encoding interactions expr result: %w", err)
 	}

@@ -49,6 +49,58 @@ func TestDecodeConfigKeepsIntegersIntegral(t *testing.T) {
 	}
 }
 
+func TestDecodeConfigKeepsIndentedMultilineText(t *testing.T) {
+	// yaml.v3 writes a multi-line string whose first line begins with whitespace
+	// as a literal block scalar with an explicit indentation indicator, then
+	// fails to parse its own output. A shell argument holding indented captured
+	// output therefore died with "did not find expected '-' indicator".
+	var config struct {
+		Args   []any          `yaml:"args"`
+		Script string         `yaml:"script"`
+		Nested map[string]any `yaml:"nested"`
+	}
+	raw := map[string]any{
+		"args":   []any{"  upload attempt 1\npublished", "\ttabbed\nnext", " x\n y"},
+		"script": "  indented\nsecond line\n",
+		"nested": map[string]any{"body": "  leading\ntrailing"},
+	}
+	if err := DecodeConfig(raw, &config); err != nil {
+		t.Fatalf("DecodeConfig() error = %v", err)
+	}
+	for index, want := range raw["args"].([]any) {
+		if config.Args[index] != want {
+			t.Fatalf("args[%d] = %q, want %q", index, config.Args[index], want)
+		}
+	}
+	if config.Script != raw["script"] {
+		t.Fatalf("script = %q, want %q", config.Script, raw["script"])
+	}
+	if got := config.Nested["body"]; got != "  leading\ntrailing" {
+		t.Fatalf("nested body = %q, want %q", got, "  leading\ntrailing")
+	}
+}
+
+func TestDecodeConfigKeepsNumericTextTyped(t *testing.T) {
+	var config struct {
+		Version any `yaml:"version"`
+		Enabled any `yaml:"enabled"`
+		Multi   any `yaml:"multi"`
+	}
+	raw := map[string]any{"version": "45", "enabled": "true", "multi": "45\n46"}
+	if err := DecodeConfig(raw, &config); err != nil {
+		t.Fatalf("DecodeConfig() error = %v", err)
+	}
+	if value, ok := config.Version.(string); !ok || value != "45" {
+		t.Fatalf("version = %#v, want string(\"45\")", config.Version)
+	}
+	if value, ok := config.Enabled.(string); !ok || value != "true" {
+		t.Fatalf("enabled = %#v, want string(\"true\")", config.Enabled)
+	}
+	if value, ok := config.Multi.(string); !ok || value != "45\n46" {
+		t.Fatalf("multi = %#v, want string(\"45\\n46\")", config.Multi)
+	}
+}
+
 func TestDecodeConfigEncodesNonFiniteFloats(t *testing.T) {
 	var config struct {
 		Nan      any `yaml:"nan"`

@@ -337,7 +337,7 @@ func (r *Registry) BuildContext(ctx context.Context, name string, raw map[string
 
 // DecodeConfig converts an untyped YAML mapping into a strict typed step configuration.
 func DecodeConfig(raw map[string]any, target any) error {
-	data, err := yaml.Marshal(preserveFloats(raw))
+	data, err := yaml.Marshal(Encodable(raw))
 	if err != nil {
 		return fmt.Errorf("encoding step configuration: %w", err)
 	}
@@ -374,22 +374,40 @@ func (value yamlFloat) MarshalYAML() (any, error) {
 	return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!float", Value: text}, nil
 }
 
-// preserveFloats rewrites the float values of an untyped configuration tree so
-// yaml.Marshal emits them with a fractional part.
-func preserveFloats(value any) any {
+// yamlText keeps a multi-line string decodable across the same round trip.
+// yaml.v3 writes a string whose first line begins with whitespace as a literal
+// block scalar carrying an explicit indentation indicator, and then cannot parse
+// its own output — so a step argument holding indented captured output failed
+// with "did not find expected '-' indicator". Double quoting escapes the
+// newlines instead, which every emitter and parser agrees on.
+type yamlText string
+
+func (value yamlText) MarshalYAML() (any, error) {
+	return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Style: yaml.DoubleQuotedStyle, Value: string(value)}, nil
+}
+
+// Encodable rewrites an untyped configuration tree so that yaml.Marshal emits a
+// value every YAML parser reads back unchanged: floats keep their fractional
+// part, and multi-line strings stay quoted rather than becoming block scalars.
+func Encodable(value any) any {
 	switch value := value.(type) {
 	case map[string]any:
 		result := make(map[string]any, len(value))
 		for key, child := range value {
-			result[key] = preserveFloats(child)
+			result[key] = Encodable(child)
 		}
 		return result
 	case []any:
 		result := make([]any, len(value))
 		for index, child := range value {
-			result[index] = preserveFloats(child)
+			result[index] = Encodable(child)
 		}
 		return result
+	case string:
+		if strings.Contains(value, "\n") {
+			return yamlText(value)
+		}
+		return value
 	case float64:
 		return yamlFloat(value)
 	case float32:

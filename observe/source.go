@@ -8,6 +8,7 @@ import (
 	"slices"
 	"sync"
 
+	"github.com/up2jj/wuko/step"
 	"gopkg.in/yaml.v3"
 )
 
@@ -156,7 +157,7 @@ func (batch *latestBatch) Binding() map[string]any {
 }
 
 func decodeConfig(raw map[string]any, target any) error {
-	data, err := yaml.Marshal(raw)
+	data, err := yaml.Marshal(step.Encodable(raw))
 	if err != nil {
 		return fmt.Errorf("encoding source configuration: %w", err)
 	}
