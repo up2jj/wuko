@@ -43,18 +43,25 @@ type Config struct {
 }
 
 type ChoiceConfig struct {
-	Label       string `yaml:"label"`
-	Description string `yaml:"description,omitempty"`
-	Value       any    `yaml:"value"`
-	Disabled    bool   `yaml:"disabled,omitempty"`
-	Reason      string `yaml:"reason,omitempty"`
-	Default     bool   `yaml:"default,omitempty"`
+	Label       string  `yaml:"label"`
+	Description string  `yaml:"description,omitempty"`
+	Value       any     `yaml:"value"`
+	Disabled    bool    `yaml:"disabled,omitempty"`
+	Reason      string  `yaml:"reason,omitempty"`
+	Default     bool    `yaml:"default,omitempty"`
+	Section     *string `yaml:"section,omitempty"`
+	Separator   *bool   `yaml:"separator,omitempty"`
 }
 
 type resolvedChoice struct {
 	tui.Option
 	item    any
 	hasItem bool
+}
+
+type resolvedChoices struct {
+	options []resolvedChoice
+	markers []tui.ChoiceMarker
 }
 
 type expressionPrograms struct {
@@ -67,8 +74,9 @@ type expressionPrograms struct {
 }
 
 type Runner struct {
-	config   Config
-	programs expressionPrograms
+	config     Config
+	programs   expressionPrograms
+	staticRows []any
 }
 
 func Register(registry *step.Registry) error { return registry.Register("tui_choice", New) }
@@ -84,6 +92,18 @@ func New(raw map[string]any) (step.Runner, error) {
 	if (len(config.Choices) == 0) == (config.From == "") {
 		return nil, fmt.Errorf("exactly one of choices or from is required")
 	}
+	var staticRows []any
+	if len(config.Choices) > 0 {
+		var ok bool
+		staticRows, ok = asSlice(raw["choices"])
+		if !ok {
+			return nil, fmt.Errorf("choices must be a list")
+		}
+		if _, err := resolveChoiceRows(staticRows, validateStaticChoice); err != nil {
+			return nil, err
+		}
+		staticRows = workflow.Clone(staticRows).([]any)
+	}
 	if err := validateBounds(config); err != nil {
 		return nil, err
 	}
@@ -97,7 +117,7 @@ func New(raw map[string]any) (step.Runner, error) {
 	if config.ValueField == "" && config.ValueExpr == "" {
 		config.ValueField = "value"
 	}
-	return &Runner{config: config, programs: programs}, nil
+	return &Runner{config: config, programs: programs, staticRows: staticRows}, nil
 }
 
 func compileExpressions(raw map[string]any, config Config) (expressionPrograms, error) {
@@ -219,10 +239,11 @@ func choiceExpressionShape(names ...string) map[string]any {
 }
 
 func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, error) {
-	options, err := r.options(request)
+	choices, err := r.resolveChoices(request)
 	if err != nil {
 		return step.Result{}, err
 	}
+	options := choices.options
 	if err := ensureUnique(options); err != nil {
 		return step.Result{}, err
 	}
@@ -245,7 +266,8 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 		}
 	}
 	indexes, err := tui.Choose(ctx, request.Stdin, request.Stdout, tui.ChoicePickerConfig{
-		Message: r.config.Message, Options: tuiOptions(options), Multiple: r.config.Multiple, Required: r.required(),
+		Message: r.config.Message, Options: tuiOptions(options), Markers: choices.markers,
+		Multiple: r.config.Multiple, Required: r.required(),
 		SelectAll:   r.config.SelectAll,
 		MinSelected: r.config.MinSelected, MaxSelected: r.config.MaxSelected,
 	})
@@ -256,46 +278,158 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 }
 
 func (r *Runner) options(request step.Request) ([]resolvedChoice, error) {
+	choices, err := r.resolveChoices(request)
+	return choices.options, err
+}
+
+func (r *Runner) resolveChoices(request step.Request) (resolvedChoices, error) {
 	if len(r.config.Choices) > 0 {
-		options := make([]resolvedChoice, len(r.config.Choices))
-		for i, choice := range r.config.Choices {
-			if choice.Label == "" {
-				return nil, fmt.Errorf("choice %d has an empty label", i+1)
-			}
-			if !scalar(choice.Value) {
-				return nil, fmt.Errorf("choice %d value must be a scalar", i+1)
-			}
-			if choice.Disabled && strings.TrimSpace(choice.Reason) == "" {
-				return nil, fmt.Errorf("choice %d is disabled without a reason", i+1)
-			}
-			options[i] = resolvedChoice{Option: tui.Option{
-				Label: choice.Label, Description: choice.Description, Value: choice.Value,
-				Disabled: choice.Disabled, DisabledReason: choice.Reason, Default: choice.Default,
-			}}
-		}
-		return options, nil
+		return resolveChoiceRows(r.staticRows, resolveStaticChoice)
 	}
 
 	value, err := step.Lookup(request, r.config.From)
 	if err != nil {
-		return nil, fmt.Errorf("resolving choices: %w", err)
+		return resolvedChoices{}, fmt.Errorf("resolving choices: %w", err)
 	}
 	items, ok := asSlice(value)
 	if !ok {
-		return nil, fmt.Errorf("choice source %q is not a list", r.config.From)
+		return resolvedChoices{}, fmt.Errorf("choice source %q is not a list", r.config.From)
 	}
-	options := make([]resolvedChoice, 0, len(items))
-	for i, item := range items {
-		option, err := r.resolveDynamicChoice(request, item, i+1)
+	return resolveChoiceRows(items, func(item any, index int) (resolvedChoice, error) {
+		option, err := r.resolveDynamicChoice(request, item, index)
 		if err != nil {
-			return nil, err
+			return resolvedChoice{}, err
 		}
-		options = append(options, resolvedChoice{
+		return resolvedChoice{
 			Option: option,
 			item:   workflow.Clone(item), hasItem: !scalar(item),
-		})
+		}, nil
+	})
+}
+
+func resolveStaticChoice(item any, index int) (resolvedChoice, error) {
+	choice, err := decodeStaticChoice(item, index)
+	if err != nil {
+		return resolvedChoice{}, err
 	}
-	return options, nil
+	if choice.Label == "" {
+		return resolvedChoice{}, fmt.Errorf("choice %d has an empty label", index)
+	}
+	if !scalar(choice.Value) {
+		return resolvedChoice{}, fmt.Errorf("choice %d value must be a scalar", index)
+	}
+	if choice.Disabled && strings.TrimSpace(choice.Reason) == "" {
+		return resolvedChoice{}, fmt.Errorf("choice %d is disabled without a reason", index)
+	}
+	return resolvedChoice{Option: tui.Option{
+		Label: choice.Label, Description: choice.Description, Value: choice.Value,
+		Disabled: choice.Disabled, DisabledReason: choice.Reason, Default: choice.Default,
+	}}, nil
+}
+
+func validateStaticChoice(item any, index int) (resolvedChoice, error) {
+	_, err := decodeStaticChoice(item, index)
+	return resolvedChoice{}, err
+}
+
+// decodeStaticChoice decodes one non-marker row. Templates are still unrendered when
+// New validates, so only the shape is checked here; resolveStaticChoice validates the
+// rendered values at run time.
+func decodeStaticChoice(item any, index int) (ChoiceConfig, error) {
+	raw, ok := item.(map[string]any)
+	if !ok {
+		return ChoiceConfig{}, fmt.Errorf("choice %d must be a mapping", index)
+	}
+	var choice ChoiceConfig
+	if err := step.DecodeConfig(raw, &choice); err != nil {
+		return ChoiceConfig{}, fmt.Errorf("choice %d: %w", index, err)
+	}
+	if choice.Section != nil || choice.Separator != nil {
+		return ChoiceConfig{}, fmt.Errorf("choice %d must not mix section or separator with other choice fields", index)
+	}
+	return choice, nil
+}
+
+func resolveChoiceRows(rows []any, resolveOption func(any, int) (resolvedChoice, error)) (resolvedChoices, error) {
+	result := resolvedChoices{
+		options: make([]resolvedChoice, 0, len(rows)),
+		markers: make([]tui.ChoiceMarker, 0),
+	}
+	var pending tui.ChoiceMarkerKind
+	for rowIndex, row := range rows {
+		index := rowIndex + 1
+		marker, isMarker, err := parseChoiceMarker(row, index)
+		if err != nil {
+			return resolvedChoices{}, err
+		}
+		if !isMarker {
+			option, err := resolveOption(row, index)
+			if err != nil {
+				return resolvedChoices{}, err
+			}
+			result.options = append(result.options, option)
+			pending = 0
+			continue
+		}
+
+		marker.Before = len(result.options)
+		switch marker.Kind {
+		case tui.ChoiceMarkerSeparator:
+			if len(result.options) == 0 {
+				return resolvedChoices{}, fmt.Errorf("choice marker %d separator cannot be first", index)
+			}
+			if pending == tui.ChoiceMarkerSeparator {
+				return resolvedChoices{}, fmt.Errorf("choice marker %d duplicates a separator", index)
+			}
+			if pending == tui.ChoiceMarkerSection {
+				return resolvedChoices{}, fmt.Errorf("choice marker %d follows an empty section", index)
+			}
+		case tui.ChoiceMarkerSection:
+			if pending == tui.ChoiceMarkerSection {
+				return resolvedChoices{}, fmt.Errorf("choice marker %d follows an empty section", index)
+			}
+		}
+		result.markers = append(result.markers, marker)
+		pending = marker.Kind
+	}
+	if pending == tui.ChoiceMarkerSection {
+		return resolvedChoices{}, fmt.Errorf("choice section must be followed by a choice")
+	}
+	if pending == tui.ChoiceMarkerSeparator {
+		return resolvedChoices{}, fmt.Errorf("choice separator must be followed by a choice")
+	}
+	return result, nil
+}
+
+func parseChoiceMarker(item any, index int) (tui.ChoiceMarker, bool, error) {
+	key, value, ok := singletonStringMapEntry(item)
+	if !ok {
+		return tui.ChoiceMarker{}, false, nil
+	}
+	if key == "section" {
+		label, ok := value.(string)
+		if !ok || strings.TrimSpace(label) == "" {
+			return tui.ChoiceMarker{}, false, fmt.Errorf("choice marker %d section must be a non-empty string", index)
+		}
+		return tui.ChoiceMarker{Kind: tui.ChoiceMarkerSection, Label: strings.TrimSpace(label)}, true, nil
+	}
+	if key == "separator" {
+		separator, ok := value.(bool)
+		if !ok || !separator {
+			return tui.ChoiceMarker{}, false, fmt.Errorf("choice marker %d separator must be true", index)
+		}
+		return tui.ChoiceMarker{Kind: tui.ChoiceMarkerSeparator}, true, nil
+	}
+	return tui.ChoiceMarker{}, false, nil
+}
+
+func singletonStringMapEntry(value any) (string, any, bool) {
+	reflectValue := reflect.ValueOf(value)
+	if !reflectValue.IsValid() || reflectValue.Kind() != reflect.Map || reflectValue.Len() != 1 || reflectValue.Type().Key().Kind() != reflect.String {
+		return "", nil, false
+	}
+	key := reflectValue.MapKeys()[0]
+	return key.String(), reflectValue.MapIndex(key).Interface(), true
 }
 
 func (r *Runner) resolveDynamicChoice(request step.Request, item any, index int) (tui.Option, error) {

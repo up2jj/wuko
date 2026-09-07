@@ -22,6 +22,10 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
   visible text, `tui_password` for masked text, and `tui_path` for rooted selection of existing
   files or directories.
   Choice descriptions and `description_field` make large static or dynamic lists searchable.
+  Organize long choice lists with exact singleton `{section: Name}` and `{separator: true}` marker
+  objects. They are display-only, may appear in static `choices` or dynamic `from` lists, and must
+  delimit non-empty choice blocks; a separator may be followed immediately by a section. Dynamic
+  marker objects bypass choice field mappings and expressions.
   Mark unavailable static choices with `disabled` plus a non-empty `reason`, or map dynamic object
   metadata with `disabled_field` and `reason_field`; use `default` or `default_field` only to
   initialize interactive selection. For computed dynamic mappings, use `label_expr`, `value_expr`,

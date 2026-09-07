@@ -9,6 +9,7 @@ import (
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/sahilm/fuzzy"
 )
 
@@ -23,10 +24,26 @@ type Option struct {
 	Default        bool
 }
 
+// ChoiceMarkerKind identifies a display-only row in a choice picker.
+type ChoiceMarkerKind uint8
+
+const (
+	ChoiceMarkerSection ChoiceMarkerKind = iota + 1
+	ChoiceMarkerSeparator
+)
+
+// ChoiceMarker inserts a display-only row before an option index.
+type ChoiceMarker struct {
+	Kind   ChoiceMarkerKind
+	Before int
+	Label  string
+}
+
 // ChoicePickerConfig configures an interactive selection list.
 type ChoicePickerConfig struct {
 	Message     string
 	Options     []Option
+	Markers     []ChoiceMarker
 	Multiple    bool
 	SelectAll   bool
 	Required    bool
@@ -41,12 +58,34 @@ type choiceItem struct {
 	disabled    bool
 	reason      string
 	none        bool
+	block       int
+}
+
+type choiceBlock struct {
+	section         string
+	separatorBefore bool
+}
+
+type choiceRowKind uint8
+
+const (
+	choiceRowOption choiceRowKind = iota
+	choiceRowSection
+	choiceRowSeparator
+)
+
+type choiceRow struct {
+	kind         choiceRowKind
+	item         choiceItem
+	visibleIndex int
+	label        string
 }
 
 type choiceModel struct {
 	config    ChoicePickerConfig
 	items     []choiceItem
 	visible   []choiceItem
+	blocks    []choiceBlock
 	cursor    int
 	selected  map[int]bool
 	order     []int
@@ -63,13 +102,33 @@ type choiceModel struct {
 func newChoiceModel(config ChoicePickerConfig) choiceModel {
 	items := make([]choiceItem, 0, len(config.Options)+1)
 	if !config.Required && !config.Multiple {
-		items = append(items, choiceItem{index: -1, label: "(none)", description: "select no value", none: true})
+		items = append(items, choiceItem{index: -1, label: "(none)", description: "select no value", none: true, block: -1})
 	}
+	blocks := []choiceBlock{{}}
+	markerIndex := 0
+	blockOptions := 0
 	for index, option := range config.Options {
+		for markerIndex < len(config.Markers) && config.Markers[markerIndex].Before == index {
+			marker := config.Markers[markerIndex]
+			switch marker.Kind {
+			case ChoiceMarkerSeparator:
+				blocks = append(blocks, choiceBlock{separatorBefore: true})
+				blockOptions = 0
+			case ChoiceMarkerSection:
+				if blockOptions == 0 {
+					blocks[len(blocks)-1].section = strings.TrimSpace(marker.Label)
+				} else {
+					blocks = append(blocks, choiceBlock{section: strings.TrimSpace(marker.Label)})
+					blockOptions = 0
+				}
+			}
+			markerIndex++
+		}
 		items = append(items, choiceItem{
 			index: index, label: option.Label, description: option.Description,
-			disabled: option.Disabled, reason: option.DisabledReason,
+			disabled: option.Disabled, reason: option.DisabledReason, block: len(blocks) - 1,
 		})
+		blockOptions++
 	}
 	filter := textinput.New()
 	filter.Prompt = "/"
@@ -77,7 +136,7 @@ func newChoiceModel(config ChoicePickerConfig) choiceModel {
 	styleInteractiveTextInput(&filter)
 	filter.SetWidth(40)
 	model := choiceModel{
-		config: config, items: items, selected: make(map[int]bool), filter: filter,
+		config: config, items: items, blocks: blocks, selected: make(map[int]bool), filter: filter,
 		width: 80, height: 24,
 	}
 	for index, option := range config.Options {
@@ -160,9 +219,9 @@ func (m choiceModel) updateKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "end":
 		m.cursor = max(len(m.visible)-1, 0)
 	case "pgup":
-		m.cursor = max(m.cursor-m.pageSize(), 0)
+		m.movePage(-1)
 	case "pgdown":
-		m.cursor = min(m.cursor+m.pageSize(), max(len(m.visible)-1, 0))
+		m.movePage(1)
 	case "space":
 		if m.config.Multiple {
 			m.toggleSelected()
@@ -265,6 +324,20 @@ func (m *choiceModel) refreshVisible() {
 	query := strings.TrimSpace(m.filter.Value())
 	if query == "" {
 		m.visible = slices.Clone(m.items)
+	} else if len(m.config.Markers) > 0 {
+		matchingSections := make(map[int]bool)
+		for index, block := range m.blocks {
+			if block.section != "" && fuzzyMatches(query, block.section) {
+				matchingSections[index] = true
+			}
+		}
+		m.visible = make([]choiceItem, 0, len(m.items))
+		for _, item := range m.items {
+			metadata := strings.Join([]string{item.label, item.description, item.reason}, " ")
+			if matchingSections[item.block] || fuzzyMatches(query, metadata) {
+				m.visible = append(m.visible, item)
+			}
+		}
 	} else {
 		search := make([]string, len(m.items))
 		for index, item := range m.items {
@@ -277,6 +350,10 @@ func (m *choiceModel) refreshVisible() {
 		}
 	}
 	m.cursor = min(m.cursor, max(len(m.visible)-1, 0))
+}
+
+func fuzzyMatches(query, value string) bool {
+	return len(fuzzy.FindNoSort(query, []string{value})) > 0
 }
 
 func (m choiceModel) View() tea.View {
@@ -300,14 +377,25 @@ func (m choiceModel) View() tea.View {
 		view.WriteString(renderFilter(m.filter) + "\n")
 	}
 
-	start, end := m.visibleRange()
+	rows := m.displayRows()
+	start, end := m.visibleRange(rows)
 	if len(m.visible) == 0 {
 		view.WriteString(interactiveStyles.disabled.Render("  (no matching choices)") + "\n")
 	}
-	for index := start; index < end; index++ {
-		item := m.visible[index]
+	for _, row := range rows[start:end] {
+		if row.kind == choiceRowSection {
+			view.WriteString(renderChoiceRule(row.label, m.width, interactiveStyles.label.Bold(true)))
+			view.WriteByte('\n')
+			continue
+		}
+		if row.kind == choiceRowSeparator {
+			view.WriteString(renderChoiceRule("", m.width, interactiveStyles.disabled))
+			view.WriteByte('\n')
+			continue
+		}
+		item := row.item
 		cursor := " "
-		if index == m.cursor {
+		if row.visibleIndex == m.cursor {
 			cursor = interactiveStyles.cursor.Render(">")
 		}
 		mark := " "
@@ -320,7 +408,7 @@ func (m choiceModel) View() tea.View {
 		label := item.label
 		if item.disabled {
 			label = interactiveStyles.disabled.Render(label)
-		} else if index == m.cursor {
+		} else if row.visibleIndex == m.cursor {
 			label = interactiveStyles.selected.Render(label)
 		}
 		fmt.Fprintf(&view, "%s %s %s", cursor, mark, label)
@@ -344,15 +432,88 @@ func (m choiceModel) View() tea.View {
 	return tea.NewView(view.String())
 }
 
-func (m choiceModel) visibleRange() (int, int) {
-	page := m.pageSize()
-	if len(m.visible) <= page {
-		return 0, len(m.visible)
+func (m choiceModel) displayRows() []choiceRow {
+	rows := make([]choiceRow, 0, len(m.visible)+len(m.config.Markers))
+	previousBlock := -2
+	for visibleIndex, item := range m.visible {
+		if item.block >= 0 && item.block != previousBlock {
+			// previousBlock is negative before the first block row and for the synthetic
+			// "(none)" row, neither of which is a choice a separator can sit after.
+			if previousBlock >= 0 && m.separatorBetween(previousBlock, item.block) {
+				rows = append(rows, choiceRow{kind: choiceRowSeparator})
+			}
+			if section := m.blocks[item.block].section; section != "" {
+				rows = append(rows, choiceRow{kind: choiceRowSection, label: section})
+			}
+		}
+		rows = append(rows, choiceRow{kind: choiceRowOption, item: item, visibleIndex: visibleIndex})
+		previousBlock = item.block
 	}
-	start := m.cursor - page/2
+	return rows
+}
+
+func (m choiceModel) separatorBetween(previous, current int) bool {
+	for index := previous + 1; index <= current && index < len(m.blocks); index++ {
+		if m.blocks[index].separatorBefore {
+			return true
+		}
+	}
+	return false
+}
+
+func (m choiceModel) visibleRange(rows []choiceRow) (int, int) {
+	page := m.pageSize()
+	if len(rows) <= page {
+		return 0, len(rows)
+	}
+	cursorRow := m.cursorRow(rows)
+	start := cursorRow - page/2
 	start = max(start, 0)
-	start = min(start, len(m.visible)-page)
+	start = min(start, len(rows)-page)
 	return start, start + page
+}
+
+func (m choiceModel) cursorRow(rows []choiceRow) int {
+	index := slices.IndexFunc(rows, func(row choiceRow) bool {
+		return row.kind == choiceRowOption && row.visibleIndex == m.cursor
+	})
+	return max(index, 0)
+}
+
+func (m *choiceModel) movePage(direction int) {
+	if len(m.visible) == 0 {
+		return
+	}
+	rows := m.displayRows()
+	target := min(max(m.cursorRow(rows)+direction*m.pageSize(), 0), len(rows)-1)
+	if direction < 0 {
+		for index := target; index >= 0; index-- {
+			if rows[index].kind == choiceRowOption {
+				m.cursor = rows[index].visibleIndex
+				return
+			}
+		}
+		m.cursor = 0
+		return
+	}
+	for index := target; index < len(rows); index++ {
+		if rows[index].kind == choiceRowOption {
+			m.cursor = rows[index].visibleIndex
+			return
+		}
+	}
+	m.cursor = len(m.visible) - 1
+}
+
+func renderChoiceRule(label string, width int, style interface{ Render(...string) string }) string {
+	width = max(width, 1)
+	if label == "" {
+		return style.Render(strings.Repeat("─", width))
+	}
+	prefix := "── "
+	text := ansi.Truncate(prefix+label+" ", width, "")
+	rule := text + strings.Repeat("─", max(width-ansi.StringWidth(text), 0))
+	return style.Render(rule)
 }
 
 func (m choiceModel) pageSize() int {
@@ -410,6 +571,9 @@ func validateChoicePickerConfig(config ChoicePickerConfig) error {
 	if config.MinSelected != nil && config.MaxSelected != nil && *config.MinSelected > *config.MaxSelected {
 		return fmt.Errorf("minimum selected cannot exceed maximum selected")
 	}
+	if err := validateChoiceMarkers(config.Options, config.Markers); err != nil {
+		return err
+	}
 
 	enabled := 0
 	defaults := 0
@@ -440,6 +604,45 @@ func validateChoicePickerConfig(config ChoicePickerConfig) error {
 	}
 	if maximum := model.maximum(); maximum != nil && defaults > *maximum {
 		return fmt.Errorf("%d default choices exceed maximum selected %d", defaults, *maximum)
+	}
+	return nil
+}
+
+func validateChoiceMarkers(options []Option, markers []ChoiceMarker) error {
+	previousBefore := -1
+	var previousKind ChoiceMarkerKind
+	for index, marker := range markers {
+		position := index + 1
+		if marker.Before < previousBefore {
+			return fmt.Errorf("choice marker %d is out of order", position)
+		}
+		if marker.Before < 0 || marker.Before >= len(options) {
+			return fmt.Errorf("choice marker %d must precede a choice", position)
+		}
+		samePosition := marker.Before == previousBefore
+		switch marker.Kind {
+		case ChoiceMarkerSection:
+			if strings.TrimSpace(marker.Label) == "" {
+				return fmt.Errorf("choice section %d has an empty label", position)
+			}
+			if samePosition && previousKind != ChoiceMarkerSeparator {
+				return fmt.Errorf("choice section %d has no choices", position)
+			}
+		case ChoiceMarkerSeparator:
+			if marker.Label != "" {
+				return fmt.Errorf("choice separator %d cannot have a label", position)
+			}
+			if marker.Before == 0 {
+				return fmt.Errorf("choice separator %d cannot be first", position)
+			}
+			if samePosition {
+				return fmt.Errorf("choice separator %d has no choices before it", position)
+			}
+		default:
+			return fmt.Errorf("choice marker %d has an unknown kind", position)
+		}
+		previousBefore = marker.Before
+		previousKind = marker.Kind
 	}
 	return nil
 }

@@ -484,6 +484,107 @@ func TestDynamicChoiceMetadata(t *testing.T) {
 	}
 }
 
+func TestStaticChoiceMarkersAreDisplayOnly(t *testing.T) {
+	runnerValue, err := New(map[string]any{
+		"variable": "items", "message": "Items", "multiple": true,
+		"choices": []any{
+			map[string]any{"section": "Common"},
+			map[string]any{"label": "Development", "value": "dev"},
+			map[string]any{"label": "Staging", "value": "staging"},
+			map[string]any{"separator": true},
+			map[string]any{"section": "Restricted"},
+			map[string]any{"label": "Production", "value": "prod"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := runnerValue.(*Runner)
+	choices, err := runner.resolveChoices(step.Request{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(choices.options) != 3 || len(choices.markers) != 3 {
+		t.Fatalf("options = %#v, markers = %#v", choices.options, choices.markers)
+	}
+	wantMarkers := []tui.ChoiceMarker{
+		{Kind: tui.ChoiceMarkerSection, Before: 0, Label: "Common"},
+		{Kind: tui.ChoiceMarkerSeparator, Before: 2},
+		{Kind: tui.ChoiceMarkerSection, Before: 2, Label: "Restricted"},
+	}
+	if !reflect.DeepEqual(choices.markers, wantMarkers) {
+		t.Fatalf("markers = %#v, want %#v", choices.markers, wantMarkers)
+	}
+
+	result, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{"items": []any{"prod", "dev"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if values := result.Outputs["values"].([]any); !reflect.DeepEqual(values, []any{"prod", "dev"}) {
+		t.Fatalf("values = %#v", values)
+	}
+	if labels := result.Outputs["labels"].([]any); !reflect.DeepEqual(labels, []any{"Production", "Development"}) {
+		t.Fatalf("labels = %#v", labels)
+	}
+}
+
+func TestDynamicChoiceMarkersBypassMappingsAndExpressions(t *testing.T) {
+	runnerValue, err := New(map[string]any{
+		"variable": "item", "message": "Item", "from": "steps.fetch.items",
+		"label_expr": `item.name`, "value_expr": `item.id`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := runnerValue.(*Runner)
+	source := []any{
+		map[string]string{"section": "Common"},
+		map[string]any{"name": "Development", "id": "dev"},
+		map[string]bool{"separator": true},
+		map[string]any{"section": "Restricted"},
+		map[string]any{"name": "Production", "id": "prod"},
+	}
+	request := step.Request{
+		Vars:  map[string]any{"item": "prod"},
+		Steps: map[string]any{"fetch": map[string]any{"items": source}},
+	}
+	choices, err := runner.resolveChoices(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(choices.options) != 2 || len(choices.markers) != 3 {
+		t.Fatalf("options = %#v, markers = %#v", choices.options, choices.markers)
+	}
+	result, err := runner.Run(t.Context(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := result.Outputs["item"].(map[string]any)
+	if !reflect.DeepEqual(item, source[4]) {
+		t.Fatalf("item = %#v, want %#v", item, source[4])
+	}
+}
+
+func TestDynamicChoiceMarkerKeysWithAdditionalFieldsRemainChoices(t *testing.T) {
+	runnerValue, err := New(map[string]any{
+		"variable": "item", "message": "Item", "from": "vars.items",
+		"label_field": "name", "value_field": "id",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	choices, err := runnerValue.(*Runner).resolveChoices(step.Request{Vars: map[string]any{"items": []any{
+		map[string]any{"section": "metadata", "name": "Development", "id": "dev"},
+		map[string]any{"separator": false, "name": "Staging", "id": "staging"},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(choices.options) != 2 || len(choices.markers) != 0 {
+		t.Fatalf("options = %#v, markers = %#v", choices.options, choices.markers)
+	}
+}
+
 func TestDynamicChoiceExpressionsUseOrderedEnvironment(t *testing.T) {
 	source := map[string]any{"name": "dev", "label": "Development", "context": "dev-cluster"}
 	runnerValue, err := New(map[string]any{
@@ -753,6 +854,51 @@ func TestChoiceConfigurationValidation(t *testing.T) {
 				t.Fatal("expected configuration error")
 			}
 		})
+	}
+}
+
+func TestChoiceMarkerConfigurationValidation(t *testing.T) {
+	choice := func(label string) map[string]any {
+		return map[string]any{"label": label, "value": strings.ToLower(label)}
+	}
+	tests := []struct {
+		name    string
+		choices []any
+		want    string
+	}{
+		{name: "empty section", choices: []any{map[string]any{"section": " "}, choice("A")}, want: "non-empty string"},
+		{name: "false separator", choices: []any{choice("A"), map[string]any{"separator": false}, choice("B")}, want: "must be true"},
+		{name: "leading separator", choices: []any{map[string]any{"separator": true}, choice("A")}, want: "cannot be first"},
+		{name: "trailing separator", choices: []any{choice("A"), map[string]any{"separator": true}}, want: "must be followed"},
+		{name: "trailing section", choices: []any{choice("A"), map[string]any{"section": "Later"}}, want: "must be followed"},
+		{name: "duplicate separators", choices: []any{choice("A"), map[string]any{"separator": true}, map[string]any{"separator": true}, choice("B")}, want: "duplicates"},
+		{name: "consecutive sections", choices: []any{map[string]any{"section": "One"}, map[string]any{"section": "Two"}, choice("A")}, want: "empty section"},
+		{name: "section then separator", choices: []any{choice("A"), map[string]any{"section": "Two"}, map[string]any{"separator": true}, choice("B")}, want: "empty section"},
+		{name: "section mixed into a choice", choices: []any{map[string]any{"label": "A", "value": "a", "section": "One"}}, want: "must not mix section or separator"},
+		{name: "separator mixed into a choice", choices: []any{map[string]any{"label": "A", "value": "a", "separator": true}}, want: "must not mix section or separator"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := New(map[string]any{"variable": "item", "message": "Item", "choices": tt.choices})
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestDynamicChoiceMarkerPlacementIsValidatedAtRuntime(t *testing.T) {
+	runnerValue, err := New(map[string]any{
+		"variable": "item", "message": "Item", "from": "vars.items",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runnerValue.Run(t.Context(), step.Request{Vars: map[string]any{
+		"items": []any{map[string]any{"separator": true}, "value"},
+	}})
+	if err == nil || !strings.Contains(err.Error(), "cannot be first") {
+		t.Fatalf("error = %v", err)
 	}
 }
 

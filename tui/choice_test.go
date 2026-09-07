@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestChoiceModelMultipleSelection(t *testing.T) {
@@ -70,6 +71,166 @@ func TestChoiceModelFiltersDescriptions(t *testing.T) {
 	}
 }
 
+func TestChoiceModelRendersNonSelectableSectionsAndSeparators(t *testing.T) {
+	config := ChoicePickerConfig{
+		Message: "Pick", Required: true,
+		Options: []Option{
+			{Label: "Development"},
+			{Label: "Staging"},
+			{Label: "Production"},
+		},
+		Markers: []ChoiceMarker{
+			{Kind: ChoiceMarkerSection, Before: 0, Label: "Common"},
+			{Kind: ChoiceMarkerSeparator, Before: 2},
+			{Kind: ChoiceMarkerSection, Before: 2, Label: "Restricted"},
+		},
+	}
+	if err := validateChoicePickerConfig(config); err != nil {
+		t.Fatal(err)
+	}
+	model := newChoiceModel(config)
+	rows := model.displayRows()
+	wantKinds := []choiceRowKind{
+		choiceRowSection, choiceRowOption, choiceRowOption,
+		choiceRowSeparator, choiceRowSection, choiceRowOption,
+	}
+	if len(rows) != len(wantKinds) {
+		t.Fatalf("rows = %#v", rows)
+	}
+	for index, want := range wantKinds {
+		if rows[index].kind != want {
+			t.Fatalf("row %d kind = %v, want %v", index, rows[index].kind, want)
+		}
+	}
+
+	view := model.View().Content
+	for _, want := range []string{"── Common", "── Restricted", "Development", "Production"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("view = %q, want %q", view, want)
+		}
+	}
+
+	updated, _ := model.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	model = updated.(choiceModel)
+	updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	model = updated.(choiceModel)
+	updated, command := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = updated.(choiceModel)
+	if command == nil || !slices.Equal(model.result, []int{2}) {
+		t.Fatalf("result = %#v, command nil = %v", model.result, command == nil)
+	}
+}
+
+func TestChoiceModelKeepsOptionalNoneBeforeFirstSection(t *testing.T) {
+	model := newChoiceModel(ChoicePickerConfig{
+		Message: "Pick", Required: false,
+		Options: []Option{{Label: "Development", Default: true}},
+		Markers: []ChoiceMarker{{Kind: ChoiceMarkerSection, Before: 0, Label: "Common"}},
+	})
+	rows := model.displayRows()
+	if len(rows) != 3 || rows[0].kind != choiceRowOption || !rows[0].item.none || rows[1].kind != choiceRowSection {
+		t.Fatalf("rows = %#v", rows)
+	}
+	if model.cursor != 1 || model.visible[model.cursor].index != 0 {
+		t.Fatalf("cursor = %d, visible = %#v", model.cursor, model.visible)
+	}
+}
+
+func TestChoiceModelHidesSeparatorWhenOnlyNonePrecedesIt(t *testing.T) {
+	model := newChoiceModel(ChoicePickerConfig{
+		Message: "Pick", Required: false,
+		Options: []Option{{Label: "aaa"}, {Label: "zzz value"}},
+		Markers: []ChoiceMarker{{Kind: ChoiceMarkerSeparator, Before: 1}},
+	})
+	// "value" matches the synthetic "(none)" row and the second option, so the first
+	// block has no visible choice for the separator to sit after.
+	model.filter.SetValue("value")
+	model.refreshVisible()
+	rows := model.displayRows()
+	if slices.IndexFunc(rows, func(row choiceRow) bool { return row.kind == choiceRowSeparator }) >= 0 {
+		t.Fatalf("separator rendered without a choice above it: %#v", rows)
+	}
+}
+
+func TestChoiceModelFiltersDecoratedChoicesBySectionInSourceOrder(t *testing.T) {
+	model := newChoiceModel(ChoicePickerConfig{
+		Message: "Pick", Required: true,
+		Options: []Option{
+			{Label: "Development", Description: "shared"},
+			{Label: "Staging", Description: "shared"},
+			{Label: "Production", Description: "shared"},
+			{Label: "Emergency rollback", Description: "special"},
+		},
+		Markers: []ChoiceMarker{
+			{Kind: ChoiceMarkerSection, Before: 0, Label: "Common"},
+			{Kind: ChoiceMarkerSeparator, Before: 2},
+			{Kind: ChoiceMarkerSection, Before: 2, Label: "Restricted"},
+		},
+	})
+
+	model.filter.SetValue("Restricted")
+	model.refreshVisible()
+	if got := []int{model.visible[0].index, model.visible[1].index}; !slices.Equal(got, []int{2, 3}) {
+		t.Fatalf("section matches = %#v", model.visible)
+	}
+	rows := model.displayRows()
+	if len(rows) != 3 || rows[0].kind != choiceRowSection || rows[0].label != "Restricted" {
+		t.Fatalf("section rows = %#v", rows)
+	}
+
+	model.filter.SetValue("special")
+	model.refreshVisible()
+	rows = model.displayRows()
+	if len(model.visible) != 1 || model.visible[0].index != 3 || len(rows) != 2 || rows[0].kind != choiceRowSection {
+		t.Fatalf("option rows = %#v, visible = %#v", rows, model.visible)
+	}
+
+	model.filter.SetValue("shared")
+	model.refreshVisible()
+	if got := []int{model.visible[0].index, model.visible[1].index, model.visible[2].index}; !slices.Equal(got, []int{0, 1, 2}) {
+		t.Fatalf("source order = %#v", model.visible)
+	}
+	rows = model.displayRows()
+	if slices.IndexFunc(rows, func(row choiceRow) bool { return row.kind == choiceRowSeparator }) < 0 {
+		t.Fatalf("divider missing from rows = %#v", rows)
+	}
+}
+
+func TestChoiceModelMarkersConsumeViewportRows(t *testing.T) {
+	model := newChoiceModel(ChoicePickerConfig{
+		Message: "Pick", Required: true,
+		Options: []Option{{Label: "A"}, {Label: "B"}, {Label: "C"}},
+		Markers: []ChoiceMarker{
+			{Kind: ChoiceMarkerSection, Before: 0, Label: "First"},
+			{Kind: ChoiceMarkerSeparator, Before: 2},
+			{Kind: ChoiceMarkerSection, Before: 2, Label: "Second"},
+		},
+	})
+	model.height = 5
+	model.cursor = 2
+	rows := model.displayRows()
+	start, end := model.visibleRange(rows)
+	if end-start != model.pageSize() || end-start >= len(rows) {
+		t.Fatalf("range = %d:%d, page = %d, rows = %d", start, end, model.pageSize(), len(rows))
+	}
+	updated, _ := model.Update(tea.KeyPressMsg{Code: tea.KeyPgUp})
+	model = updated.(choiceModel)
+	if model.cursor >= 2 {
+		t.Fatalf("page up cursor = %d", model.cursor)
+	}
+}
+
+func TestChoiceRulesFitTerminalWidth(t *testing.T) {
+	for _, width := range []int{1, 8, 24} {
+		for _, label := range []string{"", "Restricted environments"} {
+			rule := renderChoiceRule(label, width, interactiveStyles.label)
+			if got := ansi.StringWidth(rule); got != width {
+				t.Fatalf("width = %d for %q, want %d: %q", got, label, width, rule)
+			}
+		}
+	}
+}
+
 func TestChoiceModelPaginatesAndWrapsHelp(t *testing.T) {
 	options := make([]Option, 12)
 	for index := range options {
@@ -79,7 +240,7 @@ func TestChoiceModelPaginatesAndWrapsHelp(t *testing.T) {
 	model.width = 18
 	model.height = 6
 	model.cursor = len(model.visible) - 1
-	start, end := model.visibleRange()
+	start, end := model.visibleRange(model.displayRows())
 	if start == 0 || end != len(model.visible) || end-start >= len(model.visible) {
 		t.Fatalf("range = %d:%d for %d choices", start, end, len(model.visible))
 	}
@@ -226,6 +387,11 @@ func TestChoicePickerConfigValidation(t *testing.T) {
 		{name: "minimum exceeds enabled", config: ChoicePickerConfig{Multiple: true, MinSelected: &one, Options: []Option{{Disabled: true, DisabledReason: "no"}}}},
 		{name: "defaults exceed maximum", config: ChoicePickerConfig{Multiple: true, MaxSelected: &zero, Options: []Option{{Default: true}}}},
 		{name: "select all exceeds maximum", config: ChoicePickerConfig{Multiple: true, SelectAll: true, MaxSelected: &zero, Options: []Option{{}, {}}}},
+		{name: "empty section", config: ChoicePickerConfig{Options: []Option{{}}, Markers: []ChoiceMarker{{Kind: ChoiceMarkerSection, Before: 0}}}},
+		{name: "leading separator", config: ChoicePickerConfig{Options: []Option{{}}, Markers: []ChoiceMarker{{Kind: ChoiceMarkerSeparator, Before: 0}}}},
+		{name: "trailing marker", config: ChoicePickerConfig{Options: []Option{{}}, Markers: []ChoiceMarker{{Kind: ChoiceMarkerSection, Before: 1, Label: "Later"}}}},
+		{name: "duplicate separator", config: ChoicePickerConfig{Options: []Option{{}, {}}, Markers: []ChoiceMarker{{Kind: ChoiceMarkerSeparator, Before: 1}, {Kind: ChoiceMarkerSeparator, Before: 1}}}},
+		{name: "section then separator", config: ChoicePickerConfig{Options: []Option{{}, {}}, Markers: []ChoiceMarker{{Kind: ChoiceMarkerSection, Before: 1, Label: "Later"}, {Kind: ChoiceMarkerSeparator, Before: 1}}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

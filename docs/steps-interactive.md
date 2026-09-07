@@ -102,8 +102,11 @@ Use static choices:
     variable: environment
     message: Select an environment
     choices:
+      - section: Common
       - {label: Development, description: Local and test infrastructure, value: dev, default: true}
       - {label: Staging, description: Shared release verification, value: staging}
+      - separator: true
+      - section: Restricted
       - label: Production
         description: Customer-facing infrastructure
         value: prod
@@ -176,6 +179,20 @@ Static choices require `label` and scalar `value`; `description`, `disabled`, `r
 `default` are optional. Every disabled choice requires a non-empty reason and cannot be a default.
 In single mode, at most one choice may be the default; the picker initially focuses it. In multiple
 mode, all defaults start selected in source order.
+
+Interleave display-only section and separator markers to visually organize a long picker. A
+`{section: Name}` marker starts a named block, while `{separator: true}` ends the current section
+and starts an unnamed block. Markers are never focusable or selectable and do not participate in
+values, outputs, defaults, enabled-choice counts, or selection bounds. Sections must contain at
+least one choice. Separators require choices on both sides; a separator may be followed immediately
+by a section, but other consecutive or leading/trailing marker arrangements are rejected.
+
+Dynamic `from` lists support the same exact singleton marker objects. Wuko recognizes only objects
+whose sole field is `section` or `separator`; objects carrying either name alongside other fields
+remain ordinary choices. Markers bypass `*_field` mappings and `*_expr` evaluation and are omitted
+from `item` and `items` outputs. Filtering a section name shows its whole block. Ordinary option
+matches retain their section heading, decorated results stay in source order, and separators are
+shown only when visible matches remain on both sides.
 
 Set `select_all: true` to start multiple-choice prompts with every enabled choice selected in
 source order. Disabled choices are excluded. This option is valid only with `multiple: true`; when
