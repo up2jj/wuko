@@ -21,6 +21,7 @@ import (
 	luastep "github.com/up2jj/wuko/steps/lua"
 	setstep "github.com/up2jj/wuko/steps/set"
 	"github.com/up2jj/wuko/steps/shell"
+	tablestep "github.com/up2jj/wuko/steps/table"
 	timestep "github.com/up2jj/wuko/steps/time"
 	"github.com/up2jj/wuko/workflow"
 )
@@ -39,6 +40,27 @@ func TestTimeExampleValidates(t *testing.T) {
 	}
 	if err := engine.New(registry).Validate(t.Context(), definition, engine.Options{RunDir: t.TempDir()}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestWorktreeLifecycleExampleValidates(t *testing.T) {
+	path := filepath.Join("examples", "worktree-lifecycle.yaml")
+	for _, target := range []string{"list", "start", "shell", "remove", "merge"} {
+		t.Run(target, func(t *testing.T) {
+			definition, err := workflow.NewLoader(nil).Load(t.Context(), path, workflow.LoadOptions{Target: target, RunDir: t.TempDir()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			registry := step.NewRegistry()
+			for _, register := range []func(*step.Registry) error{gitstep.Register, shell.Register, tablestep.Register} {
+				if err := register(registry); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := engine.New(registry).Validate(t.Context(), definition, engine.Options{RunDir: t.TempDir()}); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 

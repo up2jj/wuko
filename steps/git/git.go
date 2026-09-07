@@ -72,6 +72,10 @@ func Register(registry *step.Registry) error {
 		{"git_log", NewLog},
 		{"git_diff", NewDiff},
 		{"git_diff_check", NewDiffCheck},
+		{"git_worktree", NewWorktree},
+		{"git_squash", NewSquash},
+		{"git_rebase", NewRebase},
+		{"git_merge", NewMerge},
 	}
 	for _, registration := range registrations {
 		if err := registry.Register(registration.name, registration.builder); err != nil {

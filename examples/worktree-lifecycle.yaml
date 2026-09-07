@@ -1,0 +1,116 @@
+version: 1
+name: worktree-lifecycle
+description: Persistent branch worktrees composed from host-local Git steps
+
+vars:
+  branch: feature/example
+  base: main
+  squash_message: "feat: finish example"
+
+targets:
+  list:
+    description: Show every worktree and its state relative to the base branch
+    steps:
+      - id: worktrees
+        type: git_worktree
+        with:
+          operation: list
+          comparison: "{{ .vars.base }}"
+
+      - id: display
+        type: tui_table
+        with:
+          message: Git worktrees
+          from: steps.worktrees.items
+          columns:
+            - {header: Branch, field: branch}
+            - {header: Path, field: path}
+            - {header: Commit, field: short_head, width: 12}
+            - {header: Ahead, field: ahead, width: 7}
+            - {header: Behind, field: behind, width: 7}
+            - {header: Changes, field: changes.total, width: 9}
+
+  start:
+    description: Create a branch worktree, or return its existing checkout
+    steps:
+      - id: worktree
+        type: git_worktree
+        with:
+          operation: ensure
+          branch: "{{ .vars.branch }}"
+          base: "{{ .vars.base }}"
+          create: true
+
+      - working_directory: "{{ .steps.worktree.worktree.path }}"
+        steps:
+          - id: status
+            type: shell
+            with: {command: git, args: [status, --short, --branch]}
+
+  shell:
+    description: Enter the branch worktree in an interactive shell
+    steps:
+      - id: worktree
+        type: git_worktree
+        with:
+          operation: ensure
+          branch: "{{ .vars.branch }}"
+
+      - working_directory: "{{ .steps.worktree.worktree.path }}"
+        steps:
+          - id: terminal
+            type: shell
+            with: {command: /bin/sh, tty: true}
+
+  remove:
+    description: Remove the worktree and delete its branch only when integrated
+    steps:
+      - id: remove
+        type: git_worktree
+        with:
+          operation: remove
+          target: "{{ .vars.branch }}"
+          delete_branch: safe
+          integrated_into: "{{ .vars.base }}"
+
+  merge:
+    description: Squash, rebase, test, fast-forward the base, and clean up
+    steps:
+      - id: worktree
+        type: git_worktree
+        with:
+          operation: ensure
+          branch: "{{ .vars.branch }}"
+
+      - working_directory: "{{ .steps.worktree.worktree.path }}"
+        steps:
+          - id: squash
+            type: git_squash
+            with:
+              target: "{{ .vars.base }}"
+              message: "{{ .vars.squash_message }}"
+              stage: all
+
+          - id: rebase
+            type: git_rebase
+            with:
+              target: "{{ .vars.base }}"
+
+          - id: tests
+            type: shell
+            with: {command: go, args: [test, ./...]}
+
+      - id: merge
+        type: git_merge
+        with:
+          target: "{{ .vars.base }}"
+          source: "{{ .vars.branch }}"
+          mode: ff_only
+
+      - id: remove
+        type: git_worktree
+        with:
+          operation: remove
+          target: "{{ .vars.branch }}"
+          delete_branch: safe
+          integrated_into: "{{ .vars.base }}"
