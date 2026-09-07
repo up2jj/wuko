@@ -1462,6 +1462,109 @@ was configured explicitly. A `304 Not Modified` then succeeds with the previous 
 and value while exposing the `304` status and refreshed headers. Validators are retained only
 between attempts of that one step execution and are not applied to downloads.
 
+The optional `root_ca_file` adds PEM certificates to the system trust roots used by this step. It
+is useful with a local intercepting proxy and is independent of `client_certificate`, which
+authenticates the client to the server. Relative certificate paths resolve from the workflow or
+action directory.
+
+## `forward_proxy`
+
+Start a lifecycle-managed, loopback-only forward proxy that can inspect and rewrite opted-in HTTP
+and HTTPS requests. It uses Go's HTTP and TLS libraries directly. HTTPS uses a per-run certificate
+authority; its private key remains in memory and the generated CA certificate is removed during
+workflow cleanup.
+
+```yaml
+- id: proxy
+  type: forward_proxy
+  with:
+    # Optional; defaults to an available loopback port at 127.0.0.1:0.
+    listen: 127.0.0.1:0
+    keep_alive: false
+    max_body_bytes: 10MiB
+    rules:
+      - name: redirect_api
+        when: 'original.method == "POST" && original.host == "api.example.com"'
+        rewrite:
+          method: PUT
+          host: staging.example.com
+          path: /v2/items
+          headers:
+            set: {X-Proxied: ["true"]}
+            add: {X-Trace: ["wuko"]}
+            remove: [Authorization]
+          query:
+            set: {source: ["wuko"]}
+            add: {tag: ["intercepted"]}
+            remove: [token]
+          body: '{"rewritten":true}'
+        stop: false
+    log:
+      destination: stdout
+      include_bodies: false
+      redact_headers: [X-Private]
+```
+
+Rules evaluate `when` against the immutable `original` request. Its fields are `method`, `url`,
+`scheme`, `host`, `path`, `query`, `headers`, `body`, and `body_base64`. Every matching rule is
+applied in declaration order; `stop: true` prevents later rules from running. A rewrite may set
+`url`, or individual `scheme`, `host`, and `path` fields; these forms are mutually exclusive. It
+may also change the method, set/add/remove header and query values, and replace either `body` or
+`body_base64`.
+
+An optional isolated Lua transform runs after declarative rules. Each request gets a fresh state
+with only the base, table, string, and math libraries:
+
+```yaml
+lua:
+  source: |
+    function handle(original, request, matched_rules)
+      request.headers["X-Original-Host"] = {original.host}
+      return request -- nil preserves the current request
+    end
+```
+
+Transformation errors affect only that request and return `502`; the proxy continues serving.
+Request bodies are buffered up to `max_body_bytes` (exactly 10 MiB by default), with larger bodies
+returning `413`. Responses are not transformed and are streamed back to the client. CONNECT is
+used only to intercept HTTPS, not as a general TCP tunnel. The proxy is deliberately local,
+unauthenticated, does not inherit environment proxy settings, and cannot run inside an executor.
+
+Only proxy-form traffic is served. A request sent straight at the listener rather than through a
+client's proxy setting returns `400`, and a rewrite that points a request back at the proxy's own
+address returns `502` -- either would otherwise make the proxy call itself in a loop. The query
+string is passed through byte for byte unless a rule's `query` block or the Lua transform changes
+it; a changed query is re-encoded, which sorts its keys.
+
+The outputs are `ready`, `url`, `ca_cert`, and the SHA-256 fingerprint `ca_sha256`. When file
+logging is selected, `log_path` is also returned. Use those outputs with Wuko's `http` step:
+
+```yaml
+- id: call
+  type: http
+  with:
+    url: https://api.example.com/items
+    proxy: {url: "{{ .steps.proxy.url }}"}
+    root_ca_file: "{{ .steps.proxy.ca_cert }}"
+```
+
+Omit `log` to disable traffic logging. `destination: stdout` writes one serialized JSONL record per
+request through the step output stream; Wuko's own progress remains on stderr. Other concurrent
+steps can still write between complete proxy records, so use `destination: file` for a standalone
+machine-readable log:
+
+```yaml
+log:
+  destination: file
+  path: .wuko/proxy.jsonl
+  overwrite: false
+  include_bodies: false
+```
+
+File logs use mode `0600` and reject an existing path unless `overwrite` is true. Authorization,
+proxy authorization, cookies, common secret query parameters, and configured `redact_headers` are
+redacted. Bodies are omitted unless `include_bodies` is enabled.
+
 ## `docker`
 
 Run containers, wait for container health, transfer container files, and perform Docker image,

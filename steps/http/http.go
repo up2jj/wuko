@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -39,6 +40,7 @@ type Config struct {
 	Auth              *AuthConfig              `yaml:"auth,omitempty"`
 	Cookies           *CookiesConfig           `yaml:"cookies,omitempty"`
 	Proxy             *ProxyConfig             `yaml:"proxy,omitempty"`
+	RootCAFile        string                   `yaml:"root_ca_file,omitempty"`
 	ClientCertificate *ClientCertificateConfig `yaml:"client_certificate,omitempty"`
 }
 
@@ -419,27 +421,49 @@ func (r *Runner) newTransport(workflowDir string) (*http.Transport, error) {
 		}
 		transport.Proxy = http.ProxyURL(proxyURL)
 	}
-	if r.config.ClientCertificate == nil {
-		return transport, nil
-	}
-	certFile, err := resolvePath(workflowDir, r.config.ClientCertificate.CertFile)
-	if err != nil {
-		return nil, fmt.Errorf("resolving client certificate: %w", err)
-	}
-	keyFile, err := resolvePath(workflowDir, r.config.ClientCertificate.KeyFile)
-	if err != nil {
-		return nil, fmt.Errorf("resolving client certificate key: %w", err)
-	}
-	certificate, err := tls.LoadX509KeyPair(certFile, keyFile)
-	if err != nil {
-		return nil, fmt.Errorf("loading client certificate: %w", err)
-	}
 	tlsConfig := &tls.Config{}
 	if transport.TLSClientConfig != nil {
 		tlsConfig = transport.TLSClientConfig.Clone()
 	}
-	tlsConfig.Certificates = append(tlsConfig.Certificates, certificate)
-	transport.TLSClientConfig = tlsConfig
+	hasTLSConfig := transport.TLSClientConfig != nil
+	if r.config.RootCAFile != "" {
+		rootCAFile, err := resolvePath(workflowDir, r.config.RootCAFile)
+		if err != nil {
+			return nil, fmt.Errorf("resolving root CA file: %w", err)
+		}
+		certificate, err := os.ReadFile(rootCAFile)
+		if err != nil {
+			return nil, fmt.Errorf("reading root CA file %s: %w", rootCAFile, err)
+		}
+		roots, err := x509.SystemCertPool()
+		if err != nil || roots == nil {
+			roots = x509.NewCertPool()
+		}
+		if !roots.AppendCertsFromPEM(certificate) {
+			return nil, fmt.Errorf("root CA file %s contains no certificates", rootCAFile)
+		}
+		tlsConfig.RootCAs = roots
+		hasTLSConfig = true
+	}
+	if r.config.ClientCertificate != nil {
+		certFile, err := resolvePath(workflowDir, r.config.ClientCertificate.CertFile)
+		if err != nil {
+			return nil, fmt.Errorf("resolving client certificate: %w", err)
+		}
+		keyFile, err := resolvePath(workflowDir, r.config.ClientCertificate.KeyFile)
+		if err != nil {
+			return nil, fmt.Errorf("resolving client certificate key: %w", err)
+		}
+		certificate, err := tls.LoadX509KeyPair(certFile, keyFile)
+		if err != nil {
+			return nil, fmt.Errorf("loading client certificate: %w", err)
+		}
+		tlsConfig.Certificates = append(tlsConfig.Certificates, certificate)
+		hasTLSConfig = true
+	}
+	if hasTLSConfig {
+		transport.TLSClientConfig = tlsConfig
+	}
 	return transport, nil
 }
 
@@ -580,6 +604,9 @@ func (r *Runner) validateTransport(resolved bool) error {
 				return fmt.Errorf("proxy url must use http or https and include a host")
 			}
 		}
+	}
+	if r.config.RootCAFile != "" && (resolved || !templated(r.config.RootCAFile)) && strings.TrimSpace(r.config.RootCAFile) == "" {
+		return fmt.Errorf("root_ca_file must not be empty")
 	}
 	if r.config.ClientCertificate != nil {
 		certificate := r.config.ClientCertificate

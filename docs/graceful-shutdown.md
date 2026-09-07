@@ -47,7 +47,12 @@ itself start that process-wide budget.
 
 ## Step termination
 
-In-process step runners must observe `ctx.Done()` and return. Go cannot safely terminate an
+In-process step runners must observe `ctx.Done()` and return. The `forward_proxy` step stops
+accepting requests, closes intercepted CONNECT/upgrade connections, drains ordinary HTTP requests,
+and closes its idle upstream connections during this phase. A hijacked connection is no longer
+tracked by the HTTP server, so the step then waits up to five more seconds for the handlers behind
+those connections to return before it closes the traffic log; without that wait the last records of
+a tunnelled request are lost. Go cannot safely terminate an
 individual goroutine, so a runner that ignores cancellation can outlive its step or group deadline.
 A later `SIGINT` or `SIGTERM` still starts the process-wide 10-second shutdown budget.
 
