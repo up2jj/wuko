@@ -1100,8 +1100,9 @@ directory. `--global` saves them under `~/.wuko/workflows/`.
 
 ### Workflow marketplaces
 
-An HTTPS source is first checked for `manifest.json` at its repository root. If present, it is a
-version-1 archive marketplace and `wuko install SOURCE` opens a searchable Bubble Tea picker.
+An HTTPS source is first checked for `manifest.json` at its repository root. Version 1 contains
+workflow archives only; version 2 can publish both workflows and executable plugins. `wuko install SOURCE`
+opens the workflow picker, while `wuko plugin install SOURCE` opens a plugin picker.
 Space toggles the highlighted package, `ctrl+a` selects visible matches, `ctrl+x` clears visible
 matches, and Enter installs selected packages in manifest order.
 
@@ -1120,7 +1121,8 @@ Normal GitHub repository URLs are also accepted. Wuko resolves a repository-root
 `https://github.com/up2jj/wuko-marketplace` against the repository's default branch, so users do
 not need to construct a `raw.githubusercontent.com` URL manually.
 
-Marketplace manifests use version 1 and list package archives:
+The marketplace manifest keeps workflow archives in `packages` and plugin releases in a separate
+`plugins` collection. Both collections are optional:
 
 ```json
 {
@@ -1137,6 +1139,21 @@ Marketplace manifests use version 1 and list package archives:
       "source_sha256": "...",
       "sha256": "..."
     }
+  ],
+  "plugins": [
+    {
+      "namespace": "acme",
+      "plugin_version": "1.2.0",
+      "description": "Acme workflow operations",
+      "source": ".wuko/plugin-sources/acme",
+      "source_sha256": "...",
+      "path": "plugins/acme/plugin.json",
+      "sha256": "...",
+      "platforms": [
+        {"os": "darwin", "arch": "arm64"},
+        {"os": "linux", "arch": "amd64"}
+      ]
+    }
   ]
 }
 ```
@@ -1146,6 +1163,7 @@ Create and rebuild the manifest from a marketplace repository with:
 ```sh
 wuko marketplace init
 wuko marketplace build
+wuko marketplace build --check
 ```
 
 `build` discovers package directories containing a root `wuko.yaml` or `wuko.yml` below
@@ -1156,6 +1174,16 @@ Stale generated archives are removed only when they still match their recorded d
 unsafe paths, duplicate files, oversized packages, and packages without a root manifest are rejected.
 The root workflow may declare `package_version` separately from its workflow schema `version`; the
 package version is copied into the manifest, shown in the picker, and checked against the archive.
+
+Plugin maintainers create Go scaffolds with `wuko marketplace plugin init`, import complete releases
+with `wuko marketplace plugin add`, and replace them with `wuko marketplace plugin update`. Imported
+manifests and all declared platform archives live under `.wuko/plugin-sources/<namespace>/`, which is
+deliberately separate from the `.wuko/plugins/` installation root; build validates
+and copies only those public release files beneath `plugins/<namespace>/`. It never executes
+foreign-platform binaries. `build --check` validates that the manifest and all generated workflow
+and plugin files are current without modifying them, making it suitable for CI. See
+[Executable plugins](plugins.md#create-and-publish-a-marketplace-plugin) for the complete maintainer
+workflow and [version-resolution rules](plugins.md#version-resolution-and-conflicts).
 
 Selected packages install beneath a repository-related directory such as
 `.wuko/workflows/wuko-marketplace/release/`; `--global` uses the analogous directory below

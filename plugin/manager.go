@@ -9,6 +9,7 @@ import (
 	"io"
 	"maps"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -66,6 +67,26 @@ type executorDeclaration struct {
 	Type               string `json:"type"`
 	CancelStopsProcess bool   `json:"cancel_stops_process"`
 }
+
+// executorRunResult defines the language-neutral wire format in snake_case.
+type executorRunResult struct {
+	Stdout          string `json:"stdout"`
+	Stderr          string `json:"stderr"`
+	ExitCode        int    `json:"exit_code"`
+	StdoutTruncated bool   `json:"stdout_truncated"`
+	StderrTruncated bool   `json:"stderr_truncated"`
+}
+
+func (result executorRunResult) processResult() process.Result {
+	return process.Result{
+		Stdout:          result.Stdout,
+		Stderr:          result.Stderr,
+		ExitCode:        result.ExitCode,
+		StdoutTruncated: result.StdoutTruncated,
+		StderrTruncated: result.StderrTruncated,
+	}
+}
+
 type runningPlugin struct {
 	namespace   string
 	client      *client
@@ -197,8 +218,11 @@ func (m *Manager) configureSources(sources map[string]workflow.PluginSource) err
 		}
 		source.Source = canonical
 		if previous, ok := m.declarations[namespace]; ok {
-			if !reflect.DeepEqual(previous, source) {
-				return fmt.Errorf("plugin %q has conflicting workflow declarations", namespace)
+			if previous.Source != source.Source || previous.SHA256 != source.SHA256 {
+				return fmt.Errorf("plugin %q has conflicting workflow declarations: %s (%s) and %s (%s)", namespace, diagnosticPluginSource(previous.Source), shortDigest(previous.SHA256), diagnosticPluginSource(source.Source), shortDigest(source.SHA256))
+			}
+			if !reflect.DeepEqual(previous.With, source.With) {
+				return fmt.Errorf("plugin %q has conflicting workflow configuration for %s (%s)", namespace, diagnosticPluginSource(source.Source), shortDigest(source.SHA256))
 			}
 			continue
 		}
@@ -208,6 +232,27 @@ func (m *Manager) configureSources(sources map[string]workflow.PluginSource) err
 		m.declarations[namespace] = source
 	}
 	return nil
+}
+
+func diagnosticPluginSource(source string) string {
+	if !strings.HasPrefix(source, "https://") {
+		return source
+	}
+	parsed, err := url.Parse(source)
+	if err != nil {
+		return "HTTPS source"
+	}
+	parsed.RawQuery = ""
+	parsed.ForceQuery = false
+	parsed.Fragment = ""
+	return parsed.String()
+}
+
+func shortDigest(value string) string {
+	if len(value) <= 12 {
+		return value
+	}
+	return value[:12]
 }
 
 func namespaceForType(name string) (string, error) {
@@ -464,7 +509,8 @@ func (s *pluginStep) Run(ctx context.Context, request step.Request) (step.Result
 type cleaningPluginStep struct{ *pluginStep }
 
 func (s *cleaningPluginStep) Cleanup(ctx context.Context, result step.Result) error {
-	return s.plugin.client.call(ctx, "step.cleanup", map[string]any{"type": s.name, "with": s.raw, "result": result}, &struct{}{}, nil)
+	wireResult := map[string]any{"outputs": result.Outputs, "variables": result.Variables}
+	return s.plugin.client.call(ctx, "step.cleanup", map[string]any{"type": s.name, "with": s.raw, "result": wireResult}, &struct{}{}, nil)
 }
 
 func stepContext(r step.Request) map[string]any {
@@ -543,7 +589,7 @@ func (s *pluginSession) Run(ctx context.Context, o process.Options) (process.Res
 		}
 	}
 	params := map[string]any{"session": s.id, "command": o.Command, "args": o.Args, "dir": o.Dir, "env": o.Env, "stdin": base64.StdEncoding.EncodeToString(stdin), "capture_limit": o.CaptureLimit, "stdout_policy": o.StdoutPolicy, "stderr_policy": o.StderrPolicy}
-	var result process.Result
+	var wireResult executorRunResult
 	stdout, stderr := o.Stdout, o.Stderr
 	if !o.StdoutPolicy.Streams() {
 		stdout = nil
@@ -551,7 +597,8 @@ func (s *pluginSession) Run(ctx context.Context, o process.Options) (process.Res
 	if !o.StderrPolicy.Streams() {
 		stderr = nil
 	}
-	err = s.plugin.client.call(ctx, "executor.run", params, &result, streamEvents(stdout, stderr, o.Started))
+	err = s.plugin.client.call(ctx, "executor.run", params, &wireResult, streamEvents(stdout, stderr, o.Started))
+	result := wireResult.processResult()
 	if !o.StdoutPolicy.Captures() {
 		result.Stdout = ""
 	}

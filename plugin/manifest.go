@@ -45,10 +45,14 @@ func ParseManifest(data []byte) (Manifest, error) {
 	if manifest.Version != 1 || manifest.Protocol != Protocol {
 		return Manifest{}, fmt.Errorf("unsupported plugin manifest version or protocol")
 	}
-	if !validNamespace(manifest.Namespace) || strings.TrimSpace(manifest.PluginVersion) == "" {
+	if !validNamespace(manifest.Namespace) || manifest.PluginVersion == "" || strings.TrimSpace(manifest.PluginVersion) != manifest.PluginVersion {
 		return Manifest{}, fmt.Errorf("plugin manifest has an invalid namespace or version")
 	}
+	if len(manifest.Artifacts) == 0 {
+		return Manifest{}, fmt.Errorf("plugin manifest has no artifacts")
+	}
 	seen := make(map[string]bool)
+	seenPaths := make(map[string]bool)
 	for _, artifact := range manifest.Artifacts {
 		key := artifact.OS + "/" + artifact.Arch
 		if seen[key] {
@@ -61,6 +65,10 @@ func ParseManifest(data []byte) (Manifest, error) {
 		if _, err := safeRelative(artifact.Path); err != nil {
 			return Manifest{}, fmt.Errorf("invalid plugin artifact for %s: %w", key, err)
 		}
+		if seenPaths[artifact.Path] {
+			return Manifest{}, fmt.Errorf("duplicate plugin artifact path %q", artifact.Path)
+		}
+		seenPaths[artifact.Path] = true
 	}
 	return manifest, nil
 }

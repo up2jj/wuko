@@ -106,13 +106,13 @@ affects display order, not which definition wins.
 - `wuko install SOURCE` saves a standalone local, HTTPS, or `github:` workflow under the current
   directory’s `.wuko/workflows/`; `--global` selects `~/.wuko/workflows/`. The YAML `name` is used
   as the installed filename. An HTTPS repository URL with a root `manifest.json` is treated as a
-  version-1 package marketplace: the searchable picker supports space to toggle, `ctrl+a`/`ctrl+x`
+  marketplace of workflow and plugin packages: the searchable picker supports space to toggle, `ctrl+a`/`ctrl+x`
   for visible bulk selection, and Enter to install. Repeatable `--package NAME` flags bypass the
   picker and install in manifest order; names are validated before any package is written.
   Selected marketplace packages are stored below a repository-named subdirectory, with a marker
-  preventing different repositories from sharing it. `wuko marketplace init` creates a version-1
-  manifest, while `wuko marketplace build` discovers package directories and incrementally rebuilds
-  deterministic archives. `wuko uninstall NAME` removes a complete installed package directory,
+  preventing different repositories from sharing it. `wuko marketplace init` creates a marketplace
+  manifest, while `wuko marketplace build` discovers workflow and plugin sources and incrementally
+  publishes deterministic artifacts. `wuko uninstall NAME` removes a complete installed package directory,
   runs its uninstall hook first, and accepts `--yes` for non-interactive use.
 - `wuko run --file PATH [TARGET]` bypasses discovery. The exact path `-` reads one workflow snapshot
   from standard input, uses the invocation's current directory as the base for relative resources,

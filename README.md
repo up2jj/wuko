@@ -22,8 +22,8 @@ with typed data and files, call APIs, run scripts or containers, and start codin
   Codex.
 - **Reusable definitions** — split steps across files, compose local actions, consume public remote
   workflows, and load complete Wuko action packages from public or private GitHub repositories.
-- **Workflow marketplaces** — publish self-contained workflow packages with sidecars and let users
-  browse and install one or more packages interactively. See
+- **Workflow and plugin marketplaces** — publish self-contained workflow packages and verified
+  multi-platform plugin releases, then install selections interactively or from CI. See
   [Workflow marketplaces](docs/execution.md#workflow-marketplaces).
 - **Visible execution** — get live progress, retry and polling details, run statistics, and
   redacted debug tracing.
@@ -135,7 +135,15 @@ wuko uninstall release
 wuko uninstall --global --yes release
 ```
 
-Executable plugins can add language-neutral namespaced steps and executors. See [Executable plugins](docs/plugins.md) for discovery, pinned remote manifests, lifecycle hooks, installation, and the Go authoring initializer.
+Executable plugins can add language-neutral namespaced steps and executors. They can be installed
+directly or selected from a marketplace:
+
+```sh
+wuko plugin install --global --package acme https://github.com/acme/wuko-marketplace
+```
+
+See [Executable plugins](docs/plugins.md) for authoring, publishing, the trust model, lifecycle,
+and [version-resolution rules](docs/plugins.md#version-resolution-and-conflicts).
 
 Bare `wuko` opens a searchable picker in a terminal and shows each workflow's direct prerequisites.
 Press Enter to run the selected workflow, `u` to open a declared browser form, `m` to open the
@@ -168,7 +176,7 @@ non-interactive behavior.
 `wuko install SOURCE` saves a standalone workflow under the current project’s `.wuko/workflows/`
 directory. Use `--global` to save it under `~/.wuko/workflows/` instead. `SOURCE` may be a local
 YAML file, an HTTPS URL, or a `github:` locator. An HTTPS repository URL, including a normal
-GitHub repository URL, is also checked for a version-1 package marketplace manifest. When found,
+GitHub repository URL, is also checked for a versioned marketplace manifest. When found,
 Wuko opens a picker unless packages are selected explicitly with repeatable `--package` flags:
 
 ```sh
@@ -177,10 +185,11 @@ wuko install --global --package release --package lint https://github.com/acme/w
 ```
 
 Marketplace packages are stored under a repository-named subdirectory and preserve their complete
-package tree, including JSON sidecars and local scripts. Use `wuko marketplace init` to create an
-empty manifest and `wuko marketplace build` to build only new or changed package archives from
-`.wuko/workflows/<package>/`. Set `package_version` in the package root `wuko.yaml` to publish a
-package release version; the picker displays it separately from the workflow schema `version`.
+package tree, including JSON sidecars and local scripts. Use `wuko marketplace init` to create a
+marketplace manifest and `wuko marketplace build` to publish only new or changed workflow packages
+and plugin releases from `.wuko/workflows/` and `.wuko/plugin-sources/`. Set `package_version` in the
+package root `wuko.yaml` to publish a package release version; the picker displays it separately
+from the workflow schema `version`.
 Install and uninstall also accept the `--var`, `--var-file`, and `--env` flags for lifecycle hooks.
 
 For example, install a marketplace directly from a GitHub repository page:
@@ -550,7 +559,8 @@ Use controls to run independent work or repeat a block over runtime data.
 | `finally` | Run workflow-level cleanup after the main phase | [Finally cleanup](docs/finally.md) |
 | `install` | Run steps before an installed workflow is committed | [Workflow installation](docs/execution.md#workflow-installation) |
 | `uninstall` | Run steps before an installed workflow is removed | [Workflow installation](docs/execution.md#workflow-installation) |
-| `marketplace init/build` | Create or rebuild a versioned workflow marketplace manifest | [Workflow installation](docs/execution.md#workflow-marketplaces) |
+| `marketplace init/build` | Create, rebuild, or check a workflow and plugin marketplace | [Workflow installation](docs/execution.md#workflow-marketplaces) |
+| `marketplace plugin init/add/update` | Create a plugin scaffold and manage marketplace plugin releases | [Executable plugins](docs/plugins.md#create-and-publish-a-marketplace-plugin) |
 | `cron` | Run a workflow on a schedule | [Execution and composition](docs/execution.md#scheduled-runs) |
 
 ## Workflow composition
@@ -617,6 +627,8 @@ Claude skills are installed under `~/.claude/skills/`; Codex skills are installe
 ## Documentation
 
 - [Execution and composition](docs/execution.md)
+- [Executable plugins](docs/plugins.md)
+- [Technology-neutral plugin protocol v1](docs/plugin-protocol.md)
 - [ClickUp task agent example](docs/clickup-task-example.md)
 - [Interactive steps](docs/steps-interactive.md)
 - [Data steps](docs/steps-data.md)

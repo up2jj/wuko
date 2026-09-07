@@ -84,3 +84,16 @@ func TestPluginCandidateDoesNotSkipInvalidHigherPrecedence(t *testing.T) {
 		t.Fatalf("found=%v err=%v", found, err)
 	}
 }
+
+func TestParseManifestRejectsPaddedPluginVersionAndEmptyArtifacts(t *testing.T) {
+	// A padded version parses but fails marketplace manifest validation, which would let
+	// `wuko marketplace build` publish a manifest.json it can no longer read back.
+	padded := []byte(`{"version":1,"namespace":"acme","plugin_version":" 1.0.0 ","protocol":"wuko.plugin/v1","artifacts":[{"os":"linux","arch":"amd64","path":"a.tar.gz","format":"tar.gz","entry":"wuko-plugin-acme","sha256":"` + strings.Repeat("a", 64) + `"}]}`)
+	if _, err := ParseManifest(padded); err == nil || !strings.Contains(err.Error(), "namespace or version") {
+		t.Fatalf("padded plugin_version error = %v", err)
+	}
+	empty := []byte(`{"version":1,"namespace":"acme","plugin_version":"1.0.0","protocol":"wuko.plugin/v1","artifacts":[]}`)
+	if _, err := ParseManifest(empty); err == nil || !strings.Contains(err.Error(), "no artifacts") {
+		t.Fatalf("empty artifacts error = %v", err)
+	}
+}

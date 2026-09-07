@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -125,6 +126,7 @@ type dependencies struct {
 	registry      *step.Registry
 	executors     *executor.Registry
 	plugins       *plugin.Manager
+	httpClient    *http.Client
 	providers     *provider.Registry
 	loader        *workflow.Loader
 	isInteractive func(io.Reader) bool
@@ -225,7 +227,7 @@ func newRootCmd(deps dependencies) *cobra.Command {
 		deps.executors = executor.NewRegistry()
 	}
 	if deps.plugins == nil {
-		deps.plugins = plugin.NewManager(plugin.Config{CWD: deps.cwd, HomeDir: deps.homeDir, ConfigDir: deps.configDir, LookPath: deps.agentLookPath, Stderr: deps.stderr, HostVersion: version})
+		deps.plugins = plugin.NewManager(plugin.Config{CWD: deps.cwd, HomeDir: deps.homeDir, ConfigDir: deps.configDir, LookPath: deps.agentLookPath, Stderr: deps.stderr, HostVersion: version, HTTPClient: deps.httpClient})
 		deps.registry.SetResolver(deps.plugins.ResolveStep)
 		deps.executors.SetResolver(deps.plugins.ResolveExecutor)
 	}

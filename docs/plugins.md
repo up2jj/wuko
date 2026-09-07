@@ -5,11 +5,15 @@ Wuko plugins are persistent executables that exchange newline-delimited JSON wit
 Create a standard-library-only Go plugin project:
 
 ```sh
-wuko plugin init acme
-wuko plugin init acme ./plugins/acme
+wuko marketplace plugin init acme
+wuko marketplace plugin init acme ./plugins/acme
 ```
 
 The generated project contains a working `acme.uppercase` step, an `acme.local` executor, tests, a `justfile`, an example workflow, and a release-manifest template.
+
+To implement a plugin in any language, use the technology-neutral
+[Plugin protocol v1](plugin-protocol.md) reference. It starts with a minimal message loop and then
+documents every request, response, event, lifecycle call, and cancellation rule.
 
 ## Local discovery
 
@@ -59,6 +63,144 @@ wuko plugin uninstall --global --yes acme
 ```
 
 Installation downloads only the current-platform archive, verifies both digests, safely extracts regular files, performs the pure `initialize` handshake, and atomically publishes the installation. It does not call `plugin.start`.
+
+Marketplace repositories are also accepted. An interactive terminal opens a searchable picker;
+scripts select namespaces with repeatable `--package` flags:
+
+```sh
+wuko plugin install --global https://github.com/acme/wuko-marketplace
+wuko plugin install --global --package acme https://github.com/acme/wuko-marketplace
+wuko plugin install --global --reinstall --package acme https://github.com/acme/wuko-marketplace
+```
+
+The picker includes only plugins supporting the current OS and architecture. Explicitly selecting
+an incompatible plugin returns a platform-specific error. A non-interactive marketplace install
+without `--package` fails instead of implicitly installing everything. Wuko verifies the
+marketplace's pinned `plugin.json` digest before applying the normal manifest, artifact, and
+handshake checks.
+
+## Create and publish a marketplace plugin
+
+The following walkthrough starts with neither a plugin nor a marketplace. First initialize a
+marketplace repository:
+
+```sh
+mkdir wuko-marketplace
+cd wuko-marketplace
+git init
+wuko marketplace init
+```
+
+This creates a `manifest.json` plus `.wuko/workflows/` and `.wuko/plugin-sources/` source
+directories. Create the example Go plugin next to the marketplace and build its complete release:
+
+```sh
+cd ..
+wuko marketplace plugin init hello
+cd wuko-plugin-hello
+go test ./...
+just release 0.1.0
+```
+
+The generated release helper uses only the Go toolchain and standard library. It cross-compiles
+with CGO disabled for Darwin and Linux on amd64 and arm64, creates deterministic `tar.gz` archives,
+and replaces the placeholder `plugin.json` with the selected version and archive digests:
+
+```text
+wuko-plugin-hello/
+├── plugin.json
+└── dist/
+    ├── wuko-plugin-hello_Darwin_amd64.tar.gz
+    ├── wuko-plugin-hello_Darwin_arm64.tar.gz
+    ├── wuko-plugin-hello_Linux_amd64.tar.gz
+    └── wuko-plugin-hello_Linux_arm64.tar.gz
+```
+
+Import and publish the release:
+
+```sh
+cd ../wuko-marketplace
+wuko marketplace plugin add \
+  --description "A simple uppercase step" \
+  ../wuko-plugin-hello
+wuko marketplace build
+wuko marketplace build --check
+```
+
+`plugin add` accepts the same local, HTTPS, and pinned `github:` sources as direct installation. It
+downloads every declared platform archive, validates its digest and safe executable structure,
+and commits the import atomically without executing any binary. Imported sources and published
+files have separate locations:
+
+```text
+.wuko/plugin-sources/hello/      # maintainer source, including build-only provenance metadata
+plugins/hello/plugin.json        # public release manifest
+plugins/hello/dist/*.tar.gz      # public platform archives
+```
+
+`marketplace build` also continues to package workflows from `.wuko/workflows/`. It preserves
+unchanged files and timestamps and removes a stale generated plugin file only when it still matches
+its previously recorded digest. `--check` performs the same validation and comparison without
+writing; use it in CI.
+
+Commit the imported source, generated catalog, and published files:
+
+```sh
+git add .
+git commit -m "feat: add hello plugin"
+git push
+```
+
+A public GitHub repository can be installed through its normal repository URL. To publish an
+update, build the new release and replace the import transactionally:
+
+```sh
+cd ../wuko-plugin-hello
+just release 0.2.0
+
+cd ../wuko-marketplace
+wuko marketplace plugin update hello ../wuko-plugin-hello
+wuko marketplace build
+wuko marketplace build --check
+```
+
+The fetched namespace must match `hello`. The existing description is preserved unless
+`--description` is supplied; explicitly passing an empty description clears it. Failed validation
+leaves the previous import intact.
+
+Marketplace repositories distribute native executable code. SHA-256 verification protects file
+integrity, but it does not establish publisher identity, make a plugin safe, or provide a sandbox.
+Install plugins only from maintainers you trust.
+
+## Version resolution and conflicts
+
+A marketplace is an installation source, not a runtime version solver. Wuko runs at most one
+plugin process for a namespace during a command and never automatically chooses the newest version.
+
+| Workflow situation | Selected plugin | Conflict behavior |
+| --- | --- | --- |
+| `plugins.acme` declares a source and digest | That exact remote release | Installed project/global versions are ignored |
+| No `plugins.acme` declaration | First valid project, home, config, or `PATH` candidate | An invalid higher-precedence candidate blocks fallback |
+| Multiple workflows declare the same source, digest, and `with` | One shared process | No conflict |
+| Declarations differ by source or digest | None | Command fails with both source identities and abbreviated digests |
+| Declarations use the same release but different `with` | None | Command fails without printing configuration values |
+| Project and global installations both exist | Project installation | Shadowing is intentional; versions are not compared |
+
+An explicit declaration is authoritative and reproducible:
+
+```yaml
+plugins:
+  acme:
+    source: github:acme/wuko-plugin-acme@v1.2.0
+    sha256: 8421e8f400000000000000000000000000000000000000000000000000000000
+    with:
+      endpoint: production
+```
+
+Without that declaration, a namespaced step or executor uses ambient local discovery. A
+marketplace-installed plugin participates exactly like any other local installation. Installed
+manifest version labels are informational during resolution; source and digest establish the
+identity of pinned releases. Incompatible parallel APIs must use different namespaces.
 
 ## Helpers
 

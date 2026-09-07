@@ -1,45 +1,177 @@
 package cmd
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
 	pluginpkg "github.com/up2jj/wuko/plugin"
+	"github.com/up2jj/wuko/tui"
+	"github.com/up2jj/wuko/workflow"
 )
 
 var pluginNamePattern = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 
 func newPluginCmd(deps dependencies) *cobra.Command {
-	command := &cobra.Command{Use: "plugin", Short: "Create and manage executable plugins"}
-	command.AddCommand(newPluginInitCmd(), newPluginInstallCmd(deps), newPluginUninstallCmd(deps))
+	command := &cobra.Command{Use: "plugin", Short: "Install and manage executable plugins"}
+	command.AddCommand(newPluginInstallCmd(deps), newPluginUninstallCmd(deps))
 	return command
 }
 
 func newPluginInstallCmd(deps dependencies) *cobra.Command {
 	var global, reinstall bool
-	command := &cobra.Command{Use: "install SOURCE", Short: "Install a plugin release for the current platform", Args: cobra.ExactArgs(1), RunE: func(command *cobra.Command, args []string) error {
-		cwd, home, _, err := directories(deps)
-		if err != nil {
-			return err
-		}
-		root := filepath.Join(cwd, ".wuko", "plugins")
-		if global {
-			root = filepath.Join(home, ".wuko", "plugins")
-		}
-		marker, err := pluginpkg.Install(command.Context(), args[0], root, reinstall, nil, command.ErrOrStderr())
-		if err != nil {
-			return err
-		}
-		fmt.Fprintf(command.OutOrStdout(), "Installed plugin %s %s in %s\n", marker.Namespace, marker.PluginVersion, filepath.Join(root, marker.Namespace))
-		return nil
+	var packages []string
+	command := &cobra.Command{Use: "install SOURCE", Short: "Install a plugin release or selected marketplace plugins", Example: "  wuko plugin install --package acme https://github.com/acme/wuko-marketplace\n  wuko plugin install --global --reinstall --package acme https://github.com/acme/wuko-marketplace", Args: cobra.ExactArgs(1), RunE: func(command *cobra.Command, args []string) error {
+		return installPlugin(command, deps, args[0], global, reinstall, packages)
 	}}
 	command.Flags().BoolVar(&global, "global", false, "install in the user plugin directory")
 	command.Flags().BoolVar(&reinstall, "reinstall", false, "replace an existing installation")
+	command.Flags().StringArrayVar(&packages, "package", nil, "select a marketplace plugin namespace (repeatable)")
 	return command
+}
+
+func installPlugin(command *cobra.Command, deps dependencies, source string, global, reinstall bool, requested []string) error {
+	cwd, home, _, err := directories(deps)
+	if err != nil {
+		return err
+	}
+	root := filepath.Join(cwd, ".wuko", "plugins")
+	if global {
+		root = filepath.Join(home, ".wuko", "plugins")
+	}
+	if isHTTPSURL(source) {
+		manifest, manifestErr := deps.loader.DiscoverMarketplace(command.Context(), source)
+		if manifestErr == nil {
+			return installPluginMarketplace(command, deps, source, root, reinstall, requested, manifest)
+		}
+		if !errors.Is(manifestErr, workflow.ErrMarketplaceNotFound) {
+			return manifestErr
+		}
+	}
+	if len(requested) > 0 {
+		return fmt.Errorf("--package can only be used when SOURCE is a marketplace")
+	}
+	return installPluginRelease(command, deps, source, "", "", "", root, reinstall)
+}
+
+func installPluginMarketplace(command *cobra.Command, deps dependencies, source, root string, reinstall bool, requested []string, manifest workflow.MarketplaceManifest) error {
+	if len(manifest.Plugins) == 0 {
+		return fmt.Errorf("marketplace %s contains no plugins", source)
+	}
+	selected, err := selectMarketplacePlugins(command, deps, manifest.Plugins, requested)
+	if err != nil || selected == nil {
+		return err
+	}
+	for index, item := range manifest.Plugins {
+		if _, ok := selected[index]; !ok {
+			continue
+		}
+		resolved, err := workflow.ResolveMarketplacePlugin(source, item)
+		if err != nil {
+			return fmt.Errorf("resolving marketplace plugin %q: %w", item.Namespace, err)
+		}
+		if err := installPluginRelease(command, deps, resolved, item.SHA256, item.Namespace, item.PluginVersion, root, reinstall); err != nil {
+			return fmt.Errorf("installing marketplace plugin %q: %w", item.Namespace, err)
+		}
+	}
+	return nil
+}
+
+func installPluginRelease(command *cobra.Command, deps dependencies, source, expectedDigest, expectedNamespace, expectedVersion, root string, reinstall bool) error {
+	var marker pluginpkg.InstallationMarker
+	var err error
+	if expectedNamespace == "" {
+		marker, err = pluginpkg.InstallPinned(command.Context(), source, expectedDigest, root, reinstall, deps.httpClient, command.ErrOrStderr())
+	} else {
+		marker, err = pluginpkg.InstallMarketplace(command.Context(), source, expectedDigest, expectedNamespace, expectedVersion, root, reinstall, deps.httpClient, command.ErrOrStderr())
+	}
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(command.OutOrStdout(), "Installed plugin %s %s in %s\n", marker.Namespace, marker.PluginVersion, filepath.Join(root, marker.Namespace))
+	return err
+}
+
+func selectMarketplacePlugins(command *cobra.Command, deps dependencies, plugins []workflow.MarketplacePluginPackage, requested []string) (map[int]struct{}, error) {
+	if len(requested) > 0 {
+		indexes := make(map[string]int, len(plugins))
+		for index, item := range plugins {
+			indexes[item.Namespace] = index
+		}
+		selected := make(map[int]struct{}, len(requested))
+		for _, namespace := range requested {
+			index, ok := indexes[namespace]
+			if !ok {
+				return nil, fmt.Errorf("marketplace plugin %q was not found", namespace)
+			}
+			if !marketplacePluginSupportsCurrentPlatform(plugins[index]) {
+				return nil, fmt.Errorf("marketplace plugin %q does not support %s/%s", namespace, runtime.GOOS, runtime.GOARCH)
+			}
+			if _, exists := selected[index]; exists {
+				return nil, fmt.Errorf("marketplace plugin %q was selected more than once", namespace)
+			}
+			selected[index] = struct{}{}
+		}
+		return selected, nil
+	}
+	if deps.isInteractive == nil || !deps.isInteractive(command.InOrStdin()) {
+		return nil, fmt.Errorf("marketplace plugin install requires an interactive terminal or at least one --package flag")
+	}
+	var options []tui.Option
+	var indexes []int
+	for index, item := range plugins {
+		if !marketplacePluginSupportsCurrentPlatform(item) {
+			continue
+		}
+		options = append(options, tui.Option{Label: item.Namespace, Description: marketplacePluginDescription(item), Path: item.Path, Value: item})
+		indexes = append(indexes, index)
+	}
+	if len(options) == 0 {
+		return nil, fmt.Errorf("marketplace contains no plugins for %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+	selectMany := deps.selectMany
+	if selectMany == nil {
+		selectMany = tui.SelectMany
+	}
+	chosen, err := selectMany(command.Context(), command.InOrStdin(), command.OutOrStdout(), "Marketplace plugins", options)
+	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("selecting marketplace plugins: %w", err)
+	}
+	selected := make(map[int]struct{}, len(chosen))
+	for _, optionIndex := range chosen {
+		if optionIndex < 0 || optionIndex >= len(indexes) {
+			return nil, fmt.Errorf("marketplace picker returned invalid plugin index %d", optionIndex)
+		}
+		selected[indexes[optionIndex]] = struct{}{}
+	}
+	if len(selected) == 0 {
+		return nil, fmt.Errorf("select at least one marketplace plugin")
+	}
+	return selected, nil
+}
+
+func marketplacePluginSupportsCurrentPlatform(item workflow.MarketplacePluginPackage) bool {
+	return slices.ContainsFunc(item.Platforms, func(platform workflow.MarketplacePlatform) bool {
+		return platform.OS == runtime.GOOS && platform.Arch == runtime.GOARCH
+	})
+}
+
+func marketplacePluginDescription(item workflow.MarketplacePluginPackage) string {
+	version := "plugin " + item.PluginVersion
+	if item.Description == "" {
+		return version
+	}
+	return item.Description + " • " + version
 }
 
 func newPluginUninstallCmd(deps dependencies) *cobra.Command {
@@ -85,7 +217,7 @@ func newPluginUninstallCmd(deps dependencies) *cobra.Command {
 }
 
 func newPluginInitCmd() *cobra.Command {
-	return &cobra.Command{Use: "init NAMESPACE [DIRECTORY]", Short: "Create a standalone Go executable plugin", Args: cobra.RangeArgs(1, 2), RunE: func(command *cobra.Command, args []string) error {
+	return &cobra.Command{Use: "init NAMESPACE [DIRECTORY]", Short: "Create a standalone Go executable plugin", Example: "  wuko marketplace plugin init hello\n  wuko marketplace plugin init hello ./plugins/hello", Args: cobra.RangeArgs(1, 2), RunE: func(command *cobra.Command, args []string) error {
 		namespace := args[0]
 		if !pluginNamePattern.MatchString(namespace) {
 			return fmt.Errorf("invalid plugin namespace %q", namespace)
@@ -192,8 +324,10 @@ test:
 vet:
 	go vet ./...
 fmt:
-	gofmt -w *.go
+	gofmt -w *.go tools/release/*.go
 check: fmt vet test
+release version:
+	go run ./tools/release -version "{{version}}"
 install: build
 	mkdir -p "${HOME}/.wuko/plugins/{{NS}}"
 	cp wuko-plugin-{{NS}} "${HOME}/.wuko/plugins/{{NS}}/"
@@ -224,7 +358,9 @@ A standard-library-only Wuko JSONL plugin with a shared ` + "`{{NS}}_slug`" + ` 
 
 The executable keeps stdin/stdout exclusively for protocol frames; diagnostics go to stderr. Start and Stop are command-wide hooks. Edit lifecycle.go to use values from plugins.{{NS}}.with.
 
-Publish tar.gz archives whose executable entry is named wuko-plugin-{{NS}}, then replace the example digests in plugin.json. Wuko verifies both the manifest and selected archive before launch.
+The runtime contract is language-neutral. See [Wuko plugin protocol v1](https://github.com/up2jj/wuko/blob/main/docs/plugin-protocol.md) for message envelopes, methods, events, cancellation, and lifecycle ordering.
+
+Run ` + "`just release 0.1.0`" + ` to cross-compile deterministic Darwin/Linux archives for amd64/arm64 and generate plugin.json. From a marketplace repository, import this release with ` + "`wuko marketplace plugin add ../wuko-plugin-{{NS}}`" + `. Wuko verifies both the manifest and selected archive before launch.
 `,
 		"plugin.json": `{
   "version": 1,
@@ -238,5 +374,74 @@ Publish tar.gz archives whose executable entry is named wuko-plugin-{{NS}}, then
     {"os":"linux","arch":"arm64","path":"dist/wuko-plugin-{{NS}}_Linux_arm64.tar.gz","format":"tar.gz","entry":"wuko-plugin-{{NS}}","sha256":"REPLACE_WITH_64_CHARACTER_SHA256"}
   ]
 }
-`}
+`,
+		"tools/release/main.go": `package main
+
+import (
+	"archive/tar"
+	"compress/gzip"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
+)
+
+const namespace = "{{NS}}"
+
+type artifact struct { OS string ` + "`json:\"os\"`" + `; Arch string ` + "`json:\"arch\"`" + `; Path string ` + "`json:\"path\"`" + `; Format string ` + "`json:\"format\"`" + `; Entry string ` + "`json:\"entry\"`" + `; SHA256 string ` + "`json:\"sha256\"`" + ` }
+type manifest struct { Version int ` + "`json:\"version\"`" + `; Namespace string ` + "`json:\"namespace\"`" + `; PluginVersion string ` + "`json:\"plugin_version\"`" + `; Protocol string ` + "`json:\"protocol\"`" + `; Artifacts []artifact ` + "`json:\"artifacts\"`" + ` }
+type target struct { os, arch, label string }
+
+func main() {
+	version := flag.String("version", "", "plugin version")
+	flag.Parse()
+	if strings.TrimSpace(*version) == "" || strings.TrimSpace(*version) != *version { fatal(fmt.Errorf("version must be non-empty without surrounding whitespace")) }
+	cwd, err := os.Getwd(); if err != nil { fatal(err) }
+	stage, err := os.MkdirTemp(cwd, ".release-*"); if err != nil { fatal(err) }; defer os.RemoveAll(stage)
+	targets := []target{{"darwin","amd64","Darwin"},{"darwin","arm64","Darwin"},{"linux","amd64","Linux"},{"linux","arm64","Linux"}}
+	result := manifest{Version:1, Namespace:namespace, PluginVersion:*version, Protocol:"wuko.plugin/v1"}
+	for _, item := range targets {
+		binary := filepath.Join(stage, "bin", item.os+"-"+item.arch, "wuko-plugin-"+namespace)
+		if err := os.MkdirAll(filepath.Dir(binary), 0755); err != nil { fatal(err) }
+		command := exec.Command("go", "build", "-trimpath", "-buildvcs=false", "-o", binary, ".")
+		command.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS="+item.os, "GOARCH="+item.arch)
+		command.Stdout, command.Stderr = os.Stdout, os.Stderr
+		if err := command.Run(); err != nil { fatal(fmt.Errorf("building %s/%s: %w", item.os, item.arch, err)) }
+		name := "wuko-plugin-"+namespace+"_"+item.label+"_"+item.arch+".tar.gz"
+		relative := filepath.ToSlash(filepath.Join("dist", name)); archivePath := filepath.Join(stage, filepath.FromSlash(relative))
+		if err := os.MkdirAll(filepath.Dir(archivePath), 0755); err != nil { fatal(err) }
+		if err := writeArchive(binary, archivePath); err != nil { fatal(err) }
+		data, err := os.ReadFile(archivePath); if err != nil { fatal(err) }; sum := sha256.Sum256(data)
+		result.Artifacts = append(result.Artifacts, artifact{OS:item.os, Arch:item.arch, Path:relative, Format:"tar.gz", Entry:"wuko-plugin-"+namespace, SHA256:hex.EncodeToString(sum[:])})
+	}
+	manifestPath := filepath.Join(stage, "plugin.json"); file, err := os.Create(manifestPath); if err != nil { fatal(err) }
+	encoder := json.NewEncoder(file); encoder.SetIndent("", "  "); if err := encoder.Encode(result); err != nil { file.Close(); fatal(err) }; if err := file.Close(); err != nil { fatal(err) }
+	if err := replace(filepath.Join(cwd,"dist"), filepath.Join(stage,"dist")); err != nil { fatal(err) }
+	if err := replace(filepath.Join(cwd,"plugin.json"), manifestPath); err != nil { fatal(err) }
+	fmt.Printf("released plugin %s %s for %d platforms\n", namespace, *version, len(targets))
+}
+
+func writeArchive(binary, destination string) error {
+	input, err := os.Open(binary); if err != nil { return err }; defer input.Close()
+	info, err := input.Stat(); if err != nil { return err }
+	output, err := os.Create(destination); if err != nil { return err }
+	gzipWriter := gzip.NewWriter(output); gzipWriter.Header.ModTime = time.Unix(0,0); gzipWriter.Header.OS = 255
+	tarWriter := tar.NewWriter(gzipWriter)
+	header := &tar.Header{Name:"wuko-plugin-"+namespace, Mode:0755, Size:info.Size(), ModTime:time.Unix(0,0), AccessTime:time.Unix(0,0), ChangeTime:time.Unix(0,0), Format:tar.FormatPAX}
+	if err := tarWriter.WriteHeader(header); err != nil { output.Close(); return err }
+	if _, err := io.Copy(tarWriter, input); err != nil { output.Close(); return err }
+	if err := tarWriter.Close(); err != nil { output.Close(); return err }; if err := gzipWriter.Close(); err != nil { output.Close(); return err }; return output.Close()
+}
+
+func replace(target, staged string) error { if err := os.RemoveAll(target); err != nil { return err }; return os.Rename(staged, target) }
+func fatal(err error) { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
+`,
+	}
 }

@@ -1,19 +1,24 @@
 package cmd
 
 import (
+	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
+	pluginpkg "github.com/up2jj/wuko/plugin"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/tui"
 	"github.com/up2jj/wuko/workflow"
@@ -30,6 +35,13 @@ func TestMarketplaceInitAndIncrementalBuild(t *testing.T) {
 	if err := command.ExecuteContext(t.Context()); err != nil {
 		t.Fatal(err)
 	}
+	pluginSource := filepath.Join(t.TempDir(), "plugin")
+	writeMarketplacePluginRelease(t, pluginSource, "acme", "1.0.0")
+	command = marketplaceTestCommand(root, home, nil)
+	command.SetArgs([]string{"marketplace", "plugin", "add", pluginSource})
+	if err := command.ExecuteContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
 	command = marketplaceTestCommand(root, home, nil)
 	command.SetArgs([]string{"marketplace", "build"})
 	if err := command.ExecuteContext(t.Context()); err != nil {
@@ -43,7 +55,7 @@ func TestMarketplaceInitAndIncrementalBuild(t *testing.T) {
 	if err := json.Unmarshal(data, &manifest); err != nil {
 		t.Fatal(err)
 	}
-	if manifest.Version != workflow.MarketplaceManifestVersion || len(manifest.Packages) != 2 {
+	if manifest.Version != workflow.MarketplaceManifestVersion || len(manifest.Packages) != 2 || len(manifest.Plugins) != 1 {
 		t.Fatalf("manifest = %#v", manifest)
 	}
 	if manifest.Packages[0].PackageVersion != "1.0.0" || manifest.Packages[1].PackageVersion != "1.0.0" {
@@ -140,6 +152,225 @@ func TestMarketplaceInitAndIncrementalBuild(t *testing.T) {
 	command.SetArgs([]string{"marketplace", "init"})
 	if err := command.ExecuteContext(t.Context()); err == nil || !strings.Contains(err.Error(), "already exists") {
 		t.Fatalf("second init error = %v", err)
+	}
+}
+
+func TestMarketplacePluginAddBuildAndCheck(t *testing.T) {
+	root, home := t.TempDir(), t.TempDir()
+	source := filepath.Join(t.TempDir(), "plugin")
+	writeMarketplacePluginRelease(t, source, "acme", "1.0.0")
+
+	command := marketplaceTestCommand(root, home, nil)
+	command.SetArgs([]string{"marketplace", "init"})
+	if err := command.ExecuteContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	command = marketplaceTestCommand(root, home, nil)
+	command.SetArgs([]string{"marketplace", "plugin", "add", "--description", "Acme tools", source})
+	if err := command.ExecuteContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	imported := filepath.Join(root, ".wuko", "plugin-sources", "acme")
+	if _, err := pluginpkg.LoadBundle(imported); err != nil {
+		t.Fatalf("imported bundle: %v", err)
+	}
+	// An import must never land in the local plugin installation root: it holds no executable, so
+	// local discovery would fail for the namespace here and in every directory below.
+	if _, err := os.Stat(filepath.Join(root, ".wuko", "plugins")); !os.IsNotExist(err) {
+		t.Fatalf("import used the local plugin installation root: %v", err)
+	}
+
+	command = marketplaceTestCommand(root, home, nil)
+	command.SetArgs([]string{"marketplace", "build"})
+	if err := command.ExecuteContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(root, "manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest workflow.MarketplaceManifest
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Version != workflow.MarketplaceManifestVersion || len(manifest.Plugins) != 1 || manifest.Plugins[0].Namespace != "acme" || manifest.Plugins[0].Description != "Acme tools" {
+		t.Fatalf("manifest = %#v", manifest)
+	}
+	if _, err := pluginpkg.LoadBundle(filepath.Join(root, "plugins", "acme")); err != nil {
+		t.Fatalf("published bundle: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "plugins", "acme", marketplacePluginSourceName)); !os.IsNotExist(err) {
+		t.Fatalf("source metadata was published: %v", err)
+	}
+
+	command = marketplaceTestCommand(root, home, nil)
+	command.SetArgs([]string{"marketplace", "build", "--check"})
+	if err := command.ExecuteContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	metadata, err := readMarketplacePluginSource(imported)
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadata.Description = "Changed"
+	if err := writeJSONAtomically(filepath.Join(imported, marketplacePluginSourceName), metadata); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(filepath.Join(root, "manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	command = marketplaceTestCommand(root, home, nil)
+	command.SetArgs([]string{"marketplace", "build", "--check"})
+	if err := command.ExecuteContext(t.Context()); err == nil || !strings.Contains(err.Error(), "not up to date") {
+		t.Fatalf("check error = %v", err)
+	}
+	after, err := os.ReadFile(filepath.Join(root, "manifest.json"))
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatalf("check modified manifest: %v", err)
+	}
+}
+
+func TestMarketplacePluginUpdateRequiresMatchingNamespaceAndPreservesImport(t *testing.T) {
+	root, home := t.TempDir(), t.TempDir()
+	acme := filepath.Join(t.TempDir(), "acme")
+	other := filepath.Join(t.TempDir(), "other")
+	writeMarketplacePluginRelease(t, acme, "acme", "1.0.0")
+	writeMarketplacePluginRelease(t, other, "other", "2.0.0")
+	command := marketplaceTestCommand(root, home, nil)
+	command.SetArgs([]string{"marketplace", "plugin", "add", acme})
+	if err := command.ExecuteContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	manifestBefore, err := os.ReadFile(filepath.Join(root, ".wuko", "plugin-sources", "acme", "plugin.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	command = marketplaceTestCommand(root, home, nil)
+	command.SetArgs([]string{"marketplace", "plugin", "update", "acme", other})
+	if err := command.ExecuteContext(t.Context()); err == nil || !strings.Contains(err.Error(), "conflicts") {
+		t.Fatalf("update error = %v", err)
+	}
+	manifestAfter, err := os.ReadFile(filepath.Join(root, ".wuko", "plugin-sources", "acme", "plugin.json"))
+	if err != nil || !bytes.Equal(manifestBefore, manifestAfter) {
+		t.Fatalf("failed update changed import: %v", err)
+	}
+}
+
+func TestMarketplacePluginImportRejectsCorruptionAndDuplicatesTransactionally(t *testing.T) {
+	root, home := t.TempDir(), t.TempDir()
+	source := filepath.Join(t.TempDir(), "plugin")
+	writeMarketplacePluginRelease(t, source, "acme", "1.0.0")
+	bundle, err := pluginpkg.LoadBundle(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	corruptPath := filepath.Join(source, filepath.FromSlash(bundle.Manifest.Artifacts[0].Path))
+	if err := os.WriteFile(corruptPath, []byte("corrupt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	command := marketplaceTestCommand(root, home, nil)
+	command.SetArgs([]string{"marketplace", "plugin", "add", source})
+	if err := command.ExecuteContext(t.Context()); err == nil || !strings.Contains(err.Error(), "sha256 mismatch") {
+		t.Fatalf("corrupt import error = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".wuko", "plugin-sources", "acme")); !os.IsNotExist(err) {
+		t.Fatalf("failed import created a target: %v", err)
+	}
+
+	writeMarketplacePluginRelease(t, source, "acme", "1.0.0")
+	command = marketplaceTestCommand(root, home, nil)
+	command.SetArgs([]string{"marketplace", "plugin", "add", "--description", "Acme tools", source})
+	if err := command.ExecuteContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(filepath.Join(root, ".wuko", "plugin-sources", "acme", "plugin.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	command = marketplaceTestCommand(root, home, nil)
+	command.SetArgs([]string{"marketplace", "plugin", "add", source})
+	if err := command.ExecuteContext(t.Context()); err == nil || !strings.Contains(err.Error(), "already imported") {
+		t.Fatalf("duplicate import error = %v", err)
+	}
+	after, err := os.ReadFile(filepath.Join(root, ".wuko", "plugin-sources", "acme", "plugin.json"))
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatalf("duplicate import changed the target: %v", err)
+	}
+
+	writeMarketplacePluginRelease(t, source, "acme", "2.0.0")
+	command = marketplaceTestCommand(root, home, nil)
+	command.SetArgs([]string{"marketplace", "plugin", "update", "acme", source})
+	if err := command.ExecuteContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	metadata, err := readMarketplacePluginSource(filepath.Join(root, ".wuko", "plugin-sources", "acme"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if metadata.Description != "Acme tools" {
+		t.Fatalf("update description = %q", metadata.Description)
+	}
+}
+
+func TestMarketplaceBuildRemovesOnlyUnmodifiedStalePluginArtifacts(t *testing.T) {
+	root, home := t.TempDir(), t.TempDir()
+	source := filepath.Join(t.TempDir(), "plugin")
+	writeMarketplacePluginRelease(t, source, "acme", "1.0.0")
+	command := marketplaceTestCommand(root, home, nil)
+	command.SetArgs([]string{"marketplace", "plugin", "add", source})
+	if err := command.ExecuteContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	command = marketplaceTestCommand(root, home, nil)
+	command.SetArgs([]string{"marketplace", "build"})
+	if err := command.ExecuteContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	imported := filepath.Join(root, ".wuko", "plugin-sources", "acme")
+	bundle, err := pluginpkg.LoadBundle(imported)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldRelative := bundle.Manifest.Artifacts[0].Path
+	oldPublished := filepath.Join(root, "plugins", "acme", filepath.FromSlash(oldRelative))
+	newRelative := "dist/replacement.tar.gz"
+	if err := os.Rename(filepath.Join(imported, filepath.FromSlash(oldRelative)), filepath.Join(imported, filepath.FromSlash(newRelative))); err != nil {
+		t.Fatal(err)
+	}
+	bundle.Manifest.Artifacts[0].Path = newRelative
+	data, err := json.MarshalIndent(bundle.Manifest, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(imported, "plugin.json"), append(data, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	command = marketplaceTestCommand(root, home, nil)
+	command.SetArgs([]string{"marketplace", "build"})
+	if err := command.ExecuteContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(oldPublished); !os.IsNotExist(err) {
+		t.Fatalf("stale artifact remains: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "plugins", "acme", filepath.FromSlash(newRelative))); err != nil {
+		t.Fatalf("replacement artifact is missing: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(root, "plugins", "acme", filepath.FromSlash(newRelative)), []byte("maintainer edit"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(imported); err != nil {
+		t.Fatal(err)
+	}
+	command = marketplaceTestCommand(root, home, nil)
+	command.SetArgs([]string{"marketplace", "build"})
+	if err := command.ExecuteContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := os.ReadFile(filepath.Join(root, "plugins", "acme", filepath.FromSlash(newRelative))); err != nil || string(data) != "maintainer edit" {
+		t.Fatalf("modified stale artifact was removed: %q, %v", data, err)
 	}
 }
 
@@ -422,4 +653,52 @@ func writeMarketplacePackage(t *testing.T, directory, name, description, default
 
 func commandTestResponse(status int, body string) *http.Response {
 	return &http.Response{StatusCode: status, Status: fmt.Sprintf("%d %s", status, http.StatusText(status)), Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}
+}
+
+func writeMarketplacePluginRelease(t *testing.T, directory, namespace, version string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(directory, "dist"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	platforms := []workflow.MarketplacePlatform{{OS: runtime.GOOS, Arch: runtime.GOARCH}, {OS: "linux", Arch: "arm64"}}
+	if runtime.GOOS == "linux" && runtime.GOARCH == "arm64" {
+		platforms[1] = workflow.MarketplacePlatform{OS: "darwin", Arch: "amd64"}
+	}
+	manifest := pluginpkg.Manifest{Version: 1, Namespace: namespace, PluginVersion: version, Protocol: pluginpkg.Protocol}
+	for _, platform := range platforms {
+		name := platform.OS + "-" + platform.Arch + ".tar.gz"
+		archive := pluginTestArchive(t, "wuko-plugin-"+namespace, []byte("binary"))
+		if err := os.WriteFile(filepath.Join(directory, "dist", name), archive, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		digest := sha256.Sum256(archive)
+		manifest.Artifacts = append(manifest.Artifacts, pluginpkg.Artifact{OS: platform.OS, Arch: platform.Arch, Path: "dist/" + name, Format: "tar.gz", Entry: "wuko-plugin-" + namespace, SHA256: fmt.Sprintf("%x", digest[:])})
+	}
+	data, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "plugin.json"), append(data, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func pluginTestArchive(t *testing.T, name string, data []byte) []byte {
+	t.Helper()
+	var result bytes.Buffer
+	gzipWriter := gzip.NewWriter(&result)
+	tarWriter := tar.NewWriter(gzipWriter)
+	if err := tarWriter.WriteHeader(&tar.Header{Name: name, Mode: 0o755, Size: int64(len(data)), Typeflag: tar.TypeReg}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tarWriter.Write(data); err != nil {
+		t.Fatal(err)
+	}
+	if err := tarWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gzipWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return result.Bytes()
 }

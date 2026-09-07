@@ -126,6 +126,41 @@ func TestPluginHelperDeclarations(t *testing.T) {
 	}
 }
 
+func TestPluginDeclarationConflictsReportIdentityWithoutConfigurationValues(t *testing.T) {
+	manager := NewManager(Config{})
+	digestA := strings.Repeat("a", 64)
+	digestB := strings.Repeat("b", 64)
+	if err := manager.configureSources(map[string]workflow.PluginSource{"acme": {Source: "github:acme/plugin@v1", SHA256: digestA, With: map[string]any{"token": "first-secret"}}}); err != nil {
+		t.Fatal(err)
+	}
+	err := manager.configureSources(map[string]workflow.PluginSource{"acme": {Source: "github:acme/plugin@v2", SHA256: digestB, With: map[string]any{"token": "second-secret"}}})
+	if err == nil || !strings.Contains(err.Error(), "github:acme/plugin@v1:plugin.json") || !strings.Contains(err.Error(), digestA[:12]) || strings.Contains(err.Error(), "secret") {
+		t.Fatalf("source conflict error = %v", err)
+	}
+
+	manager = NewManager(Config{})
+	base := workflow.PluginSource{Source: "github:acme/plugin@v1", SHA256: digestA, With: map[string]any{"token": "first-secret"}}
+	if err := manager.configureSources(map[string]workflow.PluginSource{"acme": base}); err != nil {
+		t.Fatal(err)
+	}
+	base.With = map[string]any{"token": "second-secret"}
+	err = manager.configureSources(map[string]workflow.PluginSource{"acme": base})
+	if err == nil || !strings.Contains(err.Error(), "conflicting workflow configuration") || strings.Contains(err.Error(), "secret") {
+		t.Fatalf("configuration conflict error = %v", err)
+	}
+}
+
+func TestExecutorRunResultUsesLanguageNeutralFieldNames(t *testing.T) {
+	var wire executorRunResult
+	if err := json.Unmarshal([]byte(`{"stdout":"out","stderr":"err","exit_code":7,"stdout_truncated":true,"stderr_truncated":true}`), &wire); err != nil {
+		t.Fatal(err)
+	}
+	result := wire.processResult()
+	if result.Stdout != "out" || result.Stderr != "err" || result.ExitCode != 7 || !result.StdoutTruncated || !result.StderrTruncated {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
 type memoryTransport struct{ manifest, archive []byte }
 
 type synchronizedBuffer struct {

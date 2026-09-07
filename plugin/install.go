@@ -27,10 +27,34 @@ type InstallationMarker struct {
 }
 
 func Install(ctx context.Context, source, destinationRoot string, reinstall bool, clientHTTP *http.Client, stderr io.Writer) (InstallationMarker, error) {
-	release, err := FetchRelease(ctx, source, "", clientHTTP)
+	return InstallPinned(ctx, source, "", destinationRoot, reinstall, clientHTTP, stderr)
+}
+
+// InstallPinned installs a plugin and verifies the release manifest against expectedManifestDigest.
+func InstallPinned(ctx context.Context, source, expectedManifestDigest, destinationRoot string, reinstall bool, clientHTTP *http.Client, stderr io.Writer) (InstallationMarker, error) {
+	release, err := FetchRelease(ctx, source, expectedManifestDigest, clientHTTP)
 	if err != nil {
 		return InstallationMarker{}, err
 	}
+	return installRelease(ctx, release, destinationRoot, reinstall, stderr)
+}
+
+// InstallMarketplace installs a catalog-pinned release after checking its catalog identity.
+func InstallMarketplace(ctx context.Context, source, expectedManifestDigest, expectedNamespace, expectedVersion, destinationRoot string, reinstall bool, clientHTTP *http.Client, stderr io.Writer) (InstallationMarker, error) {
+	release, err := FetchRelease(ctx, source, expectedManifestDigest, clientHTTP)
+	if err != nil {
+		return InstallationMarker{}, err
+	}
+	if release.Manifest.Namespace != expectedNamespace {
+		return InstallationMarker{}, fmt.Errorf("marketplace namespace %q conflicts with plugin manifest namespace %q", expectedNamespace, release.Manifest.Namespace)
+	}
+	if release.Manifest.PluginVersion != expectedVersion {
+		return InstallationMarker{}, fmt.Errorf("marketplace version %q conflicts with plugin manifest version %q", expectedVersion, release.Manifest.PluginVersion)
+	}
+	return installRelease(ctx, release, destinationRoot, reinstall, stderr)
+}
+
+func installRelease(ctx context.Context, release Release, destinationRoot string, reinstall bool, stderr io.Writer) (InstallationMarker, error) {
 	destination := filepath.Join(destinationRoot, release.Manifest.Namespace)
 	if _, err := os.Stat(destination); err == nil && !reinstall {
 		return InstallationMarker{}, fmt.Errorf("plugin %q is already installed; use --reinstall", release.Manifest.Namespace)

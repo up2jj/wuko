@@ -14,15 +14,16 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/up2jj/wuko/diagnostic"
+	pluginpkg "github.com/up2jj/wuko/plugin"
 	"github.com/up2jj/wuko/workflow"
 )
 
 func newMarketplaceCmd(deps dependencies) *cobra.Command {
 	marketplace := &cobra.Command{
 		Use:   "marketplace",
-		Short: "Create and build workflow marketplaces",
+		Short: "Create and build workflow and plugin marketplaces",
 	}
-	marketplace.AddCommand(newMarketplaceInitCmd(deps), newMarketplaceBuildCmd(deps))
+	marketplace.AddCommand(newMarketplaceInitCmd(deps), newMarketplacePluginCmd(deps), newMarketplaceBuildCmd(deps))
 	return marketplace
 }
 
@@ -42,7 +43,12 @@ func newMarketplaceInitCmd(deps dependencies) *cobra.Command {
 			} else if !os.IsNotExist(err) {
 				return fmt.Errorf("checking marketplace manifest %s: %w", manifestPath, err)
 			}
-			manifest := workflow.MarketplaceManifest{Version: workflow.MarketplaceManifestVersion, Packages: []workflow.MarketplacePackage{}}
+			for _, directory := range []string{filepath.Join(cwd, ".wuko", "workflows"), marketplacePluginSourceRoot(cwd)} {
+				if err := os.MkdirAll(directory, 0o755); err != nil {
+					return fmt.Errorf("creating marketplace source directory %s: %w", directory, err)
+				}
+			}
+			manifest := workflow.MarketplaceManifest{Version: workflow.MarketplaceManifestVersion, Packages: []workflow.MarketplacePackage{}, Plugins: []workflow.MarketplacePluginPackage{}}
 			if err := writeJSONAtomically(manifestPath, manifest); err != nil {
 				return err
 			}
@@ -53,10 +59,12 @@ func newMarketplaceInitCmd(deps dependencies) *cobra.Command {
 }
 
 func newMarketplaceBuildCmd(deps dependencies) *cobra.Command {
-	return &cobra.Command{
-		Use:   "build",
-		Short: "Discover packages and rebuild the marketplace manifest",
-		Args:  cobra.NoArgs,
+	var check bool
+	command := &cobra.Command{
+		Use:     "build",
+		Short:   "Publish workflows and plugins and rebuild the marketplace manifest",
+		Example: "  wuko marketplace build\n  wuko marketplace build --check",
+		Args:    cobra.NoArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
 			cwd, err := deps.cwd()
 			if err != nil {
@@ -68,6 +76,13 @@ func newMarketplaceBuildCmd(deps dependencies) *cobra.Command {
 			}
 			defer build.cleanup()
 			manifestPath := filepath.Join(cwd, "manifest.json")
+			if check {
+				if build.changed {
+					return fmt.Errorf("marketplace is not up to date; run wuko marketplace build")
+				}
+				_, err = fmt.Fprintf(command.OutOrStdout(), "marketplace is up to date with %s and %s\n", countMarketplaceItems(len(build.manifest.Packages), "workflow package"), countMarketplaceItems(len(build.manifest.Plugins), "plugin"))
+				return err
+			}
 			if build.changed {
 				if err := publishMarketplaceBuild(cwd, manifestPath, build); err != nil {
 					return err
@@ -77,10 +92,21 @@ func newMarketplaceBuildCmd(deps dependencies) *cobra.Command {
 			if !build.changed {
 				message = "marketplace is already up to date"
 			}
-			_, err = fmt.Fprintf(command.OutOrStdout(), "%s with %d packages in %s\n", message, len(build.manifest.Packages), manifestPath)
+			_, err = fmt.Fprintf(command.OutOrStdout(), "%s with %s and %s in %s\n", message, countMarketplaceItems(len(build.manifest.Packages), "workflow package"), countMarketplaceItems(len(build.manifest.Plugins), "plugin"), manifestPath)
 			return err
 		},
 	}
+	command.Flags().BoolVar(&check, "check", false, "fail when generated marketplace files are not up to date")
+	return command
+}
+
+// countMarketplaceItems renders a count with its noun, so a marketplace holding
+// exactly one plugin does not report "1 plugins".
+func countMarketplaceItems(count int, noun string) string {
+	if count == 1 {
+		return fmt.Sprintf("%d %s", count, noun)
+	}
+	return fmt.Sprintf("%d %ss", count, noun)
 }
 
 type marketplaceBuild struct {
@@ -237,26 +263,31 @@ func buildMarketplaceManifest(cwd string, loader *workflow.Loader, reporter diag
 		}
 	}()
 	workflowRoot := filepath.Join(cwd, ".wuko", "workflows")
-	manifest := workflow.MarketplaceManifest{Version: workflow.MarketplaceManifestVersion, Packages: []workflow.MarketplacePackage{}}
+	manifest := workflow.MarketplaceManifest{Version: workflow.MarketplaceManifestVersion, Packages: []workflow.MarketplacePackage{}, Plugins: []workflow.MarketplacePluginPackage{}}
 	manifestPath := filepath.Join(cwd, "manifest.json")
 	previous, hasPrevious, err := readMarketplaceManifest(manifestPath)
 	if err != nil {
 		return marketplaceBuild{}, err
 	}
-	if _, err := os.Stat(workflowRoot); err != nil {
-		if os.IsNotExist(err) {
-			result.manifest = manifest
-			result.changed = !hasPrevious || !reflect.DeepEqual(previous, manifest)
-			if result.changed {
-				result.stale = staleMarketplaceArchives(cwd, previous, manifest)
-			}
-			return result, nil
+	ensureStaging := func() error {
+		if result.stagingDir != "" {
+			return nil
 		}
-		return marketplaceBuild{}, fmt.Errorf("checking workflow directory %s: %w", workflowRoot, err)
+		result.stagingDir, err = os.MkdirTemp(cwd, ".wuko-marketplace-build-*")
+		if err != nil {
+			return fmt.Errorf("creating marketplace staging directory: %w", err)
+		}
+		cleanupDir = result.stagingDir
+		return nil
 	}
-	sourcePackages, err := discoverMarketplacePackages(workflowRoot)
-	if err != nil {
-		return marketplaceBuild{}, err
+	var sourcePackages []marketplaceSourcePackage
+	if _, statErr := os.Stat(workflowRoot); statErr == nil {
+		sourcePackages, err = discoverMarketplacePackages(workflowRoot)
+		if err != nil {
+			return marketplaceBuild{}, err
+		}
+	} else if !os.IsNotExist(statErr) {
+		return marketplaceBuild{}, fmt.Errorf("checking workflow directory %s: %w", workflowRoot, statErr)
 	}
 	seenNames := make(map[string]string)
 	previousBySource := make(map[string]workflow.MarketplacePackage, len(previous.Packages))
@@ -296,12 +327,8 @@ func buildMarketplaceManifest(cwd string, loader *workflow.Loader, reporter diag
 		if reused && old.SourceSHA256 == sourceDigest && old.Path == archivePath && old.Format == item.Format && old.Entry == item.Entry && fileDigestMatches(archiveFile, old.SHA256) {
 			item.SHA256 = old.SHA256
 		} else {
-			if result.stagingDir == "" {
-				result.stagingDir, err = os.MkdirTemp(cwd, ".wuko-marketplace-build-*")
-				if err != nil {
-					return marketplaceBuild{}, fmt.Errorf("creating marketplace staging directory: %w", err)
-				}
-				cleanupDir = result.stagingDir
+			if err := ensureStaging(); err != nil {
+				return marketplaceBuild{}, err
 			}
 			stagedArchive := filepath.Join(result.stagingDir, definition.Name+".tar.gz")
 			_, archiveDigest, err := workflow.BuildWorkflowPackage(sourcePackage.directory, stagedArchive)
@@ -313,18 +340,130 @@ func buildMarketplaceManifest(cwd string, loader *workflow.Loader, reporter diag
 		}
 		manifest.Packages = append(manifest.Packages, item)
 	}
+	published, err := addMarketplacePlugins(cwd, &manifest, previous, &result, ensureStaging)
+	if err != nil {
+		return marketplaceBuild{}, err
+	}
 	slices.SortStableFunc(manifest.Packages, func(a, b workflow.MarketplacePackage) int {
 		if comparison := strings.Compare(a.Path, b.Path); comparison != 0 {
 			return comparison
 		}
 		return strings.Compare(a.Name, b.Name)
 	})
+	slices.SortStableFunc(manifest.Plugins, func(a, b workflow.MarketplacePluginPackage) int {
+		return strings.Compare(a.Namespace, b.Namespace)
+	})
+	if err := workflow.ValidateMarketplaceManifest(manifest); err != nil {
+		return marketplaceBuild{}, fmt.Errorf("generated marketplace manifest is invalid: %w", err)
+	}
 	result.manifest = manifest
 	result.changed = !hasPrevious || !reflect.DeepEqual(previous, manifest) || len(result.replacements) > 0
 	if result.changed {
-		result.stale = staleMarketplaceArchives(cwd, previous, manifest)
+		result.stale = staleMarketplaceFiles(cwd, previous, manifest, published)
 	}
 	return result, nil
+}
+
+// addMarketplacePlugins appends every imported plugin release to manifest and returns the complete
+// set of published file paths it is responsible for, so stale detection never has to reload and
+// revalidate the same bundles.
+func addMarketplacePlugins(cwd string, manifest *workflow.MarketplaceManifest, previous workflow.MarketplaceManifest, result *marketplaceBuild, ensureStaging func() error) (map[string]struct{}, error) {
+	published := make(map[string]struct{})
+	root := marketplacePluginSourceRoot(cwd)
+	entries, err := os.ReadDir(root)
+	if os.IsNotExist(err) {
+		return published, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading marketplace plugin directory %s: %w", root, err)
+	}
+	previousBySource := make(map[string]workflow.MarketplacePluginPackage, len(previous.Plugins))
+	for _, item := range previous.Plugins {
+		previousBySource[item.Source] = item
+	}
+	for _, entry := range entries {
+		directory := filepath.Join(root, entry.Name())
+		if strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		if entry.Type()&os.ModeSymlink != 0 || !entry.IsDir() {
+			return nil, fmt.Errorf("marketplace plugin entry %s is not a directory", directory)
+		}
+		if !workflow.ValidPluginNamespace(entry.Name()) {
+			return nil, fmt.Errorf("marketplace plugin directory has invalid namespace %q", entry.Name())
+		}
+		bundle, err := pluginpkg.LoadBundle(directory)
+		if err != nil {
+			return nil, fmt.Errorf("loading marketplace plugin %s: %w", entry.Name(), err)
+		}
+		if bundle.Manifest.Namespace != entry.Name() {
+			return nil, fmt.Errorf("marketplace plugin directory %q conflicts with manifest namespace %q", entry.Name(), bundle.Manifest.Namespace)
+		}
+		metadata, err := readMarketplacePluginSource(directory)
+		if err != nil {
+			return nil, fmt.Errorf("loading marketplace plugin %s: %w", entry.Name(), err)
+		}
+		sourcePath, err := filepath.Rel(cwd, directory)
+		if err != nil {
+			return nil, fmt.Errorf("relating marketplace plugin %s: %w", entry.Name(), err)
+		}
+		sourcePath = filepath.ToSlash(sourcePath)
+		publishedManifest := filepath.ToSlash(filepath.Join("plugins", entry.Name(), "plugin.json"))
+		platforms := make([]workflow.MarketplacePlatform, 0, len(bundle.Manifest.Artifacts))
+		for _, artifact := range bundle.Manifest.Artifacts {
+			platforms = append(platforms, workflow.MarketplacePlatform{OS: artifact.OS, Arch: artifact.Arch})
+		}
+		slices.SortStableFunc(platforms, func(a, b workflow.MarketplacePlatform) int {
+			if comparison := strings.Compare(a.OS, b.OS); comparison != 0 {
+				return comparison
+			}
+			return strings.Compare(a.Arch, b.Arch)
+		})
+		item := workflow.MarketplacePluginPackage{
+			Namespace: entry.Name(), PluginVersion: bundle.Manifest.PluginVersion, Description: metadata.Description,
+			Source: sourcePath, SourceSHA256: pluginpkg.DigestBundle(bundle), Path: publishedManifest,
+			SHA256: bundle.ManifestDigest, Platforms: platforms,
+		}
+		files := map[string][]byte{publishedManifest: bundle.ManifestData}
+		artifactsMatch := true
+		for _, artifact := range bundle.Manifest.Artifacts {
+			publishedPath := filepath.ToSlash(filepath.Join("plugins", entry.Name(), filepath.FromSlash(artifact.Path)))
+			files[publishedPath] = bundle.ArtifactData[artifact.Path]
+			if artifactsMatch && !fileDigestMatches(filepath.Join(cwd, filepath.FromSlash(publishedPath)), artifact.SHA256) {
+				artifactsMatch = false
+			}
+		}
+		for relative := range files {
+			published[relative] = struct{}{}
+		}
+		old, reused := previousBySource[sourcePath]
+		manifestMatches := fileDigestMatches(filepath.Join(cwd, filepath.FromSlash(publishedManifest)), bundle.ManifestDigest)
+		if !(reused && reflect.DeepEqual(old, item) && manifestMatches && artifactsMatch) {
+			if err := ensureStaging(); err != nil {
+				return nil, err
+			}
+			for relative, data := range files {
+				if fileDigestMatches(filepath.Join(cwd, filepath.FromSlash(relative)), digestBytes(data)) {
+					continue
+				}
+				staged := filepath.Join(result.stagingDir, filepath.FromSlash(relative))
+				if err := os.MkdirAll(filepath.Dir(staged), 0o755); err != nil {
+					return nil, fmt.Errorf("creating staged plugin directory: %w", err)
+				}
+				if err := os.WriteFile(staged, data, 0o644); err != nil {
+					return nil, fmt.Errorf("staging marketplace plugin file %s: %w", relative, err)
+				}
+				result.replacements[relative] = staged
+			}
+		}
+		manifest.Plugins = append(manifest.Plugins, item)
+	}
+	return published, nil
+}
+
+func digestBytes(data []byte) string {
+	digest := sha256.Sum256(data)
+	return fmt.Sprintf("%x", digest[:])
 }
 
 type marketplaceSourcePackage struct {
@@ -400,12 +539,13 @@ func fileDigestMatches(filename, expected string) bool {
 	return strings.EqualFold(fmt.Sprintf("%x", digest[:]), expected)
 }
 
-func staleMarketplaceArchives(cwd string, previous, current workflow.MarketplaceManifest) []string {
+func staleMarketplaceFiles(cwd string, previous, current workflow.MarketplaceManifest, publishedPlugins map[string]struct{}) []string {
 	var stale []string
-	currentPaths := make(map[string]struct{}, len(current.Packages))
+	currentPaths := make(map[string]struct{}, len(current.Packages)+len(publishedPlugins))
 	for _, item := range current.Packages {
 		currentPaths[item.Path] = struct{}{}
 	}
+	maps.Copy(currentPaths, publishedPlugins)
 	for _, item := range previous.Packages {
 		if _, exists := currentPaths[item.Path]; exists || !strings.HasPrefix(item.Path, "packages/") {
 			continue
@@ -416,6 +556,33 @@ func staleMarketplaceArchives(cwd string, previous, current workflow.Marketplace
 		}
 		stale = append(stale, item.Path)
 	}
+	for _, item := range previous.Plugins {
+		if !strings.HasPrefix(item.Path, "plugins/") {
+			continue
+		}
+		publishedManifest := filepath.Join(cwd, filepath.FromSlash(item.Path))
+		if _, exists := currentPaths[item.Path]; !exists && fileDigestMatches(publishedManifest, item.SHA256) {
+			stale = append(stale, item.Path)
+		}
+		data, err := os.ReadFile(publishedManifest)
+		if err != nil || digestBytes(data) != item.SHA256 {
+			continue
+		}
+		pluginManifest, err := pluginpkg.ParseManifest(data)
+		if err != nil {
+			continue
+		}
+		for _, artifact := range pluginManifest.Artifacts {
+			relative := filepath.ToSlash(filepath.Join(filepath.Dir(item.Path), filepath.FromSlash(artifact.Path)))
+			if _, exists := currentPaths[relative]; exists || !strings.HasPrefix(relative, "plugins/") {
+				continue
+			}
+			if fileDigestMatches(filepath.Join(cwd, filepath.FromSlash(relative)), artifact.SHA256) {
+				stale = append(stale, relative)
+			}
+		}
+	}
+	slices.Sort(stale)
 	return stale
 }
 

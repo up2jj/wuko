@@ -15,13 +15,38 @@ import (
 
 const MarketplaceManifestVersion = 1
 
+// MarketplacePluginSourceDir holds imported plugin releases inside a marketplace repository. It is
+// deliberately distinct from ".wuko/plugins", which is the local plugin *installation* root: an
+// imported release has no executable, so sharing the directory would make local plugin discovery
+// fail for that namespace in the marketplace repository and every directory below it.
+const MarketplacePluginSourceDir = ".wuko/plugin-sources"
+
 // ErrMarketplaceNotFound indicates that an HTTPS source does not expose a marketplace manifest.
 var ErrMarketplaceNotFound = errors.New("marketplace manifest not found")
 
-// MarketplaceManifest lists workflow packages published by a marketplace.
+// MarketplaceManifest lists workflow and plugin packages published by a marketplace.
 type MarketplaceManifest struct {
-	Version  int                  `json:"version"`
-	Packages []MarketplacePackage `json:"packages"`
+	Version  int                        `json:"version"`
+	Packages []MarketplacePackage       `json:"packages"`
+	Plugins  []MarketplacePluginPackage `json:"plugins"`
+}
+
+// MarketplacePluginPackage identifies a copied plugin release manifest.
+type MarketplacePluginPackage struct {
+	Namespace     string                `json:"namespace"`
+	PluginVersion string                `json:"plugin_version"`
+	Description   string                `json:"description,omitempty"`
+	Source        string                `json:"source"`
+	SourceSHA256  string                `json:"source_sha256"`
+	Path          string                `json:"path"`
+	SHA256        string                `json:"sha256"`
+	Platforms     []MarketplacePlatform `json:"platforms"`
+}
+
+// MarketplacePlatform identifies an operating system and architecture pair.
+type MarketplacePlatform struct {
+	OS   string `json:"os"`
+	Arch string `json:"arch"`
 }
 
 // MarketplacePackage identifies an archived workflow package relative to a marketplace root.
@@ -124,6 +149,67 @@ func ValidateMarketplaceManifest(manifest MarketplaceManifest) error {
 		}
 		seenNames[item.Name] = struct{}{}
 	}
+	seenNamespaces := make(map[string]struct{}, len(manifest.Plugins))
+	seenPluginSources := make(map[string]struct{}, len(manifest.Plugins))
+	seenPluginPaths := make(map[string]struct{}, len(manifest.Plugins))
+	for index, item := range manifest.Plugins {
+		if !ValidPluginNamespace(item.Namespace) {
+			return fmt.Errorf("plugin %d: invalid namespace %q", index+1, item.Namespace)
+		}
+		if strings.TrimSpace(item.PluginVersion) == "" || strings.TrimSpace(item.PluginVersion) != item.PluginVersion {
+			return fmt.Errorf("plugin %d: plugin_version must be non-empty without surrounding whitespace", index+1)
+		}
+		if strings.TrimSpace(item.Description) != item.Description {
+			return fmt.Errorf("plugin %d: description must not have leading or trailing whitespace", index+1)
+		}
+		if _, err := validateMarketplacePath(item.Source); err != nil {
+			return fmt.Errorf("plugin %d source: %w", index+1, err)
+		}
+		if item.Source != path.Join(MarketplacePluginSourceDir, item.Namespace) {
+			return fmt.Errorf("plugin %d: source must be %q", index+1, path.Join(MarketplacePluginSourceDir, item.Namespace))
+		}
+		if !sha256Pattern.MatchString(item.SourceSHA256) {
+			return fmt.Errorf("plugin %d: source_sha256 must be a 64-character hexadecimal digest", index+1)
+		}
+		if _, err := validateMarketplacePath(item.Path); err != nil {
+			return fmt.Errorf("plugin %d path: %w", index+1, err)
+		}
+		if path.Base(item.Path) != "plugin.json" {
+			return fmt.Errorf("plugin %d: path must end in plugin.json", index+1)
+		}
+		if item.Path != path.Join("plugins", item.Namespace, "plugin.json") {
+			return fmt.Errorf("plugin %d: path must be %q", index+1, path.Join("plugins", item.Namespace, "plugin.json"))
+		}
+		if !sha256Pattern.MatchString(item.SHA256) {
+			return fmt.Errorf("plugin %d: sha256 must be a 64-character hexadecimal digest", index+1)
+		}
+		if len(item.Platforms) == 0 {
+			return fmt.Errorf("plugin %d: at least one platform is required", index+1)
+		}
+		seenPlatforms := make(map[string]struct{}, len(item.Platforms))
+		for _, platform := range item.Platforms {
+			if (platform.OS != "darwin" && platform.OS != "linux") || (platform.Arch != "amd64" && platform.Arch != "arm64") {
+				return fmt.Errorf("plugin %d: unsupported platform %s/%s", index+1, platform.OS, platform.Arch)
+			}
+			key := platform.OS + "/" + platform.Arch
+			if _, exists := seenPlatforms[key]; exists {
+				return fmt.Errorf("plugin %d: duplicate platform %s", index+1, key)
+			}
+			seenPlatforms[key] = struct{}{}
+		}
+		if _, exists := seenNamespaces[item.Namespace]; exists {
+			return fmt.Errorf("plugin namespace %q is duplicated", item.Namespace)
+		}
+		seenNamespaces[item.Namespace] = struct{}{}
+		if _, exists := seenPluginSources[item.Source]; exists {
+			return fmt.Errorf("plugin source %q is duplicated", item.Source)
+		}
+		seenPluginSources[item.Source] = struct{}{}
+		if _, exists := seenPluginPaths[item.Path]; exists {
+			return fmt.Errorf("plugin path %q is duplicated", item.Path)
+		}
+		seenPluginPaths[item.Path] = struct{}{}
+	}
 	return nil
 }
 
@@ -143,6 +229,28 @@ func ResolveMarketplacePackage(baseURL string, item MarketplacePackage) (string,
 	resolved := base.ResolveReference(entry)
 	if resolved.Scheme != "https" || resolved.Host != base.Host {
 		return "", fmt.Errorf("marketplace package path %q resolves outside the marketplace", item.Path)
+	}
+	resolved.RawQuery = base.RawQuery
+	resolved.ForceQuery = base.ForceQuery
+	return resolved.String(), nil
+}
+
+// ResolveMarketplacePlugin resolves a plugin manifest path against a marketplace URL.
+func ResolveMarketplacePlugin(baseURL string, item MarketplacePluginPackage) (string, error) {
+	base, err := marketplaceContentBaseURL(baseURL)
+	if err != nil {
+		return "", err
+	}
+	if _, err := validateMarketplacePath(item.Path); err != nil {
+		return "", err
+	}
+	entry, err := url.Parse(item.Path)
+	if err != nil {
+		return "", fmt.Errorf("parsing marketplace plugin path %q: %w", item.Path, err)
+	}
+	resolved := base.ResolveReference(entry)
+	if resolved.Scheme != "https" || resolved.Host != base.Host {
+		return "", fmt.Errorf("marketplace plugin path %q resolves outside the marketplace", item.Path)
 	}
 	resolved.RawQuery = base.RawQuery
 	resolved.ForceQuery = base.ForceQuery

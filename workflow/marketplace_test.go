@@ -21,7 +21,7 @@ func TestDiscoverMarketplaceValidatesPackageManifest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Version != MarketplaceManifestVersion || len(got.Packages) != 1 || got.Packages[0].Name != "release" || got.Packages[0].PackageVersion != "1.0.0" {
+	if got.Version != 1 || len(got.Packages) != 1 || got.Packages[0].Name != "release" || got.Packages[0].PackageVersion != "1.0.0" {
 		t.Fatalf("manifest = %#v", got)
 	}
 	resolved, err := ResolveMarketplacePackage("https://example.test/repo", got.Packages[0])
@@ -82,6 +82,27 @@ func TestValidateMarketplaceManifestRejectsInvalidPackages(t *testing.T) {
 		if err := ValidateMarketplaceManifest(manifest); err == nil {
 			t.Fatalf("test %d: expected validation error", index)
 		}
+	}
+}
+
+func TestValidateMarketplaceManifestSupportsPluginPackages(t *testing.T) {
+	t.Parallel()
+	plugin := MarketplacePluginPackage{
+		Namespace: "acme", PluginVersion: "1.2.0", Description: "Acme tools",
+		Source: ".wuko/plugin-sources/acme", SourceSHA256: strings.Repeat("a", 64),
+		Path: "plugins/acme/plugin.json", SHA256: strings.Repeat("b", 64),
+		Platforms: []MarketplacePlatform{{OS: "darwin", Arch: "arm64"}, {OS: "linux", Arch: "amd64"}},
+	}
+	if err := ValidateMarketplaceManifest(MarketplaceManifest{Version: 1, Packages: []MarketplacePackage{}, Plugins: []MarketplacePluginPackage{plugin}}); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := ResolveMarketplacePlugin("https://github.com/acme/marketplace", plugin)
+	if err != nil || resolved != "https://raw.githubusercontent.com/acme/marketplace/HEAD/plugins/acme/plugin.json" {
+		t.Fatalf("resolved plugin = %q, %v", resolved, err)
+	}
+	plugin.Platforms = append(plugin.Platforms, plugin.Platforms[0])
+	if err := ValidateMarketplaceManifest(MarketplaceManifest{Version: 1, Plugins: []MarketplacePluginPackage{plugin}}); err == nil {
+		t.Fatal("duplicate plugin platform was accepted")
 	}
 }
 

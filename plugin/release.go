@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -26,6 +28,127 @@ type Release struct {
 	Artifact        Artifact
 	ArtifactData    []byte
 	CanonicalSource string
+}
+
+// Bundle contains a plugin manifest and every platform artifact it declares.
+type Bundle struct {
+	Manifest        Manifest
+	ManifestData    []byte
+	ManifestDigest  string
+	ArtifactData    map[string][]byte
+	CanonicalSource string
+}
+
+// FetchBundle downloads and validates a complete multi-platform plugin release.
+func FetchBundle(ctx context.Context, source string, client *http.Client) (Bundle, error) {
+	manifestData, canonical, resolver, err := fetchManifest(ctx, source, client)
+	if err != nil {
+		return Bundle{}, err
+	}
+	manifest, err := ParseManifest(manifestData)
+	if err != nil {
+		return Bundle{}, err
+	}
+	bundle := Bundle{
+		Manifest: manifest, ManifestData: manifestData, ManifestDigest: digest(manifestData),
+		ArtifactData: make(map[string][]byte, len(manifest.Artifacts)), CanonicalSource: canonical,
+	}
+	for _, artifact := range manifest.Artifacts {
+		data, err := resolver(ctx, artifact.Path)
+		if err != nil {
+			return Bundle{}, fmt.Errorf("fetching plugin artifact %s/%s: %w", artifact.OS, artifact.Arch, err)
+		}
+		if err := ValidateArtifact(artifact, data); err != nil {
+			return Bundle{}, fmt.Errorf("validating plugin artifact %s/%s: %w", artifact.OS, artifact.Arch, err)
+		}
+		bundle.ArtifactData[artifact.Path] = data
+	}
+	return bundle, nil
+}
+
+// LoadBundle reads and validates a complete plugin release from a directory.
+func LoadBundle(directory string) (Bundle, error) {
+	manifestPath := filepath.Join(directory, "plugin.json")
+	info, err := os.Lstat(manifestPath)
+	if err != nil {
+		return Bundle{}, fmt.Errorf("reading plugin manifest: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return Bundle{}, fmt.Errorf("plugin manifest is not a regular file")
+	}
+	manifestData, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return Bundle{}, fmt.Errorf("reading plugin manifest: %w", err)
+	}
+	manifest, err := ParseManifest(manifestData)
+	if err != nil {
+		return Bundle{}, err
+	}
+	resolvedDirectory, err := filepath.EvalSymlinks(directory)
+	if err != nil {
+		return Bundle{}, fmt.Errorf("resolving plugin release directory: %w", err)
+	}
+	bundle := Bundle{Manifest: manifest, ManifestData: manifestData, ManifestDigest: digest(manifestData), ArtifactData: make(map[string][]byte, len(manifest.Artifacts))}
+	for _, artifact := range manifest.Artifacts {
+		filename := filepath.Join(directory, filepath.FromSlash(artifact.Path))
+		if !within(directory, filename) {
+			return Bundle{}, fmt.Errorf("plugin artifact escapes release directory")
+		}
+		info, err := os.Lstat(filename)
+		if err != nil {
+			return Bundle{}, fmt.Errorf("reading plugin artifact %s/%s: %w", artifact.OS, artifact.Arch, err)
+		}
+		if !info.Mode().IsRegular() {
+			return Bundle{}, fmt.Errorf("plugin artifact %s/%s is not a regular file", artifact.OS, artifact.Arch)
+		}
+		resolved, err := filepath.EvalSymlinks(filename)
+		if err != nil {
+			return Bundle{}, fmt.Errorf("resolving plugin artifact %s/%s: %w", artifact.OS, artifact.Arch, err)
+		}
+		if !within(resolvedDirectory, resolved) {
+			return Bundle{}, fmt.Errorf("plugin artifact %s/%s escapes the release directory through a symlink", artifact.OS, artifact.Arch)
+		}
+		data, err := os.ReadFile(filename)
+		if err != nil {
+			return Bundle{}, fmt.Errorf("reading plugin artifact %s/%s: %w", artifact.OS, artifact.Arch, err)
+		}
+		if err := ValidateArtifact(artifact, data); err != nil {
+			return Bundle{}, fmt.Errorf("validating plugin artifact %s/%s: %w", artifact.OS, artifact.Arch, err)
+		}
+		bundle.ArtifactData[artifact.Path] = data
+	}
+	return bundle, nil
+}
+
+// DigestBundle returns a deterministic digest of the publishable release files.
+func DigestBundle(bundle Bundle) string {
+	hash := sha256.New()
+	_, _ = io.WriteString(hash, "plugin.json\x00")
+	_, _ = hash.Write(bundle.ManifestData)
+	paths := make([]string, 0, len(bundle.ArtifactData))
+	for path := range bundle.ArtifactData {
+		paths = append(paths, path)
+	}
+	slices.Sort(paths)
+	for _, path := range paths {
+		_, _ = io.WriteString(hash, "\x00"+path+"\x00")
+		_, _ = hash.Write(bundle.ArtifactData[path])
+	}
+	return fmt.Sprintf("%x", hash.Sum(nil))
+}
+
+// ValidateArtifact verifies an archive digest and its safe executable contents.
+func ValidateArtifact(artifact Artifact, data []byte) error {
+	if digest(data) != artifact.SHA256 {
+		return fmt.Errorf("plugin artifact sha256 mismatch")
+	}
+	directory, err := os.MkdirTemp("", "wuko-plugin-artifact-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(directory)
+	_, err = Extract(Release{Artifact: artifact, ArtifactData: data}, directory)
+	return err
 }
 
 func FetchRelease(ctx context.Context, source string, expectedManifestDigest string, client *http.Client) (Release, error) {
@@ -113,9 +236,12 @@ func fetchManifest(ctx context.Context, source string, client *http.Client) ([]b
 		return nil, "", nil, fmt.Errorf("plugin sources must be local, HTTPS, or github")
 	}
 	manifestPath := source
-	info, err := os.Stat(manifestPath)
+	info, err := os.Lstat(manifestPath)
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("reading plugin source: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return nil, "", nil, fmt.Errorf("plugin source must not be a symlink")
 	}
 	if info.IsDir() {
 		manifestPath = filepath.Join(manifestPath, "plugin.json")
@@ -124,11 +250,22 @@ func fetchManifest(ctx context.Context, source string, client *http.Client) ([]b
 	if err != nil {
 		return nil, "", nil, err
 	}
+	manifestInfo, err := os.Lstat(manifestPath)
+	if err != nil {
+		return nil, "", nil, fmt.Errorf("reading plugin manifest: %w", err)
+	}
+	if !manifestInfo.Mode().IsRegular() {
+		return nil, "", nil, fmt.Errorf("plugin manifest is not a regular file")
+	}
 	data, err := os.ReadFile(manifestPath)
 	if err != nil {
 		return nil, "", nil, err
 	}
 	directory := filepath.Dir(manifestPath)
+	resolvedDirectory, err := filepath.EvalSymlinks(directory)
+	if err != nil {
+		return nil, "", nil, fmt.Errorf("resolving plugin release directory: %w", err)
+	}
 	resolver := func(_ context.Context, item string) ([]byte, error) {
 		safe, err := safeRelative(item)
 		if err != nil {
@@ -137,6 +274,20 @@ func fetchManifest(ctx context.Context, source string, client *http.Client) ([]b
 		target := filepath.Join(directory, filepath.FromSlash(safe))
 		if !within(directory, target) {
 			return nil, fmt.Errorf("artifact escapes manifest directory")
+		}
+		info, err := os.Lstat(target)
+		if err != nil {
+			return nil, err
+		}
+		if !info.Mode().IsRegular() {
+			return nil, fmt.Errorf("plugin artifact is not a regular file")
+		}
+		resolvedTarget, err := filepath.EvalSymlinks(target)
+		if err != nil {
+			return nil, err
+		}
+		if !within(resolvedDirectory, resolvedTarget) {
+			return nil, fmt.Errorf("artifact escapes manifest directory through a symlink")
 		}
 		return os.ReadFile(target)
 	}
