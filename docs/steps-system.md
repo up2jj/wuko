@@ -804,43 +804,84 @@ Outputs include `repository`, `found`, `status`, `has_changes`, `release_tag`, `
 
 ## `github_actions`
 
-Observe one GitHub Actions workflow run through the installed `gh` CLI. The step performs one
-non-blocking lookup; use the `loop` control when the run may still be queued or in progress.
+Watch one GitHub Actions workflow run to completion through the installed `gh` CLI. `operation` is
+required and currently supports `watch`.
 
 ```yaml
-- id: pull_request
-  type: github_pr
-  with:
-    operation: find
-
 - id: ci
-  loop:
-    until: steps.poll.terminal
-    delay: 10s
-    timeout: 30m
-    steps:
-      - id: poll
-        type: github_actions
-        with:
-          workflow: ci.yml
-          pull_request: "{{ .steps.pull_request.number }}"
-
-- id: verify_ci
-  type: assert
+  type: github_actions
   with:
-    expr: steps.poll.success
-    message: GitHub Actions CI did not succeed
+    operation: watch
+    workflow: ci
 ```
 
-`repository` is optional. Wuko passes it to `gh` when configured, otherwise `gh` uses the current
-repository context. Set `run_id` to observe a known run directly. Otherwise configure `workflow`
-and either `pull_request` or `head_sha`; those selectors are mutually exclusive.
+With only `workflow`, Wuko selects the latest existing run, pins its id, and passes that id to
+`gh run watch --compact`. Discovery fails when the workflow has no runs; it does not wait for a
+future run to appear. It also fails when that latest run has already completed, because nothing
+distinguishes it from the run a preceding step just triggered but GitHub has not created yet;
+reporting a finished run's conclusion as this step's would be a silent false pass. Watching a run
+that may already be finished requires an explicit `run_id`, `pull_request`, or `head_sha`. Set
+`interval` to a positive number of seconds to override the CLI's refresh interval.
 
-The result includes `found`, `run_id`, `run_number`, `workflow`, `workflow_id`, `status`,
-`conclusion`, `terminal`, `success`, `event`, `head_sha`, `head_branch`, `url`, `attempt`,
-`created_at`, `started_at`, and `updated_at`. A run that has not been created yet returns
-`found: false` and `status: not_found`; completed failures are returned as observations with
-`success: false` so a following assertion can decide whether the Wuko workflow should fail.
+Select a matrix job and return its complete log:
+
+```yaml
+- id: action_logs
+  matrix:
+    axes:
+      os: [ubuntu-latest, macos-latest]
+    collect: steps.ci.log
+    steps:
+      - id: ci
+        type: github_actions
+        with:
+          operation: watch
+          workflow: ci
+          job: 'action ({{ .matrix.os }})'
+```
+
+Add `step` to conservatively scope the returned log to one exact step name:
+
+```yaml
+- id: action_build
+  type: github_actions
+  with:
+    operation: watch
+    repository: up2jj/wuko
+    workflow: ci
+    job: action (ubuntu-latest)
+    step: build action test binary
+```
+
+`job` and `step` are ordinary templated `with` strings and may use variables, earlier step outputs,
+dependencies, inputs, environment values, and active control bindings. Matching uses exact GitHub
+display names and fails when no match or more than one match exists. `step` requires `job`. A job
+selector returns the complete job log; adding a step returns the timestamp-scoped step log. Bare
+expression-like values such as `vars.job` are literal names; there are no `job_expr` or `step_expr`
+fields.
+
+`repository` is optional. Resolution prefers the configured value, then `GITHUB_REPOSITORY`, then
+`GH_REPO`; when none is set, `gh` derives the repository from the Git checkout containing Wuko's
+run directory. Running outside a checkout requires one of those explicit contexts. Set `run_id` to
+watch a known run directly. Otherwise configure `workflow`, optionally with `pull_request` or
+`head_sha`; `run_id`, `pull_request`, and `head_sha` are mutually exclusive.
+
+The result includes `run_id`, `run_number`, `workflow`, `workflow_id`, `status`, `conclusion`,
+`terminal`, `success`, `event`, `head_sha`, `head_branch`, `url`, `attempt`, `created_at`,
+`started_at`, and `updated_at`. Log selection also adds `log`, `log_scope`, `log_truncated`,
+`job_id`, `job`, and, when selected, `step`. Job log capture stops at 4 MiB and sets
+`log_truncated`; a step selection whose log falls past that cut fails rather than returning a
+partial step log. Completed workflow failures are returned with `success: false` so a following
+assertion can decide whether the Wuko workflow should fail.
+
+GitHub exposes complete job logs but no supported per-step log download. Step scoping therefore
+uses the structured step interval and timestamps in the job log. GitHub truncates step timestamps
+to whole seconds, so a step shares its first and last timestamp bucket with its neighbors; both
+buckets are kept, because short steps emit most of their output inside them. Scoping preserves the
+raw log text and fails only when the job log has no lines in the interval. A step's log may
+therefore include up to one second of adjacent-step output at each boundary. The CLI's `run watch`
+command does not support fine-grained personal access tokens because the required `checks:read`
+permission is unavailable to them.
 
 ## `require_tool`
 

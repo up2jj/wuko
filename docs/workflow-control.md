@@ -579,18 +579,18 @@ an optional delay, timeout, and maximum iteration limit. Child outputs remain av
 and the loop output contains `iterations`, `count`, and `last`.
 
 ```yaml
-- id: wait_for_ci
+- id: wait_for_deployment
   loop:
-    until: steps.poll.terminal
+    until: steps.poll.status == 200
     delay: 10s
     timeout: 30m
     max_iterations: 180
     steps:
       - id: poll
-        type: github_actions
+        type: http
         with:
-          workflow: ci.yml
-          head_sha: "{{ .vars.head_sha }}"
+          url: https://deployments.example.test/status
+          success_statuses: [200, 503]
 ```
 
 `batch`, `foreach`, and `matrix` are logical parent steps. Each iteration receives an isolated copy of

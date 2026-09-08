@@ -527,7 +527,7 @@ Each linked guide contains multiple examples for every step.
 | `git_commit` | Stage selected paths and create a Git commit | [System steps](docs/steps-system.md#git_commit) |
 | `github_pr` | Find an open GitHub pull request from CI metadata or a Git branch | [System steps](docs/steps-system.md#github_pr) |
 | `github_release` | Check GitHub repository drift since the latest stable release | [System steps](docs/steps-system.md#github_release) |
-| `github_actions` | Observe one GitHub Actions run through `gh` | [System steps](docs/steps-system.md#github_actions) |
+| `github_actions` | Watch one GitHub Actions run to completion through `gh` | [System steps](docs/steps-system.md#github_actions) |
 | `file` | Perform shell-independent filesystem operations | [System steps](docs/steps-system.md#file) |
 | `scaffold` | Render a packaged template directory tree | [System steps](docs/steps-system.md#scaffold) |
 | `glob` | Discover regular files with portable patterns | [System steps](docs/steps-system.md#glob) |
