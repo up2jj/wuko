@@ -22,6 +22,7 @@ type Option struct {
 	Disabled       bool
 	DisabledReason string
 	Default        bool
+	Actions        []SelectionAction
 }
 
 // ChoiceMarkerKind identifies a display-only row in a choice picker.

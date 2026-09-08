@@ -146,12 +146,14 @@ See [Executable plugins](docs/plugins.md) for authoring, publishing, the trust m
 and [version-resolution rules](docs/plugins.md#version-resolution-and-conflicts).
 
 Bare `wuko` opens a searchable picker in a terminal and shows each workflow's direct prerequisites.
-Press Enter to run the selected workflow, `u` to open a declared browser form, `m` to open the
-marketplace it came from, `r` to reinstall it from that marketplace, `e` to open it in the
-configured editor, `p` to toggle its plain-text `[pinned]` marker, or `s` to switch between name
-and recently-used sorting. Shift+Enter prints its reproducible `wuko run` command. Picker
-pins, successful-run history, and the sort preference are stored globally, and unavailable
-workflows are pruned.
+Press Enter to run the selected workflow or `a` to open its action palette. The palette can open a
+declared browser form, validate the workflow, show its execution tree, perform a dry run, print a
+reproducible command, edit or pin the workflow, change sorting, and manage marketplace installs.
+Validation, tree, and dry-run output opens in a scrollable viewer; Enter or Escape returns to the
+same picker selection and filter. Existing direct shortcuts remain available in expanded help.
+After editing or reinstalling, the picker refreshes automatically while retaining its last valid
+snapshot if rediscovery fails. Pins, successful-run history, and the sort preference are stored
+globally, and unavailable workflows are pruned.
 `wuko run NAME` searches the nearest
 `.wuko/workflows/` directory first, then the user workflow directories. Use `--file` for an explicit
 path:

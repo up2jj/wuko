@@ -91,12 +91,19 @@ affects display order, not which definition wins.
   validates every effective workflow. Both inspection commands accept dependency-only workflows.
 - Bare `wuko` calls `DiscoverAll`. In an interactive terminal it shows effective and shadowed
   directly invokable sources in the picker, including one row per target and each workflow's direct
-  prerequisites. Enter runs the exact selected source, `u` opens its selected target's form, `e` opens its file in `$VISUAL` or `$EDITOR`,
-  `p` toggles a plain-text `[pinned]` marker, and `s` switches between name and recently-used
-  sorting. Press `m` on a marketplace-installed workflow to open its marketplace URL, or `r` to reinstall it. Shift+Enter prints `wuko run NAME [TARGET]` for an effective source or `wuko run --file
-  PATH [TARGET]` for a shadowed source so the printed command remains unambiguous. Picker state
-  and the selected sort preference are global; successful runs are remembered, and entries for
-  workflows no longer discovered as directly invokable are pruned.
+  prerequisites. Enter runs the exact selected source and `a` opens a contextual action palette.
+  Its actions run or open the selected target, validate it, render its tree, perform a dry run,
+  print its reproducible command, edit or pin it, change sorting, and open or reinstall its
+  marketplace package when available. Form actions are disabled when the selected target has no
+  form. Validation, tree, and dry-run results use the exact selected path and target—including a
+  shadowed source—and open in a scrollable viewer before returning to the same selection and
+  filter. The existing `u`, `e`, `p`, `s`, `m`, `r`, and Shift+Enter shortcuts remain available in
+  expanded help. Editing always triggers rediscovery; a successful reinstall does the same. A
+  refresh failure leaves the last valid picker snapshot available and displays a warning.
+  Shift+Enter prints `wuko run NAME [TARGET]` for an effective source or `wuko run --file PATH
+  [TARGET]` for a shadowed source so the printed command remains unambiguous. Picker state and the
+  selected sort preference are global; successful runs are remembered, and entries for workflows
+  no longer discovered as directly invokable are pruned.
 - Bare `wuko` in a non-interactive context prints directly invokable discovered sources as
   tab-separated rows, appending the target name and dependency summary when present. Target rows
   are emitted separately.

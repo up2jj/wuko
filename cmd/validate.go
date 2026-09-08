@@ -20,117 +20,9 @@ func newValidateCmd(deps dependencies) *cobra.Command {
 		Short: "Validate one or all effective workflows",
 		Args:  cobra.MaximumNArgs(2),
 		RunE: func(command *cobra.Command, args []string) error {
-			cwd, home, config, err := directories(deps)
-			if err != nil {
-				return err
-			}
-			reporter := diagnosticsFor(command, deps, cwd)
-			diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseInvocation, Status: diagnostic.StatusStarted, Message: "validate workflows", Attributes: []diagnostic.Attribute{diagnostic.Attr("run_dir", cwd)}})
-			vars, err := parseVars(command.Context(), cwd, variableFiles, variables)
-			if err != nil {
-				return err
-			}
-			env, err := parseEnv(environment)
-			if err != nil {
-				return err
-			}
-			invocationEnv, err := invocationEnvironment(command, deps, cwd)
-			if err != nil {
-				return err
-			}
-			baseEnv, environmentLoaders := environmentValues(invocationEnv)
-			providers, err := invocationProviders(command, deps, baseEnv)
-			if err != nil {
-				return err
-			}
-			if providers.Values == nil {
-				providers.Values = make(map[string]map[string]any)
-			}
-			validationRepository, validationRepositoryErr := githook.Discover(command.Context(), cwd)
-			if _, registered := providers.Schemas["git"]; registered {
-				repositoryRoot, gitDir, commonDir := cwd, "", ""
-				if validationRepositoryErr == nil {
-					repositoryRoot, gitDir, commonDir = validationRepository.Root, validationRepository.GitDir, validationRepository.CommonDir
-				}
-				providers.Values["git"] = map[string]any{
-					"repository": map[string]any{"root": repositoryRoot, "git_dir": gitDir, "common_dir": commonDir},
-					"hook":       map[string]any{"name": "", "args": []any{}, "stdin": "", "payload": map[string]any{}},
-				}
-			}
-			var sources []workflow.Source
-			discoveryStarted := time.Now()
-			diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusStarted, Time: discoveryStarted, Message: "discovering workflows"})
-			if len(args) > 0 {
-				source, err := workflow.Find(cwd, home, config, args[0])
-				if err != nil {
-					diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusFailed, Duration: time.Since(discoveryStarted), Error: err})
-					return err
-				}
-				sources = []workflow.Source{source}
-			} else {
-				sources, err = workflow.Discover(cwd, home, config)
-				if err != nil {
-					diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusFailed, Duration: time.Since(discoveryStarted), Error: err})
-					return err
-				}
-			}
-			diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusSucceeded, Duration: time.Since(discoveryStarted), Attributes: []diagnostic.Attribute{diagnostic.Attr("workflows", fmt.Sprint(len(sources)))}})
-			for _, source := range sources {
-				loader := deps.loader
-				if loader == nil {
-					loader = defaultWorkflowLoader(deps.plugins)
-				}
-				loadOptions := workflow.LoadOptions{Vars: vars, Env: env, BaseEnv: baseEnv, EnvironmentLoaders: environmentLoaders, RunDir: cwd, Diagnostics: reporter, Providers: providers,
-					Stdin: command.InOrStdin(), Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(), Interactive: interactive(command.InOrStdin())}
-				if len(args) == 0 {
-					loadOptions.Target = source.Target
-				}
-				if len(args) == 2 {
-					loadOptions.Target = args[1]
-				}
-				definition, err := loader.Load(command.Context(), source.Path, loadOptions)
-				if err != nil {
-					return err
-				}
-				plan, err := resolveDependencyPlan(command.Context(), definition, loader, loadOptions, cwd, home, config)
-				if err != nil {
-					return err
-				}
-				optionsFor := func(definition *workflow.Definition, dependencies map[string]map[string]any) engine.Options {
-					return engine.Options{
-						Vars: vars, Env: env, BaseEnv: baseEnv, EnvironmentLoaders: environmentLoaders, Dependencies: dependencies, RunDir: cwd, Providers: providers,
-						Stdin: command.InOrStdin(), Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(),
-						LocalValueDir: filepath.Join(definition.Dir, ".wuko", "values"), GlobalValueDir: filepath.Join(config, "wuko", "values"),
-						Diagnostics: reporter,
-					}
-				}
-				if err := validateDependencyPlan(command.Context(), plan, func() *engine.Engine { return workflowEngine(deps) }, optionsFor); err != nil {
-					return err
-				}
-				label := source.Name
-				if loadOptions.Target != "" {
-					label += " (" + loadOptions.Target + ")"
-				}
-				fmt.Fprintf(command.OutOrStdout(), "%s: valid\n", label)
-			}
-			if len(args) == 0 {
-				if validationRepositoryErr == nil {
-					manifestPath := filepath.Join(validationRepository.Root, ".wuko", "git-hooks.yaml")
-					if _, statErr := os.Stat(manifestPath); statErr == nil {
-						manifest, err := githook.LoadManifest(validationRepository.Root)
-						if err != nil {
-							return err
-						}
-						if err := validateGitHookBindings(command, deps, validationRepository, manifest); err != nil {
-							return err
-						}
-						fmt.Fprintln(command.OutOrStdout(), ".wuko/git-hooks.yaml: valid")
-					} else if !os.IsNotExist(statErr) {
-						return fmt.Errorf("checking Git hook manifest %s: %w", manifestPath, statErr)
-					}
-				}
-			}
-			return nil
+			return validateWorkflowSources(command, deps, args, validateWorkflowConfig{
+				variables: variables, variableFiles: variableFiles, environment: environment,
+			})
 		},
 	}
 	command.Flags().StringArrayVar(&variables, "var", nil, "set a workflow variable (key=value; repeatable)")
@@ -138,6 +30,126 @@ func newValidateCmd(deps dependencies) *cobra.Command {
 	command.Flags().StringArrayVar(&environment, "env", nil, "override an environment variable (KEY=value; repeatable)")
 	command.ValidArgsFunction = workflowCompletion(deps, false)
 	return command
+}
+
+type validateWorkflowConfig struct {
+	variables     []string
+	variableFiles []string
+	environment   []string
+	sources       []workflow.Source
+}
+
+func validateWorkflowSources(command *cobra.Command, deps dependencies, args []string, config validateWorkflowConfig) error {
+	cwd, home, configDir, err := directories(deps)
+	if err != nil {
+		return err
+	}
+	reporter := diagnosticsFor(command, deps, cwd)
+	diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseInvocation, Status: diagnostic.StatusStarted, Message: "validate workflows", Attributes: []diagnostic.Attribute{diagnostic.Attr("run_dir", cwd)}})
+	vars, err := parseVars(command.Context(), cwd, config.variableFiles, config.variables)
+	if err != nil {
+		return err
+	}
+	env, err := parseEnv(config.environment)
+	if err != nil {
+		return err
+	}
+	invocationEnv, err := invocationEnvironment(command, deps, cwd)
+	if err != nil {
+		return err
+	}
+	baseEnv, environmentLoaders := environmentValues(invocationEnv)
+	providers, err := invocationProviders(command, deps, baseEnv)
+	if err != nil {
+		return err
+	}
+	if providers.Values == nil {
+		providers.Values = make(map[string]map[string]any)
+	}
+	validationRepository, validationRepositoryErr := githook.Discover(command.Context(), cwd)
+	if _, registered := providers.Schemas["git"]; registered {
+		repositoryRoot, gitDir, commonDir := cwd, "", ""
+		if validationRepositoryErr == nil {
+			repositoryRoot, gitDir, commonDir = validationRepository.Root, validationRepository.GitDir, validationRepository.CommonDir
+		}
+		providers.Values["git"] = map[string]any{
+			"repository": map[string]any{"root": repositoryRoot, "git_dir": gitDir, "common_dir": commonDir},
+			"hook":       map[string]any{"name": "", "args": []any{}, "stdin": "", "payload": map[string]any{}},
+		}
+	}
+	sources := config.sources
+	all := len(config.sources) == 0 && len(args) == 0
+	discoveryStarted := time.Now()
+	diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusStarted, Time: discoveryStarted, Message: "discovering workflows"})
+	if len(sources) == 0 && len(args) > 0 {
+		source, findErr := workflow.Find(cwd, home, configDir, args[0])
+		if findErr != nil {
+			diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusFailed, Duration: time.Since(discoveryStarted), Error: findErr})
+			return findErr
+		}
+		sources = []workflow.Source{source}
+	} else if len(sources) == 0 {
+		sources, err = workflow.Discover(cwd, home, configDir)
+		if err != nil {
+			diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusFailed, Duration: time.Since(discoveryStarted), Error: err})
+			return err
+		}
+	}
+	diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusSucceeded, Duration: time.Since(discoveryStarted), Attributes: []diagnostic.Attribute{diagnostic.Attr("workflows", fmt.Sprint(len(sources)))}})
+	for _, source := range sources {
+		loader := deps.loader
+		if loader == nil {
+			loader = defaultWorkflowLoader(deps.plugins)
+		}
+		loadOptions := workflow.LoadOptions{Vars: vars, Env: env, BaseEnv: baseEnv, EnvironmentLoaders: environmentLoaders, RunDir: cwd, Diagnostics: reporter, Providers: providers,
+			Stdin: command.InOrStdin(), Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(), Interactive: interactive(command.InOrStdin())}
+		if len(config.sources) > 0 || len(args) == 0 {
+			loadOptions.Target = source.Target
+		}
+		if len(args) == 2 {
+			loadOptions.Target = args[1]
+		}
+		definition, err := loader.Load(command.Context(), source.Path, loadOptions)
+		if err != nil {
+			return err
+		}
+		plan, err := resolveDependencyPlan(command.Context(), definition, loader, loadOptions, cwd, home, configDir)
+		if err != nil {
+			return err
+		}
+		optionsFor := func(definition *workflow.Definition, dependencies map[string]map[string]any) engine.Options {
+			return engine.Options{
+				Vars: vars, Env: env, BaseEnv: baseEnv, EnvironmentLoaders: environmentLoaders, Dependencies: dependencies, RunDir: cwd, Providers: providers,
+				Stdin: command.InOrStdin(), Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(),
+				LocalValueDir: filepath.Join(definition.Dir, ".wuko", "values"), GlobalValueDir: filepath.Join(configDir, "wuko", "values"),
+				Diagnostics: reporter,
+			}
+		}
+		if err := validateDependencyPlan(command.Context(), plan, func() *engine.Engine { return workflowEngine(deps) }, optionsFor); err != nil {
+			return err
+		}
+		label := source.Name
+		if loadOptions.Target != "" {
+			label += " (" + loadOptions.Target + ")"
+		}
+		fmt.Fprintf(command.OutOrStdout(), "%s: valid\n", label)
+	}
+	if all && validationRepositoryErr == nil {
+		manifestPath := filepath.Join(validationRepository.Root, ".wuko", "git-hooks.yaml")
+		if _, statErr := os.Stat(manifestPath); statErr == nil {
+			manifest, err := githook.LoadManifest(validationRepository.Root)
+			if err != nil {
+				return err
+			}
+			if err := validateGitHookBindings(command, deps, validationRepository, manifest); err != nil {
+				return err
+			}
+			fmt.Fprintln(command.OutOrStdout(), ".wuko/git-hooks.yaml: valid")
+		} else if !os.IsNotExist(statErr) {
+			return fmt.Errorf("checking Git hook manifest %s: %w", manifestPath, statErr)
+		}
+	}
+	return nil
 }
 
 func workflowCompletion(deps dependencies, invokableOnly bool) cobra.CompletionFunc {

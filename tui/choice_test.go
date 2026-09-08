@@ -555,9 +555,87 @@ func TestSelectionModelViewIncludesDescription(t *testing.T) {
 	if !strings.Contains(model.View().Content, path) {
 		t.Fatalf("view = %q, want full path", model.View().Content)
 	}
-	for _, shortcut := range []string{"enter", "run", "u", "open UI", "shift+enter", "print command", "e", "edit", "p", "pin", "s", "sort", "ctrl+c", "cancel"} {
+	for _, shortcut := range []string{"enter", "run", "a", "actions", "ctrl+c", "cancel"} {
 		if !strings.Contains(model.View().Content, shortcut) {
 			t.Fatalf("view = %q, want shortcut %q", model.View().Content, shortcut)
 		}
+	}
+	for _, hidden := range []string{"open UI", "print command", "edit", "pin", "sort"} {
+		if strings.Contains(model.View().Content, hidden) {
+			t.Fatalf("short help = %q, unexpectedly contains %q", model.View().Content, hidden)
+		}
+	}
+	updated, _ := model.Update(tea.KeyPressMsg{Code: '?'})
+	fullHelp := updated.(selectionModel).View().Content
+	for _, shortcut := range []string{"open UI", "print command", "edit", "pin", "sort"} {
+		if !strings.Contains(fullHelp, shortcut) {
+			t.Fatalf("full help = %q, want shortcut %q", fullHelp, shortcut)
+		}
+	}
+}
+
+func TestSelectionModelActionPaletteSelectsIntentAndReturnsFromDisabledAction(t *testing.T) {
+	model := newSelectionModelWithConfig(SelectionPickerConfig{
+		Title: "Workflows", InitialFilter: "release", Options: []Option{{
+			Label: "release", Description: "local", Actions: []SelectionAction{
+				{Label: "Run", Intent: SelectionPrimary},
+				{Label: "Open form", Intent: SelectionUI, Disabled: true, DisabledReason: "no form"},
+				{Label: "Validate", Intent: SelectionValidate},
+			},
+		}},
+	})
+	updated, command := model.Update(tea.KeyPressMsg{Code: 'a'})
+	model = updated.(selectionModel)
+	if command != nil || !model.actionMode || !strings.Contains(model.View().Content, "Actions — release") {
+		t.Fatalf("action mode = %v, command nil = %v, view = %q", model.actionMode, command == nil, model.View().Content)
+	}
+	updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	model = updated.(selectionModel)
+	updated, command = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = updated.(selectionModel)
+	if command != nil || model.done || model.actionError != "no form" {
+		t.Fatalf("disabled action done = %v, command nil = %v, error = %q", model.done, command == nil, model.actionError)
+	}
+	updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	model = updated.(selectionModel)
+	if model.actionMode || model.list.FilterValue() != "release" {
+		t.Fatalf("action mode = %v, filter = %q", model.actionMode, model.list.FilterValue())
+	}
+	updated, _ = model.Update(tea.KeyPressMsg{Code: 'a'})
+	model = updated.(selectionModel)
+	updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	model = updated.(selectionModel)
+	updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	model = updated.(selectionModel)
+	updated, command = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = updated.(selectionModel)
+	if command == nil || !model.done || model.intent != SelectionValidate || model.filter != "release" {
+		t.Fatalf("intent = %v, filter = %q, done = %v, command nil = %v", model.intent, model.filter, model.done, command == nil)
+	}
+}
+
+func TestSelectionModelActionPaletteCtrlCCancels(t *testing.T) {
+	model := newSelectionModel("Workflows", []Option{{Label: "build", Actions: []SelectionAction{{Label: "Run"}}}})
+	updated, _ := model.Update(tea.KeyPressMsg{Code: 'a'})
+	model = updated.(selectionModel)
+	updated, command := model.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+	if command == nil || !updated.(selectionModel).cancelled {
+		t.Fatal("ctrl+c did not cancel from action palette")
+	}
+}
+
+func TestSelectionModelShowsNoticeAndUsesVisibleDefault(t *testing.T) {
+	model := newSelectionModelWithConfig(SelectionPickerConfig{
+		Title: "Workflows", InitialFilter: "global", Notice: "refresh failed", Options: []Option{
+			{Label: "local", Description: "local"},
+			{Label: "global", Description: "global", Default: true},
+		},
+	})
+	item, ok := model.list.SelectedItem().(listOption)
+	if !ok || item.Label != "global" {
+		t.Fatalf("selected item = %#v, want visible default", model.list.SelectedItem())
+	}
+	if !strings.Contains(model.View().Content, "refresh failed") {
+		t.Fatalf("view = %q, want notice", model.View().Content)
 	}
 }

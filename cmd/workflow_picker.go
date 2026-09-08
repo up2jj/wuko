@@ -180,13 +180,46 @@ func sortWorkflowSources(sources []workflow.Source, state workflowPickerState, m
 	return result
 }
 
-func workflowPickerOptions(sources []workflow.Source, state workflowPickerState, selectedPath string) []tui.Option {
+func workflowPickerOptions(sources []workflow.Source, state workflowPickerState, selectedPath string, mode workflowPickerSort) []tui.Option {
 	options := make([]tui.Option, len(sources))
 	for index, source := range sources {
 		path := workflowPickerPath(source.Path)
-		options[index] = workflowPickerOptionWithState(source, state.isPinned(path), workflowPickerSelectionKey(source) == selectedPath)
+		pinned := state.isPinned(path)
+		options[index] = workflowPickerOptionWithState(source, pinned, workflowPickerSelectionKey(source) == selectedPath)
+		options[index].Actions = workflowPickerActions(source, pinned, mode)
 	}
 	return options
+}
+
+func workflowPickerActions(source workflow.Source, pinned bool, mode workflowPickerSort) []tui.SelectionAction {
+	pinLabel := "Pin workflow"
+	pinDescription := "keep this workflow above unpinned workflows"
+	if pinned {
+		pinLabel = "Unpin workflow"
+		pinDescription = "remove this workflow from pinned workflows"
+	}
+	sortLabel := "Sort by recent"
+	if mode == workflowPickerSortRecent {
+		sortLabel = "Sort by name"
+	}
+	actions := []tui.SelectionAction{
+		{Label: "Run", Description: "execute this workflow", Intent: tui.SelectionPrimary},
+		{Label: "Open form", Description: "configure and run in the browser", Intent: tui.SelectionUI, Disabled: !source.HasForm, DisabledReason: "workflow does not declare a form"},
+		{Label: "Validate", Description: "validate workflow and dependencies", Intent: tui.SelectionValidate},
+		{Label: "Show tree", Description: "inspect the execution structure", Intent: tui.SelectionTree},
+		{Label: "Dry run", Description: "resolve and print steps without executing them", Intent: tui.SelectionDryRun},
+		{Label: "Print command", Description: "print a reproducible wuko run command", Intent: tui.SelectionAlternate},
+		{Label: "Edit workflow", Description: "open in $VISUAL or $EDITOR", Intent: tui.SelectionEditor},
+		{Label: pinLabel, Description: pinDescription, Intent: tui.SelectionTogglePin},
+		{Label: sortLabel, Description: "change the picker ordering", Intent: tui.SelectionToggleSort},
+	}
+	if source.MarketplaceURL != "" {
+		actions = append(actions,
+			tui.SelectionAction{Label: "Open marketplace", Description: "open the originating marketplace", Intent: tui.SelectionMarketplace},
+			tui.SelectionAction{Label: "Reinstall", Description: "reinstall the marketplace package", Intent: tui.SelectionReinstall},
+		)
+	}
+	return actions
 }
 
 func workflowPickerOptionWithState(source workflow.Source, pinned, selected bool) tui.Option {

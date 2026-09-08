@@ -23,86 +23,9 @@ func newTreeCmd(deps dependencies) *cobra.Command {
 		Short: "Display a workflow as a tree",
 		Args:  cobra.MaximumNArgs(2),
 		RunE: func(command *cobra.Command, args []string) error {
-			cwd, home, config, err := directories(deps)
-			if err != nil {
-				return err
-			}
-			reporter := diagnosticsFor(command, deps, cwd)
-			diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseInvocation, Status: diagnostic.StatusStarted, Message: "render workflow tree", Attributes: []diagnostic.Attribute{diagnostic.Attr("run_dir", cwd)}})
-			if workflowFile != "" && len(args) > 1 {
-				return fmt.Errorf("workflow selector and --file cannot be used together")
-			}
-			if workflowFile == "" && len(args) == 0 {
-				return fmt.Errorf("workflow name or --file is required")
-			}
-			vars, err := parseVars(command.Context(), cwd, variableFiles, variables)
-			if err != nil {
-				return err
-			}
-			env, err := parseEnv(environment)
-			if err != nil {
-				return err
-			}
-			invocationEnv, err := invocationEnvironment(command, deps, cwd)
-			if err != nil {
-				return err
-			}
-			baseEnv, environmentLoaders := environmentValues(invocationEnv)
-			providers, err := invocationProviders(command, deps, baseEnv)
-			if err != nil {
-				return err
-			}
-
-			loader := deps.loader
-			if loader == nil {
-				loader = defaultWorkflowLoader(deps.plugins)
-			}
-			options := workflow.LoadOptions{Vars: vars, Env: env, BaseEnv: baseEnv, EnvironmentLoaders: environmentLoaders, RunDir: cwd, Diagnostics: reporter, Providers: providers,
-				Stdin: command.InOrStdin(), Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(), Interactive: interactive(command.InOrStdin())}
-			if workflowFile != "" {
-				if len(args) == 1 {
-					options.Target = args[0]
-				}
-			} else if len(args) == 2 {
-				options.Target = args[1]
-			}
-			var definition *workflow.Definition
-			if workflowFile != "" {
-				path, err := filepath.Abs(workflowFile)
-				if err != nil {
-					return fmt.Errorf("resolving workflow file %s: %w", workflowFile, err)
-				}
-				definition, err = loader.Load(command.Context(), path, options)
-				if err != nil {
-					return err
-				}
-			} else if workflow.IsRemoteLocator(args[0]) {
-				var cleanup func()
-				definition, cleanup, err = loader.LoadRemote(command.Context(), args[0], options)
-				if err != nil {
-					return err
-				}
-				defer cleanup()
-			} else {
-				discoveryStarted := time.Now()
-				diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusStarted, Time: discoveryStarted, Message: args[0]})
-				source, err := workflow.Find(cwd, home, config, args[0])
-				if err != nil {
-					diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusFailed, Duration: time.Since(discoveryStarted), Error: err})
-					return err
-				}
-				diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusSucceeded, Duration: time.Since(discoveryStarted), Location: diagnostic.Location{Source: source.Path}, Message: source.Name})
-				definition, err = loader.Load(command.Context(), source.Path, options)
-				if err != nil {
-					return err
-				}
-			}
-
-			plan, err := resolveDependencyPlan(command.Context(), definition, loader, options, cwd, home, config)
-			if err != nil {
-				return err
-			}
-			return writeDependencyPlanTree(command.OutOrStdout(), plan)
+			return renderWorkflowTree(command, deps, args, treeWorkflowConfig{
+				variables: variables, variableFiles: variableFiles, environment: environment, workflowFile: workflowFile,
+			})
 		},
 	}
 	command.Flags().StringArrayVar(&variables, "var", nil, "set a workflow variable (key=value; repeatable)")
@@ -111,6 +34,96 @@ func newTreeCmd(deps dependencies) *cobra.Command {
 	command.Flags().StringVar(&workflowFile, "file", "", "display a workflow from a file path")
 	command.ValidArgsFunction = workflowCompletion(deps, false)
 	return command
+}
+
+type treeWorkflowConfig struct {
+	variables     []string
+	variableFiles []string
+	environment   []string
+	workflowFile  string
+	targetName    string
+}
+
+func renderWorkflowTree(command *cobra.Command, deps dependencies, args []string, config treeWorkflowConfig) error {
+	cwd, home, configDir, err := directories(deps)
+	if err != nil {
+		return err
+	}
+	reporter := diagnosticsFor(command, deps, cwd)
+	diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseInvocation, Status: diagnostic.StatusStarted, Message: "render workflow tree", Attributes: []diagnostic.Attribute{diagnostic.Attr("run_dir", cwd)}})
+	if config.workflowFile != "" && len(args) > 1 {
+		return fmt.Errorf("workflow selector and --file cannot be used together")
+	}
+	if config.workflowFile == "" && len(args) == 0 {
+		return fmt.Errorf("workflow name or --file is required")
+	}
+	vars, err := parseVars(command.Context(), cwd, config.variableFiles, config.variables)
+	if err != nil {
+		return err
+	}
+	env, err := parseEnv(config.environment)
+	if err != nil {
+		return err
+	}
+	invocationEnv, err := invocationEnvironment(command, deps, cwd)
+	if err != nil {
+		return err
+	}
+	baseEnv, environmentLoaders := environmentValues(invocationEnv)
+	providers, err := invocationProviders(command, deps, baseEnv)
+	if err != nil {
+		return err
+	}
+
+	loader := deps.loader
+	if loader == nil {
+		loader = defaultWorkflowLoader(deps.plugins)
+	}
+	options := workflow.LoadOptions{Vars: vars, Env: env, BaseEnv: baseEnv, EnvironmentLoaders: environmentLoaders, RunDir: cwd, Diagnostics: reporter, Providers: providers,
+		Stdin: command.InOrStdin(), Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(), Interactive: interactive(command.InOrStdin())}
+	options.Target = config.targetName
+	if config.workflowFile != "" && options.Target == "" && len(args) == 1 {
+		options.Target = args[0]
+	} else if config.workflowFile == "" && len(args) == 2 {
+		options.Target = args[1]
+	}
+	var definition *workflow.Definition
+	if config.workflowFile != "" {
+		path, err := filepath.Abs(config.workflowFile)
+		if err != nil {
+			return fmt.Errorf("resolving workflow file %s: %w", config.workflowFile, err)
+		}
+		definition, err = loader.Load(command.Context(), path, options)
+		if err != nil {
+			return err
+		}
+	} else if workflow.IsRemoteLocator(args[0]) {
+		var cleanup func()
+		definition, cleanup, err = loader.LoadRemote(command.Context(), args[0], options)
+		if err != nil {
+			return err
+		}
+		defer cleanup()
+	} else {
+		discoveryStarted := time.Now()
+		diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusStarted, Time: discoveryStarted, Message: args[0]})
+		source, err := workflow.Find(cwd, home, configDir, args[0])
+		if err != nil {
+			diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusFailed, Duration: time.Since(discoveryStarted), Error: err})
+			return err
+		}
+		diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusSucceeded, Duration: time.Since(discoveryStarted), Location: diagnostic.Location{Source: source.Path}, Message: source.Name})
+		definition, err = loader.Load(command.Context(), source.Path, options)
+		if err != nil {
+			return err
+		}
+	}
+
+	plan, err := resolveDependencyPlan(command.Context(), definition, loader, options, cwd, home, configDir)
+	if err != nil {
+		return err
+	}
+	return writeDependencyPlanTree(command.OutOrStdout(), plan)
 }
 
 func writeDependencyPlanTree(writer io.Writer, plan *workflow.DependencyPlan) error {

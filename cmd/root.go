@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -115,30 +116,33 @@ Use wuko list to inspect dependency-only workflows.
 `
 
 type dependencies struct {
-	stdin         io.Reader
-	stdout        io.Writer
-	stderr        io.Writer
-	cwd           func() (string, error)
-	environment   envload.InvocationLoader
-	homeDir       func() (string, error)
-	configDir     func() (string, error)
-	agentLookPath func(string) (string, error)
-	executable    func() (string, error)
-	registry      *step.Registry
-	executors     *executor.Registry
-	plugins       *plugin.Manager
-	httpClient    *http.Client
-	providers     *provider.Registry
-	loader        *workflow.Loader
-	isInteractive func(io.Reader) bool
-	now           func() time.Time
-	waitUntil     func(context.Context, time.Time) error
-	getenv        func(string) string
-	openURL       func(string) error
-	openEditor    func(context.Context, io.Reader, io.Writer, io.Writer, string) error
-	confirm       func(context.Context, io.Reader, io.Writer, string, bool) (bool, error)
-	selectMany    func(context.Context, io.Reader, io.Writer, string, []tui.Option) ([]int, error)
-	debug         *bool
+	stdin             io.Reader
+	stdout            io.Writer
+	stderr            io.Writer
+	cwd               func() (string, error)
+	environment       envload.InvocationLoader
+	homeDir           func() (string, error)
+	configDir         func() (string, error)
+	agentLookPath     func(string) (string, error)
+	executable        func() (string, error)
+	registry          *step.Registry
+	executors         *executor.Registry
+	plugins           *plugin.Manager
+	httpClient        *http.Client
+	providers         *provider.Registry
+	loader            *workflow.Loader
+	isInteractive     func(io.Reader) bool
+	now               func() time.Time
+	waitUntil         func(context.Context, time.Time) error
+	getenv            func(string) string
+	openURL           func(string) error
+	openEditor        func(context.Context, io.Reader, io.Writer, io.Writer, string) error
+	confirm           func(context.Context, io.Reader, io.Writer, string, bool) (bool, error)
+	selectMany        func(context.Context, io.Reader, io.Writer, string, []tui.Option) ([]int, error)
+	selectWorkflow    func(context.Context, io.Reader, io.Writer, tui.SelectionPickerConfig) (tui.Selection, error)
+	viewText          func(context.Context, io.Reader, io.Writer, tui.TextViewerConfig) error
+	reinstallWorkflow func(*cobra.Command, workflow.Source) error
+	debug             *bool
 }
 
 func Execute() error {
@@ -205,10 +209,12 @@ func NewRootCmd() *cobra.Command {
 		executable:    os.Executable,
 		loader:        defaultWorkflowLoader(plugins), providers: defaultProviderRegistry(), isInteractive: interactive,
 		now: time.Now, waitUntil: workflowschedule.Wait,
-		getenv:     os.Getenv,
-		openEditor: openWorkflowEditor(os.Getenv),
-		confirm:    tui.Confirm,
-		selectMany: tui.SelectMany,
+		getenv:         os.Getenv,
+		openEditor:     openWorkflowEditor(os.Getenv),
+		confirm:        tui.Confirm,
+		selectMany:     tui.SelectMany,
+		selectWorkflow: tui.SelectWithIntentConfig,
+		viewText:       tui.ViewText,
 	})
 }
 
@@ -264,6 +270,12 @@ func newRootCmd(deps dependencies) *cobra.Command {
 	}
 	if deps.selectMany == nil {
 		deps.selectMany = tui.SelectMany
+	}
+	if deps.selectWorkflow == nil {
+		deps.selectWorkflow = tui.SelectWithIntentConfig
+	}
+	if deps.viewText == nil {
+		deps.viewText = tui.ViewText
 	}
 	debug := false
 	deps.debug = &debug
@@ -338,17 +350,11 @@ func runWorkflowPicker(command *cobra.Command, deps dependencies) error {
 	}
 	reporter := diagnosticsFor(command, deps, cwd)
 	diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseInvocation, Status: diagnostic.StatusStarted, Message: "workflow picker", Attributes: []diagnostic.Attribute{diagnostic.Attr("run_dir", cwd)}})
-	discoveryStarted := time.Now()
-	diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusStarted, Time: discoveryStarted, Message: "discovering workflows"})
-	sources, err := workflow.DiscoverAll(cwd, home, config)
+	sources, discovered, err := discoverWorkflowPickerSources(cwd, home, config, reporter)
 	if err != nil {
-		diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusFailed, Duration: time.Since(discoveryStarted), Error: err})
 		return err
 	}
-	discovered := len(sources)
-	diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusSucceeded, Duration: time.Since(discoveryStarted), Attributes: []diagnostic.Attribute{diagnostic.Attr("workflows", fmt.Sprint(discovered))}})
 	if !deps.isInteractive(command.InOrStdin()) {
-		sources = slices.DeleteFunc(sources, func(source workflow.Source) bool { return !source.Invokable })
 		for _, source := range sources {
 			if err := writeWorkflowSource(command.OutOrStdout(), source); err != nil {
 				return err
@@ -356,7 +362,6 @@ func runWorkflowPicker(command *cobra.Command, deps dependencies) error {
 		}
 		return nil
 	}
-	sources = slices.DeleteFunc(sources, func(source workflow.Source) bool { return !source.Invokable })
 	pickerState, stateErr := loadWorkflowPickerState(command.Context(), config)
 	if stateErr != nil {
 		fmt.Fprintf(command.ErrOrStderr(), "Warning: cannot load workflow picker state: %v\n", stateErr)
@@ -377,17 +382,58 @@ func runWorkflowPicker(command *cobra.Command, deps dependencies) error {
 
 	sortMode := pickerState.sortMode()
 	selectedPath := ""
+	filter := ""
+	notice := ""
+	addNotice := func(message string) {
+		if notice == "" {
+			notice = message
+			return
+		}
+		notice += "; " + message
+	}
+	refresh := func() bool {
+		refreshed, refreshedCount, refreshErr := discoverWorkflowPickerSources(cwd, home, config, reporter)
+		if refreshErr != nil {
+			addNotice("refresh failed: " + refreshErr.Error())
+			return false
+		}
+		sources = refreshed
+		discovered = refreshedCount
+		if pickerState.reconcile(sources) {
+			if saveErr := saveWorkflowPickerState(command.Context(), config, pickerState); saveErr != nil {
+				addNotice("cannot save picker state: " + saveErr.Error())
+			}
+		}
+		if len(sources) == 0 {
+			if discovered > 0 {
+				fmt.Fprint(command.OutOrStdout(), noInvokableWorkflowsHelp)
+			} else {
+				fmt.Fprint(command.OutOrStdout(), noWorkflowsHelp)
+			}
+			return true
+		}
+		if !slices.ContainsFunc(sources, func(source workflow.Source) bool {
+			return workflowPickerSelectionKey(source) == selectedPath
+		}) {
+			selectedPath = ""
+		}
+		return false
+	}
 	for {
 		sortedSources := sortWorkflowSources(sources, pickerState, sortMode)
-		options := workflowPickerOptions(sortedSources, pickerState, selectedPath)
+		options := workflowPickerOptions(sortedSources, pickerState, selectedPath, sortMode)
 		title := fmt.Sprintf("Workflows (sort: %s)", sortMode)
-		selection, err := tui.SelectWithIntent(command.Context(), command.InOrStdin(), command.OutOrStdout(), title, options)
+		selection, err := deps.selectWorkflow(command.Context(), command.InOrStdin(), command.OutOrStdout(), tui.SelectionPickerConfig{
+			Title: title, Options: options, InitialFilter: filter, Notice: notice,
+		})
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
 				return nil
 			}
 			return err
 		}
+		filter = selection.Filter
+		notice = ""
 		source, ok := selection.Option.Value.(workflow.Source)
 		if !ok {
 			return fmt.Errorf("workflow selection did not contain a workflow")
@@ -406,12 +452,13 @@ func runWorkflowPicker(command *cobra.Command, deps dependencies) error {
 			return runErr
 		case tui.SelectionUI:
 			if !source.HasForm {
-				fmt.Fprintf(command.OutOrStdout(), "Workflow %s does not declare a form.\n", source.Name)
+				notice = fmt.Sprintf("workflow %s does not declare a form", workflowDisplayName(source))
 				continue
 			}
 			return runWorkflowUI(command, deps, nil, uiWorkflowConfig{workflowFile: source.Path, targetName: source.Target})
 		case tui.SelectionMarketplace:
 			if source.MarketplaceURL == "" {
+				notice = fmt.Sprintf("workflow %s was not installed from a marketplace", workflowDisplayName(source))
 				continue
 			}
 			openURL := deps.openURL
@@ -419,15 +466,28 @@ func runWorkflowPicker(command *cobra.Command, deps dependencies) error {
 				openURL = openBrowser
 			}
 			if err := openURL(source.MarketplaceURL); err != nil {
-				fmt.Fprintf(command.ErrOrStderr(), "Warning: %v\n", err)
+				notice = err.Error()
 			}
 		case tui.SelectionReinstall:
-			if err := reinstallMarketplaceWorkflow(command, deps, source); err != nil {
-				fmt.Fprintf(command.ErrOrStderr(), "Warning: %v\n", err)
+			reinstall := deps.reinstallWorkflow
+			if reinstall == nil {
+				reinstall = func(command *cobra.Command, source workflow.Source) error {
+					return reinstallMarketplaceWorkflow(command, deps, source)
+				}
+			}
+			if err := reinstall(command, source); err != nil {
+				addNotice(err.Error())
+				continue
+			}
+			if refresh() {
+				return nil
 			}
 		case tui.SelectionEditor:
 			if err := deps.openEditor(command.Context(), command.InOrStdin(), command.OutOrStdout(), command.ErrOrStderr(), source.Path); err != nil {
-				fmt.Fprintf(command.ErrOrStderr(), "Warning: %v\n", err)
+				addNotice(err.Error())
+			}
+			if refresh() {
+				return nil
 			}
 		case tui.SelectionTogglePin:
 			pickerState.togglePinned(source.Path)
@@ -444,6 +504,14 @@ func runWorkflowPicker(command *cobra.Command, deps dependencies) error {
 			if err := saveWorkflowPickerState(command.Context(), config, pickerState); err != nil {
 				fmt.Fprintf(command.ErrOrStderr(), "Warning: cannot save workflow picker state: %v\n", err)
 			}
+		case tui.SelectionValidate, tui.SelectionTree, tui.SelectionDryRun:
+			title, content, failed := runWorkflowPickerInspection(command, deps, source, selection.Intent)
+			if err := deps.viewText(command.Context(), command.InOrStdin(), command.OutOrStdout(), tui.TextViewerConfig{Title: title, Content: content, Failed: failed}); err != nil {
+				if errors.Is(err, context.Canceled) {
+					return nil
+				}
+				return err
+			}
 		default:
 			target := ""
 			if source.Target != "" {
@@ -457,6 +525,54 @@ func runWorkflowPicker(command *cobra.Command, deps dependencies) error {
 			return nil
 		}
 	}
+}
+
+func discoverWorkflowPickerSources(cwd, home, config string, reporter diagnostic.Reporter) ([]workflow.Source, int, error) {
+	discoveryStarted := time.Now()
+	diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusStarted, Time: discoveryStarted, Message: "discovering workflows"})
+	sources, err := workflow.DiscoverAll(cwd, home, config)
+	if err != nil {
+		diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusFailed, Duration: time.Since(discoveryStarted), Error: err})
+		return nil, 0, err
+	}
+	discovered := len(sources)
+	diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusSucceeded, Duration: time.Since(discoveryStarted), Attributes: []diagnostic.Attribute{diagnostic.Attr("workflows", fmt.Sprint(discovered))}})
+	sources = slices.DeleteFunc(sources, func(source workflow.Source) bool { return !source.Invokable })
+	return sources, discovered, nil
+}
+
+func runWorkflowPickerInspection(command *cobra.Command, deps dependencies, source workflow.Source, intent tui.SelectionIntent) (string, string, bool) {
+	var output bytes.Buffer
+	previousOut, previousErr := command.OutOrStdout(), command.ErrOrStderr()
+	command.SetOut(&output)
+	command.SetErr(&output)
+	defer command.SetOut(previousOut)
+	defer command.SetErr(previousErr)
+
+	label := workflowDisplayName(source)
+	var title string
+	var err error
+	switch intent {
+	case tui.SelectionValidate:
+		title = "Validate — " + label
+		err = validateWorkflowSources(command, deps, nil, validateWorkflowConfig{sources: []workflow.Source{source}})
+	case tui.SelectionTree:
+		title = "Tree — " + label
+		err = renderWorkflowTree(command, deps, nil, treeWorkflowConfig{workflowFile: source.Path, targetName: source.Target})
+	case tui.SelectionDryRun:
+		title = "Dry run — " + label
+		err = runWorkflow(command, deps, nil, runWorkflowConfig{workflowFile: source.Path, targetName: source.Target, dryRun: true})
+	default:
+		title = "Inspect — " + label
+		err = fmt.Errorf("unsupported workflow inspection")
+	}
+	if err != nil {
+		if output.Len() > 0 && !strings.HasSuffix(output.String(), "\n") {
+			output.WriteByte('\n')
+		}
+		fmt.Fprintf(&output, "Error: %v\n", err)
+	}
+	return title, output.String(), err != nil
 }
 
 func workflowPickerOption(source workflow.Source) tui.Option {

@@ -42,11 +42,19 @@ Type "/"
 Type "release"
 Wait+Screen@5s /release-demo/
 Sleep 1s
+Enter
+Wait+Screen@5s /Workflows \(sort: name\)/
+Sleep 500ms
+Type "a"
+Wait+Screen@5s /Actions.*release-demo/
+Sleep 1s
+Down@200ms 2
+Enter
+Wait+Screen@10s /release-demo: valid/
+Sleep 1s
 Escape
-Down
-Sleep 500ms
-Up
-Sleep 500ms
+Wait+Screen@5s /Workflows \(sort: name\)/
+Sleep 1s
 Ctrl+C
 Hide
 Type "rm -rf /tmp/wuko-vhs-demo"
