@@ -337,7 +337,7 @@ default; increase `max_bytes` with a byte size such as `4MiB` when the larger in
 
 ## `extract`
 
-Extract named, typed fields from exactly one line of text with a friendly format:
+Extract named, typed fields from one or every matching line of text with a friendly format:
 
 ```yaml
 - id: release
@@ -349,8 +349,8 @@ Extract named, typed fields from exactly one line of text with a friendly format
 ```
 
 Raw named Go regular-expression captures are available for substring and multiline matching. See
-[Text extraction](extract.md) for the complete syntax, capture types, examples, failure behavior,
-and RE2 limitations.
+[Text extraction](extract.md) for `match: all`, marker-delimited field extraction, the complete
+capture syntax, failure behavior, and RE2 limitations.
 
 ## `semver`
 

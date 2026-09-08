@@ -1,4 +1,4 @@
-// Package extract implements typed text extraction with friendly formats or named regular-expression captures.
+// Package extract implements typed text extraction with formats, regular expressions, and marker fields.
 package extract
 
 import (
@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"math"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -20,17 +22,32 @@ const (
 	typeNumber  = "number"
 	typeBoolean = "boolean"
 	typeJSON    = "json"
+
+	matchOne = "one"
+	matchAll = "all"
+
+	markerPrefix = "WUKO_OUTPUT_V1"
 )
 
 var identifierPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 type Config struct {
-	Text      string            `yaml:"text,omitempty"`
-	From      string            `yaml:"from,omitempty"`
-	Format    string            `yaml:"format,omitempty"`
-	Pattern   string            `yaml:"pattern,omitempty"`
-	Types     map[string]string `yaml:"types,omitempty"`
-	Variables map[string]string `yaml:"variables,omitempty"`
+	Text      string                 `yaml:"text,omitempty"`
+	From      string                 `yaml:"from,omitempty"`
+	Format    string                 `yaml:"format,omitempty"`
+	Pattern   string                 `yaml:"pattern,omitempty"`
+	Match     string                 `yaml:"match,omitempty"`
+	Types     map[string]string      `yaml:"types,omitempty"`
+	Fields    map[string]FieldConfig `yaml:"fields,omitempty"`
+	Variables map[string]string      `yaml:"variables,omitempty"`
+}
+
+// FieldConfig declares one named output extracted from the shared input text.
+type FieldConfig struct {
+	Marker string `yaml:"marker,omitempty"`
+	Regex  string `yaml:"regex,omitempty"`
+	Type   string `yaml:"type,omitempty"`
+	Match  string `yaml:"match,omitempty"`
 }
 
 type capture struct {
@@ -39,10 +56,18 @@ type capture struct {
 	index int
 }
 
+type compiledField struct {
+	name       string
+	config     FieldConfig
+	regexp     *regexp.Regexp
+	valueIndex int
+}
+
 type Runner struct {
 	config   Config
 	regexp   *regexp.Regexp
 	captures []capture
+	fields   []compiledField
 	format   bool
 }
 
@@ -70,8 +95,29 @@ func New(raw map[string]any) (step.Runner, error) {
 		}
 	}
 
+	if err := validateVariables(config.Variables); err != nil {
+		return nil, err
+	}
+
+	_, hasFields := raw["fields"]
 	_, hasFormat := raw["format"]
 	_, hasPattern := raw["pattern"]
+	runner := &Runner{config: config, format: hasFormat}
+	if hasFields {
+		if len(config.Fields) == 0 {
+			return nil, fmt.Errorf("fields must contain at least one field")
+		}
+		for _, name := range []string{"format", "pattern", "types", "match"} {
+			if _, exists := raw[name]; exists {
+				return nil, fmt.Errorf("fields cannot be combined with %s", name)
+			}
+		}
+		if err := runner.compileFields(raw); err != nil {
+			return nil, err
+		}
+		return runner, nil
+	}
+
 	if hasFormat == hasPattern {
 		return nil, fmt.Errorf("exactly one of format or pattern is required")
 	}
@@ -86,11 +132,14 @@ func New(raw map[string]any) (step.Runner, error) {
 			return nil, fmt.Errorf("types.%s: %w", name, err)
 		}
 	}
-	if err := validateVariables(config.Variables); err != nil {
-		return nil, err
+	if config.Match == "" {
+		runner.config.Match = matchOne
+	} else if !templated(config.Match) {
+		if err := validateMatch(config.Match); err != nil {
+			return nil, err
+		}
 	}
 
-	runner := &Runner{config: config, format: hasFormat}
 	matcher := config.Pattern
 	if hasFormat {
 		matcher = config.Format
@@ -108,7 +157,7 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 	if err := ctx.Err(); err != nil {
 		return step.Result{}, err
 	}
-	if r.regexp == nil {
+	if len(r.fields) == 0 && r.regexp == nil {
 		return step.Result{}, fmt.Errorf("extract matcher was not resolved before execution")
 	}
 	text := r.config.Text
@@ -124,34 +173,73 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 		}
 	}
 
-	indices, count, err := r.findMatch(ctx, text)
-	if err != nil {
-		return step.Result{}, err
+	if len(r.fields) > 0 {
+		return r.runFields(ctx, text)
 	}
-	if count != 1 {
-		return step.Result{}, fmt.Errorf("extraction found %d matches, want exactly one", count)
-	}
-	if err := ctx.Err(); err != nil {
+	if err := validateMatch(r.config.Match); err != nil {
 		return step.Result{}, err
 	}
 
+	indices, err := r.findMatches(ctx, text, r.config.Match)
+	if err != nil {
+		return step.Result{}, err
+	}
+	if r.config.Match == matchOne {
+		if len(indices) != 1 {
+			return step.Result{}, fmt.Errorf("extraction found %d matches, want exactly one", len(indices))
+		}
+		outputs, err := r.convertMatch(text, indices[0])
+		if err != nil {
+			return step.Result{}, err
+		}
+		variables := make(map[string]any, len(r.config.Variables))
+		for source, target := range r.config.Variables {
+			variables[target] = outputs[source]
+		}
+		return step.Result{Outputs: outputs, Variables: variables}, nil
+	}
+
+	matches := make([]any, 0, len(indices))
+	// Only captures a variable actually maps need a flattened list; building one per
+	// capture doubled the peak memory of a large match: all extraction for nothing.
+	values := make(map[string][]any, len(r.config.Variables))
+	for source := range r.config.Variables {
+		values[source] = make([]any, 0, len(indices))
+	}
+	for _, item := range indices {
+		if err := ctx.Err(); err != nil {
+			return step.Result{}, err
+		}
+		record, err := r.convertMatch(text, item)
+		if err != nil {
+			return step.Result{}, err
+		}
+		matches = append(matches, record)
+		for source := range values {
+			values[source] = append(values[source], record[source])
+		}
+	}
+	variables := make(map[string]any, len(r.config.Variables))
+	for source, target := range r.config.Variables {
+		variables[target] = values[source]
+	}
+	return step.Result{Outputs: map[string]any{"matches": matches, "count": len(matches)}, Variables: variables}, nil
+}
+
+func (r *Runner) convertMatch(text string, indices []int) (map[string]any, error) {
 	outputs := make(map[string]any, len(r.captures))
 	for _, item := range r.captures {
 		start, end := indices[item.index*2], indices[item.index*2+1]
 		if start < 0 || end < 0 {
-			return step.Result{}, fmt.Errorf("capture %q did not participate in the match", item.name)
+			return nil, fmt.Errorf("capture %q did not participate in the match", item.name)
 		}
 		value, err := convert(text[start:end], item.kind)
 		if err != nil {
-			return step.Result{}, fmt.Errorf("converting capture %q to %s: %w", item.name, item.kind, err)
+			return nil, fmt.Errorf("converting capture %q to %s: %w", item.name, item.kind, err)
 		}
 		outputs[item.name] = value
 	}
-	variables := make(map[string]any, len(r.config.Variables))
-	for source, target := range r.config.Variables {
-		variables[target] = outputs[source]
-	}
-	return step.Result{Outputs: outputs, Variables: variables}, nil
+	return outputs, nil
 }
 
 func (r *Runner) compile() error {
@@ -171,6 +259,11 @@ func (r *Runner) compile() error {
 	available := make(map[string]struct{}, len(captures))
 	for _, item := range captures {
 		available[item.name] = struct{}{}
+		// match: all replaces the per-capture outputs with matches and count, so a
+		// capture of either name would be silently shadowed by the wrong value.
+		if r.config.Match == matchAll && (item.name == "matches" || item.name == "count") {
+			return fmt.Errorf("capture %q collides with the match: all output %q", item.name, item.name)
+		}
 	}
 	for source := range r.config.Variables {
 		if _, ok := available[source]; !ok {
@@ -182,49 +275,306 @@ func (r *Runner) compile() error {
 	return nil
 }
 
-func (r *Runner) findMatch(ctx context.Context, text string) ([]int, int, error) {
+func (r *Runner) compileFields(raw map[string]any) error {
+	rawFields, _ := raw["fields"].(map[string]any)
+	fields := make([]compiledField, 0, len(r.config.Fields))
+	available := make(map[string]struct{}, len(r.config.Fields))
+	for _, name := range slices.Sorted(maps.Keys(r.config.Fields)) {
+		if !identifierPattern.MatchString(name) {
+			return fmt.Errorf("invalid field name %q", name)
+		}
+		config := r.config.Fields[name]
+		rawField, _ := rawFields[name].(map[string]any)
+		_, hasMarker := rawField["marker"]
+		_, hasRegex := rawField["regex"]
+		if !hasMarker && !hasRegex {
+			return fmt.Errorf("field %q requires marker or regex", name)
+		}
+		if hasMarker && strings.TrimSpace(config.Marker) == "" {
+			return fmt.Errorf("field %q marker must not be empty", name)
+		}
+		if hasRegex && strings.TrimSpace(config.Regex) == "" {
+			return fmt.Errorf("field %q regex must not be empty", name)
+		}
+		if config.Type != "" && !hasRegex {
+			return fmt.Errorf("field %q type requires regex", name)
+		}
+		if config.Type == "" {
+			config.Type = typeString
+		} else if !templated(config.Type) {
+			if err := validateType(config.Type); err != nil {
+				return fmt.Errorf("field %q type: %w", name, err)
+			}
+		}
+		if config.Match == "" {
+			config.Match = matchOne
+		} else if !templated(config.Match) {
+			if err := validateMatch(config.Match); err != nil {
+				return fmt.Errorf("field %q: %w", name, err)
+			}
+		}
+
+		field := compiledField{name: name, config: config}
+		if hasRegex && !templated(config.Regex) {
+			compiled, index, err := compileFieldRegex(config.Regex)
+			if err != nil {
+				return fmt.Errorf("field %q: %w", name, err)
+			}
+			field.regexp = compiled
+			field.valueIndex = index
+		}
+		fields = append(fields, field)
+		available[name] = struct{}{}
+	}
+	for source := range r.config.Variables {
+		if _, ok := available[source]; !ok {
+			return fmt.Errorf("variables references unknown field %q", source)
+		}
+	}
+	r.fields = fields
+	return nil
+}
+
+func compileFieldRegex(pattern string) (*regexp.Regexp, int, error) {
+	compiled, err := regexp.Compile(pattern)
+	if err != nil {
+		return nil, 0, fmt.Errorf("compiling regex: %w", err)
+	}
+	valueIndex := 0
+	for index, name := range compiled.SubexpNames() {
+		if index == 0 || name == "" {
+			continue
+		}
+		if name != "value" {
+			return nil, 0, fmt.Errorf("regex named capture must be value, found %q", name)
+		}
+		if valueIndex != 0 {
+			return nil, 0, fmt.Errorf("regex must contain exactly one named value capture")
+		}
+		valueIndex = index
+	}
+	if valueIndex == 0 {
+		return nil, 0, fmt.Errorf("regex must contain exactly one named value capture")
+	}
+	return compiled, valueIndex, nil
+}
+
+func (r *Runner) findMatches(ctx context.Context, text, cardinality string) ([][]int, error) {
+	limit := -1
+	if cardinality == matchOne {
+		limit = 2
+	}
 	if !r.format {
-		matches := r.regexp.FindAllStringSubmatchIndex(text, 2)
-		return singleMatch(matches), len(matches), ctx.Err()
+		matches := r.regexp.FindAllStringSubmatchIndex(text, limit)
+		return matches, ctx.Err()
 	}
 	lines := strings.Split(text, "\n")
 	if len(lines) > 1 && lines[len(lines)-1] == "" {
 		lines = lines[:len(lines)-1]
 	}
-	var match []int
-	count := 0
+	matches := make([][]int, 0)
 	offset := 0
 	for _, rawLine := range lines {
 		if err := ctx.Err(); err != nil {
-			return nil, 0, err
+			return nil, err
 		}
 		line := strings.TrimSuffix(rawLine, "\r")
 		if indices := r.regexp.FindStringSubmatchIndex(line); indices != nil {
-			count++
-			if count == 1 {
-				match = make([]int, len(indices))
-				for i, index := range indices {
-					if index >= 0 {
-						match[i] = index + offset
-					} else {
-						match[i] = -1
-					}
+			match := make([]int, len(indices))
+			for i, index := range indices {
+				if index >= 0 {
+					match[i] = index + offset
+				} else {
+					match[i] = -1
 				}
 			}
-			if count == 2 {
-				return match, count, nil
+			matches = append(matches, match)
+			if limit > 0 && len(matches) == limit {
+				return matches, nil
 			}
 		}
 		offset += len(rawLine) + 1
 	}
-	return match, count, nil
+	return matches, nil
 }
 
-func singleMatch(matches [][]int) []int {
-	if len(matches) == 0 {
-		return nil
+func (r *Runner) runFields(ctx context.Context, text string) (step.Result, error) {
+	needsMarkers := false
+	for _, field := range r.fields {
+		if field.config.Marker != "" {
+			needsMarkers = true
+			break
+		}
 	}
-	return matches[0]
+	var markers map[string][]string
+	if needsMarkers {
+		var err error
+		markers, err = parseMarkers(text)
+		if err != nil {
+			return step.Result{}, err
+		}
+	}
+
+	outputs := make(map[string]any, len(r.fields))
+	for _, field := range r.fields {
+		if err := ctx.Err(); err != nil {
+			return step.Result{}, err
+		}
+		value, err := field.extract(ctx, text, markers)
+		if err != nil {
+			return step.Result{}, fmt.Errorf("field %q: %w", field.name, err)
+		}
+		outputs[field.name] = value
+	}
+	variables := make(map[string]any, len(r.config.Variables))
+	for source, target := range r.config.Variables {
+		variables[target] = outputs[source]
+	}
+	return step.Result{Outputs: outputs, Variables: variables}, nil
+}
+
+func (field compiledField) extract(ctx context.Context, text string, markers map[string][]string) (any, error) {
+	if err := validateMatch(field.config.Match); err != nil {
+		return nil, err
+	}
+	if templated(field.config.Marker) {
+		return nil, fmt.Errorf("marker was not resolved before execution")
+	}
+	if templated(field.config.Type) {
+		return nil, fmt.Errorf("type was not resolved before execution")
+	}
+	if err := validateType(field.config.Type); err != nil {
+		return nil, fmt.Errorf("type: %w", err)
+	}
+
+	sources := []string{text}
+	if field.config.Marker != "" {
+		sources = markers[field.config.Marker]
+	}
+	values := make([]any, 0)
+	if field.config.Regex == "" {
+		for _, source := range sources {
+			values = append(values, source)
+			if field.config.Match == matchOne && len(values) == 2 {
+				break
+			}
+		}
+	} else {
+		if field.regexp == nil {
+			return nil, fmt.Errorf("regex was not resolved before execution")
+		}
+		for _, source := range sources {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			limit := -1
+			if field.config.Match == matchOne {
+				limit = 2 - len(values)
+			}
+			for _, indices := range field.regexp.FindAllStringSubmatchIndex(source, limit) {
+				start, end := indices[field.valueIndex*2], indices[field.valueIndex*2+1]
+				if start < 0 || end < 0 {
+					return nil, fmt.Errorf("value capture did not participate in the match")
+				}
+				value, err := convert(source[start:end], field.config.Type)
+				if err != nil {
+					return nil, fmt.Errorf("converting value to %s: %w", field.config.Type, err)
+				}
+				values = append(values, value)
+			}
+			if field.config.Match == matchOne && len(values) == 2 {
+				break
+			}
+		}
+	}
+	if field.config.Match == matchAll {
+		return values, nil
+	}
+	if len(values) != 1 {
+		return nil, fmt.Errorf("extraction found %d matches, want exactly one", len(values))
+	}
+	return values[0], nil
+}
+
+type markerEvent struct {
+	Event string `json:"event"`
+	Key   string `json:"key"`
+}
+
+func parseMarkers(text string) (map[string][]string, error) {
+	markers := make(map[string][]string)
+	activeKey := ""
+	payloadStart := 0
+	for lineStart := 0; lineStart < len(text); {
+		lineEnd := strings.IndexByte(text[lineStart:], '\n')
+		next := len(text)
+		if lineEnd >= 0 {
+			lineEnd += lineStart
+			next = lineEnd + 1
+		} else {
+			lineEnd = len(text)
+		}
+		line := text[lineStart:lineEnd]
+		line = strings.TrimSuffix(line, "\r")
+		if line == markerPrefix || strings.HasPrefix(line, markerPrefix+" ") {
+			event, err := parseMarkerEvent(line)
+			if err != nil {
+				return nil, err
+			}
+			switch event.Event {
+			case "begin":
+				if activeKey != "" {
+					return nil, fmt.Errorf("marker %q begins inside marker %q", event.Key, activeKey)
+				}
+				activeKey = event.Key
+				payloadStart = next
+			case "end":
+				if activeKey == "" {
+					return nil, fmt.Errorf("marker %q ends without a matching begin", event.Key)
+				}
+				if event.Key != activeKey {
+					return nil, fmt.Errorf("marker %q ends marker %q", event.Key, activeKey)
+				}
+				markers[activeKey] = append(markers[activeKey], text[payloadStart:lineStart])
+				activeKey = ""
+			}
+		}
+		lineStart = next
+	}
+	if activeKey != "" {
+		return nil, fmt.Errorf("marker %q is not closed", activeKey)
+	}
+	return markers, nil
+}
+
+func parseMarkerEvent(line string) (markerEvent, error) {
+	payload, ok := strings.CutPrefix(line, markerPrefix+" ")
+	if !ok || strings.TrimSpace(payload) == "" {
+		return markerEvent{}, fmt.Errorf("invalid %s marker line", markerPrefix)
+	}
+	decoder := json.NewDecoder(strings.NewReader(payload))
+	decoder.DisallowUnknownFields()
+	var event markerEvent
+	if err := decoder.Decode(&event); err != nil {
+		return markerEvent{}, fmt.Errorf("decoding %s marker: %w", markerPrefix, err)
+	}
+	if err := ensureJSONEnd(decoder); err != nil {
+		return markerEvent{}, fmt.Errorf("decoding %s marker: %w", markerPrefix, err)
+	}
+	if strings.TrimSpace(event.Key) == "" {
+		return markerEvent{}, fmt.Errorf("%s marker key must not be empty", markerPrefix)
+	}
+	if event.Event != "begin" && event.Event != "end" {
+		return markerEvent{}, fmt.Errorf("%s marker event must be begin or end", markerPrefix)
+	}
+	return event, nil
+}
+
+func validateMatch(value string) error {
+	if value != matchOne && value != matchAll {
+		return fmt.Errorf("match must be one or all")
+	}
+	return nil
 }
 
 func compilePattern(pattern string, types map[string]string) (*regexp.Regexp, []capture, error) {

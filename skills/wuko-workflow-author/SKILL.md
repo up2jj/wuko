@@ -55,10 +55,13 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
 - Use `jsonpath` for RFC 9535 selection from a typed `vars` or `steps` value. Use `result: all`
   for a nodelist and `result: one` only when exactly one match is required; read normalized match
   locations from `paths`. Use `edit` when the selected data also needs transformation.
-- Use `extract` for exactly one typed record embedded in text. Prefer a typed `format` for a
-  complete predictable line and named Go regexp captures for substring or multiline matching.
-  Read captures directly from the step outputs and map only intentionally shared values through
-  `variables`; use `jsonpath` instead when the source is already structured.
+- Use `extract` for typed records embedded in text. Prefer a typed `format` for complete predictable
+  lines and named Go regexp captures for substring or multiline matching. Exact-one matching is
+  the default; use `match: all` for ordered `matches` records and capture-list variables. Use
+  `fields` to derive several named values from one input with `WUKO_OUTPUT_V1` marker blocks,
+  single-`value` regexes, or both. Read captures and fields directly from step outputs and map only
+  intentionally shared values through `variables`; use `jsonpath` instead when the source is
+  already structured.
 - Use `edit` to set, create, delete, append/insert, deep-merge, or rename JSON/YAML/TOML nodes
   without re-encoding the whole file, or to derive an edited clone from a variable/expression.
   Choose exactly one `from.file`, `from.var`, or `from.expr`; use `expr` with `current` for
