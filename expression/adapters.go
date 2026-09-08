@@ -78,6 +78,7 @@ func TemplateFuncsWithSecret(resolver SecretResolver) template.FuncMap {
 		"parseJSON":               parseJSON,
 		"parseYAML":               parseYAML,
 		"parseTime":               templateParseTime,
+		"parseNaturalTime":        templateParseNaturalTime,
 		"addTime":                 templateAddTime,
 		"formatTime":              templateFormatTime,
 		"parseURI":                ParseURI,
@@ -236,6 +237,7 @@ func exprOptions() []expr.Option {
 			return parseYAML(values[0].(string))
 		}, new(func(string) any)),
 		expr.Function("parseTime", exprParseTime, new(func(...any) string)),
+		expr.Function("parseNaturalTime", exprParseNaturalTime, new(func(...any) string)),
 		expr.Function("addTime", exprAddTime, new(func(...any) string)),
 		expr.Function("formatTime", exprFormatTime, new(func(...any) string)),
 		expr.Function("parseURI", func(values ...any) (any, error) {
@@ -297,6 +299,22 @@ func exprOptions() []expr.Option {
 		}, new(func(map[string]any) string)),
 		expr.Function("isConventionalCommit", exprIsConventionalCommit, new(func(...any) bool)),
 	}
+}
+
+func templateParseNaturalTime(values ...any) (string, error) {
+	value, options, err := templateStringOptionsArguments("parseNaturalTime", values)
+	if err != nil {
+		return "", err
+	}
+	return ParseNaturalTime(value, options)
+}
+
+func exprParseNaturalTime(values ...any) (any, error) {
+	value, options, err := stringOptionsArguments("parseNaturalTime", values)
+	if err != nil {
+		return nil, err
+	}
+	return ParseNaturalTime(value, options)
 }
 
 func templateParseTime(values ...any) (string, error) {

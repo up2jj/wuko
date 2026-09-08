@@ -35,8 +35,8 @@ with:
 ```
 
 Wuko also provides string, defaulting, collection, indentation, JSON, YAML, encoding, hashing,
-number, and inspection helpers, plus explicitly named clock and secure-generator helpers. See [Template, Expr, and Lua functions](template-functions.md) for the complete reference
-and equivalent syntax in each language.
+number, inspection, natural-time, clock, and secure-generator helpers. See [Template, Expr, and Lua
+functions](template-functions.md) for the complete reference and equivalent syntax in each language.
 
 Lua `source` is deliberately not rendered. Pass dynamic values through the Lua step's typed
 `args` instead.
@@ -311,6 +311,7 @@ serialization helpers where appropriate, quote values for their destination form
 treating untrusted values as executable shell source. Wuko does not add filesystem,
 command-execution, or environment-lookup functions; templates receive only the documented data
 roots and [helpers](template-functions.md). The clock and secure randomness are reachable only
-through the explicitly named `currentTime`, `unixTimestamp`, and generator helpers; every other
-helper is deterministic. Prefer capturing time with the recordable, `--var`-overridable
-[`time` step](steps-data.md#time), then use the pure time helpers on its output or variable.
+through the explicitly named `currentTime`, `unixTimestamp`, generator helpers, and
+`parseNaturalTime` when its reference is omitted; every other helper invocation is deterministic.
+Prefer capturing time with the recordable, `--var`-overridable [`time`
+step](steps-data.md#time), then pass its output or variable to the time helpers.

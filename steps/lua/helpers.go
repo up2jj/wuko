@@ -55,6 +55,7 @@ func helperFunctions() map[string]glua.LGFunction {
 		"to_json_compact":           helperToJSONCompact,
 		"to_yaml":                   helperToYAML,
 		"parse_time":                helperParseTime,
+		"parse_natural_time":        helperParseNaturalTime,
 		"add_time":                  helperAddTime,
 		"format_time":               helperFormatTime,
 		"parse_uri":                 helperParseURI,
@@ -468,6 +469,23 @@ func helperParseTime(state *glua.LState) int {
 	}
 	result, err := expression.ParseTime(state.CheckString(1), state.CheckString(2), timezone)
 	return pushHelperResult(state, "parse_time", result, err)
+}
+
+func helperParseNaturalTime(state *glua.LState) int {
+	if state.GetTop() < 1 || state.GetTop() > 2 {
+		state.RaiseError("helpers.parse_natural_time: expected a value and optional options object")
+		return 0
+	}
+	var options map[string]any
+	var err error
+	if state.GetTop() == 2 {
+		options, err = luaOptions(state, 2, "parse_natural_time")
+	}
+	if err != nil {
+		return pushHelperResult(state, "parse_natural_time", nil, err)
+	}
+	result, err := expression.ParseNaturalTime(state.CheckString(1), options)
+	return pushHelperResult(state, "parse_natural_time", result, err)
 }
 
 func helperAddTime(state *glua.LState) int {

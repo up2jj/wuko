@@ -330,6 +330,54 @@ wuko.output("value", h.format_time(tomorrow, "2006-01-02 15:04 Z07:00", wuko.wor
 	}
 }
 
+func TestLuaNaturalTimeHelper(t *testing.T) {
+	t.Parallel()
+	runner, err := New(map[string]any{"source": `
+local h = wuko.helpers
+local options = {
+  reference = "2026-09-08T10:15:00+02:00",
+  timezone = wuko.workflow.timezone,
+  language = "en",
+}
+wuko.output("next", h.parse_natural_time("next monday", options))
+wuko.output("later", h.parse_natural_time("in two weeks", options))
+`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runner.Run(t.Context(), step.Request{StepID: "time", WorkflowName: "release", WorkflowTimezone: "Europe/Warsaw"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Outputs["next"] != "2026-09-14T10:15:00+02:00" || result.Outputs["later"] != "2026-09-22T10:15:00+02:00" {
+		t.Fatalf("outputs = %#v", result.Outputs)
+	}
+}
+
+func TestLuaNaturalTimeHelperRejectsInvalidInput(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{name: "prose", source: `wuko.helpers.parse_natural_time("deploy next monday")`, want: "complete recognized phrase"},
+		{name: "options", source: `wuko.helpers.parse_natural_time("tomorrow", {language = "pl"})`, want: "unsupported natural time language"},
+		{name: "argument count", source: `wuko.helpers.parse_natural_time()`, want: "expected a value"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			runner, err := New(map[string]any{"source": test.source})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = runner.Run(t.Context(), step.Request{StepID: "time"})
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
 func TestLuaURIHelpers(t *testing.T) {
 	runner, err := New(map[string]any{
 		"source": `

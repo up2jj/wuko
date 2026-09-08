@@ -88,10 +88,13 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
   `committer` identities in fresh CI environments, ordered trailers for duplicate tokens, `signoff`
   for DCO workflows, and leave `verify` enabled unless bypassing hooks is deliberate.
 - Prefer `time` as the recordable, `--var`-overridable current-time boundary. Use `parseTime`,
-  `addTime`, and `formatTime` to transform explicit strings. `currentTime`, `unixTimestamp`, UUID,
-  token, password, and random helpers are available when nondeterminism is intentional; capture
-  their result once with `set` or a Lua variable before reuse. Top-level `timezone` supplies the
-  workflow default even without `cron`.
+  `addTime`, and `formatTime` to transform explicit strings, or `parseNaturalTime` and Lua's
+  `parse_natural_time` for complete English phrases such as `next monday` and `in two weeks`.
+  Pass the captured value as the natural parser's `reference` and pass `workflow.timezone` for
+  calendar and daylight-saving semantics. Omitting the reference reads the clock, like
+  `currentTime` and `unixTimestamp`; capture nondeterministic helper results once with `set` or a
+  Lua variable before reuse. Top-level `timezone` supplies the workflow default even without
+  `cron`.
 - Use the shared encoding, hash/HMAC, number, and inspection helpers for small inline
   transformations across templates, Expr, and Lua. Treat MD5 and SHA-1 as compatibility checksums,
   use SHA-256/SHA-512 or HMAC for security, and keep HMAC keys in secret-backed values.

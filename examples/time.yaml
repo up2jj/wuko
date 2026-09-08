@@ -1,6 +1,6 @@
 version: 1
 name: release-stamp
-description: Capture one overridable release date and derive another with pure time helpers
+description: Capture one overridable release date and derive dates with structured and natural time helpers
 timezone: Europe/Warsaw
 steps:
   - id: stamp
@@ -14,8 +14,14 @@ steps:
       variable: tomorrow
       expr: 'addTime(vars.stamp, {"days": 1, "timezone": workflow.timezone})'
 
+  - id: next_monday
+    type: set
+    with:
+      variable: next_monday
+      expr: 'parseNaturalTime("next monday", {"reference": vars.stamp, "timezone": workflow.timezone})'
+
   - id: summary
     type: set
     with:
       variable: release_message
-      value: 'Release date: {{ .vars.tomorrow | formatTime "January 2, 2006" .workflow.timezone }}'
+      value: 'Tomorrow: {{ .vars.tomorrow | formatTime "January 2, 2006" .workflow.timezone }}; next Monday: {{ .vars.next_monday | formatTime "January 2, 2006" .workflow.timezone }}'

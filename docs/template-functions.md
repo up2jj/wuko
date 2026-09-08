@@ -6,8 +6,9 @@ The `secret(reference)` helper is available to Go templates and Expr expressions
 
 Wuko exposes the same named helpers to Go templates, Expr, and Lua. Most are deterministic and
 side-effect-free; the explicitly named generation and current-time helpers use secure randomness
-or the host clock. Go templates always render strings, while Expr and Lua preserve typed results
-such as booleans, numbers, lists, and objects.
+or the host clock, as does `parseNaturalTime` when no reference is supplied. Go templates always
+render strings, while Expr and Lua preserve typed results such as booleans, numbers, lists, and
+objects.
 
 Go template pipelines pass the value as the final function argument:
 
@@ -617,13 +618,15 @@ task-bearing header, but a `body` whose lines start with `#` is rejected because
 
 ## Time functions
 
-Time helpers transform explicit string values. They never read the clock; use the [`time`
-step](steps-data.md#time) to capture a recordable, overridable current time. Go layouts use the
-reference instant syntax, such as `2006-01-02` for a calendar date.
+Structured time helpers transform explicit string values. Natural-language parsing may use the
+clock when its reference is omitted; use the [`time` step](steps-data.md#time) and pass its value as
+the reference for recordable, overridable behavior. Go layouts use the reference instant syntax,
+such as `2006-01-02` for a calendar date.
 
 | Function | Go template | Expr | Lua | Result |
 | --- | --- | --- | --- | --- |
 | `parseTime` | `{{ value \| parseTime layout timezone }}` | `parseTime(value, layout, timezone)` | `h.parse_time(value, layout, timezone)` | Canonical RFC3339Nano string |
+| `parseNaturalTime` | `{{ value \| parseNaturalTime options }}` | `parseNaturalTime(value, options)` | `h.parse_natural_time(value, options)` | Canonical RFC3339Nano string |
 | `addTime` | `{{ value \| addTime adjustments }}` | `addTime(value, adjustments)` | `h.add_time(value, adjustments)` | Adjusted RFC3339Nano string |
 | `formatTime` | `{{ value \| formatTime layout timezone }}` | `formatTime(value, layout, timezone)` | `h.format_time(value, layout, timezone)` | Formatted string |
 
@@ -657,6 +660,46 @@ wuko.output("next_week", h.format_time(next_week, "2006-01-02", "UTC"))
 `parseTime` accepts a custom source layout and normalizes it for composition. `addTime` and
 `formatTime` consume RFC3339 or RFC3339Nano strings, so custom source text must be parsed first.
 Offset-bearing inputs retain their instant before an explicit timezone conversion.
+
+`parseNaturalTime` accepts one complete English date or time phrase of at most 1 KiB. Surrounding
+and repeated whitespace is normalized and matching is case-insensitive, but surrounding prose and
+unrecognized punctuation fail instead of being silently discarded. English support includes relative durations,
+`today`, `tomorrow`, `yesterday`, weekdays, named calendar dates, and optional clock times:
+
+```gotemplate
+{{ "next monday" | parseNaturalTime
+    (dict "reference" .vars.stamp "timezone" .workflow.timezone "language" "en") }}
+```
+
+```expr
+parseNaturalTime("in two weeks", {
+  "reference": vars.stamp,
+  "timezone": workflow.timezone,
+  "language": "en",
+})
+```
+
+```lua
+local due = h.parse_natural_time("tomorrow at 9:30", {
+  reference = wuko.args.stamp,
+  timezone = wuko.workflow.timezone,
+  language = "en",
+})
+```
+
+The optional object accepts only `reference`, `timezone`, and `language`. `reference` is an
+RFC3339 or RFC3339Nano timestamp; when omitted, it is captured from the host clock in UTC.
+`timezone` applies an IANA location and defaults to the reference's zone; a blank value preserves
+that zone, so `workflow.timezone` can be passed directly. `language` defaults to `en`, the only
+language in the initial rule registry. Unknown options, invalid values, and unsupported language
+codes stop evaluation.
+
+Date-only phrases preserve the reference's local clock time. Days, weeks, months, years, and
+weekdays use calendar arithmetic in the selected timezone, so they preserve wall time across
+daylight-saving transitions; seconds, minutes, and hours are exact durations. `next` is strictly
+future, so `next monday` from a Monday means seven days later. An explicit clock phrase replaces
+the whole time of day and sets seconds and fractional seconds to zero, so `tonight` and
+`last night` are 23:00 of the current and previous day regardless of the reference's minute.
 
 ## Encoding and decoding
 
@@ -744,8 +787,8 @@ must be reused:
 ```
 
 For reproducible or `--var`-overridable time, continue to use the `time` step. Expr's implicit
-`now()` builtin remains disabled; `currentTime()` and `unixTimestamp()` are the explicit,
-documented nondeterministic boundaries.
+`now()` builtin remains disabled; `currentTime()`, `unixTimestamp()`, and `parseNaturalTime`
+without a reference are the explicit, documented nondeterministic boundaries.
 
 ## Availability and safety
 
@@ -754,9 +797,10 @@ Helpers are available in named and inline Go templates, in every Wuko Expr surfa
 and matrix expressions, composite-action inputs and outputs, and the `set` and `assert` steps.
 
 Helpers cannot read the process environment or filesystem, execute commands, access the network,
-or quote shell commands. Hashes are deterministic; generator and current-time helpers are the only
-nondeterministic functions. They use the operating system's cryptographic random source or clock
-and may change whenever an expression or template is evaluated again. JSON and YAML serialization
-does not make a value safe to interpolate into executable shell source. Lua's existing
+or quote shell commands. Hashes are deterministic; generator and current-time helpers, including
+reference-less natural-time parsing, are the only nondeterministic functions. They use the
+operating system's cryptographic random source or clock and may change whenever an expression or
+template is evaluated again. JSON and YAML serialization does not make a value safe to interpolate
+into executable shell source. Lua's existing
 `wuko.json.encode` remains the compact JSON encoder; `wuko.helpers.to_json` adds the shared indented
 form.
