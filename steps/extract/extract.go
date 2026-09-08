@@ -365,20 +365,22 @@ func (r *Runner) findMatches(ctx context.Context, text, cardinality string) ([][
 		limit = 2
 	}
 	if !r.format {
-		matches := r.regexp.FindAllStringSubmatchIndex(text, limit)
-		return matches, ctx.Err()
+		return scanAll(ctx, r.regexp, text, limit)
 	}
-	lines := strings.Split(text, "\n")
-	if len(lines) > 1 && lines[len(lines)-1] == "" {
-		lines = lines[:len(lines)-1]
-	}
+
 	matches := make([][]int, 0)
-	offset := 0
-	for _, rawLine := range lines {
+	// Walking the lines in place keeps a large input from being copied into a
+	// slice of every line before the first one is even matched.
+	for offset := 0; ; {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		line := strings.TrimSuffix(rawLine, "\r")
+		lineEnd, next := len(text), -1
+		if index := strings.IndexByte(text[offset:], '\n'); index >= 0 {
+			lineEnd = offset + index
+			next = lineEnd + 1
+		}
+		line := strings.TrimSuffix(text[offset:lineEnd], "\r")
 		if indices := r.regexp.FindStringSubmatchIndex(line); indices != nil {
 			match := make([]int, len(indices))
 			for i, index := range indices {
@@ -393,9 +395,28 @@ func (r *Runner) findMatches(ctx context.Context, text, cardinality string) ([][
 				return matches, nil
 			}
 		}
-		offset += len(rawLine) + 1
+		// A final newline closes the last line rather than opening an empty one,
+		// but wholly empty input is still one empty line.
+		if next < 0 || next == len(text) {
+			return matches, nil
+		}
+		offset = next
 	}
-	return matches, nil
+}
+
+// scanAll searches the whole text on its own goroutine. RE2 exposes no way to
+// resume a search at an offset without changing what `^`, `$`, and `\b` mean, so
+// one FindAll call has to cover the input and it cannot poll ctx; abandoning it
+// keeps a cancelled step from waiting out a pass over a large input.
+func scanAll(ctx context.Context, expression *regexp.Regexp, text string, limit int) ([][]int, error) {
+	done := make(chan [][]int, 1)
+	go func() { done <- expression.FindAllStringSubmatchIndex(text, limit) }()
+	select {
+	case matches := <-done:
+		return matches, ctx.Err()
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 func (r *Runner) runFields(ctx context.Context, text string) (step.Result, error) {
@@ -464,14 +485,15 @@ func (field compiledField) extract(ctx context.Context, text string, markers map
 			return nil, fmt.Errorf("regex was not resolved before execution")
 		}
 		for _, source := range sources {
-			if err := ctx.Err(); err != nil {
-				return nil, err
-			}
 			limit := -1
 			if field.config.Match == matchOne {
 				limit = 2 - len(values)
 			}
-			for _, indices := range field.regexp.FindAllStringSubmatchIndex(source, limit) {
+			found, err := scanAll(ctx, field.regexp, source, limit)
+			if err != nil {
+				return nil, err
+			}
+			for _, indices := range found {
 				start, end := indices[field.valueIndex*2], indices[field.valueIndex*2+1]
 				if start < 0 || end < 0 {
 					return nil, fmt.Errorf("value capture did not participate in the match")
@@ -516,24 +538,22 @@ func parseMarkers(text string) (map[string][]string, error) {
 		}
 		line := text[lineStart:lineEnd]
 		line = strings.TrimSuffix(line, "\r")
-		if line == markerPrefix || strings.HasPrefix(line, markerPrefix+" ") {
-			event, err := parseMarkerEvent(line)
-			if err != nil {
-				return nil, err
-			}
-			switch event.Event {
+		if directive, ok, err := parseMarkerEvent(line); err != nil {
+			return nil, err
+		} else if ok {
+			switch directive.Event {
 			case "begin":
 				if activeKey != "" {
-					return nil, fmt.Errorf("marker %q begins inside marker %q", event.Key, activeKey)
+					return nil, fmt.Errorf("marker %q begins inside marker %q", directive.Key, activeKey)
 				}
-				activeKey = event.Key
+				activeKey = directive.Key
 				payloadStart = next
 			case "end":
 				if activeKey == "" {
-					return nil, fmt.Errorf("marker %q ends without a matching begin", event.Key)
+					return nil, fmt.Errorf("marker %q ends without a matching begin", directive.Key)
 				}
-				if event.Key != activeKey {
-					return nil, fmt.Errorf("marker %q ends marker %q", event.Key, activeKey)
+				if directive.Key != activeKey {
+					return nil, fmt.Errorf("marker %q ends marker %q", directive.Key, activeKey)
 				}
 				markers[activeKey] = append(markers[activeKey], text[payloadStart:lineStart])
 				activeKey = ""
@@ -547,27 +567,34 @@ func parseMarkers(text string) (map[string][]string, error) {
 	return markers, nil
 }
 
-func parseMarkerEvent(line string) (markerEvent, error) {
+// parseMarkerEvent reports whether the line is a marker directive and decodes it.
+// The text being scanned is arbitrary program output that may mention the prefix
+// in prose, so only a line whose remainder is a JSON object claims to be a
+// directive; anything else is payload, and a malformed object is still an error.
+func parseMarkerEvent(line string) (markerEvent, bool, error) {
 	payload, ok := strings.CutPrefix(line, markerPrefix+" ")
-	if !ok || strings.TrimSpace(payload) == "" {
-		return markerEvent{}, fmt.Errorf("invalid %s marker line", markerPrefix)
+	if !ok {
+		return markerEvent{}, false, nil
+	}
+	if !strings.HasPrefix(strings.TrimSpace(payload), "{") {
+		return markerEvent{}, false, nil
 	}
 	decoder := json.NewDecoder(strings.NewReader(payload))
 	decoder.DisallowUnknownFields()
 	var event markerEvent
 	if err := decoder.Decode(&event); err != nil {
-		return markerEvent{}, fmt.Errorf("decoding %s marker: %w", markerPrefix, err)
+		return markerEvent{}, false, fmt.Errorf("decoding %s marker: %w", markerPrefix, err)
 	}
 	if err := ensureJSONEnd(decoder); err != nil {
-		return markerEvent{}, fmt.Errorf("decoding %s marker: %w", markerPrefix, err)
+		return markerEvent{}, false, fmt.Errorf("decoding %s marker: %w", markerPrefix, err)
 	}
 	if strings.TrimSpace(event.Key) == "" {
-		return markerEvent{}, fmt.Errorf("%s marker key must not be empty", markerPrefix)
+		return markerEvent{}, false, fmt.Errorf("%s marker key must not be empty", markerPrefix)
 	}
 	if event.Event != "begin" && event.Event != "end" {
-		return markerEvent{}, fmt.Errorf("%s marker event must be begin or end", markerPrefix)
+		return markerEvent{}, false, fmt.Errorf("%s marker event must be begin or end", markerPrefix)
 	}
-	return event, nil
+	return event, true, nil
 }
 
 func validateMatch(value string) error {

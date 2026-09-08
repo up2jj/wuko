@@ -321,7 +321,8 @@ func TestMarkerProtocolRejectsInvalidStreams(t *testing.T) {
 		text string
 		want string
 	}{
-		{"malformed", "WUKO_OUTPUT_V1 nope\n", "decoding WUKO_OUTPUT_V1 marker"},
+		{"malformed", `WUKO_OUTPUT_V1 {"event":"begin",` + "\n", "decoding WUKO_OUTPUT_V1 marker"},
+		{"trailing json", `WUKO_OUTPUT_V1 {"event":"begin","key":"x"} extra` + "\n", "decoding WUKO_OUTPUT_V1 marker"},
 		{"unknown field", `WUKO_OUTPUT_V1 {"event":"begin","key":"x","extra":true}` + "\n", "unknown field"},
 		{"unknown event", `WUKO_OUTPUT_V1 {"event":"write","key":"x"}` + "\n", "must be begin or end"},
 		{"empty key", `WUKO_OUTPUT_V1 {"event":"begin","key":""}` + "\n", "key must not be empty"},
@@ -346,6 +347,50 @@ func TestMarkerProtocolRejectsInvalidStreams(t *testing.T) {
 				t.Fatalf("result = %#v", result)
 			}
 		})
+	}
+}
+
+func TestMarkerProtocolTreatsPrefixedProseAsPayload(t *testing.T) {
+	runner, err := New(map[string]any{
+		"text": "WUKO_OUTPUT_V1 is the marker protocol\n" +
+			"WUKO_OUTPUT_V1\n" +
+			"warning: unrelated\n" +
+			`WUKO_OUTPUT_V1 {"event":"begin","key":"x"}` + "\n" +
+			"payload\n" +
+			"WUKO_OUTPUT_V1 marks a block\n" +
+			`WUKO_OUTPUT_V1 {"event":"end","key":"x"}` + "\n",
+		"fields": map[string]any{
+			"block":   map[string]any{"marker": "x"},
+			"warning": map[string]any{"regex": `warning: (?P<value>[^\r\n]+)`},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runner.Run(t.Context(), step.Request{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{"block": "payload\nWUKO_OUTPUT_V1 marks a block\n", "warning": "unrelated"}
+	if !reflect.DeepEqual(result.Outputs, want) {
+		t.Fatalf("outputs = %#v, want %#v", result.Outputs, want)
+	}
+}
+
+func TestFormatMatchAllReadsCRLFAndTrailingNewlineLines(t *testing.T) {
+	runner, err := New(map[string]any{
+		"text": "value=1\r\n\nvalue=22\r\n", "format": "value={value:integer}", "match": "all",
+		"variables": map[string]any{"value": "values"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runner.Run(t.Context(), step.Request{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(result.Variables["values"], []any{int64(1), int64(22)}) || result.Outputs["count"] != 2 {
+		t.Fatalf("result = %#v", result)
 	}
 }
 

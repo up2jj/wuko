@@ -208,8 +208,10 @@ WUKO_OUTPUT_V1 {"event":"end","key":"action_test_binary"}
 ```
 
 Boundary lines are excluded and payload bytes, including line endings, are preserved. Keys are
-case-sensitive and repeated blocks are allowed. Marker parsing rejects malformed JSON, unknown
-fields or events, nesting, unmatched keys, and unclosed blocks. All fields are atomic: one invalid
+case-sensitive and repeated blocks are allowed. A prefixed line is a boundary only when the rest of
+the line is a JSON object, so program output that merely mentions `WUKO_OUTPUT_V1` stays payload;
+once a line claims to be a boundary, parsing rejects malformed JSON, unknown fields or events,
+nesting, unmatched keys, and unclosed blocks. All fields are atomic: one invalid
 field prevents every output and variable from being published.
 
 ## Publishing workflow variables
