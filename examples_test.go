@@ -19,6 +19,7 @@ import (
 	gitstep "github.com/up2jj/wuko/steps/git"
 	inputstep "github.com/up2jj/wuko/steps/input"
 	luastep "github.com/up2jj/wuko/steps/lua"
+	markdowneditstep "github.com/up2jj/wuko/steps/markdown_edit"
 	setstep "github.com/up2jj/wuko/steps/set"
 	"github.com/up2jj/wuko/steps/shell"
 	tablestep "github.com/up2jj/wuko/steps/table"
@@ -37,6 +38,21 @@ func TestTimeExampleValidates(t *testing.T) {
 		if err := register(registry); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if err := engine.New(registry).Validate(t.Context(), definition, engine.Options{RunDir: t.TempDir()}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMarkdownEditExampleValidates(t *testing.T) {
+	t.Parallel()
+	definition, err := workflow.NewLoader(nil).Load(t.Context(), filepath.Join("examples", "markdown-edit.yaml"), workflow.LoadOptions{RunDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := step.NewRegistry()
+	if err := markdowneditstep.Register(registry); err != nil {
+		t.Fatal(err)
 	}
 	if err := engine.New(registry).Validate(t.Context(), definition, engine.Options{RunDir: t.TempDir()}); err != nil {
 		t.Fatal(err)

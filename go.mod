@@ -29,6 +29,7 @@ require (
 	github.com/spf13/cobra v1.9.1
 	github.com/spf13/viper v1.21.0
 	github.com/theory/jsonpath v0.12.0
+	github.com/yuin/goldmark/v2 v2.0.1
 	github.com/yuin/gopher-lua v1.1.1
 	golang.org/x/sync v0.20.0
 	golang.org/x/sys v0.45.0

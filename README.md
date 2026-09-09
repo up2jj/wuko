@@ -501,6 +501,7 @@ Each linked guide contains multiple examples for every step.
 | `decode` | Convert JSON, YAML, TOML, or lines into a typed value | [Data steps](docs/steps-data.md#decode) |
 | `jsonpath` | Select values with RFC 9535 JSONPath | [Data steps](docs/steps-data.md#jsonpath) |
 | `edit` | Update structured files or values with RFC 9535 JSONPath | [Data steps](docs/steps-data.md#edit) |
+| `markdown_edit` | Update Markdown by semantic AST nodes while preserving unrelated source | [Data steps](docs/steps-data.md#markdown_edit) |
 | `extract` | Extract typed records and marker fields from text | [Text extraction](docs/extract.md) |
 | `semver` | Parse, compare, constrain, or increment versions | [Data steps](docs/steps-data.md#semver) |
 | `time` | Capture, parse, adjust, and format an explicit time value | [Data steps](docs/steps-data.md#time) |

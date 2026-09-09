@@ -335,6 +335,209 @@ Outputs include the complete transformed `value`, original normalized `paths`, o
 list. File edits also return the resolved `file` and `format`. Files are limited to `1MiB` by
 default; increase `max_bytes` with a byte size such as `4MiB` when the larger input is intentional.
 
+## `markdown_edit`
+
+Edit Markdown by native syntax nodes while preserving unrelated bytes, comments, whitespace, and
+line endings. Parsing uses Goldmark v2 with GFM and heading attributes enabled. A heading is a
+heading node only: deleting it does not implicitly delete the content below it.
+
+Prepare a new release heading while renaming the previous one:
+
+````yaml
+- id: prepare_release
+  type: markdown_edit
+  with:
+    from:
+      file: operations.md
+    edits:
+      - operation: set
+        select:
+          kind: heading
+          level: 3
+          text: "Next release (2026-09-09)"
+        field: text
+        value: "2026-09-09"
+
+      - operation: insert
+        select:
+          kind: heading
+          level: 3
+          text: "Next release (2026-09-09)"
+        position: before
+        value: |+
+          ### Next release (2026-09-27)
+
+          - Add release notes here.
+
+````
+
+Every selector is resolved against the original document. The two edits above can therefore use
+the same original heading even though the first edit changes its text. Overlapping replacements
+are rejected before a file is written; insertions exactly at a replacement boundary are allowed.
+
+Duplicate matches fail by default and include their line and column. Select a one-based occurrence
+or explicitly request every match:
+
+```yaml
+- type: markdown_edit
+  with:
+    from: {file: CHANGELOG.md}
+    edits:
+      - operation: set
+        select: {kind: heading, level: 2, text: Fixed, occurrence: 2}
+        field: text
+        value: Resolved
+
+      - operation: set
+        select: {kind: list_item, task: true, text: Publish release}
+        result: all
+        field: checked
+        value: true
+```
+
+Structural selectors disambiguate repeated content without relying on a global occurrence number.
+`parent` matches the immediate native parent, `ancestor` matches any parent, and `contains` matches
+a descendant. `before` and `after` are unique positional anchors:
+
+```yaml
+- type: markdown_edit
+  with:
+    from: {file: CHANGELOG.md}
+    edits:
+      - operation: set
+        select:
+          kind: heading
+          text: Fixed
+          after: {kind: heading, text: "Version 2.0"}
+          before: {kind: heading, text: "Version 1.9"}
+        field: text
+        value: Bug fixes
+```
+
+Explicit heading IDs and attributes can be selected and edited. Automatic IDs are not generated:
+
+```yaml
+- type: markdown_edit
+  with:
+    from: {file: guide.md}
+    edits:
+      - operation: set
+        select:
+          kind: heading
+          id: install
+          attributes: {owner: docs}
+        field: attribute.reviewed
+        value: "true"
+```
+
+Set `attribute.<name>` to `null` to remove it. Heading `text` and `level` are also editable. ATX
+markers and Setext underlines are retained when possible; changing a Setext heading to level 3–6
+converts only that heading to ATX form.
+
+Fenced code blocks, inline links and images, and existing GFM task items expose typed fields:
+
+```yaml
+- type: markdown_edit
+  with:
+    from: {file: README.md}
+    edits:
+      - operation: set
+        select: {kind: code_block, language: ruby}
+        field: content
+        value: |
+          Feature.enable!(:new_checkout)
+          Checkout::Backfill.enqueue()
+
+      - operation: set
+        select: {kind: link, destination: /old/setup}
+        result: all
+        field: destination
+        value: /getting-started
+```
+
+Code fields are `content`, `info`, and `language`; a replacement that contains a closing fence
+automatically lengthens the original fence. Link fields are `text`, `destination`, and `title`;
+image fields are `alt`, `source`, and `title`. Typed link fields require inline syntax. Reference
+links and autolinks can still be replaced or deleted as complete nodes.
+
+GFM tables support semantic cell and body-row editing. Select columns by one-based number or by a
+unique header name:
+
+```yaml
+- type: markdown_edit
+  with:
+    from: {file: services.md}
+    edits:
+      - operation: set
+        select:
+          kind: table_cell
+          column: Status
+          header: false
+          ancestor:
+            kind: table
+            headers: [Service, Status]
+          parent:
+            kind: table_row
+            contains: {kind: table_cell, column: Service, text: API}
+        field: content
+        value: stable
+
+      - operation: append
+        select: {kind: table, headers: [Service, Status]}
+        value: [Scheduler, experimental]
+
+      - operation: delete
+        select:
+          kind: table_row
+          ancestor: {kind: table, headers: [Service, Status]}
+          contains: {kind: table_cell, column: Service, text: Legacy API}
+```
+
+Rows are lists of strings and must match the table width. `insert` adds a row before or after a
+selected body row; `prepend` and `append` add body rows to a selected table. Column and alignment
+mutations are not supported.
+
+The complete operation set is:
+
+| Operation | Fields | Behavior |
+| --- | --- | --- |
+| `set` | `field`; exactly one of `value`, `expr` | Update a typed field on a heading, fenced code block, inline link/image, task item, or table cell. |
+| `replace` | exactly one of `value`, `expr` | Replace the selected native node. |
+| `insert` | exactly one of `value`, `expr`; `position: before \| after` | Insert relative to the selected node. |
+| `delete` | none | Delete only the selected native node. |
+| `prepend` | exactly one of `value`, `expr` | Insert at the start of a document/node, or add the first table body row. |
+| `append` | exactly one of `value`, `expr` | Insert at the end of a document/node, or add the last table body row. |
+
+Selectors support `kind`, exact `text`, Go regular-expression `text_regex`, one-based
+`occurrence`, and type-specific fields. Supported kinds are `document`, `heading`, `paragraph`,
+`blockquote`, `code_block`, `link`, `image`, `list`, `list_item`, `table`, `table_row`, and
+`table_cell`. `result` defaults to `one`; use `all` intentionally for repeated matches. Missing
+nodes fail by default, while `missing: ignore` produces a successful no-op.
+
+Use an expression for a computed replacement. It receives a JSON-compatible `current` descriptor,
+the AST child-index `path`, and the zero-based match `index`:
+
+```yaml
+- id: number_chapters
+  type: markdown_edit
+  with:
+    from:
+      expr: vars.generated_markdown
+    edits:
+      - operation: set
+        select: {kind: heading, level: 2}
+        result: all
+        field: text
+        expr: '"Chapter " + string(index + 1) + ": " + current.text'
+```
+
+`from` requires exactly one of `file`, `var`, or `expr`. Variables and expressions must produce a
+string and remain immutable; save the returned `steps.<id>.value` with `set` when desired. File
+paths resolve from the active run directory, follow executor filesystems, reject symlinks and other
+non-regular files, preserve permissions, and are installed atomically. Outputs are `value`,
+`changed`, `count`, `changed_count`, and `matches`; file sources also return the resolved `file`.
+The default `max_bytes` is `1MiB`.
+
 ## `extract`
 
 Extract named, typed fields from one or every matching line of text with a friendly format:

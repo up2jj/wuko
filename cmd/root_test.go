@@ -261,6 +261,47 @@ steps:
 	}
 }
 
+func TestRootCommandRegistersMarkdownEditStep(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+	documentPath := filepath.Join(root, "README.md")
+	if err := os.WriteFile(documentPath, []byte("# Before\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	workflowPath := filepath.Join(root, "markdown-edit.yaml")
+	data := `version: 1
+name: markdown-edit
+steps:
+  - id: rename
+    type: markdown_edit
+    with:
+      from: {file: README.md}
+      edits:
+        - operation: set
+          select: {kind: heading, text: Before}
+          field: text
+          value: After
+`
+	if err := os.WriteFile(workflowPath, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	command := NewRootCmd()
+	command.SetIn(bytes.NewReader(nil))
+	command.SetOut(io.Discard)
+	command.SetErr(io.Discard)
+	command.SetArgs([]string{"run", "--file", workflowPath})
+	if err := command.ExecuteContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := os.ReadFile(documentPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(updated) != "# After\n" {
+		t.Fatalf("document = %q", updated)
+	}
+}
+
 func TestRootCommandRegistersSemVerStep(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "semver.yaml")

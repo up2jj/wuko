@@ -1,0 +1,39 @@
+version: 1
+name: markdown-edit
+
+vars:
+  release_notes: |
+    ### Next release (2026-09-09)
+
+    - Add keyboard navigation to the command palette.
+    - Preserve filters when returning to the dashboard.
+
+    ### 2026-08-19
+
+    - Improve retry diagnostics for failed uploads.
+
+steps:
+  - id: prepare_release
+    type: markdown_edit
+    with:
+      from:
+        var: release_notes
+      edits:
+        - operation: set
+          select:
+            kind: heading
+            level: 3
+            text: "Next release (2026-09-09)"
+          field: text
+          value: "2026-09-09"
+
+        - operation: insert
+          select:
+            kind: heading
+            level: 3
+            text: "Next release (2026-09-09)"
+          position: before
+          value: |+
+            ### Next release (2026-09-27)
+
+            - Add release notes here.
