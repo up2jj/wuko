@@ -12,6 +12,18 @@ func helperFunctions() map[string]glua.LGFunction {
 	return map[string]glua.LGFunction{
 		"lower":                     helperLower,
 		"upper":                     helperUpper,
+		"alternate_case":            helperAlternateCase,
+		"camel_case":                helperCamelCase,
+		"capitalize":                helperCapitalize,
+		"constant_case":             helperConstantCase,
+		"dot_case":                  helperDotCase,
+		"kebab_case":                helperKebabCase,
+		"pascal_case":               helperPascalCase,
+		"sentence_case":             helperSentenceCase,
+		"snake_case":                helperSnakeCase,
+		"swap_case":                 helperSwapCase,
+		"title_case":                helperTitleCase,
+		"train_case":                helperTrainCase,
 		"trim":                      helperTrim,
 		"trim_prefix":               helperTrimPrefix,
 		"trim_suffix":               helperTrimSuffix,
@@ -112,6 +124,71 @@ func helperLower(state *glua.LState) int {
 func helperUpper(state *glua.LState) int {
 	state.Push(glua.LString(strings.ToUpper(state.CheckString(1))))
 	return 1
+}
+
+func helperAlternateCase(state *glua.LState) int {
+	state.Push(glua.LString(expression.AlternateCase(helperCaseString(state))))
+	return 1
+}
+
+func helperCamelCase(state *glua.LState) int {
+	state.Push(glua.LString(expression.CamelCase(helperCaseString(state))))
+	return 1
+}
+
+func helperCapitalize(state *glua.LState) int {
+	state.Push(glua.LString(expression.Capitalize(helperCaseString(state))))
+	return 1
+}
+
+func helperConstantCase(state *glua.LState) int {
+	state.Push(glua.LString(expression.ConstantCase(helperCaseString(state))))
+	return 1
+}
+
+func helperDotCase(state *glua.LState) int {
+	state.Push(glua.LString(expression.DotCase(helperCaseString(state))))
+	return 1
+}
+
+func helperKebabCase(state *glua.LState) int {
+	state.Push(glua.LString(expression.KebabCase(helperCaseString(state))))
+	return 1
+}
+
+func helperPascalCase(state *glua.LState) int {
+	state.Push(glua.LString(expression.PascalCase(helperCaseString(state))))
+	return 1
+}
+
+func helperSentenceCase(state *glua.LState) int {
+	state.Push(glua.LString(expression.SentenceCase(helperCaseString(state))))
+	return 1
+}
+
+func helperSnakeCase(state *glua.LState) int {
+	state.Push(glua.LString(expression.SnakeCase(helperCaseString(state))))
+	return 1
+}
+
+func helperSwapCase(state *glua.LState) int {
+	state.Push(glua.LString(expression.SwapCase(helperCaseString(state))))
+	return 1
+}
+
+func helperTitleCase(state *glua.LState) int {
+	state.Push(glua.LString(expression.TitleCase(helperCaseString(state))))
+	return 1
+}
+
+func helperTrainCase(state *glua.LState) int {
+	state.Push(glua.LString(expression.TrainCase(helperCaseString(state))))
+	return 1
+}
+
+func helperCaseString(state *glua.LState) string {
+	state.CheckType(1, glua.LTString)
+	return string(state.Get(1).(glua.LString))
 }
 
 func helperTrim(state *glua.LState) int {

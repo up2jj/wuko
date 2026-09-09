@@ -98,6 +98,11 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
 - Use the shared encoding, hash/HMAC, number, and inspection helpers for small inline
   transformations across templates, Expr, and Lua. Treat MD5 and SHA-1 as compatibility checksums,
   use SHA-256/SHA-512 or HMAC for security, and keep HMAC keys in secret-backed values.
+- Use the shared deterministic casing helpers for identifiers and labels: `camelCase`,
+  `constantCase`, `dotCase`, `kebabCase`, `pascalCase`, `snakeCase`, and `trainCase` split mixed
+  input at punctuation, case boundaries, acronym endings, and digit boundaries. Use `capitalize`,
+  `sentenceCase`, `titleCase`, `alternateCase`, or `swapCase` when preserving readable text; Lua
+  exposes the corresponding snake_case names. Wuko intentionally does not expose random casing.
 - Use `require_tool` before external commands that need an executable or supported tool version.
   Configure nonstandard version flags with `version_args`, and consume its `path` or checked
   `version` output only after the guard succeeds.

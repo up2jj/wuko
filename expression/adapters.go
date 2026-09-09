@@ -33,6 +33,18 @@ func TemplateFuncsWithSecret(resolver SecretResolver) template.FuncMap {
 		"secret":                  secret,
 		"lower":                   strings.ToLower,
 		"upper":                   strings.ToUpper,
+		"alternateCase":           AlternateCase,
+		"camelCase":               CamelCase,
+		"capitalize":              Capitalize,
+		"constantCase":            ConstantCase,
+		"dotCase":                 DotCase,
+		"kebabCase":               KebabCase,
+		"pascalCase":              PascalCase,
+		"sentenceCase":            SentenceCase,
+		"snakeCase":               SnakeCase,
+		"swapCase":                SwapCase,
+		"titleCase":               TitleCase,
+		"trainCase":               TrainCase,
 		"trim":                    strings.TrimSpace,
 		"trimPrefix":              func(prefix, value string) string { return strings.TrimPrefix(value, prefix) },
 		"trimSuffix":              func(suffix, value string) string { return strings.TrimSuffix(value, suffix) },
@@ -141,6 +153,18 @@ func exprOptions() []expr.Option {
 		// helpers. Disabling the builtin fails such an expression at compile time with
 		// "unknown name now".
 		expr.DisableBuiltin("now"),
+		exprCaseFunction("alternateCase", AlternateCase),
+		exprCaseFunction("camelCase", CamelCase),
+		exprCaseFunction("capitalize", Capitalize),
+		exprCaseFunction("constantCase", ConstantCase),
+		exprCaseFunction("dotCase", DotCase),
+		exprCaseFunction("kebabCase", KebabCase),
+		exprCaseFunction("pascalCase", PascalCase),
+		exprCaseFunction("sentenceCase", SentenceCase),
+		exprCaseFunction("snakeCase", SnakeCase),
+		exprCaseFunction("swapCase", SwapCase),
+		exprCaseFunction("titleCase", TitleCase),
+		exprCaseFunction("trainCase", TrainCase),
 		expr.Function("default", func(values ...any) (any, error) {
 			return defaultValue(values[1], values[0]), nil
 		}, new(func(any, any) any)),
@@ -299,6 +323,16 @@ func exprOptions() []expr.Option {
 		}, new(func(map[string]any) string)),
 		expr.Function("isConventionalCommit", exprIsConventionalCommit, new(func(...any) bool)),
 	}
+}
+
+func exprCaseFunction(name string, run func(string) string) expr.Option {
+	return expr.Function(name, func(values ...any) (any, error) {
+		value, err := utilityString(name+" value", values[0])
+		if err != nil {
+			return nil, err
+		}
+		return run(value), nil
+	}, new(func(string) string))
 }
 
 func templateParseNaturalTime(values ...any) (string, error) {

@@ -242,6 +242,70 @@ wuko.output("helpers", {
 	}
 }
 
+func TestLuaCaseHelpers(t *testing.T) {
+	runner, err := New(map[string]any{
+		"source": `
+local h = wuko.helpers
+wuko.output("cases", {
+  alternate = h.alternate_case("hello"),
+  camel = h.camel_case("user first name"),
+  capitalize = h.capitalize("iPhone case"),
+  constant = h.constant_case("max retry count"),
+  dot = h.dot_case("user first name"),
+  kebab = h.kebab_case("userFirstName"),
+  pascal = h.pascal_case("user first name"),
+  sentence = h.sentence_case("FIRST. SECOND"),
+  snake = h.snake_case("userFirstName"),
+  swap = h.swap_case("Hello"),
+  title = h.title_case("tHE title"),
+  train = h.train_case("user first name"),
+})
+`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runner.Run(t.Context(), step.Request{StepID: "cases", WorkflowName: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := result.Outputs["cases"].(map[string]any)
+	wants := map[string]any{
+		"alternate": "hElLo", "camel": "userFirstName", "capitalize": "IPhone Case",
+		"constant": "MAX_RETRY_COUNT", "dot": "user.first.name", "kebab": "user-first-name",
+		"pascal": "UserFirstName", "sentence": "First. Second", "snake": "user_first_name",
+		"swap": "hELLO", "title": "The Title", "train": "User-First-Name",
+	}
+	for name, want := range wants {
+		if got := output[name]; got != want {
+			t.Errorf("%s = %#v, want %#v", name, got, want)
+		}
+	}
+}
+
+func TestLuaCaseHelpersRejectNonStrings(t *testing.T) {
+	for _, name := range []string{
+		"alternate_case", "camel_case", "capitalize", "constant_case", "dot_case", "kebab_case",
+		"pascal_case", "sentence_case", "snake_case", "swap_case", "title_case", "train_case",
+	} {
+		t.Run(name, func(t *testing.T) {
+			runner, err := New(map[string]any{"source": "wuko.helpers." + name + "(1)"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := runner.Run(t.Context(), step.Request{StepID: "cases", WorkflowName: "test"}); err == nil {
+				t.Fatalf("Lua helper %s accepted a number", name)
+			}
+		})
+	}
+}
+
+func TestLuaCaseCatalogExcludesRandomCase(t *testing.T) {
+	if _, exists := BuiltinHelperNames()["random_case"]; exists {
+		t.Fatal("random_case must not be exposed to Lua")
+	}
+}
+
 func TestLuaUtilityHelpers(t *testing.T) {
 	runner, err := New(map[string]any{"source": `
 local h = wuko.helpers

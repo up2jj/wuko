@@ -48,6 +48,18 @@ list or array containing only strings.
 | --- | --- | --- | --- | --- |
 | `lower` | `{{ value \| lower }}` | `lower(value)` | `h.lower(value)` | Unicode-aware lowercase string |
 | `upper` | `{{ value \| upper }}` | `upper(value)` | `h.upper(value)` | Unicode-aware uppercase string |
+| `alternateCase` | `{{ value \| alternateCase }}` | `alternateCase(value)` | `h.alternate_case(value)` | Alternating case beginning with lowercase |
+| `camelCase` | `{{ value \| camelCase }}` | `camelCase(value)` | `h.camel_case(value)` | `camelCase` words |
+| `capitalize` | `{{ value \| capitalize }}` | `capitalize(value)` | `h.capitalize(value)` | Uppercase each word's first character and preserve the rest |
+| `constantCase` | `{{ value \| constantCase }}` | `constantCase(value)` | `h.constant_case(value)` | `CONSTANT_CASE` words |
+| `dotCase` | `{{ value \| dotCase }}` | `dotCase(value)` | `h.dot_case(value)` | `dot.case` words |
+| `kebabCase` | `{{ value \| kebabCase }}` | `kebabCase(value)` | `h.kebab_case(value)` | `kebab-case` words |
+| `pascalCase` | `{{ value \| pascalCase }}` | `pascalCase(value)` | `h.pascal_case(value)` | `PascalCase` words |
+| `sentenceCase` | `{{ value \| sentenceCase }}` | `sentenceCase(value)` | `h.sentence_case(value)` | Uppercase sentence starts and lowercase the rest |
+| `snakeCase` | `{{ value \| snakeCase }}` | `snakeCase(value)` | `h.snake_case(value)` | `snake_case` words |
+| `swapCase` | `{{ value \| swapCase }}` | `swapCase(value)` | `h.swap_case(value)` | Swap the case of every cased character |
+| `titleCase` | `{{ value \| titleCase }}` | `titleCase(value)` | `h.title_case(value)` | Uppercase each word's first character and lowercase the rest |
+| `trainCase` | `{{ value \| trainCase }}` | `trainCase(value)` | `h.train_case(value)` | `Train-Case` words |
 | `trim` | `{{ value \| trim }}` | `trim(value)` | `h.trim(value)` | String with surrounding whitespace removed |
 | `trimPrefix` | `{{ value \| trimPrefix prefix }}` | `trimPrefix(value, prefix)` | `h.trim_prefix(value, prefix)` | String with one matching prefix removed |
 | `trimSuffix` | `{{ value \| trimSuffix suffix }}` | `trimSuffix(value, suffix)` | `h.trim_suffix(value, suffix)` | String with one matching suffix removed |
@@ -57,6 +69,18 @@ list or array containing only strings.
 | `replace` | `{{ value \| replace old replacement }}` | `replace(value, old, replacement)` | `h.replace(value, old, replacement)` | String with every match replaced |
 | `split` | `{{ value \| split separator }}` | `split(value, separator)` | `h.split(value, separator)` | List of strings |
 | `join` | `{{ values \| join separator }}` | `join(values, separator)` | `h.join(values, separator)` | Joined string |
+
+The convention converters recognize Unicode letters and numbers. Non-alphanumeric characters are
+word separators, and case changes split compact identifiers: `userFirstName` becomes
+`user_first_name`, `parseHTTPResponse` becomes `parse_http_response`, and `version2Point0` becomes
+`version_2_point_0`. Every conversion runs independently on each line and preserves `\n` or `\r\n`
+line endings, empty lines, and a terminal newline.
+
+`capitalize` preserves every character after a whitespace-delimited word's first character;
+`titleCase` lowercases those remaining characters. `sentenceCase` lowercases text except for the
+first letter of the input and the first letter after `.`, `!`, or `?`. `alternateCase` begins with
+lowercase on every line and ignores non-letters when choosing the next case. The nondeterministic
+`random-case` operation from txc is intentionally not exposed as a Wuko helper.
 
 For example:
 
@@ -68,6 +92,20 @@ with:
 
 The equivalent Expr is `replace(lower(trim(vars.application)), "_", "-")`; Lua uses
 `h.replace(h.lower(h.trim(wuko.args.application)), "_", "-")`.
+
+Case conversions use the same names and data flow:
+
+```gotemplate
+{{ .vars.component | snakeCase }}
+```
+
+```expr
+constantCase(vars.setting)
+```
+
+```lua
+local branch = wuko.helpers.kebab_case(wuko.args.branch)
+```
 
 ### Slugification
 
