@@ -13,6 +13,7 @@ func TestLoadReturnControl(t *testing.T) {
 name: cached
 steps:
   - return:
+      to: picker
       outputs:
         artifact: '"dist/app.tar.gz"'
         cached: "true"
@@ -23,7 +24,7 @@ steps:
 		t.Fatal(err)
 	}
 	control := definition.Steps[0].Return
-	if control == nil || control.Outputs["cached"] != "true" || definition.Steps[0].If != "vars.cached" {
+	if control == nil || control.To != ReturnDestinationPicker || control.Outputs["cached"] != "true" || definition.Steps[0].If != "vars.cached" {
 		t.Fatalf("return = %#v, step = %#v", control, definition.Steps[0])
 	}
 }
@@ -40,7 +41,10 @@ func TestReturnSchemaValidation(t *testing.T) {
 		{name: "non-string expression", body: "  - return: {outputs: {ok: true}}\n", want: "expression string"},
 		{name: "empty expression", body: "  - return: {outputs: {ok: ''}}\n", want: "non-empty expression"},
 		{name: "invalid name", body: "  - return: {outputs: {'bad-name': 'true'}}\n", want: "invalid return output name"},
+		{name: "non-string destination", body: "  - return: {to: true, outputs: {}}\n", want: "destination must be a string"},
+		{name: "invalid destination", body: "  - return: {to: command, outputs: {}}\n", want: "unsupported return destination"},
 		{name: "unknown field", body: "  - return: {outputs: {}, status: success}\n", want: "field status"},
+		{name: "duplicate destination field", body: "  - return:\n      to: picker\n      to: picker\n      outputs: {}\n", want: `duplicate return field "to"`},
 		{name: "duplicate outputs field", body: "  - return:\n      outputs: {}\n      outputs: {ok: 'true'}\n", want: `duplicate return field "outputs"`},
 		{name: "mixed id", body: "  - id: done\n    return: {outputs: {}}\n", want: "cannot be combined"},
 		{name: "inside concurrent", body: "  - concurrent:\n      steps:\n        - return: {outputs: {}}\n        - {id: work, type: shell}\n", want: "inside concurrent"},
@@ -64,7 +68,7 @@ func TestReturnSchemaValidation(t *testing.T) {
 func TestReturnCanComeFromRequiredSequentialFragment(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	writeTestFile(t, filepath.Join(dir, "finish.yaml"), "- return: {outputs: {result: '\"done\"'}}\n")
+	writeTestFile(t, filepath.Join(dir, "finish.yaml"), "- return: {to: picker, outputs: {result: '\"done\"'}}\n")
 	path := filepath.Join(dir, "workflow.yaml")
 	writeTestFile(t, path, `version: 1
 name: required-return
@@ -78,8 +82,23 @@ steps:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if definition.Steps[0].Steps[0].Return == nil {
+	if definition.Steps[0].Steps[0].Return == nil || definition.Steps[0].Steps[0].Return.To != ReturnDestinationPicker {
 		t.Fatalf("definition = %#v", definition)
+	}
+}
+
+func TestActionRejectsReturnDestination(t *testing.T) {
+	t.Parallel()
+	action := &Action{
+		Outputs: map[string]ActionOutput{"result": {Value: `"fallback"`}},
+		Steps: []Step{{Return: &ReturnControl{
+			To:      ReturnDestinationPicker,
+			Outputs: map[string]string{"result": `"done"`},
+		}}},
+	}
+	err := action.ValidateReturnContracts()
+	if err == nil || !strings.Contains(err.Error(), "not supported in composite actions") {
+		t.Fatalf("error = %v", err)
 	}
 }
 

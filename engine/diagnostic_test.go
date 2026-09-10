@@ -29,3 +29,21 @@ func TestTraceStepIncludesWrappedErrorAttributes(t *testing.T) {
 		t.Fatalf("attributes = %#v", event.Attributes)
 	}
 }
+
+func TestReturnDiagnosticIncludesDestination(t *testing.T) {
+	definition := testDefinition(t, "picker-return", workflow.Step{
+		Return: &workflow.ReturnControl{To: workflow.ReturnDestinationPicker, Outputs: map[string]string{}},
+	})
+	var returned diagnostic.Event
+	_, err := New(newTestRegistry(t, nil)).Run(t.Context(), definition, Options{Diagnostics: func(event diagnostic.Event) {
+		if event.Phase == diagnostic.PhaseControl && event.Status == diagnostic.StatusSucceeded {
+			returned = event
+		}
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(returned.Attributes) != 2 || returned.Attributes[1].Key != "to" || returned.Attributes[1].Value != "picker" {
+		t.Fatalf("attributes = %#v", returned.Attributes)
+	}
+}

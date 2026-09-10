@@ -153,7 +153,16 @@ Validation, tree, and dry-run output opens in a scrollable viewer; Enter or Esca
 same picker selection and filter. Existing direct shortcuts remain available in expanded help.
 After editing or reinstalling, the picker refreshes automatically while retaining its last valid
 snapshot if rediscovery fails. Pins, successful-run history, and the sort preference are stored
-globally, and unavailable workflows are pruned.
+globally, and unavailable workflows are pruned. A workflow launched here can return to the same
+picker filter and selection after cleanup:
+
+```yaml
+- return:
+    to: picker
+    outputs: {}
+```
+
+Direct `wuko run` and `wuko ui` commands treat that destination as an ordinary successful return.
 `wuko run NAME` searches the nearest
 `.wuko/workflows/` directory first, then the user workflow directories. Use `--file` for an explicit
 path:

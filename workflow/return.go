@@ -7,8 +7,17 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// ReturnDestination describes where an embedding host should resume after a successful return.
+type ReturnDestination string
+
+const (
+	// ReturnDestinationPicker asks an interactive host to resume its workflow picker.
+	ReturnDestinationPicker ReturnDestination = "picker"
+)
+
 // ReturnControl finishes the current workflow or composite action successfully with explicit outputs.
 type ReturnControl struct {
+	To      ReturnDestination `yaml:"to,omitempty"`
 	Outputs map[string]string `yaml:"outputs"`
 }
 
@@ -25,8 +34,15 @@ func (control *ReturnControl) UnmarshalYAML(node *yaml.Node) error {
 		}
 		seen[name] = struct{}{}
 	}
-	if err := rejectUnknownFields(node, "return", map[string]bool{"outputs": true}); err != nil {
+	if err := rejectUnknownFields(node, "return", map[string]bool{"to": true, "outputs": true}); err != nil {
 		return err
+	}
+	var destination ReturnDestination
+	if destinationNode := mappingValue(node, "to"); destinationNode != nil {
+		if destinationNode.Kind != yaml.ScalarNode || destinationNode.Tag != "!!str" {
+			return fmt.Errorf("return destination must be a string")
+		}
+		destination = ReturnDestination(destinationNode.Value)
 	}
 	outputsNode := mappingValue(node, "outputs")
 	if outputsNode == nil {
@@ -49,12 +65,18 @@ func (control *ReturnControl) UnmarshalYAML(node *yaml.Node) error {
 		}
 		outputs[nameNode.Value] = expressionNode.Value
 	}
+	control.To = destination
 	control.Outputs = outputs
 	return nil
 }
 
-// Validate checks the return output contract.
+// Validate checks the return destination and output contract.
 func (control ReturnControl) Validate() error {
+	switch control.To {
+	case "", ReturnDestinationPicker:
+	default:
+		return fmt.Errorf("unsupported return destination %q (want picker)", control.To)
+	}
 	if control.Outputs == nil {
 		return fmt.Errorf("return outputs are required")
 	}

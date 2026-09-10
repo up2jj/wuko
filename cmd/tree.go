@@ -392,7 +392,11 @@ func writeTreeStepsWithFollowing(writer io.Writer, steps []workflow.Step, prefix
 			if names == "" {
 				names = "{}"
 			}
-			if _, err := fmt.Fprintf(writer, "%s%sreturn (outputs: %s)%s%s\n", prefix, branch, names, treeCondition(workflowStep), needs); err != nil {
+			destination := ""
+			if workflowStep.Return.To != "" {
+				destination = " to " + string(workflowStep.Return.To)
+			}
+			if _, err := fmt.Fprintf(writer, "%s%sreturn%s (outputs: %s)%s%s\n", prefix, branch, destination, names, treeCondition(workflowStep), needs); err != nil {
 				return err
 			}
 			continue

@@ -420,6 +420,31 @@ func runWorkflowPicker(command *cobra.Command, deps dependencies) error {
 		}
 		return false
 	}
+	resumeAfterReturn := func(source workflow.Source, observer *returnDestinationObserver, runErr error) (bool, error) {
+		if !observer.requested(workflow.ReturnDestinationPicker) {
+			return false, runErr
+		}
+		if errors.Is(runErr, context.Canceled) {
+			return false, runErr
+		}
+		if command.Context().Err() != nil {
+			return false, errors.Join(runErr, command.Context().Err())
+		}
+		if runErr != nil {
+			addNotice(fmt.Sprintf("workflow %s failed: %v", workflowDisplayName(source), runErr))
+		}
+		// The finished run keeps its plugin declarations and lifecycles to itself: the next
+		// selection declares its own sources, and a stateful plugin starts fresh for it.
+		if deps.plugins != nil {
+			resetCtx, cancel := context.WithTimeout(context.WithoutCancel(command.Context()), 10*time.Second)
+			resetErr := deps.plugins.Reset(resetCtx, "completed")
+			cancel()
+			if resetErr != nil {
+				addNotice("plugin teardown failed: " + resetErr.Error())
+			}
+		}
+		return !refresh(), nil
+	}
 	for {
 		sortedSources := sortWorkflowSources(sources, pickerState, sortMode)
 		options := workflowPickerOptions(sortedSources, pickerState, selectedPath, sortMode)
@@ -443,20 +468,29 @@ func runWorkflowPicker(command *cobra.Command, deps dependencies) error {
 		diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseSelection, Status: diagnostic.StatusSucceeded, Location: diagnostic.Location{Source: source.Path}, Message: workflowDisplayName(source)})
 		switch selection.Intent {
 		case tui.SelectionPrimary:
-			runErr := runWorkflow(command, deps, nil, runWorkflowConfig{workflowFile: source.Path, targetName: source.Target})
+			returnObserver := &returnDestinationObserver{}
+			runErr := runWorkflow(command, deps, nil, runWorkflowConfig{workflowFile: source.Path, targetName: source.Target, returnObserver: returnObserver})
 			if runErr == nil {
 				pickerState.markRecent(source.Path)
 				if err := saveWorkflowPickerState(command.Context(), config, pickerState); err != nil {
 					fmt.Fprintf(command.ErrOrStderr(), "Warning: cannot save workflow picker state: %v\n", err)
 				}
 			}
-			return runErr
+			resume, err := resumeAfterReturn(source, returnObserver, runErr)
+			if !resume {
+				return err
+			}
 		case tui.SelectionUI:
 			if !source.HasForm {
 				notice = fmt.Sprintf("workflow %s does not declare a form", workflowDisplayName(source))
 				continue
 			}
-			return runWorkflowUI(command, deps, nil, uiWorkflowConfig{workflowFile: source.Path, targetName: source.Target})
+			returnObserver := &returnDestinationObserver{}
+			runErr := runWorkflowUI(command, deps, nil, uiWorkflowConfig{workflowFile: source.Path, targetName: source.Target, returnObserver: returnObserver})
+			resume, err := resumeAfterReturn(source, returnObserver, runErr)
+			if !resume {
+				return err
+			}
 		case tui.SelectionMarketplace:
 			if source.MarketplaceURL == "" {
 				notice = fmt.Sprintf("workflow %s was not installed from a marketplace", workflowDisplayName(source))

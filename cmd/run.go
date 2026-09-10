@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -51,6 +52,41 @@ type runWorkflowConfig struct {
 	providerValues  map[string]map[string]any
 	nonInteractive  bool
 	defaultReporter reporterpkg.Reporter
+	returnObserver  *returnDestinationObserver
+}
+
+type returnDestinationObserver struct {
+	mutex       sync.Mutex
+	destination workflow.ReturnDestination
+}
+
+func (observer *returnDestinationObserver) observe(destination workflow.ReturnDestination) {
+	if observer == nil {
+		return
+	}
+	observer.mutex.Lock()
+	observer.destination = destination
+	observer.mutex.Unlock()
+}
+
+// reset forgets the previous attempt's destination. A scheduled run reuses one observer across
+// occurrences, so a later destinationless return must not read as the earlier attempt's request.
+func (observer *returnDestinationObserver) reset() {
+	if observer == nil {
+		return
+	}
+	observer.mutex.Lock()
+	observer.destination = ""
+	observer.mutex.Unlock()
+}
+
+func (observer *returnDestinationObserver) requested(destination workflow.ReturnDestination) bool {
+	if observer == nil {
+		return false
+	}
+	observer.mutex.Lock()
+	defer observer.mutex.Unlock()
+	return observer.destination == destination
 }
 
 func runWorkflow(command *cobra.Command, deps dependencies, args []string, config runWorkflowConfig) (runErr error) {
@@ -202,7 +238,14 @@ func runWorkflow(command *cobra.Command, deps dependencies, args []string, confi
 	}
 	engineFor := func() *engine.Engine { return workflowEngine(deps) }
 	executePlan := func(ctx context.Context, active *workflow.DependencyPlan) error {
-		state, err := executeDependencyPlan(ctx, active, engineFor, optionsFor)
+		config.returnObserver.reset()
+		state, err := executeDependencyPlan(ctx, active, engineFor, func(definition *workflow.Definition, dependencies map[string]map[string]any) engine.Options {
+			options := optionsFor(definition, dependencies)
+			if definition == active.Root.Definition && config.returnObserver != nil {
+				options.OnReturn = config.returnObserver.observe
+			}
+			return options
+		})
 		runState, attemptErr = state, err
 		return err
 	}
@@ -244,7 +287,13 @@ func runWorkflow(command *cobra.Command, deps dependencies, args []string, confi
 				return fmt.Errorf("scheduled workflow %q dependency plan is unavailable", definition.Name)
 			}
 			return executePlan(ctx, active)
-		}, now: deps.now, wait: deps.waitUntil,
+		},
+		// A failed occurrence keeps its schedule, exactly as a direct scheduled run does; only
+		// the destination the host honors ends the loop.
+		stopAfterAttempt: func(error) bool {
+			return config.returnObserver.requested(workflow.ReturnDestinationPicker)
+		},
+		now: deps.now, wait: deps.waitUntil,
 		stderr: command.ErrOrStderr(), diagnostics: reporters.Diagnostic,
 	}
 	return runner.run(command.Context(), definition, releaseDependencyPlan(plans, definition, cleanup))

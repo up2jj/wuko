@@ -409,3 +409,17 @@ func TestWorkflowTreeDisplaysReturnControl(t *testing.T) {
 		t.Fatalf("output = %q, want %q", output.String(), want)
 	}
 }
+
+func TestWorkflowTreeDisplaysReturnDestination(t *testing.T) {
+	definition := &workflow.Definition{Name: "picker", Steps: []workflow.Step{
+		{Return: &workflow.ReturnControl{To: workflow.ReturnDestinationPicker, Outputs: map[string]string{}}},
+	}}
+	var output bytes.Buffer
+	if err := writeWorkflowTree(&output, definition); err != nil {
+		t.Fatal(err)
+	}
+	want := "picker\n└── return to picker (outputs: {})\n"
+	if output.String() != want {
+		t.Fatalf("output = %q, want %q", output.String(), want)
+	}
+}

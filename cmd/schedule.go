@@ -12,12 +12,14 @@ import (
 )
 
 type scheduledRunner struct {
-	load        func(context.Context) (*workflow.Definition, func(), error)
-	execute     func(context.Context, *workflow.Definition) error
-	now         func() time.Time
-	wait        func(context.Context, time.Time) error
-	stderr      io.Writer
-	diagnostics diagnostic.Reporter
+	load    func(context.Context) (*workflow.Definition, func(), error)
+	execute func(context.Context, *workflow.Definition) error
+	// stopAfterAttempt lets an interactive host end scheduling without manufacturing a run error.
+	stopAfterAttempt func(error) bool
+	now              func() time.Time
+	wait             func(context.Context, time.Time) error
+	stderr           io.Writer
+	diagnostics      diagnostic.Reporter
 }
 
 func (runner scheduledRunner) run(ctx context.Context, initial *workflow.Definition, cleanup func()) error {
@@ -35,6 +37,9 @@ func (runner scheduledRunner) run(ctx context.Context, initial *workflow.Definit
 			return nil
 		}
 		runner.reportAttemptError(initial, runErr)
+		if runner.stopAfterAttempt != nil && runner.stopAfterAttempt(runErr) {
+			return runErr
+		}
 		next = active.NextAfter(runner.now())
 	} else {
 		cleanup()
@@ -87,6 +92,9 @@ func (runner scheduledRunner) run(ctx context.Context, initial *workflow.Definit
 			return nil
 		}
 		runner.reportAttemptError(definition, runErr)
+		if runner.stopAfterAttempt != nil && runner.stopAfterAttempt(runErr) {
+			return runErr
+		}
 		next = active.NextAfter(runner.now())
 	}
 }

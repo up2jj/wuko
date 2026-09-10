@@ -456,17 +456,35 @@ func closeClient(c *client) {
 
 // Close stops every started plugin, shuts down processes, and joins teardown errors.
 func (m *Manager) Close(ctx context.Context, reason string) error {
+	return m.teardown(ctx, reason, true)
+}
+
+// Reset stops every started plugin and drops the declarations, loaded plugins, and extracted
+// installations left by the run that just finished, leaving the manager usable. A host that runs
+// several workflows in one process - the picker reopened by a return destination - owes each run
+// its own plugin declarations and lifecycle bracket, exactly as a separate invocation gets.
+func (m *Manager) Reset(ctx context.Context, reason string) error {
+	return m.teardown(ctx, reason, false)
+}
+
+func (m *Manager) teardown(ctx context.Context, reason string, permanent bool) error {
 	m.mu.Lock()
 	if m.closed {
 		m.mu.Unlock()
 		return nil
 	}
-	m.closed = true
+	m.closed = permanent
 	plugins := make([]*runningPlugin, 0, len(m.plugins))
 	for _, p := range m.plugins {
 		plugins = append(plugins, p)
 	}
 	temporary := append([]string(nil), m.temporary...)
+	if !permanent {
+		clear(m.declarations)
+		clear(m.plugins)
+		clear(m.failures)
+		m.temporary = nil
+	}
 	m.mu.Unlock()
 	var result error
 	for _, p := range plugins {

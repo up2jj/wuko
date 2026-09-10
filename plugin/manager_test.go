@@ -265,3 +265,51 @@ func TestLocalResolutionPrecedence(t *testing.T) {
 		}
 	}
 }
+
+// A host that runs several workflows in one process - the picker reopened by a return
+// destination - resets the manager between runs so each run declares its own plugin sources,
+// brackets plugin lifecycles, and releases the installation it extracted.
+func TestManagerResetReleasesRunScopedState(t *testing.T) {
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := []byte("#!/bin/sh\nWUKO_PLUGIN_TEST_HELPER=1 exec \"" + executable + "\"\n")
+	archive := makeArchive(t, "wuko-plugin-acme", 0755, script)
+	manifestData, _ := json.Marshal(Manifest{Version: 1, Namespace: "acme", PluginVersion: "1.0.0", Protocol: Protocol, Artifacts: []Artifact{{OS: runtime.GOOS, Arch: runtime.GOARCH, Path: "plugin.tar.gz", Format: "tar.gz", Entry: "wuko-plugin-acme", SHA256: digest(archive)}}})
+	var diagnostics synchronizedBuffer
+	manager := NewManager(Config{HTTPClient: &http.Client{Transport: memoryTransport{manifest: manifestData, archive: archive}}, Stderr: &diagnostics})
+	load := func(mode string) {
+		t.Helper()
+		sources := map[string]workflow.PluginSource{"acme": {Source: "https://plugins.test/plugin.json", SHA256: digest(manifestData), With: map[string]any{"mode": mode}}}
+		helpers, err := manager.LoadHelpers(t.Context(), sources)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := helpers["acme_slug"](t.Context(), []any{"Hello World"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	load("first")
+	manager.mu.Lock()
+	extracted := append([]string(nil), manager.temporary...)
+	manager.mu.Unlock()
+	if len(extracted) != 1 {
+		t.Fatalf("extracted installations = %v", extracted)
+	}
+	if err := manager.Reset(t.Context(), "completed"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(extracted[0]); !os.IsNotExist(err) {
+		t.Fatalf("extracted installation %s survived the reset: %v", extracted[0], err)
+	}
+	// The second run configures the same namespace differently, which conflicts while the
+	// first run's declaration stands.
+	load("second")
+	if err := manager.Close(t.Context(), "completed"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(diagnostics.String(), "started:first") != 1 || strings.Count(diagnostics.String(), "started:second") != 1 || strings.Count(diagnostics.String(), "stopped") != 2 {
+		t.Fatalf("lifecycle diagnostics: %q", diagnostics.String())
+	}
+}

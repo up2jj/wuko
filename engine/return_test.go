@@ -55,16 +55,78 @@ func TestReturnConditionFalseContinues(t *testing.T) {
 		t.Fatal(err)
 	}
 	definition := testDefinition(t, "continue",
-		workflow.Step{Return: &workflow.ReturnControl{Outputs: map[string]string{}}, If: "false"},
+		workflow.Step{Return: &workflow.ReturnControl{To: workflow.ReturnDestinationPicker, Outputs: map[string]string{}}, If: "false"},
 		workflow.Step{ID: "after", Type: "capture_return", With: map[string]any{"value": "ran"}},
 	)
 
-	state, err := New(registry).Run(t.Context(), definition, Options{})
+	observed := 0
+	state, err := New(registry).Run(t.Context(), definition, Options{OnReturn: func(workflow.ReturnDestination) { observed++ }})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if runs != 1 || len(state.Outputs) != 0 || state.Steps["after"].(map[string]any)["value"] != "ran" {
-		t.Fatalf("runs = %d, state = %#v", runs, state)
+	if runs != 1 || observed != 0 || len(state.Outputs) != 0 || state.Steps["after"].(map[string]any)["value"] != "ran" {
+		t.Fatalf("runs = %d, observed = %d, state = %#v", runs, observed, state)
+	}
+}
+
+func TestReturnDestinationObserverFiresOnceAfterSuccessfulReturn(t *testing.T) {
+	definition := testDefinition(t, "picker-return", workflow.Step{
+		Return: &workflow.ReturnControl{To: workflow.ReturnDestinationPicker, Outputs: map[string]string{"result": `"done"`}},
+	})
+	var destinations []workflow.ReturnDestination
+	state, err := New(newTestRegistry(t, nil)).Run(t.Context(), definition, Options{
+		OnReturn: func(destination workflow.ReturnDestination) { destinations = append(destinations, destination) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Outputs["result"] != "done" || !reflect.DeepEqual(destinations, []workflow.ReturnDestination{workflow.ReturnDestinationPicker}) {
+		t.Fatalf("outputs = %#v, destinations = %#v", state.Outputs, destinations)
+	}
+}
+
+func TestReturnObserverReportsDestinationlessReturn(t *testing.T) {
+	definition := testDefinition(t, "destinationless", workflow.Step{
+		Return: &workflow.ReturnControl{Outputs: map[string]string{}},
+	})
+	var destinations []workflow.ReturnDestination
+	_, err := New(newTestRegistry(t, nil)).Run(t.Context(), definition, Options{OnReturn: func(destination workflow.ReturnDestination) {
+		destinations = append(destinations, destination)
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(destinations, []workflow.ReturnDestination{""}) {
+		t.Fatalf("destinations = %#v", destinations)
+	}
+}
+
+func TestReturnObserverIgnoresInvalidReturn(t *testing.T) {
+	definition := testDefinition(t, "invalid", workflow.Step{
+		Return: &workflow.ReturnControl{To: "command", Outputs: map[string]string{}},
+	})
+	observed := 0
+	_, err := New(newTestRegistry(t, nil)).Run(t.Context(), definition, Options{OnReturn: func(workflow.ReturnDestination) { observed++ }})
+	if err == nil || !strings.Contains(err.Error(), "unsupported return destination") {
+		t.Fatalf("error = %v", err)
+	}
+	if observed != 0 {
+		t.Fatalf("observer calls = %d, want 0", observed)
+	}
+}
+
+func TestReturnObserverWaitsForOutputContract(t *testing.T) {
+	definition := testDefinition(t, "invalid-output", workflow.Step{
+		Return: &workflow.ReturnControl{To: workflow.ReturnDestinationPicker, Outputs: map[string]string{"ready": `"yes"`}},
+	})
+	definition.Outputs = map[string]workflow.WorkflowOutput{"ready": {Type: "boolean", Value: "true"}}
+	observed := 0
+	_, err := New(newTestRegistry(t, nil)).Run(t.Context(), definition, Options{OnReturn: func(workflow.ReturnDestination) { observed++ }})
+	if err == nil || !strings.Contains(err.Error(), "does not match type boolean") {
+		t.Fatalf("error = %v", err)
+	}
+	if observed != 0 {
+		t.Fatalf("observer calls = %d, want 0", observed)
 	}
 }
 
@@ -127,12 +189,16 @@ func TestReturnPropagatesThroughSequentialBlocksAndRunsFinally(t *testing.T) {
 
 func TestReturnExpressionFailureFailsWorkflowAtomically(t *testing.T) {
 	definition := testDefinition(t, "broken", workflow.Step{
-		Return: &workflow.ReturnControl{Outputs: map[string]string{"good": "true", "missing": "steps.unknown.value"}},
+		Return: &workflow.ReturnControl{To: workflow.ReturnDestinationPicker, Outputs: map[string]string{"good": "true", "missing": "steps.unknown.value"}},
 	})
 
-	state, err := New(newTestRegistry(t, nil)).Run(t.Context(), definition, Options{})
+	observed := 0
+	state, err := New(newTestRegistry(t, nil)).Run(t.Context(), definition, Options{OnReturn: func(workflow.ReturnDestination) { observed++ }})
 	if err == nil || !strings.Contains(err.Error(), `return output "missing"`) {
 		t.Fatalf("state = %#v, error = %v", state, err)
+	}
+	if observed != 0 {
+		t.Fatalf("observer calls = %d, want 0", observed)
 	}
 }
 
@@ -140,12 +206,16 @@ func TestCanceledContextPreventsReturn(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	definition := testDefinition(t, "canceled-return", workflow.Step{
-		Return: &workflow.ReturnControl{Outputs: map[string]string{"result": `"done"`}},
+		Return: &workflow.ReturnControl{To: workflow.ReturnDestinationPicker, Outputs: map[string]string{"result": `"done"`}},
 	})
 
-	_, err := New(newTestRegistry(t, nil)).Run(ctx, definition, Options{})
+	observed := 0
+	_, err := New(newTestRegistry(t, nil)).Run(ctx, definition, Options{OnReturn: func(workflow.ReturnDestination) { observed++ }})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("error = %v", err)
+	}
+	if observed != 0 {
+		t.Fatalf("observer calls = %d, want 0", observed)
 	}
 }
 
@@ -170,13 +240,14 @@ func TestCompositeActionReturnSuppliesDeclaredOutputsWithoutRetry(t *testing.T) 
 		With: map[string]any{"result": "returned"},
 	}))
 
-	state, err := New(registry).Run(t.Context(), definition, Options{})
+	observed := 0
+	state, err := New(registry).Run(t.Context(), definition, Options{OnReturn: func(workflow.ReturnDestination) { observed++ }})
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := map[string]any{"result": "returned", "cached": true}
-	if got := attemptBody(state, "call", "call_body"); !reflect.DeepEqual(got, want) || runs != 0 {
-		t.Fatalf("outputs = %#v, runs = %d", got, runs)
+	if got := attemptBody(state, "call", "call_body"); !reflect.DeepEqual(got, want) || runs != 0 || observed != 0 {
+		t.Fatalf("outputs = %#v, runs = %d, observer calls = %d", got, runs, observed)
 	}
 	if attempts := len(state.Stats.Steps[0].Attempts); attempts != 1 {
 		t.Fatalf("attempts = %d", attempts)
@@ -212,11 +283,20 @@ func TestReturnDoesNotMaskFinallyFailure(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	definition := testDefinition(t, "cleanup-failure", workflow.Step{Return: &workflow.ReturnControl{Outputs: map[string]string{"result": `"done"`}}})
+	definition := testDefinition(t, "cleanup-failure", workflow.Step{Return: &workflow.ReturnControl{To: workflow.ReturnDestinationPicker, Outputs: map[string]string{"result": `"done"`}}})
 	definition.Finally = []workflow.Step{{ID: "cleanup", Type: "return_cleanup_fail"}}
-	_, err := New(registry).Run(t.Context(), definition, Options{})
+	observed := 0
+	_, err := New(registry).Run(t.Context(), definition, Options{OnReturn: func(destination workflow.ReturnDestination) {
+		if destination != workflow.ReturnDestinationPicker {
+			t.Fatalf("destination = %q", destination)
+		}
+		observed++
+	}})
 	if !errors.Is(err, cleanupErr) {
 		t.Fatalf("error = %v", err)
+	}
+	if observed != 1 {
+		t.Fatalf("observer calls = %d, want 1", observed)
 	}
 }
 
@@ -232,11 +312,32 @@ func TestDryRunDisplaysReturnControl(t *testing.T) {
 	definition.Vars = map[string]any{"cached": false, "artifact": "cached.tar"}
 
 	var output bytes.Buffer
-	if _, err := New(registry).Run(t.Context(), definition, Options{DryRun: true, Stdout: &output, Stderr: io.Discard}); err != nil {
+	observed := 0
+	if _, err := New(registry).Run(t.Context(), definition, Options{DryRun: true, Stdout: &output, Stderr: io.Discard, OnReturn: func(workflow.ReturnDestination) { observed++ }}); err != nil {
 		t.Fatal(err)
 	}
 	want := "1. return (outputs: artifact, cached) if: vars.cached\n2. build (capture_return)\n"
 	if output.String() != want {
 		t.Fatalf("output = %q, want %q", output.String(), want)
+	}
+	if observed != 0 {
+		t.Fatalf("observer calls = %d, want 0", observed)
+	}
+}
+
+func TestDryRunDisplaysReturnDestination(t *testing.T) {
+	definition := testDefinition(t, "dry-picker-return", workflow.Step{
+		Return: &workflow.ReturnControl{To: workflow.ReturnDestinationPicker, Outputs: map[string]string{}},
+	})
+	var output bytes.Buffer
+	observed := 0
+	if _, err := New(newTestRegistry(t, nil)).Run(t.Context(), definition, Options{DryRun: true, Stdout: &output, Stderr: io.Discard, OnReturn: func(workflow.ReturnDestination) { observed++ }}); err != nil {
+		t.Fatal(err)
+	}
+	if want := "1. return to picker (outputs: {})\n"; output.String() != want {
+		t.Fatalf("output = %q, want %q", output.String(), want)
+	}
+	if observed != 0 {
+		t.Fatalf("observer calls = %d, want 0", observed)
 	}
 }

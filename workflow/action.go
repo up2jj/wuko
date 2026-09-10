@@ -899,6 +899,9 @@ func validateActionReturnContracts(steps []Step, outputs map[string]ActionOutput
 		if workflowStep.Return == nil {
 			continue
 		}
+		if workflowStep.Return.To != "" {
+			return fmt.Errorf("return destination %q is not supported in composite actions", workflowStep.Return.To)
+		}
 		for name := range outputs {
 			if _, exists := workflowStep.Return.Outputs[name]; !exists {
 				return fmt.Errorf("return outputs do not match action outputs: missing %q", name)

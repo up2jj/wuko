@@ -100,6 +100,13 @@ affects display order, not which definition wins.
   filter. The existing `u`, `e`, `p`, `s`, `m`, `r`, and Shift+Enter shortcuts remain available in
   expanded help. Editing always triggers rediscovery; a successful reinstall does the same. A
   refresh failure leaves the last valid picker snapshot available and displays a warning.
+  A root workflow can use `return: {to: picker, outputs: {}}` to finish normally, run cleanup, and
+  rediscover workflows before reopening the same filter and selection. Prerequisite returns do not
+  navigate. A failure before that return exits normally with an error; cleanup or reporting errors
+  after it reopens the picker with an error notice. Cancellation still exits. Scheduled picker runs
+  stop scheduling after the first occurrence that triggers the destination; a failed occurrence
+  waits for its next one. Plugins started by a selection are stopped before the picker reopens, so
+  the next selection declares and starts its own.
   Shift+Enter prints `wuko run NAME [TARGET]` for an effective source or `wuko run --file PATH
   [TARGET]` for a shadowed source so the printed command remains unambiguous. Picker state and the
   selected sort preference are global; successful runs are remembered, and entries for workflows

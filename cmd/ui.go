@@ -21,13 +21,14 @@ import (
 )
 
 type uiWorkflowConfig struct {
-	variables     []string
-	variableFiles []string
-	environment   []string
-	reporters     []string
-	workflowFile  string
-	targetName    string
-	noOpen        bool
+	variables      []string
+	variableFiles  []string
+	environment    []string
+	reporters      []string
+	workflowFile   string
+	targetName     string
+	noOpen         bool
+	returnObserver *returnDestinationObserver
 }
 
 func newUICmd(deps dependencies) *cobra.Command {
@@ -154,13 +155,17 @@ func runWorkflowUI(command *cobra.Command, deps dependencies, args []string, con
 			if !remoteDefinitions[item.Path] {
 				localValueDir = filepath.Join(item.Dir, ".wuko", "values")
 			}
-			return engine.Options{
+			options := engine.Options{
 				InvocationID: reporters.InvocationID(),
 				Vars:         activeVars, Env: env, BaseEnv: baseEnv, EnvironmentLoaders: environmentLoaders, Dependencies: dependencies, RunDir: cwd, Providers: providers,
 				Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(),
 				Interactive: false, Progress: activeReporters.Progress, Diagnostics: activeReporters.Diagnostic,
 				LocalValueDir: localValueDir, GlobalValueDir: filepath.Join(configDir, "wuko", "values"),
 			}
+			if item == plan.Root.Definition && config.returnObserver != nil {
+				options.OnReturn = config.returnObserver.observe
+			}
+			return options
 		}
 		state, engineErr := executeDependencyPlan(ctx, plan, func() *engine.Engine { return workflowEngine(deps) }, optionsFor)
 		finishErr, _ := finishReporters(ctx, definition.Name, state, engineErr, false)

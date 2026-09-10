@@ -175,7 +175,10 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
 - Use anonymous `return` with Expr-valued `outputs` to finish a workflow or composite action
   successfully after a cache hit or other terminal condition. Keep it in the main sequential flow
   or a conditional/working-directory block; do not place it inside concurrent, foreach, matrix, or
-  finally. Composite-action return keys must exactly match the declared action outputs.
+  finally. Add `to: picker` only when a root workflow launched from bare `wuko` should finish,
+  complete cleanup, and reopen the interactive workflow picker; direct run/UI hosts ignore that
+  destination, prerequisite returns stay local, and composite actions cannot declare it.
+  Composite-action return keys must exactly match the declared action outputs.
 - Use shell for external programs, Lua for multi-operation scripting, Docker for isolated
   containers, and agent for coding-agent execution. For large machine-readable shell output, set
   `stdout: capture` and consume `steps.<id>.stdout` instead of redirecting through a temporary file;
@@ -213,7 +216,9 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
   guard optional producers with membership checks.
 - A triggered `return` preserves prior commits, marks later declared work skipped, publishes its
   typed expressions through workflow outputs or the invoking action step, and still runs `finally`
-  with successful main status. Use `outputs: {}` for a successful no-op result.
+  with successful main status. Use `outputs: {}` for a successful no-op result. A scheduled root
+  launched from bare `wuko` stops after the first occurrence that triggers `to: picker`; a direct
+  scheduled command continues normally.
 - Treat templates as string presentation, not workflow logic. Keep step ordering, `if` conditions,
   retries, types, and typed data explicit in YAML. Do not split a readable one-line substitution
   into a named template or build chains of templates that merely rename values.

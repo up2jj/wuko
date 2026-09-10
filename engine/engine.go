@@ -58,6 +58,10 @@ type Options struct {
 	Interactive    bool
 	DryRun         bool
 	Executor       process.Executor
+	// OnReturn observes a return after its condition, expressions, and output contract succeed.
+	// A destinationless return supplies the empty value. Hosts should attach the callback only to
+	// the root workflow whose destination they intend to honor; nested action runs do not inherit it.
+	OnReturn func(workflow.ReturnDestination)
 	// Progress receives structured workflow, step, attempt, retry, poll, and timing events.
 	// Calls are serialized against each other and against Diagnostics, so the callback
 	// needs no locking of its own. It must not block indefinitely: every later event

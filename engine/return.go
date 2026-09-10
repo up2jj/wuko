@@ -80,7 +80,14 @@ func (e *Engine) executeReturn(ctx context.Context, definition *workflow.Definit
 	state.Outputs = outputs
 	state.returning = true
 	state.didReturn = true
-	trace(options, diagnostic.Event{Phase: diagnostic.PhaseControl, Status: diagnostic.StatusSucceeded, Time: time.Now(), Duration: time.Since(started), WorkflowName: definition.Name, Location: workflowStep.Location, Message: "workflow returned successfully", Attributes: []diagnostic.Attribute{diagnostic.Attr("outputs", fmt.Sprint(len(outputs)))}})
+	attributes := []diagnostic.Attribute{diagnostic.Attr("outputs", fmt.Sprint(len(outputs)))}
+	if workflowStep.Return.To != "" {
+		attributes = append(attributes, diagnostic.Attr("to", string(workflowStep.Return.To)))
+	}
+	trace(options, diagnostic.Event{Phase: diagnostic.PhaseControl, Status: diagnostic.StatusSucceeded, Time: time.Now(), Duration: time.Since(started), WorkflowName: definition.Name, Location: workflowStep.Location, Message: "workflow returned successfully", Attributes: attributes})
+	if options.OnReturn != nil {
+		options.OnReturn(workflowStep.Return.To)
+	}
 	return true, nil
 }
 

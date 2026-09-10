@@ -95,6 +95,34 @@ An explicitly empty output map is valid when “nothing to do” is itself the s
 Embedders receive top-level workflow values through `engine.State.Outputs`. The `wuko run` command
 does not print them automatically.
 
+## Return to the workflow picker
+
+When a workflow was launched from the interactive picker opened by bare `wuko`, it can finish and
+reopen that picker by setting the optional destination to `picker`:
+
+```yaml
+- return:
+    to: picker
+    outputs: {}
+```
+
+The return is still an ordinary successful workflow return: its condition and output expressions
+must succeed, later main steps are skipped, and cleanup runs before control reaches the picker.
+The picker rediscovers workflows and preserves the previous filter and selection when that source
+still exists. If rediscovery fails, the last valid snapshot remains available with a warning. If
+cleanup or final reporting fails after the return triggers, the picker reopens with the error; a
+failure before the return retains the normal nonzero exit behavior. Cancellation and forced
+shutdown exit instead of navigating.
+
+The destination belongs to the selected root workflow. A prerequisite's return stays local, while
+returns inside transparent sequential blocks still propagate to their root. Composite actions
+cannot declare `to`. Direct `wuko run` and `wuko ui` invocations have no picker host, so `to: picker`
+behaves like an ordinary successful return. For a scheduled workflow launched from bare `wuko`,
+the scheduler stops after the first occurrence that triggers this destination; a failed occurrence
+keeps its schedule and waits for the next one, and direct scheduled commands continue with their
+usual repetition. Each workflow the picker runs owns its plugin declarations and lifecycle: plugins
+started for one selection are stopped before the picker reopens.
+
 ## Declared workflow outputs
 
 A workflow used as a prerequisite declares the names and types it exports with top-level
@@ -209,7 +237,8 @@ finish the surrounding iteration, control, or workflow.
 
 Every return in a composite action must provide exactly the keys declared by the action's
 `outputs` contract. A triggered return supplies those values directly. If no return triggers, the
-normal output expressions are evaluated as before:
+normal output expressions are evaluated as before. Composite actions cannot use a return
+destination because they return only to their invoking step:
 
 ```yaml
 version: 1

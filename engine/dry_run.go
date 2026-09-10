@@ -174,7 +174,11 @@ func writeDryRun(writer io.Writer, steps []workflow.Step, indent string, parent 
 			if names == "" {
 				names = "{}"
 			}
-			if _, err := fmt.Fprintf(writer, "%s%s return (outputs: %s)%s%s\n", indent, index, names, dryRunCondition(workflowStep), needs); err != nil {
+			destination := ""
+			if workflowStep.Return.To != "" {
+				destination = " to " + string(workflowStep.Return.To)
+			}
+			if _, err := fmt.Fprintf(writer, "%s%s return%s (outputs: %s)%s%s\n", indent, index, destination, names, dryRunCondition(workflowStep), needs); err != nil {
 				return err
 			}
 			continue

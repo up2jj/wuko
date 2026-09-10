@@ -205,3 +205,42 @@ func TestScheduledRunnerCancellationWhileWaitingIsClean(t *testing.T) {
 		t.Fatalf("cleanups = %d, want 1", cleanups)
 	}
 }
+
+func TestScheduledRunnerCanStopAfterOccurrence(t *testing.T) {
+	now := time.Date(2026, time.August, 21, 10, 0, 0, 500_000_000, time.UTC)
+	for _, test := range []struct {
+		name   string
+		runErr error
+	}{
+		{name: "successful return", runErr: nil},
+		{name: "failure before return", runErr: errors.New("boom")},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			attempts := 0
+			var stderr bytes.Buffer
+			runner := scheduledRunner{
+				now: func() time.Time { return now },
+				wait: func(_ context.Context, instant time.Time) error {
+					now = instant
+					return nil
+				},
+				load: func(context.Context) (*workflow.Definition, func(), error) {
+					return scheduledDefinition("* * * * * *"), func() {}, nil
+				},
+				execute: func(context.Context, *workflow.Definition) error {
+					attempts++
+					return test.runErr
+				},
+				stopAfterAttempt: func(error) bool { return true },
+				stderr:           &stderr,
+			}
+			err := runner.run(t.Context(), scheduledDefinition("* * * * * *"), func() {})
+			if err != test.runErr || attempts != 1 {
+				t.Fatalf("error = %v, attempts = %d", err, attempts)
+			}
+			if test.runErr != nil && !strings.Contains(stderr.String(), "scheduled attempt failed: boom") {
+				t.Fatalf("stderr = %q", stderr.String())
+			}
+		})
+	}
+}

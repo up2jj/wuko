@@ -3,11 +3,17 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/up2jj/wuko/keyvalue"
@@ -233,6 +239,346 @@ func TestWorkflowPickerInspectionReturnsToFilterWithoutMarkingRecent(t *testing.
 	}
 }
 
+func TestWorkflowPickerReturnDestinationReopensAfterRun(t *testing.T) {
+	root := t.TempDir()
+	path := writePickerWorkflow(t, root, `version: 1
+name: return-to-picker
+description: Original
+steps:
+  - return: {to: picker, outputs: {}}
+`)
+	var selections int
+	deps := pickerDependencies(root, step.NewRegistry(), func(_ context.Context, _ io.Reader, _ io.Writer, config tui.SelectionPickerConfig) (tui.Selection, error) {
+		selections++
+		if selections == 1 {
+			return tui.Selection{Option: config.Options[0], Intent: tui.SelectionPrimary, Filter: "return"}, nil
+		}
+		if config.InitialFilter != "return" || !config.Options[0].Default || config.Options[0].Value.(workflow.Source).Path != path {
+			t.Fatalf("restored picker config = %#v", config)
+		}
+		return tui.Selection{}, context.Canceled
+	})
+	command := newRootCmd(deps)
+	command.SetArgs(nil)
+	if err := command.ExecuteContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if selections != 2 {
+		t.Fatalf("selections = %d, want 2", selections)
+	}
+}
+
+func TestWorkflowPickerOrdinaryReturnStillExits(t *testing.T) {
+	root := t.TempDir()
+	writePickerWorkflow(t, root, "version: 1\nname: ordinary\nsteps:\n  - return: {outputs: {}}\n")
+	selections := 0
+	deps := pickerDependencies(root, step.NewRegistry(), func(_ context.Context, _ io.Reader, _ io.Writer, config tui.SelectionPickerConfig) (tui.Selection, error) {
+		selections++
+		if selections > 1 {
+			t.Fatal("ordinary return reopened the picker")
+		}
+		return tui.Selection{Option: config.Options[0], Intent: tui.SelectionPrimary}, nil
+	})
+	command := newRootCmd(deps)
+	command.SetArgs(nil)
+	if err := command.ExecuteContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestWorkflowPickerReturnDestinationHonorsFailureBoundary(t *testing.T) {
+	failure := errors.New("picker test failed")
+	for _, test := range []struct {
+		name       string
+		definition string
+		wantReopen bool
+	}{
+		{name: "failure before return exits", definition: "version: 1\nname: before\nsteps:\n  - {id: fail, type: picker_test}\n  - return: {to: picker, outputs: {}}\n"},
+		{name: "cleanup failure after return reopens", wantReopen: true, definition: "version: 1\nname: after\nsteps:\n  - return: {to: picker, outputs: {}}\nfinally:\n  - {id: fail, type: picker_test}\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			writePickerWorkflow(t, root, test.definition)
+			registry := step.NewRegistry()
+			if err := registry.Register("picker_test", func(map[string]any) (step.Runner, error) {
+				return pickerTestRunner{run: func() error { return failure }}, nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			selections := 0
+			deps := pickerDependencies(root, registry, func(_ context.Context, _ io.Reader, _ io.Writer, config tui.SelectionPickerConfig) (tui.Selection, error) {
+				selections++
+				if selections == 1 {
+					return tui.Selection{Option: config.Options[0], Intent: tui.SelectionPrimary}, nil
+				}
+				if !test.wantReopen || !strings.Contains(config.Notice, failure.Error()) {
+					t.Fatalf("reopened picker config = %#v", config)
+				}
+				return tui.Selection{}, context.Canceled
+			})
+			command := newRootCmd(deps)
+			command.SetArgs(nil)
+			err := command.ExecuteContext(t.Context())
+			if test.wantReopen {
+				if err != nil || selections != 2 {
+					t.Fatalf("error = %v, selections = %d", err, selections)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), failure.Error()) || selections != 1 {
+				t.Fatalf("error = %v, selections = %d", err, selections)
+			}
+		})
+	}
+}
+
+func TestWorkflowPickerReturnDestinationRefreshesDiscovery(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		mutate     func(string) error
+		wantDesc   string
+		wantNotice string
+		wantEmpty  bool
+	}{
+		{name: "rediscovery updates workflow", wantDesc: "Updated", mutate: func(path string) error {
+			return os.WriteFile(path, []byte("version: 1\nname: refreshed\ndescription: Updated\nsteps:\n  - return: {to: picker, outputs: {}}\n"), 0o644)
+		}},
+		{name: "failed rediscovery keeps snapshot", wantDesc: "Original", wantNotice: "refresh failed:", mutate: func(path string) error {
+			return os.WriteFile(path, []byte("invalid: true\n"), 0o644)
+		}},
+		{name: "empty rediscovery exits", wantEmpty: true, mutate: os.Remove},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			path := writePickerWorkflow(t, root, "version: 1\nname: refreshed\ndescription: Original\nsteps:\n  - {id: mutate, type: picker_mutate}\n  - return: {to: picker, outputs: {}}\n")
+			registry := step.NewRegistry()
+			if err := registry.Register("picker_mutate", func(map[string]any) (step.Runner, error) {
+				return pickerTestRunner{run: func() error { return test.mutate(path) }}, nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			var output bytes.Buffer
+			selections := 0
+			deps := pickerDependencies(root, registry, func(_ context.Context, _ io.Reader, _ io.Writer, config tui.SelectionPickerConfig) (tui.Selection, error) {
+				selections++
+				if selections == 1 {
+					return tui.Selection{Option: config.Options[0], Intent: tui.SelectionPrimary, Filter: "ref"}, nil
+				}
+				if test.wantEmpty || config.InitialFilter != "ref" || !config.Options[0].Default || !strings.Contains(config.Options[0].Description, test.wantDesc) || !strings.Contains(config.Notice, test.wantNotice) {
+					t.Fatalf("refreshed picker config = %#v", config)
+				}
+				return tui.Selection{}, context.Canceled
+			})
+			deps.stdout = &output
+			command := newRootCmd(deps)
+			command.SetArgs(nil)
+			if err := command.ExecuteContext(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if test.wantEmpty {
+				if selections != 1 || !strings.Contains(output.String(), "No workflows found") {
+					t.Fatalf("selections = %d, output = %q", selections, output.String())
+				}
+			} else if selections != 2 {
+				t.Fatalf("selections = %d, want 2", selections)
+			}
+		})
+	}
+}
+
+func TestWorkflowPickerDependencyReturnDestinationStaysLocal(t *testing.T) {
+	root := t.TempDir()
+	workflowDir := filepath.Join(root, ".wuko", "workflows")
+	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeWorkflowData(t, filepath.Join(workflowDir, "child.yaml"), "version: 1\nname: child\ninvokable: false\nsteps:\n  - return: {to: picker, outputs: {}}\n")
+	writeWorkflowData(t, filepath.Join(workflowDir, "root.yaml"), "version: 1\nname: root\ndepends_on: {child: child}\nsteps:\n  - return: {outputs: {}}\n")
+	selections := 0
+	deps := pickerDependencies(root, step.NewRegistry(), func(_ context.Context, _ io.Reader, _ io.Writer, config tui.SelectionPickerConfig) (tui.Selection, error) {
+		selections++
+		if selections > 1 {
+			t.Fatal("dependency return reopened the picker")
+		}
+		return tui.Selection{Option: config.Options[0], Intent: tui.SelectionPrimary}, nil
+	})
+	command := newRootCmd(deps)
+	command.SetArgs(nil)
+	if err := command.ExecuteContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestWorkflowPickerReturnDestinationCancellationExits(t *testing.T) {
+	root := t.TempDir()
+	writePickerWorkflow(t, root, "version: 1\nname: canceled\nsteps:\n  - return: {to: picker, outputs: {}}\nfinally:\n  - {id: cancel, type: picker_cancel}\n")
+	ctx, cancel := context.WithCancel(t.Context())
+	registry := step.NewRegistry()
+	if err := registry.Register("picker_cancel", func(map[string]any) (step.Runner, error) {
+		return pickerTestRunner{run: func() error { cancel(); return nil }}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	selections := 0
+	deps := pickerDependencies(root, registry, func(_ context.Context, _ io.Reader, _ io.Writer, config tui.SelectionPickerConfig) (tui.Selection, error) {
+		selections++
+		return tui.Selection{Option: config.Options[0], Intent: tui.SelectionPrimary}, nil
+	})
+	command := newRootCmd(deps)
+	command.SetArgs(nil)
+	if err := command.ExecuteContext(ctx); !errors.Is(err, context.Canceled) || selections != 1 {
+		t.Fatalf("error = %v, selections = %d", err, selections)
+	}
+}
+
+func TestWorkflowPickerScheduledReturnDestinationStopsAfterOccurrence(t *testing.T) {
+	root := t.TempDir()
+	writePickerWorkflow(t, root, "version: 1\nname: scheduled-return\ncron: '* * * * * *'\ntimezone: UTC\nsteps:\n  - return: {to: picker, outputs: {}}\n")
+	selections := 0
+	deps := pickerDependencies(root, step.NewRegistry(), func(_ context.Context, _ io.Reader, _ io.Writer, config tui.SelectionPickerConfig) (tui.Selection, error) {
+		selections++
+		if selections == 1 {
+			return tui.Selection{Option: config.Options[0], Intent: tui.SelectionPrimary}, nil
+		}
+		return tui.Selection{}, context.Canceled
+	})
+	deps.now = func() time.Time { return time.Date(2026, time.September, 9, 12, 0, 0, 500_000_000, time.UTC) }
+	deps.waitUntil = func(context.Context, time.Time) error {
+		t.Fatal("scheduled picker run waited after its return destination triggered")
+		return nil
+	}
+	command := newRootCmd(deps)
+	command.SetArgs(nil)
+	if err := command.ExecuteContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if selections != 2 {
+		t.Fatalf("selections = %d, want 2", selections)
+	}
+}
+
+// A failed occurrence keeps its schedule under the picker exactly as it does under a direct
+// scheduled run: only the return destination ends the loop and reopens the picker.
+func TestWorkflowPickerScheduledFailureKeepsSchedule(t *testing.T) {
+	root := t.TempDir()
+	writePickerWorkflow(t, root, "version: 1\nname: scheduled-flaky\ncron: '* * * * * *'\ntimezone: UTC\nsteps:\n  - {id: flaky, type: picker_test}\n  - return: {to: picker, outputs: {}}\n")
+	registry := step.NewRegistry()
+	attempts := 0
+	if err := registry.Register("picker_test", func(map[string]any) (step.Runner, error) {
+		return pickerTestRunner{run: func() error {
+			attempts++
+			if attempts == 1 {
+				return errors.New("occurrence failed")
+			}
+			return nil
+		}}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	selections := 0
+	deps := pickerDependencies(root, registry, func(_ context.Context, _ io.Reader, _ io.Writer, config tui.SelectionPickerConfig) (tui.Selection, error) {
+		selections++
+		if selections == 1 {
+			return tui.Selection{Option: config.Options[0], Intent: tui.SelectionPrimary}, nil
+		}
+		return tui.Selection{}, context.Canceled
+	})
+	now := time.Date(2026, time.September, 9, 12, 0, 0, 500_000_000, time.UTC)
+	waits := 0
+	deps.now = func() time.Time { return now }
+	deps.waitUntil = func(_ context.Context, instant time.Time) error {
+		waits++
+		now = instant
+		return nil
+	}
+	command := newRootCmd(deps)
+	command.SetArgs(nil)
+	if err := command.ExecuteContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if attempts != 2 || waits != 1 || selections != 2 {
+		t.Fatalf("attempts = %d, waits = %d, selections = %d", attempts, waits, selections)
+	}
+}
+
+func TestWorkflowPickerReturnDestinationReopensAfterFormRun(t *testing.T) {
+	root := t.TempDir()
+	writePickerWorkflow(t, root, `version: 1
+name: form-return
+vars: {confirmed: false}
+form:
+  title: Return
+  fields:
+    - {variable: confirmed, label: Confirmed, type: boolean}
+steps:
+  - return: {to: picker, outputs: {}}
+`)
+	opener, clientErr := workflowFormOpener(t)
+	selections := 0
+	deps := pickerDependencies(root, step.NewRegistry(), func(_ context.Context, _ io.Reader, _ io.Writer, config tui.SelectionPickerConfig) (tui.Selection, error) {
+		selections++
+		if selections == 1 {
+			return tui.Selection{Option: config.Options[0], Intent: tui.SelectionUI, Filter: "form"}, nil
+		}
+		if config.InitialFilter != "form" || !config.Options[0].Default {
+			t.Fatalf("restored picker config = %#v", config)
+		}
+		return tui.Selection{}, context.Canceled
+	})
+	deps.openURL = opener
+	command := newRootCmd(deps)
+	command.SetArgs(nil)
+	if err := command.ExecuteContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-clientErr; err != nil {
+		t.Fatal(err)
+	}
+	if selections != 2 {
+		t.Fatalf("selections = %d, want 2", selections)
+	}
+}
+
+func TestDirectWorkflowCommandsIgnoreReturnDestination(t *testing.T) {
+	root := t.TempDir()
+	path := writePickerWorkflow(t, root, `version: 1
+name: direct-return
+vars: {confirmed: false}
+form:
+  title: Return
+  fields:
+    - {variable: confirmed, label: Confirmed, type: boolean}
+steps:
+  - return: {to: picker, outputs: {}}
+`)
+	for _, test := range []struct {
+		name string
+		args []string
+		ui   bool
+	}{
+		{name: "run", args: []string{"run", "--file", path}},
+		{name: "ui", args: []string{"ui", "--file", path}, ui: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			deps := pickerDependencies(root, step.NewRegistry(), nil)
+			var clientErr <-chan error
+			if test.ui {
+				deps.openURL, clientErr = workflowFormOpener(t)
+			}
+			command := newRootCmd(deps)
+			command.SetArgs(test.args)
+			if err := command.ExecuteContext(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if test.ui {
+				if err := <-clientErr; err != nil {
+					t.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
 func TestWorkflowPickerInspectionsUseExactShadowedPathAndTarget(t *testing.T) {
 	root := t.TempDir()
 	home := filepath.Join(root, "home")
@@ -359,4 +705,93 @@ func sourceNames(sources []workflow.Source) string {
 		names[index] = source.Name
 	}
 	return strings.Join(names, ",")
+}
+
+func writePickerWorkflow(t *testing.T, root, data string) string {
+	t.Helper()
+	dir := filepath.Join(root, ".wuko", "workflows")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "workflow.yaml")
+	writeWorkflowData(t, path, data)
+	return path
+}
+
+func pickerDependencies(root string, registry *step.Registry, selectWorkflow func(context.Context, io.Reader, io.Writer, tui.SelectionPickerConfig) (tui.Selection, error)) dependencies {
+	return dependencies{
+		stdin: bytes.NewReader(nil), stdout: io.Discard, stderr: io.Discard,
+		cwd: func() (string, error) { return root, nil }, homeDir: func() (string, error) { return filepath.Join(root, "home"), nil },
+		configDir: func() (string, error) { return filepath.Join(root, "config"), nil }, registry: registry,
+		isInteractive: func(io.Reader) bool { return true }, selectWorkflow: selectWorkflow,
+	}
+}
+
+func workflowFormOpener(t *testing.T) (func(string) error, <-chan error) {
+	t.Helper()
+	clientErr := make(chan error, 1)
+	opener := func(target string) error {
+		go func() {
+			client := &http.Client{Timeout: 5 * time.Second}
+			response, err := client.Get(target)
+			if err != nil {
+				clientErr <- err
+				return
+			}
+			body, readErr := io.ReadAll(response.Body)
+			_ = response.Body.Close()
+			if readErr != nil {
+				clientErr <- readErr
+				return
+			}
+			match := regexp.MustCompile(`name="csrf" value="([^"]+)"`).FindStringSubmatch(string(body))
+			if len(match) != 2 {
+				clientErr <- fmt.Errorf("csrf token not found")
+				return
+			}
+			values := url.Values{"csrf": {match[1]}, "field_0": {"true"}}
+			request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, target+"submit", strings.NewReader(values.Encode()))
+			if err != nil {
+				clientErr <- err
+				return
+			}
+			request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			request.Header.Set("Origin", "null")
+			response, err = client.Do(request)
+			if err != nil {
+				clientErr <- err
+				return
+			}
+			_ = response.Body.Close()
+			for range 100 {
+				response, err = client.Get(target)
+				if err != nil {
+					clientErr <- err
+					return
+				}
+				body, readErr = io.ReadAll(response.Body)
+				_ = response.Body.Close()
+				if readErr != nil {
+					clientErr <- readErr
+					return
+				}
+				if strings.Contains(string(body), "Workflow complete") {
+					clientErr <- nil
+					return
+				}
+				time.Sleep(5 * time.Millisecond)
+			}
+			clientErr <- fmt.Errorf("workflow result page was not served")
+		}()
+		return nil
+	}
+	return opener, clientErr
+}
+
+type pickerTestRunner struct {
+	run func() error
+}
+
+func (runner pickerTestRunner) Run(context.Context, step.Request) (step.Result, error) {
+	return step.Result{}, runner.run()
 }
