@@ -182,7 +182,9 @@ func (c *client) call(ctx context.Context, method string, params, result any, ev
 			return errors.New(frame.Error.Message)
 		}
 		if result != nil {
-			if err := json.Unmarshal(frame.Result, result); err != nil {
+			decoder := json.NewDecoder(bytes.NewReader(frame.Result))
+			decoder.UseNumber()
+			if err := decoder.Decode(result); err != nil {
 				return fmt.Errorf("decoding plugin response: %w", err)
 			}
 		}

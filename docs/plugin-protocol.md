@@ -126,11 +126,13 @@ standard output must remain serialized so frames cannot interleave.
 Wuko initializes a process before using any operation:
 
 ```json
-{"id":"1","method":"initialize","params":{"protocol":"wuko.plugin/v1","host_version":"0.13.0"}}
+{"id":"1","method":"initialize","params":{"protocol":"wuko.plugin/v1","host_version":"v0.14.0"}}
 ```
 
 `host_version` is optional and may be absent during installation verification. A plugin must use
-`protocol`, not the Wuko application version, to decide whether the wire contract is compatible.
+`protocol` to decide whether the wire format is compatible. It may additionally require a minimum
+host version for a documented host capability, but its versionless installation handshake must
+remain side-effect free and successful.
 
 A complete response looks like:
 
@@ -253,7 +255,10 @@ Validation and execution receive the same shape:
 ```
 
 `with` is the rendered configuration for the step. Context collections contain JSON-compatible
-workflow state and should be treated as read-only snapshots.
+workflow state and should be treated as read-only snapshots. JSON numbers retain their lexical
+representation across the protocol; implementations decoding into `any` should use their JSON
+library's lossless-number mode rather than converting every number to a binary floating-point
+value.
 
 A step returns outputs and optional workflow-variable writes:
 

@@ -49,7 +49,7 @@ func runProtocolHelper() {
 		case "plugin.stop":
 			fmt.Fprintln(os.Stderr, "stopped")
 		case "step.run":
-			result = step.Result{Outputs: map[string]any{"value": "HELLO"}}
+			result = step.Result{Outputs: map[string]any{"value": "HELLO", "large_integer": json.Number("9007199254740993")}}
 		case "helper.call":
 			parameters, _ := request.Params.(map[string]any)
 			if parameters["name"] == "nullable" {
@@ -216,6 +216,9 @@ func TestWorkflowPluginStartAndStopOnce(t *testing.T) {
 		}
 		if result.Outputs["value"] != "HELLO" {
 			t.Fatal(result)
+		}
+		if result.Outputs["large_integer"] != json.Number("9007199254740993") {
+			t.Fatalf("large integer output = %#v", result.Outputs["large_integer"])
 		}
 	}
 	if err := manager.Close(ctx, "completed"); err != nil {
