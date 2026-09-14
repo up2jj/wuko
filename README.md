@@ -244,7 +244,7 @@ steps:
   - uses: actions/checkout@v6
 
   - name: Run Wuko checks
-    uses: up2jj/wuko@v0.13.0
+    uses: up2jj/wuko@v0.14.0
     with:
       workflow: check
       vars: |
@@ -274,7 +274,7 @@ repository:
 
 ```yaml
 - name: Run cross-repository release workflow
-  uses: up2jj/wuko@v0.13.0
+  uses: up2jj/wuko@v0.14.0
   with:
     workflow: release
     token: ${{ secrets.WUKO_GITHUB_TOKEN }}
@@ -288,7 +288,7 @@ return is conditional:
 ```yaml
 - name: Build the release archive
   id: wuko
-  uses: up2jj/wuko@v0.13.0
+  uses: up2jj/wuko@v0.14.0
   with:
     workflow: build
 
@@ -317,7 +317,7 @@ that point:
 - name: Run Wuko checks
   id: wuko
   continue-on-error: true
-  uses: up2jj/wuko@v0.13.0
+  uses: up2jj/wuko@v0.14.0
   with:
     workflow: check
 
@@ -370,7 +370,7 @@ For a small workflow constructed by the GitHub workflow itself, provide an inlin
 ```yaml
 - name: Run inline Wuko workflow
   id: wuko
-  uses: up2jj/wuko@v0.13.0
+  uses: up2jj/wuko@v0.14.0
   with:
     definition: |
       version: 1
