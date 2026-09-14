@@ -137,6 +137,10 @@ type client struct {
 
 func launch(ctx context.Context, path string, stderr io.Writer) (*client, error) {
 	cmd := exec.CommandContext(context.WithoutCancel(ctx), path)
+	// A terminal sends Ctrl-C and job-control termination signals to the whole foreground
+	// process group. Keep the plugin outside Wuko's group so the host can deliver protocol
+	// cancellation, drain its final response, and then shut it down cleanly.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err

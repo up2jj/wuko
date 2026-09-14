@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 
 	"github.com/up2jj/wuko/step"
@@ -64,6 +65,30 @@ func runProtocolHelper() {
 		}
 		data, _ := json.Marshal(result)
 		_ = encoder.Encode(responseFrame{ID: request.ID, Result: data})
+	}
+}
+
+func TestLaunchIsolatesPluginFromTerminalProcessGroup(t *testing.T) {
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "wuko-plugin-acme")
+	script := []byte("#!/bin/sh\nWUKO_PLUGIN_TEST_HELPER=1 exec \"" + executable + "\"\n")
+	if err := os.WriteFile(path, script, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	client, err := launch(t.Context(), path, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeClient(client)
+	processGroup, err := syscall.Getpgid(client.cmd.Process.Pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if processGroup != client.cmd.Process.Pid {
+		t.Fatalf("plugin process group = %d, want child pid %d", processGroup, client.cmd.Process.Pid)
 	}
 }
 

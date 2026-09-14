@@ -302,6 +302,29 @@ steps:
 	}
 }
 
+func TestRootCommandDoesNotRegisterExtractedHTTPServices(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+	for _, stepType := range []string{"forward_proxy", "mock_server"} {
+		t.Run(stepType, func(t *testing.T) {
+			path := filepath.Join(root, stepType+".yaml")
+			data := fmt.Sprintf("version: 1\nname: extracted\nsteps:\n  - id: service\n    type: %s\n    with: {}\n", stepType)
+			if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			command := NewRootCmd()
+			command.SetIn(bytes.NewReader(nil))
+			command.SetOut(io.Discard)
+			command.SetErr(io.Discard)
+			command.SetArgs([]string{"run", "--file", path})
+			err := command.ExecuteContext(t.Context())
+			if err == nil || !strings.Contains(err.Error(), "unknown step type \""+stepType+"\"") {
+				t.Fatalf("expected %s to be unknown, got %v", stepType, err)
+			}
+		})
+	}
+}
+
 func TestRootCommandRegistersSemVerStep(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "semver.yaml")

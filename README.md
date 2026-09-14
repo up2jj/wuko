@@ -547,8 +547,6 @@ Each linked guide contains multiple examples for every step.
 | `temp` | Create automatically cleaned files, directories, or FIFOs | [System steps](docs/steps-system.md#temp) |
 | `cache` | Restore and save directory caches | [System steps](docs/steps-system.md#cache) |
 | `http` | Make structured HTTP API calls | [System steps](docs/steps-system.md#http) |
-| `forward_proxy` | Intercept and rewrite opted-in HTTP(S) requests | [System steps](docs/steps-system.md#forward_proxy) |
-| `mock_server` | Serve stateful HTTP(S) expectations and verify requests | [System steps](docs/steps-system.md#mock_server) |
 | `docker` | Run containers and manage Docker files and resources | [System steps](docs/steps-system.md#docker) |
 | `shell` | Run argv commands, inline shell, or scripted PTY interactions | [Automation steps](docs/steps-automation.md#shell) |
 | `process` | Run a readiness-gated, lifecycle-managed service | [Automation steps](docs/steps-automation.md#process) |

@@ -47,14 +47,15 @@ itself start that process-wide budget.
 
 ## Step termination
 
-In-process step runners must observe `ctx.Done()` and return. The `forward_proxy` step stops
-accepting requests, closes intercepted CONNECT/upgrade connections, drains ordinary HTTP requests,
-and closes its idle upstream connections during this phase. A hijacked connection is no longer
-tracked by the HTTP server, so the step then waits up to five more seconds for the handlers behind
-those connections to return before it closes the traffic log; without that wait the last records of
-a tunnelled request are lost. Go cannot safely terminate an
-individual goroutine, so a runner that ignores cancellation can outlive its step or group deadline.
-A later `SIGINT` or `SIGTERM` still starts the process-wide 10-second shutdown budget.
+In-process step runners must observe `ctx.Done()` and return. Protocol-v2 managed plugin services
+receive a `cancel` notification, and Wuko drains their final response for a bounded interval so the
+plugin can report verification or graceful-shutdown failures before cleanup begins. Each service
+still owns its listener, connections, child goroutines, and any service-specific draining. Plugin
+processes run outside Wuko's foreground process group so a terminal interrupt reaches the host,
+which can preserve that protocol shutdown instead of losing the plugin to the same signal. Go
+cannot safely terminate an individual goroutine, so a runner that ignores cancellation can outlive
+its step or group deadline. A later `SIGINT` or `SIGTERM` still starts the process-wide 10-second
+shutdown budget.
 
 On supported Unix platforms, shell and agent commands run in their own process group. When their
 context is canceled, Wuko sends `SIGTERM` to the complete process group, waits up to two seconds,
