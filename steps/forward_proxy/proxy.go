@@ -72,7 +72,7 @@ func (runner *Runner) Run(ctx context.Context, execution step.Request) (step.Res
 		listener.Close()
 		return step.Result{}, err
 	}
-	caPath, err := writeCACertificate(execution.RunDir, authority.pem)
+	caPath, err := writeCACertificate(execution.RunDir, authority.PEM())
 	if err != nil {
 		listener.Close()
 		return step.Result{}, err
@@ -151,7 +151,7 @@ func (runner *Runner) Run(ctx context.Context, execution step.Request) (step.Res
 		return step.Result{}, fmt.Errorf("reading proxy address: %w", err)
 	}
 	proxyURL := "http://" + net.JoinHostPort(host, port)
-	outputs := map[string]any{"ready": true, "url": proxyURL, "ca_cert": caPath, "ca_sha256": authority.sha256}
+	outputs := map[string]any{"ready": true, "url": proxyURL, "ca_cert": caPath, "ca_sha256": authority.SHA256()}
 	if logPath != "" {
 		outputs["log_path"] = logPath
 	}
@@ -335,7 +335,7 @@ func (proxy *proxyServer) connect(writer http.ResponseWriter, request *http.Requ
 		if name == "" {
 			name = host
 		}
-		return proxy.authority.certificateFor(name)
+		return proxy.authority.CertificateFor(name)
 	}, MinVersion: tls.VersionTLS12})
 	// The request context is not canceled while this handler runs, so an idle client would hold the
 	// goroutine for the life of the step without a deadline of its own.

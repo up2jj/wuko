@@ -71,6 +71,7 @@ func TemplateFuncsWithSecret(resolver SecretResolver) template.FuncMap {
 		"rotate":                  templateRotate,
 		"quote":                   templateQuote,
 		"escapeRegex":             escapeRegex,
+		"jsonPointerEscape":       JSONPointerEscape,
 		"normalizeUnicode":        templateNormalizeUnicode,
 		"slugify":                 templateSlugify,
 		"default":                 defaultValue,
@@ -209,6 +210,9 @@ func exprOptions() []expr.Option {
 		expr.Function("quote", exprQuote, new(func(...any) string)),
 		expr.Function("escapeRegex", func(values ...any) (any, error) {
 			return escapeRegex(values[0].(string)), nil
+		}, new(func(string) string)),
+		expr.Function("jsonPointerEscape", func(values ...any) (any, error) {
+			return JSONPointerEscape(values[0].(string)), nil
 		}, new(func(string) string)),
 		expr.Function("normalizeUnicode", exprNormalizeUnicode, new(func(...any) string)),
 		expr.Function("slugify", exprSlugify, new(func(...any) string)),

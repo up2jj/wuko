@@ -110,6 +110,9 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
   timeouts. Keep authorization values in environment-backed headers. Use `forward_proxy` when a
   local workflow must inspect or rewrite opted-in HTTP(S) traffic, then pass its `url` as the HTTP
   step's proxy and its generated `ca_cert` as `root_ca_file` for HTTPS interception.
+- Use `mock_server` for a lifecycle-scoped origin with file-backed expectations. Keep routing in
+  `when`, request validation in `assertions`, and exact interaction counts in `times`; assertion,
+  malformed, unmatched, and processing failures are reported when the containing scope ends.
 - Use `attempt` with `duration` for a fixed delay, or give it a `steps` body and an Expr `until`
   predicate for polling. A poll requires `max_elapsed_time`; prefer read-only probes. Readiness
   expressed by a command succeeding needs no `until` -- that is `max_attempts` with a fixed cadence.

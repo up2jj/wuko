@@ -50,6 +50,7 @@ func helperFunctions() map[string]glua.LGFunction {
 		"rotate":                    helperRotate,
 		"quote":                     helperQuote,
 		"escape_regex":              helperEscapeRegex,
+		"json_pointer_escape":       helperJSONPointerEscape,
 		"normalize_unicode":         helperNormalizeUnicode,
 		"slugify":                   helperSlugify,
 		"default":                   helperDefault,
@@ -377,6 +378,11 @@ func helperQuote(state *glua.LState) int {
 
 func helperEscapeRegex(state *glua.LState) int {
 	state.Push(glua.LString(expression.EscapeRegex(state.CheckString(1))))
+	return 1
+}
+
+func helperJSONPointerEscape(state *glua.LState) int {
+	state.Push(glua.LString(expression.JSONPointerEscape(state.CheckString(1))))
 	return 1
 }
 

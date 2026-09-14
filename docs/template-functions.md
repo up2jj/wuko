@@ -167,6 +167,7 @@ grapheme clusters, so combining marks and joined emoji stay together.
 | `rotate` | `{{ value \| rotate count }}` | `rotate(value, count)` | `h.rotate(value, count)` | Rotate each line left; a negative count rotates right |
 | `quote` | `{{ value \| quote delimiter }}` | `quote(value, delimiter)` | `h.quote(value, delimiter)` | Wrap each line with a delimiter |
 | `escapeRegex` | `{{ value \| escapeRegex }}` | `escapeRegex(value)` | `h.escape_regex(value)` | Escape text for literal use in a Go RE2 pattern |
+| `jsonPointerEscape` | `{{ value \| jsonPointerEscape }}` | `jsonPointerEscape(value)` | `h.json_pointer_escape(value)` | Escape one RFC 6901 JSON Pointer path token |
 | `normalizeUnicode` | `{{ value \| normalizeUnicode form }}` | `normalizeUnicode(value, form)` | `h.normalize_unicode(value, form)` | Apply NFC, NFD, NFKC, or NFKD normalization |
 
 The optional arguments use these defaults: `repeat` uses count `2` and an empty separator;

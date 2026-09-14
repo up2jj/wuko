@@ -179,6 +179,7 @@ func TestTextHelpersTemplateAndExprParity(t *testing.T) {
 		{name: "rotate default", template: `{{ "abcd" | rotate }}`, expression: `rotate("abcd")`, want: "bcda"},
 		{name: "quote default", template: `{{ "hi" | quote }}`, expression: `quote("hi")`, want: `"hi"`},
 		{name: "escape regex", template: `{{ "a.b" | escapeRegex }}`, expression: `escapeRegex("a.b")`, want: `a\.b`},
+		{name: "escape JSON Pointer", template: `{{ "a~/b" | jsonPointerEscape }}`, expression: `jsonPointerEscape("a~/b")`, want: `a~0~1b`},
 		{name: "normalize Unicode", template: `{{ "é" | normalizeUnicode "nfc" }}`, expression: `normalizeUnicode("é", "nfc")`, want: "é"},
 		{name: "normalize Unicode default", template: `{{ "é" | normalizeUnicode }}`, expression: `normalizeUnicode("é")`, want: "é"},
 	}

@@ -620,6 +620,7 @@ wuko.output("rotate", h.rotate("abcd", -1))
 wuko.output("rotate_default", h.rotate("abcd"))
 wuko.output("quote", h.quote("hi"))
 wuko.output("escape_regex", h.escape_regex("a.b"))
+wuko.output("json_pointer_escape", h.json_pointer_escape("a~/b"))
 wuko.output("normalize_unicode", h.normalize_unicode("é", "nfc"))
 wuko.output("normalize_unicode_default", h.normalize_unicode("é"))
 `,
@@ -653,6 +654,7 @@ wuko.output("normalize_unicode_default", h.normalize_unicode("é"))
 		"rotate_default":            "bcda",
 		"quote":                     `"hi"`,
 		"escape_regex":              `a\.b`,
+		"json_pointer_escape":       `a~0~1b`,
 		"normalize_unicode":         "é",
 		"normalize_unicode_default": "é",
 	}

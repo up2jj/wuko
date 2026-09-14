@@ -31,6 +31,16 @@ type TemplateRenderer interface {
 	RenderContent(string) (string, error)
 }
 
+// DataTemplateRenderer extends TemplateRenderer for long-lived steps that add request-local
+// roots while retaining the workflow's named templates and helper functions. Snapshot freezes
+// the workflow data before the step starts serving concurrent requests.
+type DataTemplateRenderer interface {
+	TemplateRenderer
+	RenderWith(string, map[string]any) (string, error)
+	RenderContentWith(string, map[string]any) (string, error)
+	Snapshot() DataTemplateRenderer
+}
+
 type Request struct {
 	StepID       string
 	WorkflowName string
