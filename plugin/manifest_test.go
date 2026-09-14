@@ -31,6 +31,25 @@ func TestParseManifestSelectsCurrentArtifact(t *testing.T) {
 	}
 }
 
+func TestParseManifestAcceptsBothRuntimeProtocols(t *testing.T) {
+	artifact := Artifact{OS: runtime.GOOS, Arch: runtime.GOARCH, Path: "plugin.tar.gz", Format: "tar.gz", Entry: "wuko-plugin-acme", SHA256: strings.Repeat("a", 64)}
+	for _, protocol := range []string{ProtocolV1, ProtocolV2} {
+		t.Run(protocol, func(t *testing.T) {
+			data, err := json.Marshal(Manifest{Version: 1, Namespace: "acme", PluginVersion: "1.0.0", Protocol: protocol, Artifacts: []Artifact{artifact}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			manifest, err := ParseManifest(data)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if manifest.Protocol != protocol {
+				t.Fatalf("protocol = %q", manifest.Protocol)
+			}
+		})
+	}
+}
+
 func TestParseManifestRejectsDuplicatePlatform(t *testing.T) {
 	artifact := Artifact{OS: "linux", Arch: "arm64", Path: "plugin.tar.gz", Format: "tar.gz", Entry: "wuko-plugin-acme", SHA256: strings.Repeat("a", 64)}
 	data, _ := json.Marshal(Manifest{Version: 1, Namespace: "acme", PluginVersion: "1", Protocol: Protocol, Artifacts: []Artifact{artifact, artifact}})

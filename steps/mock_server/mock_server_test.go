@@ -68,6 +68,10 @@ func (renderer *testRenderer) Snapshot() step.DataTemplateRenderer {
 	return &testRenderer{renderer: renderer.renderer, data: workflow.CloneMap(renderer.data)}
 }
 
+func (renderer *testRenderer) WithoutSecrets() step.DataTemplateRenderer {
+	return &testRenderer{renderer: renderer.renderer.WithoutSecrets(), data: renderer.data}
+}
+
 func overlay(base, extra map[string]any) map[string]any {
 	result := maps.Clone(base)
 	maps.Copy(result, extra)

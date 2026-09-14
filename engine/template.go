@@ -51,6 +51,12 @@ func (renderer *boundTemplateRenderer) Snapshot() step.DataTemplateRenderer {
 	return &snapshotTemplateRenderer{renderer: renderer.renderer, data: workflow.CloneMap(renderer.templateData())}
 }
 
+// WithoutSecrets shares the assembled data rather than copying it: neither renderer writes to it,
+// and the RenderWith family overlays extra roots onto a clone.
+func (renderer *boundTemplateRenderer) WithoutSecrets() step.DataTemplateRenderer {
+	return &snapshotTemplateRenderer{renderer: renderer.renderer.WithoutSecrets(), data: renderer.templateData()}
+}
+
 func (renderer *boundTemplateRenderer) templateData() map[string]any {
 	renderer.once.Do(func() {
 		renderer.data = renderer.build()
@@ -89,6 +95,10 @@ func (renderer *snapshotTemplateRenderer) RenderContentWith(value string, extra 
 }
 
 func (renderer *snapshotTemplateRenderer) Snapshot() step.DataTemplateRenderer { return renderer }
+
+func (renderer *snapshotTemplateRenderer) WithoutSecrets() step.DataTemplateRenderer {
+	return &snapshotTemplateRenderer{renderer: renderer.renderer.WithoutSecrets(), data: renderer.data}
+}
 
 func overlayTemplateData(base, extra map[string]any) map[string]any {
 	data := maps.Clone(base)

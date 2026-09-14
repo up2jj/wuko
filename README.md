@@ -135,8 +135,9 @@ wuko uninstall release
 wuko uninstall --global --yes release
 ```
 
-Executable plugins can add language-neutral namespaced steps and executors. They can be installed
-directly or selected from a marketplace:
+Executable plugins can add language-neutral namespaced steps, executors, and helpers. Advanced v2
+plugins can also expose Wuko-managed services with scoped template, secret, and helper callbacks.
+Plugins can be installed directly or selected from a marketplace:
 
 ```sh
 wuko plugin install --global --package acme https://github.com/acme/wuko-marketplace
@@ -647,6 +648,7 @@ Claude skills are installed under `~/.claude/skills/`; Codex skills are installe
 - [Execution and composition](docs/execution.md)
 - [Executable plugins](docs/plugins.md)
 - [Technology-neutral plugin protocol v1](docs/plugin-protocol.md)
+- [Technology-neutral plugin protocol v2](docs/plugin-protocol-v2.md)
 - [ClickUp task agent example](docs/clickup-task-example.md)
 - [Interactive steps](docs/steps-interactive.md)
 - [Data steps](docs/steps-data.md)

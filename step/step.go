@@ -39,6 +39,11 @@ type DataTemplateRenderer interface {
 	RenderWith(string, map[string]any) (string, error)
 	RenderContentWith(string, map[string]any) (string, error)
 	Snapshot() DataTemplateRenderer
+	// WithoutSecrets returns an equivalent renderer whose secret helper always fails. A step
+	// that renders content supplied by a less-trusted caller -- a plugin that did not declare
+	// the callback granting secret access -- must render through it, because every template
+	// function including secret is reachable from any content that caller submits.
+	WithoutSecrets() DataTemplateRenderer
 }
 
 type Request struct {

@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -18,6 +19,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/up2jj/wuko/executor"
@@ -60,8 +62,10 @@ type helperDeclaration struct {
 	Name string `json:"name"`
 }
 type stepDeclaration struct {
-	Type    string `json:"type"`
-	Cleanup bool   `json:"cleanup,omitempty"`
+	Type          string   `json:"type"`
+	Cleanup       bool     `json:"cleanup,omitempty"`
+	Service       bool     `json:"service,omitempty"`
+	HostCallbacks []string `json:"host_callbacks,omitempty"`
 }
 type executorDeclaration struct {
 	Type               string `json:"type"`
@@ -89,6 +93,7 @@ func (result executorRunResult) processResult() process.Result {
 
 type runningPlugin struct {
 	namespace   string
+	protocol    string
 	client      *client
 	initialized initializeResult
 	startWith   map[string]any
@@ -138,7 +143,7 @@ func (m *Manager) ResolveStep(ctx context.Context, name string, raw map[string]a
 	if declaration == nil {
 		return nil, fmt.Errorf("plugin %q does not declare step type %q", namespace, name)
 	}
-	base := &pluginStep{plugin: plugin, name: name, raw: raw}
+	base := &pluginStep{plugin: plugin, declaration: *declaration, name: name, raw: raw}
 	if declaration.Cleanup {
 		return &cleaningPluginStep{pluginStep: base}, nil
 	}
@@ -283,6 +288,7 @@ func (m *Manager) load(ctx context.Context, namespace string) (result *runningPl
 		return nil, failure
 	}
 	var path string
+	var protocol string
 	var startWith map[string]any
 	if declaration, ok := m.declarations[namespace]; ok {
 		if !strings.HasPrefix(declaration.Source, "https://") && !strings.HasPrefix(declaration.Source, "github:") {
@@ -295,6 +301,7 @@ func (m *Manager) load(ctx context.Context, namespace string) (result *runningPl
 		if release.Manifest.Namespace != namespace {
 			return nil, fmt.Errorf("plugin declaration namespace %q conflicts with manifest namespace %q", namespace, release.Manifest.Namespace)
 		}
+		protocol = release.Manifest.Protocol
 		directory, err := os.MkdirTemp("", "wuko-plugin-"+namespace+"-")
 		if err != nil {
 			return nil, err
@@ -314,34 +321,80 @@ func (m *Manager) load(ctx context.Context, namespace string) (result *runningPl
 		if err != nil {
 			return nil, err
 		}
+		protocol, err = localPluginProtocol(path, namespace)
+		if err != nil {
+			return nil, err
+		}
 	}
-	c, err := launch(ctx, path, m.config.Stderr)
+	c, initialized, protocol, err := launchInitialized(ctx, path, namespace, protocol, m.config.HostVersion, m.config.Stderr)
 	if err != nil {
-		return nil, fmt.Errorf("plugin %q: %w", namespace, err)
+		return nil, err
 	}
-	var initialized initializeResult
-	if err := c.call(ctx, "initialize", map[string]any{"protocol": Protocol, "host_version": m.config.HostVersion}, &initialized, nil); err != nil {
-		closeClient(c)
-		return nil, fmt.Errorf("initializing plugin %q: %w", namespace, err)
-	}
-	if initialized.Protocol != Protocol || initialized.Namespace != namespace {
-		closeClient(c)
-		return nil, fmt.Errorf("plugin %q handshake namespace or protocol mismatch", namespace)
-	}
-	if err := validateInitializeDeclarations(namespace, initialized); err != nil {
+	if err := validateInitializeDeclarations(namespace, protocol, initialized); err != nil {
 		closeClient(c)
 		return nil, err
 	}
-	plugin := &runningPlugin{namespace: namespace, client: c, initialized: initialized, startWith: startWith}
+	plugin := &runningPlugin{namespace: namespace, protocol: protocol, client: c, initialized: initialized, startWith: startWith}
 	m.plugins[namespace] = plugin
 	return plugin, nil
 }
 
-func validateInitializeDeclarations(namespace string, initialized initializeResult) error {
+func launchInitialized(ctx context.Context, path, namespace, protocol, hostVersion string, stderr io.Writer) (*client, initializeResult, string, error) {
+	protocols := []string{protocol}
+	// An installed release pins its protocol; only a bare development or PATH executable leaves
+	// Wuko to negotiate, and only then may the plugin answer with a protocol other than the one
+	// offered.
+	negotiating := protocol == ""
+	if negotiating {
+		protocols = []string{ProtocolV2, ProtocolV1}
+	}
+	var attempts []error
+	for _, candidate := range protocols {
+		client, err := launch(ctx, path, stderr)
+		if err != nil {
+			attempts = append(attempts, fmt.Errorf("%s launch: %w", candidate, err))
+			continue
+		}
+		var initialized initializeResult
+		err = client.call(ctx, "initialize", map[string]any{"protocol": candidate, "host_version": hostVersion}, &initialized, nil)
+		if err == nil && initialized.Namespace == namespace {
+			if initialized.Protocol == candidate {
+				return client, initialized, candidate, nil
+			}
+			// The plugin named a protocol Wuko was going to offer anyway, so take it at its
+			// word rather than shutting the process down and relaunching it to be told the
+			// same thing. Declarations are validated against the accepted protocol next.
+			if negotiating && slices.Contains(protocols, initialized.Protocol) {
+				return client, initialized, initialized.Protocol, nil
+			}
+		}
+		if err == nil {
+			err = fmt.Errorf("handshake namespace or protocol mismatch")
+		}
+		attempts = append(attempts, fmt.Errorf("%s: %w", candidate, err))
+		closeClient(client)
+		if ctx.Err() != nil {
+			break
+		}
+	}
+	return nil, initializeResult{}, "", fmt.Errorf("initializing plugin %q: %w", namespace, errors.Join(attempts...))
+}
+
+func validateInitializeDeclarations(namespace, protocol string, initialized initializeResult) error {
 	seen := make(map[string]bool)
 	for _, item := range initialized.Steps {
 		if seen[item.Type] || !strings.HasPrefix(item.Type, namespace+".") {
 			return fmt.Errorf("plugin %q has invalid or duplicate declaration %q", namespace, item.Type)
+		}
+		if protocol == ProtocolV1 && (item.Service || len(item.HostCallbacks) != 0) {
+			return fmt.Errorf("plugin %q declares v2 step capabilities with protocol v1", namespace)
+		}
+		seenCallbacks := make(map[string]bool)
+		for _, callback := range item.HostCallbacks {
+			if seenCallbacks[callback] || (callback != "host.template.validate" && callback != "host.template.render" && callback != "host.function.call") {
+				return fmt.Errorf("plugin %q has invalid or duplicate host callback %q", namespace, callback)
+			}
+			seenCallbacks[callback] = true
 		}
 		seen[item.Type] = true
 	}
@@ -364,6 +417,20 @@ func validateInitializeDeclarations(namespace string, initialized initializeResu
 		seenHelpers[item.Name] = true
 	}
 	return nil
+}
+
+func localPluginProtocol(path, namespace string) (string, error) {
+	directory := filepath.Dir(path)
+	if _, err := os.Stat(filepath.Join(directory, MarkerName)); os.IsNotExist(err) {
+		return "", nil
+	} else if err != nil {
+		return "", err
+	}
+	marker, err := ValidateInstallation(directory, namespace)
+	if err != nil {
+		return "", err
+	}
+	return marker.Protocol, nil
 }
 
 func (m *Manager) findLocal(namespace string) (string, error) {
@@ -428,16 +495,29 @@ func pluginCandidate(directory, name string) (string, bool, error) {
 func (plugin *runningPlugin) start(ctx context.Context) error {
 	plugin.lifecycleMu.Lock()
 	defer plugin.lifecycleMu.Unlock()
-	if plugin.started || plugin.startErr != nil {
+	if plugin.started {
+		return nil
+	}
+	if plugin.startErr != nil {
 		return plugin.startErr
 	}
-	if plugin.initialized.Lifecycle {
-		plugin.startErr = plugin.client.call(ctx, "plugin.start", map[string]any{"with": plugin.startWith}, &struct{}{}, nil)
-	}
-	if plugin.startErr == nil {
+	if !plugin.initialized.Lifecycle {
 		plugin.started = true
+		return nil
 	}
-	return plugin.startErr
+	err := plugin.client.call(ctx, "plugin.start", map[string]any{"with": plugin.startWith}, &struct{}{}, nil)
+	if err == nil {
+		plugin.started = true
+		return nil
+	}
+	// Context errors are transient, exactly as in Manager.load: a run canceled while the plugin
+	// was starting must not poison it for the cleanup scope, which runs with cancellation
+	// stripped and still has to stop what the run left behind.
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	plugin.startErr = err
+	return err
 }
 
 func (plugin *runningPlugin) lifecycleStarted() bool {
@@ -507,21 +587,135 @@ func (m *Manager) teardown(ctx context.Context, reason string, permanent bool) e
 }
 
 type pluginStep struct {
-	plugin *runningPlugin
-	name   string
-	raw    map[string]any
+	plugin      *runningPlugin
+	declaration stepDeclaration
+	name        string
+	raw         map[string]any
 }
 
 func (s *pluginStep) Validate(ctx context.Context, request step.Request) error {
-	return s.plugin.client.call(ctx, "step.validate", map[string]any{"type": s.name, "with": s.raw, "context": stepContext(request)}, &struct{}{}, nil)
+	params := map[string]any{"type": s.name, "with": s.raw, "context": stepContext(request, s.plugin.protocol)}
+	if s.plugin.protocol == ProtocolV2 {
+		return s.plugin.client.callWithOptions(ctx, "step.validate", params, &struct{}{}, callOptions{host: s.hostCallbacks(request)})
+	}
+	return s.plugin.client.call(ctx, "step.validate", params, &struct{}{}, nil)
 }
 func (s *pluginStep) Run(ctx context.Context, request step.Request) (step.Result, error) {
 	if err := s.plugin.start(ctx); err != nil {
 		return step.Result{}, err
 	}
+	if s.plugin.protocol == ProtocolV2 && s.declaration.Service {
+		return s.runService(ctx, request)
+	}
 	var result step.Result
-	err := s.plugin.client.call(ctx, "step.run", map[string]any{"type": s.name, "with": s.raw, "context": stepContext(request)}, &result, streamEvents(request.Stdout, request.Stderr, nil))
+	params := map[string]any{"type": s.name, "with": s.raw, "context": stepContext(request, s.plugin.protocol)}
+	if s.plugin.protocol == ProtocolV2 {
+		err := s.plugin.client.callWithOptions(ctx, "step.run", params, &result, callOptions{event: streamEvents(request.Stdout, request.Stderr, nil), host: s.hostCallbacks(request)})
+		return result, err
+	}
+	err := s.plugin.client.call(ctx, "step.run", params, &result, streamEvents(request.Stdout, request.Stderr, nil))
 	return result, err
+}
+
+type serviceOptionsResult struct {
+	Kind      string `json:"kind"`
+	KeepAlive bool   `json:"keep_alive"`
+	FailFast  bool   `json:"fail_fast"`
+	ExitOnEnd bool   `json:"exit_on_end"`
+}
+
+type serviceStartup struct {
+	result step.Result
+	err    error
+}
+
+func (s *pluginStep) runService(ctx context.Context, request step.Request) (step.Result, error) {
+	if request.Services == nil {
+		return step.Result{}, fmt.Errorf("plugin service %q requires the workflow service supervisor", s.name)
+	}
+	var service serviceOptionsResult
+	params := map[string]any{"type": s.name, "with": s.raw, "context": stepContext(request, ProtocolV2)}
+	if err := s.plugin.client.call(ctx, "step.service", params, &service, nil); err != nil {
+		return step.Result{}, err
+	}
+	if strings.TrimSpace(service.Kind) == "" {
+		return step.Result{}, fmt.Errorf("plugin service %q returned an empty kind", s.name)
+	}
+	frozen := freezeStepRequest(request)
+	params["context"] = stepContext(frozen, ProtocolV2)
+	startup := make(chan serviceStartup, 1)
+	if err := request.Services.StartService(request.StepID, service.Kind, step.ServiceOptions{KeepAlive: service.KeepAlive, FailFast: service.FailFast, ExitOnEnd: service.ExitOnEnd}, func(serviceCtx context.Context) error {
+		callCtx, cancel := context.WithCancel(serviceCtx)
+		defer cancel()
+		var ready atomic.Bool
+		var readyEvents atomic.Uint32
+		protocolFailure := make(chan error, 1)
+		var startupOnce sync.Once
+		reportStartup := func(value serviceStartup) { startupOnce.Do(func() { startup <- value }) }
+		events := streamEvents(request.Stdout, request.Stderr, nil)
+		event := func(frame eventFrame) {
+			if frame.Event != "ready" {
+				events(frame)
+				return
+			}
+			if readyEvents.Add(1) != 1 {
+				failure := fmt.Errorf("plugin service %q sent more than one readiness event", s.name)
+				select {
+				case protocolFailure <- failure:
+				default:
+				}
+				cancel()
+				return
+			}
+			var result step.Result
+			if len(frame.Result) == 0 || decodeNumber(frame.Result, &result) != nil {
+				reportStartup(serviceStartup{err: fmt.Errorf("plugin service %q sent malformed readiness result", s.name)})
+				cancel()
+				return
+			}
+			ready.Store(true)
+			reportStartup(serviceStartup{result: result})
+		}
+		var final step.Result
+		err := s.plugin.client.callWithOptions(callCtx, "step.run", params, &final, callOptions{event: event, host: s.hostCallbacks(frozen), drainCancel: 10 * time.Second})
+		select {
+		case failure := <-protocolFailure:
+			err = errors.Join(failure, err)
+		default:
+		}
+		if !ready.Load() {
+			if err == nil {
+				err = fmt.Errorf("plugin service %q exited before readiness", s.name)
+			}
+			reportStartup(serviceStartup{err: err})
+			return errors.Join(step.ErrServiceAborted, err)
+		}
+		return err
+	}); err != nil {
+		return step.Result{}, err
+	}
+	select {
+	case started := <-startup:
+		return started.result, started.err
+	default:
+	}
+	select {
+	case started := <-startup:
+		return started.result, started.err
+	case <-ctx.Done():
+		select {
+		case started := <-startup:
+			return started.result, started.err
+		default:
+			return step.Result{}, ctx.Err()
+		}
+	}
+}
+
+func decodeNumber(data []byte, target any) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	return decoder.Decode(target)
 }
 
 type cleaningPluginStep struct{ *pluginStep }
@@ -531,8 +725,141 @@ func (s *cleaningPluginStep) Cleanup(ctx context.Context, result step.Result) er
 	return s.plugin.client.call(ctx, "step.cleanup", map[string]any{"type": s.name, "with": s.raw, "result": wireResult}, &struct{}{}, nil)
 }
 
-func stepContext(r step.Request) map[string]any {
-	return map[string]any{"step_id": r.StepID, "workflow_name": r.WorkflowName, "workflow_dir": r.WorkflowDir, "run_dir": r.RunDir, "vars": r.Vars, "inputs": r.Inputs, "env": r.Env, "steps": r.Steps, "dependencies": r.Dependencies, "attempt": r.Attempt, "max_attempts": r.MaxAttempts, "operation_id": r.OperationID}
+func stepContext(r step.Request, protocol string) map[string]any {
+	result := map[string]any{"step_id": r.StepID, "workflow_name": r.WorkflowName, "workflow_dir": r.WorkflowDir, "run_dir": r.RunDir, "vars": r.Vars, "inputs": r.Inputs, "env": r.Env, "steps": r.Steps, "dependencies": r.Dependencies, "attempt": r.Attempt, "max_attempts": r.MaxAttempts, "operation_id": r.OperationID}
+	if protocol == ProtocolV2 {
+		result["workflow_source"] = r.WorkflowSource
+		result["workflow_dir_borrowed"] = r.WorkflowDirBorrowed
+		result["workflow_timezone"] = r.WorkflowTimezone
+		result["environment_loaders"] = r.EnvironmentLoaders
+		result["local_value_dir"] = r.LocalValueDir
+		result["global_value_dir"] = r.GlobalValueDir
+		result["preset_vars"] = r.PresetVars
+		result["bindings"] = r.Bindings
+		result["providers"] = r.Providers.Values
+		result["helpers"] = r.Helpers.Names()
+		if r.PreviousAttempt != nil {
+			result["previous_attempt"] = map[string]any{"outputs": r.PreviousAttempt.Outputs, "variables": r.PreviousAttempt.Variables}
+		}
+	}
+	return result
+}
+
+func freezeStepRequest(request step.Request) step.Request {
+	request.EnvironmentLoaders = slices.Clone(request.EnvironmentLoaders)
+	request.Vars = workflow.CloneMap(request.Vars)
+	request.PresetVars = workflow.CloneMap(request.PresetVars)
+	request.Inputs = workflow.CloneMap(request.Inputs)
+	request.Env = maps.Clone(request.Env)
+	request.Steps = workflow.CloneMap(request.Steps)
+	request.Dependencies = workflow.CloneDependencies(request.Dependencies)
+	request.Bindings = workflow.CloneMap(request.Bindings)
+	request.Providers = request.Providers.Clone()
+	request.Helpers = request.Helpers.Clone()
+	if request.PreviousAttempt != nil {
+		request.PreviousAttempt = &step.Result{Outputs: workflow.CloneMap(request.PreviousAttempt.Outputs), Variables: workflow.CloneMap(request.PreviousAttempt.Variables)}
+	}
+	if renderer, ok := request.TemplateRenderer.(step.DataTemplateRenderer); ok {
+		request.TemplateRenderer = renderer.Snapshot()
+	}
+	return request
+}
+
+func (s *pluginStep) hostCallbacks(request step.Request) hostCall {
+	allowed := make(map[string]bool, len(s.declaration.HostCallbacks))
+	for _, method := range s.declaration.HostCallbacks {
+		allowed[method] = true
+	}
+	// Rendering runs the workflow function map, so host.template.render would otherwise reach
+	// secret as well and make the declared-callback list meaningless as a boundary: a plugin
+	// that asked only to render templates could read every secret the run can resolve. A step
+	// that declared host.function.call may already resolve secrets directly and keeps the
+	// unrestricted renderer; every other step renders through one whose secret helper fails.
+	// The variant is built once per step run because it clones the compiled template set.
+	renderer := sync.OnceValue(func() step.DataTemplateRenderer {
+		data, ok := request.TemplateRenderer.(step.DataTemplateRenderer)
+		if !ok {
+			return nil
+		}
+		if allowed["host.function.call"] {
+			return data
+		}
+		return data.WithoutSecrets()
+	})
+	return func(ctx context.Context, method string, raw json.RawMessage) (any, error) {
+		if !allowed[method] {
+			return nil, fmt.Errorf("plugin step %q did not declare host callback %q", s.name, method)
+		}
+		switch method {
+		case "host.template.validate":
+			var params struct {
+				ParentID string `json:"parent_id"`
+				Content  string `json:"content"`
+			}
+			if err := decodeFrame(raw, &params); err != nil {
+				return nil, fmt.Errorf("decoding template validation request: %w", err)
+			}
+			if request.TemplateRenderer == nil {
+				return nil, fmt.Errorf("template renderer is unavailable")
+			}
+			if err := request.TemplateRenderer.ValidateContent(params.Content); err != nil {
+				return nil, err
+			}
+			return struct{}{}, nil
+		case "host.template.render":
+			var params struct {
+				ParentID string         `json:"parent_id"`
+				Content  string         `json:"content"`
+				Extra    map[string]any `json:"extra,omitempty"`
+			}
+			if err := decodeFrame(raw, &params); err != nil {
+				return nil, fmt.Errorf("decoding template render request: %w", err)
+			}
+			data := renderer()
+			if data == nil {
+				return nil, fmt.Errorf("data template renderer is unavailable")
+			}
+			value, err := data.RenderContentWith(params.Content, params.Extra)
+			if err != nil {
+				return nil, err
+			}
+			return map[string]any{"value": value}, nil
+		case "host.function.call":
+			var params struct {
+				ParentID string `json:"parent_id"`
+				Name     string `json:"name"`
+				Args     []any  `json:"args"`
+			}
+			if err := decodeFrame(raw, &params); err != nil {
+				return nil, fmt.Errorf("decoding function call: %w", err)
+			}
+			if params.Name == "secret" {
+				if len(params.Args) != 1 {
+					return nil, fmt.Errorf("secret requires one string argument")
+				}
+				reference, ok := params.Args[0].(string)
+				if !ok {
+					return nil, fmt.Errorf("secret requires one string argument")
+				}
+				value, err := request.ResolveSecret(reference)
+				if err != nil {
+					return nil, err
+				}
+				return map[string]any{"value": value}, nil
+			}
+			call := request.Helpers[params.Name]
+			if call == nil {
+				return nil, fmt.Errorf("workflow helper %q is unavailable", params.Name)
+			}
+			value, err := call(ctx, params.Args)
+			if err != nil {
+				return nil, err
+			}
+			return map[string]any{"value": value}, nil
+		default:
+			return nil, fmt.Errorf("unsupported host callback %q", method)
+		}
+	}
 }
 func streamEvents(stdout, stderr io.Writer, started func()) func(eventFrame) {
 	return func(event eventFrame) {

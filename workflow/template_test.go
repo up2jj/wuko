@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/secret"
 	"gopkg.in/yaml.v3"
 )
 
@@ -343,5 +344,41 @@ func TestRendererRendersArgumentLessTemplateInvocation(t *testing.T) {
 	}
 	if got != "hello!" {
 		t.Fatalf("rendered = %q", got)
+	}
+}
+
+func TestWithoutSecretsDeniesTheSecretHelperEverywhere(t *testing.T) {
+	t.Parallel()
+	session := secret.NewSession(t.Context(), secret.Options{Runner: &workflowSecretRunner{}, BaseEnv: map[string]string{}})
+	renderer, err := NewRendererWithSecrets(map[string]TemplateDefinition{
+		"token": {Inline: `{{ secret "op://Production/API/token" }}`},
+	}, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const direct = `{{ secret "op://Production/API/token" }}`
+	const nested = `{{ template "token" . }}`
+	for _, value := range []string{direct, nested} {
+		if got, err := renderer.Render(value, nil); err != nil || got != "workflow-token" {
+			t.Fatalf("renderer.Render(%q) = %q, %v", value, got, err)
+		}
+	}
+	restricted := renderer.WithoutSecrets()
+	// A named template was parsed with the original function map, so it is the case a
+	// content-level check would miss: the denial has to live in the function map itself.
+	for _, value := range []string{direct, nested} {
+		if _, err := restricted.Render(value, nil); err == nil || !strings.Contains(err.Error(), "secret is unavailable") {
+			t.Fatalf("restricted.Render(%q) = %v", value, err)
+		}
+		if _, err := restricted.RenderUncached(value, nil); err == nil || !strings.Contains(err.Error(), "secret is unavailable") {
+			t.Fatalf("restricted.RenderUncached(%q) = %v", value, err)
+		}
+	}
+	if got, err := restricted.Render(`{{ upper "hi" }}`, nil); err != nil || got != "HI" {
+		t.Fatalf("restricted.Render of an ordinary function = %q, %v", got, err)
+	}
+	// Neither the shared template set nor the caches are disturbed for the workflow itself.
+	if got, err := renderer.Render(nested, nil); err != nil || got != "workflow-token" {
+		t.Fatalf("renderer.Render after restriction = %q, %v", got, err)
 	}
 }

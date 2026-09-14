@@ -64,6 +64,10 @@ type Renderer struct {
 	base      *template.Template
 	cache     sync.Map
 	functions template.FuncMap
+	// overrides replaces named functions on each compiled template. It is nil for a workflow's
+	// own renderer and carries the denied secret helper for the WithoutSecrets variant, which
+	// shares base instead of reparsing every named template.
+	overrides template.FuncMap
 }
 
 // NewRenderer constructs a renderer from resolved template definitions.
@@ -139,6 +143,20 @@ func (renderer *Renderer) Derive(definitions map[string]TemplateDefinition) (*Re
 	return newRendererWithFunctions(definitions, renderer.functions)
 }
 
+// WithoutSecrets returns a renderer with the same named templates and functions as this one
+// except secret, which always fails. Rendering executes the whole function map, so a caller that
+// may submit template content but may not read secrets -- a plugin host callback that did not
+// declare the secret-bearing callback -- must render through this variant: otherwise
+// {{ secret "env://TOKEN" }} turns template rendering into unrestricted secret access.
+func (renderer *Renderer) WithoutSecrets() *Renderer {
+	overrides := template.FuncMap{"secret": func(string) (string, error) {
+		return "", fmt.Errorf("secret is unavailable in this template context")
+	}}
+	functions := maps.Clone(renderer.functions)
+	maps.Copy(functions, overrides)
+	return &Renderer{base: renderer.base, functions: functions, overrides: overrides}
+}
+
 // Validate parses one template string and checks named-template references.
 func (renderer *Renderer) Validate(value string) error {
 	_, err := renderer.compile(value, true)
@@ -206,6 +224,9 @@ func (renderer *Renderer) compile(value string, cache bool) (*template.Template,
 	cloned, err := renderer.base.Clone()
 	if err != nil {
 		return nil, err
+	}
+	if renderer.overrides != nil {
+		cloned = cloned.Funcs(renderer.overrides)
 	}
 	compiled, err := cloned.AddParseTree(executionTemplateName, parsed.Lookup(executionTemplateName).Tree)
 	if err != nil {

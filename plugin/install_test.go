@@ -33,7 +33,19 @@ func TestInstallIsTransactionalAndWritesMarker(t *testing.T) {
 	if marker.Namespace != "acme" {
 		t.Fatal(marker)
 	}
+	if marker.Protocol != ProtocolV1 {
+		t.Fatalf("marker protocol = %q", marker.Protocol)
+	}
 	directory := filepath.Join(root, "acme")
+	// A v1 marker leaves the field out so an older wuko, which rejects unknown marker fields,
+	// can still read installations written by this build.
+	stored, err := os.ReadFile(filepath.Join(directory, MarkerName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(stored), "protocol") {
+		t.Fatalf("v1 marker records a protocol: %s", stored)
+	}
 	if _, err := ValidateInstallation(directory, "acme"); err != nil {
 		t.Fatal(err)
 	}
@@ -45,6 +57,33 @@ func TestInstallIsTransactionalAndWritesMarker(t *testing.T) {
 	}
 	if _, err := ValidateInstallation(directory, "acme"); err == nil {
 		t.Fatal("expected corrupted marker error")
+	}
+}
+
+func TestLegacyInstallationMarkerDefaultsToV1(t *testing.T) {
+	directory := t.TempDir()
+	executable := filepath.Join(directory, "wuko-plugin-acme")
+	if err := os.WriteFile(executable, []byte("binary"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	marker := map[string]any{
+		"manifest_version": 1, "namespace": "acme", "plugin_version": "1.0.0",
+		"source": "https://plugins.test/acme", "manifest_digest": strings.Repeat("a", 64),
+		"artifact_digest": strings.Repeat("b", 64), "os": runtime.GOOS, "arch": runtime.GOARCH,
+	}
+	data, err := json.Marshal(marker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, MarkerName), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	validated, err := ValidateInstallation(directory, "acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if validated.Protocol != ProtocolV1 {
+		t.Fatalf("legacy marker protocol = %q", validated.Protocol)
 	}
 }
 

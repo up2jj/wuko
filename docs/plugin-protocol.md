@@ -4,6 +4,9 @@ This document defines `wuko.plugin/v1` without assuming a programming language o
 plugin is simply an executable named `wuko-plugin-<namespace>` that reads JSON messages from
 standard input and writes JSON messages to standard output.
 
+Protocol v1 remains supported unchanged. Steps that need managed-service lifetime or scoped calls
+back into Wuko should opt into [plugin protocol v2](plugin-protocol-v2.md).
+
 The distribution manifest and marketplace format are separate from this runtime protocol. See
 [Executable plugins](plugins.md) for packaging, installation, discovery, and publishing.
 

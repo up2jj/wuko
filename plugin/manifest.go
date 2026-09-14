@@ -12,7 +12,14 @@ import (
 	"strings"
 )
 
-const Protocol = "wuko.plugin/v1"
+const (
+	ProtocolV1 = "wuko.plugin/v1"
+	ProtocolV2 = "wuko.plugin/v2"
+
+	// Protocol remains the default emitted by plugin init. Protocol v2 is opt-in
+	// because it adds bidirectional host calls and managed service semantics.
+	Protocol = ProtocolV1
+)
 
 type Manifest struct {
 	Version       int        `json:"version"`
@@ -42,7 +49,7 @@ func ParseManifest(data []byte) (Manifest, error) {
 	if err := decoder.Decode(&extra); err != io.EOF {
 		return Manifest{}, fmt.Errorf("plugin manifest contains trailing data")
 	}
-	if manifest.Version != 1 || manifest.Protocol != Protocol {
+	if manifest.Version != 1 || !supportedProtocol(manifest.Protocol) {
 		return Manifest{}, fmt.Errorf("unsupported plugin manifest version or protocol")
 	}
 	if !validNamespace(manifest.Namespace) || manifest.PluginVersion == "" || strings.TrimSpace(manifest.PluginVersion) != manifest.PluginVersion {
@@ -71,6 +78,10 @@ func ParseManifest(data []byte) (Manifest, error) {
 		seenPaths[artifact.Path] = true
 	}
 	return manifest, nil
+}
+
+func supportedProtocol(protocol string) bool {
+	return protocol == ProtocolV1 || protocol == ProtocolV2
 }
 
 func (manifest Manifest) CurrentArtifact() (Artifact, error) {

@@ -118,7 +118,7 @@ func TestPluginHelperDeclarations(t *testing.T) {
 		{name: "built-in collision", namespace: "parse", helpers: []helperDeclaration{{Name: "time"}}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			err := validateInitializeDeclarations(test.namespace, initializeResult{Helpers: test.helpers})
+			err := validateInitializeDeclarations(test.namespace, ProtocolV1, initializeResult{Helpers: test.helpers})
 			if err == nil {
 				t.Fatal("expected invalid helper declaration")
 			}

@@ -19,6 +19,7 @@ type InstallationMarker struct {
 	ManifestVersion int    `json:"manifest_version"`
 	Namespace       string `json:"namespace"`
 	PluginVersion   string `json:"plugin_version"`
+	Protocol        string `json:"protocol,omitempty"`
 	Source          string `json:"source"`
 	ManifestDigest  string `json:"manifest_digest"`
 	ArtifactDigest  string `json:"artifact_digest"`
@@ -73,11 +74,20 @@ func installRelease(ctx context.Context, release Release, destinationRoot string
 	if err != nil {
 		return InstallationMarker{}, err
 	}
-	if err := verifyExecutable(ctx, executable, release.Manifest.Namespace, stderr); err != nil {
+	if err := verifyExecutable(ctx, executable, release.Manifest.Namespace, release.Manifest.Protocol, stderr); err != nil {
 		return InstallationMarker{}, err
 	}
-	marker := InstallationMarker{ManifestVersion: release.Manifest.Version, Namespace: release.Manifest.Namespace, PluginVersion: release.Manifest.PluginVersion, Source: release.CanonicalSource, ManifestDigest: release.ManifestDigest, ArtifactDigest: release.Artifact.SHA256, OS: runtime.GOOS, Arch: runtime.GOARCH}
-	data, _ := json.MarshalIndent(marker, "", "  ")
+	marker := InstallationMarker{ManifestVersion: release.Manifest.Version, Namespace: release.Manifest.Namespace, PluginVersion: release.Manifest.PluginVersion, Protocol: release.Manifest.Protocol, Source: release.CanonicalSource, ManifestDigest: release.ManifestDigest, ArtifactDigest: release.Artifact.SHA256, OS: runtime.GOOS, Arch: runtime.GOARCH}
+	// A v1 installation leaves protocol out of the file so a marker written here stays readable
+	// by an older wuko, which decodes markers with unknown fields disallowed and would otherwise
+	// reject every installation -- list and uninstall included -- after a downgrade.
+	// ValidateInstallation reads an absent field back as v1. A v2 marker does record it, and an
+	// older binary refusing a plugin it could not have run is the outcome that belongs there.
+	stored := marker
+	if stored.Protocol == ProtocolV1 {
+		stored.Protocol = ""
+	}
+	data, _ := json.MarshalIndent(stored, "", "  ")
 	data = append(data, '\n')
 	if err := os.WriteFile(filepath.Join(stage, MarkerName), data, 0600); err != nil {
 		return InstallationMarker{}, err
@@ -110,13 +120,13 @@ func installRelease(ctx context.Context, release Release, destinationRoot string
 	return marker, nil
 }
 
-func verifyExecutable(ctx context.Context, path, namespace string, stderr io.Writer) error {
+func verifyExecutable(ctx context.Context, path, namespace, protocol string, stderr io.Writer) error {
 	client, err := launch(ctx, path, stderr)
 	if err != nil {
 		return err
 	}
 	var initialized initializeResult
-	callErr := client.call(ctx, "initialize", map[string]any{"protocol": Protocol}, &initialized, nil)
+	callErr := client.call(ctx, "initialize", map[string]any{"protocol": protocol}, &initialized, nil)
 	closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	closeErr := client.close(closeCtx)
@@ -126,10 +136,10 @@ func verifyExecutable(ctx context.Context, path, namespace string, stderr io.Wri
 	if closeErr != nil {
 		return closeErr
 	}
-	if initialized.Protocol != Protocol || initialized.Namespace != namespace {
+	if initialized.Protocol != protocol || initialized.Namespace != namespace {
 		return fmt.Errorf("plugin handshake namespace or protocol mismatch")
 	}
-	return validateInitializeDeclarations(namespace, initialized)
+	return validateInitializeDeclarations(namespace, protocol, initialized)
 }
 
 func ValidateInstallation(directory, namespace string) (InstallationMarker, error) {
@@ -143,7 +153,10 @@ func ValidateInstallation(directory, namespace string) (InstallationMarker, erro
 	if err := decoder.Decode(&marker); err != nil {
 		return InstallationMarker{}, fmt.Errorf("invalid plugin marker: %w", err)
 	}
-	if marker.ManifestVersion != 1 || marker.Namespace != namespace || marker.PluginVersion == "" || marker.Source == "" || marker.OS == "" || marker.Arch == "" || !validDigest(marker.ManifestDigest) || !validDigest(marker.ArtifactDigest) {
+	if marker.Protocol == "" {
+		marker.Protocol = ProtocolV1
+	}
+	if marker.ManifestVersion != 1 || marker.Namespace != namespace || marker.PluginVersion == "" || !supportedProtocol(marker.Protocol) || marker.Source == "" || marker.OS == "" || marker.Arch == "" || !validDigest(marker.ManifestDigest) || !validDigest(marker.ArtifactDigest) {
 		return InstallationMarker{}, fmt.Errorf("invalid plugin marker")
 	}
 	expected := filepath.Join(directory, "wuko-plugin-"+namespace)
