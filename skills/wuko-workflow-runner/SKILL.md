@@ -1,6 +1,6 @@
 ---
 name: wuko-workflow-runner
-description: Safely select, preview, and execute an existing Wuko workflow from a discovered name, local file, HTTPS URL, or GitHub locator. Use when the user wants to run a workflow and review its inputs and effects before execution; use the author or debugger skill instead for workflow edits or detailed failure diagnosis.
+description: Safely select, preview, and execute an existing Wuko workflow, including workflows that load remote actions or executable plugins. Use when the user wants to run a workflow and review its inputs, trust boundaries, and effects before execution; use the author or debugger skill for edits or detailed failure diagnosis.
 ---
 
 # Wuko Workflow Runner
@@ -12,17 +12,22 @@ Run a trusted existing workflow only after its source, inputs, and expected effe
 1. Record the working directory and exact selector. Use `wuko list` when discovery is needed. If a
    name is shadowed or the user identified a particular file, preserve that choice with `--file`
    rather than substituting another definition.
-2. For a local workflow, inspect its YAML, recursively required files, referenced templates, and
-   visible action sources before invoking Wuko. Identify shell, Lua, Docker, HTTP, file, agent,
-   persistent key-value, retry, polling, and concurrent effects. Do not edit the workflow while
-   preparing to run it. If it declares `invokable: false`, do not try another selector: it may run
-   only as another workflow's `depends_on` prerequisite.
-3. Treat a remote workflow or action as trusted executable code. Before the first command that
-   loads one, show its locator, whether it is pinned, and the fact that loading may download
-   content. Require explicit trust confirmation. A command-based `uses` source requires the same
-   separate confirmation because `validate`, `tree`, and dry-run execute its resolver command
-   while loading the workflow.
-4. Gather required non-secret `--var` and `--var-file` inputs and list environment names without
+2. For a local workflow, inspect its YAML, recursively required files, referenced templates,
+   visible action sources, `plugins` declarations, and namespaced step, executor, and helper uses
+   before invoking Wuko. Identify shell, Lua, Docker, HTTP, file, agent, plugin service, persistent
+   key-value, retry, polling, and concurrent effects. Do not edit the workflow while preparing to
+   run it. If it declares `invokable: false`, do not try another selector: it may run only as
+   another workflow's `depends_on` prerequisite.
+3. For each plugin namespace, report either the authoritative declared source, ref, and manifest
+   digest or the ambient discovery mode (project, home, config, or `PATH`). State whether the
+   identity is immutable and digest-verified. List plugin `with` keys without rendering or
+   displaying their values, because configuration may contain credentials.
+4. Treat a remote workflow, action, command-based action source, or plugin executable as trusted
+   code. Before the first command that can download or start one, show its locator or discovery
+   mode, pinning status, and executable trust implications, then require explicit confirmation.
+   This confirmation precedes validation when a declared helper or rendered source can initialize
+   or start a plugin. `validate`, `tree`, and dry-run can execute command resolvers while loading.
+5. Gather required non-secret `--var` and `--var-file` inputs and list environment names without
    exposing their values. Preserve workflow prompts when an interactive terminal is available;
    otherwise arrange their values explicitly before previewing.
 
@@ -39,12 +44,14 @@ then check only whether its name is present. Do not display secret-bearing varia
    inherited environment, intended for the real run. Validation and tree inspection accept
    dependency-only workflows, but dry-run is a direct invocation and does not bypass
    `invokable: false`.
-2. Avoid redundant loads when loading itself has effects. In particular, choose one sufficient
-   preview command for a workflow with a command-based action source instead of executing that
-   resolver through validate, tree, and dry-run separately.
+2. Avoid redundant loads when loading itself has effects. Choose one sufficient preview command
+   when a command-based action source or plugin helper can execute during loading instead of
+   starting it through validate, tree, and dry-run separately.
 3. Summarize the exact command, working directory, selector, non-secret inputs by name, interactive
-   prompts, retries, and expected external effects. Require explicit confirmation immediately
-   before the real `wuko run`; an earlier request to run the workflow is not this confirmation.
+   prompts, retries, expected external effects, and plugin lifecycle behavior. Identify managed
+   services, declared host callbacks, and whether service failures can cancel foreground work or
+   surface during shutdown. Require explicit confirmation immediately before the real `wuko run`;
+   an earlier request to run the workflow is not this confirmation.
 4. If the command, working directory, source, or inputs change after preview, preview the changed
    run and confirm it again. Otherwise execute the confirmed command once and stream its normal
    progress without enabling debug output unnecessarily.

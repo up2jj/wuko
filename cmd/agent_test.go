@@ -65,6 +65,12 @@ func TestAgentInstallCopiesEmbeddedSkills(t *testing.T) {
 			}
 		}
 	}
+	for _, reference := range []string{"data-and-transforms.md", "resources-and-execution.md", "control-flow-and-lifecycle.md"} {
+		path := filepath.Join(home, ".claude", "skills", "wuko-workflow-author", "references", reference)
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("skill reference %s was not installed: %v", path, err)
+		}
+	}
 	if !strings.Contains(output.String(), "installed 4 skills for claude") {
 		t.Fatalf("output = %q", output.String())
 	}

@@ -30,9 +30,10 @@ func TestDiscoverOnlyReturnsAgentsAvailableOnPath(t *testing.T) {
 
 func TestInstallCopiesAndReplacesSkills(t *testing.T) {
 	source := testingfst.MapFS{
-		"wuko-test/SKILL.md":           &testingfst.MapFile{Data: []byte("version 1")},
-		"wuko-test/agents/openai.yaml": &testingfst.MapFile{Data: []byte("metadata")},
-		"not-a-skill/README.md":        &testingfst.MapFile{Data: []byte("ignored")},
+		"wuko-test/SKILL.md":            &testingfst.MapFile{Data: []byte("version 1")},
+		"wuko-test/agents/openai.yaml":  &testingfst.MapFile{Data: []byte("metadata")},
+		"wuko-test/references/guide.md": &testingfst.MapFile{Data: []byte("guide 1")},
+		"not-a-skill/README.md":         &testingfst.MapFile{Data: []byte("ignored")},
 	}
 	destination := t.TempDir()
 
@@ -46,14 +47,18 @@ func TestInstallCopiesAndReplacesSkills(t *testing.T) {
 
 	skillPath := filepath.Join(destination, "wuko-test", "SKILL.md")
 	metadataPath := filepath.Join(destination, "wuko-test", "agents", "openai.yaml")
+	referencePath := filepath.Join(destination, "wuko-test", "references", "guide.md")
 	assertFileContents(t, skillPath, "version 1")
 	assertFileContents(t, metadataPath, "metadata")
+	assertFileContents(t, referencePath, "guide 1")
 
 	source["wuko-test/SKILL.md"] = &testingfst.MapFile{Data: []byte("version 2")}
+	source["wuko-test/references/guide.md"] = &testingfst.MapFile{Data: []byte("guide 2")}
 	if _, err := Install(source, destination); err != nil {
 		t.Fatal(err)
 	}
 	assertFileContents(t, skillPath, "version 2")
+	assertFileContents(t, referencePath, "guide 2")
 }
 
 func TestInstallRejectsEmptySource(t *testing.T) {

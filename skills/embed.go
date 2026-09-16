@@ -7,5 +7,5 @@ import "embed"
 // Keep the embedded paths explicit enough to make the installed binary
 // independent of the repository's working directory.
 //
-//go:embed wuko-*/SKILL.md wuko-*/agents/openai.yaml
+//go:embed wuko-*/SKILL.md wuko-*/agents/openai.yaml wuko-*/references/*.md
 var Assets embed.FS
