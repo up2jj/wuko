@@ -55,6 +55,12 @@ homebrew_casks:
       fish: completions/wuko.fish
     homepage: "https://github.com/up2jj/wuko"
     description: "Trusted workflow runner for everyday development tasks"
+    custom_block: |
+      postflight_steps do
+        on_macos do
+          run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ "{{staged_path}}" }}/wuko"]
+        end
+      end
     repository:
       owner: up2jj
       name: homebrew-tap
@@ -63,8 +69,3 @@ homebrew_casks:
     commit_author:
       name: goreleaser-bot
       email: goreleaser-bot@users.noreply.github.com
-    # Strip the Gatekeeper quarantine flag so the unsigned binary runs on first launch.
-    hooks:
-      post:
-        install: |
-          system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/wuko"]
