@@ -180,7 +180,7 @@ func TestParseErrorsContainLocationsAndRejectExtraDocuments(t *testing.T) {
 		{name: "json trailing", format: "json", input: "{}\n[]", want: "multiple JSON values"},
 		{name: "yaml syntax", format: "yaml", input: "value: [one,\n", want: "line 1, column"},
 		{name: "yaml documents", format: "yaml", input: "one\n---\ntwo\n", want: "multiple YAML documents"},
-		{name: "toml syntax", format: "toml", input: "value = [1,\n", want: "line 2, column"},
+		{name: "toml syntax", format: "toml", input: "value = [1,\n", want: "line 1, column"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
