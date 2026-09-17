@@ -175,7 +175,7 @@ required tools are unavailable.
 ## Docker executor
 
 The Docker executor requires `image` and accepts `pull`, `platform`, `network`, `user`,
-`workspace`, `mounts`, and `init`:
+`resources`, `workspace`, `mounts`, and `init`:
 
 ```yaml
 - executor:
@@ -185,6 +185,10 @@ The Docker executor requires `image` and accepts `pull`, `platform`, `network`, 
       pull: if-missing
       network: none
       user: "1000:1000"
+      resources:
+        cpus: 1.5
+        memory: 512MiB
+        pids: 128
       workspace:
         target: /workspace
         read_only: false
@@ -206,6 +210,9 @@ The Docker executor requires `image` and accepts `pull`, `platform`, `network`, 
 | `platform` | Docker default | OCI platform such as `linux/amd64`. |
 | `network` | Docker default | Docker network mode or network name. |
 | `user` | Image default | Default user for the container and its shell commands. A shell step's `with.user` overrides it. |
+| `resources.cpus` | Unlimited | Positive decimal CPU limit with up to nine fractional digits, such as `1.5`. |
+| `resources.memory` | Unlimited | Memory limit of at least `6MiB`, using `B`, `KiB`, `MiB`, `GiB`, or `TiB`. |
+| `resources.pids` | Unlimited | Positive integer limit for processes and threads. |
 | `workspace.enabled` | `true` | Whether to bind the active host run directory. |
 | `workspace.target` | `/workspace` | Container path for the automatic workspace bind. |
 | `workspace.read_only` | `false` | Whether the automatic workspace bind is read-only. |
@@ -217,6 +224,14 @@ The active host run directory is mounted read-write at `/workspace` by default. 
 `workspace.enabled: false` to disable it, or change `target` and `read_only`. Relative bind-mount
 sources resolve from the host run directory; volume sources remain Docker volume names. Container
 targets must be absolute and unique.
+
+Resource limits apply to the executor container as a whole. Its init process, shell and file
+operations, and all managed `process` workers share one CPU, memory, and PID budget; a
+`process_call` consumes the budget of its existing worker rather than receiving a separate limit.
+PID accounting includes threads as reported by the host kernel. Setting `resources.memory` leaves
+Docker's swap setting unspecified, so the daemon keeps its normal swap behavior. Resource values
+may use templates like other strings beneath `executor.with`; rendered values are validated before
+the container is created.
 
 The default container process requires `/bin/sh`. Use `init` when an image needs a different
 keepalive. Relative shell working directories are translated through the most specific bind mount;

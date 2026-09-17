@@ -39,6 +39,7 @@ type ExecutorConfig struct {
 	Platform  string           `yaml:"platform,omitempty"`
 	Network   string           `yaml:"network,omitempty"`
 	User      string           `yaml:"user,omitempty"`
+	Resources *ResourceConfig  `yaml:"resources,omitempty"`
 	Workspace *WorkspaceConfig `yaml:"workspace,omitempty"`
 	Mounts    []Mount          `yaml:"mounts,omitempty"`
 	Init      *InitConfig      `yaml:"init,omitempty"`
@@ -112,6 +113,9 @@ func validateExecutorConfig(config ExecutorConfig) error {
 	}
 	if err := validatePlatformValue(config.Platform); err != nil {
 		return err
+	}
+	if _, err := executorResources(config.Resources, true); err != nil {
+		return fmt.Errorf("resources: %w", err)
 	}
 	workspace := executorWorkspace(config)
 	if workspace.Enabled {
@@ -289,6 +293,10 @@ func (session *dockerExecutorSession) startLocked(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	resources, err := executorResources(session.config.Resources, false)
+	if err != nil {
+		return fmt.Errorf("resources: %w", err)
+	}
 	if err := ensureImage(ctx, session.client, session.config.Image, session.config.Pull, platform); err != nil {
 		return err
 	}
@@ -312,8 +320,12 @@ func (session *dockerExecutorSession) startLocked(ctx context.Context) error {
 				workflowLabel: session.request.WorkflowName, stepLabel: "executor:docker",
 			},
 		},
-		HostConfig: &container.HostConfig{NetworkMode: container.NetworkMode(session.config.Network), Mounts: mounts},
-		Platform:   platform,
+		HostConfig: &container.HostConfig{
+			NetworkMode: container.NetworkMode(session.config.Network),
+			Resources:   resources,
+			Mounts:      mounts,
+		},
+		Platform: platform,
 	})
 	if err != nil {
 		return fmt.Errorf("creating Docker executor container: %w", err)
