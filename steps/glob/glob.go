@@ -27,7 +27,12 @@ type Runner struct {
 	fsys   fs.FS
 }
 
-func Register(registry *step.Registry) error { return registry.Register("glob", New) }
+func Register(registry *step.Registry) error {
+	return registry.RegisterDefinition("glob", step.Registration{Builder: New, Outputs: step.ClosedObject(map[string]step.OutputSchema{
+		"root": step.Scalar(), "count": step.Scalar(),
+		"files": step.Array(step.ClosedOutputs("name", "path", "type", "size", "mode", "modified_at")),
+	})})
+}
 
 func New(raw map[string]any) (step.Runner, error) {
 	var config Config

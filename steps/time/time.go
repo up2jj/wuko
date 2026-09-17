@@ -41,7 +41,9 @@ type Runner struct {
 	now     func() stdtime.Time
 }
 
-func Register(registry *step.Registry) error { return registry.Register("time", New) }
+func Register(registry *step.Registry) error {
+	return registry.RegisterDefinition("time", step.Registration{Builder: New, Outputs: step.ClosedOutputs("value")})
+}
 
 func New(raw map[string]any) (step.Runner, error) {
 	return NewWithClock(raw, stdtime.Now)

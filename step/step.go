@@ -293,9 +293,76 @@ type Builder func(raw map[string]any) (Runner, error)
 // explicitly registered builders, which keeps built-in behavior authoritative.
 type Resolver func(context.Context, string, map[string]any) (Runner, error)
 
+// OutputKind describes the statically visible shape of a step result.
+type OutputKind uint8
+
+const (
+	OutputUnknown OutputKind = iota
+	OutputScalar
+	OutputObject
+	OutputArray
+)
+
+// OutputSchema describes a step's result recursively. Open objects allow keys
+// not present in Fields; closed objects reject them during reference validation.
+// Scalar values have no addressable child fields.
+type OutputSchema struct {
+	Kind   OutputKind
+	Open   bool
+	Fields map[string]OutputSchema
+	Items  *OutputSchema
+}
+
+// Scalar declares a leaf output value.
+func Scalar() OutputSchema { return OutputSchema{Kind: OutputScalar} }
+
+// Array declares a list whose statically visible elements share one schema.
+func Array(items OutputSchema) OutputSchema { return OutputSchema{Kind: OutputArray, Items: &items} }
+
+// OpenObject declares an object whose keys are not known statically.
+func OpenObject(fields ...map[string]OutputSchema) OutputSchema {
+	return objectSchema(true, fields...)
+}
+
+// ClosedObject declares an object containing only the provided fields.
+func ClosedObject(fields map[string]OutputSchema) OutputSchema {
+	return objectSchema(false, fields)
+}
+
+// ClosedOutputs is a concise helper for steps returning scalar top-level keys.
+func ClosedOutputs(names ...string) OutputSchema {
+	fields := make(map[string]OutputSchema, len(names))
+	for _, name := range names {
+		fields[name] = Scalar()
+	}
+	return ClosedObject(fields)
+}
+
+func objectSchema(open bool, fieldSets ...map[string]OutputSchema) OutputSchema {
+	fields := make(map[string]OutputSchema)
+	for _, fieldSet := range fieldSets {
+		for name, schema := range fieldSet {
+			fields[name] = schema
+		}
+	}
+	return OutputSchema{Kind: OutputObject, Open: open, Fields: fields}
+}
+
+// Registration keeps a builder and its output contract together.
+type Registration struct {
+	Builder Builder
+	Outputs OutputSchema
+}
+
+// OutputSchemaResolver resolves optional schemas for dynamically provided step
+// types such as plugins. The bool is false when the provider has no schema,
+// which deliberately leaves that step open for compatibility.
+type OutputSchemaResolver func(context.Context, string) (OutputSchema, bool, error)
+
 type Registry struct {
-	builders map[string]Builder
-	resolver Resolver
+	definitions    map[string]Registration
+	resolver       Resolver
+	schemaResolver OutputSchemaResolver
 }
 
 type RegistryOption func(*Registry)
@@ -305,8 +372,13 @@ func WithResolver(resolver Resolver) RegistryOption {
 	return func(registry *Registry) { registry.resolver = resolver }
 }
 
+// WithOutputSchemaResolver adds schema lookup for dynamically provided steps.
+func WithOutputSchemaResolver(resolver OutputSchemaResolver) RegistryOption {
+	return func(registry *Registry) { registry.schemaResolver = resolver }
+}
+
 func NewRegistry(options ...RegistryOption) *Registry {
-	registry := &Registry{builders: make(map[string]Builder)}
+	registry := &Registry{definitions: make(map[string]Registration)}
 	for _, option := range options {
 		option(registry)
 	}
@@ -316,14 +388,113 @@ func NewRegistry(options ...RegistryOption) *Registry {
 // SetResolver replaces the unknown-type fallback.
 func (r *Registry) SetResolver(resolver Resolver) { r.resolver = resolver }
 
+// SetOutputSchemaResolver replaces the dynamic output-schema resolver.
+func (r *Registry) SetOutputSchemaResolver(resolver OutputSchemaResolver) {
+	r.schemaResolver = resolver
+}
+
+// Register is the compatibility shorthand for a step with an open output
+// object. Existing external steps therefore remain valid until they opt into a
+// stricter contract.
 func (r *Registry) Register(name string, builder Builder) error {
-	if name == "" || builder == nil {
+	return r.RegisterDefinition(name, Registration{Builder: builder, Outputs: OpenObject()})
+}
+
+// RegisterDefinition registers a builder and its co-located output contract.
+func (r *Registry) RegisterDefinition(name string, definition Registration) error {
+	if name == "" || definition.Builder == nil {
 		return fmt.Errorf("step registration requires a name and builder")
 	}
-	if _, exists := r.builders[name]; exists {
+	if _, exists := r.definitions[name]; exists {
 		return fmt.Errorf("step type %q is already registered", name)
 	}
-	r.builders[name] = builder
+	if definition.Outputs.Kind == OutputUnknown {
+		definition.Outputs = OpenObject()
+	}
+	r.definitions[name] = definition
+	return nil
+}
+
+// OutputSchema returns the registered or dynamically resolved output contract.
+// Unknown and schema-less dynamic steps return an open object.
+func (r *Registry) OutputSchema(ctx context.Context, name string) (OutputSchema, error) {
+	if r == nil {
+		return OpenObject(), nil
+	}
+	if definition, ok := r.definitions[name]; ok {
+		return definition.Outputs, nil
+	}
+	if r.schemaResolver != nil {
+		schema, found, err := r.schemaResolver(ctx, name)
+		if err != nil {
+			return OutputSchema{}, err
+		}
+		if found {
+			return schema, nil
+		}
+	}
+	return OpenObject(), nil
+}
+
+// Definitions returns a copy for contract tests and documentation tooling.
+func (r *Registry) Definitions() map[string]Registration {
+	definitions := make(map[string]Registration, len(r.definitions))
+	for name, definition := range r.definitions {
+		definitions[name] = definition
+	}
+	return definitions
+}
+
+// Len reports the number of explicitly registered step definitions.
+func (r *Registry) Len() int {
+	if r == nil {
+		return 0
+	}
+	return len(r.definitions)
+}
+
+// ValidateOutputKeys checks that a produced result conforms to a declared
+// closed schema. It is intentionally small so registration contract tests can
+// execute runners without duplicating expected key maps elsewhere.
+func ValidateOutputKeys(schema OutputSchema, outputs map[string]any) error {
+	return validateOutputValue(schema, outputs, "outputs")
+}
+
+func validateOutputValue(schema OutputSchema, value any, path string) error {
+	if schema.Kind == OutputUnknown || schema.Open {
+		return nil
+	}
+	if schema.Kind == OutputScalar {
+		return nil
+	}
+	if schema.Kind == OutputArray {
+		items, ok := value.([]any)
+		if !ok {
+			return fmt.Errorf("%s must be an array", path)
+		}
+		if schema.Items == nil {
+			return nil
+		}
+		for index, item := range items {
+			if err := validateOutputValue(*schema.Items, item, fmt.Sprintf("%s[%d]", path, index)); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	object, ok := value.(map[string]any)
+	if !ok {
+		return fmt.Errorf("%s must be an object", path)
+	}
+	for name, childValue := range object {
+		child, exists := schema.Fields[name]
+		if !exists {
+			return fmt.Errorf("%s contains undeclared output %q", path, name)
+		}
+		if err := validateOutputValue(child, childValue, path+"."+name); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -336,14 +507,14 @@ func (r *Registry) BuildContext(ctx context.Context, name string, raw map[string
 	if r == nil {
 		return nil, fmt.Errorf("unknown step type %q", name)
 	}
-	builder, ok := r.builders[name]
+	definition, ok := r.definitions[name]
 	if !ok {
 		if r.resolver != nil {
 			return r.resolver(ctx, name, raw)
 		}
 		return nil, fmt.Errorf("unknown step type %q", name)
 	}
-	runner, err := builder(raw)
+	runner, err := definition.Builder(raw)
 	if err != nil {
 		return nil, fmt.Errorf("decoding %s step: %w", name, err)
 	}

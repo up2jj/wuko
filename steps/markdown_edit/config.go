@@ -82,7 +82,12 @@ type Runner struct {
 func (*Runner) ExecutorAware()      {}
 func (*Runner) ExecutorFileSystem() {}
 
-func Register(registry *step.Registry) error { return registry.Register("markdown_edit", New) }
+func Register(registry *step.Registry) error {
+	return registry.RegisterDefinition("markdown_edit", step.Registration{Builder: New, Outputs: step.ClosedObject(map[string]step.OutputSchema{
+		"value": step.Scalar(), "changed": step.Scalar(), "count": step.Scalar(), "changed_count": step.Scalar(), "file": step.Scalar(),
+		"matches": step.Array(step.ClosedOutputs("edit", "operation", "path", "kind", "line", "column")),
+	})})
+}
 
 func New(raw map[string]any) (step.Runner, error) {
 	config := Config{MaxBytes: defaultMaxBytes}

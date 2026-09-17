@@ -84,7 +84,7 @@ type pullRequest struct {
 }
 
 func Register(registry *step.Registry) error {
-	return registry.Register("github_actions", New)
+	return registry.RegisterDefinition("github_actions", step.Registration{Builder: New, Outputs: step.OpenObject()})
 }
 
 func New(raw map[string]any) (step.Runner, error) {

@@ -50,7 +50,11 @@ type Runner struct {
 	controller controller
 }
 
-func Register(registry *step.Registry) error { return registry.Register("multiplexer", New) }
+func Register(registry *step.Registry) error {
+	return registry.RegisterDefinition("multiplexer", step.Registration{Builder: New, Outputs: step.ClosedOutputs(
+		"active", "provider", "operation", "scope", "previous_title", "target", "changed",
+	)})
+}
 
 func New(raw map[string]any) (step.Runner, error) {
 	return newRunner(raw, mux.New(nil))

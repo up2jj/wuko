@@ -184,15 +184,10 @@ func NewRootCmd() *cobra.Command {
 	executors := executor.NewRegistry()
 	plugins := plugin.NewManager(plugin.Config{CWD: os.Getwd, HomeDir: os.UserHomeDir, ConfigDir: os.UserConfigDir, LookPath: exec.LookPath, Stderr: os.Stderr, HostVersion: version})
 	registry.SetResolver(plugins.ResolveStep)
+	registry.SetOutputSchemaResolver(plugins.ResolveOutputSchema)
 	executors.SetResolver(plugins.ResolveExecutor)
-	for _, register := range []func(*step.Registry) error{
-		inputstep.Register, passwordstep.Register, choice.Register, pathstep.Register, review.Register, tablestep.Register,
-		confirm.Register, assertstep.Register, setstep.Register, importvarsstep.Register, decodestep.Register, jsonpathstep.Register, editstep.Register, markdowneditstep.Register, extractstep.Register, semverstep.Register, httpstep.Register, filestep.Register, scaffoldstep.Register, tempstep.Register, globstep.Register, watchstep.Register, cachestep.Register, changedstep.Register, requiretoolstep.Register,
-		dockerstep.Register, gitstep.Register, githubprstep.Register, githubactionsstep.Register, githubreleasestep.Register, keyvaluestep.Register, luastep.Register, logwaitstep.Register, multiplexerstep.Register, timestep.Register, shell.Register, processstep.Register, agentstep.Register, devenvstep.RegisterTask,
-	} {
-		if err := register(registry); err != nil {
-			panic(err)
-		}
+	if err := registerBuiltinSteps(registry); err != nil {
+		panic(err)
 	}
 	if err := dockerstep.RegisterExecutor(executors); err != nil {
 		panic(err)
@@ -218,6 +213,19 @@ func NewRootCmd() *cobra.Command {
 	})
 }
 
+func registerBuiltinSteps(registry *step.Registry) error {
+	for _, register := range []func(*step.Registry) error{
+		inputstep.Register, passwordstep.Register, choice.Register, pathstep.Register, review.Register, tablestep.Register,
+		confirm.Register, assertstep.Register, setstep.Register, importvarsstep.Register, decodestep.Register, jsonpathstep.Register, editstep.Register, markdowneditstep.Register, extractstep.Register, semverstep.Register, httpstep.Register, filestep.Register, scaffoldstep.Register, tempstep.Register, globstep.Register, watchstep.Register, cachestep.Register, changedstep.Register, requiretoolstep.Register,
+		dockerstep.Register, gitstep.Register, githubprstep.Register, githubactionsstep.Register, githubreleasestep.Register, keyvaluestep.Register, luastep.Register, logwaitstep.Register, multiplexerstep.Register, timestep.Register, shell.Register, processstep.Register, agentstep.Register, devenvstep.RegisterTask,
+	} {
+		if err := register(registry); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func workflowEngine(deps dependencies) *engine.Engine {
 	return engine.New(
 		deps.registry,
@@ -236,6 +244,7 @@ func newRootCmd(deps dependencies) *cobra.Command {
 	if deps.plugins == nil {
 		deps.plugins = plugin.NewManager(plugin.Config{CWD: deps.cwd, HomeDir: deps.homeDir, ConfigDir: deps.configDir, LookPath: deps.agentLookPath, Stderr: deps.stderr, HostVersion: version, HTTPClient: deps.httpClient})
 		deps.registry.SetResolver(deps.plugins.ResolveStep)
+		deps.registry.SetOutputSchemaResolver(deps.plugins.ResolveOutputSchema)
 		deps.executors.SetResolver(deps.plugins.ResolveExecutor)
 	}
 	if deps.loader == nil {
@@ -604,7 +613,10 @@ func runWorkflowPickerInspection(command *cobra.Command, deps dependencies, sour
 		if output.Len() > 0 && !strings.HasSuffix(output.String(), "\n") {
 			output.WriteByte('\n')
 		}
-		fmt.Fprintf(&output, "Error: %v\n", err)
+		cwd, _ := deps.cwd()
+		if !tui.WriteValidation(&output, err, cwd) {
+			fmt.Fprintf(&output, "Error: %v\n", err)
+		}
 	}
 	return title, output.String(), err != nil
 }

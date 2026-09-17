@@ -62,11 +62,40 @@ type helperDeclaration struct {
 	Name string `json:"name"`
 }
 type stepDeclaration struct {
-	Type          string   `json:"type"`
-	Cleanup       bool     `json:"cleanup,omitempty"`
-	Service       bool     `json:"service,omitempty"`
-	HostCallbacks []string `json:"host_callbacks,omitempty"`
+	Type          string                   `json:"type"`
+	Cleanup       bool                     `json:"cleanup,omitempty"`
+	Service       bool                     `json:"service,omitempty"`
+	HostCallbacks []string                 `json:"host_callbacks,omitempty"`
+	Outputs       *outputSchemaDeclaration `json:"outputs,omitempty"`
 }
+
+// outputSchemaDeclaration is the language-neutral plugin wire representation.
+// An omitted declaration is open for compatibility; a nil Fields value is a
+// scalar unless Open is set, while an object (including an empty one) has
+// non-nil Fields. `{"open": true}` alone is an open object with no known keys.
+type outputSchemaDeclaration struct {
+	Open   bool                               `json:"open,omitempty"`
+	Fields map[string]outputSchemaDeclaration `json:"fields"`
+	Items  *outputSchemaDeclaration           `json:"items,omitempty"`
+}
+
+func (schema outputSchemaDeclaration) stepSchema() step.OutputSchema {
+	if schema.Items != nil {
+		return step.Array(schema.Items.stepSchema())
+	}
+	if schema.Fields == nil && !schema.Open {
+		return step.Scalar()
+	}
+	fields := make(map[string]step.OutputSchema, len(schema.Fields))
+	for name, child := range schema.Fields {
+		fields[name] = child.stepSchema()
+	}
+	if schema.Open {
+		return step.OpenObject(fields)
+	}
+	return step.ClosedObject(fields)
+}
+
 type executorDeclaration struct {
 	Type               string `json:"type"`
 	CancelStopsProcess bool   `json:"cancel_stops_process"`
@@ -148,6 +177,31 @@ func (m *Manager) ResolveStep(ctx context.Context, name string, raw map[string]a
 		return &cleaningPluginStep{pluginStep: base}, nil
 	}
 	return base, nil
+}
+
+// ResolveOutputSchema implements step.OutputSchemaResolver for plugin steps.
+// Schema-less plugins remain open and therefore preserve the v1/v2 contract.
+func (m *Manager) ResolveOutputSchema(ctx context.Context, name string) (step.OutputSchema, bool, error) {
+	if err := m.configureSources(workflow.PluginsFromContext(ctx)); err != nil {
+		return step.OutputSchema{}, false, err
+	}
+	namespace, err := namespaceForType(name)
+	if err != nil {
+		return step.OutputSchema{}, false, nil
+	}
+	plugin, err := m.load(ctx, namespace)
+	if err != nil {
+		return step.OutputSchema{}, false, err
+	}
+	for _, declaration := range plugin.initialized.Steps {
+		if declaration.Type == name {
+			if declaration.Outputs == nil {
+				return step.OutputSchema{}, false, nil
+			}
+			return declaration.Outputs.stepSchema(), true, nil
+		}
+	}
+	return step.OutputSchema{}, false, nil
 }
 
 func (m *Manager) ResolveExecutor(ctx context.Context, name string, raw map[string]any) (executor.Provider, error) {

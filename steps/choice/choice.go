@@ -79,7 +79,12 @@ type Runner struct {
 	staticRows []any
 }
 
-func Register(registry *step.Registry) error { return registry.Register("tui_choice", New) }
+func Register(registry *step.Registry) error {
+	return registry.RegisterDefinition("tui_choice", step.Registration{Builder: New, Outputs: step.ClosedObject(map[string]step.OutputSchema{
+		"value": step.OpenObject(), "label": step.Scalar(), "selected": step.Scalar(), "item": step.OpenObject(),
+		"values": step.Array(step.OpenObject()), "labels": step.Array(step.Scalar()), "count": step.Scalar(), "items": step.Array(step.OpenObject()),
+	})})
+}
 
 func New(raw map[string]any) (step.Runner, error) {
 	var config Config

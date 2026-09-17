@@ -28,7 +28,9 @@ type ColumnConfig struct {
 
 type Runner struct{ config Config }
 
-func Register(registry *step.Registry) error { return registry.Register("tui_table", New) }
+func Register(registry *step.Registry) error {
+	return registry.RegisterDefinition("tui_table", step.Registration{Builder: New, Outputs: step.ClosedOutputs()})
+}
 
 func New(raw map[string]any) (step.Runner, error) {
 	var config Config

@@ -167,7 +167,13 @@ func runWorkflowUI(command *cobra.Command, deps dependencies, args []string, con
 			}
 			return options
 		}
-		state, engineErr := executeDependencyPlan(ctx, plan, func() *engine.Engine { return workflowEngine(deps) }, optionsFor)
+		engineFor := func() *engine.Engine { return workflowEngine(deps) }
+		if err := preflightDependencyPlan(ctx, plan, engineFor, optionsFor); err != nil {
+			result.Err = err
+			result.Duration = time.Since(started)
+			return result
+		}
+		state, engineErr := executeDependencyPlan(ctx, plan, engineFor, optionsFor)
 		finishErr, _ := finishReporters(ctx, definition.Name, state, engineErr, false)
 		result.Err = errors.Join(engineErr, finishErr)
 		result.Duration = time.Since(started)

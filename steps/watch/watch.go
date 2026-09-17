@@ -35,7 +35,9 @@ func (watcher nativeWatcher) EventChannel() <-chan fsnotify.Event { return watch
 func (watcher nativeWatcher) ErrorChannel() <-chan error          { return watcher.Errors }
 
 // Register adds the watch step to a registry.
-func Register(registry *step.Registry) error { return registry.Register("watch", New) }
+func Register(registry *step.Registry) error {
+	return registry.RegisterDefinition("watch", step.Registration{Builder: New, Outputs: step.ClosedOutputs("root", "path", "operations")})
+}
 
 // New decodes and validates a watch step configuration.
 func New(raw map[string]any) (step.Runner, error) {

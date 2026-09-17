@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"github.com/up2jj/wuko/validation"
 )
 
 // Source identifies a discovered workflow and its precedence scope.
@@ -40,6 +42,85 @@ func Discover(cwd, homeDir, configDir string) ([]Source, error) {
 		}
 	}
 	return effective, nil
+}
+
+// DiscoverForValidation returns effective sources while retaining malformed
+// workflow files so validation can report independent files in one run.
+// Unrecoverable directory and I/O failures still fail immediately.
+func DiscoverForValidation(cwd, homeDir, configDir string) ([]Source, error) {
+	var sources []Source
+	for _, location := range discoveryLocations(cwd, homeDir, configDir) {
+		files, err := discoverWorkflowFiles(location.dir)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return nil, err
+		}
+		for _, file := range files {
+			definition, loadErr := loadLocal(file.path)
+			if loadErr != nil {
+				if !validation.Is(loadErr) {
+					return nil, loadErr
+				}
+				sources = append(sources, Source{Name: file.name, Path: file.path, PackageDir: file.packageDir, MarketplaceURL: file.marketplaceURL, Scope: location.scope})
+				continue
+			}
+			name := file.name
+			if file.packageDir != "" {
+				if !ValidWorkflowName(definition.Name) {
+					return nil, fmt.Errorf("installed package %s has invalid workflow name %q", file.packageDir, definition.Name)
+				}
+				name = definition.Name
+			}
+			targets := definition.TargetNames()
+			if len(targets) == 0 {
+				targets = []string{""}
+			}
+			for _, target := range targets {
+				selected, selectErr := definition.SelectTarget(target)
+				if selectErr != nil {
+					return nil, fmt.Errorf("selecting workflow %q target %q: %w", name, target, selectErr)
+				}
+				sources = append(sources, Source{Name: name, Target: target, Path: file.path, PackageDir: file.packageDir, MarketplaceURL: file.marketplaceURL,
+					PackageVersion: selected.PackageVersion, Description: selected.Description, Invokable: selected.IsInvokable(), DependsOn: maps.Clone(selected.DependsOn), HasForm: selected.HasForm(), Scope: location.scope})
+			}
+		}
+	}
+	unique := sources[:0]
+	seen := make(map[struct{ path, target string }]struct{}, len(sources))
+	for _, source := range sources {
+		key := struct{ path, target string }{filepath.Clean(source.Path), source.Target}
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		unique = append(unique, source)
+	}
+	sources = unique
+	effective := make(map[string]string, len(sources))
+	for index := range sources {
+		path, exists := effective[sources[index].Name]
+		if !exists {
+			sources[index].Effective = true
+			effective[sources[index].Name] = sources[index].Path
+			continue
+		}
+		sources[index].Effective = path == sources[index].Path
+	}
+	result := sources[:0]
+	for _, source := range sources {
+		if source.Effective {
+			result = append(result, source)
+		}
+	}
+	slices.SortStableFunc(result, func(left, right Source) int {
+		if comparison := strings.Compare(left.Name, right.Name); comparison != 0 {
+			return comparison
+		}
+		return strings.Compare(left.Target, right.Target)
+	})
+	return result, nil
 }
 
 // DiscoverAll returns every workflow definition in discovery order, including definitions

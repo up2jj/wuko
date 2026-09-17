@@ -127,10 +127,16 @@ func (*Runner) ExecutorAware() {}
 
 func Register(registry *step.Registry) error {
 	rpc := newRPCRegistry()
-	if err := registry.Register("process", func(raw map[string]any) (step.Runner, error) { return newProcess(raw, rpc) }); err != nil {
+	if err := registry.RegisterDefinition("process", step.Registration{
+		Builder: func(raw map[string]any) (step.Runner, error) { return newProcess(raw, rpc) },
+		Outputs: step.ClosedOutputs("ready", "label", "detached", "readiness", "worker_id"),
+	}); err != nil {
 		return err
 	}
-	return registry.Register("process_call", func(raw map[string]any) (step.Runner, error) { return newCall(raw, rpc) })
+	return registry.RegisterDefinition("process_call", step.Registration{
+		Builder: func(raw map[string]any) (step.Runner, error) { return newCall(raw, rpc) },
+		Outputs: step.ClosedObject(map[string]step.OutputSchema{"result": step.OpenObject(), "worker_id": step.Scalar()}),
+	})
 }
 
 func New(raw map[string]any) (step.Runner, error) {

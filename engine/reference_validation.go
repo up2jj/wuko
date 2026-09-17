@@ -1,14 +1,18 @@
 package engine
 
 import (
+	"context"
 	"fmt"
 	"maps"
+	"reflect"
 	"slices"
 	"strings"
 
 	"github.com/expr-lang/expr/ast"
 	"github.com/expr-lang/expr/parser"
 	"github.com/up2jj/wuko/provider"
+	"github.com/up2jj/wuko/step"
+	"github.com/up2jj/wuko/validation"
 	"github.com/up2jj/wuko/workflow"
 )
 
@@ -21,7 +25,8 @@ type referenceSchema struct {
 }
 
 type referenceScope struct {
-	roots map[string]*referenceSchema
+	roots       map[string]*referenceSchema
+	stepSchemas map[string]*referenceSchema
 }
 
 type deferredReferences struct {
@@ -56,7 +61,11 @@ var (
 	}
 )
 
-func (e *Engine) validateDataReferences(definition *workflow.Definition, options Options, state *State) error {
+func (e *Engine) validateDataReferences(ctx context.Context, definition *workflow.Definition, options Options, state *State) error {
+	stepSchemas, err := collectStepSchemas(ctx, e.registry, e.backgroundControls, definition)
+	if err != nil {
+		return err
+	}
 	validator := &referenceValidator{
 		definition: definition, renderer: options.renderer,
 		actions: make(map[*workflow.Action]struct{}), controls: e.backgroundControls,
@@ -70,11 +79,11 @@ func (e *Engine) validateDataReferences(definition *workflow.Definition, options
 		validator.templateRoots[name] = struct{}{}
 		validator.expressionRoots[name] = struct{}{}
 	}
-	validator.initial = newReferenceScope(state)
+	validator.initial = newReferenceScope(state, stepSchemas)
 	return validator.validateDefinition()
 }
 
-func newReferenceScope(state *State) *referenceScope {
+func newReferenceScope(state *State, stepSchemas map[string]*referenceSchema) *referenceScope {
 	scope := &referenceScope{roots: map[string]*referenceSchema{
 		"inputs":       schemaForAnyMap(state.Inputs),
 		"vars":         schemaForAnyMap(state.Vars),
@@ -83,7 +92,7 @@ func newReferenceScope(state *State) *referenceScope {
 		"dependencies": schemaForDependencies(state.Dependencies),
 		"workflow":     closedReference("name", "dir", "timezone"),
 		"run":          closedReference("dir", "environment_loaders"),
-	}}
+	}, stepSchemas: stepSchemas}
 	for name := range state.Providers.Values {
 		scope.roots[name] = schemaForProvider(state.Providers.Schemas[name])
 	}
@@ -91,6 +100,84 @@ func newReferenceScope(state *State) *referenceScope {
 		scope.addBinding(name, value)
 	}
 	return scope
+}
+
+func collectStepSchemas(ctx context.Context, registry *step.Registry, controls []BackgroundControl, definition *workflow.Definition) (map[string]*referenceSchema, error) {
+	result := make(map[string]*referenceSchema)
+	var collect func([]workflow.Step) error
+	collect = func(steps []workflow.Step) error {
+		for _, declaration := range steps {
+			if declaration.ID != "" {
+				schema := openReference
+				switch {
+				case declaration.IsBackgroundControl():
+					for _, control := range controls {
+						provider, ok := control.(BackgroundControlOutputSchema)
+						if control.Matches(declaration) && ok {
+							schema = schemaForStepOutputs(provider.OutputSchema())
+							break
+						}
+					}
+				case declaration.Action != nil:
+					fields := make(map[string]*referenceSchema, len(declaration.Action.Outputs))
+					for name := range declaration.Action.Outputs {
+						fields[name] = openReference
+					}
+					schema = &referenceSchema{fields: fields}
+				case declaration.Type != "":
+					// A type that cannot be resolved stays open here: step validation
+					// reports the resolution failure at the step's own location.
+					if registered, err := registry.OutputSchema(ctx, declaration.Type); err == nil {
+						schema = schemaForStepOutputs(registered)
+					} else if ctxErr := ctx.Err(); ctxErr != nil {
+						return ctxErr
+					}
+				}
+				// IDs are unique only per scope (lifecycle hooks and sibling
+				// bodies have their own), so a reused ID with a different shape
+				// stays open instead of borrowing another declaration's contract.
+				if previous, exists := result[declaration.ID]; exists && !reflect.DeepEqual(previous, schema) {
+					schema = openReference
+				}
+				result[declaration.ID] = schema
+			}
+			for _, child := range declaration.ChildSequences() {
+				if err := collect(child.Steps); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+	for _, steps := range [][]workflow.Step{definition.Steps, definition.Finally, definition.Install, definition.Uninstall} {
+		if err := collect(steps); err != nil {
+			return nil, err
+		}
+	}
+	return result, nil
+}
+
+func schemaForStepOutputs(schema step.OutputSchema) *referenceSchema {
+	if schema.Kind == step.OutputScalar {
+		return leafReference
+	}
+	if schema.Kind == step.OutputArray {
+		if schema.Items == nil {
+			return openReference
+		}
+		return schemaForStepOutputs(*schema.Items)
+	}
+	if schema.Kind == step.OutputUnknown {
+		return openReference
+	}
+	if schema.Open {
+		return openReference
+	}
+	fields := make(map[string]*referenceSchema, len(schema.Fields))
+	for name, child := range schema.Fields {
+		fields[name] = schemaForStepOutputs(child)
+	}
+	return &referenceSchema{fields: fields}
 }
 
 func schemaForProvider(schema provider.Schema) *referenceSchema {
@@ -220,7 +307,7 @@ func closedReference(names ...string) *referenceSchema {
 }
 
 func (scope *referenceScope) clone() *referenceScope {
-	result := &referenceScope{roots: make(map[string]*referenceSchema, len(scope.roots))}
+	result := &referenceScope{roots: make(map[string]*referenceSchema, len(scope.roots)), stepSchemas: scope.stepSchemas}
 	for name, schema := range scope.roots {
 		result.roots[name] = cloneReferenceSchema(schema)
 	}
@@ -247,7 +334,11 @@ func (scope *referenceScope) addStep(id string) {
 		steps = &referenceSchema{fields: make(map[string]*referenceSchema)}
 		scope.roots["steps"] = steps
 	}
-	steps.fields[id] = openReference
+	schema := scope.stepSchemas[id]
+	if schema == nil {
+		schema = openReference
+	}
+	steps.fields[id] = schema
 }
 
 func (scope *referenceScope) addBinding(name string, value any) {
@@ -297,32 +388,37 @@ func (scope *referenceScope) validate(path []string, known map[string]struct{}) 
 		}
 		child, exists := schema.fields[field]
 		if !exists {
-			return referenceFieldError(path[0], index, field)
+			return referenceFieldError(path, index, field, slices.Sorted(maps.Keys(schema.fields)))
 		}
 		schema = child
 	}
 	return nil
 }
 
-func referenceFieldError(root string, depth int, field string) error {
+func referenceFieldError(path []string, depth int, field string, available []string) error {
+	root := path[0]
+	issuePath := validation.Path(strings.Join(path[:depth+2], "."))
 	if depth == 0 {
 		switch root {
 		case "vars":
-			return fmt.Errorf("variable %q is not declared", field)
+			return validation.UnavailableReference(issuePath, "variable", field, available)
 		case "inputs":
-			return fmt.Errorf("input %q is not declared", field)
+			return validation.UnavailableReference(issuePath, "input", field, available)
 		case "env":
-			return fmt.Errorf("environment value %q is not available", field)
+			return validation.UnavailableReference(issuePath, "environment value", field, available)
 		case "steps":
-			return fmt.Errorf("step %q is not available here", field)
+			return validation.UnavailableReference(issuePath, "step", field, available)
 		case "dependencies":
-			return fmt.Errorf("dependency alias %q is not declared", field)
+			return validation.UnavailableReference(issuePath, "dependency", field, available)
 		}
 	}
-	if root == "dependencies" && depth == 1 {
-		return fmt.Errorf("dependency output %q is not declared", field)
+	if root == "steps" && depth == 1 && len(path) > 1 {
+		return validation.UnknownStepOutput(issuePath, path[1], field, available)
 	}
-	return fmt.Errorf("field %q is not available in %s", field, root)
+	if root == "dependencies" && depth == 1 {
+		return validation.UnavailableReference(issuePath, "output", field, available)
+	}
+	return validation.UnavailableField(issuePath, root, field, available)
 }
 
 func (validator *referenceValidator) validateDefinition() error {
@@ -439,10 +535,7 @@ func (validator *referenceValidator) validateSteps(steps []workflow.Step, scope 
 		var err error
 		scope, nested, err = validator.validateStep(step, scope)
 		if err != nil {
-			if step.ID != "" {
-				return nil, nil, fmt.Errorf("step %q: %w", step.ID, err)
-			}
-			return nil, nil, err
+			return nil, nil, validator.definition.ValidationError(err, validation.CodeInvalidExpression, step.ValidationPath(), step.Location, step.ID)
 		}
 		defers = append(defers, nested...)
 	}
@@ -650,7 +743,7 @@ func (validator *referenceValidator) validateConcurrent(step workflow.Step, scop
 		ready = ready[1:]
 		branchInput := scope.clone()
 		for _, ancestor := range graph.ancestors[index] {
-			branchInput.mergeSteps(selectedStepSchema([]workflow.Step{step.Concurrent.Steps[ancestor]}))
+			branchInput.mergeSteps(selectedStepSchema(branchInput, []workflow.Step{step.Concurrent.Steps[ancestor]}))
 			branchInput.mergeVariables(branchScopes[ancestor])
 		}
 		branchScope, _, err := validator.validateSteps([]workflow.Step{step.Concurrent.Steps[index]}, branchInput)
@@ -669,7 +762,7 @@ func (validator *referenceValidator) validateConcurrent(step workflow.Step, scop
 
 	result := scope.clone()
 	for index, branch := range step.Concurrent.Steps {
-		for id := range selectedStepSchema([]workflow.Step{branch}).fields {
+		for id := range selectedStepSchema(result, []workflow.Step{branch}).fields {
 			result.addStep(id)
 		}
 		result.mergeVariables(branchScopes[index])
@@ -781,7 +874,7 @@ func (validator *referenceValidator) validateCancelOn(step workflow.Step, scope 
 		return nil, nil, fmt.Errorf("cancel_on body: %w", err)
 	}
 	collectScope := scope.clone()
-	collectScope.roots["steps"] = selectedStepSchema(step.CancelOn.Steps)
+	collectScope.roots["steps"] = selectedStepSchema(collectScope, step.CancelOn.Steps)
 	collectScope.roots["vars"] = cloneReferenceSchema(scope.roots["vars"])
 	collectScope.roots["monitors"] = monitorSchema(step.CancelOn.Monitors)
 	collectScope.roots["cancel_on"] = &referenceSchema{fields: map[string]*referenceSchema{
@@ -820,17 +913,21 @@ func (validator *referenceValidator) validateBackgroundControl(step workflow.Ste
 	return result, nil, nil
 }
 
-func selectedStepSchema(steps []workflow.Step) *referenceSchema {
+func selectedStepSchema(scope *referenceScope, steps []workflow.Step) *referenceSchema {
 	result := &referenceSchema{fields: make(map[string]*referenceSchema)}
 	for _, step := range steps {
 		if step.IsExecutorBlock() || step.IsEnvironmentBlock() || step.IsWorkingDirectoryBlock() || step.IsConditionalBlock() || step.Concurrent != nil {
 			for _, child := range step.ChildSequences() {
-				maps.Copy(result.fields, selectedStepSchema(child.Steps).fields)
+				maps.Copy(result.fields, selectedStepSchema(scope, child.Steps).fields)
 			}
 			continue
 		}
 		if step.ID != "" {
-			result.fields[step.ID] = openReference
+			schema := scope.stepSchemas[step.ID]
+			if schema == nil {
+				schema = openReference
+			}
+			result.fields[step.ID] = schema
 		}
 	}
 	return result

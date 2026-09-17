@@ -308,7 +308,7 @@ func validateGitHookBindings(command *cobra.Command, deps dependencies, reposito
 					LocalValueDir: filepath.Join(definition.Dir, ".wuko", "values"), GlobalValueDir: filepath.Join(config, "wuko", "values"),
 				}
 			}
-			if err := validateDependencyPlan(command.Context(), plan, func() *engine.Engine { return workflowEngine(deps) }, optionsFor); err != nil {
+			if err := preflightDependencyPlan(command.Context(), plan, func() *engine.Engine { return workflowEngine(deps) }, optionsFor); err != nil {
 				return fmt.Errorf("Git hook %s workflow %q: %w", hookName, binding.Workflow, err)
 			}
 		}

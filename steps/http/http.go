@@ -122,7 +122,15 @@ func (requestError) HTTPRetryAfter() time.Duration { return 0 }
 // of a response.
 func (requestError) RetryConditionOutputs() map[string]any { return map[string]any{"status": 0} }
 
-func Register(registry *step.Registry) error { return registry.Register("http", New) }
+func Register(registry *step.Registry) error {
+	return registry.RegisterDefinition("http", step.Registration{
+		Builder: New,
+		Outputs: step.ClosedObject(map[string]step.OutputSchema{
+			"status": step.Scalar(), "headers": step.OpenObject(), "body": step.Scalar(),
+			"value": step.OpenObject(), "path": step.Scalar(), "size": step.Scalar(),
+		}),
+	})
+}
 
 func New(raw map[string]any) (step.Runner, error) {
 	var config Config

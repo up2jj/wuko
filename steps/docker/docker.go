@@ -143,7 +143,9 @@ type dockerClient interface {
 	Close() error
 }
 
-func Register(registry *step.Registry) error { return registry.Register("docker", New) }
+func Register(registry *step.Registry) error {
+	return registry.RegisterDefinition("docker", step.Registration{Builder: New, Outputs: step.OpenObject()})
+}
 
 func New(raw map[string]any) (step.Runner, error) {
 	var config Config

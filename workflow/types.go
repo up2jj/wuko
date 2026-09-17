@@ -3,6 +3,7 @@ package workflow
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -19,6 +20,7 @@ import (
 	"github.com/up2jj/wuko/helper"
 	workflowschedule "github.com/up2jj/wuko/schedule"
 	"github.com/up2jj/wuko/secret"
+	"github.com/up2jj/wuko/validation"
 	"gopkg.in/yaml.v3"
 )
 
@@ -56,14 +58,15 @@ type Definition struct {
 	// DirBorrowed reports that Dir belongs to a calling workflow rather than to this
 	// definition. It is set for the inner definition of a remote action loaded as a plain
 	// manifest, which carries no files of its own. See Action.DirBorrowed.
-	DirBorrowed   bool                `yaml:"-"`
-	Location      diagnostic.Location `yaml:"-"`
-	Secrets       secret.Config       `yaml:"secrets,omitempty"`
-	secretSession *secret.Session
-	helperContext context.Context
-	helpers       helper.Set
-	sourceRoot    string
-	sourceLabel   string
+	DirBorrowed     bool                `yaml:"-"`
+	Location        diagnostic.Location `yaml:"-"`
+	Secrets         secret.Config       `yaml:"secrets,omitempty"`
+	secretSession   *secret.Session
+	helperContext   context.Context
+	helpers         helper.Set
+	sourceRoot      string
+	sourceLabel     string
+	validationIndex *validation.SourceIndex
 }
 
 // Helpers returns the helper set bound while this workflow was loaded.
@@ -189,7 +192,11 @@ type Step struct {
 	hasEnv           bool
 	hasNeeds         bool
 	sourcePath       string
+	validationPath   validation.Path
 }
+
+// ValidationPath returns the declaration's stable YAML path.
+func (workflowStep Step) ValidationPath() validation.Path { return workflowStep.validationPath }
 
 func (workflowStep *Step) UnmarshalYAML(node *yaml.Node) error {
 	if node.Kind != yaml.MappingNode {
@@ -708,11 +715,13 @@ func decodeWorkflowData(data []byte, source workflowDecodeSource, reporter diagn
 	displaySource := source.display
 	sourceRoot := source.sourceRoot
 	sourceLabel := source.sourceLabel
+	sourceIndex := validation.NewLazySourceIndex(displaySource, data)
 
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	decoder.KnownFields(true)
 	var definition Definition
 	if err := decoder.Decode(&definition); err != nil {
+		err = decodeValidationError(err, displaySource, sourceIndex)
 		traceFinish(reporter, loadStarted, diagnostic.PhaseDecode, diagnostic.StatusFailed, diagnostic.Location{Source: displaySource}, "", "", "", "", err)
 		return nil, fmt.Errorf("decoding workflow %s: %w", displaySource, err)
 	}
@@ -738,6 +747,7 @@ func decodeWorkflowData(data []byte, source workflowDecodeSource, reporter diagn
 	definition.Dir = filepath.Dir(abs)
 	definition.sourceRoot = sourceRoot
 	definition.sourceLabel = sourceLabel
+	definition.validationIndex = sourceIndex
 	if err := resolveTemplateFiles(definition.Templates, definition.Dir, nil, source.allowedRoot); err != nil {
 		return nil, fmt.Errorf("loading workflow templates from %s: %w", displaySource, err)
 	}
@@ -799,7 +809,8 @@ func decodeWorkflowData(data []byte, source workflowDecodeSource, reporter diagn
 	traceFinish(reporter, requireStarted, diagnostic.PhaseRequire, diagnostic.StatusSucceeded, definition.Location, definition.Name, "", "", "", nil, countAttr("steps", len(definition.Steps)))
 	validationStarted := traceStart(reporter, diagnostic.PhaseValidation, definition.Location, definition.Name, "", "", "validating workflow schema")
 	if err := definition.ValidateStructure(); err != nil {
-		traceFinish(reporter, validationStarted, diagnostic.PhaseValidation, diagnostic.StatusFailed, validationLocation(&definition, err), definition.Name, "", "", "", err)
+		err = definition.ValidationError(err, validation.CodeInvalidWorkflow, "", definition.Location, "")
+		traceFinish(reporter, validationStarted, diagnostic.PhaseValidation, diagnostic.StatusFailed, validationDiagnosticLocation(err, definition.Location), definition.Name, "", "", "", err)
 		return nil, fmt.Errorf("validating workflow %s: %w", displaySource, err)
 	}
 	// Plugin namespaces are only trustworthy once the schema has accepted them, so declared
@@ -816,7 +827,8 @@ func decodeWorkflowData(data []byte, source workflowDecodeSource, reporter diagn
 	// Prepare and engine validation re-parse these templates with the real helper set.
 	if pluginHelpers != nil || len(definition.Plugins) == 0 {
 		if _, err := NewRendererWithHelpers(definition.HelperContext(), definition.Templates, nil, definition.helpers); err != nil {
-			traceFinish(reporter, validationStarted, diagnostic.PhaseValidation, diagnostic.StatusFailed, validationLocation(&definition, err), definition.Name, "", "", "", err)
+			err = definition.ValidationError(err, validation.CodeInvalidTemplate, "templates", definition.Location, "")
+			traceFinish(reporter, validationStarted, diagnostic.PhaseValidation, diagnostic.StatusFailed, validationDiagnosticLocation(err, definition.Location), definition.Name, "", "", "", err)
 			return nil, fmt.Errorf("validating workflow %s: %w", displaySource, err)
 		}
 	}
@@ -1125,8 +1137,19 @@ func collectScopeIDs(steps []Step, seen map[string]struct{}) error {
 	return nil
 }
 
-func validateSteps(steps []Step, allowActions bool, scope stepScope, seen map[string]struct{}) error {
+func validateSteps(steps []Step, allowActions bool, scope stepScope, seen map[string]struct{}) (resultErr error) {
+	var current Step
+	defer func() {
+		if resultErr == nil {
+			return
+		}
+		var located *locatedValidationError
+		if !errors.As(resultErr, &located) {
+			resultErr = &locatedValidationError{location: current.Location, err: resultErr}
+		}
+	}()
 	for i, workflowStep := range steps {
+		current = workflowStep
 		if workflowStep.IsTryCatch() {
 			if err := validateTryCatchEntry(workflowStep, scope, allowActions, seen); err != nil {
 				return fmt.Errorf("step %q: %w", workflowStep.ID, err)

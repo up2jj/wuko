@@ -40,7 +40,9 @@ type Runner struct {
 	maxBytes int64
 }
 
-func Register(registry *step.Registry) error { return registry.Register("decode", New) }
+func Register(registry *step.Registry) error {
+	return registry.RegisterDefinition("decode", step.Registration{Builder: New, Outputs: step.ClosedObject(map[string]step.OutputSchema{"value": step.OpenObject()})})
+}
 
 func New(raw map[string]any) (step.Runner, error) {
 	config := Config{MaxBytes: defaultMaxBytes}

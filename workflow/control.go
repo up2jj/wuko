@@ -6,6 +6,7 @@ import (
 	"time"
 
 	controlpkg "github.com/up2jj/wuko/control"
+	"github.com/up2jj/wuko/validation"
 	"gopkg.in/yaml.v3"
 )
 
@@ -261,7 +262,14 @@ func validateCollectNode(node *yaml.Node, kind string) error {
 func rejectUnknownFields(node *yaml.Node, kind string, allowed map[string]bool) error {
 	for i := 0; i < len(node.Content); i += 2 {
 		if !allowed[node.Content[i].Value] {
-			return fmt.Errorf("field %s not found in %s group", node.Content[i].Value, kind)
+			names := make([]string, 0, len(allowed))
+			for name := range allowed {
+				names = append(names, name)
+			}
+			key := node.Content[i]
+			issue := validation.UnknownFieldIn("", key.Value, names, kind)
+			issue.Span = validation.Span{Line: key.Line, Column: key.Column, EndLine: key.Line, EndColumn: key.Column + len([]rune(key.Value)) - 1}
+			return issue
 		}
 	}
 	return nil

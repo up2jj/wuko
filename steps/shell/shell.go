@@ -74,7 +74,12 @@ type Runner struct {
 
 func (*Runner) ExecutorAware() {}
 
-func Register(registry *step.Registry) error { return registry.Register("shell", New) }
+func Register(registry *step.Registry) error {
+	return registry.RegisterDefinition("shell", step.Registration{
+		Builder: New,
+		Outputs: step.ClosedOutputs("stdout", "stderr", "exit_code", "stdout_truncated", "stderr_truncated"),
+	})
+}
 
 func New(raw map[string]any) (step.Runner, error) {
 	var config Config

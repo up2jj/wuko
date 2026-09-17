@@ -247,5 +247,8 @@ func TestDocumentedDependencyExamplesValidateTreeAndDryRun(t *testing.T) {
 		if !strings.Contains(output.String(), test.want) {
 			t.Fatalf("%v output = %q, want %q", test.args, output.String(), test.want)
 		}
+		if strings.HasPrefix(test.want, "Workflow ") && strings.Count(output.String(), test.want+" (") != 1 {
+			t.Fatalf("%v output = %q, want exactly one %q header", test.args, output.String(), test.want)
+		}
 	}
 }

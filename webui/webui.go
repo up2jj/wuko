@@ -21,6 +21,7 @@ import (
 
 	"github.com/up2jj/wuko/correlation"
 	"github.com/up2jj/wuko/form"
+	"github.com/up2jj/wuko/validation"
 )
 
 // Progress is the browser-safe projection of one execution event.
@@ -399,6 +400,22 @@ func renderResult(definition *form.Definition, result Result) (string, template.
 	}
 	if strings.TrimSpace(view.Template) == "" {
 		if result.Err != nil {
+			if issues := validation.Issues(result.Err); len(issues) != 0 {
+				var content strings.Builder
+				content.WriteString("<ul class=\"validation-issues\">")
+				for _, issue := range issues {
+					content.WriteString("<li><strong>")
+					content.WriteString(template.HTMLEscapeString(string(issue.Code)))
+					content.WriteString("</strong>: ")
+					content.WriteString(template.HTMLEscapeString(issue.Message))
+					if issue.Hint != "" {
+						content.WriteString("<br><small>" + template.HTMLEscapeString(issue.Hint) + "</small>")
+					}
+					content.WriteString("</li>")
+				}
+				content.WriteString("</ul>")
+				return title, template.HTML(content.String())
+			}
 			return title, template.HTML("<p>" + template.HTMLEscapeString(result.Err.Error()) + "</p>")
 		}
 		return title, template.HTML("<p>The workflow completed successfully.</p>")

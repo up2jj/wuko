@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
+
+	"github.com/up2jj/wuko/validation"
 )
 
 type fakeRunner struct {
@@ -176,6 +179,28 @@ func TestRedactPreservesUnwrapAndEscapedDiagnostics(t *testing.T) {
 	}
 	if got := session.Redact(`{"value":"line one\nline two"}`); got != `{"value":"<redacted>"}` {
 		t.Fatalf("diagnostic = %s", got)
+	}
+}
+
+func TestRedactErrorRedactsStructuredValidationIssues(t *testing.T) {
+	runner := &fakeRunner{run: func(Command) (string, error) { return "hunter2-secret", nil }}
+	session := NewSession(t.Context(), Options{Runner: runner, BaseEnv: map[string]string{}})
+	if _, err := session.Resolve("op://Production/API/token"); err != nil {
+		t.Fatal(err)
+	}
+	sentinel := errors.New("cause")
+	underlying := fmt.Errorf("workflow: %w", &validation.Error{Issues: []validation.Issue{
+		{Code: validation.CodeInvalidValue, Message: "safe first"},
+		{Code: validation.CodeInvalidValue, Message: `invalid value "hunter2-secret"`, SourceLine: "token: hunter2-secret", Cause: sentinel},
+	}})
+	redacted := session.RedactError(underlying)
+	for _, issue := range validation.Issues(redacted) {
+		if strings.Contains(issue.Message, "hunter2") || strings.Contains(issue.SourceLine, "hunter2") {
+			t.Fatalf("issue leaked secret: %#v", issue)
+		}
+	}
+	if len(validation.Issues(redacted)) != 2 || !errors.Is(redacted, sentinel) {
+		t.Fatalf("redacted error lost issues or unwrapping: %v", redacted)
 	}
 }
 

@@ -19,6 +19,7 @@ import (
 	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/engine"
 	reporterpkg "github.com/up2jj/wuko/reporter"
+	"github.com/up2jj/wuko/validation"
 )
 
 const (
@@ -153,6 +154,12 @@ func (reporter *Reporter) Finish(_ context.Context, outcome reporterpkg.Outcome)
 }
 
 func (reporter *Reporter) annotate(event diagnostic.Event) {
+	if issues := validation.Issues(event.Error); len(issues) != 0 {
+		for _, issue := range issues {
+			reporter.annotateValidation(issue)
+		}
+		return
+	}
 	message := strings.TrimSpace(event.Message)
 	if event.Error != nil {
 		if message == "" {
@@ -184,6 +191,55 @@ func (reporter *Reporter) annotate(event diagnostic.Event) {
 	reporter.annotations[key] = struct{}{}
 	reporter.annotated = true
 	reporter.writeCommand("::error " + strings.Join(properties, ",") + "::" + escapeData(message) + "\n")
+}
+
+func (reporter *Reporter) annotateValidation(issue validation.Issue) {
+	message := issue.Message
+	if issue.Hint != "" {
+		message += " (" + issue.Hint + ")"
+	}
+	properties := []string{"title=" + escapeProperty("Wuko "+string(issue.Code))}
+	file, located := reporter.repositoryPath(validation.SanitizeSource(issue.Span.Source))
+	if located {
+		properties = append(properties, "file="+escapeProperty(file))
+		if issue.Span.Line > 0 {
+			properties = append(properties, fmt.Sprintf("line=%d", issue.Span.Line))
+		}
+		if issue.Span.Column > 0 {
+			properties = append(properties, fmt.Sprintf("col=%d", issue.Span.Column))
+		}
+		if issue.Span.EndLine > 0 && issue.Span.EndLine != issue.Span.Line {
+			properties = append(properties, fmt.Sprintf("endLine=%d", issue.Span.EndLine))
+		}
+		if issue.Span.EndColumn > 0 && issue.Span.EndColumn != issue.Span.Column {
+			properties = append(properties, fmt.Sprintf("endColumn=%d", issue.Span.EndColumn))
+		}
+	}
+	key := strings.Join(properties, ",") + "\x00" + message
+	if _, exists := reporter.annotations[key]; exists {
+		return
+	}
+	reporter.annotations[key] = struct{}{}
+	reporter.annotated = true
+	reporter.writeCommand("::error " + strings.Join(properties, ",") + "::" + escapeData(singleLine(message)) + "\n")
+}
+
+// WriteValidationAnnotations emits one deduplicated GitHub annotation per
+// structured issue without requiring execution output or summary files.
+func WriteValidationAnnotations(writer io.Writer, workspace string, err error) error {
+	if writer == nil {
+		writer = io.Discard
+	}
+	reporter := &Reporter{workspace: workspace, commands: writer, annotations: make(map[string]struct{})}
+	if workspace != "" {
+		absolute, resolveErr := filepath.Abs(workspace)
+		if resolveErr != nil {
+			return fmt.Errorf("resolving GitHub workspace %s: %w", workspace, resolveErr)
+		}
+		reporter.workspace = filepath.Clean(absolute)
+	}
+	reporter.Diagnostic(diagnostic.Event{Phase: diagnostic.PhaseValidation, Status: diagnostic.StatusFailed, Error: err})
+	return reporter.commandErr
 }
 
 func (reporter *Reporter) repositoryPath(source string) (string, bool) {

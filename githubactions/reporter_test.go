@@ -14,6 +14,7 @@ import (
 	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/engine"
 	reporterpkg "github.com/up2jj/wuko/reporter"
+	"github.com/up2jj/wuko/validation"
 )
 
 func TestNewRequiresGitHubFiles(t *testing.T) {
@@ -32,6 +33,27 @@ func TestNewRequiresGitHubFiles(t *testing.T) {
 				t.Fatalf("New() error = %v, want %q", err, test.want)
 			}
 		})
+	}
+}
+
+func TestWriteValidationAnnotationsUsesExactSpanAndDeduplicates(t *testing.T) {
+	workspace := t.TempDir()
+	issue := validation.Issue{Code: validation.CodeUnknownStepOutput, Message: "bad output", Hint: "use status", Span: validation.Span{
+		Source: filepath.Join(workspace, "workflow.yaml"), Line: 4, Column: 8, EndLine: 4, EndColumn: 13,
+	}}
+	var output bytes.Buffer
+	err := WriteValidationAnnotations(&output, workspace, &validation.Error{Issues: []validation.Issue{issue, issue}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := output.String()
+	if strings.Count(got, "::error") != 1 {
+		t.Fatalf("annotations = %q", got)
+	}
+	for _, want := range []string{"file=workflow.yaml", "line=4", "col=8", "endColumn=13", "bad output (use status)"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("annotation = %q, want %q", got, want)
+		}
 	}
 }
 

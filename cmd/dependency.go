@@ -6,6 +6,7 @@ import (
 	"reflect"
 
 	"github.com/up2jj/wuko/engine"
+	"github.com/up2jj/wuko/validation"
 	"github.com/up2jj/wuko/workflow"
 )
 
@@ -70,17 +71,29 @@ func dependencyValues(node *workflow.DependencyNode, states map[*workflow.Depend
 	return values
 }
 
-func validateDependencyPlan(ctx context.Context, plan *workflow.DependencyPlan, engineFor func() *engine.Engine, optionsFor func(*workflow.Definition, map[string]map[string]any) engine.Options) error {
+// preflightDependencyPlan is the single semantic-validation path used by every
+// command context after loading and dependency preparation.
+func preflightDependencyPlan(ctx context.Context, plan *workflow.DependencyPlan, engineFor func() *engine.Engine, optionsFor func(*workflow.Definition, map[string]map[string]any) engine.Options) error {
 	if err := validatePluginDeclarations(plan); err != nil {
 		return err
 	}
+	var issues validation.Collector
 	for _, node := range plan.Order {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		options := optionsFor(node.Definition, node.PlaceholderDependencies())
 		if err := engineFor().Validate(ctx, node.Definition, options); err != nil {
-			return fmt.Errorf("workflow %q: %w", node.Definition.Name, err)
+			if !issues.AddError(fmt.Errorf("workflow %q: %w", node.Definition.Name, err)) {
+				return fmt.Errorf("workflow %q: %w", node.Definition.Name, err)
+			}
 		}
 	}
-	return nil
+	return issues.Err()
+}
+
+func preflightDefinition(ctx context.Context, definition *workflow.Definition, engineFor *engine.Engine, options engine.Options) error {
+	return engineFor.Validate(ctx, definition, options)
 }
 
 func executeDependencyPlan(ctx context.Context, plan *workflow.DependencyPlan, engineFor func() *engine.Engine, optionsFor func(*workflow.Definition, map[string]map[string]any) engine.Options) (*engine.State, error) {
@@ -91,7 +104,7 @@ func executeDependencyPlan(ctx context.Context, plan *workflow.DependencyPlan, e
 	for _, node := range plan.Order {
 		options := optionsFor(node.Definition, nil)
 		options.Dependencies = dependencyValues(node, states, options.DryRun)
-		state, err := engineFor().Run(ctx, node.Definition, options)
+		state, err := engineFor().RunValidated(ctx, node.Definition, options)
 		if err != nil {
 			return nil, fmt.Errorf("workflow %q: %w", node.Definition.Name, err)
 		}

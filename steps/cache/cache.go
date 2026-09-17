@@ -59,7 +59,9 @@ type directoryMetadata struct {
 	modTime time.Time
 }
 
-func Register(registry *step.Registry) error { return registry.Register("cache", New) }
+func Register(registry *step.Registry) error {
+	return registry.RegisterDefinition("cache", step.Registration{Builder: New, Outputs: step.ClosedOutputs("key", "hit", "stored", "size")})
+}
 
 func New(raw map[string]any) (step.Runner, error) {
 	var config Config

@@ -304,7 +304,7 @@ func installPreparedWorkflow(command *cobra.Command, deps dependencies, config w
 	}
 	options := lifecycleEngineOptions(command, deps, definition, invocation.vars, invocation.env, invocation.baseEnv, invocation.environmentLoaders, invocation.providers, workflowDir, invocation.configDir)
 	engineFor := workflowEngine(deps)
-	if err := engineFor.Validate(command.Context(), definition, options); err != nil {
+	if err := preflightDefinition(command.Context(), definition, engineFor, options); err != nil {
 		return fmt.Errorf("validating workflow %q: %w", definition.Name, err)
 	}
 	if _, err := engineFor.RunSteps(command.Context(), definition, definition.Install, options); err != nil {
@@ -363,7 +363,7 @@ func installPreparedMarketplacePackage(command *cobra.Command, deps dependencies
 	}
 	options := lifecycleEngineOptions(command, deps, definition, invocation.vars, invocation.env, invocation.baseEnv, invocation.environmentLoaders, invocation.providers, stage, invocation.configDir)
 	engineFor := workflowEngine(deps)
-	if err := engineFor.Validate(command.Context(), definition, options); err != nil {
+	if err := preflightDefinition(command.Context(), definition, engineFor, options); err != nil {
 		return fmt.Errorf("validating workflow package %q: %w", definition.Name, err)
 	}
 	if _, err := engineFor.RunSteps(command.Context(), definition, definition.Install, options); err != nil {
@@ -554,7 +554,7 @@ func uninstallWorkflow(command *cobra.Command, deps dependencies, name string, c
 	}
 	options := lifecycleEngineOptions(command, deps, definition, vars, env, baseEnv, environmentLoaders, providers, runDir, configDir)
 	engineFor := workflowEngine(deps)
-	if err := engineFor.Validate(command.Context(), definition, options); err != nil {
+	if err := preflightDefinition(command.Context(), definition, engineFor, options); err != nil {
 		return fmt.Errorf("validating workflow %q: %w", name, err)
 	}
 

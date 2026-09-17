@@ -27,6 +27,12 @@ func (*Control) Body(workflowStep workflow.Step) []workflow.Step {
 	return workflowStep.Observe.Steps
 }
 func (*Control) BindingRoot() string { return "observe" }
+func (*Control) OutputSchema() step.OutputSchema {
+	return step.ClosedObject(map[string]step.OutputSchema{
+		"status": step.Scalar(), "source": step.OpenObject(), "debounce": step.Scalar(),
+		"on_change": step.Scalar(), "on_error": step.Scalar(),
+	})
+}
 func (*Control) Configuration(workflowStep workflow.Step) any {
 	return workflowStep.Observe.Source.With
 }

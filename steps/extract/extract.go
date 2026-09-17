@@ -71,7 +71,9 @@ type Runner struct {
 	format   bool
 }
 
-func Register(registry *step.Registry) error { return registry.Register("extract", New) }
+func Register(registry *step.Registry) error {
+	return registry.RegisterDefinition("extract", step.Registration{Builder: New, Outputs: step.OpenObject()})
+}
 
 func New(raw map[string]any) (step.Runner, error) {
 	var config Config

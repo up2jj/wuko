@@ -59,26 +59,27 @@ func Register(registry *step.Registry) error {
 	registrations := []struct {
 		name    string
 		builder step.Builder
+		outputs step.OutputSchema
 	}{
-		{"git_clean", NewClean},
-		{"git_branch", NewBranch},
-		{"git_remote_branch", NewRemoteBranch},
-		{"git_branch_name", NewBranchName},
-		{"git_on_branch", NewOnBranch},
-		{"git_conventional_commit", NewConventionalCommit},
-		{"git_commit", NewCommit},
-		{"git_revision", NewRevision},
-		{"git_merge_base", NewMergeBase},
-		{"git_log", NewLog},
-		{"git_diff", NewDiff},
-		{"git_diff_check", NewDiffCheck},
-		{"git_worktree", NewWorktree},
-		{"git_squash", NewSquash},
-		{"git_rebase", NewRebase},
-		{"git_merge", NewMerge},
+		{"git_clean", NewClean, step.OpenObject()},
+		{"git_branch", NewBranch, step.OpenObject()},
+		{"git_remote_branch", NewRemoteBranch, step.OpenObject()},
+		{"git_branch_name", NewBranchName, step.OpenObject()},
+		{"git_on_branch", NewOnBranch, step.OpenObject()},
+		{"git_conventional_commit", NewConventionalCommit, step.OpenObject()},
+		{"git_commit", NewCommit, step.ClosedOutputs("created", "commit")},
+		{"git_revision", NewRevision, step.OpenObject()},
+		{"git_merge_base", NewMergeBase, step.OpenObject()},
+		{"git_log", NewLog, step.OpenObject()},
+		{"git_diff", NewDiff, step.OpenObject()},
+		{"git_diff_check", NewDiffCheck, step.OpenObject()},
+		{"git_worktree", NewWorktree, step.OpenObject()},
+		{"git_squash", NewSquash, step.OpenObject()},
+		{"git_rebase", NewRebase, step.OpenObject()},
+		{"git_merge", NewMerge, step.OpenObject()},
 	}
 	for _, registration := range registrations {
-		if err := registry.Register(registration.name, registration.builder); err != nil {
+		if err := registry.RegisterDefinition(registration.name, step.Registration{Builder: registration.builder, Outputs: registration.outputs}); err != nil {
 			return err
 		}
 	}

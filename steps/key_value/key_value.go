@@ -72,7 +72,12 @@ type Runner struct {
 }
 
 // Register adds the key_value step to a registry.
-func Register(registry *step.Registry) error { return registry.Register("key_value", New) }
+func Register(registry *step.Registry) error {
+	return registry.RegisterDefinition("key_value", step.Registration{Builder: New, Outputs: step.ClosedObject(map[string]step.OutputSchema{
+		"value": step.OpenObject(), "found": step.Scalar(), "changed": step.Scalar(), "deleted": step.Scalar(),
+		"entries": step.OpenObject(), "cleared": step.Scalar(),
+	})})
+}
 
 // New decodes and validates a key_value step configuration.
 func New(raw map[string]any) (step.Runner, error) {

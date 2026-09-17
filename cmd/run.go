@@ -218,13 +218,12 @@ func runWorkflow(command *cobra.Command, deps dependencies, args []string, confi
 		cleanup()
 		return err
 	}
-	optionsFor := func(definition *workflow.Definition, dependencies map[string]map[string]any) engine.Options {
+	// preflightOptionsFor has no output side effects; preflight runs it for
+	// every plan node before execution prints each dry-run header once.
+	preflightOptionsFor := func(definition *workflow.Definition, dependencies map[string]map[string]any) engine.Options {
 		localValueDir := ""
 		if !remoteDefinitions[definition.Path] {
 			localValueDir = filepath.Join(definition.Dir, ".wuko", "values")
-		}
-		if config.dryRun {
-			fmt.Fprintf(command.OutOrStdout(), "Workflow %s (%s)\n", definition.Name, workflowDisplaySource(definition))
 		}
 		return engine.Options{
 			InvocationID: reporters.InvocationID(),
@@ -236,7 +235,17 @@ func runWorkflow(command *cobra.Command, deps dependencies, args []string, confi
 			Diagnostics: reporters.Diagnostic,
 		}
 	}
+	optionsFor := func(definition *workflow.Definition, dependencies map[string]map[string]any) engine.Options {
+		if config.dryRun {
+			fmt.Fprintf(command.OutOrStdout(), "Workflow %s (%s)\n", definition.Name, workflowDisplaySource(definition))
+		}
+		return preflightOptionsFor(definition, dependencies)
+	}
 	engineFor := func() *engine.Engine { return workflowEngine(deps) }
+	if err := preflightDependencyPlan(command.Context(), plan, engineFor, preflightOptionsFor); err != nil {
+		cleanup()
+		return err
+	}
 	executePlan := func(ctx context.Context, active *workflow.DependencyPlan) error {
 		config.returnObserver.reset()
 		state, err := executeDependencyPlan(ctx, active, engineFor, func(definition *workflow.Definition, dependencies map[string]map[string]any) engine.Options {
@@ -254,10 +263,6 @@ func runWorkflow(command *cobra.Command, deps dependencies, args []string, confi
 		return executePlan(command.Context(), plan)
 	}
 
-	if err := validateDependencyPlan(command.Context(), plan, engineFor, optionsFor); err != nil {
-		cleanup()
-		return err
-	}
 	plans := map[*workflow.Definition]*workflow.DependencyPlan{definition: plan}
 	runner := scheduledRunner{
 		load: func(ctx context.Context) (*workflow.Definition, func(), error) {
@@ -273,7 +278,7 @@ func runWorkflow(command *cobra.Command, deps dependencies, args []string, confi
 				release()
 				return nil, func() {}, err
 			}
-			if err := validateDependencyPlan(ctx, active, engineFor, optionsFor); err != nil {
+			if err := preflightDependencyPlan(ctx, active, engineFor, preflightOptionsFor); err != nil {
 				release()
 				return nil, func() {}, err
 			}

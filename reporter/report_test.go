@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/up2jj/wuko/engine"
+	"github.com/up2jj/wuko/validation"
 )
 
 func TestNewExecutionReportProjectsSafeSuccess(t *testing.T) {
@@ -27,7 +28,7 @@ func TestNewExecutionReportProjectsSafeSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `{"schema_version":1,"invocation_id":"invocation","run_id":"run","workflow":"check","status":"succeeded","dry_run":false,"duration_ms":42381,"stats":{"run_duration_ms":41002,"steps":{"total":8,"succeeded":6,"failed":1,"skipped":1,"canceled":0,"timed_out":0},"attempts":9,"retries":2,"retry_wait_ms":1000,"polls":14,"poll_wait_ms":7000},"outputs":{"artifact":"dist/app.tar.gz"}}`
+	want := `{"schema_version":2,"invocation_id":"invocation","run_id":"run","workflow":"check","status":"succeeded","dry_run":false,"duration_ms":42381,"stats":{"run_duration_ms":41002,"steps":{"total":8,"succeeded":6,"failed":1,"skipped":1,"canceled":0,"timed_out":0},"attempts":9,"retries":2,"retry_wait_ms":1000,"polls":14,"poll_wait_ms":7000},"outputs":{"artifact":"dist/app.tar.gz"}}`
 	if string(data) != want {
 		t.Fatalf("report = %s, want %s", data, want)
 	}
@@ -54,6 +55,21 @@ func TestNewExecutionReportFailureOmitsUnavailableAndSensitiveData(t *testing.T)
 	}
 	if !strings.Contains(text, `"failed_step":"integration"`) {
 		t.Fatalf("report = %s, want first unsuccessful step ID", text)
+	}
+}
+
+func TestNewExecutionReportIncludesSafeValidationIssues(t *testing.T) {
+	issue := validation.Issue{Code: validation.CodeUnknownStepOutput, Message: "safe message", SourceLine: "token: secret", Cause: errors.New("raw secret")}
+	data, err := json.Marshal(NewExecutionReport(Outcome{Status: engine.StatusFailed, Err: issue}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if !strings.Contains(text, `"validation_issues":[{"code":"unknown_step_output","message":"safe message"`) {
+		t.Fatalf("report = %s", text)
+	}
+	if strings.Contains(text, "token: secret") || strings.Contains(text, "raw secret") {
+		t.Fatalf("report leaked diagnostic internals: %s", text)
 	}
 }
 
@@ -130,7 +146,7 @@ func TestJSONFileAtomicallyOverwritesWithPrivatePrettyReport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasSuffix(string(data), "\n") || !strings.Contains(string(data), "\n  \"schema_version\": 1,") {
+	if !strings.HasSuffix(string(data), "\n") || !strings.Contains(string(data), "\n  \"schema_version\": 2,") {
 		t.Fatalf("report = %q, want indented JSON with trailing newline", data)
 	}
 	info, err := os.Stat(path)

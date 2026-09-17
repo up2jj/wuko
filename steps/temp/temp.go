@@ -31,7 +31,9 @@ type Runner struct {
 	hasPattern bool
 }
 
-func Register(registry *step.Registry) error { return registry.Register("temp", New) }
+func Register(registry *step.Registry) error {
+	return registry.RegisterDefinition("temp", step.Registration{Builder: New, Outputs: step.ClosedOutputs("path", "kind")})
+}
 
 func New(raw map[string]any) (step.Runner, error) {
 	config := Config{Pattern: defaultPattern}

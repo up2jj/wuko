@@ -34,7 +34,12 @@ type Runner struct {
 	constraint *masterminds.Constraints
 }
 
-func Register(registry *step.Registry) error { return registry.Register("semver", New) }
+func Register(registry *step.Registry) error {
+	return registry.RegisterDefinition("semver", step.Registration{Builder: New, Outputs: step.ClosedOutputs(
+		"version", "value", "major", "minor", "patch", "prerelease", "metadata", "other", "comparison", "less", "equal", "greater",
+		"constraint", "matched", "previous", "part",
+	)})
+}
 
 func New(raw map[string]any) (step.Runner, error) {
 	var config Config

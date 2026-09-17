@@ -22,7 +22,9 @@ type Runner struct {
 	program *vm.Program
 }
 
-func Register(registry *step.Registry) error { return registry.Register("assert", New) }
+func Register(registry *step.Registry) error {
+	return registry.RegisterDefinition("assert", step.Registration{Builder: New, Outputs: step.ClosedOutputs()})
+}
 
 func New(raw map[string]any) (step.Runner, error) {
 	var config Config

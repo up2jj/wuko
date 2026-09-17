@@ -20,6 +20,7 @@ import (
 	"github.com/up2jj/wuko/provider"
 	"github.com/up2jj/wuko/secret"
 	"github.com/up2jj/wuko/step"
+	"github.com/up2jj/wuko/validation"
 	"github.com/up2jj/wuko/workflow"
 )
 
@@ -28,6 +29,14 @@ type Engine struct {
 	executors          *executor.Registry
 	backgroundControls []BackgroundControl
 }
+
+type stepValidationError struct {
+	step workflow.Step
+	err  error
+}
+
+func (err *stepValidationError) Error() string { return err.err.Error() }
+func (err *stepValidationError) Unwrap() error { return err.err }
 
 type Option func(*Engine)
 
@@ -148,16 +157,23 @@ func New(registry *step.Registry, options ...Option) *Engine {
 	return engine
 }
 
-func (e *Engine) Validate(ctx context.Context, definition *workflow.Definition, options Options) error {
+func (e *Engine) Validate(ctx context.Context, definition *workflow.Definition, options Options) (validateErr error) {
 	ctx = workflow.ContextWithPlugins(ctx, definition.Plugins)
 	options.secretSession = definition.SecretSession()
+	// Command preflight calls Validate outside Run, so it redacts its own
+	// result; Run's redaction of the same error is idempotent.
+	if session := definition.SecretSession(); session != nil {
+		defer func() { validateErr = session.RedactError(validateErr) }()
+	}
 	started := time.Now()
 	trace(options, diagnostic.Event{Phase: diagnostic.PhaseValidation, Status: diagnostic.StatusStarted, Time: started, WorkflowName: definition.Name, Location: definition.Location, Message: "validating workflow"})
 	if err := definition.ValidateStructure(); err != nil {
+		err = definition.ValidationError(err, validation.CodeInvalidWorkflow, "", definition.Location, "")
 		trace(options, diagnostic.Event{Phase: diagnostic.PhaseValidation, Status: diagnostic.StatusFailed, WorkflowName: definition.Name, Location: definition.Location, Duration: time.Since(started), Error: err})
 		return err
 	}
 	if err := validateWorkflowOutputExpressions(definition); err != nil {
+		err = definition.ValidationError(err, validation.CodeInvalidExpression, "outputs", definition.Location, "")
 		trace(options, diagnostic.Event{Phase: diagnostic.PhaseValidation, Status: diagnostic.StatusFailed, WorkflowName: definition.Name, Location: definition.Location, Duration: time.Since(started), Error: err})
 		return err
 	}
@@ -165,11 +181,12 @@ func (e *Engine) Validate(ctx context.Context, definition *workflow.Definition, 
 		var err error
 		options.renderer, err = workflow.NewRendererWithHelpers(ctx, definition.Templates, definition.SecretSession(), definition.Helpers())
 		if err != nil {
-			return err
+			return definition.ValidationError(err, validation.CodeInvalidTemplate, "templates", definition.Location, "")
 		}
 	}
 	state, err := initialState(definition, options)
 	if err != nil {
+		err = definition.ValidationError(err, validation.CodeInvalidValue, "", definition.Location, "")
 		trace(options, diagnostic.Event{Phase: diagnostic.PhaseValues, Status: diagnostic.StatusFailed, WorkflowName: definition.Name, Location: definition.Location, Error: err})
 		trace(options, diagnostic.Event{Phase: diagnostic.PhaseValidation, Status: diagnostic.StatusFailed, WorkflowName: definition.Name, Location: definition.Location, Duration: time.Since(started)})
 		return err
@@ -179,32 +196,60 @@ func (e *Engine) Validate(ctx context.Context, definition *workflow.Definition, 
 		providerBindings[control.BindingRoot()] = struct{}{}
 	}
 	if err := state.Providers.ValidateNames(providerBindings); err != nil {
+		err = definition.ValidationError(err, validation.CodeInvalidWorkflow, "", definition.Location, "")
 		trace(options, diagnostic.Event{Phase: diagnostic.PhaseValidation, Status: diagnostic.StatusFailed, WorkflowName: definition.Name, Location: definition.Location, Duration: time.Since(started), Error: err})
 		return err
 	}
-	if err := e.validateDataReferences(definition, options, state); err != nil {
+	if err := e.validateDataReferences(ctx, definition, options, state); err != nil {
+		err = definition.ValidationError(err, validation.CodeUnavailableReference, "", definition.Location, "")
 		trace(options, diagnostic.Event{Phase: diagnostic.PhaseValidation, Status: diagnostic.StatusFailed, WorkflowName: definition.Name, Location: definition.Location, Duration: time.Since(started), Error: err})
 		return err
 	}
-	err = e.validateSteps(ctx, definition, definition.Steps, options, state)
-	if err == nil && len(definition.Finally) > 0 {
+	var issues validation.Collector
+	if err := e.validateIndependentSteps(ctx, definition, definition.Steps, options, state); err != nil {
+		if !issues.AddError(err) {
+			return err
+		}
+	}
+	if len(definition.Finally) > 0 {
 		state.Bindings = map[string]any{"finally": map[string]any{
 			"status": string(StatusSucceeded), "errors": []any{},
 		}}
-		err = e.validateSteps(ctx, definition, definition.Finally, options, state)
+		if err := e.validateIndependentSteps(ctx, definition, definition.Finally, options, state); err != nil {
+			if !issues.AddError(err) {
+				return err
+			}
+		}
 	}
-	if err == nil {
-		err = e.validateLifecycleSteps(ctx, definition, "install", definition.Install, options)
+	if err := e.validateLifecycleSteps(ctx, definition, "install", definition.Install, options); err != nil {
+		if !issues.AddError(err) {
+			return err
+		}
 	}
-	if err == nil {
-		err = e.validateLifecycleSteps(ctx, definition, "uninstall", definition.Uninstall, options)
+	if err := e.validateLifecycleSteps(ctx, definition, "uninstall", definition.Uninstall, options); err != nil {
+		if !issues.AddError(err) {
+			return err
+		}
 	}
+	err = issues.Err()
 	status := diagnostic.StatusSucceeded
 	if err != nil {
 		status = diagnostic.StatusFailed
 	}
 	trace(options, diagnostic.Event{Phase: diagnostic.PhaseValidation, Status: status, WorkflowName: definition.Name, Location: definition.Location, Duration: time.Since(started)})
 	return err
+}
+
+func (e *Engine) validateIndependentSteps(ctx context.Context, definition *workflow.Definition, steps []workflow.Step, options Options, state *State) error {
+	var issues validation.Collector
+	for _, declaration := range steps {
+		if err := e.validateSteps(ctx, definition, []workflow.Step{declaration}, options, state); err != nil {
+			if !issues.AddError(err) {
+				return err
+			}
+		}
+	}
+	return issues.Err()
 }
 
 func (e *Engine) validateLifecycleSteps(ctx context.Context, definition *workflow.Definition, name string, steps []workflow.Step, options Options) error {
@@ -215,14 +260,37 @@ func (e *Engine) validateLifecycleSteps(ctx context.Context, definition *workflo
 	if err != nil {
 		return fmt.Errorf("%s: %w", name, err)
 	}
-	if err := e.validateSteps(ctx, definition, steps, options, state); err != nil {
-		return fmt.Errorf("%s: %w", name, err)
+	if err := e.validateIndependentSteps(ctx, definition, steps, options, state); err != nil {
+		return validation.Prefix(err, name+": ")
 	}
 	return nil
 }
 
 func (e *Engine) validateSteps(ctx context.Context, definition *workflow.Definition, steps []workflow.Step, options Options, state *State) error {
+	err := e.validateStepsRaw(ctx, definition, steps, options, state)
+	if err == nil {
+		return nil
+	}
+	var stepErr *stepValidationError
+	if errors.As(err, &stepErr) {
+		return definition.ValidationError(err, validation.CodeInvalidStep, stepErr.step.ValidationPath(), stepErr.step.Location, stepErr.step.ID)
+	}
+	return definition.ValidationError(err, validation.CodeInvalidStep, "", definition.Location, "")
+}
+
+func (e *Engine) validateStepsRaw(ctx context.Context, definition *workflow.Definition, steps []workflow.Step, options Options, state *State) (resultErr error) {
+	var current workflow.Step
+	defer func() {
+		if resultErr == nil {
+			return
+		}
+		var located *stepValidationError
+		if !errors.As(resultErr, &located) {
+			resultErr = &stepValidationError{step: current, err: resultErr}
+		}
+	}()
 	for _, workflowStep := range steps {
+		current = workflowStep
 		if workflowStep.IsTryCatch() {
 			if err := e.validateTryCatch(ctx, definition, workflowStep, options, state); err != nil {
 				return fmt.Errorf("step %q: %w", workflowStep.ID, err)
@@ -398,7 +466,18 @@ func (e *Engine) validateSteps(ctx context.Context, definition *workflow.Definit
 	return nil
 }
 
-func (e *Engine) Run(ctx context.Context, definition *workflow.Definition, options Options) (runState *State, runErr error) {
+func (e *Engine) Run(ctx context.Context, definition *workflow.Definition, options Options) (*State, error) {
+	return e.run(ctx, definition, options, true)
+}
+
+// RunValidated executes a definition already accepted by the command-level
+// preflight pipeline. It prevents validation hooks from running twice while
+// keeping Run's public behavior unchanged for direct engine callers.
+func (e *Engine) RunValidated(ctx context.Context, definition *workflow.Definition, options Options) (*State, error) {
+	return e.run(ctx, definition, options, false)
+}
+
+func (e *Engine) run(ctx context.Context, definition *workflow.Definition, options Options, validate bool) (runState *State, runErr error) {
 	ctx = workflow.ContextWithPlugins(ctx, definition.Plugins)
 	options.secretSession = definition.SecretSession()
 	if session := definition.SecretSession(); session != nil {
@@ -428,8 +507,10 @@ func (e *Engine) Run(ctx context.Context, definition *workflow.Definition, optio
 		return nil, err
 	}
 	state.Stats = runStatsIdentity(options)
-	if err := e.Validate(ctx, definition, options); err != nil {
-		return nil, err
+	if validate {
+		if err := e.Validate(ctx, definition, options); err != nil {
+			return nil, err
+		}
 	}
 	if options.DryRun {
 		if err := writeDryRun(options.Stdout, definition.Steps, "", nil); err != nil {
@@ -942,7 +1023,14 @@ func (e *Engine) executeStep(ctx context.Context, definition *workflow.Definitio
 			return outcome
 		}
 		traceStep(options, definition, workflowStep, diagnostic.PhaseRunner, diagnostic.StatusSucceeded, runnerStarted, "", nil)
-		execute = managedExecutor(options, workflowStep.ID, runner)
+		outputSchema, schemaErr := e.registry.OutputSchema(ctx, workflowStep.Type)
+		if schemaErr != nil {
+			stepErr := fmt.Errorf("workflow %q step %q (%s): resolving output contract: %w", definition.Name, workflowStep.ID, workflowStep.Type, schemaErr)
+			finishStep(StatusFailed, stepErr, nil, 0)
+			outcome.err = stepErr
+			return outcome
+		}
+		execute = managedExecutor(options, workflowStep.ID, runner, outputSchema)
 	}
 	operationID := options.operationID
 	if operationID == "" {
@@ -996,15 +1084,21 @@ func (options Options) cleanupScope() *cleanupScope {
 	return &options.runtime.cleanups
 }
 
-func managedExecutor(options Options, stepID string, runner step.Runner) stepExecutor {
+func managedExecutor(options Options, stepID string, runner step.Runner, outputs step.OutputSchema) stepExecutor {
 	return func(ctx context.Context, request step.Request) (step.Result, error) {
 		result, err := runner.Run(ctx, request)
 		if err != nil {
 			return result, err
 		}
+		// The contract is checked only after cleanup registration so a
+		// misbehaving step cannot leak the resources it already acquired.
+		contractErr := step.ValidateOutputKeys(outputs, result.Outputs)
+		if contractErr != nil {
+			contractErr = fmt.Errorf("step %q violated its registered output contract: %w", stepID, contractErr)
+		}
 		cleaner, ok := runner.(step.Cleaner)
 		if !ok {
-			return result, nil
+			return result, contractErr
 		}
 		cleanupResult := step.Result{
 			Outputs:   cloneMap(result.Outputs),
@@ -1016,7 +1110,7 @@ func managedExecutor(options Options, stepID string, runner step.Runner) stepExe
 			}
 			return nil
 		})
-		return result, nil
+		return result, contractErr
 	}
 }
 

@@ -22,7 +22,9 @@ type Runner struct {
 	validate step.TextValidator
 }
 
-func Register(registry *step.Registry) error { return registry.Register("tui_password", New) }
+func Register(registry *step.Registry) error {
+	return registry.RegisterDefinition("tui_password", step.Registration{Builder: New, Outputs: step.ClosedOutputs("value")})
+}
 
 func New(raw map[string]any) (step.Runner, error) {
 	var config Config

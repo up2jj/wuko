@@ -27,6 +27,12 @@ type BackgroundControl interface {
 	Launch(context.Context, BackgroundControlRequest) (BackgroundControlProgram, error)
 }
 
+// BackgroundControlOutputSchema is the optional static result contract kept
+// beside a control implementation.
+type BackgroundControlOutputSchema interface {
+	OutputSchema() step.OutputSchema
+}
+
 type BackgroundControlRequest struct {
 	Step   workflow.Step
 	RunDir string

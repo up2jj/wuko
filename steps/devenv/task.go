@@ -19,7 +19,7 @@ type TaskRunner struct{ config TaskConfig }
 func (*TaskRunner) ExecutorAware() {}
 
 func RegisterTask(registry *step.Registry) error {
-	return registry.Register("devenv_task", NewTask)
+	return registry.RegisterDefinition("devenv_task", step.Registration{Builder: NewTask, Outputs: step.ClosedOutputs("stdout", "stderr", "exit_code")})
 }
 
 func NewTask(raw map[string]any) (step.Runner, error) {

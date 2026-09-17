@@ -14,6 +14,8 @@ import (
 	"slices"
 	"strings"
 	"sync"
+
+	"github.com/up2jj/wuko/validation"
 )
 
 // minRedactableLength is the shortest resolved value the session substitutes in diagnostic text.
@@ -428,19 +430,59 @@ func (session *Session) RedactError(err error) error {
 		return err
 	}
 	redacted := session.Redact(err.Error())
-	if redacted == err.Error() {
+	issues, issuesChanged := session.redactIssues(validation.Issues(err))
+	if redacted == err.Error() && !issuesChanged {
 		return err
 	}
-	return redactedError{text: redacted, err: err}
+	return redactedError{text: redacted, err: err, issues: issues}
+}
+
+// redactIssues redacts every rendered field of structured validation issues;
+// renderers read issues directly rather than the wrapper's Error text.
+func (session *Session) redactIssues(issues []validation.Issue) ([]validation.Issue, bool) {
+	changed := false
+	redact := func(value string) string {
+		result := session.Redact(value)
+		if result != value {
+			changed = true
+		}
+		return result
+	}
+	for index := range issues {
+		issue := &issues[index]
+		issue.Message = redact(issue.Message)
+		issue.Hint = redact(issue.Hint)
+		issue.SourceLine = redact(issue.SourceLine)
+		issue.Target = redact(issue.Target)
+		issue.Path = validation.Path(redact(string(issue.Path)))
+		issue.Related = slices.Clone(issue.Related)
+		for related := range issue.Related {
+			issue.Related[related].Message = redact(issue.Related[related].Message)
+		}
+		if issue.Cause != nil {
+			text := issue.Cause.Error()
+			if redactedText := session.Redact(text); redactedText != text {
+				issue.Cause = redactedError{text: redactedText, err: issue.Cause}
+			}
+		}
+	}
+	return issues, changed
 }
 
 type redactedError struct {
-	text string
-	err  error
+	text   string
+	err    error
+	issues []validation.Issue
 }
 
 func (err redactedError) Error() string { return err.text }
 func (err redactedError) Unwrap() error { return err.err }
+
+// ValidationIssues exposes the redacted issues so validation renderers never
+// descend into the unredacted wrapped error.
+func (err redactedError) ValidationIssues() []validation.Issue {
+	return slices.Clone(err.issues)
+}
 
 type execRunner struct{}
 

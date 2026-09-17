@@ -2,10 +2,10 @@ package workflow
 
 import (
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/up2jj/wuko/diagnostic"
+	"github.com/up2jj/wuko/validation"
 	"gopkg.in/yaml.v3"
 )
 
@@ -15,16 +15,17 @@ func annotateDefinitionLocations(data []byte, definition *Definition, source str
 		return
 	}
 	definition.Location = nodeLocation(root, source)
-	annotateSteps(definition.Steps, mappingValue(root, "steps"), source)
-	annotateSteps(definition.Finally, mappingValue(root, "finally"), source)
+	annotateStepsAt(definition.Steps, mappingValue(root, "steps"), source, "steps")
+	annotateStepsAt(definition.Finally, mappingValue(root, "finally"), source, "finally")
 	targets := mappingValue(root, "targets")
 	for name, target := range definition.Targets {
 		targetNode := mappingValue(targets, name)
-		annotateSteps(target.Steps, mappingValue(targetNode, "steps"), source)
-		annotateSteps(target.Finally, mappingValue(targetNode, "finally"), source)
+		base := validation.Path("targets").Field(name)
+		annotateStepsAt(target.Steps, mappingValue(targetNode, "steps"), source, base.Field("steps"))
+		annotateStepsAt(target.Finally, mappingValue(targetNode, "finally"), source, base.Field("finally"))
 	}
-	annotateSteps(definition.Install, mappingValue(root, "install"), source)
-	annotateSteps(definition.Uninstall, mappingValue(root, "uninstall"), source)
+	annotateStepsAt(definition.Install, mappingValue(root, "install"), source, "install")
+	annotateStepsAt(definition.Uninstall, mappingValue(root, "uninstall"), source, "uninstall")
 }
 
 func annotateActionLocations(data []byte, action *Action, source string) {
@@ -33,8 +34,8 @@ func annotateActionLocations(data []byte, action *Action, source string) {
 		return
 	}
 	action.Location = nodeLocation(root, source)
-	annotateSteps(action.Steps, mappingValue(root, "steps"), source)
-	annotateSteps(action.Finally, mappingValue(root, "finally"), source)
+	annotateStepsAt(action.Steps, mappingValue(root, "steps"), source, "steps")
+	annotateStepsAt(action.Finally, mappingValue(root, "finally"), source, "finally")
 }
 
 func annotateFragmentLocations(data []byte, steps []Step, source string) {
@@ -45,7 +46,7 @@ func annotateFragmentLocations(data []byte, steps []Step, source string) {
 	if root.Kind == yaml.MappingNode {
 		root = mappingValue(root, "steps")
 	}
-	annotateSteps(steps, root, source)
+	annotateStepsAt(steps, root, source, "steps")
 }
 
 func yamlRoot(data []byte) *yaml.Node {
@@ -57,6 +58,10 @@ func yamlRoot(data []byte) *yaml.Node {
 }
 
 func annotateSteps(steps []Step, sequence *yaml.Node, source string) {
+	annotateStepsAt(steps, sequence, source, "steps")
+}
+
+func annotateStepsAt(steps []Step, sequence *yaml.Node, source string, base validation.Path) {
 	if sequence == nil || sequence.Kind != yaml.SequenceNode {
 		return
 	}
@@ -64,67 +69,69 @@ func annotateSteps(steps []Step, sequence *yaml.Node, source string) {
 		node := sequence.Content[i]
 		steps[i].Location = nodeLocation(node, source)
 		steps[i].sourcePath = source
+		steps[i].validationPath = base.Index(i)
+		current := steps[i].validationPath
 		if node.Kind != yaml.MappingNode {
 			continue
 		}
 		if steps[i].IsExecutorBlock() {
-			annotateSteps(steps[i].Steps, mappingValue(node, "steps"), source)
-			annotateSteps(steps[i].Finally, mappingValue(node, "finally"), source)
+			annotateStepsAt(steps[i].Steps, mappingValue(node, "steps"), source, current.Field("steps"))
+			annotateStepsAt(steps[i].Finally, mappingValue(node, "finally"), source, current.Field("finally"))
 		}
 		if steps[i].IsCancelOn() {
 			group := mappingValue(node, "cancel_on")
-			annotateSteps(steps[i].CancelOn.Monitors, mappingValue(group, "monitors"), source)
-			annotateSteps(steps[i].CancelOn.Steps, mappingValue(group, "steps"), source)
+			annotateStepsAt(steps[i].CancelOn.Monitors, mappingValue(group, "monitors"), source, current.Field("cancel_on").Field("monitors"))
+			annotateStepsAt(steps[i].CancelOn.Steps, mappingValue(group, "steps"), source, current.Field("cancel_on").Field("steps"))
 		}
 		if steps[i].IsObserve() {
 			group := mappingValue(node, "observe")
-			annotateSteps(steps[i].Observe.Steps, mappingValue(group, "steps"), source)
+			annotateStepsAt(steps[i].Observe.Steps, mappingValue(group, "steps"), source, current.Field("observe").Field("steps"))
 		}
 		if steps[i].IsTryCatch() {
 			if steps[i].Try != nil {
-				annotateSteps(steps[i].Try.Steps, mappingValue(mappingValue(node, "try"), "steps"), source)
+				annotateStepsAt(steps[i].Try.Steps, mappingValue(mappingValue(node, "try"), "steps"), source, current.Field("try").Field("steps"))
 			}
 			if steps[i].Catch != nil {
-				annotateSteps(steps[i].Catch.Steps, mappingValue(mappingValue(node, "catch"), "steps"), source)
+				annotateStepsAt(steps[i].Catch.Steps, mappingValue(mappingValue(node, "catch"), "steps"), source, current.Field("catch").Field("steps"))
 			}
 		}
-		annotateSteps(steps[i].Defer, mappingValue(node, "defer"), source)
+		annotateStepsAt(steps[i].Defer, mappingValue(node, "defer"), source, current.Field("defer"))
 		if steps[i].IsEnvironmentBlock() {
-			annotateSteps(steps[i].Steps, mappingValue(node, "steps"), source)
+			annotateStepsAt(steps[i].Steps, mappingValue(node, "steps"), source, current.Field("steps"))
 		}
 		if steps[i].IsWorkingDirectoryBlock() {
-			annotateSteps(steps[i].Steps, mappingValue(node, "steps"), source)
+			annotateStepsAt(steps[i].Steps, mappingValue(node, "steps"), source, current.Field("steps"))
 		}
 		if steps[i].IsWorktreeBlock() {
 			group := mappingValue(node, "worktree")
-			annotateSteps(steps[i].Worktree.Steps, mappingValue(group, "steps"), source)
+			annotateStepsAt(steps[i].Worktree.Steps, mappingValue(group, "steps"), source, current.Field("worktree").Field("steps"))
 		}
 		if steps[i].IsConditionalBlock() {
-			annotateSteps(steps[i].Steps, mappingValue(node, "steps"), source)
+			annotateStepsAt(steps[i].Steps, mappingValue(node, "steps"), source, current.Field("steps"))
 		}
 		if steps[i].Concurrent != nil {
 			group := mappingValue(node, "concurrent")
-			annotateSteps(steps[i].Concurrent.Steps, mappingValue(group, "steps"), source)
+			annotateStepsAt(steps[i].Concurrent.Steps, mappingValue(group, "steps"), source, current.Field("concurrent").Field("steps"))
 		}
 		if steps[i].Batch != nil {
 			group := mappingValue(node, "batch")
-			annotateSteps(steps[i].Batch.Steps, mappingValue(group, "steps"), source)
+			annotateStepsAt(steps[i].Batch.Steps, mappingValue(group, "steps"), source, current.Field("batch").Field("steps"))
 		}
 		if steps[i].Foreach != nil {
 			group := mappingValue(node, "foreach")
-			annotateSteps(steps[i].Foreach.Steps, mappingValue(group, "steps"), source)
+			annotateStepsAt(steps[i].Foreach.Steps, mappingValue(group, "steps"), source, current.Field("foreach").Field("steps"))
 		}
 		if steps[i].Matrix != nil {
 			group := mappingValue(node, "matrix")
-			annotateSteps(steps[i].Matrix.Steps, mappingValue(group, "steps"), source)
+			annotateStepsAt(steps[i].Matrix.Steps, mappingValue(group, "steps"), source, current.Field("matrix").Field("steps"))
 		}
 		if steps[i].Once != nil {
 			group := mappingValue(node, "once")
-			annotateSteps(steps[i].Once.Steps, mappingValue(group, "steps"), source)
+			annotateStepsAt(steps[i].Once.Steps, mappingValue(group, "steps"), source, current.Field("once").Field("steps"))
 		}
 		if steps[i].Attempt != nil {
 			group := mappingValue(node, "attempt")
-			annotateSteps(steps[i].Attempt.Steps, mappingValue(group, "steps"), source)
+			annotateStepsAt(steps[i].Attempt.Steps, mappingValue(group, "steps"), source, current.Field("attempt").Field("steps"))
 		}
 	}
 }
@@ -181,53 +188,4 @@ func remapSource(source, root, logical string) string {
 		return logical
 	}
 	return logical + "::" + filepath.ToSlash(relative)
-}
-
-func validationLocation(definition *Definition, err error) diagnostic.Location {
-	if err == nil {
-		return definition.Location
-	}
-	message := err.Error()
-	indexedSteps := definition.Steps
-	indexedMessage := message
-	if strings.HasPrefix(message, "finally: ") {
-		indexedSteps = definition.Finally
-		indexedMessage = strings.TrimPrefix(message, "finally: ")
-	}
-	allSteps := append(flattenSteps(definition.Steps), flattenSteps(definition.Finally)...)
-	for i := len(allSteps) - 1; i >= 0; i-- {
-		workflowStep := allSteps[i]
-		quotedID := strconv.Quote(workflowStep.ID)
-		if workflowStep.ID != "" && (strings.Contains(message, "step "+quotedID) || strings.Contains(message, "step id "+quotedID)) {
-			return workflowStep.Location
-		}
-	}
-	if strings.HasPrefix(indexedMessage, "step ") {
-		number, _, found := strings.Cut(strings.TrimPrefix(indexedMessage, "step "), ":")
-		if found {
-			index, parseErr := strconv.Atoi(number)
-			if parseErr == nil && index > 0 && index <= len(indexedSteps) {
-				return indexedSteps[index-1].Location
-			}
-		}
-	}
-	return definition.Location
-}
-
-func flattenSteps(steps []Step) []Step {
-	var flattened []Step
-	for _, workflowStep := range steps {
-		children := workflowStep.ChildSequences()
-		if len(children) == 0 {
-			flattened = append(flattened, workflowStep)
-			continue
-		}
-		if !workflowStep.IsExecutorBlock() && !workflowStep.IsEnvironmentBlock() && !workflowStep.IsWorkingDirectoryBlock() && !workflowStep.IsConditionalBlock() && workflowStep.Concurrent == nil {
-			flattened = append(flattened, workflowStep)
-		}
-		for _, child := range children {
-			flattened = append(flattened, flattenSteps(child.Steps)...)
-		}
-	}
-	return flattened
 }

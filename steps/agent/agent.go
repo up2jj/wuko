@@ -22,7 +22,9 @@ type Config struct {
 
 type Runner struct{ config Config }
 
-func Register(registry *step.Registry) error { return registry.Register("agent", New) }
+func Register(registry *step.Registry) error {
+	return registry.RegisterDefinition("agent", step.Registration{Builder: New, Outputs: step.ClosedOutputs("stdout", "stderr", "exit_code")})
+}
 
 func New(raw map[string]any) (step.Runner, error) {
 	var config Config

@@ -123,6 +123,8 @@ wuko
 wuko list
 wuko tree check
 wuko validate check
+wuko validate check --format json
+wuko validate check --reporter github
 wuko run check
 wuko ui check
 wuko run check --var package=./cmd/...

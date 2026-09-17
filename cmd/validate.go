@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,24 +11,59 @@ import (
 	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/engine"
 	"github.com/up2jj/wuko/githook"
+	"github.com/up2jj/wuko/githubactions"
+	"github.com/up2jj/wuko/validation"
 	"github.com/up2jj/wuko/workflow"
 )
 
 func newValidateCmd(deps dependencies) *cobra.Command {
 	var variables, variableFiles, environment []string
+	var format, reporterName string
 	command := &cobra.Command{
 		Use:   "validate [NAME] [TARGET]",
 		Short: "Validate one or all effective workflows",
 		Args:  cobra.MaximumNArgs(2),
 		RunE: func(command *cobra.Command, args []string) error {
-			return validateWorkflowSources(command, deps, args, validateWorkflowConfig{
+			if format != "text" && format != "json" {
+				return fmt.Errorf("format must be text or json")
+			}
+			if reporterName != "plain" && reporterName != "github" {
+				return fmt.Errorf("reporter must be plain or github")
+			}
+			err := validateWorkflowSources(command, deps, args, validateWorkflowConfig{
 				variables: variables, variableFiles: variableFiles, environment: environment,
+				format: format,
 			})
+			issues := validation.Issues(err)
+			if reporterName == "github" && len(issues) != 0 {
+				cwd, cwdErr := deps.cwd()
+				if cwdErr != nil {
+					return cwdErr
+				}
+				if annotationErr := githubactions.WriteValidationAnnotations(command.ErrOrStderr(), cwd, err); annotationErr != nil {
+					return annotationErr
+				}
+			}
+			if format == "json" {
+				if err != nil && len(issues) == 0 {
+					return err
+				}
+				if encodeErr := json.NewEncoder(command.OutOrStdout()).Encode(validation.NewDocument(issues)); encodeErr != nil {
+					return fmt.Errorf("encoding validation result: %w", encodeErr)
+				}
+				if err != nil {
+					return reportedError{err}
+				}
+				return nil
+			}
+			return err
 		},
 	}
 	command.Flags().StringArrayVar(&variables, "var", nil, "set a workflow variable (key=value; repeatable)")
 	command.Flags().StringArrayVar(&variableFiles, "var-file", nil, "import workflow variables from a JSON or TOML file (repeatable)")
 	command.Flags().StringArrayVar(&environment, "env", nil, "override an environment variable (KEY=value; repeatable)")
+	command.Flags().StringVar(&format, "format", "text", "validation output format: text or json")
+	command.Flags().StringVar(&reporterName, "reporter", "plain", "validation reporter: plain or github")
 	command.ValidArgsFunction = workflowCompletion(deps, false)
 	return command
 }
@@ -37,6 +73,7 @@ type validateWorkflowConfig struct {
 	variableFiles []string
 	environment   []string
 	sources       []workflow.Source
+	format        string
 }
 
 func validateWorkflowSources(command *cobra.Command, deps dependencies, args []string, config validateWorkflowConfig) error {
@@ -89,14 +126,18 @@ func validateWorkflowSources(command *cobra.Command, deps dependencies, args []s
 		}
 		sources = []workflow.Source{source}
 	} else if len(sources) == 0 {
-		sources, err = workflow.Discover(cwd, home, configDir)
+		sources, err = workflow.DiscoverForValidation(cwd, home, configDir)
 		if err != nil {
 			diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusFailed, Duration: time.Since(discoveryStarted), Error: err})
 			return err
 		}
 	}
 	diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusSucceeded, Duration: time.Since(discoveryStarted), Attributes: []diagnostic.Attribute{diagnostic.Attr("workflows", fmt.Sprint(len(sources)))}})
+	var validationIssues validation.Collector
 	for _, source := range sources {
+		if err := command.Context().Err(); err != nil {
+			return err
+		}
 		loader := deps.loader
 		if loader == nil {
 			loader = defaultWorkflowLoader(deps.plugins)
@@ -111,10 +152,16 @@ func validateWorkflowSources(command *cobra.Command, deps dependencies, args []s
 		}
 		definition, err := loader.Load(command.Context(), source.Path, loadOptions)
 		if err != nil {
+			if validationIssues.AddError(err) {
+				continue
+			}
 			return err
 		}
 		plan, err := resolveDependencyPlan(command.Context(), definition, loader, loadOptions, cwd, home, configDir)
 		if err != nil {
+			if validationIssues.AddError(err) {
+				continue
+			}
 			return err
 		}
 		optionsFor := func(definition *workflow.Definition, dependencies map[string]map[string]any) engine.Options {
@@ -125,14 +172,19 @@ func validateWorkflowSources(command *cobra.Command, deps dependencies, args []s
 				Diagnostics: reporter,
 			}
 		}
-		if err := validateDependencyPlan(command.Context(), plan, func() *engine.Engine { return workflowEngine(deps) }, optionsFor); err != nil {
+		if err := preflightDependencyPlan(command.Context(), plan, func() *engine.Engine { return workflowEngine(deps) }, optionsFor); err != nil {
+			if validationIssues.AddError(err) {
+				continue
+			}
 			return err
 		}
 		label := source.Name
 		if loadOptions.Target != "" {
 			label += " (" + loadOptions.Target + ")"
 		}
-		fmt.Fprintf(command.OutOrStdout(), "%s: valid\n", label)
+		if config.format != "json" {
+			fmt.Fprintf(command.OutOrStdout(), "%s: valid\n", label)
+		}
 	}
 	if all && validationRepositoryErr == nil {
 		manifestPath := filepath.Join(validationRepository.Root, ".wuko", "git-hooks.yaml")
@@ -141,15 +193,20 @@ func validateWorkflowSources(command *cobra.Command, deps dependencies, args []s
 			if err != nil {
 				return err
 			}
+			// Hook validation issues join the workflow issues collected above
+			// instead of discarding them; other failures stay fail-fast.
 			if err := validateGitHookBindings(command, deps, validationRepository, manifest); err != nil {
-				return err
+				if !validationIssues.AddError(err) {
+					return err
+				}
+			} else if config.format != "json" {
+				fmt.Fprintln(command.OutOrStdout(), ".wuko/git-hooks.yaml: valid")
 			}
-			fmt.Fprintln(command.OutOrStdout(), ".wuko/git-hooks.yaml: valid")
 		} else if !os.IsNotExist(statErr) {
 			return fmt.Errorf("checking Git hook manifest %s: %w", manifestPath, statErr)
 		}
 	}
-	return nil
+	return validationIssues.Err()
 }
 
 func workflowCompletion(deps dependencies, invokableOnly bool) cobra.CompletionFunc {

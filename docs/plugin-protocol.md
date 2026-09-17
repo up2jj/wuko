@@ -147,7 +147,7 @@ A complete response looks like:
     "namespace": "acme",
     "lifecycle": true,
     "steps": [
-      {"type": "acme.uppercase"},
+      {"type": "acme.uppercase", "outputs": {"fields": {"value": {}}}},
       {"type": "acme.temporary", "cleanup": true}
     ],
     "executors": [
@@ -165,13 +165,18 @@ A complete response looks like:
 | `protocol` | Yes | Must equal `wuko.plugin/v1`. |
 | `namespace` | Yes | Must equal the namespace Wuko used to find the executable. |
 | `lifecycle` | No | When true, enables `plugin.start` and `plugin.stop`. |
-| `steps` | Yes | Namespaced step declarations. Use `cleanup: true` to receive `step.cleanup`. |
+| `steps` | Yes | Namespaced step declarations. Use `cleanup: true` to receive `step.cleanup`; optional `outputs` declares a recursive result schema. |
 | `executors` | Yes | Namespaced executor declarations. |
 | `helpers` | No | Helper names exposed by explicitly declared workflow plugins. |
 
 Step and executor types must begin with `<namespace>.` and must be unique across both lists. Helper
 names must match `[a-z][a-z0-9_]*` and be unique. Declarations are immutable for the lifetime of
 the process.
+
+An omitted `outputs` keeps the step result open for compatibility. In a schema, `{}` is a scalar,
+`{"fields": {...}}` is a closed object, `{"open": true, "fields": {...}}` allows additional object
+keys, and `{"items": {...}}` is an array with the given element schema. Wuko uses declared schemas
+to validate references such as `steps.build.status` before execution.
 
 For an executor, `cancel_stops_process` declares whether canceling `executor.run` also stops the
 underlying command. Set it to false only when cancellation returns control to Wuko but the remote

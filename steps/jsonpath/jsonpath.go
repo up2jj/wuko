@@ -27,7 +27,11 @@ type Runner struct {
 	path   *theoryjsonpath.Path
 }
 
-func Register(registry *step.Registry) error { return registry.Register("jsonpath", New) }
+func Register(registry *step.Registry) error {
+	return registry.RegisterDefinition("jsonpath", step.Registration{Builder: New, Outputs: step.ClosedObject(map[string]step.OutputSchema{
+		"value": step.OpenObject(), "paths": step.Array(step.Scalar()), "count": step.Scalar(),
+	})})
+}
 
 func New(raw map[string]any) (step.Runner, error) {
 	var config Config

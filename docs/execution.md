@@ -931,12 +931,13 @@ execution, timeout, and graceful-cancellation failures:
 wuko run check --once --report-json ./wuko-report.json
 ```
 
-The version 1 report is a compact, safe projection. It contains no error messages, environment,
-inputs, variables, or intermediate step outputs:
+The version 2 report is a compact, safe projection. It contains no raw causes, source excerpts,
+environment, inputs, variables, or intermediate step outputs. Validation failures may include the
+same safe `validation_issues` projection emitted by `wuko validate --format json`:
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "invocation_id": "01K...",
   "run_id": "01K...",
   "workflow": "check",
@@ -967,6 +968,8 @@ inputs, variables, or intermediate step outputs:
 `workflow`, and `failed_step` are omitted when unavailable. `failed_step` is the declared ID of the
 first recorded unsuccessful top-level step and is omitted when that step has no ID. Successful non-dry runs also contain `outputs`,
 including an empty object when the workflow declares none; failed and dry runs omit it. The
+optional `validation_issues` array contains stable codes, messages, hints, YAML paths, and sanitized
+source spans; it never contains excerpts or underlying error text. The
 top-level duration covers the whole invocation, while `stats.run_duration_ms` covers only the
 engine run. Scheduled commands write one final report when the scheduler exits; use `--once` for
 one report per workflow run.

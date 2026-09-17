@@ -45,7 +45,9 @@ type compareRecord struct {
 }
 
 func Register(registry *step.Registry) error {
-	return registry.Register("github_release", New)
+	return registry.RegisterDefinition("github_release", step.Registration{Builder: New, Outputs: step.ClosedOutputs(
+		"repository", "found", "status", "has_changes", "release_tag", "release_url", "published_at", "branch", "ahead_by", "behind_by", "total_commits", "compare_url",
+	)})
 }
 
 func New(raw map[string]any) (step.Runner, error) {

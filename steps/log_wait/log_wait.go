@@ -52,7 +52,11 @@ type nativeWatcher struct{ *fsnotify.Watcher }
 func (w nativeWatcher) Events() <-chan fsnotify.Event { return w.Watcher.Events }
 func (w nativeWatcher) Errors() <-chan error          { return w.Watcher.Errors }
 
-func Register(registry *step.Registry) error { return registry.Register("log_wait", New) }
+func Register(registry *step.Registry) error {
+	return registry.RegisterDefinition("log_wait", step.Registration{Builder: New, Outputs: step.ClosedObject(map[string]step.OutputSchema{
+		"path": step.Scalar(), "match": step.Scalar(), "captures": step.OpenObject(),
+	})})
+}
 
 func New(raw map[string]any) (step.Runner, error) {
 	config := Config{MaxBytes: defaultMaxBytes}

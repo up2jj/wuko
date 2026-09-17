@@ -45,7 +45,9 @@ type runtime struct {
 	doHTTP    func(*http.Request, time.Duration) (*http.Response, error)
 }
 
-func Register(registry *step.Registry) error { return registry.Register("lua", New) }
+func Register(registry *step.Registry) error {
+	return registry.RegisterDefinition("lua", step.Registration{Builder: New, Outputs: step.OpenObject()})
+}
 
 func New(raw map[string]any) (step.Runner, error) {
 	var config Config

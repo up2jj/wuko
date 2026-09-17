@@ -17,7 +17,11 @@ type Runner struct {
 	config Config
 }
 
-func Register(registry *step.Registry) error { return registry.Register("import_vars", New) }
+func Register(registry *step.Registry) error {
+	return registry.RegisterDefinition("import_vars", step.Registration{Builder: New, Outputs: step.ClosedObject(map[string]step.OutputSchema{
+		"variables": step.OpenObject(), "count": step.Scalar(),
+	})})
+}
 
 func New(raw map[string]any) (step.Runner, error) {
 	var config Config

@@ -63,7 +63,12 @@ type Runner struct {
 func (*Runner) ExecutorAware()      {}
 func (*Runner) ExecutorFileSystem() {}
 
-func Register(registry *step.Registry) error { return registry.Register("edit", New) }
+func Register(registry *step.Registry) error {
+	return registry.RegisterDefinition("edit", step.Registration{Builder: New, Outputs: step.ClosedObject(map[string]step.OutputSchema{
+		"value": step.OpenObject(), "paths": step.Array(step.Scalar()), "replacements": step.Array(step.OpenObject()),
+		"count": step.Scalar(), "changed": step.Scalar(), "changed_count": step.Scalar(), "file": step.Scalar(), "format": step.Scalar(),
+	})})
+}
 
 func New(raw map[string]any) (step.Runner, error) {
 	config := Config{Result: "one", Missing: "error", MaxBytes: defaultMaxBytes}

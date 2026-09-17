@@ -11,24 +11,26 @@ import (
 	"github.com/up2jj/wuko/correlation"
 	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/engine"
+	"github.com/up2jj/wuko/validation"
 )
 
 // ExecutionReportSchemaVersion is the current canonical JSON report schema.
-const ExecutionReportSchemaVersion = 1
+const ExecutionReportSchemaVersion = 2
 
 // ExecutionReport is the stable, safe JSON projection of a completed Wuko invocation.
 // It deliberately excludes errors, inputs, variables, environment, and intermediate outputs.
 type ExecutionReport struct {
-	SchemaVersion int                      `json:"schema_version"`
-	InvocationID  correlation.InvocationID `json:"invocation_id"`
-	RunID         correlation.RunID        `json:"run_id,omitempty"`
-	Workflow      string                   `json:"workflow,omitempty"`
-	Status        engine.ExecutionStatus   `json:"status"`
-	DryRun        bool                     `json:"dry_run"`
-	DurationMS    int64                    `json:"duration_ms"`
-	FailedStep    string                   `json:"failed_step,omitempty"`
-	Stats         ExecutionStats           `json:"stats"`
-	Outputs       *map[string]any          `json:"outputs,omitempty"`
+	SchemaVersion    int                      `json:"schema_version"`
+	InvocationID     correlation.InvocationID `json:"invocation_id"`
+	RunID            correlation.RunID        `json:"run_id,omitempty"`
+	Workflow         string                   `json:"workflow,omitempty"`
+	Status           engine.ExecutionStatus   `json:"status"`
+	DryRun           bool                     `json:"dry_run"`
+	DurationMS       int64                    `json:"duration_ms"`
+	FailedStep       string                   `json:"failed_step,omitempty"`
+	Stats            ExecutionStats           `json:"stats"`
+	Outputs          *map[string]any          `json:"outputs,omitempty"`
+	ValidationIssues []validation.SafeIssue   `json:"validation_issues,omitempty"`
 }
 
 // ExecutionStats contains aggregate, non-sensitive statistics for one engine run.
@@ -86,6 +88,9 @@ func NewExecutionReport(outcome Outcome) ExecutionReport {
 			RetryWaitMS: milliseconds(outcome.Stats.RetryWait), Polls: outcome.Stats.Polls,
 			PollWaitMS: milliseconds(outcome.Stats.PollWait),
 		},
+	}
+	for _, issue := range validation.Issues(outcome.Err) {
+		report.ValidationIssues = append(report.ValidationIssues, issue.Safe())
 	}
 	if status == engine.StatusSucceeded && !outcome.DryRun && outcome.Err == nil {
 		outputs := outcome.Outputs

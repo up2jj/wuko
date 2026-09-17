@@ -53,7 +53,9 @@ type treePlan struct {
 	files   []*plannedEntry
 }
 
-func Register(registry *step.Registry) error { return registry.Register("scaffold", New) }
+func Register(registry *step.Registry) error {
+	return registry.RegisterDefinition("scaffold", step.Registration{Builder: New, Outputs: step.ClosedOutputs("from", "into", "created", "skipped", "overwritten", "files")})
+}
 
 func New(raw map[string]any) (step.Runner, error) {
 	var config Config

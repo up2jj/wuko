@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/engine"
 	reporterpkg "github.com/up2jj/wuko/reporter"
+	"github.com/up2jj/wuko/validation"
 )
 
 // gitHookReporter keeps successful hook runs quiet while retaining enough structured execution
@@ -122,6 +124,13 @@ func (reporter *gitHookReporter) failureError(runErr error) error {
 	cause := failure.err
 	if cause == nil {
 		cause = runErr
+	}
+	if issues := validation.Issues(cause); len(issues) != 0 {
+		message += fmt.Sprintf(": %s", issues[0].Message)
+		if len(issues) > 1 {
+			message += fmt.Sprintf(" (and %d more validation issues)", len(issues)-1)
+		}
+		return errors.New(message)
 	}
 	return gitHookRunError{message: message, cause: cause}
 }

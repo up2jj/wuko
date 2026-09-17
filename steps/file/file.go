@@ -73,7 +73,9 @@ type Runner struct {
 	present map[string]bool
 }
 
-func Register(registry *step.Registry) error { return registry.Register("file", New) }
+func Register(registry *step.Registry) error {
+	return registry.RegisterDefinition("file", step.Registration{Builder: New, Outputs: step.OpenObject()})
+}
 
 func New(raw map[string]any) (step.Runner, error) {
 	if value, ok := raw["mode"]; ok {

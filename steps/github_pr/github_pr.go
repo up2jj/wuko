@@ -38,7 +38,11 @@ type pullRequest struct {
 	BaseRefName string `json:"baseRefName"`
 }
 
-func Register(registry *step.Registry) error { return registry.Register("github_pr", New) }
+func Register(registry *step.Registry) error {
+	return registry.RegisterDefinition("github_pr", step.Registration{Builder: New, Outputs: step.ClosedOutputs(
+		"found", "number", "url", "title", "state", "is_draft", "head_branch", "head_sha", "base_branch", "repository",
+	)})
+}
 
 func New(raw map[string]any) (step.Runner, error) {
 	var config Config

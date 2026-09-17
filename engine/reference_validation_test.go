@@ -10,7 +10,9 @@ import (
 	"github.com/up2jj/wuko/steps/decode"
 	"github.com/up2jj/wuko/steps/extract"
 	luastep "github.com/up2jj/wuko/steps/lua"
+	markdownedit "github.com/up2jj/wuko/steps/markdown_edit"
 	"github.com/up2jj/wuko/steps/set"
+	"github.com/up2jj/wuko/validation"
 	"github.com/up2jj/wuko/workflow"
 )
 
@@ -68,6 +70,52 @@ func TestReferenceValidationUsesProviderSchemas(t *testing.T) {
 				t.Fatalf("Validate error = %v, want %q", err, tt.want)
 			}
 		})
+	}
+}
+
+func TestReferenceValidationUsesRegisteredStepOutputSchemas(t *testing.T) {
+	registry := step.NewRegistry()
+	if err := registry.RegisterDefinition("http_test", step.Registration{
+		Builder: func(map[string]any) (step.Runner, error) {
+			return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+				return step.Result{Outputs: map[string]any{"status": 200}}, nil
+			}), nil
+		},
+		Outputs: step.ClosedOutputs("status", "body"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.Register("capture", func(map[string]any) (step.Runner, error) {
+		return runnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	definition := testDefinition(t, "outputs",
+		workflow.Step{ID: "fetch", Type: "http_test", With: map[string]any{}},
+		workflow.Step{ID: "use", Type: "capture", With: map[string]any{"value": `{{ .steps.fetch.sttaus }}`}},
+	)
+	err := New(registry).Validate(t.Context(), definition, Options{})
+	issues := validation.Issues(err)
+	if len(issues) != 1 {
+		t.Fatalf("issues = %#v, error = %v", issues, err)
+	}
+	if issues[0].Code != validation.CodeUnknownStepOutput || issues[0].Step != "use" || issues[0].Hint != `did you mean "status"?` {
+		t.Fatalf("issue = %#v", issues[0])
+	}
+}
+
+func TestReferenceValidationDerivesCompositeActionOutputSchema(t *testing.T) {
+	registry := referenceTestRegistry(t, nil)
+	action := testAction(t, "typed")
+	action.Outputs = map[string]workflow.ActionOutput{"status": {Value: "true"}}
+	definition := testDefinition(t, "action-outputs",
+		workflow.Step{ID: "build", Uses: workflow.ActionSource{URL: "https://example.test/action"}, Action: action},
+		workflow.Step{ID: "use", Type: "capture", With: map[string]any{"value": `{{ .steps.build.sttaus }}`}},
+	)
+	err := New(registry).Validate(t.Context(), definition, Options{})
+	issues := validation.Issues(err)
+	if len(issues) != 1 || issues[0].Code != validation.CodeUnknownStepOutput || issues[0].Hint != `did you mean "status"?` {
+		t.Fatalf("issues = %#v, error = %v", issues, err)
 	}
 }
 
@@ -515,5 +563,32 @@ func TestReferenceValidationEndsTheFinallyBindingWithTheDeferredSteps(t *testing
 	err := New(registry).Validate(t.Context(), definition, Options{})
 	if err == nil || !strings.Contains(err.Error(), `data root "finally" is not available here`) {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestReferenceValidationAcceptsIndexedMarkdownEditMatches(t *testing.T) {
+	builtins := step.NewRegistry()
+	if err := markdownedit.Register(builtins); err != nil {
+		t.Fatal(err)
+	}
+	registered, err := builtins.OutputSchema(t.Context(), "markdown_edit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := referenceTestRegistry(t, nil)
+	if err := registry.RegisterDefinition("markdown_edit_test", step.Registration{
+		Builder: func(map[string]any) (step.Runner, error) {
+			return runnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
+		},
+		Outputs: registered,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	definition := testDefinition(t, "markdown-matches",
+		workflow.Step{ID: "edit", Type: "markdown_edit_test", With: map[string]any{}},
+		workflow.Step{ID: "use", Type: "capture", With: map[string]any{"value": `{{ (index .steps.edit.matches 0).path }}`, "expr": map[string]any{"expr": "steps.edit.matches[0].line"}}},
+	)
+	if err := New(registry).Validate(t.Context(), definition, Options{}); err != nil {
+		t.Fatalf("Validate() error = %v", err)
 	}
 }
