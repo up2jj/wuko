@@ -24,6 +24,7 @@ import (
 	"github.com/up2jj/wuko/steps/shell"
 	tablestep "github.com/up2jj/wuko/steps/table"
 	timestep "github.com/up2jj/wuko/steps/time"
+	transformstep "github.com/up2jj/wuko/steps/transform"
 	"github.com/up2jj/wuko/workflow"
 )
 
@@ -38,6 +39,21 @@ func TestTimeExampleValidates(t *testing.T) {
 		if err := register(registry); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if err := engine.New(registry).Validate(t.Context(), definition, engine.Options{RunDir: t.TempDir()}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTransformExampleValidates(t *testing.T) {
+	t.Parallel()
+	definition, err := workflow.NewLoader(nil).Load(t.Context(), filepath.Join("examples", "transform.yaml"), workflow.LoadOptions{RunDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := step.NewRegistry()
+	if err := transformstep.Register(registry); err != nil {
+		t.Fatal(err)
 	}
 	if err := engine.New(registry).Validate(t.Context(), definition, engine.Options{RunDir: t.TempDir()}); err != nil {
 		t.Fatal(err)

@@ -12,6 +12,7 @@ import (
 	luastep "github.com/up2jj/wuko/steps/lua"
 	markdownedit "github.com/up2jj/wuko/steps/markdown_edit"
 	"github.com/up2jj/wuko/steps/set"
+	transformstep "github.com/up2jj/wuko/steps/transform"
 	"github.com/up2jj/wuko/validation"
 	"github.com/up2jj/wuko/workflow"
 )
@@ -101,6 +102,61 @@ func TestReferenceValidationUsesRegisteredStepOutputSchemas(t *testing.T) {
 	}
 	if issues[0].Code != validation.CodeUnknownStepOutput || issues[0].Step != "use" || issues[0].Hint != `did you mean "status"?` {
 		t.Fatalf("issue = %#v", issues[0])
+	}
+}
+
+func TestTransformReferenceValidationAndOutputContract(t *testing.T) {
+	registry := referenceTestRegistry(t, nil)
+	if err := transformstep.Register(registry); err != nil {
+		t.Fatal(err)
+	}
+	options := Options{Vars: map[string]any{
+		"values": []any{map[string]any{"enabled": true}},
+		"ready":  true,
+	}}
+
+	t.Run("callback locals and variable writer", func(t *testing.T) {
+		definition := testDefinition(t, "transform-valid",
+			workflow.Step{ID: "selected", Type: "transform", With: map[string]any{
+				"from": "vars.values",
+				"operations": []any{
+					map[string]any{"filter": "item.enabled && vars.ready && index >= 0"},
+				},
+				"variable": "selected_values",
+			}},
+			workflow.Step{ID: "use", Type: "capture", With: map[string]any{
+				"value": `{{ .vars.selected_values }} {{ .steps.selected.value }}`,
+			}},
+		)
+		if err := New(registry).Validate(t.Context(), definition, options); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	tests := []struct {
+		name       string
+		operations []any
+		from       string
+		consumer   string
+		want       string
+	}{
+		{name: "unknown source", from: "steps.missing.value", operations: []any{"unique"}, want: `step "missing" is not available here`},
+		{name: "unknown callback reference", from: "vars.values", operations: []any{map[string]any{"filter": "item.enabled && vars.typo"}}, want: `variable "typo" is not declared`},
+		{name: "closed output", from: "vars.values", operations: []any{"unique"}, consumer: `{{ .steps.selected.results }}`, want: `has no output "results"`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			steps := []workflow.Step{{ID: "selected", Type: "transform", With: map[string]any{
+				"from": test.from, "operations": test.operations,
+			}}}
+			if test.consumer != "" {
+				steps = append(steps, workflow.Step{ID: "use", Type: "capture", With: map[string]any{"value": test.consumer}})
+			}
+			err := New(registry).Validate(t.Context(), testDefinition(t, test.name, steps...), options)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("Validate error = %v, want %q", err, test.want)
+			}
+		})
 	}
 }
 

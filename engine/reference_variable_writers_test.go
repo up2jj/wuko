@@ -16,6 +16,7 @@ import (
 	"github.com/up2jj/wuko/steps/semver"
 	"github.com/up2jj/wuko/steps/set"
 	timestep "github.com/up2jj/wuko/steps/time"
+	"github.com/up2jj/wuko/steps/transform"
 )
 
 // The variable-writer tables are keyed by step type name, so a renamed or
@@ -25,7 +26,7 @@ import (
 func TestVariableWriterTablesNameRegisteredSteps(t *testing.T) {
 	registry := step.NewRegistry()
 	for _, register := range []func(*step.Registry) error{
-		set.Register, jsonpath.Register, semver.Register, gitstep.Register, keyvaluestep.Register, timestep.Register,
+		set.Register, transform.Register, jsonpath.Register, semver.Register, gitstep.Register, keyvaluestep.Register, timestep.Register,
 		extract.Register, luastep.Register, importvars.Register,
 	} {
 		if err := register(registry); err != nil {

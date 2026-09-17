@@ -1,0 +1,40 @@
+version: 1
+name: transform-showcase
+description: Build deterministic release and deployment data with transform pipelines
+vars:
+  apps:
+    - {name: web, live_tag: v1, release_tag: v2, region: eu}
+    - {name: api, live_tag: v2, release_tag: v2, region: us}
+    - {name: worker, live_tag: v1, release_tag: v3, region: eu}
+    - {name: web, live_tag: v1, release_tag: v2, region: eu}
+  regions: [eu-central, us-east]
+steps:
+  - id: changed_apps
+    type: transform
+    with:
+      from: vars.apps
+      operations:
+        - filter: item.live_tag != item.release_tag
+        - map: '{name: item.name, tag: item.release_tag, region: item.region}'
+        - unique_by: item.name
+        - sort_by: item.name
+      variable: changed_apps
+
+  - id: deployments
+    type: transform
+    with:
+      from: vars.changed_apps
+      operations:
+        - cross_join_with:
+            with:
+              - {expr: vars.regions}
+            expr: '{app: items[0].name, tag: items[0].tag, region: items[1], row: index}'
+
+  - id: by_region
+    type: transform
+    with:
+      from: steps.deployments.value
+      operations:
+        - group_by: item.region
+        - map_values: "map(value, #.app)"
+        - entries

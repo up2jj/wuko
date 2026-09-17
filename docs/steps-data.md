@@ -31,6 +31,170 @@ required.
 
 The result is available as `.steps.<id>.value` and as the configured variable.
 
+## `transform`
+
+Run an ordered, deterministic pipeline over a list or object. `from` is either a dotted `steps.*`
+or `vars.*` path, or an Expr source. `operations` is required and cannot be empty. The natural
+final result is exposed only as `.steps.<id>.value`; when `variable` is present, `.vars.<variable>`
+receives the same value.
+
+```yaml
+- id: changed_apps
+  type: transform
+  with:
+    from: steps.release_matrix.results
+    operations:
+      - filter: item.live_tag != item.release_tag
+      - map: >-
+          {
+            name: item.name,
+            live_tag: item.live_tag,
+            release_tag: item.release_tag
+          }
+      - unique_by: item.name
+      - sort_by: item.name
+    variable: changed_apps
+```
+
+Use an expression source when the input needs to be computed first:
+
+```yaml
+- id: enabled_services
+  type: transform
+  with:
+    from:
+      expr: vars.catalog.services
+    operations:
+      - filter: item.enabled
+      - map: item.name
+      - sort
+```
+
+Zero-argument operations are names (`- unique`). Parameterized operations have one operation key
+(`- take: 5`). Any value operand can be dynamic with `{expr: "..."}`. Use `{literal: ...}` when a
+literal object would otherwise look like an expression operand.
+
+List callbacks receive `item` and the zero-based `index`. Object callbacks receive `key`, `value`,
+and a zero-based `index`; object keys are always visited in lexical order. Reducers also receive
+`acc`, comparator callbacks receive `left` and `right`, and tuple callbacks receive `items` plus
+`index`. Expressions may use all normal workflow expression roots.
+
+Pipelines are type-aware. List-producing and object-producing operations can continue. A scalar or
+named result record is terminal, so another operation after it is rejected. A runtime-only source
+kind is checked before each operation.
+
+### List operations
+
+| Family | Operations |
+| --- | --- |
+| Transform | `filter`, `map`, `flat_map`, `filter_map`, `reject`, `reject_map`, `filter_reject` |
+| Unique/group | `unique`, `unique_by`, `unique_map`, `find_uniques`, `find_uniques_by`, `find_duplicates`, `find_duplicates_by`, `group_by`, `group_by_map`, `partition_by`, `key_by`, `associate`, `filter_to_map`, `keyify` |
+| Segment/select | `chunk`, `flatten`, `concat`, `window`, `sliding`, `interleave`, `fill`, `drop`, `drop_right`, `drop_while`, `drop_right_while`, `drop_by_index`, `take`, `take_while`, `take_filter`, `subset`, `slice` |
+| Replace/structure | `replace`, `replace_all`, `clone`, `compact`, `splice`, `trim`, `trim_left`, `trim_prefix`, `trim_right`, `trim_suffix` |
+| Sets/compare | `union`, `intersect`, `intersect_by`, `difference`, `without`, `without_by`, `without_nth`, `contains`, `contains_by`, `every`, `every_by`, `some`, `some_by`, `none`, `none_by`, `elements_match`, `elements_match_by` |
+| Search/order | `index_of`, `last_index_of`, `has_prefix`, `has_suffix`, `find`, `find_index`, `find_last_index`, `find_or_else`, `first`, `first_or`, `first_or_empty`, `last`, `last_or`, `last_or_empty`, `nth`, `nth_or`, `nth_or_empty`, `min`, `min_by`, `min_index`, `min_index_by`, `max`, `max_by`, `max_index`, `max_index_by`, `is_sorted`, `is_sorted_by`, `sort`, `sort_by` |
+| Reduce/count | `reduce`, `reduce_right`, `count`, `count_by`, `count_values`, `count_values_by` |
+| Numeric | `sum`, `sum_by`, `product`, `product_by`, `mean`, `mean_by`, `mode` |
+
+Compound arguments use these shapes:
+
+```yaml
+operations:
+  - filter_map: {value: "item.name", when: "item.enabled"}
+  - group_by_map: {key: "item.region", value: "item.name"}
+  - associate: {key: "item.name", value: "item.version"}
+  - filter_to_map: {key: "item.name", value: "item", when: "item.enabled"}
+  - take_filter: {count: 3, when: "item.ready"}
+  - reduce: {initial: 0, expr: "acc + item.size"}
+  - sort_by: {expr: "item.priority", order: desc}
+```
+
+`filter_map` and `reject_map` use `{value, when}`. `group_by_map` and `associate` use `{key,
+value}`. `filter_to_map` uses `{key, value, when}`. `reduce` and `reduce_right` use `{initial,
+expr}`. `sort_by` accepts an expression directly or `{expr, order: asc|desc}`. Multi-list
+operations use `{with: [...]}`; each entry is a literal operand or an `{expr: ...}` operand.
+
+Wherever an operation takes a `when` guard -- `filter_map`, `reject_map`, `filter_to_map`, and
+`filter_map_to_list` -- `when` is evaluated first and the other expressions run only for the
+elements it keeps, so a guard such as `{value: "item.tag.name", when: "item.tag != nil"}` is safe.
+
+Numeric operations accept homogeneous integers or homogeneous floating-point values. Integer
+inputs keep integer arithmetic, including truncating integer division for `mean`. For an empty
+list, `sum` and `mean` return `0`, `product` returns `1`, and `mode` returns `[]`.
+
+### Object operations
+
+| Family | Operations |
+| --- | --- |
+| Extract/lookup | `keys`, `unique_keys`, `values`, `unique_values`, `has_key`, `value_or`, `find_key`, `find_key_by` |
+| Filter | `pick`, `pick_keys`, `pick_values`, `omit`, `omit_keys`, `omit_values` |
+| Convert | `entries`, `from_entries`, `invert`, `chunk_entries` |
+| Combine | `assign` |
+| Transform | `map_keys`, `map_values`, `map_entries`, `map_to_list`, `filter_map_to_list`, `filter_keys`, `filter_values` |
+
+Wuko object keys are strings. `entries` returns lexically ordered `{key, value}` objects and
+`from_entries` consumes that shape. `map_keys`, `map_entries`, and `invert` require string result
+keys. Key collisions are resolved by the last visited entry. `keys`, `unique_keys`, `values`, and
+`unique_values` optionally accept `{with: [...]}`; the current object is processed first, followed
+by the supplied objects in declaration order. `assign` follows the same precedence.
+
+```yaml
+- id: service_rows
+  type: transform
+  with:
+    from: vars.services
+    operations:
+      - filter_map_to_list:
+          when: value.enabled
+          value: '{name: key, image: value.image, position: index}'
+      - sort_by: item.name
+```
+
+`map_entries` uses `{key, value}` and `filter_map_to_list` uses `{value, when}`. List-produced
+objects such as `group_by`, `associate`, `keyify`, and `count_values` can flow directly into object
+operations.
+
+### Tuple and join operations
+
+`zip`, `zip_with`, `unzip`, `unzip_with`, `cross_join`, and `cross_join_with` use ordinary arrays
+for tuples. Their arity must be 2 through 9.
+
+```yaml
+- id: deployments
+  type: transform
+  with:
+    from: vars.apps
+    operations:
+      - cross_join_with:
+          with:
+            - {expr: vars.regions}
+            - {expr: vars.channels}
+          expr: '{app: items[0], region: items[1], channel: items[2], row: index}'
+```
+
+`zip` uses the longest input and pads missing values with `null`. `zip_with` maps each tuple through
+`expr`. `unzip` requires uniform tuple widths; `unzip_with` first maps every `item` to a tuple.
+Cross joins use deterministic nested-loop order with the current list as the outermost axis.
+
+### Terminal result records
+
+These operations return named records and therefore must end a pipeline:
+
+| Operations | Result |
+| --- | --- |
+| `find`, `first`, `last` | `{value, found}` |
+| `find_index`, `find_last_index` | `{value, index, found}` |
+| `min_index`, `min_index_by`, `max_index`, `max_index_by` | `{value, index}` |
+| `find_key`, `find_key_by` | `{key, found}` |
+| `difference` | `{left, right}` |
+| `filter_reject` | `{kept, rejected}` |
+| `cut` | `{before, after, found}` |
+| `cut_prefix`, `cut_suffix` | `{value, found}` |
+
+Equality is structural for nested lists and objects, ignores object key order, and treats numeric
+equivalents such as `1` and `1.0` as equal. Ordering accepts a homogeneous collection of numbers or
+strings. `sort` and `sort_by` are stable.
+
 ## `assert`
 
 Stop the workflow with a clear message unless an Expr expression returns boolean `true`.

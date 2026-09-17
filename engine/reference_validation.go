@@ -12,6 +12,7 @@ import (
 	"github.com/expr-lang/expr/parser"
 	"github.com/up2jj/wuko/provider"
 	"github.com/up2jj/wuko/step"
+	transformstep "github.com/up2jj/wuko/steps/transform"
 	"github.com/up2jj/wuko/validation"
 	"github.com/up2jj/wuko/workflow"
 )
@@ -216,7 +217,7 @@ func schemaForDependencies(values map[string]map[string]any) *referenceSchema {
 // they stop variable validation for everything that follows.
 var (
 	varWriters = map[string]struct{}{
-		"set": {}, "jsonpath": {}, "semver": {}, "git_conventional_commit": {}, "key_value": {}, "tui_choice": {}, "tui_confirm": {},
+		"set": {}, "transform": {}, "jsonpath": {}, "semver": {}, "git_conventional_commit": {}, "key_value": {}, "tui_choice": {}, "tui_confirm": {},
 		"tui_input": {}, "tui_password": {}, "tui_path": {}, "tui_review": {}, "time": {},
 	}
 	dynamicVarWriters = map[string]struct{}{"lua": {}, "import_vars": {}}
@@ -1078,6 +1079,26 @@ func (validator *referenceValidator) validateStepConfiguration(stepID, stepType 
 	switch stepType {
 	case "assert", "set":
 		return validator.validateRawExpression("expr", raw, "expr", scope)
+	case "transform":
+		path, references, err := transformstep.References(raw)
+		if err != nil {
+			return err
+		}
+		if path != "" {
+			if err := validator.validateLookup("from", path, scope); err != nil {
+				return err
+			}
+		}
+		for _, reference := range references {
+			locals := scope.clone()
+			for _, name := range reference.Locals {
+				locals.roots[name] = openReference
+			}
+			if err := validator.validateExpression(reference.Label, reference.Source, locals); err != nil {
+				return err
+			}
+		}
+		return nil
 	case "key_value":
 		locals := scope.clone()
 		locals.roots["current"] = openReference
