@@ -1,0 +1,39 @@
+version: 1
+name: multiplexer-worker
+description: Split the detected terminal multiplexer, run a command, and read its recent output
+steps:
+  - id: worker
+    type: multiplexer
+    with:
+      operation: split
+      direction: right
+
+  - id: type_command
+    type: multiplexer
+    with:
+      operation: send_text
+      target: "{{ .steps.worker.created_target }}"
+      text: "printf 'hello from %s\\n' wuko"
+
+  - id: submit
+    type: multiplexer
+    with:
+      operation: send_keys
+      target: "{{ .steps.worker.created_target }}"
+      keys: [enter]
+
+  # The pane runs the command asynchronously, so poll until its output shows
+  # up. The printf format keeps the echoed command line from matching early.
+  - id: await_output
+    attempt:
+      interval: 200ms
+      max_elapsed_time: 10s
+      until: steps.inspect.text contains "hello from wuko"
+      steps:
+        - id: inspect
+          type: multiplexer
+          with:
+            operation: read
+            target: "{{ .steps.worker.created_target }}"
+            scrollback: true
+            lines: 100

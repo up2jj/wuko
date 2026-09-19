@@ -4,7 +4,10 @@ package multiplexer
 import (
 	"context"
 	"fmt"
+	"math"
 	"regexp"
+	"slices"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -33,17 +36,26 @@ const (
 type Operation string
 
 const (
-	OperationTitle         Operation = "title"
-	OperationClearTitle    Operation = "clear_title"
-	OperationZoom          Operation = "zoom"
-	OperationNotify        Operation = "notify"
-	OperationStatus        Operation = "status"
-	OperationClearStatus   Operation = "clear_status"
-	OperationProgress      Operation = "progress"
-	OperationClearProgress Operation = "clear_progress"
-	OperationLog           Operation = "log"
-	OperationClearLog      Operation = "clear_log"
-	OperationMetadata      Operation = "metadata"
+	OperationTitle          Operation = "title"
+	OperationClearTitle     Operation = "clear_title"
+	OperationZoom           Operation = "zoom"
+	OperationNotify         Operation = "notify"
+	OperationStatus         Operation = "status"
+	OperationClearStatus    Operation = "clear_status"
+	OperationProgress       Operation = "progress"
+	OperationClearProgress  Operation = "clear_progress"
+	OperationLog            Operation = "log"
+	OperationClearLog       Operation = "clear_log"
+	OperationMetadata       Operation = "metadata"
+	OperationRead           Operation = "read"
+	OperationSendText       Operation = "send_text"
+	OperationSendKeys       Operation = "send_keys"
+	OperationSplit          Operation = "split"
+	OperationResize         Operation = "resize"
+	OperationFocusPane      Operation = "focus_pane"
+	OperationFocusDirection Operation = "focus_direction"
+	OperationClosePane      Operation = "close_pane"
+	OperationCloseSurface   Operation = "close_surface"
 )
 
 type Target struct {
@@ -53,22 +65,29 @@ type Target struct {
 }
 
 type Request struct {
-	Provider  Provider
-	Operation Operation
-	Scope     Scope
-	Title     string
-	Mode      string
-	Body      string
-	Key       string
-	Value     string
-	Icon      string
-	Color     string
-	Priority  *int
-	Progress  float64
-	Label     string
-	Level     string
-	Source    string
-	Message   string
+	Provider   Provider
+	Operation  Operation
+	Scope      Scope
+	Target     string
+	Title      string
+	Mode       string
+	Body       string
+	Key        string
+	Value      string
+	Icon       string
+	Color      string
+	Priority   *int
+	Progress   float64
+	Label      string
+	Level      string
+	Source     string
+	Message    string
+	Text       string
+	Keys       []string
+	Direction  string
+	Scrollback bool
+	Lines      int
+	Amount     *float64
 
 	DisplayAgent      string
 	StateLabels       map[string]string
@@ -81,12 +100,15 @@ type Request struct {
 }
 
 type Result struct {
-	Active    bool
-	Provider  Provider
-	Operation Operation
-	Scope     Scope
-	Target    string
-	Changed   bool
+	Active        bool
+	Provider      Provider
+	Operation     Operation
+	Scope         Scope
+	Target        string
+	Changed       bool
+	Text          string
+	CreatedTarget string
+	CreatedPane   string
 	// PreviousTitle is the label the target carried before a title operation
 	// replaced it, so a later step can put it back. It is empty when the target
 	// had no label or the provider cannot report one.
@@ -97,6 +119,9 @@ type Result struct {
 // running one request.
 type Outcome struct {
 	PreviousTitle string
+	Text          string
+	CreatedTarget string
+	CreatedPane   string
 }
 
 type UnsupportedError struct {
@@ -169,7 +194,9 @@ func ParseOperation(value string) (Operation, error) {
 	switch operation {
 	case OperationTitle, OperationClearTitle, OperationZoom, OperationNotify,
 		OperationStatus, OperationClearStatus, OperationProgress, OperationClearProgress,
-		OperationLog, OperationClearLog, OperationMetadata:
+		OperationLog, OperationClearLog, OperationMetadata, OperationRead, OperationSendText,
+		OperationSendKeys, OperationSplit, OperationResize, OperationFocusPane,
+		OperationFocusDirection, OperationClosePane, OperationCloseSurface:
 		return operation, nil
 	default:
 		return "", fmt.Errorf("unknown multiplexer operation %q", value)
@@ -207,6 +234,12 @@ func (controller *Controller) Execute(ctx context.Context, environment map[strin
 	result.Active = true
 	result.Provider = target.Provider
 	result.Target = target.ID
+	if request.Target != "" {
+		result.Target = request.Target
+	}
+	if err := validateProviderRequest(target.Provider, request); err != nil {
+		return result, err
+	}
 	for _, candidate := range controller.adapters {
 		if candidate.Provider() != target.Provider {
 			continue
@@ -216,18 +249,57 @@ func (controller *Controller) Execute(ctx context.Context, environment map[strin
 			return result, err
 		}
 		result.PreviousTitle = outcome.PreviousTitle
-		result.Changed = true
+		result.Text = outcome.Text
+		result.CreatedTarget = outcome.CreatedTarget
+		result.CreatedPane = outcome.CreatedPane
+		result.Changed = request.Operation != OperationRead
 		return result, nil
 	}
 	return result, fmt.Errorf("multiplexer adapter %q is unavailable", target.Provider)
 }
 
+func validateProviderRequest(provider Provider, request Request) error {
+	if request.Amount == nil {
+		return nil
+	}
+	amount := *request.Amount
+	if math.IsNaN(amount) || math.IsInf(amount, 0) || amount <= 0 {
+		return fmt.Errorf("amount must be greater than zero")
+	}
+	switch provider {
+	case ProviderTmux, ProviderCmux:
+		if amount != math.Trunc(amount) {
+			return fmt.Errorf("amount must be a whole number for %s", provider)
+		}
+	case ProviderHerdr:
+		if amount > 1 {
+			return fmt.Errorf("amount must be at most 1 for herdr")
+		}
+	}
+	return nil
+}
+
 func runCommand(ctx context.Context, executor commandExecutor, environment map[string]string, command string, args ...string) (process.Result, error) {
+	return runCommandWithLimit(ctx, executor, environment, 64*1024, command, args...)
+}
+
+func runReadCommand(ctx context.Context, executor commandExecutor, environment map[string]string, command string, args ...string) (process.Result, error) {
+	result, err := runCommandWithLimit(ctx, executor, environment, 1<<20, command, args...)
+	if err != nil {
+		return result, err
+	}
+	if result.StdoutTruncated {
+		return result, fmt.Errorf("reading multiplexer output exceeded the 1 MiB capture limit")
+	}
+	return result, nil
+}
+
+func runCommandWithLimit(ctx context.Context, executor commandExecutor, environment map[string]string, captureLimit int64, command string, args ...string) (process.Result, error) {
 	result, err := executor.Run(ctx, process.Options{
 		Command:      command,
 		Args:         args,
 		Env:          environment,
-		CaptureLimit: 64 * 1024,
+		CaptureLimit: captureLimit,
 	})
 	if err == nil {
 		return result, nil
@@ -240,6 +312,65 @@ func runCommand(ctx context.Context, executor commandExecutor, environment map[s
 		return result, fmt.Errorf("running %s: %w", command, err)
 	}
 	return result, fmt.Errorf("running %s: %s: %w", command, detail, err)
+}
+
+func targetID(detected Target, requested string) string {
+	if requested != "" {
+		return requested
+	}
+	return detected.ID
+}
+
+func amountArgument(amount *float64) string {
+	if amount == nil {
+		return ""
+	}
+	return strconv.FormatFloat(*amount, 'f', -1, 64)
+}
+
+func limitedLines(text string, request Request) string {
+	if !request.Scrollback || request.Lines < 1 {
+		return text
+	}
+	lines := strings.SplitAfter(text, "\n")
+	// Providers such as tmux pad the visible screen with empty rows, so the
+	// newest content can sit far above the end of the capture. Drop that
+	// padding before counting, or a small window returns only blank rows.
+	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
+		lines = lines[:len(lines)-1]
+	}
+	if len(lines) > request.Lines {
+		lines = lines[len(lines)-request.Lines:]
+	}
+	return strings.Join(lines, "")
+}
+
+var (
+	keyAliases = map[string]string{"esc": "escape", "return": "enter", "pgup": "pageup", "pgdn": "pagedown", "backtab": "shift+tab"}
+	namedKeys  = []string{"enter", "escape", "tab", "backspace", "delete", "insert", "home", "end", "pageup", "pagedown", "left", "right", "up", "down", "space", "shift+tab"}
+)
+
+// NormalizeKey accepts a deliberately small, provider-portable key vocabulary.
+func NormalizeKey(value string) (string, error) {
+	key := strings.ToLower(strings.TrimSpace(value))
+	if alias := keyAliases[key]; alias != "" {
+		key = alias
+	}
+	if slices.Contains(namedKeys, key) {
+		return key, nil
+	}
+	if len(key) == 2 && key[0] == 'f' && key[1] >= '1' && key[1] <= '9' {
+		return key, nil
+	}
+	if len(key) == 3 && key[0] == 'f' && key[1] == '1' && key[2] >= '0' && key[2] <= '2' {
+		return key, nil
+	}
+	for _, prefix := range []string{"ctrl+", "alt+"} {
+		if letter, ok := strings.CutPrefix(key, prefix); ok && len(letter) == 1 && letter[0] >= 'a' && letter[0] <= 'z' {
+			return key, nil
+		}
+	}
+	return "", fmt.Errorf("unsupported key %q", value)
 }
 
 func ValidateDisplayText(field, value string, required bool) error {

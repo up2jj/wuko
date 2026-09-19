@@ -26,18 +26,22 @@ func (adapter herdrAdapter) Execute(ctx context.Context, target Target, request 
 	if request.Scope == ScopeTab {
 		return adapter.executeTab(ctx, target, request, environment)
 	}
+	id := targetID(target, request.Target)
 	var args []string
 	switch request.Operation {
 	case OperationTitle:
 		if err := herdrOperandSafe(request.Title, herdrPaneRenameFlags); err != nil {
 			return Outcome{}, err
 		}
-		args = []string{"pane", "rename", target.ID, request.Title}
+		args = []string{"pane", "rename", id, request.Title}
 	case OperationClearTitle:
-		args = []string{"pane", "rename", target.ID, "--clear"}
+		args = []string{"pane", "rename", id, "--clear"}
 	case OperationZoom:
-		args = []string{"pane", "zoom", target.ID, "--" + request.Mode}
+		args = []string{"pane", "zoom", id, "--" + request.Mode}
 	case OperationNotify:
+		if request.Target != "" {
+			return Outcome{}, &UnsupportedError{Provider: ProviderHerdr, Operation: request.Operation, Detail: "herdr notifications cannot target a pane"}
+		}
 		if err := herdrOperandSafe(request.Title, herdrNotificationShowFlags); err != nil {
 			return Outcome{}, err
 		}
@@ -46,7 +50,48 @@ func (adapter herdrAdapter) Execute(ctx context.Context, target Target, request 
 			args = append(args, "--body", request.Body)
 		}
 	case OperationMetadata:
+		target.ID = id
 		args = metadataArgs(target, request)
+	case OperationRead:
+		args = []string{"pane", "read", id, "--source", "visible", "--format", "text"}
+		if request.Scrollback {
+			args = []string{"pane", "read", id, "--source", "recent", "--lines", strconv.Itoa(request.Lines), "--format", "text"}
+		}
+		result, err := runReadCommand(ctx, adapter.executor, environment, "herdr", args...)
+		if err != nil {
+			return Outcome{}, err
+		}
+		return Outcome{Text: limitedLines(result.Stdout, request)}, nil
+	case OperationSendText:
+		args = []string{"pane", "send-text", id, request.Text}
+	case OperationSendKeys:
+		keys, err := herdrKeys(request.Keys)
+		if err != nil {
+			return Outcome{}, err
+		}
+		args = append([]string{"pane", "send-keys", id}, keys...)
+	case OperationSplit:
+		result, err := runCommand(ctx, adapter.executor, environment, "herdr", "pane", "split", id, "--direction", request.Direction, "--focus")
+		if err != nil {
+			return Outcome{}, err
+		}
+		created, err := herdrField(result.Stdout, "pane", "pane_id")
+		if err != nil {
+			return Outcome{}, err
+		}
+		if created == "" {
+			return Outcome{}, fmt.Errorf("herdr split returned no pane id")
+		}
+		return Outcome{CreatedTarget: created, CreatedPane: created}, nil
+	case OperationResize:
+		args = []string{"pane", "resize", "--direction", request.Direction, "--pane", id}
+		if request.Amount != nil {
+			args = append(args, "--amount", amountArgument(request.Amount))
+		}
+	case OperationFocusDirection:
+		args = []string{"pane", "focus", "--direction", request.Direction, "--pane", id}
+	case OperationClosePane:
+		args = []string{"pane", "close", id}
 	default:
 		return Outcome{}, &UnsupportedError{Provider: ProviderHerdr, Operation: request.Operation}
 	}
@@ -70,7 +115,8 @@ func (adapter herdrAdapter) executeTab(ctx context.Context, target Target, reque
 	if err := herdrOperandSafe(title, herdrTabRenameFlags); err != nil {
 		return Outcome{}, err
 	}
-	tab, err := adapter.tabID(ctx, target, environment)
+	target.ID = targetID(target, request.Target)
+	tab, err := adapter.tabID(ctx, target, environment, request.Target == "")
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -84,8 +130,23 @@ func (adapter herdrAdapter) executeTab(ctx context.Context, target Target, reque
 	return Outcome{PreviousTitle: previous}, nil
 }
 
-func (adapter herdrAdapter) tabID(ctx context.Context, target Target, environment map[string]string) (string, error) {
-	if id := strings.TrimSpace(environment["HERDR_TAB_ID"]); id != "" {
+func herdrKeys(values []string) ([]string, error) {
+	keys := make([]string, 0, len(values))
+	for _, value := range values {
+		key, err := NormalizeKey(value)
+		if err != nil {
+			return nil, err
+		}
+		if key == "escape" {
+			key = "esc"
+		}
+		keys = append(keys, key)
+	}
+	return keys, nil
+}
+
+func (adapter herdrAdapter) tabID(ctx context.Context, target Target, environment map[string]string, allowEnvironment bool) (string, error) {
+	if id := strings.TrimSpace(environment["HERDR_TAB_ID"]); allowEnvironment && id != "" {
 		return id, nil
 	}
 	result, err := runCommand(ctx, adapter.executor, environment, "herdr", "pane", "get", target.ID)

@@ -985,6 +985,81 @@ Portable operations are:
 | `clear_title` | none | Clear the current context label |
 | `zoom` | `mode: on`, `off`, or `toggle` | Set current-pane zoom where supported |
 | `notify` | `title`, optional `body` | Show a native notification or tmux message |
+| `read` | optional `target`; optional `scrollback`; `lines` with scrollback | Read visible terminal text or up to 10,000 recent lines |
+| `send_text` | `text`, optional `target` | Type literal text without submitting it |
+| `send_keys` | non-empty `keys`, optional `target` | Press normalized navigation, editing, function, or modifier keys |
+| `split` | `direction: right` or `down`, optional `target` | Create and focus a terminal split |
+| `resize` | `direction`, optional `target` and `amount` | Resize a pane by one provider-default increment or a native amount |
+
+Provider detection applies to every operation. Do not set `provider` for ordinary workflows; use
+it only to override the `tmux`, Herdr, then cmux precedence in a nested environment. Explicit
+operation names preserve provider semantics instead of guessing what a target means:
+
+| Operation | Fields | Providers |
+| --- | --- | --- |
+| `focus_pane` | required pane `target` | tmux, cmux |
+| `focus_direction` | `direction`, optional origin pane `target` | tmux, Herdr |
+| `close_pane` | required pane `target` | tmux, Herdr |
+| `close_surface` | required surface `target` | cmux |
+
+Close operations always require an explicit target. On cmux, `read`, `send_text`, `send_keys`,
+`split`, and `close_surface` take a surface ID; `resize` and `focus_pane` take a pane ID. tmux and
+Herdr use pane IDs. Existing operations also accept `target`: cmux sidebar operations interpret it
+as a workspace ID, while terminal operations use their native pane or surface selector.
+
+`split` returns `created_target`, which is ready for terminal I/O, and `created_pane`, which is
+ready for layout operations. For tmux and Herdr they are the same pane ID; for cmux they are the
+new surface and pane IDs:
+
+```yaml
+- id: worker
+  type: multiplexer
+  with:
+    operation: split
+    direction: right
+
+- id: type_command
+  type: multiplexer
+  with:
+    operation: send_text
+    target: "{{ .steps.worker.created_target }}"
+    text: npm test
+
+- id: submit
+  type: multiplexer
+  with:
+    operation: send_keys
+    target: "{{ .steps.worker.created_target }}"
+    keys: [enter]
+
+- id: inspect
+  type: multiplexer
+  with:
+    operation: read
+    target: "{{ .steps.worker.created_target }}"
+    scrollback: true
+    lines: 100
+```
+
+Visible-screen reads omit `scrollback` and `lines`. Read text is returned in `text`, reads report
+`changed: false`, and capture fails rather than silently truncating beyond 1 MiB. `send_text` is
+literal and does not synthesize Enter; use `send_keys` for Enter or control input. Key names are
+case-insensitive and normalize to `enter`, `escape`, `tab`, `backspace`, `delete`, `insert`,
+`home`, `end`, `pageup`, `pagedown`, arrows, `space`, `f1` through `f12`, `ctrl+<letter>`,
+`alt+<letter>`, and `shift+tab`.
+
+Resize amounts deliberately retain native units after auto-detection. tmux and cmux accept positive
+whole terminal cells; Herdr accepts a fractional layout delta greater than zero and at most one.
+Omit `amount` for a portable one-increment resize:
+
+```yaml
+- id: grow_worker
+  type: multiplexer
+  with:
+    operation: resize
+    target: "{{ .steps.worker.created_pane }}"
+    direction: right
+```
 
 Provider-specific operations are rejected when the detected provider or installed CLI does not
 advertise them:
@@ -1001,7 +1076,8 @@ noun-first CLI labels the current pane. Older cmux releases without pane zoom or
 return an explicit unsupported-operation error.
 
 All successful active operations output `active`, `provider`, `operation`, `scope`, `target`,
-`changed`, and `previous_title`.
+`changed`, `previous_title`, `text`, `created_target`, and `created_pane`; fields unrelated to the
+operation are empty.
 The step controls the local host terminal and is not available inside executor blocks. Display
 text rejects terminal control characters. Raw provider commands remain available through `shell`.
 

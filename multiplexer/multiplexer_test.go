@@ -364,3 +364,225 @@ func TestScopeDefaultsToPane(t *testing.T) {
 		t.Fatalf("calls = %v", executor.calls)
 	}
 }
+
+func TestAutoDetectedPaneControlCommands(t *testing.T) {
+	amount := 4.0
+	tests := []struct {
+		name        string
+		environment map[string]string
+		results     []process.Result
+		request     Request
+		wantCalls   []commandCall
+		wantText    string
+		wantChanged bool
+	}{
+		{
+			name:        "tmux sends literal text to an explicit pane",
+			environment: map[string]string{"TMUX": "socket", "TMUX_PANE": "%1"},
+			request:     Request{Operation: OperationSendText, Target: "%8", Text: "echo hello"},
+			wantCalls:   []commandCall{{command: "tmux", args: []string{"send-keys", "-t", "%8", "-l", "--", "echo hello"}}},
+			wantChanged: true,
+		},
+		{
+			name:        "herdr reads visible text",
+			environment: map[string]string{"HERDR_PANE_ID": "1-1"},
+			results:     []process.Result{{Stdout: "ready\n"}},
+			request:     Request{Operation: OperationRead},
+			wantCalls:   []commandCall{{command: "herdr", args: []string{"pane", "read", "1-1", "--source", "visible", "--format", "text"}}},
+			wantText:    "ready\n",
+		},
+		{
+			name:        "tmux normalizes keys",
+			environment: map[string]string{"TMUX": "socket", "TMUX_PANE": "%1"},
+			request:     Request{Operation: OperationSendKeys, Keys: []string{"enter", "ctrl+c", "alt+x", "f5", "shift+tab"}},
+			wantCalls:   []commandCall{{command: "tmux", args: []string{"send-keys", "-t", "%1", "--", "Enter", "C-c", "M-x", "F5", "BTab"}}},
+			wantChanged: true,
+		},
+		{
+			name:        "herdr resizes with native fraction",
+			environment: map[string]string{"HERDR_PANE_ID": "1-1"},
+			request:     Request{Operation: OperationResize, Direction: "left", Amount: floatPointer(0.2)},
+			wantCalls:   []commandCall{{command: "herdr", args: []string{"pane", "resize", "--direction", "left", "--pane", "1-1", "--amount", "0.2"}}},
+			wantChanged: true,
+		},
+		{
+			name:        "cmux resizes an explicit pane",
+			environment: map[string]string{"CMUX_SURFACE_ID": "surface:1"},
+			results: []process.Result{
+				{Stdout: "Commands:\n  resize-pane --pane <id>\n"}, {},
+			},
+			request: Request{Operation: OperationResize, Target: "pane:7", Direction: "down", Amount: &amount},
+			wantCalls: []commandCall{
+				{command: "cmux", args: []string{"--help"}},
+				{command: "cmux", args: []string{"resize-pane", "--pane", "pane:7", "-D", "--amount", "4"}},
+			},
+			wantChanged: true,
+		},
+		{
+			name:        "cmux preserves literal backslashes",
+			environment: map[string]string{"CMUX_SURFACE_ID": "surface:1"},
+			results: []process.Result{
+				{Stdout: "Commands:\n  send [--surface <id>] <text>\n"}, {},
+			},
+			request: Request{Operation: OperationSendText, Text: `printf '\n'`},
+			wantCalls: []commandCall{
+				{command: "cmux", args: []string{"--help"}},
+				{command: "cmux", args: []string{"send", "--surface", "surface:1", "--", `printf '\\n'`}},
+			},
+			wantChanged: true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			executor := &fakeExecutor{results: test.results}
+			result, err := New(executor).Execute(t.Context(), test.environment, test.request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !callsEqual(executor.calls, test.wantCalls) {
+				t.Fatalf("calls = %#v, want %#v", executor.calls, test.wantCalls)
+			}
+			if result.Text != test.wantText || result.Changed != test.wantChanged {
+				t.Fatalf("result = %#v", result)
+			}
+		})
+	}
+}
+
+func TestSplitReturnsProviderTargets(t *testing.T) {
+	tests := []struct {
+		name        string
+		environment map[string]string
+		results     []process.Result
+		wantCalls   []commandCall
+		wantTarget  string
+		wantPane    string
+	}{
+		{
+			name:        "tmux",
+			environment: map[string]string{"TMUX": "socket", "TMUX_PANE": "%1"},
+			results:     []process.Result{{Stdout: "%9\n"}},
+			wantCalls:   []commandCall{{command: "tmux", args: []string{"split-window", "-P", "-F", "#{pane_id}", "-t", "%1", "-h"}}},
+			wantTarget:  "%9",
+			wantPane:    "%9",
+		},
+		{
+			name:        "herdr",
+			environment: map[string]string{"HERDR_PANE_ID": "1-1"},
+			results:     []process.Result{{Stdout: `{"result":{"pane":{"pane_id":"1-2"}}}`}},
+			wantCalls:   []commandCall{{command: "herdr", args: []string{"pane", "split", "1-1", "--direction", "right", "--focus"}}},
+			wantTarget:  "1-2",
+			wantPane:    "1-2",
+		},
+		{
+			name:        "cmux",
+			environment: map[string]string{"CMUX_SURFACE_ID": "surface:1", "CMUX_WORKSPACE_ID": "workspace:1"},
+			results: []process.Result{
+				{Stdout: "Commands:\n  new-split right\n"},
+				{Stdout: `{"created_surface_ref":"surface:4"}`},
+				{Stdout: `{"caller":{"surface_ref":"surface:4","pane_ref":"pane:3"}}`},
+			},
+			wantCalls: []commandCall{
+				{command: "cmux", args: []string{"--help"}},
+				{command: "cmux", args: []string{"--json", "--id-format", "refs", "new-split", "right", "--surface", "surface:1"}},
+				{command: "cmux", args: []string{"--json", "--id-format", "refs", "identify", "--surface", "surface:4"}},
+			},
+			wantTarget: "surface:4",
+			wantPane:   "pane:3",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			executor := &fakeExecutor{results: test.results}
+			result, err := New(executor).Execute(t.Context(), test.environment, Request{Operation: OperationSplit, Direction: "right"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !callsEqual(executor.calls, test.wantCalls) {
+				t.Fatalf("calls = %#v, want %#v", executor.calls, test.wantCalls)
+			}
+			if result.CreatedTarget != test.wantTarget || result.CreatedPane != test.wantPane {
+				t.Fatalf("result = %#v", result)
+			}
+		})
+	}
+}
+
+func TestProviderSpecificOperationsStayExplicit(t *testing.T) {
+	tests := []struct {
+		name        string
+		environment map[string]string
+		operation   Operation
+	}{
+		{name: "herdr cannot focus exact pane", environment: map[string]string{"HERDR_PANE_ID": "1-1"}, operation: OperationFocusPane},
+		{name: "cmux does not close pane", environment: map[string]string{"CMUX_SURFACE_ID": "surface:1"}, operation: OperationClosePane},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			executor := &fakeExecutor{results: []process.Result{{Stdout: "Commands:\n  close-surface\n"}}}
+			_, err := New(executor).Execute(t.Context(), test.environment, Request{Operation: test.operation, Target: "target:2"})
+			var unsupported *UnsupportedError
+			if !errors.As(err, &unsupported) || unsupported.Operation != test.operation {
+				t.Fatalf("error = %v", err)
+			}
+		})
+	}
+}
+
+func TestReadRejectsTruncatedOutput(t *testing.T) {
+	executor := &fakeExecutor{results: []process.Result{{Stdout: "partial", StdoutTruncated: true}}}
+	_, err := New(executor).Execute(t.Context(), map[string]string{"TMUX": "socket", "TMUX_PANE": "%1"}, Request{Operation: OperationRead})
+	if err == nil || !strings.Contains(err.Error(), "1 MiB") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestResizeValidatesAmountAfterProviderDetection(t *testing.T) {
+	tests := []struct {
+		name        string
+		environment map[string]string
+		amount      float64
+		want        string
+	}{
+		{name: "tmux requires cells", environment: map[string]string{"TMUX": "socket", "TMUX_PANE": "%1"}, amount: 0.5, want: "whole number for tmux"},
+		{name: "herdr requires fraction", environment: map[string]string{"HERDR_PANE_ID": "1-1"}, amount: 2, want: "at most 1 for herdr"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := New(&fakeExecutor{}).Execute(t.Context(), test.environment, Request{Operation: OperationResize, Direction: "right", Amount: &test.amount})
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v", err)
+			}
+		})
+	}
+}
+
+func floatPointer(value float64) *float64 { return &value }
+
+func TestScrollbackReadSkipsScreenPadding(t *testing.T) {
+	executor := &fakeExecutor{results: []process.Result{{Stdout: "a\nb\nc\n\n\n\n\n"}}}
+	result, err := New(executor).Execute(t.Context(), map[string]string{"TMUX": "socket", "TMUX_PANE": "%1"}, Request{Operation: OperationRead, Scrollback: true, Lines: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Text != "b\nc\n" {
+		t.Fatalf("text = %q", result.Text)
+	}
+}
+
+func TestCmuxSplitClosesSurfaceWhenIdentifyFails(t *testing.T) {
+	executor := &fakeExecutor{results: []process.Result{
+		{Stdout: "Commands:\n  new-split right\n"},
+		{Stdout: `{"created_surface_ref":"surface:4"}`},
+		{Stdout: `{}`},
+		{},
+	}}
+	_, err := New(executor).Execute(t.Context(), map[string]string{"CMUX_SURFACE_ID": "surface:1"}, Request{Operation: OperationSplit, Direction: "right"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	last := executor.calls[len(executor.calls)-1]
+	if last.command != "cmux" || !slices.Equal(last.args, []string{"close-surface", "--surface", "surface:4"}) {
+		t.Fatalf("calls = %#v", executor.calls)
+	}
+}

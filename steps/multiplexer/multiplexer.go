@@ -13,22 +13,29 @@ import (
 )
 
 type Config struct {
-	Scope     string  `yaml:"scope,omitempty"`
-	Provider  string  `yaml:"provider,omitempty"`
-	Operation string  `yaml:"operation"`
-	Title     string  `yaml:"title,omitempty"`
-	Mode      string  `yaml:"mode,omitempty"`
-	Body      string  `yaml:"body,omitempty"`
-	Key       string  `yaml:"key,omitempty"`
-	Value     string  `yaml:"value,omitempty"`
-	Icon      string  `yaml:"icon,omitempty"`
-	Color     string  `yaml:"color,omitempty"`
-	Priority  *int    `yaml:"priority,omitempty"`
-	Progress  float64 `yaml:"progress,omitempty"`
-	Label     string  `yaml:"label,omitempty"`
-	Level     string  `yaml:"level,omitempty"`
-	Source    string  `yaml:"source,omitempty"`
-	Message   string  `yaml:"message,omitempty"`
+	Scope      string   `yaml:"scope,omitempty"`
+	Provider   string   `yaml:"provider,omitempty"`
+	Operation  string   `yaml:"operation"`
+	Target     string   `yaml:"target,omitempty"`
+	Title      string   `yaml:"title,omitempty"`
+	Mode       string   `yaml:"mode,omitempty"`
+	Body       string   `yaml:"body,omitempty"`
+	Key        string   `yaml:"key,omitempty"`
+	Value      string   `yaml:"value,omitempty"`
+	Icon       string   `yaml:"icon,omitempty"`
+	Color      string   `yaml:"color,omitempty"`
+	Priority   *int     `yaml:"priority,omitempty"`
+	Progress   float64  `yaml:"progress,omitempty"`
+	Label      string   `yaml:"label,omitempty"`
+	Level      string   `yaml:"level,omitempty"`
+	Source     string   `yaml:"source,omitempty"`
+	Message    string   `yaml:"message,omitempty"`
+	Text       string   `yaml:"text,omitempty"`
+	Keys       []string `yaml:"keys,omitempty"`
+	Direction  string   `yaml:"direction,omitempty"`
+	Scrollback bool     `yaml:"scrollback,omitempty"`
+	Lines      int      `yaml:"lines,omitempty"`
+	Amount     *float64 `yaml:"amount,omitempty"`
 
 	DisplayAgent      string            `yaml:"display_agent,omitempty"`
 	StateLabels       map[string]string `yaml:"state_labels,omitempty"`
@@ -52,7 +59,7 @@ type Runner struct {
 
 func Register(registry *step.Registry) error {
 	return registry.RegisterDefinition("multiplexer", step.Registration{Builder: New, Outputs: step.ClosedOutputs(
-		"active", "provider", "operation", "scope", "previous_title", "target", "changed",
+		"active", "provider", "operation", "scope", "previous_title", "target", "changed", "text", "created_target", "created_pane",
 	)})
 }
 
@@ -100,11 +107,13 @@ func (runner *Runner) Run(ctx context.Context, request step.Request) (step.Resul
 		source = metadataSource(request.WorkflowName, request.StepID)
 	}
 	result, err := runner.controller.Execute(ctx, request.Env, mux.Request{
-		Provider: provider, Operation: operation, Scope: scope, Title: runner.config.Title, Mode: runner.config.Mode,
+		Provider: provider, Operation: operation, Scope: scope, Target: runner.config.Target, Title: runner.config.Title, Mode: runner.config.Mode,
 		Body: runner.config.Body, Key: runner.config.Key, Value: runner.config.Value,
 		Icon: runner.config.Icon, Color: runner.config.Color, Priority: runner.config.Priority,
 		Progress: runner.config.Progress, Label: runner.config.Label, Level: runner.config.Level,
-		Source: source, Message: runner.config.Message, DisplayAgent: runner.config.DisplayAgent,
+		Source: source, Message: runner.config.Message, Text: runner.config.Text, Keys: runner.config.Keys,
+		Direction: runner.config.Direction, Scrollback: runner.config.Scrollback, Lines: runner.config.Lines,
+		Amount: runner.config.Amount, DisplayAgent: runner.config.DisplayAgent,
 		StateLabels: runner.config.StateLabels, Tokens: runner.config.Tokens,
 		ClearTitle: runner.config.ClearTitle, ClearDisplayAgent: runner.config.ClearDisplayAgent,
 		ClearStateLabels: runner.config.ClearStateLabels, ClearTokens: runner.config.ClearTokens,
@@ -116,7 +125,8 @@ func (runner *Runner) Run(ctx context.Context, request step.Request) (step.Resul
 	return step.Result{Outputs: map[string]any{
 		"active": result.Active, "provider": string(result.Provider), "operation": string(result.Operation),
 		"scope": string(result.Scope), "previous_title": result.PreviousTitle,
-		"target": result.Target, "changed": result.Changed,
+		"target": result.Target, "changed": result.Changed, "text": result.Text,
+		"created_target": result.CreatedTarget, "created_pane": result.CreatedPane,
 	}}, nil
 }
 
@@ -139,7 +149,7 @@ func (runner *Runner) validate() error {
 	if err != nil {
 		return err
 	}
-	allowed := map[string]bool{"provider": true, "operation": true}
+	allowed := map[string]bool{"provider": true, "operation": true, "target": true}
 	if operation == mux.OperationTitle || operation == mux.OperationClearTitle {
 		allowed["scope"] = true
 	}
@@ -148,6 +158,13 @@ func (runner *Runner) validate() error {
 			return fmt.Errorf("%s is required for %s", field, operation)
 		}
 		return nil
+	}
+	if runner.present["target"] {
+		// A present but empty target (often a template that rendered to "")
+		// must not silently fall back to the pane running the workflow.
+		if err := mux.ValidateDisplayText("target", runner.config.Target, true); err != nil {
+			return err
+		}
 	}
 	switch operation {
 	case mux.OperationTitle:
@@ -230,6 +247,74 @@ func (runner *Runner) validate() error {
 		if err := runner.validateMetadata(); err != nil {
 			return err
 		}
+	case mux.OperationRead:
+		allowed["scrollback"], allowed["lines"] = true, true
+		if runner.config.Scrollback {
+			if err := require("lines"); err != nil {
+				return err
+			}
+			if runner.config.Lines < 1 || runner.config.Lines > 10_000 {
+				return fmt.Errorf("lines must be between 1 and 10000")
+			}
+		} else if runner.present["lines"] {
+			return fmt.Errorf("lines requires scrollback: true")
+		}
+	case mux.OperationSendText:
+		allowed["text"] = true
+		if err := require("text"); err != nil {
+			return err
+		}
+		if err := mux.ValidateDisplayText("text", runner.config.Text, true); err != nil {
+			return err
+		}
+	case mux.OperationSendKeys:
+		allowed["keys"] = true
+		if err := require("keys"); err != nil {
+			return err
+		}
+		if len(runner.config.Keys) == 0 {
+			return fmt.Errorf("keys must not be empty")
+		}
+		for _, key := range runner.config.Keys {
+			if templated(key) {
+				continue
+			}
+			if _, err := mux.NormalizeKey(key); err != nil {
+				return err
+			}
+		}
+	case mux.OperationSplit:
+		allowed["direction"] = true
+		if err := runner.validateDirection(operation, "right", "down"); err != nil {
+			return err
+		}
+	case mux.OperationResize:
+		allowed["direction"], allowed["amount"] = true, true
+		if err := runner.validateDirection(operation, "left", "right", "up", "down"); err != nil {
+			return err
+		}
+		if runner.config.Amount != nil && (math.IsNaN(*runner.config.Amount) || math.IsInf(*runner.config.Amount, 0) || *runner.config.Amount <= 0) {
+			return fmt.Errorf("amount must be greater than zero")
+		}
+	case mux.OperationFocusPane:
+		if err := require("target"); err != nil {
+			return err
+		}
+		if err := mux.ValidateDisplayText("target", runner.config.Target, true); err != nil {
+			return err
+		}
+	case mux.OperationFocusDirection:
+		allowed["direction"] = true
+		if err := runner.validateDirection(operation, "left", "right", "up", "down"); err != nil {
+			return err
+		}
+	case mux.OperationClosePane, mux.OperationCloseSurface:
+		if err := require("target"); err != nil {
+			return err
+		}
+		if err := mux.ValidateDisplayText("target", runner.config.Target, true); err != nil {
+			return err
+		}
 	}
 	for field := range runner.present {
 		if !allowed[field] {
@@ -237,6 +322,21 @@ func (runner *Runner) validate() error {
 		}
 	}
 	return nil
+}
+
+func (runner *Runner) validateDirection(operation mux.Operation, values ...string) error {
+	if !runner.present["direction"] {
+		return fmt.Errorf("direction is required for %s", operation)
+	}
+	if templated(runner.config.Direction) {
+		return nil
+	}
+	for _, value := range values {
+		if runner.config.Direction == value {
+			return nil
+		}
+	}
+	return fmt.Errorf("direction must be %s", strings.Join(values, ", "))
 }
 
 func (runner *Runner) validateMetadata() error {
