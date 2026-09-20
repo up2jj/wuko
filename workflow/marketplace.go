@@ -283,7 +283,7 @@ func MarketplaceRepositoryName(baseURL string) (string, error) {
 	}
 	clean := strings.Trim(result.String(), "-.")
 	if clean == "" || clean == "." || clean == ".." {
-		return "", fmt.Errorf("marketplace URL %q has no usable repository name", baseURL)
+		return "", fmt.Errorf("marketplace URL %q has no usable repository name", safeURL(base))
 	}
 	return clean, nil
 }

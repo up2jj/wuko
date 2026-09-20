@@ -402,9 +402,13 @@ runs step cleanup before `plugin.stop`.
 - Standard output must contain protocol frames only; an ordinary log line is a malformed frame.
 - Standard error is forwarded as plugin diagnostics and is not parsed as protocol data.
 - Unknown response IDs and malformed response or event envelopes fail every pending request.
+- `stdout` and `stderr` event data must be valid base64; malformed data is a protocol failure.
+- A host output-writer failure cancels the affected request. Failure to finish within the bounded
+  drain period tears down the connection.
 - Wuko requires exactly one of `result` and `error` in a response.
 - On cancellation, Wuko stops forwarding events for that request immediately.
-- Shutdown calls are bounded. A plugin that does not exit is sent `SIGTERM`, then forcibly killed.
+- Shutdown calls are bounded. A plugin that does not exit has its process group sent `SIGTERM`,
+  then `SIGKILL`, so descendants cannot be orphaned.
 - All values crossing the protocol must be valid JSON values. Binary stdin and streamed output use
   base64 because JSON strings are not a byte container.
 

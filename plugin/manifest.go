@@ -16,9 +16,10 @@ const (
 	ProtocolV1 = "wuko.plugin/v1"
 	ProtocolV2 = "wuko.plugin/v2"
 
-	// Protocol remains the default emitted by plugin init. Protocol v2 is opt-in
-	// because it adds bidirectional host calls and managed service semantics.
-	Protocol = ProtocolV1
+	// Protocol is the newest protocol emitted by plugin init. Older protocols remain
+	// supported for installed and development plugins, but new scaffolds always move
+	// forward with the host's latest contract.
+	Protocol = ProtocolV2
 )
 
 type Manifest struct {

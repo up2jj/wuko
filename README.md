@@ -580,7 +580,7 @@ Use controls to run independent work or repeat a block over runtime data.
 | `install` | Run steps before an installed workflow is committed | [Workflow installation](docs/execution.md#workflow-installation) |
 | `uninstall` | Run steps before an installed workflow is removed | [Workflow installation](docs/execution.md#workflow-installation) |
 | `marketplace init/build` | Create, rebuild, or check a workflow and plugin marketplace | [Workflow installation](docs/execution.md#workflow-marketplaces) |
-| `marketplace plugin init/add/update` | Create a plugin scaffold and manage marketplace plugin releases | [Executable plugins](docs/plugins.md#create-and-publish-a-marketplace-plugin) |
+| `marketplace plugin init/add/update` | Create a latest-protocol plugin scaffold and manage marketplace plugin releases | [Executable plugins](docs/plugins.md#create-and-publish-a-marketplace-plugin) |
 | `cron` | Run a workflow on a schedule | [Execution and composition](docs/execution.md#scheduled-runs) |
 
 ## Workflow composition

@@ -98,20 +98,19 @@ func TestBarePluginIsAcceptedOnTheProtocolItAnswersWith(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer closeClient(client)
-	if protocol != ProtocolV1 || initialized.Protocol != ProtocolV1 {
+	if protocol != Protocol || initialized.Protocol != Protocol {
 		t.Fatalf("negotiated %q with %#v", protocol, initialized)
 	}
-	// The helper answers v1 to the v2 offer, which is the whole negotiation: shutting the
-	// process down to relaunch it and be told the same thing is wasted work.
+	// The helper answers the newest offered protocol, so negotiation takes one launch.
 	data, err := os.ReadFile(launches)
 	if err != nil || len(data) != 1 {
 		t.Fatalf("plugin launched %d times, want 1 (%v)", len(data), err)
 	}
-	// A pinned protocol is not negotiable, so the same answer is a handshake failure there.
-	pinned, _, _, err := launchInitialized(t.Context(), path, "acme", ProtocolV2, "test", io.Discard)
+	// A different pinned protocol is not negotiable.
+	pinned, _, _, err := launchInitialized(t.Context(), path, "acme", ProtocolV1, "test", io.Discard)
 	if err == nil {
 		closeClient(pinned)
-		t.Fatal("expected a pinned v2 handshake to reject a v1 answer")
+		t.Fatal("expected a pinned v1 handshake to reject a v2 answer")
 	}
 }
 
@@ -391,6 +390,60 @@ func newPipeClient(t *testing.T) (*client, *bufio.Scanner, *json.Encoder) {
 	})
 	return client, bufio.NewScanner(pluginInput), json.NewEncoder(pluginOutput)
 }
+
+func TestMalformedStreamDataFailsProtocol(t *testing.T) {
+	client, scanner, encoder := newPipeClient(t)
+	go func() {
+		if !scanner.Scan() {
+			return
+		}
+		var request requestFrame
+		_ = json.Unmarshal(scanner.Bytes(), &request)
+		_ = encoder.Encode(eventFrame{ID: request.ID, Event: "stdout", Data: "not-base64!"})
+	}()
+	var result any
+	err := client.call(t.Context(), "step.run", map[string]any{}, &result, streamEvents(io.Discard, io.Discard, nil))
+	if err == nil || !strings.Contains(err.Error(), "malformed plugin stdout event data") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestStreamWriterFailureCancelsRequest(t *testing.T) {
+	client, scanner, encoder := newPipeClient(t)
+	canceled := make(chan struct{})
+	go func() {
+		if !scanner.Scan() {
+			return
+		}
+		var request requestFrame
+		_ = json.Unmarshal(scanner.Bytes(), &request)
+		_ = encoder.Encode(eventFrame{ID: request.ID, Event: "stdout", Data: base64.StdEncoding.EncodeToString([]byte("data"))})
+		if !scanner.Scan() {
+			return
+		}
+		var cancel requestFrame
+		_ = json.Unmarshal(scanner.Bytes(), &cancel)
+		if cancel.Method == "cancel" {
+			close(canceled)
+		}
+		_ = encoder.Encode(map[string]any{"id": request.ID, "result": map[string]any{}})
+	}()
+	writerErr := errors.New("writer unavailable")
+	var result any
+	err := client.call(t.Context(), "step.run", map[string]any{}, &result, streamEvents(errorWriter{err: writerErr}, io.Discard, nil))
+	if !errors.Is(err, writerErr) {
+		t.Fatalf("error = %v", err)
+	}
+	select {
+	case <-canceled:
+	default:
+		t.Fatal("stream writer failure did not cancel the plugin request")
+	}
+}
+
+type errorWriter struct{ err error }
+
+func (writer errorWriter) Write([]byte) (int, error) { return 0, writer.err }
 
 type snapshotTestRenderer struct {
 	current *string

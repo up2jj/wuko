@@ -40,3 +40,24 @@ func TestPluginOutputSchemaOpenWithoutFieldsIsOpenObject(t *testing.T) {
 		t.Fatalf("schema = %#v, want open object", schema)
 	}
 }
+
+func TestValidateInitializeDeclarationsRejectsUnreachableTypesAndAmbiguousSchemas(t *testing.T) {
+	for _, typeName := range []string{"acme.", "acme.one.two", "other.one"} {
+		err := validateInitializeDeclarations("acme", ProtocolV2, initializeResult{Steps: []stepDeclaration{{Type: typeName}}})
+		if err == nil {
+			t.Fatalf("accepted unreachable type %q", typeName)
+		}
+	}
+	items := &outputSchemaDeclaration{}
+	for _, schema := range []outputSchemaDeclaration{
+		{Items: items, Open: true},
+		{Items: items, Fields: map[string]outputSchemaDeclaration{}},
+		{Fields: map[string]outputSchemaDeclaration{"": {}}},
+		{Fields: map[string]outputSchemaDeclaration{"nested": {Items: items, Open: true}}},
+	} {
+		err := validateInitializeDeclarations("acme", ProtocolV2, initializeResult{Steps: []stepDeclaration{{Type: "acme.valid", Outputs: &schema}}})
+		if err == nil {
+			t.Fatalf("accepted ambiguous schema %#v", schema)
+		}
+	}
+}

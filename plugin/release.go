@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -208,12 +209,13 @@ func fetchManifest(ctx context.Context, source string, client *http.Client) ([]b
 	}
 	if strings.HasPrefix(source, "https://") {
 		parsed, err := url.Parse(source)
-		if err != nil || parsed.User != nil {
+		if err != nil || parsed.User != nil || parsed.Fragment != "" {
 			return nil, "", nil, fmt.Errorf("invalid HTTPS plugin source")
 		}
 		if parsed.Path == "" || strings.HasSuffix(parsed.Path, "/") || !strings.Contains(path.Base(parsed.Path), ".") {
 			parsed.Path = strings.TrimSuffix(parsed.Path, "/") + "/plugin.json"
 		}
+		parsed.RawPath = ""
 		manifestURL := parsed.String()
 		data, err := download(ctx, manifestURL, client, parsed.Host)
 		if err != nil {
@@ -226,11 +228,11 @@ func fetchManifest(ctx context.Context, source string, client *http.Client) ([]b
 			}
 			target := *parsed
 			target.Path = path.Join(path.Dir(parsed.Path), safe)
-			target.RawQuery = ""
+			target.RawPath = ""
 			target.Fragment = ""
 			return download(ctx, target.String(), client, parsed.Host)
 		}
-		return data, manifestURL, resolver, nil
+		return data, safeHTTPSURL(parsed), resolver, nil
 	}
 	if strings.Contains(source, "://") {
 		return nil, "", nil, fmt.Errorf("plugin sources must be local, HTTPS, or github")
@@ -323,6 +325,7 @@ func parseGitHub(source string) (owner, repo, ref, manifestPath string, err erro
 }
 
 func download(ctx context.Context, address string, client *http.Client, origin string) ([]byte, error) {
+	safeAddress := safeHTTPSAddress(address)
 	if client == nil {
 		client = &http.Client{CheckRedirect: func(request *http.Request, via []*http.Request) error {
 			if request.URL.Scheme != "https" || request.URL.Host != origin {
@@ -336,18 +339,22 @@ func download(ctx context.Context, address string, client *http.Client, origin s
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, address, nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("creating plugin download request for %s", safeAddress)
 	}
 	response, err := client.Do(request)
 	if err != nil {
-		return nil, err
+		var urlErr *url.Error
+		if errors.As(err, &urlErr) {
+			return nil, fmt.Errorf("downloading %s: %v", safeAddress, urlErr.Err)
+		}
+		return nil, fmt.Errorf("downloading %s: %w", safeAddress, err)
 	}
 	defer response.Body.Close()
 	if response.Request.URL.Scheme != "https" || response.Request.URL.Host != origin || response.Request.URL.User != nil {
 		return nil, fmt.Errorf("plugin redirect left original origin")
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, fmt.Errorf("downloading %s: %s", address, response.Status)
+		return nil, fmt.Errorf("downloading %s: %s", safeAddress, response.Status)
 	}
 	limited := io.LimitReader(response.Body, maxArchiveBytes+1)
 	data, err := io.ReadAll(limited)
@@ -358,6 +365,22 @@ func download(ctx context.Context, address string, client *http.Client, origin s
 		return nil, fmt.Errorf("plugin download exceeds byte limit")
 	}
 	return data, nil
+}
+
+func safeHTTPSAddress(address string) string {
+	parsed, err := url.Parse(address)
+	if err != nil {
+		return "HTTPS plugin source"
+	}
+	return safeHTTPSURL(parsed)
+}
+
+func safeHTTPSURL(parsed *url.URL) string {
+	safe := *parsed
+	safe.RawQuery = ""
+	safe.ForceQuery = false
+	safe.Fragment = ""
+	return safe.String()
 }
 
 func safeRelative(value string) (string, error) {

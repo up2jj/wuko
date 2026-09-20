@@ -1314,6 +1314,18 @@ func TestWorkflowPickerOptionShowsFormAvailability(t *testing.T) {
 	}
 }
 
+func TestPluginStopReason(t *testing.T) {
+	if got := pluginStopReason(nil); got != "completed" {
+		t.Fatalf("success reason = %q", got)
+	}
+	if got := pluginStopReason(errors.New("boom")); got != "failed" {
+		t.Fatalf("failure reason = %q", got)
+	}
+	if got := pluginStopReason(fmt.Errorf("wrapped: %w", context.Canceled)); got != "canceled" {
+		t.Fatalf("cancel reason = %q", got)
+	}
+}
+
 func writeTestWorkflow(t *testing.T, path, description string) {
 	t.Helper()
 	name := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))

@@ -1,0 +1,104 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"testing"
+)
+
+func TestUppercase(t *testing.T) {
+	result, err := runUppercase(json.RawMessage(`{"with":{"value":"hello"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.(map[string]any)["outputs"].(map[string]any)["value"] != "HELLO" {
+		t.Fatal(result)
+	}
+}
+func TestSlug(t *testing.T) {
+	result, err := callHelper(json.RawMessage(`{"name":"slug","args":["Hello World"]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.(map[string]any)["value"] != "hello-world" {
+		t.Fatal(result)
+	}
+}
+func TestOutputPolicies(t *testing.T) {
+	for policy := 0; policy <= 3; policy++ {
+		var frames bytes.Buffer
+		p := &peer{out: &frames}
+		sink := &outputSink{peer: p, id: "1", event: "stdout", policy: policy, limit: 3, budget: &captureBudget{remaining: maxResponseCapture}}
+		if _, err := sink.Write([]byte("hello")); err != nil {
+			t.Fatal(err)
+		}
+		value, truncated := sink.result()
+		wantStream := policy == 0 || policy == 1
+		wantCapture := policy == 0 || policy == 2
+		if (frames.Len() > 0) != wantStream {
+			t.Fatalf("policy %d stream=%v", policy, frames.Len() > 0)
+		}
+		if wantCapture {
+			if value != "hel" || !truncated {
+				t.Fatalf("policy %d capture=%q truncated=%v", policy, value, truncated)
+			}
+		} else if value != "" || truncated {
+			t.Fatalf("policy %d capture=%q truncated=%v", policy, value, truncated)
+		}
+	}
+}
+func TestCaptureTransportCeiling(t *testing.T) {
+	sink := &outputSink{peer: &peer{out: &bytes.Buffer{}}, id: "1", event: "stdout", policy: 2, budget: &captureBudget{remaining: maxResponseCapture}}
+	data := bytes.Repeat([]byte{'x'}, maxResponseCapture+1)
+	if _, err := sink.Write(data); err != nil {
+		t.Fatal(err)
+	}
+	value, truncated := sink.result()
+	if len(value) != maxResponseCapture || !truncated {
+		t.Fatalf("capture=%d truncated=%v", len(value), truncated)
+	}
+}
+func TestCallHostRequiresRequestContext(t *testing.T) {
+	if err := CallHost(context.Background(), "host.function.call", map[string]any{}, nil); err == nil {
+		t.Fatal("expected missing peer error")
+	}
+}
+func TestCallHostRoundTrip(t *testing.T) {
+	frames := make(frameWriter, 1)
+	p := &peer{out: frames, active: make(map[string]context.CancelFunc), callbacks: make(map[string]chan response), abandoned: make(map[string]struct{})}
+	ctx := context.WithValue(context.Background(), peerContextKey{}, p)
+	ctx = context.WithValue(ctx, requestContextKey{}, "parent")
+	var result struct {
+		Value string `json:"value"`
+	}
+	done := make(chan error, 1)
+	go func() { done <- CallHost(ctx, "host.function.call", map[string]any{"name": "example"}, &result) }()
+	var callback request
+	if err := json.Unmarshal(<-frames, &callback); err != nil {
+		t.Fatal(err)
+	}
+	var params map[string]any
+	if err := json.Unmarshal(callback.Params, &params); err != nil {
+		t.Fatal(err)
+	}
+	if params["parent_id"] != "parent" {
+		t.Fatalf("params=%#v", params)
+	}
+	if !p.deliver(response{ID: callback.ID, Result: json.RawMessage(`{"value":"ok"}`)}) {
+		t.Fatal("callback response was not routed")
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if result.Value != "ok" {
+		t.Fatalf("result=%#v", result)
+	}
+}
+
+type frameWriter chan []byte
+
+func (w frameWriter) Write(data []byte) (int, error) {
+	w <- append([]byte(nil), data...)
+	return len(data), nil
+}

@@ -1,0 +1,22 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+)
+
+func runUppercase(raw json.RawMessage) (any, error) {
+	var p struct {
+		With struct {
+			Value string `json:"value"`
+		} `json:"with"`
+	}
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return nil, err
+	}
+	if p.With.Value == "" {
+		return nil, fmt.Errorf("value is required")
+	}
+	return map[string]any{"outputs": map[string]any{"value": strings.ToUpper(p.With.Value)}}, nil
+}

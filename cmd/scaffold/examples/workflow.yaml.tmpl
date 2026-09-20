@@ -1,0 +1,18 @@
+version: 1
+name: {{NS}}-example
+plugins:
+  {{NS}}:
+    source: github:OWNER/wuko-plugin-{{NS}}@PINNED_REF
+    sha256: REPLACE_WITH_64_CHARACTER_MANIFEST_SHA256
+    with:
+      example: value
+steps:
+  - id: slug
+    type: set
+    with:
+      variable: slug
+      expr: {{NS}}_slug("Hello World")
+  - id: uppercase
+    type: {{NS}}.uppercase
+    with:
+      value: hello

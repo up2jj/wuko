@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +18,10 @@ import (
 )
 
 const maxFrameSize = 10 << 20
+
+// defaultDrainCancel bounds the wait for a plugin to acknowledge a cancel the host issued on its
+// own initiative, where the caller set no window of its own.
+const defaultDrainCancel = 10 * time.Second
 
 const (
 	// maxConcurrentHostCalls and maxHostCallBytes bound what one plugin can make the host hold
@@ -66,11 +71,13 @@ type pendingCall struct {
 // releases the closures, which capture the whole step request, instead of holding them for as
 // long as the plugin leaves the request unanswered.
 type callState struct {
-	mu       sync.Mutex
-	detached bool
-	event    func(eventFrame)
-	ctx      context.Context
-	host     hostCall
+	mu          sync.Mutex
+	detached    bool
+	event       func(eventFrame) error
+	eventErr    error
+	eventFailed chan struct{}
+	ctx         context.Context
+	host        hostCall
 }
 
 func (s *callState) deliver(frame eventFrame) {
@@ -79,7 +86,14 @@ func (s *callState) deliver(frame eventFrame) {
 	if s.detached || s.event == nil {
 		return
 	}
-	s.event(frame)
+	if err := s.event(frame); err != nil {
+		s.eventErr = err
+		s.detached = true
+		s.event = nil
+		s.host = nil
+		s.ctx = nil
+		close(s.eventFailed)
+	}
 }
 
 // hostTarget reports the callback of a still-active call. The callback itself runs outside the
@@ -94,27 +108,29 @@ func (s *callState) hostTarget() (context.Context, hostCall) {
 	return s.ctx, s.host
 }
 
-func (s *callState) detach() {
+func (s *callState) detach() error {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.detached = true
 	s.event = nil
 	s.host = nil
 	s.ctx = nil
-	s.mu.Unlock()
+	return s.eventErr
 }
 
 type hostCall func(context.Context, string, json.RawMessage) (any, error)
 
 type callOptions struct {
-	event       func(eventFrame)
+	event       func(eventFrame) error
 	host        hostCall
 	drainCancel time.Duration
 }
 type eventFrame struct {
-	ID     string          `json:"id"`
-	Event  string          `json:"event"`
-	Data   string          `json:"data,omitempty"`
-	Result json.RawMessage `json:"result,omitempty"`
+	ID      string          `json:"id"`
+	Event   string          `json:"event"`
+	Data    string          `json:"data,omitempty"`
+	Result  json.RawMessage `json:"result,omitempty"`
+	decoded []byte
 }
 
 type client struct {
@@ -211,6 +227,14 @@ func (c *client) read(reader io.Reader) {
 			if decodeFrame(line, &event) != nil || (event.Event != "stdout" && event.Event != "stderr" && event.Event != "started" && event.Event != "ready") {
 				c.fail(fmt.Errorf("malformed plugin event"))
 				return
+			}
+			if event.Event == "stdout" || event.Event == "stderr" {
+				decoded, err := base64.StdEncoding.DecodeString(event.Data)
+				if err != nil {
+					c.fail(fmt.Errorf("malformed plugin %s event data", event.Event))
+					return
+				}
+				event.decoded = decoded
 			}
 			pending.state.deliver(event)
 			continue
@@ -348,102 +372,157 @@ func (c *client) fail(err error) {
 		// The channel is buffered and every call receives at most one frame, so this never
 		// blocks. Detaching afterwards drops the sinks the failed call can no longer use.
 		call.response <- responseFrame{Error: &wireError{Message: err.Error()}}
-		call.state.detach()
+		_ = call.state.detach()
 	}
 }
 
-func (c *client) call(ctx context.Context, method string, params, result any, event func(eventFrame)) error {
+func (c *client) call(ctx context.Context, method string, params, result any, event func(eventFrame) error) error {
 	return c.callWithOptions(ctx, method, params, result, callOptions{event: event})
 }
 
 func (c *client) callWithOptions(ctx context.Context, method string, params, result any, options callOptions) error {
 	id := strconv.FormatUint(c.next.Add(1), 10)
 	response := make(chan responseFrame, 1)
-	c.mu.Lock()
-	if c.readErr != nil {
-		err := c.readErr
-		c.mu.Unlock()
+	state, err := c.register(ctx, id, response, options)
+	if err != nil {
 		return err
 	}
-	state := &callState{event: options.event, ctx: ctx, host: options.host}
-	c.pending[id] = pendingCall{response: response, state: state}
-	c.mu.Unlock()
-	discard := func() {
-		c.mu.Lock()
-		delete(c.pending, id)
-		c.mu.Unlock()
-		state.detach()
+	if err := c.send(id, method, params); err != nil {
+		c.discard(id, state)
+		return err
 	}
+	select {
+	case frame := <-response:
+		return errors.Join(state.detach(), c.decodeResponse(frame, result))
+	case <-state.eventFailed:
+		return c.drainAfterEventFailure(ctx, id, state, response, options.drainCancel, result)
+	case <-ctx.Done():
+		return c.drainAfterCancel(ctx, id, state, response, options.drainCancel, result)
+	}
+}
+
+// register reserves an id for the call and publishes the sinks the reader delivers into.
+func (c *client) register(ctx context.Context, id string, response chan responseFrame, options callOptions) (*callState, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.readErr != nil {
+		return nil, c.readErr
+	}
+	state := &callState{event: options.event, eventFailed: make(chan struct{}), ctx: ctx, host: options.host}
+	c.pending[id] = pendingCall{response: response, state: state}
+	return state, nil
+}
+
+// discard withdraws a call that never reached the plugin, so no response can arrive for its id.
+func (c *client) discard(id string, state *callState) {
+	c.mu.Lock()
+	delete(c.pending, id)
+	c.mu.Unlock()
+	_ = state.detach()
+}
+
+func (c *client) send(id, method string, params any) error {
 	data, err := json.Marshal(requestFrame{ID: id, Method: method, Params: params})
 	if err != nil {
-		discard()
 		return err
 	}
 	if len(data) > maxFrameSize {
-		discard()
 		return fmt.Errorf("plugin request exceeds 10 MiB")
 	}
 	c.writeMu.Lock()
 	_, err = c.stdin.Write(append(data, '\n'))
 	c.writeMu.Unlock()
 	if err != nil {
-		discard()
 		return fmt.Errorf("writing plugin request: %w", err)
 	}
-	decodeResponse := func(frame responseFrame) error {
-		if frame.Error != nil {
-			return errors.New(frame.Error.Message)
-		}
-		if result != nil {
-			decoder := json.NewDecoder(bytes.NewReader(frame.Result))
-			decoder.UseNumber()
-			if err := decoder.Decode(result); err != nil {
-				return fmt.Errorf("decoding plugin response: %w", err)
-			}
-		}
+	return nil
+}
+
+func (c *client) decodeResponse(frame responseFrame, result any) error {
+	if frame.Error != nil {
+		return errors.New(frame.Error.Message)
+	}
+	if result == nil {
 		return nil
 	}
+	decoder := json.NewDecoder(bytes.NewReader(frame.Result))
+	decoder.UseNumber()
+	if err := decoder.Decode(result); err != nil {
+		return fmt.Errorf("decoding plugin response: %w", err)
+	}
+	return nil
+}
+
+// drainAfterEventFailure handles a stream writer that refused a chunk. The caller still wants the
+// call's outcome, so the plugin is asked to cancel and given a bounded window to answer; a plugin
+// that ignores it is failing to honor cancellation, which condemns the whole connection.
+func (c *client) drainAfterEventFailure(ctx context.Context, id string, state *callState, response chan responseFrame, drainCancel time.Duration, result any) error {
+	eventErr := state.detach()
+	c.notify("cancel", map[string]any{"id": id})
+	drain := drainCancel
+	if drain <= 0 {
+		drain = defaultDrainCancel
+	}
+	timer := time.NewTimer(drain)
+	defer timer.Stop()
 	select {
 	case frame := <-response:
-		state.detach()
-		return decodeResponse(frame)
+		return errors.Join(eventErr, c.decodeResponse(frame, result))
+	case <-timer.C:
+		failure := fmt.Errorf("plugin did not finish after stream writer failure within %s", drain)
+		c.fail(failure)
+		return errors.Join(eventErr, failure)
+	case <-c.done:
+		return errors.Join(eventErr, c.readError())
 	case <-ctx.Done():
-		// Detach the sinks so a plugin that keeps streaming for this id cannot write into
-		// writers the canceled caller no longer owns; detach waits for an event already being
-		// delivered, so no callback outlives this return. The map entry stays registered so
-		// the eventual response is not mistaken for an unknown id.
-		if options.drainCancel <= 0 {
-			state.detach()
-		}
+		// The caller gave up first. The cancel notification is already out and the sinks are
+		// detached, so returning now costs nothing; the map entry stays registered so the
+		// eventual response is not mistaken for an unknown id.
+		return errors.Join(eventErr, ctx.Err())
+	}
+}
+
+// drainAfterCancel handles the caller giving up. Detaching the sinks stops a plugin that keeps
+// streaming for this id from writing into writers the canceled caller no longer owns; detach
+// waits for an event already being delivered, so no callback outlives this return. The map entry
+// stays registered so the eventual response is not mistaken for an unknown id.
+func (c *client) drainAfterCancel(ctx context.Context, id string, state *callState, response chan responseFrame, drainCancel time.Duration, result any) error {
+	// Without a drain window there is nothing to wait for, so the sinks go first.
+	if drainCancel <= 0 {
+		_ = state.detach()
 		c.notify("cancel", map[string]any{"id": id})
-		if options.drainCancel <= 0 {
-			return ctx.Err()
+		return ctx.Err()
+	}
+	c.notify("cancel", map[string]any{"id": id})
+	timer := time.NewTimer(drainCancel)
+	defer timer.Stop()
+	select {
+	case frame := <-response:
+		_ = state.detach()
+		if err := c.decodeResponse(frame, result); err != nil {
+			return err
 		}
-		timer := time.NewTimer(options.drainCancel)
-		defer timer.Stop()
+		return ctx.Err()
+	case <-timer.C:
+		_ = state.detach()
+		return errors.Join(ctx.Err(), fmt.Errorf("plugin did not finish canceled request within %s", drainCancel))
+	case <-c.done:
+		_ = state.detach()
+		// The reader may have delivered the response just before it stopped; prefer it over
+		// reporting the shutdown.
 		select {
 		case frame := <-response:
-			state.detach()
-			if err := decodeResponse(frame); err != nil {
-				return err
-			}
-			return ctx.Err()
-		case <-timer.C:
-			state.detach()
-			return errors.Join(ctx.Err(), fmt.Errorf("plugin did not finish canceled request within %s", options.drainCancel))
-		case <-c.done:
-			state.detach()
-			select {
-			case frame := <-response:
-				return decodeResponse(frame)
-			default:
-				c.mu.Lock()
-				readErr := c.readErr
-				c.mu.Unlock()
-				return errors.Join(ctx.Err(), readErr)
-			}
+			return c.decodeResponse(frame, result)
+		default:
+			return errors.Join(ctx.Err(), c.readError())
 		}
 	}
+}
+
+func (c *client) readError() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.readErr
 }
 
 func (c *client) notify(method string, params any) {
@@ -461,17 +540,37 @@ func (c *client) close(ctx context.Context) error {
 	go func() { wait <- c.cmd.Wait() }()
 	select {
 	case err := <-wait:
+		reapPluginGroup(c.cmd)
 		return errors.Join(shutdownErr, err)
 	case <-ctx.Done():
 	}
-	_ = c.cmd.Process.Signal(syscall.SIGTERM)
+	termErr := signalPluginGroup(c.cmd, syscall.SIGTERM)
 	timer := time.NewTimer(2 * time.Second)
 	defer timer.Stop()
 	select {
 	case err := <-wait:
-		return errors.Join(shutdownErr, err)
+		reapPluginGroup(c.cmd)
+		return errors.Join(shutdownErr, termErr, err)
 	case <-timer.C:
-		_ = c.cmd.Process.Kill()
-		return errors.Join(shutdownErr, <-wait)
+		killErr := signalPluginGroup(c.cmd, syscall.SIGKILL)
+		return errors.Join(shutdownErr, termErr, killErr, <-wait)
 	}
+}
+
+// reapPluginGroup sweeps descendants a faulty plugin left behind after it exited. Its result is
+// deliberately dropped: the plugin itself is already reaped, so a failure here says nothing about
+// whether the shutdown succeeded, and reporting it would turn a clean teardown into an error.
+func reapPluginGroup(cmd *exec.Cmd) {
+	_ = signalPluginGroup(cmd, syscall.SIGKILL)
+}
+
+func signalPluginGroup(cmd *exec.Cmd, signal syscall.Signal) error {
+	if cmd == nil || cmd.Process == nil {
+		return nil
+	}
+	err := syscall.Kill(-cmd.Process.Pid, signal)
+	if errors.Is(err, syscall.ESRCH) {
+		return nil
+	}
+	return err
 }

@@ -1,0 +1,157 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"sync"
+	"syscall"
+	"time"
+)
+
+const maxEventChunk = 32 << 10
+const maxResponseCapture = (maxProtocolFrame - 64<<10) / 6
+
+type captureBudget struct {
+	mu        sync.Mutex
+	remaining int64
+}
+type outputSink struct {
+	mu        sync.Mutex
+	peer      *peer
+	id, event string
+	policy    int
+	limit     int64
+	budget    *captureBudget
+	captured  []byte
+	truncated bool
+}
+
+func (w *outputSink) Write(data []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.policy == 0 || w.policy == 1 {
+		for start := 0; start < len(data); start += maxEventChunk {
+			end := min(start+maxEventChunk, len(data))
+			if err := w.peer.event(w.id, w.event, data[start:end]); err != nil {
+				return 0, err
+			}
+		}
+	}
+	if w.policy == 0 || w.policy == 2 {
+		allowed := int64(len(data))
+		if w.limit > 0 {
+			allowed = min(allowed, max(w.limit-int64(len(w.captured)), 0))
+		}
+		w.budget.mu.Lock()
+		allowed = min(allowed, w.budget.remaining)
+		w.budget.remaining -= allowed
+		w.budget.mu.Unlock()
+		w.captured = append(w.captured, data[:allowed]...)
+		if allowed < int64(len(data)) {
+			w.truncated = true
+		}
+	}
+	return len(data), nil
+}
+func (w *outputSink) result() (string, bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return string(w.captured), w.truncated
+}
+
+func runLocal(ctx context.Context, req request, p *peer) (any, error) {
+	var params struct {
+		Command      string            `json:"command"`
+		Args         []string          `json:"args"`
+		Dir          string            `json:"dir"`
+		Env          map[string]string `json:"env"`
+		Stdin        string            `json:"stdin"`
+		CaptureLimit int64             `json:"capture_limit"`
+		StdoutPolicy int               `json:"stdout_policy"`
+		StderrPolicy int               `json:"stderr_policy"`
+	}
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return nil, err
+	}
+	if params.Command == "" {
+		return nil, fmt.Errorf("command is required")
+	}
+	if params.CaptureLimit < 0 {
+		return nil, fmt.Errorf("capture_limit must not be negative")
+	}
+	if params.StdoutPolicy < 0 || params.StdoutPolicy > 3 || params.StderrPolicy < 0 || params.StderrPolicy > 3 {
+		return nil, fmt.Errorf("invalid output policy")
+	}
+	input, err := base64.StdEncoding.DecodeString(params.Stdin)
+	if err != nil {
+		return nil, fmt.Errorf("decoding stdin: %w", err)
+	}
+	cmd := exec.Command(params.Command, params.Args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Dir = params.Dir
+	cmd.Env = os.Environ()
+	for k, v := range params.Env {
+		cmd.Env = append(cmd.Env, k+"="+v)
+	}
+	cmd.Stdin = bytes.NewReader(input)
+	budget := &captureBudget{remaining: maxResponseCapture}
+	stdout := &outputSink{peer: p, id: req.ID, event: "stdout", policy: params.StdoutPolicy, limit: params.CaptureLimit, budget: budget}
+	stderr := &outputSink{peer: p, id: req.ID, event: "stderr", policy: params.StderrPolicy, limit: params.CaptureLimit, budget: budget}
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	if err := p.event(req.ID, "started", nil); err != nil {
+		_ = signalCommandGroup(cmd, syscall.SIGKILL)
+		_ = cmd.Wait()
+		return nil, err
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	var canceled error
+	select {
+	case err = <-done:
+	case <-ctx.Done():
+		canceled = ctx.Err()
+		_ = signalCommandGroup(cmd, syscall.SIGTERM)
+		timer := time.NewTimer(time.Second)
+		select {
+		case err = <-done:
+			if !timer.Stop() {
+				<-timer.C
+			}
+		case <-timer.C:
+			_ = signalCommandGroup(cmd, syscall.SIGKILL)
+			err = <-done
+		}
+	}
+	code := 0
+	if cmd.ProcessState != nil {
+		code = cmd.ProcessState.ExitCode()
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			err = nil
+		}
+	}
+	err = errors.Join(canceled, err)
+	stdoutValue, stdoutTruncated := stdout.result()
+	stderrValue, stderrTruncated := stderr.result()
+	return map[string]any{"stdout": stdoutValue, "stderr": stderrValue, "exit_code": code, "stdout_truncated": stdoutTruncated, "stderr_truncated": stderrTruncated}, err
+}
+func signalCommandGroup(cmd *exec.Cmd, signal syscall.Signal) error {
+	if cmd == nil || cmd.Process == nil {
+		return nil
+	}
+	err := syscall.Kill(-cmd.Process.Pid, signal)
+	if errors.Is(err, syscall.ESRCH) {
+		return nil
+	}
+	return err
+}

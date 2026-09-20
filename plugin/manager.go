@@ -437,7 +437,7 @@ func launchInitialized(ctx context.Context, path, namespace, protocol, hostVersi
 func validateInitializeDeclarations(namespace, protocol string, initialized initializeResult) error {
 	seen := make(map[string]bool)
 	for _, item := range initialized.Steps {
-		if seen[item.Type] || !strings.HasPrefix(item.Type, namespace+".") {
+		if seen[item.Type] || !validDeclarationType(namespace, item.Type) {
 			return fmt.Errorf("plugin %q has invalid or duplicate declaration %q", namespace, item.Type)
 		}
 		if protocol == ProtocolV1 && (item.Service || len(item.HostCallbacks) != 0) {
@@ -451,9 +451,14 @@ func validateInitializeDeclarations(namespace, protocol string, initialized init
 			seenCallbacks[callback] = true
 		}
 		seen[item.Type] = true
+		if item.Outputs != nil {
+			if err := validateOutputSchema(*item.Outputs); err != nil {
+				return fmt.Errorf("plugin %q step %q has invalid output schema: %w", namespace, item.Type, err)
+			}
+		}
 	}
 	for _, item := range initialized.Executors {
-		if seen[item.Type] || !strings.HasPrefix(item.Type, namespace+".") {
+		if seen[item.Type] || !validDeclarationType(namespace, item.Type) {
 			return fmt.Errorf("plugin %q has invalid or duplicate declaration %q", namespace, item.Type)
 		}
 		seen[item.Type] = true
@@ -469,6 +474,33 @@ func validateInitializeDeclarations(namespace, protocol string, initialized init
 			return fmt.Errorf("plugin %q helper %q conflicts with built-in helper %q", namespace, item.Name, exposed)
 		}
 		seenHelpers[item.Name] = true
+	}
+	return nil
+}
+
+func validDeclarationType(namespace, typeName string) bool {
+	prefix := namespace + "."
+	return strings.HasPrefix(typeName, prefix) && len(typeName) > len(prefix) && strings.Count(typeName, ".") == 1
+}
+
+func validateOutputSchema(schema outputSchemaDeclaration) error {
+	if schema.Items != nil {
+		if schema.Fields != nil || schema.Open {
+			return fmt.Errorf("array schema cannot also declare fields or open")
+		}
+		return validateOutputSchema(*schema.Items)
+	}
+	if schema.Fields == nil {
+		// A scalar, or `{"open": true}` alone, which is an open object with no known keys.
+		return nil
+	}
+	for name, child := range schema.Fields {
+		if name == "" {
+			return fmt.Errorf("object schema contains an empty field name")
+		}
+		if err := validateOutputSchema(child); err != nil {
+			return fmt.Errorf("field %q: %w", name, err)
+		}
 	}
 	return nil
 }
@@ -707,10 +739,9 @@ func (s *pluginStep) runService(ctx context.Context, request step.Request) (step
 		var startupOnce sync.Once
 		reportStartup := func(value serviceStartup) { startupOnce.Do(func() { startup <- value }) }
 		events := streamEvents(request.Stdout, request.Stderr, nil)
-		event := func(frame eventFrame) {
+		event := func(frame eventFrame) error {
 			if frame.Event != "ready" {
-				events(frame)
-				return
+				return events(frame)
 			}
 			if readyEvents.Add(1) != 1 {
 				failure := fmt.Errorf("plugin service %q sent more than one readiness event", s.name)
@@ -719,16 +750,17 @@ func (s *pluginStep) runService(ctx context.Context, request step.Request) (step
 				default:
 				}
 				cancel()
-				return
+				return nil
 			}
 			var result step.Result
 			if len(frame.Result) == 0 || decodeNumber(frame.Result, &result) != nil {
 				reportStartup(serviceStartup{err: fmt.Errorf("plugin service %q sent malformed readiness result", s.name)})
 				cancel()
-				return
+				return nil
 			}
 			ready.Store(true)
 			reportStartup(serviceStartup{result: result})
+			return nil
 		}
 		var final step.Result
 		err := s.plugin.client.callWithOptions(callCtx, "step.run", params, &final, callOptions{event: event, host: s.hostCallbacks(frozen), drainCancel: 10 * time.Second})
@@ -915,25 +947,37 @@ func (s *pluginStep) hostCallbacks(request step.Request) hostCall {
 		}
 	}
 }
-func streamEvents(stdout, stderr io.Writer, started func()) func(eventFrame) {
-	return func(event eventFrame) {
+func streamEvents(stdout, stderr io.Writer, started func()) func(eventFrame) error {
+	return func(event eventFrame) error {
 		switch event.Event {
-		case "stdout", "stderr":
-			data, err := base64.StdEncoding.DecodeString(event.Data)
-			if err != nil {
-				return
-			}
-			if event.Event == "stdout" && stdout != nil {
-				_, _ = stdout.Write(data)
-			} else if stderr != nil {
-				_, _ = stderr.Write(data)
-			}
+		case "stdout":
+			return writeStreamEvent("stdout", stdout, event.decoded)
+		case "stderr":
+			return writeStreamEvent("stderr", stderr, event.decoded)
 		case "started":
 			if started != nil {
 				started()
 			}
 		}
+		return nil
 	}
+}
+
+// writeStreamEvent forwards one decoded stream chunk to the writer that owns that stream. A nil
+// writer means the caller is not collecting that stream, which discards the chunk rather than
+// diverting it onto the other stream.
+func writeStreamEvent(name string, writer io.Writer, data []byte) error {
+	if writer == nil {
+		return nil
+	}
+	written, err := writer.Write(data)
+	if err != nil {
+		return fmt.Errorf("writing plugin %s: %w", name, err)
+	}
+	if written != len(data) {
+		return fmt.Errorf("writing plugin %s: %w", name, io.ErrShortWrite)
+	}
+	return nil
 }
 
 type pluginExecutor struct {

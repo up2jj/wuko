@@ -2,8 +2,10 @@ package cmd
 
 import (
 	"context"
+	"embed"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -18,6 +20,12 @@ import (
 )
 
 var pluginNamePattern = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+
+// scaffoldAssets holds the plugin starter tree written by `wuko plugin init`. Every template is
+// stored with a .tmpl suffix so this module never tries to compile the generated plugin's code.
+//
+//go:embed scaffold
+var scaffoldAssets embed.FS
 
 func newPluginCmd(deps dependencies) *cobra.Command {
 	command := &cobra.Command{Use: "plugin", Short: "Install and manage executable plugins"}
@@ -63,22 +71,67 @@ func installPlugin(command *cobra.Command, deps dependencies, source string, glo
 
 func installPluginMarketplace(command *cobra.Command, deps dependencies, source, root string, reinstall bool, requested []string, manifest workflow.MarketplaceManifest) error {
 	if len(manifest.Plugins) == 0 {
-		return fmt.Errorf("marketplace %s contains no plugins", source)
+		return fmt.Errorf("marketplace %s contains no plugins", marketplaceDisplaySource(source))
 	}
 	selected, err := selectMarketplacePlugins(command, deps, manifest.Plugins, requested)
 	if err != nil || selected == nil {
 		return err
 	}
-	for index, item := range manifest.Plugins {
+	requests, err := marketplaceInstallRequests(source, manifest.Plugins, selected)
+	if err != nil {
+		return err
+	}
+	markers, err := pluginpkg.InstallMarketplaceBatch(command.Context(), requests, root, reinstall, deps.httpClient, command.ErrOrStderr())
+	// A non-empty marker list means publication committed, so any error beside it comes from
+	// post-commit cleanup. Reporting the installations first keeps the user from believing a
+	// successful transaction was rolled back.
+	if writeErr := reportInstalledPlugins(command, root, markers); writeErr != nil {
+		return errors.Join(err, writeErr)
+	}
+	if err != nil {
+		if len(markers) > 0 {
+			return fmt.Errorf("cleaning up after marketplace install: %w", err)
+		}
+		return fmt.Errorf("installing marketplace plugins: %w", err)
+	}
+	return nil
+}
+
+// marketplaceDisplaySource renders a marketplace source for an error message. MarketplaceURL
+// drops the query string, so a source carrying a token in it is not echoed back to the terminal.
+func marketplaceDisplaySource(source string) string {
+	display, err := workflow.MarketplaceURL(source)
+	if err != nil {
+		return "HTTPS marketplace"
+	}
+	return display
+}
+
+func marketplaceInstallRequests(source string, plugins []workflow.MarketplacePluginPackage, selected map[int]struct{}) ([]pluginpkg.MarketplaceInstallRequest, error) {
+	requests := make([]pluginpkg.MarketplaceInstallRequest, 0, len(selected))
+	for index, item := range plugins {
 		if _, ok := selected[index]; !ok {
 			continue
 		}
 		resolved, err := workflow.ResolveMarketplacePlugin(source, item)
 		if err != nil {
-			return fmt.Errorf("resolving marketplace plugin %q: %w", item.Namespace, err)
+			return nil, fmt.Errorf("resolving marketplace plugin %q: %w", item.Namespace, err)
 		}
-		if err := installPluginRelease(command, deps, resolved, item.SHA256, item.Namespace, item.PluginVersion, root, reinstall); err != nil {
-			return fmt.Errorf("installing marketplace plugin %q: %w", item.Namespace, err)
+		requests = append(requests, pluginpkg.MarketplaceInstallRequest{
+			Source:         resolved,
+			ManifestDigest: item.SHA256,
+			Namespace:      item.Namespace,
+			PluginVersion:  item.PluginVersion,
+		})
+	}
+	return requests, nil
+}
+
+func reportInstalledPlugins(command *cobra.Command, root string, markers []pluginpkg.InstallationMarker) error {
+	for _, marker := range markers {
+		location := filepath.Join(root, marker.Namespace)
+		if _, err := fmt.Fprintf(command.OutOrStdout(), "Installed plugin %s %s in %s\n", marker.Namespace, marker.PluginVersion, location); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -250,9 +303,13 @@ func writeGoPluginScaffold(directory, namespace string) error {
 	if err := os.MkdirAll(filepath.Join(directory, "examples"), 0755); err != nil {
 		return err
 	}
-	files := scaffoldFiles()
+	files, err := scaffoldFiles()
+	if err != nil {
+		return err
+	}
 	for name, content := range files {
 		content = strings.ReplaceAll(content, "{{NS}}", namespace)
+		content = strings.ReplaceAll(content, "{{PROTOCOL}}", pluginpkg.Protocol)
 		target := filepath.Join(directory, name)
 		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
 			return err
@@ -264,184 +321,33 @@ func writeGoPluginScaffold(directory, namespace string) error {
 	return nil
 }
 
-func scaffoldFiles() map[string]string {
-	return map[string]string{
-		"go.mod": "module example.com/wuko-plugin-{{NS}}\n\ngo 1.26\n",
-		"main.go": `package main
-
-import (
-	"bufio"
-	"context"
-	"encoding/base64"
-	"encoding/json"
-	"fmt"
-	"os"
-)
-
-type request struct { ID string ` + "`json:\"id\"`" + `; Method string ` + "`json:\"method\"`" + `; Params json.RawMessage ` + "`json:\"params\"`" + ` }
-type response struct { ID string ` + "`json:\"id\"`" + `; Result any ` + "`json:\"result,omitempty\"`" + `; Error *rpcError ` + "`json:\"error,omitempty\"`" + ` }
-type rpcError struct { Message string ` + "`json:\"message\"`" + ` }
-
-func main(){scanner:=bufio.NewScanner(os.Stdin);scanner.Buffer(make([]byte,64<<10),10<<20);encoder:=json.NewEncoder(os.Stdout);for scanner.Scan(){var req request;if err:=json.Unmarshal(scanner.Bytes(),&req);err!=nil{fmt.Fprintln(os.Stderr,err);return};if req.ID==""&&req.Method=="cancel"{continue};result,err:=dispatch(context.Background(),req,encoder);reply:=response{ID:req.ID,Result:result};if err!=nil{reply.Result=nil;reply.Error=&rpcError{Message:err.Error()}};if err:=encoder.Encode(reply);err!=nil{return};if req.Method=="shutdown"{return}}}
-
-func dispatch(ctx context.Context,req request,encoder *json.Encoder)(any,error){switch req.Method{case "initialize":return map[string]any{"protocol":protocolVersion,"namespace":"{{NS}}","lifecycle":true,"helpers":[]any{map[string]any{"name":"slug"}},"steps":[]any{map[string]any{"type":"{{NS}}.uppercase"}},"executors":[]any{map[string]any{"type":"{{NS}}.local","cancel_stops_process":true}}},nil;case "plugin.start":var p struct{With map[string]any ` + "`json:\"with\"`" + `};_ = json.Unmarshal(req.Params,&p);return map[string]any{},Start(ctx,p.With);case "plugin.stop":var p struct{Reason string ` + "`json:\"reason\"`" + `};_ = json.Unmarshal(req.Params,&p);return map[string]any{},Stop(ctx,p.Reason);case "helper.call":return callHelper(req.Params);case "step.validate","executor.validate","executor.close":return map[string]any{},nil;case "step.run":return runUppercase(req.Params);case "executor.open":return map[string]any{"session":"local"},nil;case "executor.run":return runLocal(ctx,req,encoder);case "shutdown":return map[string]any{},nil;default:return nil,fmt.Errorf("unknown method %s",req.Method)}}
-func event(encoder *json.Encoder,id,kind string,data []byte){_ = encoder.Encode(map[string]any{"id":id,"event":kind,"data":base64.StdEncoding.EncodeToString(data)})}
-`,
-		"protocol.go": `package main
-
-// protocolVersion is the JSONL contract implemented by this executable.
-const protocolVersion = "wuko.plugin/v1"
-`,
-		"lifecycle.go": `package main
-import "context"
-// Start is called once before the first runtime operation. Configuration is plugins.{{NS}}.with.
-func Start(context.Context,map[string]any)error{return nil}
-// Stop is called once after executor close and step cleanup. Reason is completed, failed, or canceled.
-func Stop(context.Context,string)error{return nil}
-`,
-		"uppercase.go": `package main
-import("encoding/json";"fmt";"strings")
-func runUppercase(raw json.RawMessage)(any,error){var p struct{With struct{Value string ` + "`json:\"value\"`" + `} ` + "`json:\"with\"`" + `};if err:=json.Unmarshal(raw,&p);err!=nil{return nil,err};if p.With.Value==""{return nil,fmt.Errorf("value is required")};return map[string]any{"outputs":map[string]any{"value":strings.ToUpper(p.With.Value)}},nil}
-`,
-		"helpers.go": `package main
-import("encoding/json";"fmt";"regexp";"strings")
-var nonSlug=regexp.MustCompile(` + "`[^a-z0-9]+`" + `)
-func callHelper(raw json.RawMessage)(any,error){var p struct{Name string ` + "`json:\"name\"`" + `;Args []any ` + "`json:\"args\"`" + `};if err:=json.Unmarshal(raw,&p);err!=nil{return nil,err};if p.Name!="slug"{return nil,fmt.Errorf("unknown helper %q",p.Name)};if len(p.Args)!=1{return nil,fmt.Errorf("slug requires one argument")};value,ok:=p.Args[0].(string);if !ok{return nil,fmt.Errorf("slug argument must be a string")};value=strings.ToLower(strings.TrimSpace(value));return map[string]any{"value":strings.Trim(nonSlug.ReplaceAllString(value,"-"),"-")},nil}
-`,
-		"local_executor.go": `package main
-import("bytes";"context";"encoding/base64";"encoding/json";"os";"os/exec")
-func runLocal(ctx context.Context,req request,encoder *json.Encoder)(any,error){var p struct{Command string ` + "`json:\"command\"`" + `;Args []string ` + "`json:\"args\"`" + `;Dir string ` + "`json:\"dir\"`" + `;Env map[string]string ` + "`json:\"env\"`" + `;Stdin string ` + "`json:\"stdin\"`" + `};if err:=json.Unmarshal(req.Params,&p);err!=nil{return nil,err};cmd:=exec.CommandContext(ctx,p.Command,p.Args...);cmd.Dir=p.Dir;cmd.Env=os.Environ();for k,v:=range p.Env{cmd.Env=append(cmd.Env,k+"="+v)};input,_:=base64.StdEncoding.DecodeString(p.Stdin);cmd.Stdin=bytes.NewReader(input);var stdout,stderr bytes.Buffer;cmd.Stdout=&stdout;cmd.Stderr=&stderr;event(encoder,req.ID,"started",nil);err:=cmd.Run();event(encoder,req.ID,"stdout",stdout.Bytes());event(encoder,req.ID,"stderr",stderr.Bytes());code:=0;if cmd.ProcessState!=nil{code=cmd.ProcessState.ExitCode();err=nil};return map[string]any{"stdout":stdout.String(),"stderr":stderr.String(),"exit_code":code},err}
-`,
-		"plugin_test.go": `package main
-import("encoding/json";"testing")
-func TestUppercase(t *testing.T){result,err:=runUppercase(json.RawMessage(` + "`{\"with\":{\"value\":\"hello\"}}`" + `));if err!=nil{t.Fatal(err)};if result.(map[string]any)["outputs"].(map[string]any)["value"]!="HELLO"{t.Fatal(result)}}
-func TestSlug(t *testing.T){result,err:=callHelper(json.RawMessage(` + "`{\"name\":\"slug\",\"args\":[\"Hello World\"]}`" + `));if err!=nil{t.Fatal(err)};if result.(map[string]any)["value"]!="hello-world"{t.Fatal(result)}}
-`,
-		"justfile": `build:
-	go build -o wuko-plugin-{{NS}} .
-test:
-	go test ./...
-vet:
-	go vet ./...
-fmt:
-	gofmt -w *.go tools/release/*.go
-check: fmt vet test
-release version:
-	go run ./tools/release -version "{{version}}"
-install: build
-	mkdir -p "${HOME}/.wuko/plugins/{{NS}}"
-	cp wuko-plugin-{{NS}} "${HOME}/.wuko/plugins/{{NS}}/"
-`,
-		".gitignore": "/wuko-plugin-{{NS}}\n/dist/\n",
-		"examples/workflow.yaml": `version: 1
-name: {{NS}}-example
-plugins:
-  {{NS}}:
-    source: github:OWNER/wuko-plugin-{{NS}}@PINNED_REF
-    sha256: REPLACE_WITH_64_CHARACTER_MANIFEST_SHA256
-    with:
-      example: value
-steps:
-  - id: slug
-    type: set
-    with:
-      variable: slug
-      expr: {{NS}}_slug("Hello World")
-  - id: uppercase
-    type: {{NS}}.uppercase
-    with:
-      value: hello
-`,
-		"README.md": `# wuko-plugin-{{NS}}
-
-A standard-library-only Wuko JSONL plugin with a shared ` + "`{{NS}}_slug`" + ` helper. Run **just check** and **just build**.
-
-The executable keeps stdin/stdout exclusively for protocol frames; diagnostics go to stderr. Start and Stop are command-wide hooks. Edit lifecycle.go to use values from plugins.{{NS}}.with.
-
-The runtime contract is language-neutral. See [Wuko plugin protocol v1](https://github.com/up2jj/wuko/blob/main/docs/plugin-protocol.md) for message envelopes, methods, events, cancellation, and lifecycle ordering.
-
-Run ` + "`just release 0.1.0`" + ` to cross-compile deterministic Darwin/Linux archives for amd64/arm64 and generate plugin.json. From a marketplace repository, import this release with ` + "`wuko marketplace plugin add ../wuko-plugin-{{NS}}`" + `. Wuko verifies both the manifest and selected archive before launch.
-`,
-		"plugin.json": `{
-  "version": 1,
-  "namespace": "{{NS}}",
-  "plugin_version": "0.1.0",
-  "protocol": "wuko.plugin/v1",
-  "artifacts": [
-    {"os":"darwin","arch":"amd64","path":"dist/wuko-plugin-{{NS}}_Darwin_amd64.tar.gz","format":"tar.gz","entry":"wuko-plugin-{{NS}}","sha256":"REPLACE_WITH_64_CHARACTER_SHA256"},
-    {"os":"darwin","arch":"arm64","path":"dist/wuko-plugin-{{NS}}_Darwin_arm64.tar.gz","format":"tar.gz","entry":"wuko-plugin-{{NS}}","sha256":"REPLACE_WITH_64_CHARACTER_SHA256"},
-    {"os":"linux","arch":"amd64","path":"dist/wuko-plugin-{{NS}}_Linux_amd64.tar.gz","format":"tar.gz","entry":"wuko-plugin-{{NS}}","sha256":"REPLACE_WITH_64_CHARACTER_SHA256"},
-    {"os":"linux","arch":"arm64","path":"dist/wuko-plugin-{{NS}}_Linux_arm64.tar.gz","format":"tar.gz","entry":"wuko-plugin-{{NS}}","sha256":"REPLACE_WITH_64_CHARACTER_SHA256"}
-  ]
-}
-`,
-		"tools/release/main.go": `package main
-
-import (
-	"archive/tar"
-	"compress/gzip"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
-	"flag"
-	"fmt"
-	"io"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"strings"
-	"time"
-)
-
-const namespace = "{{NS}}"
-
-type artifact struct { OS string ` + "`json:\"os\"`" + `; Arch string ` + "`json:\"arch\"`" + `; Path string ` + "`json:\"path\"`" + `; Format string ` + "`json:\"format\"`" + `; Entry string ` + "`json:\"entry\"`" + `; SHA256 string ` + "`json:\"sha256\"`" + ` }
-type manifest struct { Version int ` + "`json:\"version\"`" + `; Namespace string ` + "`json:\"namespace\"`" + `; PluginVersion string ` + "`json:\"plugin_version\"`" + `; Protocol string ` + "`json:\"protocol\"`" + `; Artifacts []artifact ` + "`json:\"artifacts\"`" + ` }
-type target struct { os, arch, label string }
-
-func main() {
-	version := flag.String("version", "", "plugin version")
-	flag.Parse()
-	if strings.TrimSpace(*version) == "" || strings.TrimSpace(*version) != *version { fatal(fmt.Errorf("version must be non-empty without surrounding whitespace")) }
-	cwd, err := os.Getwd(); if err != nil { fatal(err) }
-	stage, err := os.MkdirTemp(cwd, ".release-*"); if err != nil { fatal(err) }; defer os.RemoveAll(stage)
-	targets := []target{{"darwin","amd64","Darwin"},{"darwin","arm64","Darwin"},{"linux","amd64","Linux"},{"linux","arm64","Linux"}}
-	result := manifest{Version:1, Namespace:namespace, PluginVersion:*version, Protocol:"wuko.plugin/v1"}
-	for _, item := range targets {
-		binary := filepath.Join(stage, "bin", item.os+"-"+item.arch, "wuko-plugin-"+namespace)
-		if err := os.MkdirAll(filepath.Dir(binary), 0755); err != nil { fatal(err) }
-		command := exec.Command("go", "build", "-trimpath", "-buildvcs=false", "-o", binary, ".")
-		command.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS="+item.os, "GOARCH="+item.arch)
-		command.Stdout, command.Stderr = os.Stdout, os.Stderr
-		if err := command.Run(); err != nil { fatal(fmt.Errorf("building %s/%s: %w", item.os, item.arch, err)) }
-		name := "wuko-plugin-"+namespace+"_"+item.label+"_"+item.arch+".tar.gz"
-		relative := filepath.ToSlash(filepath.Join("dist", name)); archivePath := filepath.Join(stage, filepath.FromSlash(relative))
-		if err := os.MkdirAll(filepath.Dir(archivePath), 0755); err != nil { fatal(err) }
-		if err := writeArchive(binary, archivePath); err != nil { fatal(err) }
-		data, err := os.ReadFile(archivePath); if err != nil { fatal(err) }; sum := sha256.Sum256(data)
-		result.Artifacts = append(result.Artifacts, artifact{OS:item.os, Arch:item.arch, Path:relative, Format:"tar.gz", Entry:"wuko-plugin-"+namespace, SHA256:hex.EncodeToString(sum[:])})
+// scaffoldFiles returns the plugin starter tree, keyed by the path each file takes in the
+// generated project. The sources live under scaffold/ as real files rather than string literals
+// so they stay gofmt-clean and reviewable; TestScaffoldIsFormatted holds that.
+func scaffoldFiles() (map[string]string, error) {
+	files := make(map[string]string)
+	err := fs.WalkDir(scaffoldAssets, "scaffold", func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return err
+		}
+		content, err := scaffoldAssets.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		files[scaffoldTargetPath(path)] = string(content)
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("reading plugin scaffold: %w", err)
 	}
-	manifestPath := filepath.Join(stage, "plugin.json"); file, err := os.Create(manifestPath); if err != nil { fatal(err) }
-	encoder := json.NewEncoder(file); encoder.SetIndent("", "  "); if err := encoder.Encode(result); err != nil { file.Close(); fatal(err) }; if err := file.Close(); err != nil { fatal(err) }
-	if err := replace(filepath.Join(cwd,"dist"), filepath.Join(stage,"dist")); err != nil { fatal(err) }
-	if err := replace(filepath.Join(cwd,"plugin.json"), manifestPath); err != nil { fatal(err) }
-	fmt.Printf("released plugin %s %s for %d platforms\n", namespace, *version, len(targets))
+	return files, nil
 }
 
-func writeArchive(binary, destination string) error {
-	input, err := os.Open(binary); if err != nil { return err }; defer input.Close()
-	info, err := input.Stat(); if err != nil { return err }
-	output, err := os.Create(destination); if err != nil { return err }
-	gzipWriter := gzip.NewWriter(output); gzipWriter.Header.ModTime = time.Unix(0,0); gzipWriter.Header.OS = 255
-	tarWriter := tar.NewWriter(gzipWriter)
-	header := &tar.Header{Name:"wuko-plugin-"+namespace, Mode:0755, Size:info.Size(), ModTime:time.Unix(0,0), AccessTime:time.Unix(0,0), ChangeTime:time.Unix(0,0), Format:tar.FormatPAX}
-	if err := tarWriter.WriteHeader(header); err != nil { output.Close(); return err }
-	if _, err := io.Copy(tarWriter, input); err != nil { output.Close(); return err }
-	if err := tarWriter.Close(); err != nil { output.Close(); return err }; if err := gzipWriter.Close(); err != nil { output.Close(); return err }; return output.Close()
-}
-
-func replace(target, staged string) error { if err := os.RemoveAll(target); err != nil { return err }; return os.Rename(staged, target) }
-func fatal(err error) { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
-`,
-	}
+// scaffoldTargetPath maps an embedded template to its path in the generated project. The .tmpl
+// suffix keeps the templates out of this module's build, and the dot- prefix carries a leading
+// dot that go:embed would otherwise skip.
+func scaffoldTargetPath(path string) string {
+	target := strings.TrimSuffix(strings.TrimPrefix(path, "scaffold/"), ".tmpl")
+	directory, name := filepath.Split(target)
+	return directory + strings.Replace(name, "dot-", ".", 1)
 }

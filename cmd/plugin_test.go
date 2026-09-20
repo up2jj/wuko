@@ -5,16 +5,23 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"go/format"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 	pluginpkg "github.com/up2jj/wuko/plugin"
@@ -62,6 +69,145 @@ func TestGoPluginScaffoldBuilds(t *testing.T) {
 	command.Env = append(command.Environ(), "GOCACHE="+filepath.Join(t.TempDir(), "cache"))
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("generated plugin tests: %v\n%s", err, output)
+	}
+}
+
+func TestGoPluginScaffoldIsFormatted(t *testing.T) {
+	directory := filepath.Join(t.TempDir(), "wuko-plugin-acme")
+	if err := writeGoPluginScaffold(directory, "acme"); err != nil {
+		t.Fatal(err)
+	}
+	err := filepath.WalkDir(directory, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() || !strings.HasSuffix(path, ".go") {
+			return err
+		}
+		source, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		formatted, err := format.Source(source)
+		if err != nil {
+			return fmt.Errorf("%s does not parse: %w", path, err)
+		}
+		if !bytes.Equal(source, formatted) {
+			t.Errorf("%s is not gofmt-clean; the scaffold ships it as a plugin author's starting point", path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestGoPluginScaffoldUsesNewestProtocolEverywhere(t *testing.T) {
+	directory := filepath.Join(t.TempDir(), "wuko-plugin-acme")
+	if err := writeGoPluginScaffold(directory, "acme"); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"protocol.go", "plugin.json", "tools/release/main.go", "README.md"} {
+		data, err := os.ReadFile(filepath.Join(directory, filepath.FromSlash(name)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(data), pluginpkg.Protocol) && name != "README.md" {
+			t.Fatalf("%s does not use newest protocol %q", name, pluginpkg.Protocol)
+		}
+		if strings.Contains(string(data), pluginpkg.ProtocolV1) {
+			t.Fatalf("%s still references old scaffold protocol", name)
+		}
+	}
+}
+
+func TestGoPluginScaffoldCancelsExecutorProcessGroup(t *testing.T) {
+	directory := filepath.Join(t.TempDir(), "wuko-plugin-acme")
+	if err := writeGoPluginScaffold(directory, "acme"); err != nil {
+		t.Fatal(err)
+	}
+	binary := filepath.Join(directory, "wuko-plugin-acme")
+	build := exec.Command("go", "build", "-o", binary, ".")
+	build.Dir = directory
+	build.Env = append(build.Environ(), "GOCACHE="+filepath.Join(t.TempDir(), "cache"))
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("building generated plugin: %v\n%s", err, output)
+	}
+	command := exec.Command(binary)
+	stdin, err := command.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := command.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	command.Stderr = io.Discard
+	if err := command.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = command.Process.Kill() }()
+	encoder := json.NewEncoder(stdin)
+	scanner := bufio.NewScanner(stdout)
+	readFrame := func() map[string]any {
+		t.Helper()
+		if !scanner.Scan() {
+			t.Fatalf("generated plugin closed output: %v", scanner.Err())
+		}
+		var frame map[string]any
+		if err := json.Unmarshal(scanner.Bytes(), &frame); err != nil {
+			t.Fatal(err)
+		}
+		return frame
+	}
+	if err := encoder.Encode(map[string]any{"id": "1", "method": "initialize", "params": map[string]any{"protocol": pluginpkg.Protocol}}); err != nil {
+		t.Fatal(err)
+	}
+	if frame := readFrame(); frame["id"] != "1" || frame["error"] != nil {
+		t.Fatalf("initialize frame = %#v", frame)
+	}
+	commandText := "sleep 30 & child=$!; printf '%s' \"$child\"; wait"
+	if err := encoder.Encode(map[string]any{"id": "2", "method": "executor.run", "params": map[string]any{"session": "local", "command": "sh", "args": []string{"-c", commandText}, "env": map[string]string{}, "stdin": "", "capture_limit": 64, "stdout_policy": 0, "stderr_policy": 3}}); err != nil {
+		t.Fatal(err)
+	}
+	var childPID int
+	for childPID == 0 {
+		frame := readFrame()
+		if frame["event"] != "stdout" {
+			continue
+		}
+		encoded, _ := frame["data"].(string)
+		decoded, err := io.ReadAll(base64.NewDecoder(base64.StdEncoding, strings.NewReader(encoded)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		childPID, err = strconv.Atoi(string(decoded))
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := encoder.Encode(map[string]any{"method": "cancel", "params": map[string]any{"id": "2"}}); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		frame := readFrame()
+		if frame["id"] == "2" && frame["event"] == nil {
+			break
+		}
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for syscall.Kill(childPID, 0) == nil && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := syscall.Kill(childPID, 0); !errors.Is(err, syscall.ESRCH) {
+		t.Fatalf("executor descendant %d survived cancellation: %v", childPID, err)
+	}
+	if err := encoder.Encode(map[string]any{"id": "3", "method": "shutdown", "params": map[string]any{}}); err != nil {
+		t.Fatal(err)
+	}
+	if frame := readFrame(); frame["id"] != "3" || frame["error"] != nil {
+		t.Fatalf("shutdown frame = %#v", frame)
+	}
+	_ = stdin.Close()
+	if err := command.Wait(); err != nil {
+		t.Fatal(err)
 	}
 }
 

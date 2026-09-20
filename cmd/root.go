@@ -325,15 +325,9 @@ func wrapPluginTeardown(command *cobra.Command, manager *plugin.Manager) {
 		run := command.RunE
 		command.RunE = func(command *cobra.Command, args []string) (runErr error) {
 			defer func() {
-				reason := "completed"
-				if errors.Is(runErr, context.Canceled) {
-					reason = "canceled"
-				} else if runErr != nil {
-					reason = "failed"
-				}
 				teardownCtx, cancel := context.WithTimeout(context.WithoutCancel(command.Context()), 10*time.Second)
 				defer cancel()
-				runErr = errors.Join(runErr, manager.Close(teardownCtx, reason))
+				runErr = errors.Join(runErr, manager.Close(teardownCtx, pluginStopReason(runErr)))
 			}()
 			return run(command, args)
 		}
@@ -341,6 +335,16 @@ func wrapPluginTeardown(command *cobra.Command, manager *plugin.Manager) {
 	for _, child := range command.Commands() {
 		wrapPluginTeardown(child, manager)
 	}
+}
+
+func pluginStopReason(runErr error) string {
+	if errors.Is(runErr, context.Canceled) {
+		return "canceled"
+	}
+	if runErr != nil {
+		return "failed"
+	}
+	return "completed"
 }
 
 func defaultProviderRegistry() *provider.Registry {
@@ -446,7 +450,7 @@ func runWorkflowPicker(command *cobra.Command, deps dependencies) error {
 		// selection declares its own sources, and a stateful plugin starts fresh for it.
 		if deps.plugins != nil {
 			resetCtx, cancel := context.WithTimeout(context.WithoutCancel(command.Context()), 10*time.Second)
-			resetErr := deps.plugins.Reset(resetCtx, "completed")
+			resetErr := deps.plugins.Reset(resetCtx, pluginStopReason(runErr))
 			cancel()
 			if resetErr != nil {
 				addNotice("plugin teardown failed: " + resetErr.Error())

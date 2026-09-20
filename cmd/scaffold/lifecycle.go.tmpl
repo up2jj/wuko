@@ -1,0 +1,9 @@
+package main
+
+import "context"
+
+// Start is called once before the first runtime operation. Configuration is plugins.{{NS}}.with.
+func Start(context.Context, map[string]any) error { return nil }
+
+// Stop is called once after executor close and step cleanup. Reason is completed, failed, or canceled.
+func Stop(context.Context, string) error { return nil }

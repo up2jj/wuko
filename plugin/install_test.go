@@ -3,6 +3,7 @@ package plugin
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -33,20 +34,32 @@ func TestInstallIsTransactionalAndWritesMarker(t *testing.T) {
 	if marker.Namespace != "acme" {
 		t.Fatal(marker)
 	}
-	if marker.Protocol != ProtocolV1 {
+	if marker.Protocol != Protocol {
 		t.Fatalf("marker protocol = %q", marker.Protocol)
 	}
 	directory := filepath.Join(root, "acme")
-	// A v1 marker leaves the field out so an older wuko, which rejects unknown marker fields,
-	// can still read installations written by this build.
 	stored, err := os.ReadFile(filepath.Join(directory, MarkerName))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(stored), "protocol") {
-		t.Fatalf("v1 marker records a protocol: %s", stored)
+	if !strings.Contains(string(stored), `"marker_version": 2`) || !strings.Contains(string(stored), `"executable_digest"`) || !strings.Contains(string(stored), `"protocol": "`+Protocol+`"`) {
+		t.Fatalf("v2 marker is incomplete: %s", stored)
 	}
 	if _, err := ValidateInstallation(directory, "acme"); err != nil {
+		t.Fatal(err)
+	}
+	installedExecutable := filepath.Join(directory, "wuko-plugin-acme")
+	originalExecutable, err := os.ReadFile(installedExecutable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(installedExecutable, append(originalExecutable, '\n'), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ValidateInstallation(directory, "acme"); err == nil || !strings.Contains(err.Error(), "digest mismatch") {
+		t.Fatalf("tampered executable error = %v", err)
+	}
+	if err := os.WriteFile(installedExecutable, originalExecutable, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := Install(context.Background(), source, root, false, nil, io.Discard); err == nil {
@@ -58,6 +71,76 @@ func TestInstallIsTransactionalAndWritesMarker(t *testing.T) {
 	if _, err := ValidateInstallation(directory, "acme"); err == nil {
 		t.Fatal("expected corrupted marker error")
 	}
+}
+
+func TestInstallReleasesRollsBackEveryCommittedPlugin(t *testing.T) {
+	root := t.TempDir()
+	for _, namespace := range []string{"acme", "beta"} {
+		directory := filepath.Join(root, namespace)
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(directory, "old"), []byte(namespace), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	releases := []Release{testInstallRelease(t, "acme"), testInstallRelease(t, "beta")}
+	commitErr := errors.New("injected publish failure")
+	ops := installationOps{
+		rename: func(oldPath, newPath string) error {
+			if strings.HasPrefix(filepath.Base(oldPath), ".plugin-stage-") && filepath.Base(newPath) == "beta" {
+				return commitErr
+			}
+			return os.Rename(oldPath, newPath)
+		},
+		removeAll: os.RemoveAll,
+	}
+	if _, err := installReleasesWithOps(t.Context(), releases, root, true, io.Discard, ops); !errors.Is(err, commitErr) {
+		t.Fatalf("install error = %v", err)
+	}
+	for _, namespace := range []string{"acme", "beta"} {
+		data, err := os.ReadFile(filepath.Join(root, namespace, "old"))
+		if err != nil || string(data) != namespace {
+			t.Fatalf("plugin %s was not restored: %q, %v", namespace, data, err)
+		}
+	}
+}
+
+func TestInstallReleasesSurfacesBackupCleanupFailure(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "acme")
+	if err := os.MkdirAll(target, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cleanupErr := errors.New("injected cleanup failure")
+	ops := installationOps{
+		rename: os.Rename,
+		removeAll: func(path string) error {
+			if strings.HasPrefix(filepath.Base(path), ".plugin-backup-") {
+				return cleanupErr
+			}
+			return os.RemoveAll(path)
+		},
+	}
+	markers, err := installReleasesWithOps(t.Context(), []Release{testInstallRelease(t, "acme")}, root, true, io.Discard, ops)
+	if !errors.Is(err, cleanupErr) || len(markers) != 1 {
+		t.Fatalf("markers = %#v, error = %v", markers, err)
+	}
+	if _, err := ValidateInstallation(target, "acme"); err != nil {
+		t.Fatalf("committed installation is invalid: %v", err)
+	}
+}
+
+func testInstallRelease(t *testing.T, namespace string) Release {
+	t.Helper()
+	script := []byte("#!/bin/sh\nread line\nprintf '{\"id\":\"1\",\"result\":{\"protocol\":\"" + Protocol + "\",\"namespace\":\"" + namespace + "\",\"steps\":[],\"executors\":[],\"helpers\":[]}}\\n'\nread line\nprintf '{\"id\":\"2\",\"result\":{}}\\n'\n")
+	archive := makeArchive(t, "wuko-plugin-"+namespace, 0o755, script)
+	manifest := Manifest{Version: 1, Namespace: namespace, PluginVersion: "1.0.0", Protocol: Protocol, Artifacts: []Artifact{{OS: runtime.GOOS, Arch: runtime.GOARCH, Path: "plugin.tar.gz", Format: "tar.gz", Entry: "wuko-plugin-" + namespace, SHA256: digest(archive)}}}
+	manifestData, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return Release{Manifest: manifest, ManifestData: manifestData, ManifestDigest: digest(manifestData), Artifact: manifest.Artifacts[0], ArtifactData: archive, CanonicalSource: "/tmp/" + namespace + "/plugin.json"}
 }
 
 func TestLegacyInstallationMarkerDefaultsToV1(t *testing.T) {
@@ -84,6 +167,17 @@ func TestLegacyInstallationMarkerDefaultsToV1(t *testing.T) {
 	}
 	if validated.Protocol != ProtocolV1 {
 		t.Fatalf("legacy marker protocol = %q", validated.Protocol)
+	}
+	marker["os"] = "plan9"
+	data, err = json.Marshal(marker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, MarkerName), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ValidateInstallation(directory, "acme"); err == nil || !strings.Contains(err.Error(), "running on") {
+		t.Fatalf("platform mismatch error = %v", err)
 	}
 }
 
