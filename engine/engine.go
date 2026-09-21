@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"runtime"
 	"slices"
 	"strings"
 	"time"
@@ -1403,7 +1404,7 @@ func (e *Engine) prepareActionExecutor(definition *workflow.Definition, workflow
 		if innerState.didReturn {
 			return step.Result{Outputs: cloneMap(innerState.Outputs)}, nil
 		}
-		environment := map[string]any{"inputs": innerState.Inputs, "vars": innerState.Vars, "steps": innerState.Steps, "env": innerState.Env, "workflow": map[string]any{"name": inner.Name, "dir": inner.Dir, "timezone": inner.Timezone}, "run": map[string]any{"dir": options.RunDir, "environment_loaders": slices.Clone(state.EnvironmentLoaders)}}
+		environment := map[string]any{"inputs": innerState.Inputs, "vars": innerState.Vars, "steps": innerState.Steps, "env": innerState.Env, "workflow": map[string]any{"name": inner.Name, "dir": inner.Dir, "timezone": inner.Timezone}, "run": step.RunValue{Dir: options.RunDir, EnvironmentLoaders: slices.Clone(state.EnvironmentLoaders), OS: runtime.GOOS, Arch: runtime.GOARCH}}
 		for name, value := range innerState.Providers.Values {
 			environment[name] = cloneMap(value)
 		}

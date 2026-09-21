@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -186,7 +187,11 @@ func TestCompositeActionRunsSequentiallyWithTypedInputsAndDeclaredOutputs(t *tes
 		"items":   {Type: "array", Required: true},
 		"enabled": {Type: "boolean", Default: true, HasDefault: true},
 	}
-	action.Outputs = map[string]workflow.ActionOutput{"result": {Value: `required(steps.second.value, "missing action result")`}}
+	action.Outputs = map[string]workflow.ActionOutput{
+		"result": {Value: `required(steps.second.value, "missing action result")`},
+		"os":     {Value: "run.os"},
+		"arch":   {Value: "run.arch"},
+	}
 	definition := testDefinition(t, "caller",
 		workflow.Step{ID: "prepare", Type: "action_capture", With: map[string]any{"value": []any{"b", "a"}}},
 		workflow.Step{ID: "remote", Uses: workflow.ActionSource{URL: "https://example.test/action@v1"}, Action: action, With: map[string]any{"items": map[string]any{"expr": "list(steps.prepare.value[1], steps.prepare.value[0])"}}},
@@ -200,7 +205,8 @@ func TestCompositeActionRunsSequentiallyWithTypedInputsAndDeclaredOutputs(t *tes
 	if !reflect.DeepEqual(order, wantOrder) {
 		t.Fatalf("order = %#v, want %#v", order, wantOrder)
 	}
-	if got := state.Steps["remote"].(map[string]any); !reflect.DeepEqual(got, map[string]any{"result": "done"}) {
+	wantOutputs := map[string]any{"result": "done", "os": runtime.GOOS, "arch": runtime.GOARCH}
+	if got := state.Steps["remote"].(map[string]any); !reflect.DeepEqual(got, wantOutputs) {
 		t.Fatalf("remote outputs = %#v", got)
 	}
 	if _, exists := state.Steps["first"]; exists {

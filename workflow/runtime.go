@@ -6,6 +6,7 @@ import (
 	"maps"
 	"os"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 
@@ -149,7 +150,10 @@ func templateData(definition *Definition, runDir string, environmentLoaders []st
 			"dir":      definition.Dir,
 			"timezone": definition.Timezone,
 		},
-		"run": map[string]any{"dir": runDir, "environment_loaders": slices.Clone(environmentLoaders)},
+		"run": map[string]any{
+			"dir": runDir, "environment_loaders": slices.Clone(environmentLoaders),
+			"os": runtime.GOOS, "arch": runtime.GOARCH,
+		},
 	}
 	for key, value := range bindings {
 		result[key] = Clone(value)

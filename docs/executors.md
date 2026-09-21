@@ -42,6 +42,10 @@ when execution enters the block, so they can consume state committed by earlier 
 Validation rejects an unknown provider or invalid provider configuration before running the
 workflow.
 
+`run.os` and `run.arch` always describe the host running Wuko, not the executor target. They stay
+stable inside the block. When a workflow needs the container or remote target's actual platform,
+query that environment through an executor-aware step.
+
 ```yaml
 version: 1
 name: mixed-build

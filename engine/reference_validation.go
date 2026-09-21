@@ -92,7 +92,7 @@ func newReferenceScope(state *State, stepSchemas map[string]*referenceSchema) *r
 		"steps":        schemaForAnyMap(state.Steps),
 		"dependencies": schemaForDependencies(state.Dependencies),
 		"workflow":     closedReference("name", "dir", "timezone"),
-		"run":          closedReference("dir", "environment_loaders"),
+		"run":          closedReference("dir", "environment_loaders", "os", "arch"),
 	}, stepSchemas: stepSchemas}
 	for name := range state.Providers.Values {
 		scope.roots[name] = schemaForProvider(state.Providers.Schemas[name])

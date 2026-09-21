@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"runtime"
 	"slices"
 
 	"github.com/expr-lang/expr"
@@ -74,7 +75,10 @@ func makeConditionEnvironment(definition *workflow.Definition, runDir string, st
 		"workflow": step.WorkflowValue{
 			Name: definition.Name, Dir: definition.Dir, Timezone: definition.Timezone,
 		},
-		"run":   step.RunValue{Dir: runDir, EnvironmentLoaders: slices.Clone(state.EnvironmentLoaders)},
+		"run": step.RunValue{
+			Dir: runDir, EnvironmentLoaders: slices.Clone(state.EnvironmentLoaders),
+			OS: runtime.GOOS, Arch: runtime.GOARCH,
+		},
 		"batch": bindingRoot(state.Bindings, "batch"), "foreach": bindingRoot(state.Bindings, "foreach"),
 		"matrix": bindingRoot(state.Bindings, "matrix"), "finally": bindingRoot(state.Bindings, "finally"),
 		"error": bindingRoot(state.Bindings, "error"),

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -96,16 +97,17 @@ func TestTemplateDataExposesWorkflowTimezone(t *testing.T) {
 	}
 }
 
-func TestTemplateDataExposesEnvironmentLoaders(t *testing.T) {
+func TestTemplateDataExposesRunMetadata(t *testing.T) {
 	t.Parallel()
 	definition := &Definition{Name: "release", Dir: "/workflow"}
 	data := TemplateDataWithRun(definition, "/run", []string{"mise", "direnv"}, nil, nil, nil, nil)
-	got, err := RenderString(`{{ index .run.environment_loaders 0 }}:{{ index .run.environment_loaders 1 }}`, data)
+	got, err := RenderString(`{{ index .run.environment_loaders 0 }}:{{ index .run.environment_loaders 1 }}:{{ .run.os }}:{{ .run.arch }}`, data)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != "mise:direnv" {
-		t.Fatalf("loaders = %q", got)
+	want := "mise:direnv:" + runtime.GOOS + ":" + runtime.GOARCH
+	if got != want {
+		t.Fatalf("run metadata = %q, want %q", got, want)
 	}
 }
 

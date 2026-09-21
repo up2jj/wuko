@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -145,11 +146,18 @@ type WorkflowValue struct {
 type RunValue struct {
 	Dir                string   `expr:"dir"`
 	EnvironmentLoaders []string `expr:"environment_loaders"`
+	OS                 string   `expr:"os"`
+	Arch               string   `expr:"arch"`
 }
 
 // RunValue returns the request's run metadata in evaluator form.
 func (request Request) RunValue() RunValue {
-	return RunValue{Dir: request.RunDir, EnvironmentLoaders: slices.Clone(request.EnvironmentLoaders)}
+	return RunValue{
+		Dir:                request.RunDir,
+		EnvironmentLoaders: slices.Clone(request.EnvironmentLoaders),
+		OS:                 runtime.GOOS,
+		Arch:               runtime.GOARCH,
+	}
 }
 
 // WorkflowValue returns the request's workflow metadata in evaluator form.

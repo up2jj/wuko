@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -54,12 +55,14 @@ func TestExecutorScopeReceivesEnvironmentBlock(t *testing.T) {
 	}
 }
 
-func TestExecutorScopePreservesInvocationEnvironmentLoaders(t *testing.T) {
+func TestExecutorScopePreservesRunMetadata(t *testing.T) {
 	scoped := &recordingExecutor{}
 	definition := testDefinition(t, "loader-executor", workflow.Step{
 		Executor: &workflow.ExecutorScope{Type: "recording", With: map[string]any{}},
-		Steps: []workflow.Step{{ID: "run", Type: "shell", If: `"direnv" in run.environment_loaders`, With: map[string]any{
-			"command": "echo", "args": []any{"{{ index .run.environment_loaders 0 }}"},
+		Steps: []workflow.Step{{ID: "run", Type: "shell", If: workflow.Condition(fmt.Sprintf(
+			`"direnv" in run.environment_loaders && run.os == %q && run.arch == %q`, runtime.GOOS, runtime.GOARCH,
+		)), With: map[string]any{
+			"command": "echo", "args": []any{"{{ index .run.environment_loaders 0 }}", "{{ .run.os }}", "{{ .run.arch }}"},
 		}}},
 	})
 	if _, err := executorTestEngine(t, scoped).Run(t.Context(), definition, Options{
@@ -67,7 +70,8 @@ func TestExecutorScopePreservesInvocationEnvironmentLoaders(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(scoped.commands, ","); got != "echo direnv" {
+	want := "echo direnv " + runtime.GOOS + " " + runtime.GOARCH
+	if got := strings.Join(scoped.commands, ","); got != want {
 		t.Fatalf("commands = %q", got)
 	}
 }

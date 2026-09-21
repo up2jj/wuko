@@ -187,12 +187,16 @@ func (r *runtime) module(state *glua.LState) (*glua.LTable, error) {
 		return nil, fmt.Errorf("converting Lua arguments: %w", err)
 	}
 	module.RawSetString("args", args)
+	run := r.request.RunValue()
 	for name, value := range map[string]any{
 		"inputs":       r.request.Inputs,
 		"steps":        r.request.Steps,
 		"dependencies": r.request.Dependencies,
 		"workflow":     map[string]any{"name": r.request.WorkflowName, "dir": r.request.WorkflowDir, "timezone": r.request.WorkflowTimezone},
-		"run":          map[string]any{"dir": r.request.RunDir, "environment_loaders": slices.Clone(r.request.EnvironmentLoaders)},
+		"run": map[string]any{
+			"dir": run.Dir, "environment_loaders": slices.Clone(run.EnvironmentLoaders),
+			"os": run.OS, "arch": run.Arch,
+		},
 	} {
 		converted, err := toLua(state, value)
 		if err != nil {

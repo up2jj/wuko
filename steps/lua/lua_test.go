@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	goruntime "runtime"
 	"strings"
 	"testing"
 	"time"
@@ -88,7 +89,7 @@ func TestLuaArgumentExpressionsUseRuntimeRootsAndPreserveTypes(t *testing.T) {
 		"source": `wuko.output("args", wuko.args)`,
 		"args": map[string]any{
 			"inventory": map[string]any{"expr": "steps.decode.value"},
-			"summary":   map[string]any{"expr": `inputs.prefix + ":" + dependencies.build.artifact + ":" + batch.name + ":" + foreach.item + ":" + matrix.os + ":" + finally.status + ":" + workflow.name + ":" + workflow.dir + ":" + run.dir`},
+			"summary":   map[string]any{"expr": `inputs.prefix + ":" + dependencies.build.artifact + ":" + batch.name + ":" + foreach.item + ":" + matrix.os + ":" + finally.status + ":" + workflow.name + ":" + workflow.dir + ":" + run.dir + ":" + run.os + ":" + run.arch`},
 		},
 	})
 	if err != nil {
@@ -113,7 +114,7 @@ func TestLuaArgumentExpressionsUseRuntimeRootsAndPreserveTypes(t *testing.T) {
 	if !reflect.DeepEqual(args["inventory"], wantInventory) {
 		t.Fatalf("inventory = %#v, want %#v", args["inventory"], wantInventory)
 	}
-	wantSummary := "deploy:app:batch:item:linux:succeeded:release:/workflow:/run"
+	wantSummary := "deploy:app:batch:item:linux:succeeded:release:/workflow:/run:" + goruntime.GOOS + ":" + goruntime.GOARCH
 	if args["summary"] != wantSummary {
 		t.Fatalf("summary = %#v, want %q", args["summary"], wantSummary)
 	}
@@ -130,6 +131,8 @@ wuko.output("roots", {
   workflow_dir = wuko.workflow.dir,
   run_dir = wuko.run.dir,
   environment_loaders = wuko.run.environment_loaders,
+  os = wuko.run.os,
+  arch = wuko.run.arch,
 })
 `})
 	if err != nil {
@@ -147,6 +150,7 @@ wuko.output("roots", {
 	want := map[string]any{
 		"input": "prod", "step": "changed", "dependency": "app.tar.gz",
 		"workflow_name": "release", "workflow_dir": "/workflow", "run_dir": "/run", "environment_loaders": []any{"mise", "direnv"},
+		"os": goruntime.GOOS, "arch": goruntime.GOARCH,
 	}
 	if got := result.Outputs["roots"]; !reflect.DeepEqual(got, want) {
 		t.Fatalf("roots = %#v, want %#v", got, want)

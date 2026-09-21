@@ -1542,6 +1542,19 @@ steps:
       command: make
 ```
 
+The Wuko host platform is available as `.run.os` and `.run.arch` in templates, `run.os` and
+`run.arch` in expressions, and `wuko.run.os` and `wuko.run.arch` in Lua. Values use Go's canonical
+lower-case names, such as `darwin`, `linux`, `arm64`, and `amd64`, and remain unchanged inside
+working-directory, worktree, action, control, lifecycle, and executor scopes:
+
+```yaml
+steps:
+  - id: macos_arm64
+    type: shell
+    if: 'run.os == "darwin" && run.arch == "arm64"'
+    with: {command: ./scripts/macos-arm64.sh}
+```
+
 Strings use strict Go templates. Templates can read `.vars`, `.env`, `.steps`, `.workflow`,
 `.run`, and action `.inputs`. See [Templates](templates.md) and
 [Template, Expr, and Lua functions](template-functions.md).

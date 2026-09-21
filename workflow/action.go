@@ -449,8 +449,8 @@ func actionWorkingDirectoryScope(renderer *Renderer, data map[string]any, runDir
 }
 
 // templateDataWithRunDir rescopes .run.dir while preserving every other run root
-// entry, so invocation provenance such as .run.environment_loaders survives a
-// working-directory scope exactly as it does at runtime.
+// entry, so invocation provenance such as .run.environment_loaders, .run.os,
+// and .run.arch survives a working-directory scope exactly as it does at runtime.
 func templateDataWithRunDir(data map[string]any, runDir string) map[string]any {
 	result := CloneMap(data)
 	run, _ := result["run"].(map[string]any)

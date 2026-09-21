@@ -18,6 +18,8 @@ Every rendered string can access these roots:
 | `.workflow.timezone` | The workflow's declared IANA timezone, or an empty string when none is declared. |
 | `.run.dir` | The active run directory: initially where Wuko was invoked, or the directory established by an enclosing `working_directory` or `worktree` block. |
 | `.run.environment_loaders` | Ordered invocation environment loaders that actually changed the environment, such as `mise` and `direnv`; always a list, empty when none applied. |
+| `.run.os` | The Wuko host operating system using Go's canonical lower-case name, such as `darwin` or `linux`. |
+| `.run.arch` | The Wuko host architecture using Go's canonical lower-case name, such as `arm64` or `amd64`. |
 | `.inputs` | Composite-action inputs; empty in a top-level workflow. |
 | `.batch` | Active zero-based batch index and current item chunk; available only inside a batch body. |
 | `.foreach` | Active foreach item and zero-based index; available only inside a foreach body. |

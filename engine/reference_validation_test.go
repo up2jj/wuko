@@ -262,6 +262,7 @@ func TestReferenceValidationChecksConstantKeysAndAllowsDynamicKeys(t *testing.T)
 		{name: "constant expression index", ifExpr: `vars["known"] == "x"`},
 		{name: "dynamic expression index", ifExpr: `vars[vars.key] == "x"`},
 		{name: "expression local", ifExpr: `let local = {"ok": true}; local.ok`},
+		{name: "declared run platform fields", ifExpr: `run.os != "" && run.arch != ""`},
 		{name: "unknown template field", value: `{{ .vars.unknown }}`, want: `variable "unknown" is not declared`},
 		{name: "unknown constant template index", value: `{{ index .vars "unknown" }}`, want: `variable "unknown" is not declared`},
 		{name: "unknown template get", value: `{{ get "unknown" .vars }}`, want: `variable "unknown" is not declared`},
@@ -273,6 +274,7 @@ func TestReferenceValidationChecksConstantKeysAndAllowsDynamicKeys(t *testing.T)
 		{name: "unknown expression get", ifExpr: `get(vars, "unknown") == nil`, want: `variable "unknown" is not declared`},
 		{name: "expression hasKey probes an undeclared key", ifExpr: `hasKey(vars, "unknown")`},
 		{name: "expression hasKey on an unknown container", ifExpr: `hasKey(vars.unknown, "key")`, want: `variable "unknown" is not declared`},
+		{name: "unknown run platform field", ifExpr: `run.platform == ""`, want: `field "platform" is not available in run`},
 		{name: "undeclared environment value", value: `{{ .env.WUKO_UNSET_ANYWHERE }}`},
 		{name: "unknown expression root", ifExpr: `varz.unknown == nil`, want: `data root "varz" is not available here`},
 	} {

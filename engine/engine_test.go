@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -62,7 +63,10 @@ func TestRunConditionUsesRuntimeState(t *testing.T) {
 		workflow.Step{ID: "prepare", Type: "capture", With: map[string]any{"value": true}},
 		workflow.Step{
 			ID: "consume", Type: "capture",
-			If:   `hasKey(steps, "prepare") && steps.prepare.value && vars.result && env.MODE == "test" && workflow.name == "conditional" && run.dir != "" && "mise" in run.environment_loaders`,
+			If: workflow.Condition(fmt.Sprintf(
+				`hasKey(steps, "prepare") && steps.prepare.value && vars.result && env.MODE == "test" && workflow.name == "conditional" && run.dir != "" && "mise" in run.environment_loaders && run.os == %q && run.arch == %q`,
+				runtime.GOOS, runtime.GOARCH,
+			)),
 			With: map[string]any{"value": "consumed"},
 		},
 	)
