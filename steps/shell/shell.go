@@ -2,13 +2,11 @@ package shell
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"maps"
 	"math"
 	"path/filepath"
 	"reflect"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -64,7 +62,7 @@ func (expression *ArgvExpression) UnmarshalYAML(node *yaml.Node) error {
 
 type Runner struct {
 	config          Config
-	exitCodes       exitCodePolicy
+	exitCodes       process.ExitCodePolicy
 	stdoutPolicy    process.OutputPolicy
 	stderrPolicy    process.OutputPolicy
 	captureLimit    int64
@@ -72,21 +70,6 @@ type Runner struct {
 	interactionExpr *vm.Program
 	interactions    *ptyinteract.Plan
 	hasInteractions bool
-}
-
-type exitCodePolicy struct {
-	allowAny bool
-	codes    []int
-}
-
-// allows reports whether an exit code passes the policy. The any form accepts every normal process
-// status but not the -1 that os/exec reports for a signal-terminated child, so a killed or crashed
-// command still fails the step.
-func (policy exitCodePolicy) allows(code int) bool {
-	if policy.allowAny {
-		return code >= 0 && code <= 255
-	}
-	return slices.Contains(policy.codes, code)
 }
 
 func (*Runner) ExecutorAware() {}
@@ -99,7 +82,7 @@ func Register(registry *step.Registry) error {
 }
 
 func New(raw map[string]any) (step.Runner, error) {
-	decodedRaw, allowAnyExitCode, err := normalizeAllowedExitCodes(raw)
+	decodedRaw, allowAnyExitCode, err := process.NormalizeAllowedExitCodes(raw)
 	if err != nil {
 		return nil, err
 	}
@@ -151,15 +134,10 @@ func New(raw map[string]any) (step.Runner, error) {
 	if err := validateTerminalConfig(config.Terminal, config.TTY, handoff); err != nil {
 		return nil, err
 	}
-	if _, configured := raw["allowed_exit_codes"]; !configured {
-		config.AllowedExitCodes = []int{0}
-	} else if !allowAnyExitCode && len(config.AllowedExitCodes) == 0 {
-		return nil, errAllowedExitCodes
-	}
-	for _, code := range config.AllowedExitCodes {
-		if code < 0 || code > 255 {
-			return nil, fmt.Errorf("allowed_exit_codes must contain only exit codes from 0 through 255")
-		}
+	_, exitCodesConfigured := raw["allowed_exit_codes"]
+	exitCodes, err := process.NewExitCodePolicy(config.AllowedExitCodes, exitCodesConfigured, allowAnyExitCode)
+	if err != nil {
+		return nil, err
 	}
 	for key := range config.Env {
 		if !workflow.ValidEnvironmentName(key) {
@@ -202,35 +180,10 @@ func New(raw map[string]any) (step.Runner, error) {
 		}
 	}
 	return &Runner{
-		config: config, exitCodes: exitCodePolicy{allowAny: allowAnyExitCode, codes: config.AllowedExitCodes},
+		config: config, exitCodes: exitCodes,
 		stdoutPolicy: stdoutPolicy, stderrPolicy: stderrPolicy, captureLimit: captureLimit,
 		argvProgram: argvProgram, interactionExpr: interactionExpr, interactions: interactions, hasInteractions: hasInteractions,
 	}, nil
-}
-
-var errAllowedExitCodes = errors.New("allowed_exit_codes must be a non-empty list of exit codes from 0 through 255 or any")
-
-func normalizeAllowedExitCodes(raw map[string]any) (map[string]any, bool, error) {
-	value, configured := raw["allowed_exit_codes"]
-	if !configured {
-		return raw, false, nil
-	}
-	if text, ok := value.(string); ok {
-		if text != "any" {
-			return nil, false, errAllowedExitCodes
-		}
-		decoded := maps.Clone(raw)
-		delete(decoded, "allowed_exit_codes")
-		return decoded, true, nil
-	}
-	if value == nil {
-		return nil, false, errAllowedExitCodes
-	}
-	kind := reflect.TypeOf(value).Kind()
-	if kind != reflect.Array && kind != reflect.Slice {
-		return nil, false, errAllowedExitCodes
-	}
-	return raw, false, nil
 }
 
 func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, error) {
@@ -282,12 +235,12 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 	}
 	if err != nil {
 		exitErr, isExitError := soleProcessExitError(err)
-		if isExitError && exitErr.Code == result.ExitCode && r.exitCodes.allows(result.ExitCode) {
+		if isExitError && exitErr.Code == result.ExitCode && r.exitCodes.Allows(result.ExitCode) {
 			return step.Result{Outputs: outputs}, nil
 		}
 		return step.Result{Outputs: outputs}, err
 	}
-	if !r.exitCodes.allows(result.ExitCode) {
+	if !r.exitCodes.Allows(result.ExitCode) {
 		return step.Result{Outputs: outputs}, &process.ExitError{Command: command, Code: result.ExitCode}
 	}
 	return step.Result{Outputs: outputs}, nil

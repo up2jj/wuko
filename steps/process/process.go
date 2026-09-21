@@ -114,6 +114,7 @@ type ArgvExpression struct {
 
 type Runner struct {
 	config       Config
+	exitCodes    processpkg.ExitCodePolicy
 	stdoutPolicy processpkg.OutputPolicy
 	stderrPolicy processpkg.OutputPolicy
 	logPattern   *regexp.Regexp
@@ -144,8 +145,12 @@ func New(raw map[string]any) (step.Runner, error) {
 }
 
 func newProcess(raw map[string]any, rpcRegistry *rpcRegistry) (step.Runner, error) {
+	decodedRaw, allowAnyExitCode, err := processpkg.NormalizeAllowedExitCodes(raw)
+	if err != nil {
+		return nil, err
+	}
 	var config Config
-	if err := step.DecodeConfig(raw, &config); err != nil {
+	if err := step.DecodeConfig(decodedRaw, &config); err != nil {
 		return nil, err
 	}
 	_, hasArgv := raw["argv"]
@@ -166,15 +171,10 @@ func newProcess(raw map[string]any, rpcRegistry *rpcRegistry) (step.Runner, erro
 			return nil, fmt.Errorf("invalid environment name %q", name)
 		}
 	}
-	if _, configured := raw["allowed_exit_codes"]; !configured {
-		config.AllowedExitCodes = []int{0}
-	} else if len(config.AllowedExitCodes) == 0 {
-		return nil, fmt.Errorf("allowed_exit_codes must contain at least one exit code")
-	}
-	for _, code := range config.AllowedExitCodes {
-		if code < 0 || code > 255 {
-			return nil, fmt.Errorf("allowed_exit_codes must contain only exit codes from 0 through 255")
-		}
+	_, exitCodesConfigured := raw["allowed_exit_codes"]
+	exitCodes, err := processpkg.NewExitCodePolicy(config.AllowedExitCodes, exitCodesConfigured, allowAnyExitCode)
+	if err != nil {
+		return nil, err
 	}
 	stdoutPolicy, err := streamPolicy("stdout", config.Stdout)
 	if err != nil {
@@ -260,8 +260,8 @@ func newProcess(raw map[string]any, rpcRegistry *rpcRegistry) (step.Runner, erro
 			return nil, err
 		}
 	}
-	return &Runner{config: config, stdoutPolicy: stdoutPolicy, stderrPolicy: stderrPolicy, logPattern: pattern, signal: signal, argvProgram: argvProgram,
-		rpcRegistry: rpcRegistry, workerID: workerID}, nil
+	return &Runner{config: config, exitCodes: exitCodes, stdoutPolicy: stdoutPolicy, stderrPolicy: stderrPolicy, logPattern: pattern, signal: signal,
+		argvProgram: argvProgram, rpcRegistry: rpcRegistry, workerID: workerID}, nil
 }
 
 func (runner *Runner) Run(ctx context.Context, request step.Request) (step.Result, error) {

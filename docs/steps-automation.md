@@ -197,8 +197,10 @@ steps:
 ```
 
 Restart policies are `never` (default), `on_failure`, and `always`. `allowed_exit_codes` defaults
-to `[0]` and accepts only an explicit list here; the shell step's `any` form is not available to
-process steps. Restart eligibility is evaluated before `exit_on_end` or `exit_on_failure`. Lifecycle
+to `[0]` and takes the same list or `any` form as the shell step, including its rule that a
+signal-terminated service still fails. Because `on_failure` restarts what `allowed_exit_codes`
+calls a failure, `any` leaves only signal termination and operational errors to restart on.
+Restart eligibility is evaluated before `exit_on_end` or `exit_on_failure`. Lifecycle
 shutdown never triggers a restart or exit policy, and neither does a service that fails before it
 becomes ready: that failure is the step's own result. A liveness failure stops the service the same
 way the lifecycle does, so `shutdown.command` runs before a restart replaces the instance. An
@@ -694,7 +696,7 @@ the captured exit code:
 
 `any` covers statuses 0 through 255, the range a list can also express. A command killed by a
 signal reports `exit_code: -1` and still fails the step, so a crashed or terminated probe is never
-recorded as a successful observation.
+recorded as a successful observation. Process steps accept the same two forms.
 
 An allowed exit commits the usual `exit_code`, `stdout`, `stderr`, `stdout_truncated`, and
 `stderr_truncated` outputs for later conditions. Command startup, executor, stream, timeout, and

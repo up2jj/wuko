@@ -458,7 +458,7 @@ func (runner *Runner) shutdown(scopeCtx context.Context, request step.Request, l
 }
 
 func (runner *Runner) exitError(exit processExit) error {
-	if slices.Contains(runner.config.AllowedExitCodes, exit.result.ExitCode) {
+	if runner.exitCodes.Allows(exit.result.ExitCode) {
 		var processExitError *processpkg.ExitError
 		if exit.err == nil || errors.As(exit.err, &processExitError) {
 			return nil
