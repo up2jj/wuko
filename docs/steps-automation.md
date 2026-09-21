@@ -197,7 +197,8 @@ steps:
 ```
 
 Restart policies are `never` (default), `on_failure`, and `always`. `allowed_exit_codes` defaults
-to `[0]`. Restart eligibility is evaluated before `exit_on_end` or `exit_on_failure`. Lifecycle
+to `[0]` and accepts only an explicit list here; the shell step's `any` form is not available to
+process steps. Restart eligibility is evaluated before `exit_on_end` or `exit_on_failure`. Lifecycle
 shutdown never triggers a restart or exit policy, and neither does a service that fails before it
 becomes ready: that failure is the step's own result. A liveness failure stops the service the same
 way the lifecycle does, so `shutdown.command` runs before a restart replaces the instance. An
@@ -661,8 +662,8 @@ outputs `stdout_truncated` and `stderr_truncated` report whether capture reached
 bound.
 
 By default, only exit code 0 succeeds. Set `allowed_exit_codes` to a non-empty list of codes from
-0 through 255 when a command uses non-zero statuses as useful observations. The configured list
-replaces the default, so include every accepted code explicitly:
+0 through 255 when a command uses selected non-zero statuses as useful observations. The
+configured list replaces the default, so include every accepted code explicitly:
 
 ```yaml
 - id: authorization
@@ -674,6 +675,26 @@ replaces the default, so include every accepted code explicitly:
     stdout: capture
     stderr: capture
 ```
+
+For a probe where every normal process status is data, use `allowed_exit_codes: any` and branch on
+the captured exit code:
+
+```yaml
+- id: certificate
+  type: shell
+  with:
+    command: security
+    args: [verify-cert, -c, certificate.cer]
+    allowed_exit_codes: any
+- id: certificate_invalid
+  type: shell
+  if: steps.certificate.exit_code != 0
+  with: {command: echo, args: [certificate verification failed]}
+```
+
+`any` covers statuses 0 through 255, the range a list can also express. A command killed by a
+signal reports `exit_code: -1` and still fails the step, so a crashed or terminated probe is never
+recorded as a successful observation.
 
 An allowed exit commits the usual `exit_code`, `stdout`, `stderr`, `stdout_truncated`, and
 `stderr_truncated` outputs for later conditions. Command startup, executor, stream, timeout, and

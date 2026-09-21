@@ -492,8 +492,13 @@ func TestNewValidatesAllowedExitCodes(t *testing.T) {
 		want string
 	}{
 		{name: "valid", raw: map[string]any{"command": "true", "allowed_exit_codes": []any{0, 1}}},
-		{name: "empty", raw: map[string]any{"command": "true", "allowed_exit_codes": []any{}}, want: "at least one"},
-		{name: "null", raw: map[string]any{"command": "true", "allowed_exit_codes": nil}, want: "at least one"},
+		{name: "any", raw: map[string]any{"command": "true", "allowed_exit_codes": "any"}},
+		{name: "empty", raw: map[string]any{"command": "true", "allowed_exit_codes": []any{}}, want: "non-empty list"},
+		{name: "null", raw: map[string]any{"command": "true", "allowed_exit_codes": nil}, want: "non-empty list"},
+		{name: "unsupported string", raw: map[string]any{"command": "true", "allowed_exit_codes": "ANY"}, want: "non-empty list"},
+		{name: "scalar number", raw: map[string]any{"command": "true", "allowed_exit_codes": 0}, want: "non-empty list"},
+		{name: "boolean", raw: map[string]any{"command": "true", "allowed_exit_codes": false}, want: "non-empty list"},
+		{name: "mapping", raw: map[string]any{"command": "true", "allowed_exit_codes": map[string]any{"any": true}}, want: "non-empty list"},
 		{name: "non-integer", raw: map[string]any{"command": "true", "allowed_exit_codes": []any{"1"}}, want: "cannot unmarshal"},
 		{name: "negative", raw: map[string]any{"command": "true", "allowed_exit_codes": []any{-1}}, want: "0 through 255"},
 		{name: "too large", raw: map[string]any{"command": "true", "allowed_exit_codes": []any{256}}, want: "0 through 255"},
@@ -514,7 +519,7 @@ func TestNewValidatesAllowedExitCodes(t *testing.T) {
 func TestShellAppliesAllowedExitCodes(t *testing.T) {
 	tests := []struct {
 		name       string
-		codes      []any
+		allowed    any
 		result     process.Result
 		runErr     error
 		wantErr    bool
@@ -522,33 +527,59 @@ func TestShellAppliesAllowedExitCodes(t *testing.T) {
 		wantOutput bool
 	}{
 		{
-			name: "allowed non-zero", codes: []any{0, 7},
+			name: "allowed non-zero", allowed: []any{0, 7},
 			result: process.Result{Stdout: "out", Stderr: "err", ExitCode: 7, StdoutTruncated: true, StderrTruncated: true},
 			runErr: &process.ExitError{Command: "probe", Code: 7}, wantOutput: true,
 		},
 		{
-			name: "allowed sole joined exit", codes: []any{0, 7}, result: process.Result{ExitCode: 7},
+			name: "allowed sole joined exit", allowed: []any{0, 7}, result: process.Result{ExitCode: 7},
+			runErr: errors.Join(&process.ExitError{Command: "probe", Code: 7}),
+		},
+		{name: "any accepts zero", allowed: "any", result: process.Result{ExitCode: 0}},
+		{
+			name: "any accepts non-zero", allowed: "any",
+			result: process.Result{Stdout: "out", Stderr: "err", ExitCode: 7, StdoutTruncated: true, StderrTruncated: true},
+			runErr: &process.ExitError{Command: "probe", Code: 7}, wantOutput: true,
+		},
+		{
+			name: "any accepts sole joined exit", allowed: "any", result: process.Result{ExitCode: 7},
 			runErr: errors.Join(&process.ExitError{Command: "probe", Code: 7}),
 		},
 		{
 			name: "default rejects non-zero", result: process.Result{ExitCode: 7},
 			runErr: &process.ExitError{Command: "probe", Code: 7}, wantErr: true, wantExit: true,
 		},
-		{name: "explicit list rejects zero", codes: []any{1}, result: process.Result{ExitCode: 0}, wantErr: true, wantExit: true},
+		{name: "explicit list rejects zero", allowed: []any{1}, result: process.Result{ExitCode: 0}, wantErr: true, wantExit: true},
 		{
-			name: "operational error is preserved", codes: []any{0, 7}, result: process.Result{ExitCode: 7},
+			name: "operational error is preserved", allowed: []any{0, 7}, result: process.Result{ExitCode: 7},
 			runErr: errors.New("executor failed"), wantErr: true,
 		},
 		{
-			name: "joined error is preserved", codes: []any{0, 7}, result: process.Result{ExitCode: 7},
+			name: "joined error is preserved", allowed: []any{0, 7}, result: process.Result{ExitCode: 7},
 			runErr: errors.Join(&process.ExitError{Command: "probe", Code: 7}, errors.New("stream failed")), wantErr: true,
+		},
+		{
+			name: "any preserves operational error", allowed: "any", result: process.Result{ExitCode: 7},
+			runErr: errors.New("executor failed"), wantErr: true,
+		},
+		{
+			name: "any preserves joined error", allowed: "any", result: process.Result{ExitCode: 7},
+			runErr: errors.Join(&process.ExitError{Command: "probe", Code: 7}, errors.New("stream failed")), wantErr: true,
+		},
+		{
+			name: "mismatched exit error is preserved", allowed: "any", result: process.Result{ExitCode: 7},
+			runErr: &process.ExitError{Command: "probe", Code: 8}, wantErr: true, wantExit: true,
+		},
+		{
+			name: "any rejects signal termination", allowed: "any", result: process.Result{ExitCode: -1},
+			runErr: &process.ExitError{Command: "probe", Code: -1}, wantErr: true, wantExit: true,
 		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			raw := map[string]any{"command": "probe"}
-			if test.codes != nil {
-				raw["allowed_exit_codes"] = test.codes
+			if test.allowed != nil {
+				raw["allowed_exit_codes"] = test.allowed
 			}
 			runner, err := New(raw)
 			if err != nil {

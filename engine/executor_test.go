@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"maps"
 	"strings"
@@ -131,15 +132,41 @@ func TestExecutorScopeSupportsRequireTool(t *testing.T) {
 }
 
 func TestExecutorScopeCommitsAllowedShellExitForLaterCondition(t *testing.T) {
+	for _, allowed := range []any{[]any{0, 7}, "any"} {
+		t.Run(fmt.Sprintf("%v", allowed), func(t *testing.T) {
+			scoped := &recordingExecutor{fail: "probe"}
+			definition := testDefinition(t, "probe", workflow.Step{
+				Executor: &workflow.ExecutorScope{Type: "recording", With: map[string]any{}},
+				Steps: []workflow.Step{
+					{ID: "probe", Type: "shell", With: map[string]any{
+						"command": "probe", "allowed_exit_codes": allowed,
+					}},
+					{ID: "fallback", Type: "shell", If: "steps.probe.exit_code == 7", With: map[string]any{"command": "fallback"}},
+				},
+			})
+			state, err := executorTestEngine(t, scoped).Run(t.Context(), definition, Options{
+				RunDir: t.TempDir(), Stdout: io.Discard, Stderr: io.Discard,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Join(scoped.commands, ","); got != "probe ,fallback " {
+				t.Fatalf("scoped commands = %q", got)
+			}
+			if state.Steps["probe"].(map[string]any)["exit_code"] != 7 {
+				t.Fatalf("steps = %#v", state.Steps)
+			}
+		})
+	}
+}
+
+func TestExecutorScopeDoesNotRetryAllowedShellExit(t *testing.T) {
 	scoped := &recordingExecutor{fail: "probe"}
-	definition := testDefinition(t, "probe", workflow.Step{
+	definition := testDefinition(t, "probe-retry", workflow.Step{
 		Executor: &workflow.ExecutorScope{Type: "recording", With: map[string]any{}},
-		Steps: []workflow.Step{
-			{ID: "probe", Type: "shell", With: map[string]any{
-				"command": "probe", "allowed_exit_codes": []any{0, 7},
-			}},
-			{ID: "fallback", Type: "shell", If: "steps.probe.exit_code == 7", With: map[string]any{"command": "fallback"}},
-		},
+		Steps: []workflow.Step{attemptStep("probe", immediateRetry(3), workflow.Step{
+			Type: "shell", With: map[string]any{"command": "probe", "allowed_exit_codes": "any"},
+		})},
 	})
 	state, err := executorTestEngine(t, scoped).Run(t.Context(), definition, Options{
 		RunDir: t.TempDir(), Stdout: io.Discard, Stderr: io.Discard,
@@ -147,11 +174,11 @@ func TestExecutorScopeCommitsAllowedShellExitForLaterCondition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(scoped.commands, ","); got != "probe ,fallback " {
-		t.Fatalf("scoped commands = %q", got)
+	if got := strings.Join(scoped.commands, ","); got != "probe " {
+		t.Fatalf("commands = %q, want one probe execution", got)
 	}
-	if state.Steps["probe"].(map[string]any)["exit_code"] != 7 {
-		t.Fatalf("steps = %#v", state.Steps)
+	if outputs := attemptBody(state, "probe", "probe_body"); outputs["exit_code"] != 7 {
+		t.Fatalf("probe outputs = %#v", outputs)
 	}
 }
 

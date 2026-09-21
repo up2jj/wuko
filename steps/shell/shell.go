@@ -2,6 +2,7 @@ package shell
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"math"
@@ -63,6 +64,7 @@ func (expression *ArgvExpression) UnmarshalYAML(node *yaml.Node) error {
 
 type Runner struct {
 	config          Config
+	exitCodes       exitCodePolicy
 	stdoutPolicy    process.OutputPolicy
 	stderrPolicy    process.OutputPolicy
 	captureLimit    int64
@@ -70,6 +72,21 @@ type Runner struct {
 	interactionExpr *vm.Program
 	interactions    *ptyinteract.Plan
 	hasInteractions bool
+}
+
+type exitCodePolicy struct {
+	allowAny bool
+	codes    []int
+}
+
+// allows reports whether an exit code passes the policy. The any form accepts every normal process
+// status but not the -1 that os/exec reports for a signal-terminated child, so a killed or crashed
+// command still fails the step.
+func (policy exitCodePolicy) allows(code int) bool {
+	if policy.allowAny {
+		return code >= 0 && code <= 255
+	}
+	return slices.Contains(policy.codes, code)
 }
 
 func (*Runner) ExecutorAware() {}
@@ -82,8 +99,12 @@ func Register(registry *step.Registry) error {
 }
 
 func New(raw map[string]any) (step.Runner, error) {
+	decodedRaw, allowAnyExitCode, err := normalizeAllowedExitCodes(raw)
+	if err != nil {
+		return nil, err
+	}
 	var config Config
-	if err := step.DecodeConfig(raw, &config); err != nil {
+	if err := step.DecodeConfig(decodedRaw, &config); err != nil {
 		return nil, err
 	}
 	_, hasArgv := raw["argv"]
@@ -132,8 +153,8 @@ func New(raw map[string]any) (step.Runner, error) {
 	}
 	if _, configured := raw["allowed_exit_codes"]; !configured {
 		config.AllowedExitCodes = []int{0}
-	} else if len(config.AllowedExitCodes) == 0 {
-		return nil, fmt.Errorf("allowed_exit_codes must contain at least one exit code")
+	} else if !allowAnyExitCode && len(config.AllowedExitCodes) == 0 {
+		return nil, errAllowedExitCodes
 	}
 	for _, code := range config.AllowedExitCodes {
 		if code < 0 || code > 255 {
@@ -181,9 +202,35 @@ func New(raw map[string]any) (step.Runner, error) {
 		}
 	}
 	return &Runner{
-		config: config, stdoutPolicy: stdoutPolicy, stderrPolicy: stderrPolicy, captureLimit: captureLimit,
+		config: config, exitCodes: exitCodePolicy{allowAny: allowAnyExitCode, codes: config.AllowedExitCodes},
+		stdoutPolicy: stdoutPolicy, stderrPolicy: stderrPolicy, captureLimit: captureLimit,
 		argvProgram: argvProgram, interactionExpr: interactionExpr, interactions: interactions, hasInteractions: hasInteractions,
 	}, nil
+}
+
+var errAllowedExitCodes = errors.New("allowed_exit_codes must be a non-empty list of exit codes from 0 through 255 or any")
+
+func normalizeAllowedExitCodes(raw map[string]any) (map[string]any, bool, error) {
+	value, configured := raw["allowed_exit_codes"]
+	if !configured {
+		return raw, false, nil
+	}
+	if text, ok := value.(string); ok {
+		if text != "any" {
+			return nil, false, errAllowedExitCodes
+		}
+		decoded := maps.Clone(raw)
+		delete(decoded, "allowed_exit_codes")
+		return decoded, true, nil
+	}
+	if value == nil {
+		return nil, false, errAllowedExitCodes
+	}
+	kind := reflect.TypeOf(value).Kind()
+	if kind != reflect.Array && kind != reflect.Slice {
+		return nil, false, errAllowedExitCodes
+	}
+	return raw, false, nil
 }
 
 func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, error) {
@@ -235,12 +282,12 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 	}
 	if err != nil {
 		exitErr, isExitError := soleProcessExitError(err)
-		if isExitError && exitErr.Code == result.ExitCode && slices.Contains(r.config.AllowedExitCodes, result.ExitCode) {
+		if isExitError && exitErr.Code == result.ExitCode && r.exitCodes.allows(result.ExitCode) {
 			return step.Result{Outputs: outputs}, nil
 		}
 		return step.Result{Outputs: outputs}, err
 	}
-	if !slices.Contains(r.config.AllowedExitCodes, result.ExitCode) {
+	if !r.exitCodes.allows(result.ExitCode) {
 		return step.Result{Outputs: outputs}, &process.ExitError{Command: command, Code: result.ExitCode}
 	}
 	return step.Result{Outputs: outputs}, nil
