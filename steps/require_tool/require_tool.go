@@ -24,6 +24,7 @@ type Config struct {
 	Tool        string   `yaml:"tool"`
 	VersionArgs []string `yaml:"version_args,omitempty"`
 	Constraint  string   `yaml:"constraint,omitempty"`
+	Required    *bool    `yaml:"required,omitempty"`
 }
 
 type Runner struct {
@@ -34,7 +35,9 @@ type Runner struct {
 func (*Runner) ExecutorAware() {}
 
 func Register(registry *step.Registry) error {
-	return registry.RegisterDefinition("require_tool", step.Registration{Builder: New, Outputs: step.ClosedOutputs("path", "version")})
+	return registry.RegisterDefinition("require_tool", step.Registration{Builder: New, Outputs: step.ClosedOutputs(
+		"available", "path", "version", "constraint_matched",
+	)})
 }
 
 func New(raw map[string]any) (step.Runner, error) {
@@ -77,6 +80,12 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 		Command: r.config.Tool, Args: r.config.VersionArgs, Dir: request.RunDir,
 		Env: environment, CaptureLimit: captureLimit,
 	})
+	outputs := map[string]any{
+		"available":          false,
+		"path":               "",
+		"version":            "",
+		"constraint_matched": false,
+	}
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return step.Result{}, ctxErr
@@ -84,23 +93,37 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return step.Result{}, err
 		}
+		if !r.required() {
+			return step.Result{Outputs: outputs}, nil
+		}
 		return step.Result{}, unavailableError(r.config.Tool, result, err)
 	}
 
-	outputs := map[string]any{"path": r.executablePath(local)}
+	outputs["available"] = true
+	outputs["path"] = r.executablePath(local)
+	version, versionErr := findVersion(result.Stdout, result.Stderr)
+	if versionErr == nil {
+		outputs["version"] = version.String()
+	}
 	if r.constraint == nil {
+		outputs["constraint_matched"] = true
 		return step.Result{Outputs: outputs}, nil
 	}
-	version, err := findVersion(result.Stdout, result.Stderr)
-	if err != nil {
-		return step.Result{}, fmt.Errorf("required tool %q: %w", r.config.Tool, err)
+	if versionErr != nil {
+		if !r.required() {
+			return step.Result{Outputs: outputs}, nil
+		}
+		return step.Result{}, fmt.Errorf("required tool %q: %w", r.config.Tool, versionErr)
 	}
-	if !r.constraint.Check(version) {
+	matched := r.constraint.Check(version)
+	outputs["constraint_matched"] = matched
+	if !matched && r.required() {
 		return step.Result{}, fmt.Errorf("required tool %q version %s does not satisfy constraint %q", r.config.Tool, version, r.config.Constraint)
 	}
-	outputs["version"] = version.String()
 	return step.Result{Outputs: outputs}, nil
 }
+
+func (r *Runner) required() bool { return r.config.Required == nil || *r.config.Required }
 
 func (r *Runner) validateResolvedConfig() error {
 	if templated(r.config.Tool) || templated(r.config.Constraint) {
@@ -132,13 +155,23 @@ func (r *Runner) executablePath(local bool) string {
 	return absolute
 }
 
+// findVersion scans captured probe output for the first parseable semantic version.
+// It walks matches one at a time rather than collecting them all, because every
+// successful probe now reports a best-effort version and the capture limit allows
+// 64 KiB per stream: a verbose --version banner would otherwise allocate a slice
+// holding every version-shaped substring before the first valid one is examined.
 func findVersion(stdout, stderr string) (*masterminds.Version, error) {
 	for _, output := range []string{stdout, stderr} {
-		for _, candidate := range semanticVersionPattern.FindAllString(output, -1) {
-			version, err := masterminds.StrictNewVersion(strings.TrimPrefix(candidate, "v"))
+		for len(output) > 0 {
+			match := semanticVersionPattern.FindStringIndex(output)
+			if match == nil {
+				break
+			}
+			version, err := masterminds.StrictNewVersion(strings.TrimPrefix(output[match[0]:match[1]], "v"))
 			if err == nil {
 				return version, nil
 			}
+			output = output[match[1]:]
 		}
 	}
 	return nil, fmt.Errorf("version output does not contain a semantic version")

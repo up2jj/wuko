@@ -899,11 +899,40 @@ in the current execution environment, including inside an executor block.
 
 `tool` is required. `version_args` defaults to `[--version]`; set it to `[]` for tools whose
 availability probe takes no arguments. Without `constraint`, a successful invocation is enough.
-With a constraint, Wuko extracts the first complete semantic version from stdout, then stderr,
-and validates it with the same constraint syntax as the `semver` step. A lowercase `v` prefix is
-accepted. Outputs include `path`, plus normalized `version` when a constraint was checked. On the
-local host, `path` is resolved through `PATH`; inside an executor it is the configured tool name or
-path.
+Wuko extracts the first complete semantic version from stdout, then stderr, when one is present.
+With a constraint, it validates that version with the same constraint syntax as the `semver` step.
+A lowercase `v` prefix is accepted.
+
+`required` defaults to `true`, preserving strict behavior: an unavailable tool, failed probe,
+unreadable required version, or constraint mismatch fails the step. Set `required: false` when any
+of those outcomes should be data instead:
+
+```yaml
+- id: lsof
+  type: require_tool
+  with:
+    tool: lsof
+    version_args: [-v]
+    required: false
+
+- if: steps.lsof.available
+  steps:
+    - id: report_lsof
+      type: shell
+      with: {command: "{{ .steps.lsof.path }}", args: [-v]}
+```
+
+A probe that exits non-zero reports `available: false` even when the executable exists, so pick
+`version_args` the tool actually accepts — `lsof --version` exits 1 on BSD and macOS. When a
+constraint is configured, gate dependent work on `constraint_matched` rather than `available`: an
+installed tool of the wrong version is available.
+
+Every successful step exposes `available`, `path`, `version`, and `constraint_matched`. An
+unavailable or failed optional probe returns `false`, `""`, `""`, and `false`, respectively. A
+successful probe sets `available: true`, resolves `path` through `PATH` on the local host (or keeps
+the configured tool name inside an executor), and returns a normalized `version` when detected.
+`constraint_matched` is true for an available tool with no constraint or a matching version, and
+false otherwise. Cancellation and configuration errors still fail even when `required` is false.
 
 ## `multiplexer`
 

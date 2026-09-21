@@ -4,7 +4,7 @@ Use this guidance when a workflow calls tools or services, touches the filesyste
 
 ## Tools, HTTP, plugins, and attempts
 
-- Use `require_tool` before external commands that need an executable or supported tool version. Configure nonstandard version flags with `version_args`, and consume its `path` or checked `version` output only after the guard succeeds.
+- Use `require_tool` before external commands that need an executable or supported tool version. Configure nonstandard version flags with `version_args`. Keep the default `required: true` for prerequisites; use `required: false` for optional integrations and branch on `steps.<id>.available` or `steps.<id>.constraint_matched`. Successful checks also expose `path` and a best-effort normalized `version`.
 - Use `http` for structured API calls with typed JSON responses, status validation, retries, and timeouts. Keep authorization values in environment-backed headers.
 - Namespaced plugin steps are supplied by installed or workflow-declared plugins rather than Wuko core. Consult the selected plugin's documentation for configuration and lifecycle behavior. Prefer an explicit source, immutable ref, and verified digest when reproducibility matters; treat plugin executables and their `with` configuration as trusted code and potentially sensitive input.
 - Use `attempt` with `duration` for a fixed delay, or give it a `steps` body and an Expr `until` predicate for polling. A poll requires `max_elapsed_time`; prefer read-only probes. Readiness expressed by a command succeeding needs no `until`—that is `max_attempts` with a fixed cadence.

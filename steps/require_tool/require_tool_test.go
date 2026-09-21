@@ -32,6 +32,8 @@ func TestNewValidatesConfiguration(t *testing.T) {
 		{"missing tool", map[string]any{}},
 		{"blank tool", map[string]any{"tool": "  "}},
 		{"invalid constraint", map[string]any{"tool": "go", "constraint": ">> 2"}},
+		{"invalid optional constraint", map[string]any{"tool": "go", "constraint": ">> 2", "required": false}},
+		{"invalid required value", map[string]any{"tool": "go", "required": "sometimes"}},
 		{"unknown field", map[string]any{"tool": "go", "unknown": true}},
 	}
 	for _, tt := range tests {
@@ -68,6 +70,28 @@ func TestDefaultAndExplicitEmptyVersionArguments(t *testing.T) {
 	}
 }
 
+func TestRequiredDefaultsToTrue(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		raw  map[string]any
+		want bool
+	}{
+		{"default", map[string]any{"tool": "go"}, true},
+		{"explicit true", map[string]any{"tool": "go", "required": true}, true},
+		{"explicit false", map[string]any{"tool": "go", "required": false}, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			runner, err := New(tt.raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := runner.(*Runner).required(); got != tt.want {
+				t.Fatalf("required() = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRunUsesExecutorEnvironmentAndReturnsName(t *testing.T) {
 	executor := &recordingExecutor{}
 	runner, err := New(map[string]any{"tool": "go", "version_args": []any{"version"}})
@@ -90,7 +114,22 @@ func TestRunUsesExecutorEnvironmentAndReturnsName(t *testing.T) {
 	if executor.options.Stdout != nil || executor.options.Stderr != nil || executor.options.CaptureLimit != captureLimit {
 		t.Fatalf("capture options = %#v", executor.options)
 	}
-	if result.Outputs["path"] != "go" {
+	if result.Outputs["available"] != true || result.Outputs["path"] != "go" || result.Outputs["version"] != "" || result.Outputs["constraint_matched"] != true {
+		t.Fatalf("outputs = %#v", result.Outputs)
+	}
+}
+
+func TestRunReturnsBestEffortVersionWithoutConstraint(t *testing.T) {
+	executor := &recordingExecutor{result: process.Result{Stdout: "tool v1.2.3\n"}}
+	runner, err := New(map[string]any{"tool": "tool"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runner.Run(t.Context(), step.Request{Executor: executor})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Outputs["available"] != true || result.Outputs["path"] != "tool" || result.Outputs["version"] != "1.2.3" || result.Outputs["constraint_matched"] != true {
 		t.Fatalf("outputs = %#v", result.Outputs)
 	}
 }
@@ -106,6 +145,7 @@ func TestRunExtractsAndConstrainsVersions(t *testing.T) {
 		{"stdout", "go version go1.26.1 darwin/arm64\n", "", ">= 1.25.0", "1.26.1"},
 		{"stderr v prefix", "", "tool v2.3.4-rc.1+build.7\n", ">= 2.3.4-rc.1, < 3.0.0", "2.3.4-rc.1+build.7"},
 		{"stdout precedes stderr", "tool 1.5.0\n", "tool 2.0.0\n", "^1.0", "1.5.0"},
+		{"skips unparseable candidates", "build 01.02.03 tool 1.5.0\n", "", "^1.0", "1.5.0"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -118,7 +158,7 @@ func TestRunExtractsAndConstrainsVersions(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if result.Outputs["version"] != tt.want {
+			if result.Outputs["available"] != true || result.Outputs["version"] != tt.want || result.Outputs["constraint_matched"] != true {
 				t.Fatalf("outputs = %#v", result.Outputs)
 			}
 		})
@@ -163,9 +203,51 @@ func TestRunReportsUnavailableToolWithoutOutputs(t *testing.T) {
 	}
 }
 
+func TestOptionalRunReturnsCheckOutcomes(t *testing.T) {
+	tests := []struct {
+		name      string
+		result    process.Result
+		err       error
+		available bool
+		version   string
+	}{
+		{name: "cannot start", err: errors.New("executable file not found")},
+		{
+			name:   "nonzero probe",
+			result: process.Result{Stderr: "not found\n", ExitCode: 127},
+			err:    &process.ExitError{Command: "tool", Code: 127},
+		},
+		{name: "missing version", result: process.Result{Stdout: "development build"}, available: true},
+		{name: "constraint mismatch", result: process.Result{Stdout: "tool 1.9.0"}, available: true, version: "1.9.0"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			executor := &recordingExecutor{result: tt.result, err: tt.err}
+			runner, err := New(map[string]any{"tool": "tool", "constraint": ">= 2.0.0", "required": false})
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := runner.Run(t.Context(), step.Request{Executor: executor})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Outputs["available"] != tt.available || result.Outputs["version"] != tt.version || result.Outputs["constraint_matched"] != false {
+				t.Fatalf("outputs = %#v", result.Outputs)
+			}
+			wantPath := ""
+			if tt.available {
+				wantPath = "tool"
+			}
+			if result.Outputs["path"] != wantPath {
+				t.Fatalf("path = %#v, want %q", result.Outputs["path"], wantPath)
+			}
+		})
+	}
+}
+
 func TestRunPreservesCancellation(t *testing.T) {
 	executor := &recordingExecutor{err: context.Canceled}
-	runner, err := New(map[string]any{"tool": "tool"})
+	runner, err := New(map[string]any{"tool": "tool", "required": false})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,7 +278,7 @@ func TestLocalRunReturnsResolvedPathWithoutProbeOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasSuffix(result.Outputs["path"].(string), want) || result.Outputs["version"] != "1.2.3" {
+	if result.Outputs["available"] != true || !strings.HasSuffix(result.Outputs["path"].(string), want) || result.Outputs["version"] != "1.2.3" || result.Outputs["constraint_matched"] != true {
 		t.Fatalf("outputs = %#v, want path ending in %q", result.Outputs, want)
 	}
 }
