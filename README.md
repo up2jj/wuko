@@ -16,8 +16,9 @@ with typed data and files, call APIs, run scripts or containers, and start codin
 - **Useful execution controls** — conditions, early successful returns, bounded and repeating attempts, polling,
   concurrency, batch, foreach and matrix expansion, scoped working-directory blocks, scheduled runs, dry
   runs, execution trees, and guaranteed cleanup.
-- **Portable operations** — use built-in HTTP, filesystem, glob, native watches, cache, change detection,
-  key-value, temporary resource, and Docker steps instead of platform-specific shell commands.
+- **Portable operations** — use built-in HTTP, TCP listener probes, filesystem, glob, native watches,
+  cache, change detection, key-value, temporary resource, and Docker steps instead of
+  platform-specific shell commands.
 - **Extensible automation** — run Lua, direct commands, inline shell, or an external agent such as
   Codex.
 - **Reusable definitions** — split steps across files, compose local actions, consume public remote
@@ -522,6 +523,7 @@ Each linked guide contains multiple examples for every step.
 | `changed` | Detect changed files or structured inputs | [Data steps](docs/steps-data.md#changed) |
 | `once` | Run a named block once per successful persisted key | [Execution and composition](docs/execution.md#idempotency-across-runs) |
 | `require_tool` | Require an executable and optionally validate its version | [System steps](docs/steps-system.md#require_tool) |
+| `tcp_probe` | Inspect TCP listeners without platform-specific commands | [System steps](docs/steps-system.md#tcp_probe) |
 | `multiplexer` | Label and annotate the current tmux, cmux, or Herdr context | [System steps](docs/steps-system.md#multiplexer) |
 | `git_revision` | Read the current or a selected Git commit as structured data | [System steps](docs/steps-system.md#git_revision) |
 | `git_merge_base` | Find the unambiguous common ancestor of two Git revisions | [System steps](docs/steps-system.md#git_merge_base) |

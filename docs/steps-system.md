@@ -934,6 +934,87 @@ the configured tool name inside an executor), and returns a normalized `version`
 `constraint_matched` is true for an available tool with no constraint or a matching version, and
 false otherwise. Cancellation and configuration errors still fail even when `required` is false.
 
+## `tcp_probe`
+
+Probe TCP listeners without requiring `lsof`, `netstat`, or another platform-specific command.
+The step checks every host and port combination in host-major order:
+
+```yaml
+- id: ports
+  type: tcp_probe
+  with:
+    hosts: [127.0.0.1]
+    ports: [4000, 4001, 5432, 6379]
+```
+
+`hosts` and `ports` must both be non-empty and contain no duplicates. Ports range from 1 through
+65535 and accept a template, so `ports: ["{{ .vars.port }}"]` works alongside `ports: [4000]`;
+surrounding whitespace is trimmed from a host before it is dialed or compared for duplicates.
+Each connection attempt has a one-second timeout by default; set a positive Go duration with
+`timeout` to change it. Wuko probes up to 16 endpoints concurrently but returns `results` in the
+declared host and port order.
+
+Each result contains `host`, `port`, `address`, `state`, `matched`, `detail`, and `owners`.
+`address` is the resolved remote IP after a successful connection and is empty otherwise. State is
+one of:
+
+- `listening` when the TCP handshake completed;
+- `free` when the connection was refused; or
+- `indeterminate` for DNS failures, timeouts, unreachable networks, and other inconclusive errors.
+
+`free` means that no listener accepted a connection at probe time. It does not promise that a
+later bind will succeed: another process may reserve an address without listening, and the usual
+check-then-use race still applies.
+
+Omit `expect` to use the result as data. Set it to `free` for a doctor-style conflict check or to
+`listening` for a readiness check:
+
+```yaml
+- id: ports
+  type: tcp_probe
+  with:
+    hosts: [127.0.0.1]
+    ports: [4000, 4001, 5432, 6379]
+    timeout: 500ms
+    expect: free
+```
+
+An expectation requires every endpoint to match. A different or indeterminate state fails the
+step while preserving the complete observation for attempt and error handling. The top-level
+outputs are `count`, `listening`, `free`, `indeterminate`, `matched`, `ownership`, and `results`.
+
+Without `expect` there is nothing to match, so the top-level `matched` and every
+`results[].matched` are null rather than true. Read `state` to ask whether a port is in use;
+`matched` only answers whether the state met a stated expectation.
+
+Owning-process discovery is optional because it scans operating-system process data:
+
+```yaml
+- id: ports
+  type: tcp_probe
+  with:
+    hosts: [127.0.0.1]
+    ports: [5432, 6379]
+    owners: true
+```
+
+For local listening addresses, Linux reads procfs and macOS uses native process-information
+syscalls. No external executable is invoked. Owner entries contain `pid`, `name`, and `executable`;
+command-line arguments are never collected. Shared listeners may report multiple owners, sorted by
+PID. The `ownership` object reports `requested`, `supported`, `complete`, and `detail`. Failures,
+disappearing processes, or an unsupported platform make lookup incomplete without changing
+listener states or expectation matching. Remote listeners never expose an owner.
+
+A listening endpoint with an empty `owners` list always means the scan could not see the owner,
+never that the port is unowned: the endpoint answered a handshake moments earlier. That case sets
+`complete` to `false` and names the endpoint in `detail`, so `complete` is what separates "nothing
+owns this port" from "something does and Wuko could not identify it". A process belonging to
+another user is the usual cause, and `detail` then says how many processes were unreadable and
+which UID created the socket. Ownership is found by socket inode rather than by user, so a server
+that binds and then drops privileges is still reported.
+
+`tcp_probe` always inspects the host running Wuko and is rejected inside executor blocks.
+
 ## `multiplexer`
 
 Control the terminal context hosting Wuko. The step detects tmux, Herdr, then cmux in that order;
