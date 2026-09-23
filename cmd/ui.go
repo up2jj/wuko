@@ -160,7 +160,8 @@ func runWorkflowUI(command *cobra.Command, deps dependencies, args []string, con
 				Vars:         activeVars, Env: env, BaseEnv: baseEnv, EnvironmentLoaders: environmentLoaders, Dependencies: dependencies, RunDir: cwd, Providers: providers,
 				Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(),
 				Interactive: false, Progress: activeReporters.Progress, Diagnostics: activeReporters.Diagnostic,
-				LocalValueDir: localValueDir, GlobalValueDir: filepath.Join(configDir, "wuko", "values"),
+				ElevationAllowed: !target.remote,
+				LocalValueDir:    localValueDir, GlobalValueDir: filepath.Join(configDir, "wuko", "values"),
 			}
 			if item == plan.Root.Definition && config.returnObserver != nil {
 				options.OnReturn = config.returnObserver.observe
@@ -263,7 +264,8 @@ func formLoadFunc(command *cobra.Command, deps dependencies, loader *workflow.Lo
 			Vars:         options.Vars, Env: options.Env, BaseEnv: options.BaseEnv, EnvironmentLoaders: options.EnvironmentLoaders, RunDir: cwd, Providers: options.Providers,
 			Stdin: command.InOrStdin(), Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(),
 			Interactive: false, Progress: activeReporters.Progress, Diagnostics: activeReporters.Diagnostic,
-			LocalValueDir: localValueDir, GlobalValueDir: filepath.Join(configDir, "wuko", "values"),
+			ElevationAllowed: !remote,
+			LocalValueDir:    localValueDir, GlobalValueDir: filepath.Join(configDir, "wuko", "values"),
 		})
 		if err != nil {
 			return nil, err

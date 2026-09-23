@@ -35,6 +35,11 @@ type Options struct {
 	// User is a username or numeric user ID for the child process. Empty inherits the current user.
 	User  string
 	Stdin io.Reader
+	// PromptStdin and PromptStderr are host-side streams for an executor that must obtain
+	// authorization before starting the child. LocalExecutor ignores them.
+	PromptStdin  io.Reader
+	PromptStderr io.Writer
+	Interactive  bool
 	// StdinOutlivesProcess reports that Stdin stays open past the child's own lifetime, so the
 	// exit must be reported without waiting for a stdin pump to reach EOF. This executor
 	// satisfies it by requiring an *os.File, which os/exec passes to the child as a duplicated

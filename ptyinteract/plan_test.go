@@ -43,6 +43,22 @@ func TestCompileAndRunEmptyPlan(t *testing.T) {
 	}
 }
 
+func TestPlanSpecsReturnsIndependentTransportCopy(t *testing.T) {
+	want := []Spec{{HasExpect: true, Expect: "prompt>", Send: "secret", Newline: true, Sensitive: true}}
+	plan, err := Compile(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := plan.Specs()
+	if len(got) != 1 || got[0] != want[0] {
+		t.Fatalf("Specs() = %#v, want %#v", got, want)
+	}
+	got[0].Send = "changed"
+	if plan.Specs()[0].Send != "secret" {
+		t.Fatal("Specs() exposed mutable plan storage")
+	}
+}
+
 func TestRunExecutesImmediateAndPromptInteractionsInOrder(t *testing.T) {
 	plan, err := Compile([]Spec{
 		{Send: "first", Newline: true},

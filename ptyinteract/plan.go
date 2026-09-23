@@ -37,6 +37,7 @@ type interaction struct {
 // Plan is an immutable compiled interaction sequence. It is safe to reuse across attempts.
 type Plan struct {
 	interactions []interaction
+	specs        []Spec
 }
 
 // Compile validates and compiles an interaction sequence.
@@ -76,7 +77,16 @@ func Compile(specs []Spec) (*Plan, error) {
 		item.timeout = timeout
 		compiled[i] = item
 	}
-	return &Plan{interactions: compiled}, nil
+	return &Plan{interactions: compiled, specs: append([]Spec(nil), specs...)}, nil
+}
+
+// Specs returns a copy of the rendered interaction sequence. Process wrappers use it to
+// transport a compiled plan across an execution boundary without exposing Plan internals.
+func (p *Plan) Specs() []Spec {
+	if p == nil {
+		return nil
+	}
+	return append([]Spec(nil), p.specs...)
 }
 
 // Len returns the number of interactions in the plan.

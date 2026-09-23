@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	processpkg "github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -21,6 +22,69 @@ type testServices struct {
 	done    chan struct{}
 	err     error
 	mu      sync.Mutex
+}
+
+type recordingProcessExecutor struct{ options processpkg.Options }
+
+func (executor *recordingProcessExecutor) Run(_ context.Context, options processpkg.Options) (processpkg.Result, error) {
+	executor.options = options
+	if options.Started != nil {
+		options.Started()
+	}
+	return processpkg.Result{}, nil
+}
+
+func TestElevatedProcessValidationAndExecutionContext(t *testing.T) {
+	if _, err := New(map[string]any{"command": "worker", "elevated": true, "user": "root"}); err == nil || !strings.Contains(err.Error(), "cannot be combined with user") {
+		t.Fatalf("New() error = %v", err)
+	}
+	built, err := New(map[string]any{"command": "worker", "elevated": true, "env": map[string]any{"EXPLICIT": "yes"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := built.(*Runner)
+	elevated := &recordingProcessExecutor{}
+	request := step.Request{
+		RunDir: t.TempDir(), Env: map[string]string{"WORKFLOW_ONLY": "no"}, ElevatedExecutor: elevated,
+		ElevationAllowed: true, Interactive: true, Stdin: os.Stdin, Stderr: io.Discard,
+		Attempt: 2, MaxAttempts: 4, OperationID: "operation",
+	}
+	if err := runner.Validate(t.Context(), request); err != nil {
+		t.Fatal(err)
+	}
+	if runner.executor(request) != elevated {
+		t.Fatal("process did not select the elevated executor")
+	}
+	options, _, err := runner.processOptions(request, "worker", nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if options.Env["EXPLICIT"] != "yes" || options.Env[step.AttemptEnv] != "2" {
+		t.Fatalf("environment = %#v", options.Env)
+	}
+	if _, exists := options.Env["WORKFLOW_ONLY"]; exists {
+		t.Fatalf("workflow environment leaked into %#v", options.Env)
+	}
+	if !options.Interactive || options.PromptStdin != os.Stdin {
+		t.Fatalf("authorization context = %#v", options)
+	}
+
+	for _, test := range []struct {
+		name    string
+		request step.Request
+		want    string
+	}{
+		{name: "remote", request: step.Request{ElevatedExecutor: elevated}, want: "trusted local"},
+		{name: "executor", request: step.Request{ElevationAllowed: true, InsideExecutor: true, ElevatedExecutor: elevated}, want: "executor blocks"},
+		{name: "unavailable", request: step.Request{ElevationAllowed: true}, want: "unavailable"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			err := runner.Validate(t.Context(), test.request)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("Validate() error = %v, want %q", err, test.want)
+			}
+		})
+	}
 }
 
 func newTestServices(t *testing.T) *testServices {

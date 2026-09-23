@@ -12,6 +12,7 @@ import (
 
 	processpkg "github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/step"
+	"github.com/up2jj/wuko/workflow"
 )
 
 func mustRunner(t *testing.T, raw map[string]any) *Runner {
@@ -231,5 +232,29 @@ func TestProcessAnyExitCodeSuppressesOnFailureRestart(t *testing.T) {
 		result: processpkg.Result{ExitCode: -1}, err: &processpkg.ExitError{Command: "worker", Code: -1},
 	}), 0) {
 		t.Fatal("a signal-terminated service did not restart")
+	}
+}
+
+func TestProbeTimeoutWidensForElevatedProcesses(t *testing.T) {
+	explicit := workflow.Duration(2 * time.Second)
+	for _, testCase := range []struct {
+		name     string
+		elevated bool
+		timeout  *workflow.Duration
+		want     time.Duration
+	}{
+		{name: "local default", want: time.Second},
+		// Elevation pays for sudo, a Wuko re-exec and a socket handshake before the probe
+		// command starts, which a one-second budget cannot absorb.
+		{name: "elevated default", elevated: true, want: 10 * time.Second},
+		{name: "local explicit", timeout: &explicit, want: 2 * time.Second},
+		{name: "elevated explicit", elevated: true, timeout: &explicit, want: 2 * time.Second},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			runner := &Runner{config: Config{Elevated: testCase.elevated}}
+			if got := runner.probeTimeout(ProbeTiming{Timeout: testCase.timeout}); got != testCase.want {
+				t.Fatalf("probeTimeout() = %s, want %s", got, testCase.want)
+			}
+		})
 	}
 }

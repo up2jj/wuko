@@ -35,6 +35,7 @@ type Config struct {
 	WorkingDirectory string               `yaml:"working_directory,omitempty"`
 	Env              workflow.Environment `yaml:"env,omitempty"`
 	User             string               `yaml:"user,omitempty"`
+	Elevated         bool                 `yaml:"elevated,omitempty"`
 	Label            string               `yaml:"label,omitempty"`
 	RPC              string               `yaml:"rpc,omitempty"`
 	Stdout           string               `yaml:"stdout,omitempty"`
@@ -166,6 +167,14 @@ func newProcess(raw map[string]any, rpcRegistry *rpcRegistry) (step.Runner, erro
 	} else if err := validateCommand(config.Command, config.Script, config.Shell, "process"); err != nil {
 		return nil, err
 	}
+	if config.Elevated && config.User != "" {
+		return nil, fmt.Errorf("elevated cannot be combined with user")
+	}
+	// An RPC worker keeps its request pipe open past the child's exit, which the elevated
+	// transport cannot carry because sudo only forwards a file-backed stdin.
+	if config.Elevated && config.RPC != "" {
+		return nil, fmt.Errorf("elevated cannot be combined with rpc")
+	}
 	for name := range config.Env {
 		if !workflow.ValidEnvironmentName(name) {
 			return nil, fmt.Errorf("invalid environment name %q", name)
@@ -264,7 +273,26 @@ func newProcess(raw map[string]any, rpcRegistry *rpcRegistry) (step.Runner, erro
 		argvProgram: argvProgram, rpcRegistry: rpcRegistry, workerID: workerID}, nil
 }
 
+func (runner *Runner) Validate(_ context.Context, request step.Request) error {
+	if !runner.config.Elevated {
+		return nil
+	}
+	if !request.ElevationAllowed {
+		return fmt.Errorf("elevated execution is allowed only for trusted local workflow files and local path actions")
+	}
+	if request.InsideExecutor {
+		return fmt.Errorf("elevated execution is not supported inside executor blocks")
+	}
+	if request.ElevatedExecutor == nil {
+		return fmt.Errorf("elevated execution is unavailable in this host")
+	}
+	return nil
+}
+
 func (runner *Runner) Run(ctx context.Context, request step.Request) (step.Result, error) {
+	if err := runner.Validate(ctx, request); err != nil {
+		return step.Result{}, err
+	}
 	if request.Services == nil {
 		return step.Result{}, fmt.Errorf("managed service scope is unavailable")
 	}
@@ -354,11 +382,21 @@ func (runner *Runner) checkRestartSupport(request step.Request) error {
 	if runner.config.Restart.Policy == "never" || runner.config.Shutdown.Command != nil {
 		return nil
 	}
-	policy, declared := request.Executor.(processpkg.CancelPolicy)
+	policy, declared := runner.executor(request).(processpkg.CancelPolicy)
 	if !declared || policy.CancelStopsProcess() {
 		return nil
 	}
 	return fmt.Errorf("restart policy %q requires shutdown.command: this executor cannot stop a running process by cancellation", runner.config.Restart.Policy)
+}
+
+func (runner *Runner) executor(request step.Request) processpkg.Executor {
+	if runner.config.Elevated {
+		return request.ElevatedExecutor
+	}
+	if request.Executor != nil {
+		return request.Executor
+	}
+	return processpkg.LocalExecutor{}
 }
 
 func (runner *Runner) processOptions(request step.Request, label string, started func(), matcher *logMatcher, rpc *rpcSession) (processpkg.Options, func() error, error) {
@@ -394,6 +432,7 @@ func (runner *Runner) processOptions(request step.Request, label string, started
 	}
 	return processpkg.Options{Command: command, Args: args, Dir: dir, Env: environment, User: runner.config.User,
 		Stdin: input, StdinOutlivesProcess: streamingInput,
+		PromptStdin: request.Stdin, PromptStderr: request.Stderr, Interactive: request.Interactive,
 		Stdout: output, Stderr: stderr, StdoutPolicy: runner.stdoutPolicy, StderrPolicy: runner.stderrPolicy,
 		Started: started, TerminationSignal: runner.signal, TerminationParentOnly: runner.config.Shutdown.ParentOnly,
 		TerminationGracePeriod: duration(runner.config.Shutdown.Timeout, 10*time.Second)}, flush, nil
@@ -406,7 +445,14 @@ func (runner *Runner) executionContext(request step.Request) (string, map[string
 	} else if !filepath.IsAbs(dir) {
 		dir = filepath.Join(request.RunDir, dir)
 	}
-	environment := maps.Clone(request.Env)
+	// An elevated command starts from a clean root baseline instead of the workflow environment,
+	// so the inherited values are never cloned in the first place.
+	inherited := request.Env
+	if runner.config.Elevated {
+		inherited = nil
+	}
+	environment := make(map[string]string, len(inherited)+len(runner.config.Env)+3)
+	maps.Copy(environment, inherited)
 	maps.Copy(environment, runner.config.Env)
 	return dir, step.ApplyAttemptEnvironment(environment, request)
 }

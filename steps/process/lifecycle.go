@@ -171,10 +171,7 @@ func (runner *Runner) launch(parent context.Context, request step.Request, label
 	if launchErr == nil {
 		launchErr = optionsErr
 	}
-	executor := request.Executor
-	if executor == nil {
-		executor = processpkg.LocalExecutor{}
-	}
+	executor := runner.executor(request)
 	go func() {
 		if launchErr != nil {
 			if rpc != nil {
@@ -304,7 +301,7 @@ started:
 	if runner.config.Detached {
 		exited = nil
 	}
-	return runProbeUntil(ctx, timing, probe, exited, process.protocol)
+	return runProbeUntil(ctx, timing, runner.probeTimeout(timing), probe, exited, process.protocol)
 }
 
 func (runner *Runner) waitDetached(ctx context.Context, request step.Request) (error, bool) {
@@ -327,7 +324,7 @@ func (runner *Runner) waitDetached(ctx context.Context, request step.Request) (e
 	}
 	failures := 0
 	for {
-		probeCtx, cancel := context.WithTimeout(ctx, duration(timing.Timeout, time.Second))
+		probeCtx, cancel := context.WithTimeout(ctx, runner.probeTimeout(timing))
 		err := probe(probeCtx)
 		cancel()
 		if err != nil {
@@ -391,7 +388,7 @@ func (runner *Runner) waitRunning(ctx context.Context, request step.Request, pro
 			return processExit{}, nil, true
 		default:
 		}
-		probeCtx, cancel := context.WithTimeout(ctx, duration(timing.Timeout, time.Second))
+		probeCtx, cancel := context.WithTimeout(ctx, runner.probeTimeout(timing))
 		err := probe(probeCtx)
 		cancel()
 		if err != nil {
@@ -425,15 +422,13 @@ func (runner *Runner) shutdown(scopeCtx context.Context, request step.Request, l
 		timeout := duration(runner.config.Shutdown.Timeout, 10*time.Second)
 		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(scopeCtx), timeout)
 		command, args := buildCommand(runner.config.Shutdown.Command.Command, runner.config.Shutdown.Command.Script, runner.config.Shutdown.Command.Shell, runner.config.Shutdown.Command.Args)
-		executor := request.Executor
-		if executor == nil {
-			executor = processpkg.LocalExecutor{}
-		}
+		executor := runner.executor(request)
 		dir, environment := runner.executionContext(request)
 		stdout := prefixedWriter(request.Stdout, label+"/shutdown", nil).(*linePrefixWriter)
 		stderr := prefixedWriter(request.Stderr, label+"/shutdown", nil).(*linePrefixWriter)
 		_, commandErr := executor.Run(shutdownCtx, processpkg.Options{Command: command, Args: args, Dir: dir, Env: environment,
 			Stdout: stdout, Stderr: stderr,
+			PromptStdin: request.Stdin, PromptStderr: request.Stderr, Interactive: request.Interactive,
 			StdoutPolicy: processpkg.OutputInherit, StderrPolicy: processpkg.OutputInherit})
 		commandErr = errors.Join(commandErr, stdout.Flush(), stderr.Flush())
 		cancel()
@@ -470,12 +465,12 @@ func (runner *Runner) exitError(exit processExit) error {
 	return &processpkg.ExitError{Command: runner.config.Command, Code: exit.result.ExitCode}
 }
 
+// execProbe deliberately runs non-interactively even for an elevated process. A probe fires on a
+// short budget for the life of the service, and a credential prompt raised from here would be
+// cancelled mid-read; failing the probe is the honest outcome.
 func (runner *Runner) execProbe(request step.Request, configured ExecProbe) func(context.Context) error {
 	return func(ctx context.Context) error {
-		executor := request.Executor
-		if executor == nil {
-			executor = processpkg.LocalExecutor{}
-		}
+		executor := runner.executor(request)
 		dir, environment := runner.executionContext(request)
 		result, err := executor.Run(ctx, processpkg.Options{Command: configured.Command, Args: configured.Args, Dir: dir,
 			Env: environment, StdoutPolicy: processpkg.OutputDiscard, StderrPolicy: processpkg.OutputDiscard})
@@ -521,7 +516,7 @@ func (runner *Runner) httpProbe(configured HTTPProbe) func(context.Context) erro
 	}
 }
 
-func runProbeUntil(ctx context.Context, timing ProbeTiming, probe func(context.Context) error, exited <-chan processExit, protocol <-chan error) error {
+func runProbeUntil(ctx context.Context, timing ProbeTiming, timeout time.Duration, probe func(context.Context) error, exited <-chan processExit, protocol <-chan error) error {
 	if delay := duration(timing.InitialDelay, 0); delay > 0 {
 		timer := time.NewTimer(delay)
 		select {
@@ -539,7 +534,7 @@ func runProbeUntil(ctx context.Context, timing ProbeTiming, probe func(context.C
 	}
 	successes, failures := 0, 0
 	for {
-		probeCtx, cancel := context.WithTimeout(ctx, duration(timing.Timeout, time.Second))
+		probeCtx, cancel := context.WithTimeout(ctx, timeout)
 		err := probe(probeCtx)
 		cancel()
 		if err == nil {
@@ -595,6 +590,18 @@ func waitContext(ctx context.Context, wait time.Duration) error {
 	case <-timer.C:
 		return nil
 	}
+}
+
+// probeTimeout resolves a probe's budget. An elevated probe pays for a sudo authorization, a
+// re-exec of the Wuko binary and a control socket handshake before the probe command itself
+// starts, which the ordinary one-second default cannot absorb; without a wider floor a healthy
+// service would be restarted by its own liveness probe. An explicit timeout always wins.
+func (runner *Runner) probeTimeout(timing ProbeTiming) time.Duration {
+	fallback := time.Second
+	if runner.config.Elevated {
+		fallback = 10 * time.Second
+	}
+	return duration(timing.Timeout, fallback)
 }
 
 func duration(value *workflow.Duration, fallback time.Duration) time.Duration {

@@ -31,6 +31,7 @@ type Config struct {
 	WorkingDirectory string               `yaml:"working_directory,omitempty"`
 	Env              workflow.Environment `yaml:"env,omitempty"`
 	User             string               `yaml:"user,omitempty"`
+	Elevated         bool                 `yaml:"elevated,omitempty"`
 	Stdin            string               `yaml:"stdin,omitempty"`
 	TTY              bool                 `yaml:"tty,omitempty"`
 	Interactions     interactionsConfig   `yaml:"interactions,omitempty"`
@@ -109,6 +110,9 @@ func New(raw map[string]any) (step.Runner, error) {
 	if config.Script != "" && strings.TrimSpace(config.Script) == "" {
 		return nil, fmt.Errorf("script cannot be blank")
 	}
+	if config.Elevated && config.User != "" {
+		return nil, fmt.Errorf("elevated cannot be combined with user")
+	}
 	if config.TTY && config.Stdin != "" {
 		return nil, fmt.Errorf("tty and stdin cannot be combined")
 	}
@@ -186,7 +190,26 @@ func New(raw map[string]any) (step.Runner, error) {
 	}, nil
 }
 
+func (r *Runner) Validate(_ context.Context, request step.Request) error {
+	if !r.config.Elevated {
+		return nil
+	}
+	if !request.ElevationAllowed {
+		return fmt.Errorf("elevated execution is allowed only for trusted local workflow files and local path actions")
+	}
+	if request.InsideExecutor {
+		return fmt.Errorf("elevated execution is not supported inside executor blocks")
+	}
+	if request.ElevatedExecutor == nil {
+		return fmt.Errorf("elevated execution is unavailable in this host")
+	}
+	return nil
+}
+
 func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, error) {
+	if err := r.Validate(ctx, request); err != nil {
+		return step.Result{}, err
+	}
 	handoff := r.config.TTY && (!r.hasInteractions || r.config.Interact)
 	if handoff && (!request.Interactive || request.Stdin == nil) {
 		return step.Result{}, fmt.Errorf("tty requires an interactive terminal")
@@ -205,10 +228,20 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 	} else if !filepath.IsAbs(dir) {
 		dir = filepath.Join(request.RunDir, dir)
 	}
-	environment := maps.Clone(request.Env)
+	// An elevated command starts from a clean root baseline instead of the workflow environment,
+	// so the inherited values are never cloned in the first place.
+	inherited := request.Env
+	if r.config.Elevated {
+		inherited = nil
+	}
+	environment := make(map[string]string, len(inherited)+len(r.config.Env)+3)
+	maps.Copy(environment, inherited)
 	maps.Copy(environment, r.config.Env)
 	environment = step.ApplyAttemptEnvironment(environment, request)
 	executor := request.Executor
+	if r.config.Elevated {
+		executor = request.ElevatedExecutor
+	}
 	if executor == nil {
 		executor = process.LocalExecutor{}
 	}
@@ -225,6 +258,7 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 	result, err := executor.Run(ctx, process.Options{
 		Command: command, Args: args, Dir: dir, Env: environment, User: r.config.User,
 		Stdin: stdin, Stdout: request.Stdout, Stderr: request.Stderr, TTY: r.config.TTY,
+		PromptStdin: request.Stdin, PromptStderr: request.Stderr, Interactive: request.Interactive,
 		Interactions: interactions, Interact: r.config.Interact, CaptureLimit: captureLimit,
 		Terminal:     terminalAppearance(r.config.Terminal),
 		StdoutPolicy: r.stdoutPolicy, StderrPolicy: r.stderrPolicy,

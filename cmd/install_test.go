@@ -327,3 +327,36 @@ uninstall:
 		t.Fatalf("uninstall hook directory = %q, want %q", strings.TrimSpace(string(data)), wantRunDir)
 	}
 }
+
+func TestInstalledWorkflowElevationFollowsRecordedProvenance(t *testing.T) {
+	directory := t.TempDir()
+	write := func(name, contents string) {
+		if err := os.WriteFile(workflowInstallMarkerPath(directory, name), []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("local", `{"version":1,"name":"local","source":"./local.yaml","remote":false}`)
+	write("fetched", `{"version":1,"name":"fetched","source":"https://example.com/w.yaml","remote":true}`)
+	write("corrupt", "{not json")
+	write("future", `{"version":99,"name":"future","remote":false}`)
+
+	for _, testCase := range []struct {
+		name     string
+		packaged bool
+		want     bool
+	}{
+		{name: "local", want: true},
+		{name: "fetched", want: false},
+		{name: "corrupt", want: false},
+		{name: "future", want: false},
+		// No marker: authored in place or installed before provenance was recorded, which
+		// `wuko run` already treats as trusted local code.
+		{name: "unmarked", want: true},
+		// A marketplace package is never trusted, matching the install hook it ran under.
+		{name: "local", packaged: true, want: false},
+	} {
+		if got := installedWorkflowElevationAllowed(directory, testCase.name, testCase.packaged); got != testCase.want {
+			t.Errorf("installedWorkflowElevationAllowed(%q, packaged=%v) = %v, want %v", testCase.name, testCase.packaged, got, testCase.want)
+		}
+	}
+}

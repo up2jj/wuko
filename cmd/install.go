@@ -122,9 +122,11 @@ type installInvocation struct {
 }
 
 type preparedInstallSource struct {
-	definition *workflow.Definition
-	data       []byte
-	cleanup    func()
+	definition       *workflow.Definition
+	data             []byte
+	cleanup          func()
+	source           string
+	elevationAllowed bool
 }
 
 type preparedMarketplacePackage struct {
@@ -276,7 +278,7 @@ func prepareInstallSource(command *cobra.Command, deps dependencies, invocation 
 			return nil, err
 		}
 	}
-	return &preparedInstallSource{definition: sourceDefinition, data: data, cleanup: cleanup}, nil
+	return &preparedInstallSource{definition: sourceDefinition, data: data, cleanup: cleanup, source: source, elevationAllowed: !workflow.IsRemoteLocator(source)}, nil
 }
 
 func installPreparedWorkflow(command *cobra.Command, deps dependencies, config workflowLifecycleConfig, invocation installInvocation, workflowDir string, prepared *preparedInstallSource) error {
@@ -302,7 +304,7 @@ func installPreparedWorkflow(command *cobra.Command, deps dependencies, config w
 	if err != nil {
 		return fmt.Errorf("preparing workflow for installation: %w", err)
 	}
-	options := lifecycleEngineOptions(command, deps, definition, invocation.vars, invocation.env, invocation.baseEnv, invocation.environmentLoaders, invocation.providers, workflowDir, invocation.configDir)
+	options := lifecycleEngineOptions(command, deps, definition, invocation.vars, invocation.env, invocation.baseEnv, invocation.environmentLoaders, invocation.providers, workflowDir, invocation.configDir, prepared.elevationAllowed)
 	engineFor := workflowEngine(deps)
 	if err := preflightDefinition(command.Context(), definition, engineFor, options); err != nil {
 		return fmt.Errorf("validating workflow %q: %w", definition.Name, err)
@@ -313,8 +315,50 @@ func installPreparedWorkflow(command *cobra.Command, deps dependencies, config w
 	if err := replaceWorkflowFile(stage, target); err != nil {
 		return fmt.Errorf("installing workflow %q: %w", definition.Name, err)
 	}
+	// Provenance outlives the install so that uninstall applies the same elevation rule the
+	// install hook ran under. Without it a workflow fetched from a URL, denied elevation while
+	// installing, would run its uninstall hook as root.
+	// Keyed on the installed filename so that uninstall finds it from the path it resolves.
+	marker := workflowInstallMarker{Version: workflowInstallMarkerVersion, Name: sourceDefinition.Name, Source: prepared.source, Remote: !prepared.elevationAllowed}
+	if err := writeJSONAtomically(workflowInstallMarkerPath(workflowDir, sourceDefinition.Name), marker); err != nil {
+		return fmt.Errorf("recording workflow provenance for %q: %w", definition.Name, err)
+	}
 	_, err = fmt.Fprintf(command.OutOrStdout(), "installed %s in %s\n", definition.Name, target)
 	return err
+}
+
+type workflowInstallMarker struct {
+	Version int    `json:"version"`
+	Name    string `json:"name"`
+	Source  string `json:"source"`
+	Remote  bool   `json:"remote"`
+}
+
+const workflowInstallMarkerVersion = 1
+
+func workflowInstallMarkerPath(directory, name string) string {
+	return filepath.Join(directory, "."+name+".wuko-install.json")
+}
+
+// installedWorkflowElevationAllowed decides whether an installed workflow's uninstall hook may
+// elevate. A marketplace package never can, matching its install. A single file may when it was
+// installed from a local path, and may not when it came from a remote locator. A workflow with no
+// marker predates provenance recording or was authored in place, and is treated as local code the
+// same way `wuko run` treats it.
+func installedWorkflowElevationAllowed(directory, name string, packaged bool) bool {
+	if packaged {
+		return false
+	}
+	data, err := os.ReadFile(workflowInstallMarkerPath(directory, name))
+	if err != nil {
+		return true
+	}
+	var marker workflowInstallMarker
+	if err := json.Unmarshal(data, &marker); err != nil || marker.Version != workflowInstallMarkerVersion {
+		// An unreadable marker is not a licence to elevate.
+		return false
+	}
+	return !marker.Remote
 }
 
 type marketplacePackageInstallMarker struct {
@@ -361,7 +405,7 @@ func installPreparedMarketplacePackage(command *cobra.Command, deps dependencies
 	if err != nil {
 		return fmt.Errorf("preparing workflow package for installation: %w", err)
 	}
-	options := lifecycleEngineOptions(command, deps, definition, invocation.vars, invocation.env, invocation.baseEnv, invocation.environmentLoaders, invocation.providers, stage, invocation.configDir)
+	options := lifecycleEngineOptions(command, deps, definition, invocation.vars, invocation.env, invocation.baseEnv, invocation.environmentLoaders, invocation.providers, stage, invocation.configDir, false)
 	engineFor := workflowEngine(deps)
 	if err := preflightDefinition(command.Context(), definition, engineFor, options); err != nil {
 		return fmt.Errorf("validating workflow package %q: %w", definition.Name, err)
@@ -552,7 +596,9 @@ func uninstallWorkflow(command *cobra.Command, deps dependencies, name string, c
 	if err != nil {
 		return fmt.Errorf("loading workflow %q: %w", name, err)
 	}
-	options := lifecycleEngineOptions(command, deps, definition, vars, env, baseEnv, environmentLoaders, providers, runDir, configDir)
+	installedName := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	elevationAllowed := installedWorkflowElevationAllowed(workflowDir, installedName, source.PackageDir != "")
+	options := lifecycleEngineOptions(command, deps, definition, vars, env, baseEnv, environmentLoaders, providers, runDir, configDir, elevationAllowed)
 	engineFor := workflowEngine(deps)
 	if err := preflightDefinition(command.Context(), definition, engineFor, options); err != nil {
 		return fmt.Errorf("validating workflow %q: %w", name, err)
@@ -575,6 +621,9 @@ func uninstallWorkflow(command *cobra.Command, deps dependencies, name string, c
 	}
 	if err := os.RemoveAll(removePath); err != nil {
 		return fmt.Errorf("removing workflow %q: %w", name, err)
+	}
+	if source.PackageDir == "" {
+		_ = os.Remove(workflowInstallMarkerPath(workflowDir, installedName))
 	}
 	fmt.Fprintf(command.OutOrStdout(), "uninstalled %s from %s\n", name, removePath)
 	return nil
@@ -771,12 +820,13 @@ func replaceWorkflowFile(stage, target string) error {
 	return nil
 }
 
-func lifecycleEngineOptions(command *cobra.Command, deps dependencies, definition *workflow.Definition, vars map[string]any, env, baseEnv map[string]string, environmentLoaders []string, providers provider.Set, runDir, configDir string) engine.Options {
+func lifecycleEngineOptions(command *cobra.Command, deps dependencies, definition *workflow.Definition, vars map[string]any, env, baseEnv map[string]string, environmentLoaders []string, providers provider.Set, runDir, configDir string, elevationAllowed bool) engine.Options {
 	return engine.Options{
 		Vars: vars, Env: env, BaseEnv: baseEnv, EnvironmentLoaders: environmentLoaders, RunDir: runDir, Providers: providers,
 		LocalValueDir: filepath.Join(definition.Dir, ".wuko", "values"), GlobalValueDir: filepath.Join(configDir, "wuko", "values"),
 		Stdin: command.InOrStdin(), Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(),
-		Interactive: deps.isInteractive != nil && deps.isInteractive(command.InOrStdin()),
-		Diagnostics: diagnosticsFor(command, deps, runDir),
+		Interactive:      deps.isInteractive != nil && deps.isInteractive(command.InOrStdin()),
+		ElevationAllowed: elevationAllowed,
+		Diagnostics:      diagnosticsFor(command, deps, runDir),
 	}
 }

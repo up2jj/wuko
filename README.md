@@ -679,4 +679,7 @@ Workflows and composite actions are trusted code. Lua, shell, agent, Docker, and
 sources can access local resources with the permissions granted to Wuko. Review publishers, pin
 immutable remote action releases with SHA-256, and do not mount the Docker socket for untrusted
 workflows. Safe archive extraction is not an execution sandbox, and Wuko does not provide a
-secrets store.
+secrets store. Local file workflows and local path actions may explicitly run `shell` and `process`
+steps as root with `with.elevated: true`; this is arbitrary sudo execution, not a restricted helper.
+Remote, stdin, and executor-scoped definitions cannot elevate. See
+[Elevated shell and process commands](docs/steps-automation.md#elevated-shell-and-process-commands).

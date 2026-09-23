@@ -89,6 +89,7 @@ func renderWorkflowTree(command *cobra.Command, deps dependencies, args []string
 		options.Target = args[1]
 	}
 	var definition *workflow.Definition
+	elevationAllowed := true
 	if config.workflowFile != "" {
 		path, err := filepath.Abs(config.workflowFile)
 		if err != nil {
@@ -99,6 +100,7 @@ func renderWorkflowTree(command *cobra.Command, deps dependencies, args []string
 			return err
 		}
 	} else if workflow.IsRemoteLocator(args[0]) {
+		elevationAllowed = false
 		var cleanup func()
 		definition, cleanup, err = loader.LoadRemote(command.Context(), args[0], options)
 		if err != nil {
@@ -130,7 +132,8 @@ func renderWorkflowTree(command *cobra.Command, deps dependencies, args []string
 		if err := preflightDependencyPlan(command.Context(), plan, func() *engine.Engine { return workflowEngine(deps) }, func(definition *workflow.Definition, dependencies map[string]map[string]any) engine.Options {
 			return engine.Options{Vars: vars, Env: env, BaseEnv: baseEnv, EnvironmentLoaders: environmentLoaders, Dependencies: dependencies, RunDir: cwd, Providers: providers,
 				Stdin: command.InOrStdin(), Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(), Diagnostics: reporter,
-				LocalValueDir: filepath.Join(definition.Dir, ".wuko", "values"), GlobalValueDir: filepath.Join(configDir, "wuko", "values")}
+				ElevationAllowed: elevationAllowed,
+				LocalValueDir:    filepath.Join(definition.Dir, ".wuko", "values"), GlobalValueDir: filepath.Join(configDir, "wuko", "values")}
 		}); err != nil {
 			return err
 		}

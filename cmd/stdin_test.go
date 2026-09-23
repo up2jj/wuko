@@ -79,6 +79,25 @@ func TestRunCommandDryRunNamesStdinWorkflow(t *testing.T) {
 	}
 }
 
+func TestRunCommandRejectsElevationFromStdin(t *testing.T) {
+	root := t.TempDir()
+	registry := step.NewRegistry()
+	if err := shell.Register(registry); err != nil {
+		t.Fatal(err)
+	}
+	command := newRootCmd(dependencies{
+		stdin:  strings.NewReader("version: 1\nname: streamed\nsteps:\n  - id: root\n    type: shell\n    with: {command: id, elevated: true}\n"),
+		stdout: io.Discard, stderr: io.Discard,
+		cwd: func() (string, error) { return root, nil }, homeDir: func() (string, error) { return "", nil },
+		configDir: func() (string, error) { return "", nil }, registry: registry,
+	})
+	command.SetArgs([]string{"run", "--file", "-", "--dry-run"})
+	err := command.ExecuteContext(t.Context())
+	if err == nil || !strings.Contains(err.Error(), "trusted local") {
+		t.Fatalf("ExecuteContext() error = %v", err)
+	}
+}
+
 func TestRunCommandReportsInvalidStdinWorkflow(t *testing.T) {
 	root := t.TempDir()
 	command := newRootCmd(dependencies{

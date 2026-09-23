@@ -89,6 +89,11 @@ type Request struct {
 	TemplateRenderer TemplateRenderer
 	// Executor runs process-backed work. A nil executor means local execution.
 	Executor process.Executor
+	// ElevatedExecutor runs explicitly elevated host work. ElevationAllowed records trusted
+	// local provenance; InsideExecutor prevents host elevation from escaping an executor scope.
+	ElevatedExecutor process.Executor
+	ElevationAllowed bool
+	InsideExecutor   bool
 	// Services registers ready, lifecycle-managed background work in the nearest workflow or
 	// executor scope. It is nil when a runner is invoked outside the engine.
 	Services ServiceLauncher

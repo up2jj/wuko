@@ -659,9 +659,52 @@ Run as another Unix account when Wuko has permission:
 ```
 
 Live output is forwarded and also captured as `stdout`, `stderr`, and `exit_code`. `user` uses
-native process credentials; Wuko does not invoke `sudo` or rewrite `HOME` and `USER`. The boolean
+native process credentials and does not authenticate or elevate. The boolean
 outputs `stdout_truncated` and `stderr_truncated` report whether capture reached its configured
 bound.
+
+### Elevated shell and process commands
+
+Set `elevated: true` on a `shell` or `process` step to run its command as root through `sudo`:
+
+```yaml
+- id: install
+  type: shell
+  with:
+    command: install
+    args: [-m, "0755", ./app, /usr/local/bin/app]
+    elevated: true
+```
+
+Elevation is one-shot: the root process ends with the step, and the next ordinary step runs as the
+invoking user. Wuko first reuses a cached sudo credential and otherwise prompts on the invoking
+terminal. Later elevated steps normally reuse sudo's ticket, although sudo policy or ticket expiry
+may require another prompt. Non-interactive runs require a cached credential or an applicable
+`NOPASSWD` rule. Wuko never reads or retains the password and does not invalidate the ticket.
+
+Only local file workflows and local path actions such as `uses: ./actions/install` may elevate.
+Workflows read from stdin, direct URL or GitHub workflows, URL/GitHub/command actions, and steps
+inside Docker, devenv, or other executor blocks are rejected during validation. `elevated` cannot
+be combined with `user`, and a `process` step cannot combine it with `rpc`. An elevated process also elevates its exec probes and shutdown command;
+HTTP probes stay local. Exec probes always run non-interactively: a probe repeats for the life of
+the service on a short budget, so it reports failure rather than raising a credential prompt it
+could not finish reading. Because each elevated probe pays for sudo, a Wuko re-exec and a control
+socket handshake, an elevated probe without an explicit `timeout` gets ten seconds instead of one.
+
+An installed workflow's `uninstall` hook may elevate only when the workflow was installed from a
+local path. A workflow installed from a URL, and every marketplace package, is denied elevation at
+uninstall exactly as it was during install.
+
+Elevated commands receive a clean root environment: root identity values, a fixed system `PATH`,
+safe locale and terminal metadata, Wuko attempt metadata, and only the step's explicit `with.env`
+entries. Workflow-level and invocation environment values are not inherited. Use templates to copy
+an intentional value into `with.env` explicitly. Only absolute `PATH` entries are searched when
+resolving an elevated command, so an empty or relative entry never promotes a binary from the run
+directory into root execution.
+
+`elevated: true` grants the workflow arbitrary root command execution; it is not a sandbox or an
+allowlisted administrative API. Do not grant `NOPASSWD` access to a Wuko binary that untrusted
+users can replace, because the private helper intentionally executes the trusted workflow's command.
 
 By default, only exit code 0 succeeds. Set `allowed_exit_codes` to a non-empty list of codes from
 0 through 255 when a command uses selected non-zero statuses as useful observations. The

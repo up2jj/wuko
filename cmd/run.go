@@ -209,6 +209,7 @@ func runWorkflow(command *cobra.Command, deps dependencies, args []string, confi
 		return err
 	}
 	workflowName = definition.Name
+	elevationAllowed := !target.remote && !target.fromStdin
 	remoteDefinitions := make(map[string]bool)
 	if target.remote {
 		remoteDefinitions[definition.Path] = true
@@ -232,7 +233,8 @@ func runWorkflow(command *cobra.Command, deps dependencies, args []string, confi
 			LocalValueDir: localValueDir, GlobalValueDir: filepath.Join(configDir, "wuko", "values"),
 			Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(),
 			Interactive: isInteractive, DryRun: config.dryRun, Progress: reporters.Progress,
-			Diagnostics: reporters.Diagnostic,
+			ElevationAllowed: elevationAllowed,
+			Diagnostics:      reporters.Diagnostic,
 		}
 	}
 	optionsFor := func(definition *workflow.Definition, dependencies map[string]map[string]any) engine.Options {

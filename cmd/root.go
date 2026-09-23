@@ -19,11 +19,13 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/up2jj/wuko/diagnostic"
+	"github.com/up2jj/wuko/elevation"
 	"github.com/up2jj/wuko/engine"
 	envload "github.com/up2jj/wuko/environment"
 	"github.com/up2jj/wuko/executor"
 	"github.com/up2jj/wuko/observe"
 	"github.com/up2jj/wuko/plugin"
+	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/provider"
 	workflowschedule "github.com/up2jj/wuko/schedule"
 	"github.com/up2jj/wuko/step"
@@ -129,6 +131,7 @@ type dependencies struct {
 	executable        func() (string, error)
 	registry          *step.Registry
 	executors         *executor.Registry
+	elevatedExecutor  process.Executor
 	plugins           *plugin.Manager
 	httpClient        *http.Client
 	providers         *provider.Registry
@@ -202,9 +205,10 @@ func NewRootCmd() *cobra.Command {
 		stdin: os.Stdin, stdout: os.Stdout, stderr: os.Stderr,
 		cwd: os.Getwd, environment: environments,
 		homeDir: os.UserHomeDir, configDir: os.UserConfigDir, registry: registry, executors: executors, plugins: plugins,
-		agentLookPath: exec.LookPath,
-		executable:    os.Executable,
-		loader:        defaultWorkflowLoader(plugins), providers: defaultProviderRegistry(), isInteractive: interactive,
+		elevatedExecutor: elevation.NewExecutor(),
+		agentLookPath:    exec.LookPath,
+		executable:       os.Executable,
+		loader:           defaultWorkflowLoader(plugins), providers: defaultProviderRegistry(), isInteractive: interactive,
 		now: time.Now, waitUntil: workflowschedule.Wait,
 		getenv:         os.Getenv,
 		openEditor:     openWorkflowEditor(os.Getenv),
@@ -232,6 +236,7 @@ func workflowEngine(deps dependencies) *engine.Engine {
 	return engine.New(
 		deps.registry,
 		engine.WithExecutors(deps.executors),
+		engine.WithElevatedExecutor(deps.elevatedExecutor),
 		engine.WithBackgroundControl(observe.NewControl(nil)),
 	)
 }

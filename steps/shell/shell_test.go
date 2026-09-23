@@ -46,6 +46,77 @@ func TestNewRejectsBlankScript(t *testing.T) {
 	}
 }
 
+func TestElevatedShellValidation(t *testing.T) {
+	if _, err := New(map[string]any{"command": "id", "elevated": true, "user": "root"}); err == nil || !strings.Contains(err.Error(), "cannot be combined with user") {
+		t.Fatalf("New() error = %v", err)
+	}
+	runner, err := New(map[string]any{"command": "id", "elevated": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name    string
+		request step.Request
+		want    string
+	}{
+		{name: "remote", request: step.Request{ElevatedExecutor: &recordingExecutor{}}, want: "trusted local"},
+		{name: "executor scope", request: step.Request{ElevationAllowed: true, InsideExecutor: true, ElevatedExecutor: &recordingExecutor{}}, want: "executor blocks"},
+		{name: "host unavailable", request: step.Request{ElevationAllowed: true}, want: "unavailable"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := runner.(step.Validator).Validate(t.Context(), test.request)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("Validate() error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestElevatedShellUsesDedicatedExecutorAndExplicitEnvironment(t *testing.T) {
+	local := &recordingExecutor{}
+	elevated := &recordingExecutor{result: process.Result{Stdout: "root"}}
+	runner, err := New(map[string]any{"command": "id", "elevated": true, "env": map[string]any{"EXPLICIT": "yes"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runner.Run(t.Context(), step.Request{
+		RunDir: t.TempDir(), Env: map[string]string{"WORKFLOW_ONLY": "no"}, Executor: local,
+		ElevatedExecutor: elevated, ElevationAllowed: true, Interactive: true,
+		Stdin: os.Stdin, Stdout: io.Discard, Stderr: io.Discard, Attempt: 2, MaxAttempts: 3, OperationID: "op",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if local.options.Command != "" || elevated.options.Command != "id" {
+		t.Fatalf("local = %#v, elevated = %#v", local.options, elevated.options)
+	}
+	if elevated.options.Env["EXPLICIT"] != "yes" || elevated.options.Env[step.AttemptEnv] != "2" {
+		t.Fatalf("environment = %#v", elevated.options.Env)
+	}
+	if _, exists := elevated.options.Env["WORKFLOW_ONLY"]; exists {
+		t.Fatalf("workflow environment leaked into %#v", elevated.options.Env)
+	}
+	if !elevated.options.Interactive || elevated.options.PromptStdin != os.Stdin {
+		t.Fatalf("authorization context = %#v", elevated.options)
+	}
+}
+
+func TestElevatedInfrastructureErrorCannotBeAllowed(t *testing.T) {
+	runner, err := New(map[string]any{"command": "id", "elevated": true, "allowed_exit_codes": "any"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	executor := &recordingExecutor{result: process.Result{ExitCode: 1}, err: errors.New("sudo transport failed")}
+	_, err = runner.Run(t.Context(), step.Request{
+		RunDir: t.TempDir(), Env: map[string]string{}, ElevatedExecutor: executor, ElevationAllowed: true,
+		Stdout: io.Discard, Stderr: io.Discard,
+	})
+	if err == nil || !strings.Contains(err.Error(), "sudo transport failed") {
+		t.Fatalf("Run() error = %v", err)
+	}
+}
+
 func TestNewAcceptsTemplatedScript(t *testing.T) {
 	if _, err := New(map[string]any{"script": "{{ .vars.script }}"}); err != nil {
 		t.Fatalf("New() error = %v", err)

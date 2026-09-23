@@ -28,6 +28,7 @@ import (
 type Engine struct {
 	registry           *step.Registry
 	executors          *executor.Registry
+	elevatedExecutor   process.Executor
 	backgroundControls []BackgroundControl
 }
 
@@ -45,6 +46,11 @@ func WithExecutors(registry *executor.Registry) Option {
 	return func(engine *Engine) { engine.executors = registry }
 }
 
+// WithElevatedExecutor supplies the host-only executor used by explicitly elevated steps.
+func WithElevatedExecutor(executor process.Executor) Option {
+	return func(engine *Engine) { engine.elevatedExecutor = executor }
+}
+
 type Options struct {
 	// InvocationID correlates this run with its surrounding reporting session. When empty, the
 	// run remains valid and reporters may supply an invocation identity at delivery time.
@@ -60,14 +66,17 @@ type Options struct {
 	EnvironmentLoaders []string
 	RunDir             string
 	// LocalValueDir is empty when local persistence is unavailable, such as for a remote workflow.
-	LocalValueDir  string
-	GlobalValueDir string
-	Stdin          io.Reader
-	Stdout         io.Writer
-	Stderr         io.Writer
-	Interactive    bool
-	DryRun         bool
-	Executor       process.Executor
+	LocalValueDir    string
+	GlobalValueDir   string
+	Stdin            io.Reader
+	Stdout           io.Writer
+	Stderr           io.Writer
+	Interactive      bool
+	DryRun           bool
+	Executor         process.Executor
+	ElevatedExecutor process.Executor
+	// ElevationAllowed is true only when the complete workflow provenance is trusted local code.
+	ElevationAllowed bool
 	// OnReturn observes a return after its condition, expressions, and output contract succeed.
 	// A destinationless return supplies the empty value. Hosts should attach the callback only to
 	// the root workflow whose destination they intend to honor; nested action runs do not inherit it.
@@ -159,6 +168,9 @@ func New(registry *step.Registry, options ...Option) *Engine {
 }
 
 func (e *Engine) Validate(ctx context.Context, definition *workflow.Definition, options Options) (validateErr error) {
+	if options.ElevatedExecutor == nil {
+		options.ElevatedExecutor = e.elevatedExecutor
+	}
 	ctx = workflow.ContextWithPlugins(ctx, definition.Plugins)
 	options.secretSession = definition.SecretSession()
 	// Command preflight calls Validate outside Run, so it redacts its own
@@ -479,6 +491,9 @@ func (e *Engine) RunValidated(ctx context.Context, definition *workflow.Definiti
 }
 
 func (e *Engine) run(ctx context.Context, definition *workflow.Definition, options Options, validate bool) (runState *State, runErr error) {
+	if options.ElevatedExecutor == nil {
+		options.ElevatedExecutor = e.elevatedExecutor
+	}
 	ctx = workflow.ContextWithPlugins(ctx, definition.Plugins)
 	options.secretSession = definition.SecretSession()
 	if session := definition.SecretSession(); session != nil {
@@ -1314,7 +1329,8 @@ func makeRequest(ctx context.Context, definition *workflow.Definition, stepID st
 		TemplateRenderer: newBoundTemplateRenderer(options.renderer, func() map[string]any {
 			return templateData(definition, options.RunDir, state)
 		}),
-		Executor: options.Executor,
+		Executor: options.Executor, ElevatedExecutor: options.ElevatedExecutor,
+		ElevationAllowed: options.ElevationAllowed, InsideExecutor: options.insideExecutor,
 		Services: reportingServiceLauncher{launcher: options.services, options: options, workflowName: definition.Name},
 		Secret:   resolveSecret, Helpers: definition.Helpers(), HelperContext: ctx,
 	}
@@ -1329,6 +1345,10 @@ func actionLocalValueDir(workflowStep workflow.Step, options Options) string {
 		return ""
 	}
 	return options.LocalValueDir
+}
+
+func actionElevationAllowed(workflowStep workflow.Step, options Options) bool {
+	return options.ElevationAllowed && workflowStep.Uses.Path != ""
 }
 
 func (e *Engine) validateAction(ctx context.Context, definition *workflow.Definition, workflowStep workflow.Step, options Options, state *State) error {
@@ -1359,6 +1379,7 @@ func (e *Engine) validateAction(ctx context.Context, definition *workflow.Defini
 		InvocationID: options.InvocationID,
 		inputs:       inputs, BaseEnv: state.Env, EnvironmentLoaders: slices.Clone(state.EnvironmentLoaders), RunDir: options.RunDir, Providers: state.Providers.Clone(),
 		LocalValueDir: actionLocalValueDir(workflowStep, options), GlobalValueDir: options.GlobalValueDir,
+		ElevatedExecutor: options.ElevatedExecutor, ElevationAllowed: actionElevationAllowed(workflowStep, options),
 		Stdin: options.Stdin, Stdout: options.Stdout, Stderr: options.Stderr, Interactive: options.Interactive,
 		Diagnostics: options.Diagnostics, runID: options.runID, parentRunID: options.parentRunID,
 		parentStepRunID: options.parentStepRunID, depth: options.depth + 1, runtime: options.runtime,
@@ -1390,6 +1411,7 @@ func (e *Engine) prepareActionExecutor(definition *workflow.Definition, workflow
 			InvocationID: options.InvocationID,
 			inputs:       inputs, BaseEnv: state.Env, EnvironmentLoaders: slices.Clone(state.EnvironmentLoaders), RunDir: options.RunDir, Providers: state.Providers.Clone(),
 			LocalValueDir: actionLocalValueDir(workflowStep, options), GlobalValueDir: options.GlobalValueDir,
+			ElevatedExecutor: options.ElevatedExecutor, ElevationAllowed: actionElevationAllowed(workflowStep, options),
 			Stdin: options.Stdin, Stdout: options.Stdout, Stderr: options.Stderr,
 			Interactive: options.Interactive, Progress: options.Progress,
 			Diagnostics:     options.Diagnostics,

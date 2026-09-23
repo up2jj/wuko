@@ -306,6 +306,7 @@ func validateGitHookBindings(command *cobra.Command, deps dependencies, reposito
 					BaseEnv: baseEnv, EnvironmentLoaders: environmentLoaders, Dependencies: dependencies, RunDir: repository.Root, Providers: providers,
 					Stdin: bytes.NewReader(nil), Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(),
 					LocalValueDir: filepath.Join(definition.Dir, ".wuko", "values"), GlobalValueDir: filepath.Join(config, "wuko", "values"),
+					ElevationAllowed: true,
 				}
 			}
 			if err := preflightDependencyPlan(command.Context(), plan, func() *engine.Engine { return workflowEngine(deps) }, optionsFor); err != nil {

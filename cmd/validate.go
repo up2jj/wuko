@@ -169,7 +169,8 @@ func validateWorkflowSources(command *cobra.Command, deps dependencies, args []s
 				Vars: vars, Env: env, BaseEnv: baseEnv, EnvironmentLoaders: environmentLoaders, Dependencies: dependencies, RunDir: cwd, Providers: providers,
 				Stdin: command.InOrStdin(), Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(),
 				LocalValueDir: filepath.Join(definition.Dir, ".wuko", "values"), GlobalValueDir: filepath.Join(configDir, "wuko", "values"),
-				Diagnostics: reporter,
+				ElevationAllowed: true,
+				Diagnostics:      reporter,
 			}
 		}
 		if err := preflightDependencyPlan(command.Context(), plan, func() *engine.Engine { return workflowEngine(deps) }, optionsFor); err != nil {
