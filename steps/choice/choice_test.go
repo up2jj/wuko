@@ -1047,6 +1047,29 @@ func TestChoiceSelectAllRequiresMultiple(t *testing.T) {
 	}
 }
 
+func TestChoiceFilterOnTypeRequiresSingleSelection(t *testing.T) {
+	_, err := New(map[string]any{
+		"variable": "items", "message": "Items", "multiple": true, "filter_on_type": true,
+		"choices": []any{map[string]any{"label": "A", "value": "a"}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "filter_on_type requires multiple: false") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestChoiceFilterOnTypeConfiguration(t *testing.T) {
+	runner, err := New(map[string]any{
+		"variable": "item", "message": "Item", "filter_on_type": true,
+		"choices": []any{map[string]any{"label": "A", "value": "a"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !runner.(*Runner).config.FilterOnType {
+		t.Fatal("filter_on_type was not decoded")
+	}
+}
+
 func TestChoiceSelectAllRejectsSmallMaximum(t *testing.T) {
 	runner, err := New(map[string]any{
 		"variable": "items", "message": "Items", "multiple": true, "select_all": true, "max_selected": 1,

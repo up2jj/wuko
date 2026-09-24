@@ -42,14 +42,15 @@ type ChoiceMarker struct {
 
 // ChoicePickerConfig configures an interactive selection list.
 type ChoicePickerConfig struct {
-	Message     string
-	Options     []Option
-	Markers     []ChoiceMarker
-	Multiple    bool
-	SelectAll   bool
-	Required    bool
-	MinSelected *int
-	MaxSelected *int
+	Message      string
+	Options      []Option
+	Markers      []ChoiceMarker
+	Multiple     bool
+	FilterOnType bool
+	SelectAll    bool
+	Required     bool
+	MinSelected  *int
+	MaxSelected  *int
 }
 
 type choiceItem struct {
@@ -83,21 +84,28 @@ type choiceRow struct {
 }
 
 type choiceModel struct {
-	config    ChoicePickerConfig
-	items     []choiceItem
-	visible   []choiceItem
-	blocks    []choiceBlock
-	cursor    int
-	selected  map[int]bool
-	order     []int
-	filter    textinput.Model
-	filtering bool
-	width     int
-	height    int
-	result    []int
-	done      bool
-	cancelled bool
-	err       string
+	config ChoicePickerConfig
+	items  []choiceItem
+	// searchText holds the fuzzy-match corpus for items, built once so that filtering a large
+	// list does not rebuild it on every keystroke.
+	searchText []string
+	visible    []choiceItem
+	blocks     []choiceBlock
+	cursor     int
+	selected   map[int]bool
+	order      []int
+	filter     textinput.Model
+	filtering  bool
+	width      int
+	height     int
+	result     []int
+	done       bool
+	cancelled  bool
+	err        string
+}
+
+func choiceSearchText(item choiceItem) string {
+	return strings.Join([]string{item.label, item.description, item.reason}, " ")
 }
 
 func newChoiceModel(config ChoicePickerConfig) choiceModel {
@@ -136,9 +144,18 @@ func newChoiceModel(config ChoicePickerConfig) choiceModel {
 	filter.Placeholder = "filter"
 	styleInteractiveTextInput(&filter)
 	filter.SetWidth(40)
+	searchText := make([]string, len(items))
+	for index, item := range items {
+		searchText[index] = choiceSearchText(item)
+	}
 	model := choiceModel{
-		config: config, items: items, blocks: blocks, selected: make(map[int]bool), filter: filter,
+		config: config, items: items, searchText: searchText, blocks: blocks,
+		selected: make(map[int]bool), filter: filter,
 		width: 80, height: 24,
+	}
+	if config.FilterOnType {
+		model.filtering = true
+		model.filter.Focus()
 	}
 	for index, option := range config.Options {
 		if config.Multiple && config.SelectAll && !option.Disabled {
@@ -165,7 +182,12 @@ func newChoiceModel(config ChoicePickerConfig) choiceModel {
 	return model
 }
 
-func (m choiceModel) Init() tea.Cmd { return nil }
+func (m choiceModel) Init() tea.Cmd {
+	if m.config.FilterOnType {
+		return textinput.Blink
+	}
+	return nil
+}
 
 func (m choiceModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	switch message := message.(type) {
@@ -180,6 +202,9 @@ func (m choiceModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		if m.filtering {
+			if m.config.FilterOnType {
+				return m.updateFilterOnType(message)
+			}
 			switch message.String() {
 			case "esc":
 				m.filter.SetValue("")
@@ -199,7 +224,55 @@ func (m choiceModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m.updateKey(message)
 	}
+	if m.filtering {
+		// Cursor blink and paste messages are not key presses; without forwarding them the
+		// command returned by Init and by filter.Focus never produces anything.
+		return m.updateFilterMessage(message)
+	}
 	return m, nil
+}
+
+// updateFilterMessage forwards a non-key message to the focused filter input and refreshes the
+// matches when the query changed, as a paste does.
+func (m choiceModel) updateFilterMessage(message tea.Msg) (tea.Model, tea.Cmd) {
+	query := m.filter.Value()
+	var command tea.Cmd
+	m.filter, command = m.filter.Update(message)
+	if m.filter.Value() != query {
+		m.refreshVisible()
+		if m.config.FilterOnType {
+			m.cursor = 0
+			m.err = ""
+		}
+	}
+	return m, command
+}
+
+func (m choiceModel) updateFilterOnType(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch message.String() {
+	case "esc":
+		m.filter.SetValue("")
+		m.refreshVisible()
+		m.cursor = 0
+		m.err = ""
+		return m, nil
+	case "up", "down", "pgup", "pgdown":
+		// Moving off the row that produced an error must not leave that error under the list.
+		m.err = ""
+		return m.updateKey(message)
+	case "enter":
+		return m.updateKey(message)
+	}
+
+	query := m.filter.Value()
+	var command tea.Cmd
+	m.filter, command = m.filter.Update(message)
+	if m.filter.Value() != query {
+		m.refreshVisible()
+		m.cursor = 0
+		m.err = ""
+	}
+	return m, command
 }
 
 func (m choiceModel) updateKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -332,19 +405,20 @@ func (m *choiceModel) refreshVisible() {
 				matchingSections[index] = true
 			}
 		}
+		// One batch match over the whole corpus rather than one fuzzy.FindNoSort call per item;
+		// FindNoSort matches each entry independently and preserves input order.
+		matched := make([]bool, len(m.items))
+		for _, match := range fuzzy.FindNoSort(query, m.searchText) {
+			matched[match.Index] = true
+		}
 		m.visible = make([]choiceItem, 0, len(m.items))
-		for _, item := range m.items {
-			metadata := strings.Join([]string{item.label, item.description, item.reason}, " ")
-			if matchingSections[item.block] || fuzzyMatches(query, metadata) {
+		for index, item := range m.items {
+			if matched[index] || matchingSections[item.block] {
 				m.visible = append(m.visible, item)
 			}
 		}
 	} else {
-		search := make([]string, len(m.items))
-		for index, item := range m.items {
-			search[index] = strings.Join([]string{item.label, item.description, item.reason}, " ")
-		}
-		matches := fuzzy.Find(query, search)
+		matches := fuzzy.Find(query, m.searchText)
 		m.visible = make([]choiceItem, 0, len(matches))
 		for _, match := range matches {
 			m.visible = append(m.visible, m.items[match.Index])
@@ -531,7 +605,9 @@ func (m choiceModel) pageSize() int {
 
 func (m choiceModel) help() string {
 	var tokens []string
-	if m.filtering {
+	if m.config.FilterOnType {
+		tokens = []string{"type to filter", "↑/↓ move", "enter select", "esc clear", cancelHelp}
+	} else if m.filtering {
 		tokens = []string{"type filter", "enter apply", "esc clear", cancelHelp}
 	} else if m.config.Multiple {
 		tokens = []string{"↑/↓ move", "space toggle", "ctrl+a select all", "ctrl+x clear", "enter confirm", "/ filter", cancelHelp}
@@ -557,6 +633,9 @@ func (m choiceModel) minimum() int {
 func (m choiceModel) maximum() *int { return m.config.MaxSelected }
 
 func validateChoicePickerConfig(config ChoicePickerConfig) error {
+	if config.FilterOnType && config.Multiple {
+		return fmt.Errorf("filter on type requires single choice mode")
+	}
 	if config.SelectAll && !config.Multiple {
 		return fmt.Errorf("select all requires multiple choice mode")
 	}

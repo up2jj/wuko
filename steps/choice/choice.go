@@ -21,6 +21,7 @@ type Config struct {
 	Variable         string         `yaml:"variable"`
 	Message          string         `yaml:"message"`
 	Multiple         bool           `yaml:"multiple,omitempty"`
+	FilterOnType     bool           `yaml:"filter_on_type,omitempty"`
 	SelectAll        bool           `yaml:"select_all,omitempty"`
 	AutoSelectSingle bool           `yaml:"auto_select_single,omitempty"`
 	Required         *bool          `yaml:"required,omitempty"`
@@ -272,7 +273,7 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 	}
 	indexes, err := tui.Choose(ctx, request.Stdin, request.Stdout, tui.ChoicePickerConfig{
 		Message: r.config.Message, Options: tuiOptions(options), Markers: choices.markers,
-		Multiple: r.config.Multiple, Required: r.required(),
+		Multiple: r.config.Multiple, FilterOnType: r.config.FilterOnType, Required: r.required(),
 		SelectAll:   r.config.SelectAll,
 		MinSelected: r.config.MinSelected, MaxSelected: r.config.MaxSelected,
 	})
@@ -725,6 +726,9 @@ func (r *Runner) validateOptions(options []resolvedChoice) error {
 }
 
 func validateBounds(config Config) error {
+	if config.FilterOnType && config.Multiple {
+		return fmt.Errorf("filter_on_type requires multiple: false")
+	}
 	if config.AutoSelectSingle && config.Multiple {
 		return fmt.Errorf("auto_select_single requires multiple: false")
 	}

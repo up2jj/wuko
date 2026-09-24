@@ -71,6 +71,150 @@ func TestChoiceModelFiltersDescriptions(t *testing.T) {
 	}
 }
 
+func TestChoiceModelFilterOnTypeFiltersAndSelectsImmediately(t *testing.T) {
+	model := newChoiceModel(ChoicePickerConfig{
+		Message: "Pick", FilterOnType: true, Required: true,
+		Options: []Option{{Label: "Alpha"}, {Label: "Beta"}, {Label: "Gamma"}},
+	})
+	if !model.filtering || !model.filter.Focused() || model.Init() == nil {
+		t.Fatalf("filtering = %v, focused = %v, init nil = %v", model.filtering, model.filter.Focused(), model.Init() == nil)
+	}
+	for _, want := range []string{"Filter:", "type to filter", "enter select", "esc clear"} {
+		if !strings.Contains(model.View().Content, want) {
+			t.Fatalf("view = %q, want %q", model.View().Content, want)
+		}
+	}
+
+	updated, _ := model.Update(tea.KeyPressMsg{Code: 'g', Text: "g"})
+	model = updated.(choiceModel)
+	if model.filter.Value() != "g" || len(model.visible) != 1 || model.visible[0].label != "Gamma" {
+		t.Fatalf("filter = %q, visible = %#v", model.filter.Value(), model.visible)
+	}
+
+	updated, command := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = updated.(choiceModel)
+	if command == nil || !model.done || !slices.Equal(model.result, []int{2}) {
+		t.Fatalf("result = %#v, done = %v, command nil = %v", model.result, model.done, command == nil)
+	}
+}
+
+func TestChoiceModelFilterOnTypeNavigationAndQueryEditing(t *testing.T) {
+	model := newChoiceModel(ChoicePickerConfig{
+		Message: "Pick", FilterOnType: true, Required: true,
+		Options: []Option{{Label: "Alpha"}, {Label: "Beta"}, {Label: "Gamma"}},
+	})
+	updated, _ := model.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	model = updated.(choiceModel)
+	if model.cursor != 1 {
+		t.Fatalf("cursor = %d, want 1", model.cursor)
+	}
+
+	updated, _ = model.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	model = updated.(choiceModel)
+	if model.filter.Value() != "a" || model.cursor != 0 {
+		t.Fatalf("filter = %q, cursor = %d", model.filter.Value(), model.cursor)
+	}
+	expected := model.visible[1].index
+	updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	model = updated.(choiceModel)
+	updated, command := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = updated.(choiceModel)
+	if command == nil || !slices.Equal(model.result, []int{expected}) {
+		t.Fatalf("result = %#v, want [%d]", model.result, expected)
+	}
+}
+
+func TestChoiceModelFilterOnTypeTreatsJKAsQueryAndEscapeClears(t *testing.T) {
+	model := newChoiceModel(ChoicePickerConfig{
+		Message: "Pick", FilterOnType: true, Required: true,
+		Options: []Option{{Label: "Jupiter"}, {Label: "Kilogram"}},
+	})
+	updated, _ := model.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	model = updated.(choiceModel)
+	if model.filter.Value() != "j" || len(model.visible) != 1 || model.visible[0].label != "Jupiter" {
+		t.Fatalf("filter = %q, visible = %#v", model.filter.Value(), model.visible)
+	}
+	updated, command := model.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	model = updated.(choiceModel)
+	if command != nil || model.cancelled || !model.filtering || !model.filter.Focused() || model.filter.Value() != "" || len(model.visible) != 2 {
+		t.Fatalf("filter = %q, filtering = %v, focused = %v, cancelled = %v, command nil = %v", model.filter.Value(), model.filtering, model.filter.Focused(), model.cancelled, command == nil)
+	}
+	updated, _ = model.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
+	model = updated.(choiceModel)
+	if model.filter.Value() != "k" || len(model.visible) != 1 || model.visible[0].label != "Kilogram" {
+		t.Fatalf("filter = %q, visible = %#v", model.filter.Value(), model.visible)
+	}
+}
+
+func TestChoiceModelFilterOnTypeRecoversFromNoMatches(t *testing.T) {
+	model := newChoiceModel(ChoicePickerConfig{
+		Message: "Pick", FilterOnType: true, Required: true, Options: []Option{{Label: "Alpha"}},
+	})
+	updated, _ := model.Update(tea.KeyPressMsg{Code: 'z', Text: "z"})
+	model = updated.(choiceModel)
+	updated, command := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = updated.(choiceModel)
+	if command != nil || model.err != "no value is available" {
+		t.Fatalf("err = %q, command nil = %v", model.err, command == nil)
+	}
+	updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
+	model = updated.(choiceModel)
+	if model.filter.Value() != "" || model.err != "" || len(model.visible) != 1 || model.cursor != 0 {
+		t.Fatalf("filter = %q, err = %q, visible = %#v, cursor = %d", model.filter.Value(), model.err, model.visible, model.cursor)
+	}
+}
+
+func TestChoiceModelFilterOnTypeClearsErrorOnNavigation(t *testing.T) {
+	model := newChoiceModel(ChoicePickerConfig{
+		Message: "Pick", FilterOnType: true, Required: true,
+		Options: []Option{{Label: "Alpha"}, {Label: "Beta", Disabled: true, DisabledReason: "unavailable"}},
+	})
+	updated, _ := model.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	model = updated.(choiceModel)
+	updated, command := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = updated.(choiceModel)
+	if command != nil || model.done || model.err != "unavailable" {
+		t.Fatalf("done = %v, err = %q, command nil = %v", model.done, model.err, command == nil)
+	}
+	updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+	model = updated.(choiceModel)
+	if model.cursor != 0 || model.err != "" {
+		t.Fatalf("cursor = %d, err = %q", model.cursor, model.err)
+	}
+}
+
+func TestChoiceModelFilterOnTypeAppliesPastedQuery(t *testing.T) {
+	model := newChoiceModel(ChoicePickerConfig{
+		Message: "Pick", FilterOnType: true, Required: true,
+		Options: []Option{{Label: "Alpha"}, {Label: "Beta"}, {Label: "Gamma"}},
+	})
+	updated, _ := model.Update(tea.PasteMsg{Content: "gam"})
+	model = updated.(choiceModel)
+	if model.filter.Value() != "gam" || len(model.visible) != 1 || model.visible[0].label != "Gamma" || model.cursor != 0 {
+		t.Fatalf("filter = %q, visible = %#v, cursor = %d", model.filter.Value(), model.visible, model.cursor)
+	}
+}
+
+func TestChoiceModelDefaultFilteringRemainsSlashActivated(t *testing.T) {
+	model := newChoiceModel(ChoicePickerConfig{
+		Message: "Pick", Required: true, Options: []Option{{Label: "Alpha"}, {Label: "Beta"}},
+	})
+	updated, _ := model.Update(tea.KeyPressMsg{Code: 'b', Text: "b"})
+	model = updated.(choiceModel)
+	if model.filtering || model.filter.Value() != "" || len(model.visible) != 2 {
+		t.Fatalf("filtering = %v, filter = %q, visible = %#v", model.filtering, model.filter.Value(), model.visible)
+	}
+	updated, _ = model.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
+	model = updated.(choiceModel)
+	updated, _ = model.Update(tea.KeyPressMsg{Code: 'b', Text: "b"})
+	model = updated.(choiceModel)
+	updated, command := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = updated.(choiceModel)
+	if command != nil || model.done || model.filtering || model.filter.Value() != "b" {
+		t.Fatalf("done = %v, filtering = %v, filter = %q, command nil = %v", model.done, model.filtering, model.filter.Value(), command == nil)
+	}
+}
+
 func TestChoiceModelRendersNonSelectableSectionsAndSeparators(t *testing.T) {
 	config := ChoicePickerConfig{
 		Message: "Pick", Required: true,
@@ -377,6 +521,7 @@ func TestChoicePickerConfigValidation(t *testing.T) {
 		name   string
 		config ChoicePickerConfig
 	}{
+		{name: "filter on type in multiple mode", config: ChoicePickerConfig{Multiple: true, FilterOnType: true}},
 		{name: "bounds in single mode", config: ChoicePickerConfig{MinSelected: &zero}},
 		{name: "negative minimum", config: ChoicePickerConfig{Multiple: true, MinSelected: &negative}},
 		{name: "inverted bounds", config: ChoicePickerConfig{Multiple: true, MinSelected: &one, MaxSelected: &zero}},

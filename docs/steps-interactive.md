@@ -175,6 +175,22 @@ Skip a redundant single-choice prompt when only one enabled mode is available:
     auto_select_single: true
 ```
 
+Start a single-choice picker in fuzzy search mode so typing filters immediately and Enter selects
+the highlighted match:
+
+```yaml
+- id: repository
+  type: tui_choice
+  with:
+    variable: repository
+    message: Select a repository
+    filter_on_type: true
+    from: vars.repositories
+    label_field: name
+    value_field: path
+    description_field: description
+```
+
 Static choices require `label` and scalar `value`; `description`, `disabled`, `reason`, and
 `default` are optional. Every disabled choice requires a non-empty reason and cannot be a default.
 In single mode, at most one choice may be the default; the picker initially focuses it. In multiple
@@ -233,6 +249,13 @@ and metadata. In multiple mode, Space toggles values and Enter confirms them in 
 Outside filter editing, Ctrl+A selects enabled visible matches up to the remaining maximum and
 Ctrl+X clears visible matches. Selections hidden by the filter are preserved. The header shows the
 live selected count and configured minimum or maximum. Shortcut help wraps on narrow terminals.
+
+Set `filter_on_type: true` in single-select mode for a conventional fuzzy-finder interaction. The
+filter is focused immediately, each printable keystroke (including `j`, `k`, and spaces) updates
+the matches, Up/Down and Page Up/Page Down navigate them, and Enter selects the highlighted match
+without a separate apply step. Left/Right, Home, End, Backspace, and Delete edit the query. Esc
+clears the query without cancelling; Ctrl+C cancels. Each query change focuses the first match.
+This option cannot be combined with `multiple: true`.
 
 `multiple` defaults to `false` and `required` defaults to `true`. Single selection exposes
 `.steps.<id>.value`, `.steps.<id>.label`, and `.steps.<id>.selected`. With `required: false`, the
