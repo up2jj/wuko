@@ -174,6 +174,44 @@ steps:
             EXPORTED: '{{ index .steps.task.value "smoke:prepare" "devenv" "env" "WUKO_TASK_EXPORT" }}'
 EOF
 
+# The same typed-value assertions under runtime SecretSpec, which wraps the invocation as
+# `devenv shell -- secretspec run -- devenv tasks run`. Kept separate from typed.yaml so a
+# failure localizes itself: both red means typed values are broken generally, this one red
+# alone means a wrapper writes to the stdout the typed value is decoded from.
+cat >"$fixture/typed-secrets.yaml" <<'EOF'
+version: 1
+name: devenv-typed-output-secrets-smoke
+steps:
+  - executor:
+      type: devenv
+      with:
+        directory: .
+        profiles: [smoke-a, smoke-b]
+        secrets: {mode: runtime, profile: smoke, provider: env}
+    steps:
+      - id: task
+        type: devenv_task
+        with:
+          names: [smoke:prepare, smoke:build]
+          mode: single
+          inputs: {value: ok}
+          show_output: false
+          capture_limit: 1MiB
+  - id: task_decoded
+    type: assert
+    with:
+      expr: steps.task.value_decoded == true
+      message: "devenv tasks run stdout was not decodable under devenv shell + secretspec run"
+  - id: task_output
+    type: assert
+    with:
+      expr: >-
+        steps.task.value["smoke:prepare"]["prepared"] == true &&
+        steps.task.value["smoke:prepare"]["count"] == 2 &&
+        steps.task.value["smoke:build"]["artifact"] == "dist/app"
+      message: "typed task values did not survive the runtime SecretSpec wrapper"
+EOF
+
 cat >"$fixture/mismatch.yaml" <<'EOF'
 version: 1
 name: devenv-smoke-mismatch
@@ -194,6 +232,13 @@ go build -o "$binary" "$repo_root"
 
 export WUKO_SMOKE_SECRET=smoke-secret
 export SECRETSPEC_REASON="wuko devenv smoke test"
+assert_no_secret_leak() {
+  if grep -Fq "$WUKO_SMOKE_SECRET" <<<"$1"; then
+    echo "secret value leaked into captured Wuko output" >&2
+    return 1
+  fi
+}
+
 run_workflow() {
   local output
   local -a command
@@ -207,23 +252,26 @@ run_workflow() {
     return 1
   fi
   printf '%s\n' "$output"
-  if grep -Fq "$WUKO_SMOKE_SECRET" <<<"$output"; then
-    echo "secret value leaked into captured Wuko output" >&2
-    return 1
-  fi
+  assert_no_secret_leak "$output"
 }
 
 run_typed_workflow() {
+  local file="$1"
   local output
-  if ! output="$(cd "$fixture" && "$binary" run --file typed.yaml 2>&1)"; then
+  if ! output="$(cd "$fixture" && "$binary" run --file "$file" 2>&1)"; then
     printf '%s\n' "$output" >&2
     return 1
   fi
   printf '%s\n' "$output"
+  # Runtime SecretSpec puts the secret in the task environment and the typed value is
+  # materialized into workflow state, so a leak here means devenv echoed the environment
+  # or Wuko captured more than the JSON document.
+  assert_no_secret_leak "$output"
 }
 
 run_workflow
-run_typed_workflow
+run_typed_workflow typed.yaml
+run_typed_workflow typed-secrets.yaml
 if (cd "$fixture" && devenv --profile smoke-a --profile smoke-b processes status smoke-process 2>/dev/null | grep -Eqi 'smoke-process.*(running|ready|started)'); then
   echo "Wuko-owned process was not cleaned up" >&2
   exit 1

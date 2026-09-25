@@ -1,0 +1,64 @@
+name: devenv
+
+on:
+  schedule:
+    # Off the top of the hour, where scheduled runs queue heavily.
+    - cron: "17 3 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: devenv-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    # Nix install, the devenv closure, and the first shell evaluation. Bounds a hung
+    # `devenv processes wait` instead of letting it run to the six-hour default.
+    timeout-minutes: 45
+    env:
+      # scripts/smoke-devenv.sh already infers this from CI, so a missing tool fails the
+      # job instead of skipping. Stating it keeps that intentional.
+      WUKO_SMOKE_REQUIRED: "1"
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
+          cache: true
+      - name: install Nix
+        uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
+        with:
+          # Without the devenv cache this builds devenv's Rust workspace and its vendored
+          # Nix fork from source.
+          extra_nix_config: |
+            extra-substituters = https://devenv.cachix.org
+            extra-trusted-public-keys = devenv.cachix.org-1:w1cLUi8dv3hnoSPGAuibQv+f9TZLr6cv/Hm9XgU50cw=
+      - name: install devenv
+        # Pinned rather than nixpkgs#devenv: this job exists to answer a question about a
+        # specific devenv version's stdout, so devenv must not change underneath it.
+        run: |
+          nix profile add --accept-flake-config github:cachix/devenv/v2.4.0
+          echo "$HOME/.local/state/nix/profile/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.nix-profile/bin" >> "$GITHUB_PATH"
+      - name: install SecretSpec
+        # secretspec ships inside a devenv shell, but the smoke script probes the outer
+        # PATH before entering one, so it has to be installed separately.
+        env:
+          SECRETSPEC_INSTALL_DIR: ${{ runner.temp }}/secretspec
+        run: |
+          curl --proto '=https' --tlsv1.2 -LsSf \
+            https://github.com/cachix/secretspec/releases/download/v0.21.0/secretspec-installer.sh | sh
+          echo "$SECRETSPEC_INSTALL_DIR/bin" >> "$GITHUB_PATH"
+      - name: record tool versions
+        # Pins which devenv and secretspec produced whatever value_decoded result follows.
+        run: |
+          devenv --version
+          secretspec --version
+      - name: devenv smoke test
+        # So a hang reads as "the smoke script hung", not "the job hung".
+        timeout-minutes: 30
+        run: go test -tags devenv_smoke -count=1 -v ./smoke

@@ -194,9 +194,14 @@ An opt-in real-environment smoke test is available with:
 WUKO_SMOKE_REQUIRED=1 go test -tags devenv_smoke ./smoke
 ```
 
-It requires devenv 2.2+, creates an isolated fixture, tests multiple profiles, active-environment
-reuse, task inputs, runtime SecretSpec, and process cleanup, and skips with a clear message when the
-required tools are unavailable.
+It requires devenv 2.2+ and the SecretSpec CLI, creates an isolated fixture, tests multiple profiles,
+active-environment reuse, task inputs, runtime SecretSpec, typed task values under both disabled and
+runtime secret modes, and process cleanup, and skips with a clear message when the required tools are
+unavailable. The `devenv` workflow runs it nightly, which is what keeps the decoding rules above
+honest: whether devenv's stdout survives the `devenv shell` and `secretspec run` wrappers is asserted
+there rather than assumed. The executor's own end-to-end behaviour — argv construction, stdout
+capture, and decoding — is covered on every change by `go test ./steps/devenv`, which drives a fake
+devenv CLI and needs no nix.
 
 ## Docker executor
 

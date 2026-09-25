@@ -22,6 +22,14 @@ test:
 test-race:
     go test -race ./...
 
+# Run the devenv executor end-to-end tests against a fake devenv CLI (no nix required).
+test-devenv:
+    go test -race -count=1 ./steps/devenv
+
+# Run the opt-in real-devenv smoke test. Requires devenv 2.2+ and the secretspec CLI.
+smoke-devenv:
+    WUKO_SMOKE_REQUIRED=1 go test -tags devenv_smoke -count=1 ./smoke
+
 # Run go vet.
 vet:
     go vet ./...
