@@ -30,6 +30,83 @@ func TestInputAcceptsPrepopulatedValue(t *testing.T) {
 	}
 }
 
+func TestInputAcceptsMultilineValue(t *testing.T) {
+	runner, err := New(map[string]any{
+		"variable": "notes", "message": "Enter release notes", "multiline": true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runner.Run(t.Context(), step.Request{
+		Vars:        map[string]any{},
+		Stdin:       bytes.NewBufferString("First line\rSecond line\x13"),
+		Stdout:      io.Discard,
+		Interactive: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "First line\nSecond line"
+	if result.Outputs["value"] != want || result.Variables["notes"] != want {
+		t.Fatalf("result = %#v, want %q", result, want)
+	}
+}
+
+func TestMultilineInputAppliesModifiers(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		modifiers map[string]any
+		check     func(*testing.T, any)
+	}{
+		{
+			name:      "split",
+			input:     "alice\rbob\x13",
+			modifiers: map[string]any{"split": "\\n"},
+			check: func(t *testing.T, value any) {
+				t.Helper()
+				got, ok := value.([]any)
+				want := []any{"alice", "bob"}
+				if !ok || !slices.Equal(got, want) {
+					t.Fatalf("value = %#v, want %#v", value, want)
+				}
+			},
+		},
+		{
+			name:      "json",
+			input:     "{\r  \"enabled\": true\r}\x13",
+			modifiers: map[string]any{"json": true},
+			check: func(t *testing.T, value any) {
+				t.Helper()
+				got, ok := value.(map[string]any)
+				if !ok || got["enabled"] != true {
+					t.Fatalf("value = %#v, want decoded object", value)
+				}
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runner, err := New(map[string]any{
+				"variable": "value", "message": "Enter value", "multiline": true, "modifiers": tt.modifiers,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := runner.Run(t.Context(), step.Request{
+				Vars:        map[string]any{},
+				Stdin:       bytes.NewBufferString(tt.input),
+				Stdout:      io.Discard,
+				Interactive: true,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			tt.check(t, result.Outputs["value"])
+		})
+	}
+}
+
 func TestInputUsesPreSuppliedVariable(t *testing.T) {
 	runner, err := New(map[string]any{"variable": "name", "message": "Name", "value": "suggested"})
 	if err != nil {

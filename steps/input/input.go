@@ -17,6 +17,7 @@ type Config struct {
 	Variable   string              `yaml:"variable"`
 	Message    string              `yaml:"message"`
 	Value      string              `yaml:"value,omitempty"`
+	Multiline  bool                `yaml:"multiline,omitempty"`
 	Required   *bool               `yaml:"required,omitempty"`
 	Validation step.TextValidation `yaml:"validation,omitempty"`
 	Modifiers  Modifiers           `yaml:"modifiers,omitempty"`
@@ -82,7 +83,11 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 	if !request.Interactive {
 		return step.Result{}, fmt.Errorf("variable %q is required when stdin is non-interactive; supply it with --var", r.config.Variable)
 	}
-	value, err := tui.TextWithValidation(ctx, request.Stdin, request.Stdout, r.config.Message, r.config.Value, required(r.config.Required), r.validate)
+	read := tui.TextWithValidation
+	if r.config.Multiline {
+		read = tui.TextAreaWithValidation
+	}
+	value, err := read(ctx, request.Stdin, request.Stdout, r.config.Message, r.config.Value, required(r.config.Required), r.validate)
 	if err != nil {
 		return step.Result{}, fmt.Errorf("reading input: %w", err)
 	}

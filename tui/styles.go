@@ -5,6 +5,7 @@ import (
 	"unicode/utf8"
 
 	"charm.land/bubbles/v2/list"
+	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/lipgloss/v2"
 )
@@ -57,6 +58,26 @@ func interactiveTextInputStyles() textinput.Styles {
 
 func styleInteractiveTextInput(input *textinput.Model) {
 	input.SetStyles(interactiveTextInputStyles())
+}
+
+func interactiveTextAreaStyles() textarea.Styles {
+	styles := textarea.DefaultStyles(true)
+	styles.Focused.CursorLine = lipgloss.NewStyle()
+	styles.Focused.EndOfBuffer = interactiveStyles.disabled
+	styles.Focused.Placeholder = interactiveStyles.disabled
+	styles.Focused.Prompt = interactiveStyles.cursor
+	styles.Focused.Text = interactiveStyles.content
+	styles.Blurred.CursorLine = lipgloss.NewStyle()
+	styles.Blurred.EndOfBuffer = interactiveStyles.disabled
+	styles.Blurred.Placeholder = interactiveStyles.disabled
+	styles.Blurred.Prompt = interactiveStyles.cursor
+	styles.Blurred.Text = interactiveStyles.content
+	styles.Cursor.Color = lipgloss.Color("81")
+	return styles
+}
+
+func styleInteractiveTextArea(input *textarea.Model) {
+	input.SetStyles(interactiveTextAreaStyles())
 }
 
 func styleSelectionList(model *list.Model) {

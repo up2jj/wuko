@@ -12,7 +12,9 @@ table when input is non-interactive.
 ## `tui_input`
 
 Collect editable text. Use `required`, validation rules, or modifiers when the workflow needs a
-specific shape.
+specific shape. Set `multiline: true` to edit longer text in a text area of up to six rows, shrunk
+to fit a short terminal. Enter inserts a newline in multiline mode; Ctrl+S validates and submits the
+value.
 
 Prompt for a release name:
 
@@ -49,7 +51,19 @@ Collect one typed JSON value:
   with:
     variable: deployment
     message: Enter deployment settings as JSON
+    multiline: true
     modifiers: {trim: true, json: true}
+```
+
+Collect release notes while preserving line breaks:
+
+```yaml
+- id: release_notes
+  type: tui_input
+  with:
+    variable: release_notes
+    message: Enter the release notes
+    multiline: true
 ```
 
 `trim` happens before validation. `split` uses a Go regular expression and preserves empty fields;
