@@ -26,9 +26,11 @@ type Session interface {
 
 // TaskRequest describes one task-graph invocation supported by an executor.
 type TaskRequest struct {
-	Name         string
+	Name         string // Legacy single root; mutually exclusive with Names.
+	Names        []string
 	Mode         string
 	Inputs       map[string]any
+	ShowOutput   bool
 	Stdin        io.Reader
 	Stdout       io.Writer
 	Stderr       io.Writer

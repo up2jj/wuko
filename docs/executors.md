@@ -133,9 +133,11 @@ the host filesystem. Devenv must be version 2.2 or newer.
     - id: build
       type: devenv_task
       with:
-        name: app:build
+        names: [app:prepare, app:build]
         mode: before
         inputs: {target: production}
+        show_output: false
+        capture_limit: 1MiB
     - id: tests
       type: shell
       with: {command: go, args: [test, ./...]}
@@ -157,9 +159,29 @@ SecretSpec modes are `auto`, `runtime`, `inherit`, and `disabled`. Runtime mode 
 diagnostics. `auto` enables runtime mode when `secretspec.toml` or active SecretSpec configuration
 is present.
 
-`devenv_task` supports `single`, `before`, `after`, and `all` task modes. Its `inputs` map is passed
-as JSON to devenv. Task dependencies, status checks, task caching, and transient process cleanup
-remain owned by devenv.
+`devenv_task` requires exactly one of `name` or `names`. The latter supplies multiple roots to one
+task-graph invocation in list order. Task names must be non-blank and must not start with `-`, so a
+rendered value can never reach devenv as a flag. It supports `single`, `before`, `after`, and `all` task modes;
+the `inputs` map is passed as JSON to every matching root. Set `show_output: true` to forward
+devenv's `--show-output` flag.
+
+On success, `steps.<id>.value` is the typed JSON object returned by `devenv tasks run`, keyed by
+the tasks that produced outputs, and `steps.<id>.value_decoded` reports whether it is published.
+Decoding requires devenv's stdout to hold nothing but that one JSON document, so `value` is absent
+whenever `show_output: true` forwards a task's own output, a wrapping `devenv shell` or
+`secretspec run` writes to stdout, or `capture_limit` truncates the document. A task graph that
+matched no task publishes an empty `value`. None of these fail the step: a zero exit means the graph
+already committed its side effects, so gate on `value_decoded` rather than on `retry` or `catch`.
+The raw `stdout`, `stderr`, and `exit_code` remain available, along with `stdout_truncated` and
+`stderr_truncated`. `capture_limit` accepts the same binary sizes as a shell step and bounds each
+captured stream independently; it defaults to `1MiB`, since the step holds both the raw stdout and
+the materialized value for the rest of the run.
+
+Task exports remain data under each task output's `devenv.env`; Wuko does not install them into the
+environment of later Wuko steps. Devenv still applies exports between tasks inside the same graph.
+On a failed invocation, Wuko preserves the raw process outputs for retry and catch handling but
+publishes neither `value` nor `value_decoded`. Task dependencies, status checks, task caching, and transient process
+cleanup remain owned by devenv.
 
 The optional `processes` setting ensures persistent devenv processes are ready. Wuko reuses already
 running processes, records only processes it starts, and stops only those owned processes when the

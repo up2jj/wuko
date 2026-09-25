@@ -70,6 +70,22 @@ cat >"$fixture/devenv.nix" <<'EOF'
     '';
   };
 
+  tasks."smoke:prepare" = {
+    exec = ''
+      test "$DEVENV_TASK_INPUT" = '{"value":"ok"}'
+      echo '{"prepared":true,"count":2}' > "$DEVENV_TASK_OUTPUT_FILE"
+      export WUKO_TASK_EXPORT=task-export
+    '';
+    exports = [ "WUKO_TASK_EXPORT" ];
+  };
+
+  tasks."smoke:build" = {
+    exec = ''
+      test "$DEVENV_TASK_INPUT" = '{"value":"ok"}'
+      echo '{"artifact":"dist/app"}' > "$DEVENV_TASK_OUTPUT_FILE"
+    '';
+  };
+
   processes.smoke-process = {
     exec = "sleep 30";
     ready.exec = "true";
@@ -120,6 +136,44 @@ steps:
           inputs: {value: ok}
 EOF
 
+cat >"$fixture/typed.yaml" <<'EOF'
+version: 1
+name: devenv-typed-output-smoke
+steps:
+  - executor:
+      type: devenv
+      with:
+        directory: .
+        profiles: [smoke-a, smoke-b]
+        secrets: {mode: disabled}
+    steps:
+      - id: task
+        type: devenv_task
+        with:
+          names: [smoke:prepare, smoke:build]
+          mode: single
+          inputs: {value: ok}
+          show_output: false
+          capture_limit: 1MiB
+      - id: task_decoded
+        type: shell
+        with:
+          command: sh
+          args: [-c, 'test "$DECODED" = true']
+          env:
+            DECODED: '{{ .steps.task.value_decoded }}'
+      - id: task_output
+        type: shell
+        with:
+          command: sh
+          args: [-c, 'test "$PREPARED" = true && test "$COUNT" = 2 && test "$ARTIFACT" = dist/app && test "$EXPORTED" = task-export && test -z "${WUKO_TASK_EXPORT:-}"']
+          env:
+            PREPARED: '{{ index .steps.task.value "smoke:prepare" "prepared" }}'
+            COUNT: '{{ index .steps.task.value "smoke:prepare" "count" }}'
+            ARTIFACT: '{{ index .steps.task.value "smoke:build" "artifact" }}'
+            EXPORTED: '{{ index .steps.task.value "smoke:prepare" "devenv" "env" "WUKO_TASK_EXPORT" }}'
+EOF
+
 cat >"$fixture/mismatch.yaml" <<'EOF'
 version: 1
 name: devenv-smoke-mismatch
@@ -159,7 +213,17 @@ run_workflow() {
   fi
 }
 
+run_typed_workflow() {
+  local output
+  if ! output="$(cd "$fixture" && "$binary" run --file typed.yaml 2>&1)"; then
+    printf '%s\n' "$output" >&2
+    return 1
+  fi
+  printf '%s\n' "$output"
+}
+
 run_workflow
+run_typed_workflow
 if (cd "$fixture" && devenv --profile smoke-a --profile smoke-b processes status smoke-process 2>/dev/null | grep -Eqi 'smoke-process.*(running|ready|started)'); then
   echo "Wuko-owned process was not cleaned up" >&2
   exit 1

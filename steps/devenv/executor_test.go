@@ -96,6 +96,67 @@ func TestOpenUsesManagerPreparedPathToLaunchDevenv(t *testing.T) {
 	}
 }
 
+func TestRunTaskPassesMultipleRootsAndOptions(t *testing.T) {
+	command := &recordedCommand{result: process.Result{Stdout: "{}\n"}}
+	session := &session{
+		command: command.run, root: "/workspace", active: true, secretMode: "disabled",
+		request: executor.Request{Env: map[string]string{"BASE": "yes"}},
+	}
+	result, err := session.RunTask(t.Context(), executor.TaskRequest{
+		Names: []string{"app:prepare", "app:build"}, Mode: "after",
+		Inputs: map[string]any{"target": "production"}, ShowOutput: true, CaptureLimit: 1 << 20,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"tasks", "run", "app:prepare", "app:build", "--mode", "after", "--show-output", "--input-json", `{"target":"production"}`}
+	if command.options.Command != "devenv" || !slices.Equal(command.options.Args, want) {
+		t.Fatalf("command = %s %v, want devenv %v", command.options.Command, command.options.Args, want)
+	}
+	if command.options.Dir != "/workspace" || command.options.Env["BASE"] != "yes" || command.options.CaptureLimit != 1<<20 {
+		t.Fatalf("options = %#v", command.options)
+	}
+	if result.Stdout != "{}\n" {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestRunTaskAcceptsLegacyNameAndDefaultsMode(t *testing.T) {
+	command := &recordedCommand{}
+	session := &session{command: command.run, active: true, secretMode: "disabled"}
+	if _, err := session.RunTask(t.Context(), executor.TaskRequest{Name: "app:build"}); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"tasks", "run", "app:build", "--mode", "before"}
+	if !slices.Equal(command.options.Args, want) {
+		t.Fatalf("args = %v, want %v", command.options.Args, want)
+	}
+}
+
+func TestRunTaskValidatesRequest(t *testing.T) {
+	tests := []struct {
+		name    string
+		request executor.TaskRequest
+		want    string
+	}{
+		{name: "missing roots", request: executor.TaskRequest{}, want: "at least one task name"},
+		{name: "both root forms", request: executor.TaskRequest{Name: "app:build", Names: []string{"app:test"}}, want: "cannot be combined"},
+		{name: "blank root", request: executor.TaskRequest{Names: []string{"app:build", " "}}, want: "task name 2 must not be blank"},
+		{name: "flag-like root", request: executor.TaskRequest{Names: []string{"app:build", "--input-json"}}, want: "task name 2 must not start with a dash"},
+		{name: "invalid mode", request: executor.TaskRequest{Name: "app:build", Mode: "nearby"}, want: "task mode"},
+		{name: "invalid inputs", request: executor.TaskRequest{Name: "app:build", Inputs: map[string]any{"bad": make(chan struct{})}}, want: "encoding task inputs"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			session := &session{command: (&recordedCommand{}).run, active: true, secretMode: "disabled"}
+			_, err := session.RunTask(t.Context(), test.request)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("RunTask() error = %v, want containing %q", err, test.want)
+			}
+		})
+	}
+}
+
 func TestOpenRejectsDifferentActiveRoot(t *testing.T) {
 	provider := &ExecutorProvider{config: ExecutorConfig{Directory: t.TempDir()}, command: (&recordedCommand{}).run}
 	_, err := provider.Open(t.Context(), executor.Request{RunDir: t.TempDir(), Env: map[string]string{"DEVENV_ROOT": t.TempDir()}})

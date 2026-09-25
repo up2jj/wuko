@@ -259,8 +259,25 @@ func (s *session) Run(ctx context.Context, options process.Options) (process.Res
 }
 
 func (s *session) RunTask(ctx context.Context, request executor.TaskRequest) (process.Result, error) {
-	if strings.TrimSpace(request.Name) == "" {
-		return process.Result{}, fmt.Errorf("task name is required")
+	if request.Name != "" && len(request.Names) > 0 {
+		return process.Result{}, fmt.Errorf("task name and names cannot be combined")
+	}
+	names := request.Names
+	if request.Name != "" {
+		names = []string{request.Name}
+	}
+	if len(names) == 0 {
+		return process.Result{}, fmt.Errorf("at least one task name is required")
+	}
+	// A dash-prefixed root would reach devenv as a flag instead of a task, exactly as
+	// validateConfig already prevents for profiles and process names.
+	for i, name := range names {
+		if strings.TrimSpace(name) == "" {
+			return process.Result{}, fmt.Errorf("task name %d must not be blank", i+1)
+		}
+		if strings.HasPrefix(name, "-") {
+			return process.Result{}, fmt.Errorf("task name %d must not start with a dash", i+1)
+		}
 	}
 	mode := request.Mode
 	if mode == "" {
@@ -269,7 +286,11 @@ func (s *session) RunTask(ctx context.Context, request executor.TaskRequest) (pr
 	if mode != "single" && mode != "before" && mode != "after" && mode != "all" {
 		return process.Result{}, fmt.Errorf("task mode %q is invalid", mode)
 	}
-	args := []string{"tasks", "run", request.Name, "--mode", mode}
+	args := append([]string{"tasks", "run"}, names...)
+	args = append(args, "--mode", mode)
+	if request.ShowOutput {
+		args = append(args, "--show-output")
+	}
 	if len(request.Inputs) > 0 {
 		encoded, err := json.Marshal(request.Inputs)
 		if err != nil {
