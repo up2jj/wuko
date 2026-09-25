@@ -54,9 +54,15 @@ type peerContextKey struct{}
 
 func serve(root context.Context, input io.Reader, output io.Writer, dispatch func(context.Context, wireRequest, *peer) (any, error)) error {
 	protocolPeer := &peer{out: output, active: make(map[string]context.CancelFunc), callbacks: make(map[string]chan wireResponse), abandoned: make(map[string]struct{})}
+	// A shutdown reply waits for the in-flight requests and so cannot be one of them: adding it
+	// to wg would make it wait on itself. Without a counter of its own, a cancel arriving between
+	// the shutdown request and its reply lets the process exit before the reply is written, and
+	// the host's close waits out its timeout instead of returning.
+	var shutdownReply sync.WaitGroup
 	defer func() {
 		protocolPeer.cancelAll()
 		protocolPeer.wg.Wait()
+		shutdownReply.Wait()
 	}()
 	lines := make(chan []byte)
 	readErrors := make(chan error, 1)
@@ -66,7 +72,10 @@ func serve(root context.Context, input io.Reader, output io.Writer, dispatch fun
 	defer close(stop)
 	go func() {
 		scanner := bufio.NewScanner(input)
-		scanner.Buffer(make([]byte, 64<<10), maxProtocolFrame)
+		// The cap bounds the JSON, and the terminating newline is framing on top of it, so the
+		// scanner needs room for both: capped at maxProtocolFrame it would reject the largest
+		// frame either side is allowed to write as a token too long.
+		scanner.Buffer(make([]byte, 64<<10), maxProtocolFrame+1)
 		for scanner.Scan() {
 			line := append([]byte(nil), scanner.Bytes()...)
 			select {
@@ -136,7 +145,9 @@ func serve(root context.Context, input io.Reader, output io.Writer, dispatch fun
 				}
 				shuttingDown = true
 				protocolPeer.cancelAll()
+				shutdownReply.Add(1)
 				go func(id string) {
+					defer shutdownReply.Done()
 					protocolPeer.wg.Wait()
 					_ = protocolPeer.reply(id, map[string]any{}, nil)
 				}(request.ID)

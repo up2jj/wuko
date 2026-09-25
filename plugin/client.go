@@ -180,7 +180,9 @@ func newClient(cmd *exec.Cmd, stdin io.WriteCloser) *client {
 
 func (c *client) read(reader io.Reader) {
 	scanner := bufio.NewScanner(reader)
-	scanner.Buffer(make([]byte, 64<<10), maxFrameSize)
+	// maxFrameSize bounds the JSON a writer may emit; the terminating newline is framing on top
+	// of it, so the scanner needs room for both or it rejects the largest permitted frame.
+	scanner.Buffer(make([]byte, 64<<10), maxFrameSize+1)
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		var header struct {
