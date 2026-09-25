@@ -80,6 +80,49 @@ func TestOpenActivatesConfiguredProfilesOutsideDevenv(t *testing.T) {
 	}
 }
 
+// Process commands stay profile-scoped inside an active devenv shell. Without the
+// --profile flags devenv looks at a different, unprofiled process manager and reports
+// "No process manager is running", so an active session with both profiles and processes
+// could never open. Scoping is independent of the shell wrapping that `active` suppresses.
+func TestOpenScopesProcessCommandsToProfilesInsideActiveDevenv(t *testing.T) {
+	root := t.TempDir()
+	var commands []string
+	provider := &ExecutorProvider{
+		config: ExecutorConfig{Directory: root, Profiles: []string{"backend"}, Processes: []string{"db"}},
+		command: func(_ context.Context, options process.Options) (process.Result, error) {
+			commands = append(commands, options.Command+" "+strings.Join(options.Args, " "))
+			if slices.Contains(options.Args, "--version") {
+				return process.Result{Stdout: "devenv 2.2.0"}, nil
+			}
+			if slices.Contains(options.Args, "info") {
+				return process.Result{Stdout: "DEVENV_PROFILE: backend"}, nil
+			}
+			return process.Result{}, nil
+		},
+		processState: processStateReaderFunc(func(context.Context, string, []string, map[string]string) (map[string]processState, error) {
+			return map[string]processState{"db": processStopped}, nil
+		}),
+	}
+	environment := map[string]string{"DEVENV_ROOT": root, "DEVENV_PROFILE": "backend"}
+	session, err := provider.Open(t.Context(), executor.Request{RunDir: root, Env: environment})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := session.Close(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"devenv --profile backend --version",
+		"devenv --profile backend info",
+		"devenv --profile backend processes start db",
+		"devenv --profile backend processes wait",
+		"devenv --profile backend processes stop db",
+	}
+	if !slices.Equal(commands, want) {
+		t.Fatalf("commands = %#v, want %#v", commands, want)
+	}
+}
+
 func TestOpenUsesManagerPreparedPathToLaunchDevenv(t *testing.T) {
 	root := t.TempDir()
 	command := &recordedCommand{}

@@ -390,17 +390,22 @@ func (s *session) Close(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
+// processOptions names which process manager to talk to, so it always carries the
+// configured profiles — including inside an active devenv shell, where the profile
+// environment alone does not make the profile-scoped manager discoverable and devenv
+// answers "No process manager is running". This is deliberately unlike wrapOptions,
+// whose active check avoids re-entering a shell: scoping and wrapping are orthogonal,
+// and cliProcessStateReader.Status has always scoped `processes status` unconditionally.
 func (s *session) processOptions(args []string) process.Options {
-	options := process.Options{Command: "devenv", Args: args, Dir: s.root, Env: maps.Clone(s.request.Env), CaptureLimit: 64 * 1024}
-	if !s.active {
-		prefixed := make([]string, 0, len(s.config.Profiles)*2+len(args))
-		for _, profile := range s.config.Profiles {
-			prefixed = append(prefixed, "--profile", profile)
-		}
-		prefixed = append(prefixed, args...)
-		options.Args = prefixed
+	prefixed := make([]string, 0, len(s.config.Profiles)*2+len(args))
+	for _, profile := range s.config.Profiles {
+		prefixed = append(prefixed, "--profile", profile)
 	}
-	return options
+	prefixed = append(prefixed, args...)
+	return process.Options{
+		Command: "devenv", Args: prefixed, Dir: s.root,
+		Env: maps.Clone(s.request.Env), CaptureLimit: 64 * 1024,
+	}
 }
 
 func (s *session) ensureProcesses(ctx context.Context) error {
