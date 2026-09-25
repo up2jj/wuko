@@ -1,6 +1,6 @@
 # Executable plugins
 
-Wuko plugins are persistent executables that exchange newline-delimited JSON with Wuko over stdin and stdout. A plugin may expose namespaced steps, executors, and helpers shared by Expr, Go templates, and Lua. Its stderr is reserved for diagnostics.
+Wuko plugins are persistent executables that exchange newline-delimited JSON with Wuko over stdin and stdout. A plugin may expose namespaced steps, executors, helpers shared by Expr, Go templates, and Lua, and v3 static composite actions. Its stderr is reserved for diagnostics.
 
 Create a standard-library-only Go plugin project:
 
@@ -12,7 +12,7 @@ wuko marketplace plugin init acme ./plugins/acme
 The generated project contains a working `acme.uppercase` step, an `acme.local` executor, tests, a `justfile`, an example workflow, and a release-manifest template.
 
 New projects always implement Wuko's newest protocol, currently [plugin protocol
-v2](plugin-protocol-v2.md). The generated concurrent reader handles cancellation and responses to
+v3](plugin-protocol-v3.md). The generated concurrent reader handles cancellation and responses to
 plugin-to-host callbacks while operations run. The [protocol v1](plugin-protocol.md) reference
 remains available for maintaining existing plugins.
 
@@ -253,20 +253,20 @@ action-reference templates, so they may start a plugin when those values call a 
 
 ## Protocol selection
 
-Release manifests may declare `wuko.plugin/v1` or `wuko.plugin/v2`. Wuko records that value in
+Release manifests may declare `wuko.plugin/v1`, `wuko.plugin/v2`, or `wuko.plugin/v3`. Wuko records that value in
 installation markers and uses it for the handshake. Marker version 2 also records the executable
 digest. Legacy markers without `marker_version` remain readable as marker version 1; a missing
 `protocol` in a legacy marker continues to mean v1. Legacy markers do not gain executable-integrity
 checking until the plugin is reinstalled.
 
 A directly discovered development executable, or an executable found only through `PATH`, may not
-have a release manifest or marker. Wuko first offers v2; an executable that answers with v1 is
-accepted on that answer, and one that fails the handshake outright is retried with v1 in a fresh
+have a release manifest or marker. Wuko offers v3, then v2, then v1; an executable that answers with
+one of those versions is accepted on that answer, and one that fails the handshake outright is retried in a fresh
 process. This negotiation does not change strict v1 behavior: after v1 is selected, its
 declarations, contexts, events, and request direction remain unchanged.
 
 `wuko marketplace plugin init` always generates the newest protocol supported by that Wuko
-release. It has no protocol-selection flag. The current scaffold is v2 and includes a concurrent,
+release. It has no protocol-selection flag. The current scaffold is v3 and includes a concurrent,
 bidirectional loop, request-scoped cancellation, serialized writes, a `CallHost` helper, bounded
 executor streaming, and process-group cleanup. See the [v2 service and callback examples](plugin-protocol-v2.md#complete-service-sequence).
 
@@ -277,7 +277,8 @@ Wuko owns one multiplexed process per namespace for the entire command. Validati
 Version 1 excludes TTY interaction, streaming stdin, native task graphs, host-managed services,
 nested executor calls from plugin steps, filesystem access from plugin executors, and template or
 secret callbacks beyond declared helper calls. Version 2 adds only managed step services and
-request-scoped host callbacks; it does not lift the other restrictions.
+request-scoped host callbacks; it does not lift the other restrictions. Version 3 adds static
+structured actions and otherwise preserves the v2 runtime contract.
 
 A v2 step's `host_callbacks` list is the boundary for what it can reach back into: `secret` is
 available only to a step that declares `host.function.call`, and `host.template.render` alone

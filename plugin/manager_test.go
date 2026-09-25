@@ -15,6 +15,7 @@ import (
 	"sync"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
@@ -29,6 +30,10 @@ func TestMain(main *testing.M) {
 }
 
 func runProtocolHelper() {
+	namespace := os.Getenv("WUKO_PLUGIN_TEST_NAMESPACE")
+	if namespace == "" {
+		namespace = "acme"
+	}
 	scanner := bufio.NewScanner(os.Stdin)
 	encoder := json.NewEncoder(os.Stdout)
 	for scanner.Scan() {
@@ -42,7 +47,9 @@ func runProtocolHelper() {
 		var result any = map[string]any{}
 		switch request.Method {
 		case "initialize":
-			result = initializeResult{Protocol: Protocol, Namespace: "acme", Lifecycle: true, Steps: []stepDeclaration{{Type: "acme.uppercase"}}, Helpers: []helperDeclaration{{Name: "slug"}, {Name: "nullable"}}}
+			result = initializeResult{Protocol: Protocol, Namespace: namespace, Lifecycle: true, Steps: []stepDeclaration{{Type: namespace + ".uppercase"}}, Helpers: []helperDeclaration{{Name: "slug"}, {Name: "nullable"}}, Actions: []string{"build"}}
+		case "action.get":
+			result = map[string]any{"action": map[string]any{"version": 1, "name": "build", "steps": []any{map[string]any{"id": "run", "type": "shell", "with": map[string]any{"command": "true"}}}}}
 		case "plugin.start":
 			parameters, _ := request.Params.(map[string]any)
 			with, _ := parameters["with"].(map[string]any)
@@ -65,6 +72,49 @@ func runProtocolHelper() {
 		}
 		data, _ := json.Marshal(result)
 		_ = encoder.Encode(responseFrame{ID: request.ID, Result: data})
+	}
+}
+
+func TestLoadActionIsValidatedCachedAndDoesNotStartLifecycle(t *testing.T) {
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := []byte("#!/bin/sh\nWUKO_PLUGIN_TEST_HELPER=1 exec \"" + executable + "\"\n")
+	archive := makeArchive(t, "wuko-plugin-acme", 0755, script)
+	manifestData, _ := json.Marshal(Manifest{Version: 1, Namespace: "acme", PluginVersion: "1.0.0", Protocol: ProtocolV3, Artifacts: []Artifact{{OS: runtime.GOOS, Arch: runtime.GOARCH, Path: "plugin.tar.gz", Format: "tar.gz", Entry: "wuko-plugin-acme", SHA256: digest(archive)}}})
+	var diagnostics synchronizedBuffer
+	manager := NewManager(Config{HTTPClient: &http.Client{Transport: memoryTransport{manifest: manifestData, archive: archive}}, Stderr: &diagnostics})
+	t.Cleanup(func() { _ = manager.Close(context.Background(), "completed") })
+	sources := map[string]workflow.PluginSource{"acme": {Source: "https://plugins.test/plugin.json", SHA256: digest(manifestData), With: map[string]any{"mode": "actions"}}}
+	if _, err := manager.LoadHelpers(t.Context(), sources); err != nil {
+		t.Fatal(err)
+	}
+	first, err := manager.LoadAction(t.Context(), "acme", "build")
+	if err != nil {
+		t.Fatal(err)
+	}
+	first[0] = 'x'
+	second, err := manager.LoadAction(t.Context(), "acme", "build")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !json.Valid(second) {
+		t.Fatalf("cached action was not defensively copied: %q", second)
+	}
+	if strings.Contains(diagnostics.String(), "started") {
+		t.Fatal("action retrieval called plugin.start")
+	}
+}
+
+func TestActionDeclarationsRequireProtocolV3(t *testing.T) {
+	for _, protocol := range []string{ProtocolV1, ProtocolV2} {
+		if err := validateInitializeDeclarations("acme", protocol, initializeResult{Actions: []string{"build"}}); err == nil {
+			t.Fatalf("%s accepted an action declaration", protocol)
+		}
+	}
+	if err := validateInitializeDeclarations("acme", ProtocolV3, initializeResult{Actions: []string{"build"}}); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -339,5 +389,137 @@ func TestManagerResetReleasesRunScopedState(t *testing.T) {
 	}
 	if strings.Count(diagnostics.String(), "started:first") != 1 || strings.Count(diagnostics.String(), "started:second") != 1 || strings.Count(diagnostics.String(), "stopped") != 2 {
 		t.Fatalf("lifecycle diagnostics: %q", diagnostics.String())
+	}
+}
+
+// barrierTransport serves each plugin its own manifest and archive, and holds every
+// manifest request until the expected number of them are in flight at once.
+type barrierTransport struct {
+	bodies    map[string][]byte
+	mu        sync.Mutex
+	arrived   int
+	size      int
+	ready     chan struct{}
+	downloads map[string]int
+}
+
+func newBarrierTransport(size int, bodies map[string][]byte) *barrierTransport {
+	return &barrierTransport{bodies: bodies, size: size, ready: make(chan struct{}), downloads: map[string]int{}}
+}
+
+func (transport *barrierTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	body, ok := transport.bodies[request.URL.Path]
+	if !ok {
+		return nil, fmt.Errorf("no plugin fixture for %s", request.URL.Path)
+	}
+	transport.mu.Lock()
+	transport.downloads[request.URL.Path]++
+	if strings.HasSuffix(request.URL.Path, ".json") {
+		transport.arrived++
+		if transport.arrived == transport.size {
+			close(transport.ready)
+		}
+	}
+	transport.mu.Unlock()
+	if strings.HasSuffix(request.URL.Path, ".json") {
+		select {
+		case <-transport.ready:
+		case <-time.After(10 * time.Second):
+			return nil, fmt.Errorf("plugin loads were serialized: only %d of %d manifest fetches were in flight", transport.arrived, transport.size)
+		}
+	}
+	return &http.Response{StatusCode: 200, Status: "200 OK", Body: io.NopCloser(bytes.NewReader(body)), Header: make(http.Header), Request: request}, nil
+}
+
+func (transport *barrierTransport) downloadCount(path string) int {
+	transport.mu.Lock()
+	defer transport.mu.Unlock()
+	return transport.downloads[path]
+}
+
+// pluginFixture builds the manifest and archive for a plugin that answers under its own
+// namespace, served at /<namespace>.json and /<namespace>.tar.gz.
+func pluginFixture(t *testing.T, namespace string) (manifest, archive []byte) {
+	t.Helper()
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := []byte("#!/bin/sh\nWUKO_PLUGIN_TEST_HELPER=1 WUKO_PLUGIN_TEST_NAMESPACE=" + namespace + " exec \"" + executable + "\"\n")
+	archive = makeArchive(t, "wuko-plugin-"+namespace, 0755, script)
+	manifest, err = json.Marshal(Manifest{Version: 1, Namespace: namespace, PluginVersion: "1.0.0", Protocol: Protocol, Artifacts: []Artifact{{OS: runtime.GOOS, Arch: runtime.GOARCH, Path: namespace + ".tar.gz", Format: "tar.gz", Entry: "wuko-plugin-" + namespace, SHA256: digest(archive)}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return manifest, archive
+}
+
+// Loading one plugin must not block every other namespace: the manager lock guards the
+// maps, not the download, process launch, and action fetches a load performs. The barrier
+// only clears once both manifest fetches are in flight, so a lock held across the load
+// fails this rather than merely making it slow.
+func TestConcurrentLoadsOfDistinctPluginsDoNotSerialize(t *testing.T) {
+	namespaces := []string{"acme", "beta"}
+	bodies := map[string][]byte{}
+	sources := map[string]workflow.PluginSource{}
+	for _, namespace := range namespaces {
+		manifest, archive := pluginFixture(t, namespace)
+		bodies["/"+namespace+".json"] = manifest
+		bodies["/"+namespace+".tar.gz"] = archive
+		sources[namespace] = workflow.PluginSource{Source: "https://plugins.test/" + namespace + ".json", SHA256: digest(manifest)}
+	}
+	transport := newBarrierTransport(len(namespaces), bodies)
+	manager := NewManager(Config{HTTPClient: &http.Client{Transport: transport}, Stderr: io.Discard})
+	t.Cleanup(func() { _ = manager.Close(context.Background(), "completed") })
+	if err := manager.configureSources(sources); err != nil {
+		t.Fatal(err)
+	}
+	failures := make(chan error, len(namespaces))
+	for _, namespace := range namespaces {
+		go func() {
+			_, err := manager.load(t.Context(), namespace)
+			failures <- err
+		}()
+	}
+	for range namespaces {
+		if err := <-failures; err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// Callers that race for the same namespace share one load instead of each launching the
+// plugin: a second process would leave the first one running and unowned.
+func TestConcurrentLoadsOfOnePluginLaunchItOnce(t *testing.T) {
+	manifest, archive := pluginFixture(t, "acme")
+	transport := newBarrierTransport(1, map[string][]byte{"/acme.json": manifest, "/acme.tar.gz": archive})
+	manager := NewManager(Config{HTTPClient: &http.Client{Transport: transport}, Stderr: io.Discard})
+	t.Cleanup(func() { _ = manager.Close(context.Background(), "completed") })
+	if err := manager.configureSources(map[string]workflow.PluginSource{"acme": {Source: "https://plugins.test/acme.json", SHA256: digest(manifest)}}); err != nil {
+		t.Fatal(err)
+	}
+	loaded := make(chan *runningPlugin, 8)
+	failures := make(chan error, 8)
+	for range 8 {
+		go func() {
+			plugin, err := manager.load(t.Context(), "acme")
+			failures <- err
+			loaded <- plugin
+		}()
+	}
+	var first *runningPlugin
+	for range 8 {
+		if err := <-failures; err != nil {
+			t.Fatal(err)
+		}
+		plugin := <-loaded
+		if first == nil {
+			first = plugin
+		} else if plugin != first {
+			t.Fatal("racing callers were handed different plugin processes")
+		}
+	}
+	if count := transport.downloadCount("/acme.tar.gz"); count != 1 {
+		t.Fatalf("plugin archive was downloaded %d times", count)
 	}
 }

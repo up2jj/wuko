@@ -323,7 +323,7 @@ func defaultWorkflowLoader(plugins *plugin.Manager) *workflow.Loader {
 	if plugins == nil {
 		return workflow.NewLoader(nil)
 	}
-	return workflow.NewLoader(nil, workflow.WithPluginHelpers(plugins))
+	return workflow.NewLoader(nil, workflow.WithPluginHelpers(plugins), workflow.WithPluginActions(plugins))
 }
 
 func wrapPluginTeardown(command *cobra.Command, manager *plugin.Manager) {

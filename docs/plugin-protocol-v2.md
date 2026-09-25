@@ -36,12 +36,12 @@ An installed release pins its protocol through its manifest and installation mar
 plugin must return that same protocol. A legacy marker without `protocol` means v1. Current marker
 version 2 records the selected protocol and extracted executable digest.
 
-A bare development or `PATH` executable carries no marker, so Wuko negotiates: it offers v2 and
-accepts v1 if the plugin answers with it instead. Answering with the protocol you implement costs
-one handshake; answering with something Wuko did not offer, or with the wrong namespace, fails the
-handshake. Wuko then retries the remaining protocol in a fresh process.
+A bare development or `PATH` executable carries no marker, so current Wuko versions negotiate v3,
+then v2, then v1. Once v2 is selected, answering with something Wuko did not offer, or with the
+wrong namespace, fails the handshake.
 
-`wuko marketplace plugin init` always generates the newest supported protocol, currently v2. Its
+`wuko marketplace plugin init` always generates the newest supported protocol, currently
+[v3](plugin-protocol-v3.md). Its
 standard-library-only scaffold includes the required bidirectional reader loop, serialized writes,
 request cancellation, callback-response routing, and bounded executor output. Existing v1 plugins
 remain supported, but the initializer does not generate older protocol versions.

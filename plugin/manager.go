@@ -46,8 +46,20 @@ type Manager struct {
 	declarations map[string]workflow.PluginSource
 	plugins      map[string]*runningPlugin
 	failures     map[string]error
+	loading      map[string]*loadState
 	temporary    []string
+	generation   uint64
 	closed       bool
+}
+
+// loadState is the in-flight gate for one namespace. Loading a plugin downloads a
+// release, launches a process, and - for v3 - fetches every advertised action, none
+// of which may run under m.mu: that lock guards the maps for every namespace, so
+// holding it would serialize unrelated plugins behind one plugin's network I/O.
+// A caller that finds a namespace already in flight waits here instead of launching
+// the same plugin a second time.
+type loadState struct {
+	done chan struct{}
 }
 
 type initializeResult struct {
@@ -57,6 +69,7 @@ type initializeResult struct {
 	Steps     []stepDeclaration     `json:"steps"`
 	Executors []executorDeclaration `json:"executors"`
 	Helpers   []helperDeclaration   `json:"helpers,omitempty"`
+	Actions   []string              `json:"actions,omitempty"`
 }
 type helperDeclaration struct {
 	Name string `json:"name"`
@@ -129,6 +142,8 @@ type runningPlugin struct {
 	lifecycleMu sync.Mutex
 	started     bool
 	startErr    error
+	actionMu    sync.Mutex
+	actions     map[string]json.RawMessage
 }
 
 func NewManager(config Config) *Manager {
@@ -147,7 +162,7 @@ func NewManager(config Config) *Manager {
 	if config.Stderr == nil {
 		config.Stderr = io.Discard
 	}
-	return &Manager{config: config, declarations: make(map[string]workflow.PluginSource), plugins: make(map[string]*runningPlugin), failures: make(map[string]error)}
+	return &Manager{config: config, declarations: make(map[string]workflow.PluginSource), plugins: make(map[string]*runningPlugin), failures: make(map[string]error), loading: make(map[string]*loadState)}
 }
 
 func (m *Manager) ResolveStep(ctx context.Context, name string, raw map[string]any) (step.Runner, error) {
@@ -225,6 +240,7 @@ func (m *Manager) ResolveExecutor(ctx context.Context, name string, raw map[stri
 }
 
 var helperNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+var actionNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // LoadHelpers initializes every explicitly declared plugin and returns its immutable helper set.
 func (m *Manager) LoadHelpers(ctx context.Context, sources map[string]workflow.PluginSource) (helper.Set, error) {
@@ -261,6 +277,61 @@ func (m *Manager) LoadHelpers(ctx context.Context, sources map[string]workflow.P
 		}
 	}
 	return result, nil
+}
+
+// LoadAction returns the cached immutable JSON object advertised by a v3 plugin.
+// Retrieval deliberately does not start the plugin lifecycle.
+func (m *Manager) LoadAction(ctx context.Context, namespace, name string) (json.RawMessage, error) {
+	if err := m.configureSources(workflow.PluginsFromContext(ctx)); err != nil {
+		return nil, err
+	}
+	if !validNamespace(namespace) || !actionNamePattern.MatchString(name) {
+		return nil, fmt.Errorf("invalid plugin action %q", namespace+"/"+name)
+	}
+	loaded, err := m.load(ctx, namespace)
+	if err != nil {
+		return nil, err
+	}
+	if loaded.protocol != ProtocolV3 {
+		return nil, fmt.Errorf("plugin %q uses %s and cannot expose actions", namespace, loaded.protocol)
+	}
+	if !slices.Contains(loaded.initialized.Actions, name) {
+		return nil, fmt.Errorf("plugin %q does not declare action %q", namespace, name)
+	}
+	return loaded.loadAction(ctx, name)
+}
+
+func (plugin *runningPlugin) loadAction(ctx context.Context, name string) (json.RawMessage, error) {
+	plugin.actionMu.Lock()
+	defer plugin.actionMu.Unlock()
+	if cached := plugin.actions[name]; cached != nil {
+		return bytes.Clone(cached), nil
+	}
+	var response struct {
+		Action json.RawMessage `json:"action"`
+	}
+	if err := plugin.client.call(ctx, "action.get", map[string]any{"name": name}, &response, nil); err != nil {
+		return nil, fmt.Errorf("loading plugin action %q: %w", plugin.namespace+"/"+name, err)
+	}
+	if len(response.Action) == 0 {
+		return nil, fmt.Errorf("plugin action %q returned no action object", plugin.namespace+"/"+name)
+	}
+	if err := workflow.ValidatePluginAction(response.Action, "plugin:"+plugin.namespace+"/"+name, initializedHelperNames(plugin.initialized, plugin.namespace)...); err != nil {
+		return nil, fmt.Errorf("plugin action %q is invalid: %w", plugin.namespace+"/"+name, err)
+	}
+	if plugin.actions == nil {
+		plugin.actions = make(map[string]json.RawMessage)
+	}
+	plugin.actions[name] = bytes.Clone(response.Action)
+	return bytes.Clone(response.Action), nil
+}
+
+func initializedHelperNames(initialized initializeResult, namespace string) []string {
+	names := make([]string, 0, len(initialized.Helpers))
+	for _, declaration := range initialized.Helpers {
+		names = append(names, exposedHelperName(namespace, declaration.Name))
+	}
+	return names
 }
 
 func exposedHelperName(namespace, name string) string {
@@ -322,75 +393,143 @@ func namespaceForType(name string) (string, error) {
 	return parts[0], nil
 }
 
-func (m *Manager) load(ctx context.Context, namespace string) (result *runningPlugin, resultErr error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	defer func() {
-		// Context errors are transient: a run canceled mid-download must not poison the
-		// namespace for the cleanup scope, which runs with cancellation stripped.
-		if resultErr != nil && !m.closed && !errors.Is(resultErr, context.Canceled) && !errors.Is(resultErr, context.DeadlineExceeded) {
-			m.failures[namespace] = resultErr
+func (m *Manager) load(ctx context.Context, namespace string) (*runningPlugin, error) {
+	for {
+		m.mu.Lock()
+		if m.closed {
+			m.mu.Unlock()
+			return nil, fmt.Errorf("plugin manager is closed")
 		}
-	}()
-	if m.closed {
-		return nil, fmt.Errorf("plugin manager is closed")
+		if existing := m.plugins[namespace]; existing != nil {
+			m.mu.Unlock()
+			return existing, nil
+		}
+		if failure := m.failures[namespace]; failure != nil {
+			m.mu.Unlock()
+			return nil, failure
+		}
+		if inflight := m.loading[namespace]; inflight != nil {
+			m.mu.Unlock()
+			select {
+			case <-inflight.done:
+				// The leader recorded its outcome in plugins or failures, so the next turn of
+				// the loop reads it. A leader that stopped on a transient context error
+				// recorded neither, and the loop takes the load over instead.
+				continue
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		state := &loadState{done: make(chan struct{})}
+		m.loading[namespace] = state
+		declaration, declared := m.declarations[namespace]
+		generation := m.generation
+		m.mu.Unlock()
+
+		plugin, directory, err := m.bring(ctx, namespace, declaration, declared)
+
+		var discard *runningPlugin
+		m.mu.Lock()
+		switch {
+		case err != nil:
+			// Context errors are transient: a run canceled mid-download must not poison the
+			// namespace for the cleanup scope, which runs with cancellation stripped.
+			if !m.closed && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+				m.failures[namespace] = err
+			}
+		case m.closed || m.generation != generation:
+			// Close or Reset overtook this load, so the plugin belongs to a scope that is
+			// already gone: tear it down here rather than register it into the next one.
+			discard, plugin = plugin, nil
+			err = fmt.Errorf("plugin manager was reset while loading plugin %q", namespace)
+		default:
+			m.plugins[namespace] = plugin
+		}
+		// An extracted directory outlives a failed load: teardown owns its removal exactly as
+		// it does for a plugin that started, unless this load's scope is already gone.
+		if directory != "" && discard == nil && !m.closed && m.generation == generation {
+			m.temporary = append(m.temporary, directory)
+			directory = ""
+		}
+		delete(m.loading, namespace)
+		close(state.done)
+		m.mu.Unlock()
+
+		if discard != nil {
+			closeClient(discard.client)
+		}
+		if directory != "" {
+			_ = os.RemoveAll(directory)
+		}
+		if err != nil {
+			return nil, err
+		}
+		return plugin, nil
 	}
-	if existing := m.plugins[namespace]; existing != nil {
-		return existing, nil
-	}
-	if failure := m.failures[namespace]; failure != nil {
-		return nil, failure
-	}
+}
+
+// bring performs the expensive half of a load - fetching and extracting a release,
+// launching the process, validating its declarations, and prefetching the actions a
+// v3 plugin advertises - with no manager lock held. Any directory it extracted into
+// is returned even on failure, so the caller can hand it to teardown.
+func (m *Manager) bring(ctx context.Context, namespace string, declaration workflow.PluginSource, declared bool) (*runningPlugin, string, error) {
 	var path string
 	var protocol string
 	var startWith map[string]any
-	if declaration, ok := m.declarations[namespace]; ok {
+	var directory string
+	if declared {
 		if !strings.HasPrefix(declaration.Source, "https://") && !strings.HasPrefix(declaration.Source, "github:") {
-			return nil, fmt.Errorf("workflow-scoped plugin %q must use an HTTPS or GitHub manifest", namespace)
+			return nil, "", fmt.Errorf("workflow-scoped plugin %q must use an HTTPS or GitHub manifest", namespace)
 		}
 		release, err := FetchRelease(ctx, declaration.Source, declaration.SHA256, m.config.HTTPClient)
 		if err != nil {
-			return nil, fmt.Errorf("fetching plugin %q: %w", namespace, err)
+			return nil, "", fmt.Errorf("fetching plugin %q: %w", namespace, err)
 		}
 		if release.Manifest.Namespace != namespace {
-			return nil, fmt.Errorf("plugin declaration namespace %q conflicts with manifest namespace %q", namespace, release.Manifest.Namespace)
+			return nil, "", fmt.Errorf("plugin declaration namespace %q conflicts with manifest namespace %q", namespace, release.Manifest.Namespace)
 		}
 		protocol = release.Manifest.Protocol
-		directory, err := os.MkdirTemp("", "wuko-plugin-"+namespace+"-")
+		directory, err = os.MkdirTemp("", "wuko-plugin-"+namespace+"-")
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		path, err = Extract(release, directory)
 		if err != nil {
 			_ = os.RemoveAll(directory)
-			return nil, err
+			return nil, "", err
 		}
-		m.temporary = append(m.temporary, directory)
 		if startWith, err = cloneWith(declaration.With); err != nil {
-			return nil, err
+			return nil, directory, err
 		}
 	} else {
 		var err error
 		path, err = m.findLocal(namespace)
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		protocol, err = localPluginProtocol(path, namespace)
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 	}
 	c, initialized, protocol, err := launchInitialized(ctx, path, namespace, protocol, m.config.HostVersion, m.config.Stderr)
 	if err != nil {
-		return nil, err
+		return nil, directory, err
 	}
 	if err := validateInitializeDeclarations(namespace, protocol, initialized); err != nil {
 		closeClient(c)
-		return nil, err
+		return nil, directory, err
 	}
 	plugin := &runningPlugin{namespace: namespace, protocol: protocol, client: c, initialized: initialized, startWith: startWith}
-	m.plugins[namespace] = plugin
-	return plugin, nil
+	if protocol == ProtocolV3 {
+		for _, name := range initialized.Actions {
+			if _, err := plugin.loadAction(ctx, name); err != nil {
+				closeClient(c)
+				return nil, directory, err
+			}
+		}
+	}
+	return plugin, directory, nil
 }
 
 func launchInitialized(ctx context.Context, path, namespace, protocol, hostVersion string, stderr io.Writer) (*client, initializeResult, string, error) {
@@ -400,7 +539,7 @@ func launchInitialized(ctx context.Context, path, namespace, protocol, hostVersi
 	// offered.
 	negotiating := protocol == ""
 	if negotiating {
-		protocols = []string{ProtocolV2, ProtocolV1}
+		protocols = []string{ProtocolV3, ProtocolV2, ProtocolV1}
 	}
 	var attempts []error
 	for _, candidate := range protocols {
@@ -474,6 +613,16 @@ func validateInitializeDeclarations(namespace, protocol string, initialized init
 			return fmt.Errorf("plugin %q helper %q conflicts with built-in helper %q", namespace, item.Name, exposed)
 		}
 		seenHelpers[item.Name] = true
+	}
+	if protocol != ProtocolV3 && len(initialized.Actions) != 0 {
+		return fmt.Errorf("plugin %q declares actions with protocol %s", namespace, protocol)
+	}
+	seenActions := make(map[string]bool, len(initialized.Actions))
+	for _, name := range initialized.Actions {
+		if seenActions[name] || !actionNamePattern.MatchString(name) {
+			return fmt.Errorf("plugin %q has invalid or duplicate action declaration %q", namespace, name)
+		}
+		seenActions[name] = true
 	}
 	return nil
 }
@@ -650,6 +799,9 @@ func (m *Manager) teardown(ctx context.Context, reason string, permanent bool) e
 		clear(m.plugins)
 		clear(m.failures)
 		m.temporary = nil
+		// Loads that started before this reset belong to the scope being dropped; the bump
+		// makes each of them discard its plugin instead of registering it into the new one.
+		m.generation++
 	}
 	m.mu.Unlock()
 	var result error
@@ -681,7 +833,7 @@ type pluginStep struct {
 
 func (s *pluginStep) Validate(ctx context.Context, request step.Request) error {
 	params := map[string]any{"type": s.name, "with": s.raw, "context": stepContext(request, s.plugin.protocol)}
-	if s.plugin.protocol == ProtocolV2 {
+	if s.plugin.protocol != ProtocolV1 {
 		return s.plugin.client.callWithOptions(ctx, "step.validate", params, &struct{}{}, callOptions{host: s.hostCallbacks(request)})
 	}
 	return s.plugin.client.call(ctx, "step.validate", params, &struct{}{}, nil)
@@ -690,12 +842,12 @@ func (s *pluginStep) Run(ctx context.Context, request step.Request) (step.Result
 	if err := s.plugin.start(ctx); err != nil {
 		return step.Result{}, err
 	}
-	if s.plugin.protocol == ProtocolV2 && s.declaration.Service {
+	if s.plugin.protocol != ProtocolV1 && s.declaration.Service {
 		return s.runService(ctx, request)
 	}
 	var result step.Result
 	params := map[string]any{"type": s.name, "with": s.raw, "context": stepContext(request, s.plugin.protocol)}
-	if s.plugin.protocol == ProtocolV2 {
+	if s.plugin.protocol != ProtocolV1 {
 		err := s.plugin.client.callWithOptions(ctx, "step.run", params, &result, callOptions{event: streamEvents(request.Stdout, request.Stderr, nil), host: s.hostCallbacks(request)})
 		return result, err
 	}
@@ -813,7 +965,7 @@ func (s *cleaningPluginStep) Cleanup(ctx context.Context, result step.Result) er
 
 func stepContext(r step.Request, protocol string) map[string]any {
 	result := map[string]any{"step_id": r.StepID, "workflow_name": r.WorkflowName, "workflow_dir": r.WorkflowDir, "run_dir": r.RunDir, "vars": r.Vars, "inputs": r.Inputs, "env": r.Env, "steps": r.Steps, "dependencies": r.Dependencies, "attempt": r.Attempt, "max_attempts": r.MaxAttempts, "operation_id": r.OperationID}
-	if protocol == ProtocolV2 {
+	if protocol != ProtocolV1 {
 		result["workflow_source"] = r.WorkflowSource
 		result["workflow_dir_borrowed"] = r.WorkflowDirBorrowed
 		result["workflow_timezone"] = r.WorkflowTimezone

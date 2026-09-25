@@ -714,6 +714,9 @@ func (validator *referenceValidator) validateActionSource(step workflow.Step, sc
 	if err := validator.validateTemplate("uses github", step.Uses.GitHub, scope); err != nil {
 		return err
 	}
+	if err := validator.validateTemplate("uses plugin", step.Uses.Plugin, scope); err != nil {
+		return err
+	}
 	if err := validator.validateTemplate("uses token", step.Uses.Token, scope); err != nil {
 		return err
 	}

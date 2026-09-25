@@ -558,21 +558,40 @@ func (status *StatusRange) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
-// ActionSource identifies a Wuko action loaded from HTTPS, a GitHub repository, a local path, or a command.
+// ActionSource identifies a Wuko action loaded from HTTPS, a GitHub repository,
+// a plugin, a local path, or a command.
 type ActionSource struct {
 	URL     string
 	Path    string
 	GitHub  string
+	Plugin  string
 	Token   string
 	Command string
 	Args    []string
+}
+
+func parsePluginActionLocator(locator string) (string, string, error) {
+	parts := strings.Split(locator, "/")
+	if len(parts) != 2 || !ValidPluginNamespace(parts[0]) || !identifierPattern.MatchString(parts[1]) {
+		return "", "", fmt.Errorf("plugin action must use plugin:namespace/action with valid identifiers")
+	}
+	return parts[0], parts[1], nil
 }
 
 func (source *ActionSource) UnmarshalYAML(node *yaml.Node) error {
 	switch node.Kind {
 	case yaml.ScalarNode:
 		if node.Tag != "!!str" || strings.TrimSpace(node.Value) == "" {
-			return fmt.Errorf("uses must be a non-empty HTTPS URL, relative path, GitHub-hosted Wuko action locator, or command object")
+			return fmt.Errorf("uses must be a non-empty HTTPS URL, relative path, plugin action, GitHub-hosted Wuko action locator, or command object")
+		}
+		if locator, ok := strings.CutPrefix(node.Value, "plugin:"); ok {
+			if !strings.Contains(locator, "{{") {
+				if _, _, err := parsePluginActionLocator(locator); err != nil {
+					return err
+				}
+			}
+			source.Plugin = locator
+			return nil
 		}
 		if strings.HasPrefix(node.Value, "https://") || strings.HasPrefix(node.Value, "http://") {
 			source.URL = node.Value
@@ -638,13 +657,13 @@ func (source *ActionSource) UnmarshalYAML(node *yaml.Node) error {
 		source.Command, source.Args = raw.Command, raw.Args
 		return nil
 	default:
-		return fmt.Errorf("uses must be a non-empty HTTPS URL, relative path, GitHub-hosted Wuko action locator, or command object")
+		return fmt.Errorf("uses must be a non-empty HTTPS URL, relative path, plugin action, GitHub-hosted Wuko action locator, or command object")
 	}
 }
 
 // Empty reports whether no action source was declared.
 func (source ActionSource) Empty() bool {
-	return source.URL == "" && source.Path == "" && source.GitHub == "" && source.Command == ""
+	return source.URL == "" && source.Path == "" && source.GitHub == "" && source.Plugin == "" && source.Command == ""
 }
 
 // Display returns a safe description that excludes command arguments and URL query strings.
@@ -662,6 +681,9 @@ func (source ActionSource) Display() string {
 	}
 	if source.GitHub != "" {
 		return "github:" + source.GitHub
+	}
+	if source.Plugin != "" {
+		return "plugin:" + source.Plugin
 	}
 	return source.Command
 }

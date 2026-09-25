@@ -1338,10 +1338,10 @@ func makeRequest(ctx context.Context, definition *workflow.Definition, stepID st
 
 // actionLocalValueDir scopes an action's local key-value storage. A remotely fetched Wuko action
 // is code the caller did not write, so it gets what a remote workflow gets: no store beside the
-// caller's workflow. Path and command actions are workspace content the caller already trusts,
-// and keep the caller's root.
+// caller's workflow. A plugin action is third-party executable content on the same footing. Path
+// and command actions are workspace content the caller already trusts, and keep the caller's root.
 func actionLocalValueDir(workflowStep workflow.Step, options Options) string {
-	if workflowStep.Uses.URL != "" || workflowStep.Uses.GitHub != "" {
+	if workflowStep.Uses.URL != "" || workflowStep.Uses.GitHub != "" || workflowStep.Uses.Plugin != "" {
 		return ""
 	}
 	return options.LocalValueDir

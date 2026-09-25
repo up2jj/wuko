@@ -144,11 +144,17 @@ type Loader struct {
 	client              *http.Client
 	githubStoredTokenFn func(context.Context, map[string]string) string
 	pluginHelpers       PluginHelperLoader
+	pluginActions       PluginActionLoader
 }
 
 // PluginHelperLoader initializes helpers declared by one workflow.
 type PluginHelperLoader interface {
 	LoadHelpers(context.Context, map[string]PluginSource) (helper.Set, error)
+}
+
+// PluginActionLoader retrieves an immutable action JSON object from an initialized plugin.
+type PluginActionLoader interface {
+	LoadAction(context.Context, string, string) (json.RawMessage, error)
 }
 
 // LoaderOption customizes workflow loading.
@@ -157,6 +163,11 @@ type LoaderOption func(*Loader)
 // WithPluginHelpers enables helpers from explicitly declared plugins.
 func WithPluginHelpers(loader PluginHelperLoader) LoaderOption {
 	return func(workflowLoader *Loader) { workflowLoader.pluginHelpers = loader }
+}
+
+// WithPluginActions enables plugin:namespace/action composite-action sources.
+func WithPluginActions(loader PluginActionLoader) LoaderOption {
+	return func(workflowLoader *Loader) { workflowLoader.pluginActions = loader }
 }
 
 // NewLoader constructs a loader. The supplied client's transport is retained, while remote
@@ -242,6 +253,7 @@ func (loader *Loader) DecodeStdinContext(ctx context.Context, reader io.Reader, 
 
 // Prepare resolves value-dependent workflow environment and composite actions in a decoded definition.
 func (loader *Loader) Prepare(ctx context.Context, definition *Definition, options LoadOptions) (err error) {
+	ctx = ContextWithPlugins(ctx, definition.Plugins)
 	if len(definition.helpers) > 0 {
 		definition.setHelpers(ctx, definition.helpers)
 	}
@@ -370,6 +382,54 @@ func (loader *Loader) resolveActions(ctx context.Context, workflowName string, s
 			err := fmt.Errorf("sha256 is not supported for GitHub-hosted Wuko action directories; use an immutable commit ref")
 			traceFinish(reporter, started, diagnostic.PhaseActionResolve, diagnostic.StatusFailed, workflowStep.Location, workflowName, workflowStep.ID, "uses", "", err)
 			return fmt.Errorf("step %q: %w", workflowStep.ID, err)
+		}
+		if workflowStep.Uses.Plugin != "" {
+			if workflowStep.SHA256 != "" {
+				err := fmt.Errorf("sha256 is not supported for plugin actions")
+				traceFinish(reporter, started, diagnostic.PhaseActionResolve, diagnostic.StatusFailed, workflowStep.Location, workflowName, workflowStep.ID, "uses", "", err)
+				return fmt.Errorf("step %q: %w", workflowStep.ID, err)
+			}
+			if loader.pluginActions == nil {
+				err := fmt.Errorf("plugin action loading is unavailable")
+				traceFinish(reporter, started, diagnostic.PhaseActionResolve, diagnostic.StatusFailed, workflowStep.Location, workflowName, workflowStep.ID, "uses", "", err)
+				return fmt.Errorf("step %q uses: %w", workflowStep.ID, err)
+			}
+			locator, err := renderer.Render(workflowStep.Uses.Plugin, data)
+			if err != nil {
+				traceFinish(reporter, started, diagnostic.PhaseActionResolve, diagnostic.StatusFailed, workflowStep.Location, workflowName, workflowStep.ID, "uses", "", err)
+				return fmt.Errorf("step %q uses: rendering plugin action: %w", workflowStep.ID, err)
+			}
+			namespace, actionName, err := parsePluginActionLocator(locator)
+			if err != nil {
+				traceFinish(reporter, started, diagnostic.PhaseActionResolve, diagnostic.StatusFailed, workflowStep.Location, workflowName, workflowStep.ID, "uses", "", err)
+				return fmt.Errorf("step %q uses: %w", workflowStep.ID, err)
+			}
+			key := "plugin:" + namespace + "/" + actionName
+			action := cache[key]
+			if action == nil {
+				fetchStarted := traceStart(reporter, diagnostic.PhaseActionFetch, workflowStep.Location, workflowName, workflowStep.ID, "uses", key)
+				payload, loadErr := loader.pluginActions.LoadAction(ctx, namespace, actionName)
+				if loadErr != nil {
+					traceFinish(reporter, fetchStarted, diagnostic.PhaseActionFetch, diagnostic.StatusFailed, workflowStep.Location, workflowName, workflowStep.ID, "uses", "", loadErr)
+					traceFinish(reporter, started, diagnostic.PhaseActionResolve, diagnostic.StatusFailed, workflowStep.Location, workflowName, workflowStep.ID, "uses", "", nil)
+					return fmt.Errorf("step %q uses: %w", workflowStep.ID, loadErr)
+				}
+				traceFinish(reporter, fetchStarted, diagnostic.PhaseActionFetch, diagnostic.StatusSucceeded, workflowStep.Location, workflowName, workflowStep.ID, "uses", "", nil, countAttr("bytes", len(payload)))
+				decodeStarted := traceStart(reporter, diagnostic.PhaseActionDecode, workflowStep.Location, workflowName, workflowStep.ID, "uses", key)
+				action, err = decodeActionWithRenderer(payload, "plugin action", filepath.Dir(definitionPath), nil, key, "", renderer)
+				if err != nil {
+					traceFinish(reporter, decodeStarted, diagnostic.PhaseActionDecode, diagnostic.StatusFailed, workflowStep.Location, workflowName, workflowStep.ID, "uses", "", err)
+					traceFinish(reporter, started, diagnostic.PhaseActionResolve, diagnostic.StatusFailed, workflowStep.Location, workflowName, workflowStep.ID, "uses", "", nil)
+					return fmt.Errorf("step %q action %s: %w", workflowStep.ID, key, err)
+				}
+				traceFinish(reporter, decodeStarted, diagnostic.PhaseActionDecode, diagnostic.StatusSucceeded, action.Location, workflowName, workflowStep.ID, "uses", action.Name, nil, countAttr("steps", len(action.Steps)))
+				cache[key] = action
+			} else {
+				diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseActionFetch, Status: diagnostic.StatusSkipped, WorkflowName: workflowName, StepID: workflowStep.ID, StepType: "uses", Location: workflowStep.Location, Message: "using cached action"})
+			}
+			workflowStep.Action = action
+			traceFinish(reporter, started, diagnostic.PhaseActionResolve, diagnostic.StatusSucceeded, workflowStep.Location, workflowName, workflowStep.ID, "uses", action.Name, nil)
+			continue
 		}
 		resolution, err := loader.resolveSource(ctx, workflowStep.Uses, renderer, data, environment, runDir, runDirKnown, declarationPath, sourceRoot, sourceLabel, credentials)
 		if err != nil {
@@ -756,6 +816,25 @@ func verifyChecksum(payload []byte, expected string) error {
 
 func decodeActionPayload(payload []byte, callerDir, source string) (*Action, error) {
 	return decodeActionPayloadWithRenderer(payload, callerDir, source, nil)
+}
+
+// ValidatePluginAction validates the immutable JSON action returned by a v3
+// plugin without granting it an action directory or companion files. helperNames
+// permits helpers declared by that same plugin while parsing inline templates.
+func ValidatePluginAction(payload []byte, source string, helperNames ...string) error {
+	if len(payload) > maxManifestSize {
+		return fmt.Errorf("manifest exceeds %d-byte limit", maxManifestSize)
+	}
+	helpers := make(helper.Set, len(helperNames))
+	for _, name := range helperNames {
+		helpers[name] = func(context.Context, []any) (any, error) { return nil, nil }
+	}
+	renderer, err := NewRendererWithHelpers(context.Background(), nil, nil, helpers)
+	if err != nil {
+		return err
+	}
+	_, err = decodeActionWithRenderer(payload, "plugin action", "", nil, source, "", renderer)
+	return err
 }
 
 func decodeActionPayloadWithRenderer(payload []byte, callerDir, source string, renderer *Renderer) (*Action, error) {

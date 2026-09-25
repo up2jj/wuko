@@ -14,6 +14,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"time"
+
+	"github.com/up2jj/wuko/workflow"
 )
 
 const MarkerName = ".wuko-plugin.json"
@@ -364,19 +366,41 @@ func verifyExecutable(ctx context.Context, path, namespace, protocol string, std
 	}
 	var initialized initializeResult
 	callErr := client.call(ctx, "initialize", map[string]any{"protocol": protocol}, &initialized, nil)
+	var validationErr error
+	if callErr == nil {
+		if initialized.Protocol != protocol || initialized.Namespace != namespace {
+			validationErr = fmt.Errorf("plugin handshake namespace or protocol mismatch")
+		} else {
+			validationErr = validateInitializeDeclarations(namespace, protocol, initialized)
+		}
+	}
+	if callErr == nil && validationErr == nil && protocol == ProtocolV3 {
+		for _, name := range initialized.Actions {
+			var result struct {
+				Action json.RawMessage `json:"action"`
+			}
+			if err := client.call(ctx, "action.get", map[string]any{"name": name}, &result, nil); err != nil {
+				validationErr = fmt.Errorf("loading action %q during installation: %w", name, err)
+				break
+			}
+			if err := workflow.ValidatePluginAction(result.Action, "plugin:"+namespace+"/"+name, initializedHelperNames(initialized, namespace)...); err != nil {
+				validationErr = fmt.Errorf("validating action %q during installation: %w", name, err)
+				break
+			}
+		}
+	}
 	closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	closeErr := client.close(closeCtx)
 	if callErr != nil {
 		return callErr
 	}
-	if closeErr != nil {
-		return closeErr
+	// A declaration or action failure is the cause worth reporting; a noisy shutdown after one
+	// must not mask it.
+	if validationErr != nil {
+		return validationErr
 	}
-	if initialized.Protocol != protocol || initialized.Namespace != namespace {
-		return fmt.Errorf("plugin handshake namespace or protocol mismatch")
-	}
-	return validateInitializeDeclarations(namespace, protocol, initialized)
+	return closeErr
 }
 
 func ValidateInstallation(directory, namespace string) (InstallationMarker, error) {
