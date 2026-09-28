@@ -1,9 +1,17 @@
 package main
 
-import "context"
+import (
+	"context"
+
+	"github.com/up2jj/wuko/plugin/sdk"
+)
+
+func registerLifecycle(plugin *sdk.Plugin) error {
+	return plugin.SetLifecycle(sdk.Lifecycle{Start: Start, Stop: Stop})
+}
 
 // Start is called once before the first runtime operation. Configuration is plugins.{{NS}}.with.
 func Start(context.Context, map[string]any) error { return nil }
 
 // Stop is called once after executor close and step cleanup. Reason is completed, failed, or canceled.
-func Stop(context.Context, string) error { return nil }
+func Stop(context.Context, sdk.StopReason) error { return nil }

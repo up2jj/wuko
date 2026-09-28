@@ -1,32 +1,28 @@
 package main
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/up2jj/wuko/plugin/sdk"
 )
 
 var nonSlug = regexp.MustCompile(`[^a-z0-9]+`)
 
-func callHelper(raw json.RawMessage) (any, error) {
-	var p struct {
-		Name string `json:"name"`
-		Args []any  `json:"args"`
-	}
-	if err := json.Unmarshal(raw, &p); err != nil {
-		return nil, err
-	}
-	if p.Name != "slug" {
-		return nil, fmt.Errorf("unknown helper %q", p.Name)
-	}
-	if len(p.Args) != 1 {
+func registerSlug(plugin *sdk.Plugin) error {
+	return plugin.RegisterHelper("slug", slug)
+}
+
+func slug(_ context.Context, args []any) (any, error) {
+	if len(args) != 1 {
 		return nil, fmt.Errorf("slug requires one argument")
 	}
-	value, ok := p.Args[0].(string)
+	value, ok := args[0].(string)
 	if !ok {
 		return nil, fmt.Errorf("slug argument must be a string")
 	}
 	value = strings.ToLower(strings.TrimSpace(value))
-	return map[string]any{"value": strings.Trim(nonSlug.ReplaceAllString(value, "-"), "-")}, nil
+	return strings.Trim(nonSlug.ReplaceAllString(value, "-"), "-"), nil
 }

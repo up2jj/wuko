@@ -1,11 +1,11 @@
 # wuko-plugin-{{NS}}
 
-A standard-library-only Wuko JSONL plugin with a shared `{{NS}}_slug` helper. Run **just check** and **just build**.
+An SDK-backed Wuko plugin with a shared `{{NS}}_slug` helper. Run **go mod tidy** once to write go.sum, then **just check** and **just build** (both run `go mod tidy` for you).
 
 The executable keeps stdin/stdout exclusively for protocol frames; diagnostics go to stderr. Start and Stop are command-wide hooks. Edit lifecycle.go to use values from plugins.{{NS}}.with.
 
-The scaffold always targets Wuko's newest protocol, currently [plugin protocol v2](https://github.com/up2jj/wuko/blob/main/docs/plugin-protocol-v2.md). Its concurrent reader keeps cancellation and plugin-to-host callbacks live while handlers run. Use `CallHost` from a declared callback-capable step.
+The scaffold targets [plugin protocol v3](https://github.com/up2jj/wuko/blob/main/docs/plugin-protocol-v3.md) through `github.com/up2jj/wuko/plugin/sdk`. The SDK owns the concurrent JSONL transport, cancellation, declarations, and plugin-to-host callbacks. A callback-capable step uses the `Host` on its `sdk.StepRequest` after declaring the required capability with `sdk.WithHostCallbacks`.
 
-Executor output is streamed in bounded events and captured according to Wuko's output policy. A transport-safe aggregate ceiling prevents a captured result from exceeding the 10 MiB protocol frame limit.
+Executor output is streamed in bounded SDK events and captured according to Wuko's output policy. A transport-safe aggregate ceiling prevents a captured result from exceeding the 10 MiB protocol frame limit. The generated go.mod pins the SDK to the Wuko release that created this project.
 
 Run `just release 0.1.0` to cross-compile deterministic Darwin/Linux archives for amd64/arm64 and generate plugin.json. From a marketplace repository, import this release with `wuko marketplace plugin add ../wuko-plugin-{{NS}}`. Wuko verifies both the manifest and selected archive before launch.

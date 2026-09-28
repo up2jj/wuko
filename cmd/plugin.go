@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"runtime/debug"
 	"slices"
 	"strings"
 
@@ -19,7 +20,17 @@ import (
 	"github.com/up2jj/wuko/workflow"
 )
 
-var pluginNamePattern = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+const scaffoldSDKFallbackVersion = "v0.16.0"
+
+var (
+	pluginNamePattern = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+	// releaseVersionPattern accepts only versions a published tag can carry. Anything looser lets a
+	// source build pin the generated plugin to a module version that was never published: `go build`
+	// stamps an untagged checkout with a pseudo-version (v0.16.1-0.20260928150208-c48a8da14c1a),
+	// `git describe` yields v0.16.0-3-gabc1234, and goreleaser snapshots yield v0.16.1-next. None of
+	// those resolve, so the generated go.mod would fail on the user's first build.
+	releaseVersionPattern = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+(?:-(?:alpha|beta|rc)(?:[.-]?[0-9]+)?)?$`)
+)
 
 // scaffoldAssets holds the plugin starter tree written by `wuko plugin init`. Every template is
 // stored with a .tmpl suffix so this module never tries to compile the generated plugin's code.
@@ -289,7 +300,7 @@ func newPluginInitCmd() *cobra.Command {
 		if err := writeGoPluginScaffold(directory, namespace); err != nil {
 			return err
 		}
-		fmt.Fprintf(command.OutOrStdout(), "Initialized Go plugin %s in %s\n", namespace, directory)
+		fmt.Fprintf(command.OutOrStdout(), "Initialized Go plugin %s in %s\nRun `go mod tidy` there to resolve the pinned Wuko SDK before building.\n", namespace, directory)
 		return nil
 	}}
 }
@@ -310,6 +321,7 @@ func writeGoPluginScaffold(directory, namespace string) error {
 	for name, content := range files {
 		content = strings.ReplaceAll(content, "{{NS}}", namespace)
 		content = strings.ReplaceAll(content, "{{PROTOCOL}}", pluginpkg.Protocol)
+		content = strings.ReplaceAll(content, "{{SDK_VERSION}}", scaffoldSDKVersion())
 		target := filepath.Join(directory, name)
 		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
 			return err
@@ -319,6 +331,23 @@ func writeGoPluginScaffold(directory, namespace string) error {
 		}
 	}
 	return nil
+}
+
+func scaffoldSDKVersion() string {
+	buildVersion := ""
+	if info, ok := debug.ReadBuildInfo(); ok {
+		buildVersion = info.Main.Version
+	}
+	return resolveScaffoldSDKVersion(buildVersion, version)
+}
+
+func resolveScaffoldSDKVersion(buildVersion, cliVersion string) string {
+	for _, candidate := range []string{buildVersion, cliVersion} {
+		if releaseVersionPattern.MatchString(candidate) {
+			return candidate
+		}
+	}
+	return scaffoldSDKFallbackVersion
 }
 
 // scaffoldFiles returns the plugin starter tree, keyed by the path each file takes in the

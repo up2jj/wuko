@@ -101,9 +101,13 @@ directories. Create the example Go plugin next to the marketplace and build its 
 cd ..
 wuko marketplace plugin init hello
 cd wuko-plugin-hello
+go mod tidy
 go test ./...
 just release 0.1.0
 ```
+
+The scaffold pins `github.com/up2jj/wuko` but ships no `go.sum`, so the first build needs
+`go mod tidy`. Every `just` recipe that compiles runs it first.
 
 The generated release helper uses only the Go toolchain and standard library. It cross-compiles
 with CGO disabled for Darwin and Linux on amd64 and arm64, creates deterministic `tar.gz` archives,
@@ -266,9 +270,10 @@ process. This negotiation does not change strict v1 behavior: after v1 is select
 declarations, contexts, events, and request direction remain unchanged.
 
 `wuko marketplace plugin init` always generates the newest protocol supported by that Wuko
-release. It has no protocol-selection flag. The current scaffold is v3 and includes a concurrent,
-bidirectional loop, request-scoped cancellation, serialized writes, a `CallHost` helper, bounded
-executor streaming, and process-group cleanup. See the [v2 service and callback examples](plugin-protocol-v2.md#complete-service-sequence).
+release. It has no protocol-selection flag. The current scaffold pins the matching Wuko Go module
+and uses `plugin/sdk` for the v3 bidirectional transport, request-scoped cancellation, serialized
+writes, declarations, and host callbacks. The starter retains bounded executor streaming and
+process-group cleanup. See the [v2 service and callback examples](plugin-protocol-v2.md#complete-service-sequence).
 
 ## Lifecycle
 

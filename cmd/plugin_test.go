@@ -64,11 +64,26 @@ func TestGoPluginScaffoldBuilds(t *testing.T) {
 	if err := writeGoPluginScaffold(directory, "acme"); err != nil {
 		t.Fatal(err)
 	}
+	useLocalWukoModule(t, directory)
 	command := exec.Command("go", "test", "./...")
 	command.Dir = directory
 	command.Env = append(command.Environ(), "GOCACHE="+filepath.Join(t.TempDir(), "cache"))
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("generated plugin tests: %v\n%s", err, output)
+	}
+}
+
+func useLocalWukoModule(t *testing.T, directory string) {
+	t.Helper()
+	_, source, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("locating repository root")
+	}
+	repository := filepath.Dir(filepath.Dir(source))
+	command := exec.Command("go", "mod", "edit", "-replace=github.com/up2jj/wuko="+repository)
+	command.Dir = directory
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("using local Wuko module: %v\n%s", err, output)
 	}
 }
 
@@ -104,7 +119,7 @@ func TestGoPluginScaffoldUsesNewestProtocolEverywhere(t *testing.T) {
 	if err := writeGoPluginScaffold(directory, "acme"); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"protocol.go", "plugin.json", "tools/release/main.go", "README.md"} {
+	for _, name := range []string{"plugin.json", "README.md"} {
 		data, err := os.ReadFile(filepath.Join(directory, filepath.FromSlash(name)))
 		if err != nil {
 			t.Fatal(err)
@@ -116,6 +131,69 @@ func TestGoPluginScaffoldUsesNewestProtocolEverywhere(t *testing.T) {
 			t.Fatalf("%s still references old scaffold protocol", name)
 		}
 	}
+	for _, name := range []string{"main.go", "tools/release/main.go"} {
+		data, err := os.ReadFile(filepath.Join(directory, filepath.FromSlash(name)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(data), "github.com/up2jj/wuko/plugin/sdk") {
+			t.Fatalf("%s does not use the Go SDK", name)
+		}
+	}
+}
+
+func TestGoPluginScaffoldPinsSDKAndOmitsTransport(t *testing.T) {
+	directory := filepath.Join(t.TempDir(), "wuko-plugin-acme")
+	if err := writeGoPluginScaffold(directory, "acme"); err != nil {
+		t.Fatal(err)
+	}
+	module, err := os.ReadFile(filepath.Join(directory, "go.mod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "github.com/up2jj/wuko " + scaffoldSDKVersion()
+	if !strings.Contains(string(module), want) {
+		t.Fatalf("go.mod = %q, want dependency %q", module, want)
+	}
+	if _, err := os.Stat(filepath.Join(directory, "protocol.go")); !os.IsNotExist(err) {
+		t.Fatalf("hand-written protocol.go still exists: %v", err)
+	}
+	// The scaffold ships a require without a go.sum, so every recipe that compiles has to resolve
+	// the pinned SDK first; otherwise the first `just build` dies on a missing go.sum entry.
+	recipes, err := os.ReadFile(filepath.Join(directory, "justfile"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(recipes), "deps:\n\tgo mod tidy\n") {
+		t.Fatalf("justfile = %q, want a go mod tidy recipe", recipes)
+	}
+	for _, recipe := range []string{"build: deps", "test: deps", "vet: deps", "release version: deps"} {
+		if !strings.Contains(string(recipes), recipe) {
+			t.Fatalf("justfile = %q, want %q", recipes, recipe)
+		}
+	}
+}
+
+func TestResolveScaffoldSDKVersion(t *testing.T) {
+	tests := []struct {
+		name, buildVersion, cliVersion, want string
+	}{
+		{name: "module build", buildVersion: "v1.2.3", cliVersion: "v1.2.2", want: "v1.2.3"},
+		{name: "release injection", buildVersion: "(devel)", cliVersion: "v1.2.3-rc.1", want: "v1.2.3-rc.1"},
+		{name: "git describe fallback", buildVersion: "(devel)", cliVersion: "v1.2.3-4-gabc1234", want: scaffoldSDKFallbackVersion},
+		{name: "source fallback", buildVersion: "(devel)", cliVersion: "dev", want: scaffoldSDKFallbackVersion},
+		{name: "pseudo-version fallback", buildVersion: "v1.2.4-0.20260928150208-c48a8da14c1a", cliVersion: "v1.2.3-4-gabc1234", want: scaffoldSDKFallbackVersion},
+		{name: "dirty pseudo-version fallback", buildVersion: "v1.2.4-0.20260928150208-c48a8da14c1a+dirty", cliVersion: "dev", want: scaffoldSDKFallbackVersion},
+		{name: "snapshot fallback", buildVersion: "(devel)", cliVersion: "v1.2.4-next", want: scaffoldSDKFallbackVersion},
+		{name: "dirty tag fallback", buildVersion: "(devel)", cliVersion: "v1.2.3-dirty", want: scaffoldSDKFallbackVersion},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := resolveScaffoldSDKVersion(test.buildVersion, test.cliVersion); got != test.want {
+				t.Fatalf("version = %q, want %q", got, test.want)
+			}
+		})
+	}
 }
 
 func TestGoPluginScaffoldCancelsExecutorProcessGroup(t *testing.T) {
@@ -123,6 +201,7 @@ func TestGoPluginScaffoldCancelsExecutorProcessGroup(t *testing.T) {
 	if err := writeGoPluginScaffold(directory, "acme"); err != nil {
 		t.Fatal(err)
 	}
+	useLocalWukoModule(t, directory)
 	binary := filepath.Join(directory, "wuko-plugin-acme")
 	build := exec.Command("go", "build", "-o", binary, ".")
 	build.Dir = directory
@@ -162,9 +241,23 @@ func TestGoPluginScaffoldCancelsExecutorProcessGroup(t *testing.T) {
 	}
 	if frame := readFrame(); frame["id"] != "1" || frame["error"] != nil {
 		t.Fatalf("initialize frame = %#v", frame)
+	} else {
+		assertScaffoldDeclarations(t, frame["result"])
+	}
+	if err := encoder.Encode(map[string]any{"id": "open", "method": "executor.open", "params": map[string]any{"type": "acme.local", "with": map[string]any{}, "context": map[string]any{}}}); err != nil {
+		t.Fatal(err)
+	}
+	openFrame := readFrame()
+	openResult, ok := openFrame["result"].(map[string]any)
+	if openFrame["id"] != "open" || openFrame["error"] != nil || !ok {
+		t.Fatalf("executor.open frame = %#v", openFrame)
+	}
+	session, ok := openResult["session"].(string)
+	if !ok || session == "" {
+		t.Fatalf("executor.open result = %#v", openResult)
 	}
 	commandText := "sleep 30 & child=$!; printf '%s' \"$child\"; wait"
-	if err := encoder.Encode(map[string]any{"id": "2", "method": "executor.run", "params": map[string]any{"session": "local", "command": "sh", "args": []string{"-c", commandText}, "env": map[string]string{}, "stdin": "", "capture_limit": 64, "stdout_policy": 0, "stderr_policy": 3}}); err != nil {
+	if err := encoder.Encode(map[string]any{"id": "2", "method": "executor.run", "params": map[string]any{"session": session, "command": "sh", "args": []string{"-c", commandText}, "env": map[string]string{}, "stdin": "", "capture_limit": 64, "stdout_policy": 0, "stderr_policy": 3}}); err != nil {
 		t.Fatal(err)
 	}
 	var childPID int
@@ -208,6 +301,30 @@ func TestGoPluginScaffoldCancelsExecutorProcessGroup(t *testing.T) {
 	_ = stdin.Close()
 	if err := command.Wait(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func assertScaffoldDeclarations(t *testing.T, value any) {
+	t.Helper()
+	result, ok := value.(map[string]any)
+	if !ok {
+		t.Fatalf("initialize result = %#v", value)
+	}
+	if result["protocol"] != pluginpkg.Protocol || result["namespace"] != "acme" || result["lifecycle"] != true {
+		t.Fatalf("initialize result = %#v", result)
+	}
+	containsName := func(value any, field, want string) bool {
+		items, _ := value.([]any)
+		for _, item := range items {
+			declaration, _ := item.(map[string]any)
+			if declaration[field] == want {
+				return true
+			}
+		}
+		return false
+	}
+	if !containsName(result["helpers"], "name", "slug") || !containsName(result["steps"], "type", "acme.uppercase") || !containsName(result["executors"], "type", "acme.local") {
+		t.Fatalf("initialize declarations = %#v", result)
 	}
 }
 
@@ -330,6 +447,7 @@ func TestGoPluginScaffoldBuildsCompleteRelease(t *testing.T) {
 	if err := writeGoPluginScaffold(directory, "acme"); err != nil {
 		t.Fatal(err)
 	}
+	useLocalWukoModule(t, directory)
 	command := exec.Command("go", "run", "./tools/release", "-version", "1.2.3")
 	command.Dir = directory
 	command.Env = append(command.Environ(), "GOCACHE="+filepath.Join(t.TempDir(), "cache"))
@@ -340,7 +458,7 @@ func TestGoPluginScaffoldBuildsCompleteRelease(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if bundle.Manifest.PluginVersion != "1.2.3" || len(bundle.Manifest.Artifacts) != 4 {
+	if bundle.Manifest.PluginVersion != "1.2.3" || bundle.Manifest.Protocol != pluginpkg.Protocol || len(bundle.Manifest.Artifacts) != 4 {
 		t.Fatalf("manifest = %#v", bundle.Manifest)
 	}
 	firstDigest := pluginpkg.DigestBundle(bundle)

@@ -1,13 +1,15 @@
-build:
+deps:
+	go mod tidy
+build: deps
 	go build -o wuko-plugin-{{NS}} .
-test:
+test: deps
 	go test ./...
-vet:
+vet: deps
 	go vet ./...
 fmt:
 	gofmt -w *.go tools/release/*.go
 check: fmt vet test
-release version:
+release version: deps
 	go run ./tools/release -version "{{version}}"
 install: build
 	mkdir -p "${HOME}/.wuko/plugins/{{NS}}"

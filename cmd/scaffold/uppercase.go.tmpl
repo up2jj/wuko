@@ -1,22 +1,36 @@
 package main
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
 	"strings"
+
+	"github.com/up2jj/wuko/plugin/sdk"
 )
 
-func runUppercase(raw json.RawMessage) (any, error) {
-	var p struct {
-		With struct {
-			Value string `json:"value"`
-		} `json:"with"`
+type uppercaseConfig struct {
+	Value string `json:"value"`
+}
+
+func registerUppercase(plugin *sdk.Plugin) error {
+	handler := sdk.StepHandler[uppercaseConfig]{
+		Validate: validateUppercase,
+		Run:      runUppercase,
 	}
-	if err := json.Unmarshal(raw, &p); err != nil {
-		return nil, err
+	outputs := sdk.Object(map[string]sdk.OutputSchema{"value": sdk.Scalar()})
+	return sdk.RegisterStep(plugin, "uppercase", handler, sdk.WithOutputSchema(outputs))
+}
+
+func validateUppercase(_ context.Context, request sdk.StepRequest[uppercaseConfig]) error {
+	if request.Config.Value == "" {
+		return fmt.Errorf("value is required")
 	}
-	if p.With.Value == "" {
-		return nil, fmt.Errorf("value is required")
+	return nil
+}
+
+func runUppercase(ctx context.Context, request sdk.StepRequest[uppercaseConfig]) (sdk.Result, error) {
+	if err := validateUppercase(ctx, request); err != nil {
+		return sdk.Result{}, err
 	}
-	return map[string]any{"outputs": map[string]any{"value": strings.ToUpper(p.With.Value)}}, nil
+	return sdk.Result{Outputs: map[string]any{"value": strings.ToUpper(request.Config.Value)}}, nil
 }

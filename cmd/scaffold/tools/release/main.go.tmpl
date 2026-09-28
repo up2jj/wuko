@@ -14,10 +14,11 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/up2jj/wuko/plugin/sdk"
 )
 
 const namespace = "{{NS}}"
-const protocolVersion = "{{PROTOCOL}}"
 
 type artifact struct {
 	OS     string `json:"os"`
@@ -52,7 +53,7 @@ func main() {
 	}
 	defer os.RemoveAll(stage)
 	targets := []target{{"darwin", "amd64", "Darwin"}, {"darwin", "arm64", "Darwin"}, {"linux", "amd64", "Linux"}, {"linux", "arm64", "Linux"}}
-	result := manifest{Version: 1, Namespace: namespace, PluginVersion: *version, Protocol: protocolVersion}
+	result := manifest{Version: 1, Namespace: namespace, PluginVersion: *version, Protocol: sdk.Protocol}
 	for _, item := range targets {
 		binary := filepath.Join(stage, "bin", item.os+"-"+item.arch, "wuko-plugin-"+namespace)
 		if err := os.MkdirAll(filepath.Dir(binary), 0755); err != nil {
