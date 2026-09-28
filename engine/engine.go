@@ -443,7 +443,7 @@ func (e *Engine) validateStepsRaw(ctx context.Context, definition *workflow.Defi
 			traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusSucceeded, started, "", nil)
 			continue
 		}
-		if err := validateTemplates(options.renderer, workflowStep.With, workflowStep.Type == "lua"); err != nil {
+		if err := validateTemplates(options.renderer, workflowStep.With, rawSourceStep(workflowStep.Type)); err != nil {
 			traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusFailed, started, "validating templates", err)
 			return fmt.Errorf("step %q template: %w", workflowStep.ID, err)
 		}
@@ -1004,7 +1004,7 @@ func (e *Engine) executeStep(ctx context.Context, definition *workflow.Definitio
 		renderStarted := time.Now()
 		traceStep(options, definition, workflowStep, diagnostic.PhaseRender, diagnostic.StatusStarted, time.Time{}, "rendering step configuration", nil)
 		data := templateData(definition, options.RunDir, state)
-		rendered, err := renderValue(options.renderer, workflowStep.With, data, workflowStep.Type == "lua")
+		rendered, err := renderValue(options.renderer, workflowStep.With, data, rawSourceStep(workflowStep.Type))
 		if err != nil {
 			traceStep(options, definition, workflowStep, diagnostic.PhaseRender, diagnostic.StatusFailed, renderStarted, "", err)
 			stepErr := fmt.Errorf("workflow %q step %q (%s): rendering configuration: %w", definition.Name, workflowStep.ID, workflowStep.Type, err)
@@ -1039,7 +1039,7 @@ func (e *Engine) executeStep(ctx context.Context, definition *workflow.Definitio
 			return outcome
 		}
 		traceStep(options, definition, workflowStep, diagnostic.PhaseRunner, diagnostic.StatusSucceeded, runnerStarted, "", nil)
-		outputSchema, schemaErr := e.registry.OutputSchema(ctx, workflowStep.Type)
+		outputSchema, schemaErr := e.registry.OutputSchemaForConfig(ctx, workflowStep.Type, raw)
 		if schemaErr != nil {
 			stepErr := fmt.Errorf("workflow %q step %q (%s): resolving output contract: %w", definition.Name, workflowStep.ID, workflowStep.Type, schemaErr)
 			finishStep(StatusFailed, stepErr, nil, 0)

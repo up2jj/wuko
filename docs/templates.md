@@ -235,6 +235,54 @@ steps:
 
 Inside the action template, the bound value is available as `.inputs.target`.
 
+## One-off template rendering
+
+Use the `template` step when one template needs explicit parameters and its rendered text should
+be kept in workflow state or written directly to a file. Inline source and packaged files share
+the workflow's named templates and helper functions:
+
+```yaml
+- id: message
+  type: template
+  with:
+    source: '{{ template "prefix" . }} {{ .data.name }}'
+    data:
+      name: "{{ .vars.application }}"
+```
+
+The result is available as `.steps.message.content`. Passed values live under `.data`, while the
+usual roots such as `.vars` and `.steps` remain available. Inline `source` is rendered only by the
+step, so delimiters in it are not consumed while Wuko renders the rest of the step configuration.
+
+Use `{expr: ...}` for runtime values that must keep their type:
+
+```yaml
+data:
+  enabled: {expr: vars.enabled}
+  targets: {expr: steps.configuration.value.targets}
+  expression_shaped_object: {literal: {expr: keep-this-text}}
+```
+
+For a file carried by the workflow or action package, replace `source` with `file`. Relative source
+paths stay inside that package and may themselves use ordinary workflow template values to select
+a file:
+
+```yaml
+- id: configuration
+  type: template
+  with:
+    file: "templates/{{ .vars.environment }}.yaml.tmpl"
+    data:
+      service: {expr: vars.service}
+    destination: config.yaml
+    overwrite: true
+```
+
+Omitting `destination` publishes `content` and `size`. Providing it selects file mode, which writes
+atomically through the active host or executor filesystem and returns file metadata without
+retaining the rendered content. The parent directory must already exist; `mode` uses the same
+quoted octal format and permission-preservation rules as the `file` step.
+
 ## Template trees
 
 Use the `scaffold` step when a workflow or action needs to render a complete directory instead of

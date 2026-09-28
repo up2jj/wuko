@@ -12,6 +12,7 @@ import (
 	"github.com/expr-lang/expr/parser"
 	"github.com/up2jj/wuko/provider"
 	"github.com/up2jj/wuko/step"
+	templatestep "github.com/up2jj/wuko/steps/template"
 	transformstep "github.com/up2jj/wuko/steps/transform"
 	"github.com/up2jj/wuko/validation"
 	"github.com/up2jj/wuko/workflow"
@@ -128,7 +129,7 @@ func collectStepSchemas(ctx context.Context, registry *step.Registry, controls [
 				case declaration.Type != "":
 					// A type that cannot be resolved stays open here: step validation
 					// reports the resolution failure at the step's own location.
-					if registered, err := registry.OutputSchema(ctx, declaration.Type); err == nil {
+					if registered, err := registry.OutputSchemaForConfig(ctx, declaration.Type, declaration.With); err == nil {
 						schema = schemaForStepOutputs(registered)
 					} else if ctxErr := ctx.Err(); ctxErr != nil {
 						return ctxErr
@@ -1076,12 +1077,37 @@ func (validator *referenceValidator) validateAction(action *workflow.Action, cal
 }
 
 func (validator *referenceValidator) validateStepConfiguration(stepID, stepType string, raw map[string]any, scope *referenceScope) error {
-	if err := validator.validateTemplateValue("with", raw, scope, stepType == "lua"); err != nil {
+	if err := validator.validateTemplateValue("with", raw, scope, rawSourceStep(stepType)); err != nil {
 		return err
 	}
 	switch stepType {
 	case "assert", "set":
 		return validator.validateRawExpression("expr", raw, "expr", scope)
+	case "template":
+		expressions := templatestep.Expressions(raw)
+		for _, name := range slices.Sorted(maps.Keys(expressions)) {
+			if err := validator.validateExpression(fmt.Sprintf("data %q expr", name), expressions[name], scope); err != nil {
+				return err
+			}
+		}
+		// The step binds its parameters below .data, which at render time is copied over the
+		// ordinary roots and helpers. A workflow that already provides one named data would
+		// have it silently shadowed inside every template this step renders.
+		if _, exists := validator.templateRoots["data"]; exists {
+			return fmt.Errorf("step %q: data is already a template root in this workflow", stepID)
+		}
+		source, _ := raw["source"].(string)
+		if source == "" {
+			return nil
+		}
+		data, _ := raw["data"].(map[string]any)
+		locals := scope.clone()
+		locals.roots["data"] = schemaForAnyMap(data)
+		roots := maps.Clone(validator.templateRoots)
+		roots["data"] = struct{}{}
+		// An inline source is a body read once, not a configuration value repeated across
+		// steps, so it is walked without being retained in the renderer's cache.
+		return validator.validateTemplateWithRoots("source", source, locals, roots, false)
 	case "transform":
 		path, references, err := transformstep.References(raw)
 		if err != nil {
@@ -1306,11 +1332,19 @@ func expressionStaticPath(node ast.Node) []string {
 }
 
 func (validator *referenceValidator) validateTemplate(label, value string, scope *referenceScope) error {
+	return validator.validateTemplateWithRoots(label, value, scope, validator.templateRoots, true)
+}
+
+func (validator *referenceValidator) validateTemplateWithRoots(label, value string, scope *referenceScope, roots map[string]struct{}, cache bool) error {
 	if value == "" || !strings.Contains(value, "{{") {
 		return nil
 	}
-	err := validator.renderer.WalkDataReferences(value, func(path []string) error {
-		return scope.validate(path, validator.templateRoots)
+	walk := validator.renderer.WalkDataReferences
+	if !cache {
+		walk = validator.renderer.WalkDataReferencesUncached
+	}
+	err := walk(value, func(path []string) error {
+		return scope.validate(path, roots)
 	})
 	if err != nil {
 		return fmt.Errorf("%s template: %w", label, err)

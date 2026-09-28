@@ -110,6 +110,10 @@ func renderString(renderer *workflow.Renderer, value string, data map[string]any
 	return renderer.Render(value, data)
 }
 
+func rawSourceStep(stepType string) bool {
+	return stepType == "lua" || stepType == "template"
+}
+
 func validateTemplates(renderer *workflow.Renderer, value any, skipSource bool) error {
 	switch typed := value.(type) {
 	case string:

@@ -214,6 +214,10 @@ func stepDependencyReferences(steps []Step) []dependencyOutputReference {
 			if args, ok := workflowStep.With["args"].(map[string]any); ok {
 				references = append(references, typedBindingDependencyReferences(args)...)
 			}
+		case "template":
+			if data, ok := workflowStep.With["data"].(map[string]any); ok {
+				references = append(references, typedBindingDependencyReferences(data)...)
+			}
 		}
 		if workflowStep.Action != nil {
 			references = append(references, typedBindingDependencyReferences(workflowStep.With)...)

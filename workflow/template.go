@@ -271,7 +271,18 @@ func validateTemplateReferences(tmpl *template.Template) error {
 // Paths omit the leading dot or dollar sign: .steps.build.stdout becomes
 // ["steps", "build", "stdout"]. Dynamic index segments stop the static path.
 func (renderer *Renderer) WalkDataReferences(value string, visit func([]string) error) error {
-	tmpl, err := renderer.compile(value, true)
+	return renderer.walkDataReferences(value, true, visit)
+}
+
+// WalkDataReferencesUncached walks value without retaining it in the compiled-template
+// cache. See ValidateUncached: a one-off body read from a file would otherwise stay keyed
+// in the cache, whole, for the life of the run.
+func (renderer *Renderer) WalkDataReferencesUncached(value string, visit func([]string) error) error {
+	return renderer.walkDataReferences(value, false, visit)
+}
+
+func (renderer *Renderer) walkDataReferences(value string, cache bool, visit func([]string) error) error {
+	tmpl, err := renderer.compile(value, cache)
 	if err != nil {
 		return err
 	}

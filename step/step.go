@@ -365,6 +365,11 @@ func objectSchema(open bool, fieldSets ...map[string]OutputSchema) OutputSchema 
 type Registration struct {
 	Builder Builder
 	Outputs OutputSchema
+	// ConfigOutputs narrows Outputs for a step whose emitted keys depend on statically
+	// visible configuration, such as a mode selected by the presence of one field. It is
+	// consulted with that step's own raw configuration; Outputs stands for callers that
+	// have none, and must remain the union of everything ConfigOutputs can return.
+	ConfigOutputs func(raw map[string]any) OutputSchema
 }
 
 // OutputSchemaResolver resolves optional schemas for dynamically provided step
@@ -447,6 +452,18 @@ func (r *Registry) OutputSchema(ctx context.Context, name string) (OutputSchema,
 		}
 	}
 	return OpenObject(), nil
+}
+
+// OutputSchemaForConfig returns the contract for one step's own configuration. A step that
+// emits different keys per mode narrows its declared contract here, so reference validation
+// rejects an output the step provably never produces for that configuration.
+func (r *Registry) OutputSchemaForConfig(ctx context.Context, name string, raw map[string]any) (OutputSchema, error) {
+	if r != nil {
+		if definition, ok := r.definitions[name]; ok && definition.ConfigOutputs != nil {
+			return definition.ConfigOutputs(raw), nil
+		}
+	}
+	return r.OutputSchema(ctx, name)
 }
 
 // Definitions returns a copy for contract tests and documentation tooling.

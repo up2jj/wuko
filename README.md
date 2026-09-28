@@ -509,6 +509,7 @@ Each linked guide contains multiple examples for every step.
 | `tui_table` | Browse object-backed data in a paginated table | [Interactive steps](docs/steps-interactive.md#tui_table) |
 | `tui_confirm` | Collect a boolean decision | [Interactive steps](docs/steps-interactive.md#tui_confirm) |
 | `set` | Assign a literal or expression result | [Data steps](docs/steps-data.md#set) |
+| `template` | Render inline or packaged templates to memory or a file | [Data steps](docs/steps-data.md#template) |
 | `transform` | Run deterministic list, object, aggregation, and tuple pipelines | [Data steps](docs/steps-data.md#transform) |
 | `assert` | Stop unless an expression is true | [Data steps](docs/steps-data.md#assert) |
 | `import_vars` | Load JSON or TOML into workflow state | [Data steps](docs/steps-data.md#import_vars) |

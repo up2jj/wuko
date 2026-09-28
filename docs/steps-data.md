@@ -31,6 +31,60 @@ required.
 
 The result is available as `.steps.<id>.value` and as the configured variable.
 
+## `template`
+
+Render one strict Go template from inline `source` or a packaged `file`. Exactly one source is
+required. Values passed in `data` are available below `.data`; the normal `.vars`, `.steps`,
+`.env`, `.inputs`, control bindings, helpers, and named templates remain available too.
+
+```yaml
+- id: manifest
+  type: template
+  with:
+    source: |
+      name: {{ .data.name }}
+      replicas: {{ .data.replicas }}
+    data:
+      name: "{{ .vars.application }}"
+      replicas: {expr: vars.replicas}
+```
+
+Inline `source` is kept raw while the surrounding step configuration is prepared, then rendered
+exactly once after `data` is resolved. Ordinary YAML data stays typed and strings use normal
+workflow template rendering. A one-key `{expr: ...}` binding evaluates an Expr expression without
+converting its result to text. Use `{literal: ...}` when a literal object would otherwise look like
+an expression binding.
+
+Without a destination, outputs are the rendered `content` and its byte `size`. Add `destination`
+to write instead:
+
+```yaml
+- id: output_directory
+  type: file
+  with:
+    operation: mkdir
+    path: generated
+- id: config
+  type: template
+  with:
+    file: templates/config.yaml.tmpl
+    data:
+      application: {expr: vars.application}
+    destination: generated/config.yaml
+    overwrite: true
+    mode: "0644"
+```
+
+File mode returns `path`, `size`, normalized `mode`, and `created`; it deliberately does not retain
+`content` in step outputs. Relative destinations resolve from `run.dir`. Writes have the same
+atomic, overwrite, permission-preservation, parent-directory, and executor-filesystem behavior as
+[`file` `write`](filesystem-operations.md#write). `overwrite` and `mode` require `destination`.
+
+Template source files are relative to the owning workflow or action package and may not escape it
+or traverse symbolic links. They must be regular UTF-8 files no larger than 1 MiB. A packaged remote
+workflow or action can carry them; an action loaded as a standalone manifest cannot borrow files
+from its caller. See [Templates](templates.md#one-off-template-rendering) for execution details.
+
 ## `transform`
 
 Run an ordered, deterministic pipeline over a list or object. `from` is either a dotted `steps.*`

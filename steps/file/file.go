@@ -77,6 +77,53 @@ func Register(registry *step.Registry) error {
 	return registry.RegisterDefinition("file", step.Registration{Builder: New, Outputs: step.OpenObject()})
 }
 
+// Write describes one write another step performs through the file step's own
+// implementation: the same atomic replacement, overwrite refusal, permission
+// preservation, and executor filesystem routing.
+type Write struct {
+	Path      string
+	Content   string
+	Overwrite bool
+	Mode      string
+}
+
+// NewWrite builds a write runner from typed parameters. A caller holding content it has
+// already produced in memory uses this rather than New, whose raw configuration map is
+// encoded to YAML and parsed back: that costs several times the body in transient
+// allocations and rejects outright any content that is not valid UTF-8.
+func NewWrite(write Write) (step.Runner, error) {
+	if write.Path == "" {
+		return nil, fmt.Errorf("path is required")
+	}
+	if err := ValidateMode(write.Mode); err != nil {
+		return nil, err
+	}
+	present := map[string]bool{"operation": true, "path": true, "content": true, "overwrite": true}
+	if write.Mode != "" {
+		present["mode"] = true
+	}
+	return &executorAwareRunner{Runner: &Runner{
+		config: Config{
+			Operation: operationWrite,
+			Path:      write.Path,
+			Content:   write.Content,
+			Overwrite: write.Overwrite,
+			Mode:      write.Mode,
+		},
+		present: present,
+	}}, nil
+}
+
+// ValidateMode reports whether value is a quoted octal mode the file step accepts. An
+// empty mode is valid and means the mode is left to the operation's own default.
+func ValidateMode(value string) error {
+	if value == "" {
+		return nil
+	}
+	_, err := parseMode(value)
+	return err
+}
+
 func New(raw map[string]any) (step.Runner, error) {
 	if value, ok := raw["mode"]; ok {
 		if _, ok := value.(string); !ok {
