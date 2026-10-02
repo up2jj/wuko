@@ -58,31 +58,124 @@ func TestSanitizeDashboardContent(t *testing.T) {
 	}
 }
 
-func TestDashboardGlobalExitKeysWorkInsideMenu(t *testing.T) {
-	for _, test := range []struct {
-		name     string
-		key      tea.KeyPressMsg
-		canceled bool
+func TestDashboardCloseRequiresConfirmationAndEscapeDoesNotClose(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	var tracker sync.WaitGroup
+	model := newDashboardModel(ctx, cancel, DashboardConfig{
+		Title: "Test", Groups: []DashboardGroup{{ID: "static", Widgets: []DashboardWidget{{ID: "one"}}}},
+		Render: func(_, _ string, _ DashboardWidgetDimensions, _ map[string]any, _ DashboardState, _ map[string]DashboardState) (string, error) {
+			return "ready", nil
+		},
+	}, &tracker)
+	model.menu = true
+
+	updated, command := model.Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
+	model = updated.(dashboardModel)
+	if model.done || model.menu || model.confirm != dashboardCloseConfirmation || command != nil {
+		t.Fatalf("close request state = done %v menu %v confirmation %v command nil %v", model.done, model.menu, model.confirm, command == nil)
+	}
+	if view := model.View().Content; !strings.Contains(view, "Close this dashboard? [y/N]") {
+		t.Fatalf("close confirmation is not visible:\n%s", view)
+	}
+
+	updated, command = model.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	model = updated.(dashboardModel)
+	if model.done || model.confirm != dashboardNoConfirmation || command != nil {
+		t.Fatalf("dismissed close state = done %v confirmation %v command nil %v", model.done, model.confirm, command == nil)
+	}
+	updated, command = model.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	model = updated.(dashboardModel)
+	if model.done || command != nil {
+		t.Fatalf("escape closed dashboard: done %v command nil %v", model.done, command == nil)
+	}
+
+	updated, _ = model.Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
+	model = updated.(dashboardModel)
+	updated, command = model.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	model = updated.(dashboardModel)
+	if !model.done || model.canceled || command == nil {
+		t.Fatalf("confirmed close state = done %v canceled %v command nil %v", model.done, model.canceled, command == nil)
+	}
+}
+
+func TestDashboardEnterDeclinesConfirmation(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup []tea.KeyPressMsg
+		want  dashboardConfirmationKind
 	}{
-		{name: "quit", key: tea.KeyPressMsg{Code: 'q', Text: "q"}},
-		{name: "cancel", key: tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}, canceled: true},
+		{name: "action", setup: []tea.KeyPressMsg{{Code: tea.KeyEnter}, {Code: tea.KeyEnter}}, want: dashboardActionConfirmation},
+		{name: "close", setup: []tea.KeyPressMsg{{Code: 'q', Text: "q"}}, want: dashboardCloseConfirmation},
 	} {
-		t.Run(test.name, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
 			var tracker sync.WaitGroup
 			model := newDashboardModel(ctx, cancel, DashboardConfig{
-				Title: "Test", Groups: []DashboardGroup{{ID: "static", Widgets: []DashboardWidget{{ID: "one"}}}},
-				Render: func(_, _ string, _ DashboardWidgetDimensions, _ map[string]any, _ DashboardState, _ map[string]DashboardState) (string, error) {
+				Title: "Test",
+				Groups: []DashboardGroup{{
+					ID: "ops", Title: "Ops", Columns: 1,
+					Widgets: []DashboardWidget{{ID: "deploy", Title: "Deploy", Actions: []DashboardAction{{ID: "ship", Label: "Ship", Confirm: true}}}},
+				}},
+				Render: func(string, string, DashboardWidgetDimensions, map[string]any, DashboardState, map[string]DashboardState) (string, error) {
 					return "ready", nil
 				},
 			}, &tracker)
-			model.menu = true
-			updated, command := model.Update(test.key)
-			got := updated.(dashboardModel)
-			if !got.done || got.canceled != test.canceled || command == nil {
-				t.Fatalf("exit state = done %v canceled %v command nil %v", got.done, got.canceled, command == nil)
+			for _, key := range tc.setup {
+				updated, _ := model.Update(key)
+				model = updated.(dashboardModel)
+			}
+			if model.confirm != tc.want {
+				t.Fatalf("confirmation = %v, want %v", model.confirm, tc.want)
+			}
+			updated, _ := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+			model = updated.(dashboardModel)
+			if model.done || model.confirm != dashboardNoConfirmation || len(model.queue) != 0 {
+				t.Fatalf("enter did not decline: done %v confirmation %v queued %d", model.done, model.confirm, len(model.queue))
 			}
 		})
+	}
+}
+
+func TestDashboardCloseKeyKeepsPendingActionConfirmation(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	var tracker sync.WaitGroup
+	model := newDashboardModel(ctx, cancel, DashboardConfig{
+		Title: "Test",
+		Groups: []DashboardGroup{{
+			ID: "ops", Title: "Ops", Columns: 1,
+			Widgets: []DashboardWidget{{ID: "deploy", Title: "Deploy", Actions: []DashboardAction{{ID: "ship", Label: "Ship", Confirm: true}}}},
+		}},
+		Render: func(string, string, DashboardWidgetDimensions, map[string]any, DashboardState, map[string]DashboardState) (string, error) {
+			return "ready", nil
+		},
+	}, &tracker)
+	for _, key := range []tea.KeyPressMsg{{Code: tea.KeyEnter}, {Code: tea.KeyEnter}, {Code: 'q', Text: "q"}} {
+		updated, _ := model.Update(key)
+		model = updated.(dashboardModel)
+	}
+	if model.done || model.confirm != dashboardActionConfirmation || model.confirmText != "Ship?" {
+		t.Fatalf("pending action prompt replaced: done %v confirmation %v text %q", model.done, model.confirm, model.confirmText)
+	}
+}
+
+func TestDashboardControlCCancelsInsideMenu(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	var tracker sync.WaitGroup
+	model := newDashboardModel(ctx, cancel, DashboardConfig{
+		Title: "Test", Groups: []DashboardGroup{{ID: "static", Widgets: []DashboardWidget{{ID: "one"}}}},
+		Render: func(_, _ string, _ DashboardWidgetDimensions, _ map[string]any, _ DashboardState, _ map[string]DashboardState) (string, error) {
+			return "ready", nil
+		},
+	}, &tracker)
+	model.menu = true
+
+	updated, command := model.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+	got := updated.(dashboardModel)
+	if !got.done || !got.canceled || command == nil {
+		t.Fatalf("cancel state = done %v canceled %v command nil %v", got.done, got.canceled, command == nil)
 	}
 }
 
@@ -331,7 +424,7 @@ func TestDashboardHelpUsesCompactKeyLegendAndExpands(t *testing.T) {
 	updated, _ := model.Update(tea.KeyPressMsg{Code: '?'})
 	model = updated.(dashboardModel)
 	fullHelp := model.dashboardHelpText()
-	for _, want := range []string{"pgup/pgdown page", "home/end bounds", "tab/shift+tab focus", "q/esc close", "? less"} {
+	for _, want := range []string{"pgup/pgdown page", "home/end bounds", "tab/shift+tab focus", "q close", "? less"} {
 		if !strings.Contains(fullHelp, want) {
 			t.Fatalf("full help = %q, want %q", fullHelp, want)
 		}
@@ -399,7 +492,7 @@ func TestDashboardConfirmationPromptFitsViewport(t *testing.T) {
 		updated, _ = model.Update(key)
 		model = updated.(dashboardModel)
 	}
-	if !model.confirm {
+	if model.confirm != dashboardActionConfirmation {
 		t.Fatal("expected confirmation prompt")
 	}
 	if got, want := lipgloss.Height(model.renderPage()), model.pageSize(); got != want {

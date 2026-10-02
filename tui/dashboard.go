@@ -105,6 +105,14 @@ const (
 	dashboardActionJob
 )
 
+type dashboardConfirmationKind uint8
+
+const (
+	dashboardNoConfirmation dashboardConfirmationKind = iota
+	dashboardActionConfirmation
+	dashboardCloseConfirmation
+)
+
 type dashboardJob struct {
 	kind          dashboardJobKind
 	group         int
@@ -162,7 +170,7 @@ type dashboardModel struct {
 	widgets       []dashboardWidgetRef
 	menu          bool
 	menuIndex     int
-	confirm       bool
+	confirm       dashboardConfirmationKind
 	confirmText   string
 	confirmJob    dashboardJob
 	fullHelp      bool
@@ -230,18 +238,30 @@ func (m dashboardModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.cancel()
 			return m, tea.Quit
 		case "q":
-			m.done = true
-			m.cancel()
-			return m, tea.Quit
+			// An open prompt must be answered first; overwriting it would silently drop a pending action.
+			if m.confirm == dashboardNoConfirmation {
+				m.menu = false
+				m.confirm = dashboardCloseConfirmation
+				m.confirmText = "Close this dashboard?"
+				m.reflow()
+				m.clampOffset()
+				return m, nil
+			}
 		}
-		if m.confirm {
+		if m.confirm != dashboardNoConfirmation {
+			// The prompt shows [y/N], so only an explicit yes confirms; enter takes the default answer.
 			switch message.String() {
-			case "y", "Y", "enter":
-				m.confirm = false
+			case "y", "Y":
+				if m.confirm == dashboardCloseConfirmation {
+					m.done = true
+					m.cancel()
+					return m, tea.Quit
+				}
+				m.confirm = dashboardNoConfirmation
 				m.queueAction(m.confirmJob)
 				commands = append(commands, m.startQueued()...)
-			case "n", "N", "esc":
-				m.confirm = false
+			case "n", "N", "esc", "enter":
+				m.confirm = dashboardNoConfirmation
 			}
 			// Toggling the prompt changes the page and help heights, so the layout must follow.
 			m.reflow()
@@ -261,7 +281,7 @@ func (m dashboardModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 						if err != nil {
 							m.recordActionError(job, err)
 						} else {
-							m.confirm = true
+							m.confirm = dashboardActionConfirmation
 							m.confirmText = text
 							m.confirmJob = job
 						}
@@ -283,10 +303,6 @@ func (m dashboardModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		switch message.String() {
-		case "esc":
-			m.done = true
-			m.cancel()
-			return m, tea.Quit
 		case "?":
 			m.fullHelp = !m.fullHelp
 		case "r":
@@ -555,7 +571,7 @@ func (m dashboardModel) renderPage() string {
 		page.WriteString(m.renderWidgetGrid(groupIndex))
 		page.WriteString("\n\n")
 	}
-	if m.confirm {
+	if m.confirm != dashboardNoConfirmation {
 		page.WriteString(m.dashboardConfirmationText())
 		page.WriteByte('\n')
 	}
@@ -725,7 +741,7 @@ func (m dashboardModel) minimumPageHeight(layout dashboardLayout) int {
 		}
 		height++
 	}
-	if m.confirm {
+	if m.confirm != dashboardNoConfirmation {
 		height += lipgloss.Height(m.dashboardConfirmationText())
 	}
 	return max(height, 1)
@@ -868,11 +884,11 @@ func (m dashboardModel) dashboardHelpText() string {
 	if m.fullHelp {
 		help = []string{
 			"↑/k up", "↓/j down", "pgup/pgdown page", "home/end bounds",
-			"tab/shift+tab focus", "enter/a actions", "r refresh", "q/esc close", cancelHelp, "? less",
+			"tab/shift+tab focus", "enter/a actions", "r refresh", "q close", cancelHelp, "? less",
 		}
 	}
-	if m.confirm {
-		help = []string{"y/enter confirm", "n/esc cancel", cancelHelp}
+	if m.confirm != dashboardNoConfirmation {
+		help = []string{"y confirm", "n/esc/enter cancel", cancelHelp}
 	}
 	return renderHelpText(wrapHelp(help, m.width))
 }
