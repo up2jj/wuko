@@ -15,9 +15,11 @@ Use this guidance when a workflow gathers input, produces typed data, transforms
 - Use `dashboard` when one interactive step should continuously present grouped, template-backed
   widgets. Put normal Wuko steps in each group's `refresh`, declare the displayed values in its
   `outputs`, and use widget `actions` for focused operations. Widget templates retain the workflow
-  roots visible before the dashboard and add `.data`, `.refresh`, and `.actions`; action callbacks
-  also receive the current group `data` root. Dashboard callbacks are isolated, non-interactive
-  inline workflows, so do not reuse an earlier step ID or put `dashboard`/`return` inside them.
+  roots visible before the dashboard and add `.data`, `.refresh`, `.actions`, and exact
+  `.widget.width`/`.widget.height` body dimensions. Render numeric history responsively with
+  `{{ .data.samples | sparkline .widget.width .widget.height }}`. Action callbacks also receive the
+  current group `data` root. Dashboard callbacks are isolated, non-interactive inline workflows,
+  so do not reuse an earlier step ID or put `dashboard`/`return` inside them.
 
 ## Typed values and structured data
 

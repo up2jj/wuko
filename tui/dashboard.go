@@ -18,6 +18,8 @@ import (
 
 const dashboardMinPanelWidth = 28
 
+const dashboardPanelGap = 1
+
 // DashboardConfig describes a long-lived, refreshable terminal dashboard.
 type DashboardConfig struct {
 	Title          string
@@ -25,8 +27,8 @@ type DashboardConfig struct {
 	Groups         []DashboardGroup
 	Refresh        func(context.Context, string) (map[string]any, error)
 	Action         func(context.Context, string, string, string, map[string]any) (map[string]any, error)
-	Render         func(string, string, map[string]any, DashboardState, map[string]DashboardState) (string, error)
-	Confirmation   func(string, string, string, map[string]any, DashboardState, map[string]DashboardState) (string, error)
+	Render         func(string, string, DashboardWidgetDimensions, map[string]any, DashboardState, map[string]DashboardState) (string, error)
+	Confirmation   func(string, string, string, DashboardWidgetDimensions, map[string]any, DashboardState, map[string]DashboardState) (string, error)
 }
 
 type DashboardGroup struct {
@@ -49,6 +51,13 @@ type DashboardAction struct {
 	Label         string
 	Confirm       bool
 	RefreshGroups []string
+}
+
+// DashboardWidgetDimensions is the usable template body size in terminal cells. It excludes the
+// widget border, horizontal padding, title, and the reserved action-status row.
+type DashboardWidgetDimensions struct {
+	Width  int
+	Height int
 }
 
 // DashboardState is the stable result shape for refreshes and actions.
@@ -121,6 +130,21 @@ type dashboardTickMsg struct {
 
 type dashboardWidgetRef struct{ group, widget int }
 
+type dashboardWidgetLayout struct {
+	DashboardWidgetDimensions
+	panelWidth  int
+	panelHeight int
+}
+
+type dashboardGroupLayout struct {
+	columns int
+	widgets []dashboardWidgetLayout
+}
+
+type dashboardLayout struct {
+	groups []dashboardGroupLayout
+}
+
 type dashboardModel struct {
 	ctx       context.Context
 	cancel    context.CancelFunc
@@ -143,6 +167,7 @@ type dashboardModel struct {
 	confirmJob    dashboardJob
 	done          bool
 	canceled      bool
+	layout        dashboardLayout
 }
 
 func newDashboardModel(ctx context.Context, cancel context.CancelFunc, config DashboardConfig, tracker *sync.WaitGroup) dashboardModel {
@@ -161,12 +186,20 @@ func newDashboardModel(ctx context.Context, cancel context.CancelFunc, config Da
 		if group.Refresh {
 			model.groups[groupIndex].Status = "loading"
 			model.queue = append(model.queue, dashboardJob{kind: dashboardRefreshJob, group: groupIndex})
-		} else if err := model.renderGroup(groupIndex, state.Data); err != nil {
+		}
+	}
+	model.initial = tea.Batch(model.startQueued()...)
+	model.layout = model.calculateLayout()
+	for groupIndex, group := range config.Groups {
+		if group.Refresh {
+			continue
+		}
+		if err := model.renderGroup(groupIndex, model.groups[groupIndex].Data); err != nil {
 			model.groups[groupIndex].Status = "failed"
 			model.groups[groupIndex].Error = err.Error()
 		}
 	}
-	model.initial = tea.Batch(model.startQueued()...)
+	model.reflow()
 	return model
 }
 
@@ -178,6 +211,7 @@ func (m dashboardModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = max(message.Width, 1)
 		m.height = max(message.Height, 1)
+		m.reflow()
 		m.clampOffset()
 	case dashboardTickMsg:
 		if message.group < 0 || message.group >= len(m.groups) || message.generation != m.groups[message.group].tickGeneration {
@@ -208,6 +242,9 @@ func (m dashboardModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			case "n", "N", "esc":
 				m.confirm = false
 			}
+			// Toggling the prompt changes the page and help heights, so the layout must follow.
+			m.reflow()
+			m.clampOffset()
 			return m, tea.Batch(commands...)
 		}
 		if m.menu {
@@ -239,6 +276,8 @@ func (m dashboardModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 					m.menuIndex = cursor
 				}
 			}
+			m.reflow()
+			m.clampOffset()
 			return m, tea.Batch(commands...)
 		}
 
@@ -283,6 +322,8 @@ func (m dashboardModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.clampOffset()
 	}
+	m.reflow()
+	m.clampOffset()
 	return m, tea.Batch(commands...)
 }
 
@@ -303,11 +344,7 @@ func (m dashboardModel) View() tea.View {
 		visible += "\n"
 		end++
 	}
-	help := "↑/↓ scroll  tab focus  enter/a actions  r refresh  q quit"
-	if m.confirm {
-		help = "y/enter confirm  n/esc cancel"
-	}
-	view := tea.NewView(visible + "\n" + renderHelpText(wrapHelp(strings.Fields(help), m.width)) + "\n")
+	view := tea.NewView(visible + "\n" + m.dashboardHelpText() + "\n")
 	view.AltScreen = true
 	return view
 }
@@ -473,7 +510,7 @@ func (m dashboardModel) confirmation(job dashboardJob) (string, error) {
 	if m.config.Confirmation == nil {
 		return action.Label + "?", nil
 	}
-	return m.config.Confirmation(group.ID, widget.ID, action.ID, maps.Clone(m.groups[job.group].Data), m.groups[job.group].DashboardState, maps.Clone(m.groups[job.group].actions[job.widget]))
+	return m.config.Confirmation(group.ID, widget.ID, action.ID, m.widgetDimensions(job.group, job.widget), maps.Clone(m.groups[job.group].Data), m.groups[job.group].DashboardState, maps.Clone(m.groups[job.group].actions[job.widget]))
 }
 
 func (m *dashboardModel) recordActionError(job dashboardJob, err error) {
@@ -490,7 +527,7 @@ func (m *dashboardModel) renderGroup(groupIndex int, data map[string]any) error 
 	group := m.config.Groups[groupIndex]
 	contents := make([]string, len(group.Widgets))
 	for widgetIndex, widget := range group.Widgets {
-		content, err := m.config.Render(group.ID, widget.ID, maps.Clone(data), m.groups[groupIndex].DashboardState, maps.Clone(m.groups[groupIndex].actions[widgetIndex]))
+		content, err := m.config.Render(group.ID, widget.ID, m.widgetDimensions(groupIndex, widgetIndex), maps.Clone(data), m.groups[groupIndex].DashboardState, maps.Clone(m.groups[groupIndex].actions[widgetIndex]))
 		if err != nil {
 			return fmt.Errorf("widget %q: %w", widget.ID, err)
 		}
@@ -502,24 +539,13 @@ func (m *dashboardModel) renderGroup(groupIndex int, data map[string]any) error 
 
 func (m dashboardModel) renderPage() string {
 	var page strings.Builder
-	page.WriteString(interactiveStyles.message.Render(m.config.Title))
+	page.WriteString(m.wrapDashboardText(interactiveStyles.message.Render(m.config.Title)))
 	page.WriteString("\n\n")
-	for groupIndex, group := range m.config.Groups {
-		state := m.groups[groupIndex]
-		status := state.Status
-		if !state.UpdatedAt.IsZero() {
-			status += " • " + state.UpdatedAt.Local().Format("15:04:05")
-		}
-		page.WriteString(interactiveStyles.label.Bold(true).Render(group.Title))
-		page.WriteString(interactiveStyles.status.Render(" • " + status))
+	for groupIndex := range m.config.Groups {
+		page.WriteString(m.dashboardGroupHeader(groupIndex))
 		page.WriteByte('\n')
-		if state.Status == "failed" {
-			page.WriteString(interactiveStyles.error.Render("refresh failed: " + state.Error))
-			page.WriteString("\n\n")
-			continue
-		}
-		if state.Status == "loading" || (state.Status == "running" && len(state.content) == 0) {
-			page.WriteString(interactiveStyles.description.Render("Loading…"))
+		if !m.groupShowsWidgets(groupIndex) {
+			page.WriteString(m.dashboardGroupMessage(groupIndex))
 			page.WriteString("\n\n")
 			continue
 		}
@@ -527,7 +553,7 @@ func (m dashboardModel) renderPage() string {
 		page.WriteString("\n\n")
 	}
 	if m.confirm {
-		page.WriteString(interactiveStyles.error.Bold(true).Render(m.confirmText + " [y/N]"))
+		page.WriteString(m.dashboardConfirmationText())
 		page.WriteByte('\n')
 	}
 	return strings.TrimSuffix(page.String(), "\n")
@@ -535,36 +561,247 @@ func (m dashboardModel) renderPage() string {
 
 func (m dashboardModel) renderWidgetGrid(groupIndex int) string {
 	group := m.config.Groups[groupIndex]
-	available := max(m.width, dashboardMinPanelWidth)
-	columns := min(max(group.Columns, 1), max(available/dashboardMinPanelWidth, 1), max(len(group.Widgets), 1))
-	gap := 1
-	panelWidth := max((available-gap*(columns-1))/columns, dashboardMinPanelWidth)
+	layout := m.layout.groups[groupIndex]
 	var rows []string
-	for start := 0; start < len(group.Widgets); start += columns {
+	for start := 0; start < len(group.Widgets); start += layout.columns {
 		var panels []string
-		for index := start; index < min(start+columns, len(group.Widgets)); index++ {
+		for index := start; index < min(start+layout.columns, len(group.Widgets)); index++ {
 			widget := group.Widgets[index]
-			style := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("240")).Padding(0, 1).Width(panelWidth - 2)
-			if m.isFocused(groupIndex, index) {
-				style = style.BorderForeground(lipgloss.Color("205"))
-			}
+			geometry := layout.widgets[index]
+			style := dashboardPanelStyle(geometry.panelWidth, geometry.panelHeight, m.isFocused(groupIndex, index))
 			content := ""
 			if index < len(m.groups[groupIndex].content) {
 				content = m.groups[groupIndex].content[index]
 			}
 			var body strings.Builder
-			body.WriteString(interactiveStyles.value.Render(widget.Title))
+			body.WriteString(fitDashboardLine(interactiveStyles.value.Render(widget.Title), geometry.Width))
 			body.WriteByte('\n')
-			body.WriteString(content)
-			if action := latestActionLine(widget, m.groups[groupIndex].actions[index]); action != "" {
+			body.WriteString(fitDashboardContent(content, geometry.Width, geometry.Height))
+			if len(widget.Actions) > 0 {
 				body.WriteByte('\n')
-				body.WriteString(interactiveStyles.status.Render(action))
+				body.WriteString(fitDashboardLine(interactiveStyles.status.Render(latestActionLine(widget, m.groups[groupIndex].actions[index])), geometry.Width))
+			}
+			if len(panels) > 0 {
+				panels = append(panels, strings.Repeat(" ", dashboardPanelGap))
 			}
 			panels = append(panels, style.Render(body.String()))
 		}
 		rows = append(rows, lipgloss.JoinHorizontal(lipgloss.Top, panels...))
 	}
 	return strings.Join(rows, "\n")
+}
+
+func dashboardPanelStyle(width, height int, focused bool) lipgloss.Style {
+	color := lipgloss.Color("240")
+	if focused {
+		color = lipgloss.Color("205")
+	}
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(color).
+		Padding(0, 1).
+		Width(width).
+		Height(height).
+		MaxWidth(width).
+		MaxHeight(height)
+}
+
+func fitDashboardLine(value string, width int) string {
+	width = max(width, 1)
+	value = strings.ReplaceAll(value, "\t", "    ")
+	return lipgloss.NewStyle().Width(width).MaxWidth(width).Render(ansi.Truncate(value, width, "…"))
+}
+
+func fitDashboardContent(value string, width, height int) string {
+	width, height = max(width, 1), max(height, 1)
+	value = strings.ReplaceAll(value, "\t", "    ")
+	lines := strings.Split(ansi.Hardwrap(value, width, true), "\n")
+	overflow := len(lines) > height
+	lines = lines[:min(len(lines), height)]
+	for index := range lines {
+		lines[index] = ansi.Truncate(lines[index], width, "")
+	}
+	if overflow {
+		if width == 1 {
+			lines[len(lines)-1] = "…"
+		} else {
+			line := ansi.Truncate(lines[len(lines)-1], width-1, "")
+			lines[len(lines)-1] = lipgloss.NewStyle().Width(width-1).MaxWidth(width-1).Render(line) + "…"
+		}
+	}
+	return lipgloss.NewStyle().Width(width).Height(height).MaxWidth(width).MaxHeight(height).Render(strings.Join(lines, "\n"))
+}
+
+func (m dashboardModel) calculateLayout() dashboardLayout {
+	layout := dashboardLayout{groups: make([]dashboardGroupLayout, len(m.config.Groups))}
+	panelFrameWidth, panelFrameHeight := dashboardPanelStyle(1, 1, false).GetFrameSize()
+	availableWidth := max(m.width, panelFrameWidth+1)
+
+	for groupIndex, group := range m.config.Groups {
+		columns := min(max(group.Columns, 1), max(len(group.Widgets), 1))
+		columns = min(columns, max((availableWidth+dashboardPanelGap)/(dashboardMinPanelWidth+dashboardPanelGap), 1))
+		columnWidths := distributeDashboardSpace(availableWidth-dashboardPanelGap*(columns-1), columns)
+		groupLayout := dashboardGroupLayout{columns: columns, widgets: make([]dashboardWidgetLayout, len(group.Widgets))}
+		for start := 0; start < len(group.Widgets); start += columns {
+			end := min(start+columns, len(group.Widgets))
+			rowHeight := panelFrameHeight + 2
+			for index := start; index < end; index++ {
+				if len(group.Widgets[index].Actions) > 0 {
+					rowHeight = panelFrameHeight + 3
+				}
+			}
+			for index := start; index < end; index++ {
+				panelWidth := columnWidths[index-start]
+				actionHeight := 0
+				if len(group.Widgets[index].Actions) > 0 {
+					actionHeight = 1
+				}
+				groupLayout.widgets[index] = dashboardWidgetLayout{
+					DashboardWidgetDimensions: DashboardWidgetDimensions{
+						Width:  max(panelWidth-panelFrameWidth, 1),
+						Height: max(rowHeight-panelFrameHeight-1-actionHeight, 1),
+					},
+					panelWidth:  panelWidth,
+					panelHeight: rowHeight,
+				}
+			}
+		}
+		layout.groups[groupIndex] = groupLayout
+	}
+
+	type rowRef struct{ group, start, end int }
+	var rows []rowRef
+	for groupIndex, group := range m.config.Groups {
+		if !m.groupShowsWidgets(groupIndex) {
+			continue
+		}
+		columns := layout.groups[groupIndex].columns
+		for start := 0; start < len(group.Widgets); start += columns {
+			rows = append(rows, rowRef{group: groupIndex, start: start, end: min(start+columns, len(group.Widgets))})
+		}
+	}
+	extra := max(m.pageSize()-m.minimumPageHeight(layout), 0)
+	for rowIndex, row := range rows {
+		addition := extra / max(len(rows), 1)
+		if rowIndex < extra%max(len(rows), 1) {
+			addition++
+		}
+		for widgetIndex := row.start; widgetIndex < row.end; widgetIndex++ {
+			widget := &layout.groups[row.group].widgets[widgetIndex]
+			widget.Height += addition
+			widget.panelHeight += addition
+		}
+	}
+	return layout
+}
+
+func distributeDashboardSpace(total, count int) []int {
+	count = max(count, 1)
+	total = max(total, count)
+	widths := make([]int, count)
+	for index := range count {
+		widths[index] = total / count
+		if index < total%count {
+			widths[index]++
+		}
+	}
+	return widths
+}
+
+func (m dashboardModel) minimumPageHeight(layout dashboardLayout) int {
+	height := lipgloss.Height(m.wrapDashboardText(interactiveStyles.message.Render(m.config.Title))) + 1
+	for groupIndex := range m.config.Groups {
+		height += lipgloss.Height(m.dashboardGroupHeader(groupIndex))
+		if m.groupShowsWidgets(groupIndex) {
+			groupLayout := layout.groups[groupIndex]
+			for start := 0; start < len(groupLayout.widgets); start += groupLayout.columns {
+				height += groupLayout.widgets[start].panelHeight
+			}
+		} else {
+			height += lipgloss.Height(m.dashboardGroupMessage(groupIndex))
+		}
+		height++
+	}
+	if m.confirm {
+		height += lipgloss.Height(m.dashboardConfirmationText())
+	}
+	return max(height, 1)
+}
+
+func (m dashboardModel) groupShowsWidgets(groupIndex int) bool {
+	state := m.groups[groupIndex]
+	return state.Status != "failed" && state.Status != "loading" && !(state.Status == "running" && len(state.content) == 0)
+}
+
+func (m dashboardModel) dashboardGroupHeader(groupIndex int) string {
+	group, state := m.config.Groups[groupIndex], m.groups[groupIndex]
+	status := state.Status
+	if !state.UpdatedAt.IsZero() {
+		status += " • " + state.UpdatedAt.Local().Format("15:04:05")
+	}
+	header := interactiveStyles.label.Bold(true).Render(group.Title) + interactiveStyles.status.Render(" • "+status)
+	return m.wrapDashboardText(header)
+}
+
+func (m dashboardModel) dashboardGroupMessage(groupIndex int) string {
+	state := m.groups[groupIndex]
+	if state.Status == "failed" {
+		return m.wrapDashboardText(interactiveStyles.error.Render("refresh failed: " + state.Error))
+	}
+	return m.wrapDashboardText(interactiveStyles.description.Render("Loading…"))
+}
+
+func (m dashboardModel) dashboardConfirmationText() string {
+	return m.wrapDashboardText(interactiveStyles.error.Bold(true).Render(m.confirmText + " [y/N]"))
+}
+
+func (m dashboardModel) wrapDashboardText(value string) string {
+	return ansi.Hardwrap(value, max(m.width, 1), true)
+}
+
+func (m dashboardModel) widgetDimensions(groupIndex, widgetIndex int) DashboardWidgetDimensions {
+	if groupIndex >= 0 && groupIndex < len(m.layout.groups) && widgetIndex >= 0 && widgetIndex < len(m.layout.groups[groupIndex].widgets) {
+		return m.layout.groups[groupIndex].widgets[widgetIndex].DashboardWidgetDimensions
+	}
+	return DashboardWidgetDimensions{Width: 1, Height: 1}
+}
+
+func (m *dashboardModel) reflow() {
+	for range len(m.config.Groups) + 1 {
+		previous := m.layout
+		next := m.calculateLayout()
+		m.layout = next
+		failed := false
+		for groupIndex := range m.config.Groups {
+			if len(m.groups[groupIndex].content) == 0 || !m.groupShowsWidgets(groupIndex) || dashboardGroupLayoutsEqual(previous, next, groupIndex) {
+				continue
+			}
+			if err := m.renderGroup(groupIndex, m.groups[groupIndex].Data); err != nil {
+				m.groups[groupIndex].Status = "failed"
+				m.groups[groupIndex].Error = err.Error()
+				failed = true
+			}
+		}
+		if !failed {
+			return
+		}
+	}
+}
+
+func dashboardGroupLayoutsEqual(left, right dashboardLayout, groupIndex int) bool {
+	if groupIndex >= len(left.groups) || groupIndex >= len(right.groups) {
+		return false
+	}
+	leftGroup, rightGroup := left.groups[groupIndex], right.groups[groupIndex]
+	if leftGroup.columns != rightGroup.columns || len(leftGroup.widgets) != len(rightGroup.widgets) {
+		return false
+	}
+	for index := range leftGroup.widgets {
+		if leftGroup.widgets[index] != rightGroup.widgets[index] {
+			return false
+		}
+	}
+	return true
 }
 
 func latestActionLine(widget DashboardWidget, states map[string]DashboardState) string {
@@ -623,7 +860,17 @@ func (m dashboardModel) groupIndex(id string) int {
 	return -1
 }
 
-func (m dashboardModel) pageSize() int { return max(m.height-2, 1) }
+func (m dashboardModel) dashboardHelpText() string {
+	help := "↑/↓ scroll  tab focus  enter/a actions  r refresh  q quit"
+	if m.confirm {
+		help = "y/enter confirm  n/esc cancel"
+	}
+	return renderHelpText(wrapHelp(strings.Fields(help), m.width))
+}
+
+func (m dashboardModel) pageSize() int {
+	return max(m.height-lipgloss.Height(m.dashboardHelpText())-1, 1)
+}
 
 func (m dashboardModel) maxOffset() int {
 	lines := strings.Count(m.renderPage(), "\n") + 1

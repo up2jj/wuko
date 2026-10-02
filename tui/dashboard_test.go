@@ -8,6 +8,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 func TestDashboardStaticGroupRendersDuringInitialization(t *testing.T) {
@@ -17,7 +18,7 @@ func TestDashboardStaticGroupRendersDuringInitialization(t *testing.T) {
 	model := newDashboardModel(ctx, cancel, DashboardConfig{
 		Title: "Test", MaxConcurrency: 1,
 		Groups: []DashboardGroup{{ID: "static", Title: "Static", Columns: 1, Widgets: []DashboardWidget{{ID: "one", Title: "One"}}}},
-		Render: func(_, _ string, _ map[string]any, _ DashboardState, _ map[string]DashboardState) (string, error) {
+		Render: func(_, _ string, _ DashboardWidgetDimensions, _ map[string]any, _ DashboardState, _ map[string]DashboardState) (string, error) {
 			return "ready", nil
 		},
 	}, &tracker)
@@ -34,7 +35,7 @@ func TestDashboardQueuesRefreshRequestedWhileRunning(t *testing.T) {
 		Title: "Test", MaxConcurrency: 1,
 		Groups:  []DashboardGroup{{ID: "live", Title: "Live", Refresh: true, Widgets: []DashboardWidget{{ID: "one", Title: "One"}}}},
 		Refresh: func(context.Context, string) (map[string]any, error) { return map[string]any{}, nil },
-		Render: func(_, _ string, _ map[string]any, _ DashboardState, _ map[string]DashboardState) (string, error) {
+		Render: func(_, _ string, _ DashboardWidgetDimensions, _ map[string]any, _ DashboardState, _ map[string]DashboardState) (string, error) {
 			return "ready", nil
 		},
 	}, &tracker)
@@ -71,7 +72,7 @@ func TestDashboardGlobalExitKeysWorkInsideMenu(t *testing.T) {
 			var tracker sync.WaitGroup
 			model := newDashboardModel(ctx, cancel, DashboardConfig{
 				Title: "Test", Groups: []DashboardGroup{{ID: "static", Widgets: []DashboardWidget{{ID: "one"}}}},
-				Render: func(_, _ string, _ map[string]any, _ DashboardState, _ map[string]DashboardState) (string, error) {
+				Render: func(_, _ string, _ DashboardWidgetDimensions, _ map[string]any, _ DashboardState, _ map[string]DashboardState) (string, error) {
 					return "ready", nil
 				},
 			}, &tracker)
@@ -93,7 +94,7 @@ func TestDashboardUsesWorkflowActionPalette(t *testing.T) {
 		Title: "Test", Groups: []DashboardGroup{{ID: "static", Widgets: []DashboardWidget{{
 			ID: "one", Title: "One", Actions: []DashboardAction{{ID: "build", Label: "Build"}, {ID: "deploy", Label: "Deploy"}},
 		}}}},
-		Render: func(_, _ string, _ map[string]any, _ DashboardState, _ map[string]DashboardState) (string, error) {
+		Render: func(_, _ string, _ DashboardWidgetDimensions, _ map[string]any, _ DashboardState, _ map[string]DashboardState) (string, error) {
 			return "ready", nil
 		},
 	}, &tracker)
@@ -133,7 +134,7 @@ func newTwoGroupDashboard(t *testing.T, every time.Duration) dashboardModel {
 			{ID: "a", Title: "A", Refresh: true, Every: every, Widgets: widgets},
 			{ID: "b", Title: "B", Refresh: true, Every: every, Widgets: widgets},
 		},
-		Render: func(_, _ string, _ map[string]any, _ DashboardState, _ map[string]DashboardState) (string, error) {
+		Render: func(_, _ string, _ DashboardWidgetDimensions, _ map[string]any, _ DashboardState, _ map[string]DashboardState) (string, error) {
 			return "ready", nil
 		},
 	}, &tracker)
@@ -179,5 +180,216 @@ func TestDashboardIgnoresSupersededRefreshTicks(t *testing.T) {
 	updated, _ := model.Update(stale)
 	if got := updated.(dashboardModel); got.groups[0].running || got.groups[0].queued {
 		t.Fatal("superseded tick started another refresh chain")
+	}
+}
+
+func TestDashboardDistributesResponsiveWidgetDimensions(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	var tracker sync.WaitGroup
+	var dimensions map[string]DashboardWidgetDimensions
+	var confirmationSize DashboardWidgetDimensions
+	model := newDashboardModel(ctx, cancel, DashboardConfig{
+		Title: "Test",
+		Groups: []DashboardGroup{{
+			ID: "metrics", Title: "Metrics", Columns: 3,
+			Widgets: []DashboardWidget{
+				{ID: "one", Title: "One"},
+				{ID: "two", Title: "Two", Actions: []DashboardAction{{ID: "inspect", Label: "Inspect"}}},
+				{ID: "three", Title: "Three"},
+			},
+		}},
+		Render: func(_, widgetID string, size DashboardWidgetDimensions, _ map[string]any, _ DashboardState, _ map[string]DashboardState) (string, error) {
+			if dimensions == nil {
+				dimensions = make(map[string]DashboardWidgetDimensions)
+			}
+			dimensions[widgetID] = size
+			return "ready", nil
+		},
+		Confirmation: func(_, _, _ string, size DashboardWidgetDimensions, _ map[string]any, _ DashboardState, _ map[string]DashboardState) (string, error) {
+			confirmationSize = size
+			return "Confirm?", nil
+		},
+	}, &tracker)
+
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 90, Height: 20})
+	model = updated.(dashboardModel)
+	if got, want := dimensions["one"].Width, 26; got != want {
+		t.Fatalf("first widget width = %d, want %d", got, want)
+	}
+	if got, want := dimensions["three"].Width, 25; got != want {
+		t.Fatalf("last widget width = %d, want %d", got, want)
+	}
+	if got, want := dimensions["one"].Height, dimensions["two"].Height+1; got != want {
+		t.Fatalf("body heights without/with action = %d/%d, want one reserved action row", dimensions["one"].Height, dimensions["two"].Height)
+	}
+	if got, want := lipgloss.Height(model.renderPage()), model.pageSize(); got != want {
+		t.Fatalf("fitted page height = %d, want viewport height %d", got, want)
+	}
+	if got, want := lipgloss.Width(model.renderWidgetGrid(0)), 90; got != want {
+		t.Fatalf("widget grid width = %d, want %d", got, want)
+	}
+	if _, err := model.confirmation(dashboardJob{group: 0, widget: 1, action: 0}); err != nil {
+		t.Fatal(err)
+	}
+	if confirmationSize != dimensions["two"] {
+		t.Fatalf("confirmation dimensions = %#v, want %#v", confirmationSize, dimensions["two"])
+	}
+}
+
+func TestDashboardResizeRerendersWithoutRefreshing(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	var tracker sync.WaitGroup
+	renders := 0
+	refreshes := 0
+	var sizes []DashboardWidgetDimensions
+	model := newDashboardModel(ctx, cancel, DashboardConfig{
+		Title:  "Test",
+		Groups: []DashboardGroup{{ID: "static", Title: "Static", Columns: 1, Widgets: []DashboardWidget{{ID: "one", Title: "One"}}}},
+		Refresh: func(context.Context, string) (map[string]any, error) {
+			refreshes++
+			return map[string]any{}, nil
+		},
+		Render: func(_, _ string, size DashboardWidgetDimensions, _ map[string]any, _ DashboardState, _ map[string]DashboardState) (string, error) {
+			renders++
+			sizes = append(sizes, size)
+			return "ready", nil
+		},
+	}, &tracker)
+	initialRenders := renders
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 60, Height: 16})
+	model = updated.(dashboardModel)
+	if renders <= initialRenders {
+		t.Fatal("resize did not rerender the widget template")
+	}
+	if refreshes != 0 {
+		t.Fatalf("resize invoked refresh %d times", refreshes)
+	}
+	if sizes[len(sizes)-1] == sizes[0] {
+		t.Fatalf("dimensions did not change on resize: %#v", sizes)
+	}
+}
+
+func TestDashboardShortViewportKeepsPageScrolling(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	var tracker sync.WaitGroup
+	model := newDashboardModel(ctx, cancel, DashboardConfig{
+		Title: "Test",
+		Groups: []DashboardGroup{{
+			ID: "static", Title: "Static", Columns: 1,
+			Widgets: []DashboardWidget{{ID: "one", Title: "One"}, {ID: "two", Title: "Two"}, {ID: "three", Title: "Three"}},
+		}},
+		Render: func(_, _ string, _ DashboardWidgetDimensions, _ map[string]any, _ DashboardState, _ map[string]DashboardState) (string, error) {
+			return "ready", nil
+		},
+	}, &tracker)
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 40, Height: 8})
+	model = updated.(dashboardModel)
+	for _, widget := range model.layout.groups[0].widgets {
+		if widget.Height != 1 {
+			t.Fatalf("minimum body height = %d, want 1", widget.Height)
+		}
+	}
+	if model.maxOffset() == 0 {
+		t.Fatal("short viewport did not retain page scrolling")
+	}
+}
+
+func TestFitDashboardContentMarksOverflow(t *testing.T) {
+	got := fitDashboardContent("one two three four", 7, 2)
+	if width, height := lipgloss.Size(got); width != 7 || height != 2 {
+		t.Fatalf("content size = %dx%d, want 7x2", width, height)
+	}
+	lines := strings.Split(got, "\n")
+	if !strings.HasSuffix(lines[len(lines)-1], "…") {
+		t.Fatalf("overflow content = %q, want ellipsis on final line", got)
+	}
+}
+
+func TestDashboardPageSizeReservesWrappedHelp(t *testing.T) {
+	model := dashboardModel{width: 18, height: 12}
+	want := model.height - lipgloss.Height(model.dashboardHelpText()) - 1
+	if got := model.pageSize(); got != want {
+		t.Fatalf("page size = %d, want %d", got, want)
+	}
+}
+
+func TestDashboardStateTransitionsReallocateViewportHeight(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	var tracker sync.WaitGroup
+	latest := make(map[string]DashboardWidgetDimensions)
+	model := newDashboardModel(ctx, cancel, DashboardConfig{
+		Title: "Test", MaxConcurrency: 1,
+		Groups: []DashboardGroup{
+			{ID: "static", Title: "Static", Columns: 1, Widgets: []DashboardWidget{{ID: "one", Title: "One"}}},
+			{ID: "live", Title: "Live", Columns: 1, Refresh: true, Widgets: []DashboardWidget{{ID: "two", Title: "Two"}}},
+		},
+		Refresh: func(context.Context, string) (map[string]any, error) { return map[string]any{"value": 1}, nil },
+		Render: func(groupID, _ string, size DashboardWidgetDimensions, _ map[string]any, _ DashboardState, _ map[string]DashboardState) (string, error) {
+			latest[groupID] = size
+			return "ready", nil
+		},
+	}, &tracker)
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 60, Height: 24})
+	model = updated.(dashboardModel)
+	staticWhileLoading := latest["static"].Height
+
+	model.finishJob(dashboardJobResultMsg{
+		job: dashboardJob{kind: dashboardRefreshJob, group: 1}, data: map[string]any{"value": 1}, finished: time.Now(),
+	})
+	model.reflow()
+	if latest["live"].Height < 1 {
+		t.Fatalf("live widget dimensions = %#v", latest["live"])
+	}
+	if latest["static"].Height >= staticWhileLoading {
+		t.Fatalf("static height after live group appeared = %d, want less than %d", latest["static"].Height, staticWhileLoading)
+	}
+
+	staticWithLive := latest["static"].Height
+	model.groups[1].Status = "failed"
+	model.groups[1].Error = "boom"
+	model.reflow()
+	if latest["static"].Height <= staticWithLive {
+		t.Fatalf("static height after live failure = %d, want more than %d", latest["static"].Height, staticWithLive)
+	}
+}
+
+func TestDashboardConfirmationPromptFitsViewport(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	var tracker sync.WaitGroup
+	model := newDashboardModel(ctx, cancel, DashboardConfig{
+		Title: "Test",
+		Groups: []DashboardGroup{{
+			ID: "ops", Title: "Ops", Columns: 1,
+			Widgets: []DashboardWidget{{ID: "deploy", Title: "Deploy", Actions: []DashboardAction{{ID: "ship", Label: "Ship", Confirm: true}}}},
+		}},
+		Render: func(string, string, DashboardWidgetDimensions, map[string]any, DashboardState, map[string]DashboardState) (string, error) {
+			return "ready", nil
+		},
+	}, &tracker)
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 120, Height: 20})
+	model = updated.(dashboardModel)
+	for _, key := range []tea.KeyPressMsg{{Code: tea.KeyEnter}, {Code: tea.KeyEnter}} {
+		updated, _ = model.Update(key)
+		model = updated.(dashboardModel)
+	}
+	if !model.confirm {
+		t.Fatal("expected confirmation prompt")
+	}
+	if got, want := lipgloss.Height(model.renderPage()), model.pageSize(); got != want {
+		t.Fatalf("page height with confirmation = %d, want viewport height %d", got, want)
+	}
+	if view := model.View().Content; !strings.Contains(view, "[y/N]") {
+		t.Fatalf("confirmation prompt is not visible:\n%s", view)
+	}
+
+	updated, _ = model.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
+	model = updated.(dashboardModel)
+	if got, want := lipgloss.Height(model.renderPage()), model.pageSize(); got != want {
+		t.Fatalf("page height after cancel = %d, want viewport height %d", got, want)
 	}
 }

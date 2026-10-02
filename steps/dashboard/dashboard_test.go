@@ -23,6 +23,22 @@ func (fakeRenderer) RenderContentWith(value string, data map[string]any) (string
 func (fakeRenderer) Snapshot() step.DataTemplateRenderer       { return fakeRenderer{} }
 func (fakeRenderer) WithoutSecrets() step.DataTemplateRenderer { return fakeRenderer{} }
 
+type capturingRenderer struct{ data map[string]any }
+
+func (*capturingRenderer) Validate(string) error                      { return nil }
+func (*capturingRenderer) Render(value string) (string, error)        { return value, nil }
+func (*capturingRenderer) ValidateContent(string) error               { return nil }
+func (*capturingRenderer) RenderContent(value string) (string, error) { return value, nil }
+func (*capturingRenderer) RenderWith(value string, _ map[string]any) (string, error) {
+	return value, nil
+}
+func (renderer *capturingRenderer) RenderContentWith(value string, data map[string]any) (string, error) {
+	renderer.data = data
+	return value, nil
+}
+func (renderer *capturingRenderer) Snapshot() step.DataTemplateRenderer       { return renderer }
+func (renderer *capturingRenderer) WithoutSecrets() step.DataTemplateRenderer { return renderer }
+
 type fakeInline struct{ calls []step.InlineWorkflowCall }
 
 func (fake *fakeInline) ValidateInlineWorkflow(_ context.Context, call step.InlineWorkflowCall) error {
@@ -124,5 +140,37 @@ func TestRunReturnsDashboardSnapshot(t *testing.T) {
 	system := groups["system"].(map[string]any)
 	if got, want := system["status"], "succeeded"; got != want {
 		t.Fatalf("status = %#v, want %#v", got, want)
+	}
+}
+
+func TestDashboardTemplatesReceiveWidgetDimensions(t *testing.T) {
+	built, err := New(dashboardRaw())
+	if err != nil {
+		t.Fatal(err)
+	}
+	renderer := &capturingRenderer{}
+	config := built.(*Runner).tuiConfig(renderer, &fakeInline{})
+	dimensions := tui.DashboardWidgetDimensions{Width: 37, Height: 6}
+	state := tui.DashboardState{Status: "succeeded", Data: map[string]any{}}
+	actions := map[string]tui.DashboardState{"inspect": {Status: "idle", Data: map[string]any{}}}
+
+	if _, err := config.Render("system", "health", dimensions, map[string]any{"uptime": "up"}, state, actions); err != nil {
+		t.Fatal(err)
+	}
+	assertWidgetDimensions(t, renderer.data, dimensions)
+	if _, err := config.Confirmation("system", "health", "inspect", dimensions, map[string]any{"uptime": "up"}, state, actions); err != nil {
+		t.Fatal(err)
+	}
+	assertWidgetDimensions(t, renderer.data, dimensions)
+}
+
+func assertWidgetDimensions(t *testing.T, data map[string]any, want tui.DashboardWidgetDimensions) {
+	t.Helper()
+	widget, ok := data["widget"].(map[string]any)
+	if !ok {
+		t.Fatalf("widget template root = %#v", data["widget"])
+	}
+	if widget["width"] != want.Width || widget["height"] != want.Height {
+		t.Fatalf("widget dimensions = %#v, want width %d height %d", widget, want.Width, want.Height)
 	}
 }

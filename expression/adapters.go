@@ -128,6 +128,7 @@ func TemplateFuncsWithSecret(resolver SecretResolver) template.FuncMap {
 		"unixTimestamp":           adapterUnixTimestamp,
 		"buildConventionalCommit": BuildConventionalCommit,
 		"isConventionalCommit":    templateIsConventionalCommit,
+		"sparkline":               templateSparkline,
 	}
 }
 

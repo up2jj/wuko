@@ -8,7 +8,7 @@ Wuko exposes the same named helpers to Go templates, Expr, and Lua. Most are det
 side-effect-free; the explicitly named generation and current-time helpers use secure randomness
 or the host clock, as does `parseNaturalTime` when no reference is supplied. Go templates always
 render strings, while Expr and Lua preserve typed results such as booleans, numbers, lists, and
-objects.
+objects. The terminal-presentation helper `sparkline` is intentionally Go-template-only.
 
 Go template pipelines pass the value as the final function argument:
 
@@ -829,11 +829,27 @@ For reproducible or `--var`-overridable time, continue to use the `time` step. E
 `now()` builtin remains disabled; `currentTime()`, `unixTimestamp()`, and `parseNaturalTime`
 without a reference are the explicit, documented nondeterministic boundaries.
 
+## Go-template terminal presentation
+
+`sparkline(width, height, values)` renders a monochrome, multi-row column chart for terminal
+output. It accepts a numeric list or array, uses zero as its baseline, scales through the largest
+value, and keeps the newest values when the list is wider than the chart. Width and height must be
+positive. Negative, non-finite, overflowing, or nonnumeric values fail template rendering. An
+empty list renders an empty string.
+
+The helper is available only in Go templates. A dashboard can size it to the widget body with a
+pipeline, which passes the values as the final argument:
+
+```gotemplate
+{{ .data.samples | sparkline .widget.width .widget.height }}
+```
+
 ## Availability and safety
 
-Helpers are available in named and inline Go templates, in every Wuko Expr surface, and in Lua as
-`wuko.helpers`. Expr surfaces include step conditions, polling `until` expressions, batch, foreach,
-and matrix expressions, composite-action inputs and outputs, and the `set` and `assert` steps.
+Except for the Go-template-only `sparkline`, helpers are available in named and inline Go templates,
+in every Wuko Expr surface, and in Lua as `wuko.helpers`. Expr surfaces include step conditions,
+polling `until` expressions, batch, foreach, and matrix expressions, composite-action inputs and
+outputs, and the `set` and `assert` steps.
 
 Helpers cannot read the process environment or filesystem, execute commands, access the network,
 or quote shell commands. Hashes are deterministic; generator and current-time helpers, including

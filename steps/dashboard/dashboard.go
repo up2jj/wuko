@@ -288,19 +288,19 @@ func (runner *Runner) tuiConfig(renderer step.DataTemplateRenderer, inline step.
 		}
 		return inline.RunInlineWorkflow(ctx, actionCall(group, widget, action, data))
 	}
-	config.Render = func(groupID, widgetID string, data map[string]any, refresh tui.DashboardState, actions map[string]tui.DashboardState) (string, error) {
+	config.Render = func(groupID, widgetID string, dimensions tui.DashboardWidgetDimensions, data map[string]any, refresh tui.DashboardState, actions map[string]tui.DashboardState) (string, error) {
 		_, widget, ok := runner.findWidget(groupID, widgetID)
 		if !ok {
 			return "", fmt.Errorf("unknown widget %q.%q", groupID, widgetID)
 		}
-		return renderer.RenderContentWith(widget.Template, dashboardTemplateData(data, refresh, actions))
+		return renderer.RenderContentWith(widget.Template, dashboardTemplateData(data, refresh, actions, dimensions))
 	}
-	config.Confirmation = func(groupID, widgetID, actionID string, data map[string]any, refresh tui.DashboardState, actions map[string]tui.DashboardState) (string, error) {
+	config.Confirmation = func(groupID, widgetID, actionID string, dimensions tui.DashboardWidgetDimensions, data map[string]any, refresh tui.DashboardState, actions map[string]tui.DashboardState) (string, error) {
 		_, _, action, ok := runner.findAction(groupID, widgetID, actionID)
 		if !ok {
 			return "", fmt.Errorf("unknown action %q.%q.%q", groupID, widgetID, actionID)
 		}
-		return renderer.RenderContentWith(action.Confirm, dashboardTemplateData(data, refresh, actions))
+		return renderer.RenderContentWith(action.Confirm, dashboardTemplateData(data, refresh, actions, dimensions))
 	}
 	return config
 }
@@ -334,12 +334,15 @@ func outputPlaceholders(group Group) map[string]any {
 	return values
 }
 
-func dashboardTemplateData(data map[string]any, refresh tui.DashboardState, actions map[string]tui.DashboardState) map[string]any {
+func dashboardTemplateData(data map[string]any, refresh tui.DashboardState, actions map[string]tui.DashboardState, dimensions tui.DashboardWidgetDimensions) map[string]any {
 	actionValues := make(map[string]any, len(actions))
 	for id, state := range actions {
 		actionValues[id] = stateValue(state)
 	}
-	return map[string]any{"data": workflow.CloneMap(data), "refresh": stateValue(refresh), "actions": actionValues}
+	return map[string]any{
+		"data": workflow.CloneMap(data), "refresh": stateValue(refresh), "actions": actionValues,
+		"widget": map[string]any{"width": dimensions.Width, "height": dimensions.Height},
+	}
 }
 
 func stateValue(state tui.DashboardState) map[string]any {

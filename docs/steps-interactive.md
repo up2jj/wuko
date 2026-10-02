@@ -477,6 +477,23 @@ Dashboard templates retain every root visible when the step begins, including `.
 - `.data` is the current group refresh output map.
 - `.refresh` contains `status`, `data`, `error`, `updated_at`, and `duration`.
 - `.actions.<id>` contains the same fields for that widget's latest action run.
+- `.widget.width` and `.widget.height` are the exact terminal-cell dimensions available to the
+  template body, excluding the panel border, padding, title, and reserved action-status row.
+
+Use the dimensions with the Go-template-only `sparkline` helper to fill a widget with numeric
+refresh data:
+
+```yaml
+template: |-
+  {{ .data.samples | sparkline .widget.width .widget.height }}
+```
+
+The dashboard rerenders templates with new dimensions when the terminal or visible group state
+changes; it does not rerun refresh callbacks merely because the layout changed. Widget rows divide
+the available viewport height evenly. Content is wrapped to its body width and clipped with `…`
+when it exceeds the assigned height. If the terminal is too short to give every widget one body
+row, panels retain their minimum size and the existing whole-dashboard scrolling controls remain
+available.
 
 Refresh and action callbacks use ordinary inline `steps`, optional `finally`, and an `outputs` map
 whose values are Expr expressions. Each invocation starts from an isolated snapshot of all state
