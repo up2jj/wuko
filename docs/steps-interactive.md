@@ -506,9 +506,10 @@ steps are unavailable.
 
 Use Tab and Shift+Tab to move widget focus, Enter or `a` to open the focused widget's action menu,
 `r` to refresh every refreshable group, arrows or `j`/`k` to scroll, and `q` or Escape to close the
-dashboard successfully. Confirmation text is itself a live template. Only one action runs at a
-time; its group pauses while it runs and refreshes afterward. `refresh_groups` on an action names
-additional groups to refresh. Refresh callbacks otherwise run concurrently up to
+dashboard successfully. Press `?` to toggle the expanded keyboard legend. Confirmation text is
+itself a live template. Only one action runs at a time; its group pauses while it runs and refreshes
+afterward. `refresh_groups` on an action names additional groups to refresh. Refresh callbacks
+otherwise run concurrently up to
 `max_concurrency`, which defaults to 4. A failed refresh replaces that group's widgets with the
 error while other groups continue.
 

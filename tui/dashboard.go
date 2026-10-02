@@ -165,6 +165,7 @@ type dashboardModel struct {
 	confirm       bool
 	confirmText   string
 	confirmJob    dashboardJob
+	fullHelp      bool
 	done          bool
 	canceled      bool
 	layout        dashboardLayout
@@ -286,6 +287,8 @@ func (m dashboardModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.done = true
 			m.cancel()
 			return m, tea.Quit
+		case "?":
+			m.fullHelp = !m.fullHelp
 		case "r":
 			for groupIndex := range m.config.Groups {
 				m.queueRefresh(groupIndex)
@@ -861,11 +864,17 @@ func (m dashboardModel) groupIndex(id string) int {
 }
 
 func (m dashboardModel) dashboardHelpText() string {
-	help := "↑/↓ scroll  tab focus  enter/a actions  r refresh  q quit"
-	if m.confirm {
-		help = "y/enter confirm  n/esc cancel"
+	help := []string{"↑/k up", "↓/j down", "tab focus", "enter/a actions", "r refresh", "q close", cancelHelp, "? more"}
+	if m.fullHelp {
+		help = []string{
+			"↑/k up", "↓/j down", "pgup/pgdown page", "home/end bounds",
+			"tab/shift+tab focus", "enter/a actions", "r refresh", "q/esc close", cancelHelp, "? less",
+		}
 	}
-	return renderHelpText(wrapHelp(strings.Fields(help), m.width))
+	if m.confirm {
+		help = []string{"y/enter confirm", "n/esc cancel", cancelHelp}
+	}
+	return renderHelpText(wrapHelp(help, m.width))
 }
 
 func (m dashboardModel) pageSize() int {

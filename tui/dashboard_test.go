@@ -316,6 +316,28 @@ func TestDashboardPageSizeReservesWrappedHelp(t *testing.T) {
 	}
 }
 
+func TestDashboardHelpUsesCompactKeyLegendAndExpands(t *testing.T) {
+	model := dashboardModel{width: 200, height: 20}
+	shortHelp := model.dashboardHelpText()
+	for _, want := range []string{"↑/k up", "↓/j down", "tab focus", "enter/a actions", "r refresh", "q close", cancelHelp, "? more"} {
+		if !strings.Contains(shortHelp, want) {
+			t.Fatalf("short help = %q, want %q", shortHelp, want)
+		}
+	}
+	if strings.Contains(shortHelp, "pgup/pgdown page") {
+		t.Fatalf("short help = %q, unexpectedly contains full navigation help", shortHelp)
+	}
+
+	updated, _ := model.Update(tea.KeyPressMsg{Code: '?'})
+	model = updated.(dashboardModel)
+	fullHelp := model.dashboardHelpText()
+	for _, want := range []string{"pgup/pgdown page", "home/end bounds", "tab/shift+tab focus", "q/esc close", "? less"} {
+		if !strings.Contains(fullHelp, want) {
+			t.Fatalf("full help = %q, want %q", fullHelp, want)
+		}
+	}
+}
+
 func TestDashboardStateTransitionsReallocateViewportHeight(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
