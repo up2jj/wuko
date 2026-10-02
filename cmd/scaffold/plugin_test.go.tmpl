@@ -10,7 +10,7 @@ import (
 )
 
 func TestUppercase(t *testing.T) {
-	request := sdk.StepRequest[uppercaseConfig]{Config: uppercaseConfig{Value: "hello"}}
+	request := sdk.RunRequest[uppercaseConfig]{Config: uppercaseConfig{Value: "hello"}}
 	result, err := runUppercase(t.Context(), request)
 	if err != nil {
 		t.Fatal(err)

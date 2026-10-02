@@ -29,7 +29,10 @@ func TestHarnessFramesEventsCallbacksAndCancellation(t *testing.T) {
 	var functions atomic.Int32
 	var cleanups atomic.Int32
 	handler := sdk.StepHandler[testConfig]{
-		Run: func(ctx context.Context, request sdk.StepRequest[testConfig]) (sdk.Result, error) {
+		Validate: func(ctx context.Context, request sdk.ValidateRequest[testConfig]) error {
+			return request.Host.ValidateTemplate(ctx, "hello")
+		},
+		Run: func(ctx context.Context, request sdk.RunRequest[testConfig]) (sdk.Result, error) {
 			if _, err := request.Stdout.Write([]byte("started\n")); err != nil {
 				return sdk.Result{}, err
 			}
@@ -51,7 +54,10 @@ func TestHarnessFramesEventsCallbacksAndCancellation(t *testing.T) {
 			<-ctx.Done()
 			return sdk.Result{Outputs: map[string]any{"stopped": true}}, nil
 		},
-		Service: func(context.Context, sdk.StepRequest[testConfig]) (sdk.Service, error) {
+		Service: func(_ context.Context, request sdk.ServiceRequest[testConfig]) (sdk.Service, error) {
+			if request.Config.Name != "policy" || request.Context.StepID != "server" {
+				return sdk.Service{}, fmt.Errorf("service request = %+v", request)
+			}
 			return sdk.Service{Kind: "server", KeepAlive: true, FailFast: true}, nil
 		},
 		Cleanup: func(context.Context, sdk.CleanupRequest[testConfig]) error {
@@ -92,7 +98,16 @@ func TestHarnessFramesEventsCallbacksAndCancellation(t *testing.T) {
 		t.Fatalf("host callbacks = %v", got)
 	}
 
-	serviceCall := host.CallStep(StepRequest{Operation: StepService, Type: "acme.server"})
+	validation := host.CallStep(StepRequest{Operation: StepValidate, Type: "acme.server"}).Await()
+	if validation.Error != nil {
+		t.Fatal(validation.Error)
+	}
+	serviceCall := host.CallStep(StepRequest{
+		Operation: StepService,
+		Type:      "acme.server",
+		With:      map[string]any{"name": "policy"},
+		Context:   sdk.StepContext{StepID: "server"},
+	})
 	var service sdk.Service
 	if err := serviceCall.Await().DecodeResult(&service); err != nil {
 		t.Fatal(err)
@@ -135,7 +150,7 @@ func TestHarnessFramesEventsCallbacksAndCancellation(t *testing.T) {
 	if final.Outputs["stopped"] != true {
 		t.Fatalf("final result = %#v", final)
 	}
-	if validates.Load() != 1 || renders.Load() != 1 || functions.Load() != 1 {
+	if validates.Load() != 2 || renders.Load() != 1 || functions.Load() != 1 {
 		t.Fatalf("callback calls = validate:%d render:%d function:%d", validates.Load(), renders.Load(), functions.Load())
 	}
 }
@@ -148,7 +163,7 @@ func TestHarnessDemultiplexesConcurrentCallsAndCallbacks(t *testing.T) {
 	releases := map[string]chan struct{}{"first": make(chan struct{}), "second": make(chan struct{})}
 	started := make(chan string, 2)
 	if err := sdk.RegisterStep(plugin, "work", sdk.StepHandler[testConfig]{
-		Run: func(ctx context.Context, request sdk.StepRequest[testConfig]) (sdk.Result, error) {
+		Run: func(ctx context.Context, request sdk.RunRequest[testConfig]) (sdk.Result, error) {
 			started <- request.Config.Name
 			value, err := request.Host.CallFunction(ctx, "identity", []any{request.Config.Name})
 			if err != nil {
@@ -200,10 +215,10 @@ func TestHarnessReturnsStepAndCallbackErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := sdk.RegisterStep(plugin, "strict", sdk.StepHandler[testConfig]{
-		Validate: func(context.Context, sdk.StepRequest[testConfig]) error {
+		Validate: func(context.Context, sdk.ValidateRequest[testConfig]) error {
 			return sdk.Coded("invalid", errors.New("configuration rejected"))
 		},
-		Run: func(ctx context.Context, request sdk.StepRequest[testConfig]) (sdk.Result, error) {
+		Run: func(ctx context.Context, request sdk.RunRequest[testConfig]) (sdk.Result, error) {
 			_, err := request.Host.CallFunction(ctx, "missing", nil)
 			return sdk.Result{}, sdk.Coded("step_failed", err)
 		},
@@ -224,6 +239,111 @@ func TestHarnessReturnsStepAndCallbackErrors(t *testing.T) {
 	}
 }
 
+func TestHarnessRejectsUndeclaredHostCallbacksLocally(t *testing.T) {
+	tests := []struct {
+		name       string
+		capability sdk.HostCapability
+		call       func(context.Context, sdk.Host) error
+	}{
+		{
+			name:       "validate template",
+			capability: sdk.HostTemplateValidate,
+			call:       func(ctx context.Context, host sdk.Host) error { return host.ValidateTemplate(ctx, "hello") },
+		},
+		{
+			name:       "render template",
+			capability: sdk.HostTemplateRender,
+			call: func(ctx context.Context, host sdk.Host) error {
+				_, err := host.RenderTemplate(ctx, "hello", nil)
+				return err
+			},
+		},
+		{
+			name:       "call function",
+			capability: sdk.HostFunctionCall,
+			call: func(ctx context.Context, host sdk.Host) error {
+				_, err := host.CallFunction(ctx, "value", nil)
+				return err
+			},
+		},
+		{
+			name:       "resolve secret",
+			capability: sdk.HostFunctionCall,
+			call: func(ctx context.Context, host sdk.Host) error {
+				_, err := host.Secret(ctx, "env://TOKEN")
+				return err
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			plugin, err := sdk.New("acme")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := sdk.RegisterStep(plugin, "work", sdk.StepHandler[struct{}]{
+				Run: func(ctx context.Context, request sdk.RunRequest[struct{}]) (sdk.Result, error) {
+					return sdk.Result{}, test.call(ctx, request.Host)
+				},
+			}); err != nil {
+				t.Fatal(err)
+			}
+			var called atomic.Int32
+			host := Start(t, plugin, WithCallbacks(Callbacks{
+				ValidateTemplate: func(context.Context, string) error {
+					called.Add(1)
+					return nil
+				},
+				RenderTemplate: func(context.Context, string, map[string]any) (string, error) {
+					called.Add(1)
+					return "", nil
+				},
+				CallFunction: func(context.Context, string, []any) (any, error) {
+					called.Add(1)
+					return "secret", nil
+				},
+			}))
+			response := host.CallStep(StepRequest{Type: "acme.work"}).Await()
+			if response.Error == nil || !strings.Contains(response.Error.Message, string(test.capability)) {
+				t.Fatalf("response error = %+v", response.Error)
+			}
+			if called.Load() != 0 {
+				t.Fatalf("host callback calls = %d, want 0", called.Load())
+			}
+		})
+	}
+}
+
+func TestHarnessResolvesSecretWithFunctionCapability(t *testing.T) {
+	plugin, err := sdk.New("acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sdk.RegisterStep(plugin, "secret", sdk.StepHandler[struct{}]{
+		Run: func(ctx context.Context, request sdk.RunRequest[struct{}]) (sdk.Result, error) {
+			value, err := request.Host.Secret(ctx, "env://TOKEN")
+			return sdk.Result{Outputs: map[string]any{"value": value}}, err
+		},
+	}, sdk.WithHostCallbacks(sdk.HostFunctionCall)); err != nil {
+		t.Fatal(err)
+	}
+	var called atomic.Int32
+	host := Start(t, plugin, WithCallbacks(Callbacks{CallFunction: func(_ context.Context, name string, args []any) (any, error) {
+		called.Add(1)
+		if name != "secret" || len(args) != 1 || args[0] != "env://TOKEN" {
+			return nil, fmt.Errorf("unexpected secret call %q %#v", name, args)
+		}
+		return "resolved", nil
+	}}))
+	var result sdk.Result
+	if err := host.CallStep(StepRequest{Type: "acme.secret"}).Await().DecodeResult(&result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Outputs["value"] != "resolved" || called.Load() != 1 {
+		t.Fatalf("result = %#v, calls = %d", result, called.Load())
+	}
+}
+
 func TestHarnessHandlesConcurrentCallbackResponses(t *testing.T) {
 	plugin, err := sdk.New("acme")
 	if err != nil {
@@ -231,7 +351,7 @@ func TestHarnessHandlesConcurrentCallbackResponses(t *testing.T) {
 	}
 	const callbacks = 32
 	if err := sdk.RegisterStep(plugin, "parallel", sdk.StepHandler[struct{}]{
-		Run: func(ctx context.Context, request sdk.StepRequest[struct{}]) (sdk.Result, error) {
+		Run: func(ctx context.Context, request sdk.RunRequest[struct{}]) (sdk.Result, error) {
 			var wait sync.WaitGroup
 			callbackErrors := make(chan error, callbacks)
 			for index := range callbacks {
@@ -276,7 +396,7 @@ func TestHarnessCloseCancelsAndAwaitsActiveCalls(t *testing.T) {
 	}
 	started := make(chan struct{})
 	stopped := make(chan struct{})
-	if err := sdk.RegisterStep(plugin, "wait", sdk.StepHandler[struct{}]{Run: func(ctx context.Context, _ sdk.StepRequest[struct{}]) (sdk.Result, error) {
+	if err := sdk.RegisterStep(plugin, "wait", sdk.StepHandler[struct{}]{Run: func(ctx context.Context, _ sdk.RunRequest[struct{}]) (sdk.Result, error) {
 		close(started)
 		<-ctx.Done()
 		close(stopped)
@@ -304,7 +424,7 @@ func TestHarnessAutomaticCleanupStopsPlugin(t *testing.T) {
 			t.Fatal(err)
 		}
 		started := make(chan struct{})
-		if err := sdk.RegisterStep(plugin, "wait", sdk.StepHandler[struct{}]{Run: func(ctx context.Context, _ sdk.StepRequest[struct{}]) (sdk.Result, error) {
+		if err := sdk.RegisterStep(plugin, "wait", sdk.StepHandler[struct{}]{Run: func(ctx context.Context, _ sdk.RunRequest[struct{}]) (sdk.Result, error) {
 			close(started)
 			<-ctx.Done()
 			close(stopped)

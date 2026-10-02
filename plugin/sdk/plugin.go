@@ -157,6 +157,9 @@ func RegisterStep[Config any](plugin *Plugin, name string, handler StepHandler[C
 		}
 	}
 	qualified := plugin.namespace + "." + name
+	// The capability set is immutable once registration returns, so it is built once and shared
+	// read-only by every concurrent validate and run instead of being rebuilt per invocation.
+	host := newHostClient(settings.hostCallbacks)
 	registered := registeredStep{declaration: stepDeclaration{Type: qualified, Cleanup: handler.Cleanup != nil, Service: handler.Service != nil, HostCallbacks: settings.hostCallbacks, Outputs: settings.outputs}}
 	registered.validate = func(ctx context.Context, raw json.RawMessage, stepContext StepContext) error {
 		if handler.Validate == nil {
@@ -167,14 +170,20 @@ func RegisterStep[Config any](plugin *Plugin, name string, handler StepHandler[C
 		if err != nil {
 			return err
 		}
-		return handler.Validate(ctx, StepRequest[Config]{Config: config, Context: stepContext, Host: hostClient{}})
+		return handler.Validate(ctx, ValidateRequest[Config]{Config: config, Context: stepContext, Host: host})
 	}
 	registered.run = func(ctx context.Context, raw json.RawMessage, stepContext StepContext, stdout, stderr io.Writer, ready func(Result) error) (Result, error) {
 		config, err := decodeConfig[Config](raw)
 		if err != nil {
 			return Result{}, err
 		}
-		return handler.Run(ctx, StepRequest[Config]{Config: config, Context: stepContext, Host: hostClient{}, Stdout: stdout, Stderr: stderr, Ready: ready})
+		if stdout == nil {
+			stdout = io.Discard
+		}
+		if stderr == nil {
+			stderr = io.Discard
+		}
+		return handler.Run(ctx, RunRequest[Config]{Config: config, Context: stepContext, Host: host, Stdout: stdout, Stderr: stderr, ready: ready})
 	}
 	if handler.Cleanup != nil {
 		registered.cleanup = func(ctx context.Context, raw json.RawMessage, result Result) error {
@@ -191,7 +200,7 @@ func RegisterStep[Config any](plugin *Plugin, name string, handler StepHandler[C
 			if err != nil {
 				return Service{}, err
 			}
-			return handler.Service(ctx, StepRequest[Config]{Config: config, Context: stepContext, Host: hostClient{}})
+			return handler.Service(ctx, ServiceRequest[Config]{Config: config, Context: stepContext})
 		}
 	}
 	plugin.mu.Lock()

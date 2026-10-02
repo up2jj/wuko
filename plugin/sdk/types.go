@@ -64,13 +64,38 @@ type StepContext struct {
 	PreviousAttempt     *Result                   `json:"previous_attempt,omitempty"`
 }
 
-type StepRequest[Config any] struct {
+// ValidateRequest contains the capabilities available while validating a step.
+type ValidateRequest[Config any] struct {
+	Config  Config
+	Context StepContext
+	Host    Host
+}
+
+// RunRequest contains the capabilities available while running a step.
+// Stdout and Stderr are always non-nil when the SDK invokes a handler.
+type RunRequest[Config any] struct {
 	Config  Config
 	Context StepContext
 	Host    Host
 	Stdout  io.Writer
 	Stderr  io.Writer
-	Ready   func(Result) error
+	ready   func(Result) error
+}
+
+// Ready reports that a service step has completed startup. It returns an error
+// when called by a step that did not register a Service handler.
+func (request RunRequest[Config]) Ready(result Result) error {
+	if request.ready == nil {
+		return fmt.Errorf("step readiness is unavailable: no service handler is registered")
+	}
+	return request.ready(result)
+}
+
+// ServiceRequest contains the configuration available while discovering a
+// step's service policy. Host callbacks are unavailable during this phase.
+type ServiceRequest[Config any] struct {
+	Config  Config
+	Context StepContext
 }
 
 type CleanupRequest[Config any] struct {
@@ -87,10 +112,10 @@ type Service struct {
 
 // StepHandler groups the optional operations of a plugin step. Run is required.
 type StepHandler[Config any] struct {
-	Validate func(context.Context, StepRequest[Config]) error
-	Run      func(context.Context, StepRequest[Config]) (Result, error)
+	Validate func(context.Context, ValidateRequest[Config]) error
+	Run      func(context.Context, RunRequest[Config]) (Result, error)
 	Cleanup  func(context.Context, CleanupRequest[Config]) error
-	Service  func(context.Context, StepRequest[Config]) (Service, error)
+	Service  func(context.Context, ServiceRequest[Config]) (Service, error)
 }
 
 type HelperFunc func(context.Context, []any) (any, error)
@@ -116,11 +141,13 @@ const (
 	HostFunctionCall     HostCapability = "host.function.call"
 )
 
-// Host exposes the callbacks declared when a step is registered.
+// Host exposes plugin-to-host callbacks. Methods reject calls whose capability
+// was not declared when the step was registered.
 type Host interface {
 	ValidateTemplate(context.Context, string) error
 	RenderTemplate(context.Context, string, map[string]any) (string, error)
 	CallFunction(context.Context, string, []any) (any, error)
+	// Secret requires the HostFunctionCall capability.
 	Secret(context.Context, string) (string, error)
 }
 
@@ -244,13 +271,36 @@ type ExecutorHandler[Config any] struct {
 	CancelStopsProcess bool
 }
 
-type hostClient struct{}
+type hostClient struct {
+	allowed map[HostCapability]struct{}
+}
 
-func (hostClient) ValidateTemplate(ctx context.Context, content string) error {
+func newHostClient(capabilities []HostCapability) hostClient {
+	allowed := make(map[HostCapability]struct{}, len(capabilities))
+	for _, capability := range capabilities {
+		allowed[capability] = struct{}{}
+	}
+	return hostClient{allowed: allowed}
+}
+
+func (host hostClient) require(capability HostCapability) error {
+	if _, ok := host.allowed[capability]; !ok {
+		return fmt.Errorf("host callback %q is unavailable: declare it with WithHostCallbacks", capability)
+	}
+	return nil
+}
+
+func (host hostClient) ValidateTemplate(ctx context.Context, content string) error {
+	if err := host.require(HostTemplateValidate); err != nil {
+		return err
+	}
 	return callHost(ctx, string(HostTemplateValidate), map[string]any{"content": content}, nil)
 }
 
-func (hostClient) RenderTemplate(ctx context.Context, content string, extra map[string]any) (string, error) {
+func (host hostClient) RenderTemplate(ctx context.Context, content string, extra map[string]any) (string, error) {
+	if err := host.require(HostTemplateRender); err != nil {
+		return "", err
+	}
 	var result struct {
 		Value string `json:"value"`
 	}
@@ -258,7 +308,10 @@ func (hostClient) RenderTemplate(ctx context.Context, content string, extra map[
 	return result.Value, err
 }
 
-func (hostClient) CallFunction(ctx context.Context, name string, args []any) (any, error) {
+func (host hostClient) CallFunction(ctx context.Context, name string, args []any) (any, error) {
+	if err := host.require(HostFunctionCall); err != nil {
+		return nil, err
+	}
 	var result struct {
 		Value any `json:"value"`
 	}
@@ -267,6 +320,9 @@ func (hostClient) CallFunction(ctx context.Context, name string, args []any) (an
 }
 
 func (host hostClient) Secret(ctx context.Context, reference string) (string, error) {
+	if err := host.require(HostFunctionCall); err != nil {
+		return "", fmt.Errorf("resolving a secret: %w", err)
+	}
 	value, err := host.CallFunction(ctx, "secret", []any{reference})
 	if err != nil {
 		return "", err

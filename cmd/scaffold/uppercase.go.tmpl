@@ -21,15 +21,19 @@ func registerUppercase(plugin *sdk.Plugin) error {
 	return sdk.RegisterStep(plugin, "uppercase", handler, sdk.WithOutputSchema(outputs))
 }
 
-func validateUppercase(_ context.Context, request sdk.StepRequest[uppercaseConfig]) error {
-	if request.Config.Value == "" {
+func validateUppercase(_ context.Context, request sdk.ValidateRequest[uppercaseConfig]) error {
+	return validateUppercaseConfig(request.Config)
+}
+
+func validateUppercaseConfig(config uppercaseConfig) error {
+	if config.Value == "" {
 		return fmt.Errorf("value is required")
 	}
 	return nil
 }
 
-func runUppercase(ctx context.Context, request sdk.StepRequest[uppercaseConfig]) (sdk.Result, error) {
-	if err := validateUppercase(ctx, request); err != nil {
+func runUppercase(_ context.Context, request sdk.RunRequest[uppercaseConfig]) (sdk.Result, error) {
+	if err := validateUppercaseConfig(request.Config); err != nil {
 		return sdk.Result{}, err
 	}
 	return sdk.Result{Outputs: map[string]any{"value": strings.ToUpper(request.Config.Value)}}, nil

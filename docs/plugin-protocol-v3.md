@@ -65,6 +65,23 @@ as `canceled`, so a handler that simply returns `ctx.Err()` after a `cancel` not
 boilerplate. The code is diagnostic: Wuko shows the `message` and does not change step
 classification based on it.
 
+## Step handler requests
+
+The Go SDK gives each step lifecycle phase its own request type. Validation handlers receive
+`sdk.ValidateRequest`, run handlers receive `sdk.RunRequest`, and service-policy handlers receive
+`sdk.ServiceRequest`. Cleanup continues to use `sdk.CleanupRequest`. A service-policy handler has
+no host client or output streams because Wuko does not enable callbacks or execution events during
+`step.service`.
+
+`sdk.RunRequest.Stdout` and `sdk.RunRequest.Stderr` are always non-nil when the SDK invokes the
+handler. `sdk.RunRequest.Ready` reports service startup; calling it for a step without a `Service`
+handler returns an error instead of invoking a nil function.
+
+The `Host` methods are also checked against the step's `sdk.WithHostCallbacks` declaration before
+the SDK writes a callback frame. An undeclared callback therefore fails locally as well as at the
+Wuko boundary. `Host.Secret` requires `sdk.HostFunctionCall`, because secrets use
+`host.function.call` on the wire.
+
 ## Testing Go plugins
 
 The `github.com/up2jj/wuko/plugin/sdk/sdktest` package runs an `sdk.Plugin` through the real JSONL
