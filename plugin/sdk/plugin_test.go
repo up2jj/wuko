@@ -121,3 +121,18 @@ func TestRegisteredStepRunProvidesStreamsAndSafeReadiness(t *testing.T) {
 		t.Fatalf("run error = %v", err)
 	}
 }
+
+func TestDeclaredHostCallbacksAppliesOptions(t *testing.T) {
+	callbacks, err := DeclaredHostCallbacks(WithOutputSchema(Scalar()), WithHostCallbacks(HostTemplateRender, HostFunctionCall))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(callbacks) != 2 || callbacks[0] != HostTemplateRender || callbacks[1] != HostFunctionCall {
+		t.Fatalf("callbacks = %v", callbacks)
+	}
+	for _, options := range [][]StepOption{{nil}, {WithHostCallbacks("host.unknown")}} {
+		if _, err := DeclaredHostCallbacks(options...); err == nil {
+			t.Fatalf("DeclaredHostCallbacks(%v) succeeded", options)
+		}
+	}
+}

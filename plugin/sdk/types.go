@@ -225,6 +225,22 @@ func WithHostCallbacks(callbacks ...HostCapability) StepOption {
 	}
 }
 
+// DeclaredHostCallbacks reports the host callbacks that options declare, applying them exactly as
+// RegisterStep does. Adapters use it to learn the step's trust boundary, for example whether host
+// template rendering can reach secrets because HostFunctionCall was declared.
+func DeclaredHostCallbacks(options ...StepOption) ([]HostCapability, error) {
+	settings := stepOptions{}
+	for _, option := range options {
+		if option == nil {
+			return nil, fmt.Errorf("nil step option")
+		}
+		if err := option(&settings); err != nil {
+			return nil, err
+		}
+	}
+	return settings.hostCallbacks, nil
+}
+
 type ExecutorContext struct {
 	WorkflowName string            `json:"workflow_name"`
 	WorkflowDir  string            `json:"workflow_dir"`

@@ -92,6 +92,51 @@ the SDK writes a callback frame. An undeclared callback therefore fails locally 
 Wuko boundary. `Host.Secret` requires `sdk.HostFunctionCall`, because secrets use
 `host.function.call` on the wire.
 
+## Adapting native managed-service steps
+
+`plugin/sdk` uses only the Go standard library and is the portable API for executable plugins.
+Plugins that deliberately reuse Wuko-native `step.Runner` implementations can additionally import
+`github.com/up2jj/wuko/plugin/stepadapter`. That package depends on Wuko's step contracts and owns
+the conversion between SDK requests and `step.Request`, including host callbacks, readiness,
+service shutdown, error classification, and optional cleanup.
+
+```go
+plugin, err := sdk.New("acme")
+if err != nil {
+	return err
+}
+
+err = stepadapter.RegisterService(plugin, "server", stepadapter.ServiceRegistration{
+	Builder: server.New,
+	Cleanup: true,
+}, sdk.WithHostCallbacks(
+	sdk.HostTemplateValidate,
+	sdk.HostTemplateRender,
+	sdk.HostFunctionCall,
+))
+```
+
+The builder has the ordinary `step.Builder` signature. Its runner must implement
+`stepadapter.ServiceRunner` by adding a service-policy method to `step.Runner`:
+
+```go
+func (runner *Runner) ServiceOptions() (string, step.ServiceOptions) {
+	return "server", step.ServiceOptions{KeepAlive: runner.keepAlive, FailFast: true}
+}
+```
+
+The runner continues to call `request.Services.StartService` exactly as it does in process. The
+adapter starts that work immediately, reports the runner's returned result as the plugin readiness
+event, keeps the protocol request open for the service lifetime, and stops the service when the
+owning request is canceled. Set `Cleanup` only when every runner built by the registration
+implements `step.Cleaner`; the adapter then advertises and delegates `step.cleanup`. Existing SDK
+options such as `sdk.WithOutputSchema` pass through unchanged.
+
+Host template rendering can reach `secret` only when the step declares `sdk.HostFunctionCall`. In
+that case the adapted renderer's `WithoutSecrets()` variant validates templates but refuses to
+render them, because the protocol has no secret-free rendering callback; steps that render
+less-trusted content should not declare `sdk.HostFunctionCall`.
+
 ## Testing Go plugins
 
 The `github.com/up2jj/wuko/plugin/sdk/sdktest` package runs an `sdk.Plugin` through the real JSONL
