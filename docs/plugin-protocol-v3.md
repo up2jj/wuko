@@ -56,6 +56,15 @@ normal composite-action engine. It may call
 built-in steps or steps registered by the same plugin. A plugin action has borrowed-directory
 semantics: it has no package directory and cannot read files beside the executable.
 
+## Error codes
+
+A handler may attach a machine-readable code to any error with `sdk.Coded(code, err)`. When the
+returned error carries no explicit code, the SDK derives one from the error chain: an error
+wrapping `context.DeadlineExceeded` is reported as `timed_out` and one wrapping `context.Canceled`
+as `canceled`, so a handler that simply returns `ctx.Err()` after a `cancel` notification needs no
+boilerplate. The code is diagnostic: Wuko shows the `message` and does not change step
+classification based on it.
+
 ## Testing Go plugins
 
 The `github.com/up2jj/wuko/plugin/sdk/sdktest` package runs an `sdk.Plugin` through the real JSONL

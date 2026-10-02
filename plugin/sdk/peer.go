@@ -254,9 +254,18 @@ func (peer *peer) reply(id string, result any, err error) error {
 	if err != nil {
 		response.Result = nil
 		response.Error = &wireError{Message: err.Error()}
+		// An explicit code wins, but an *Error carrying an empty one must not suppress the
+		// fallback: a deadline and a cancellation stay distinct codes because the rest of Wuko
+		// reports them as distinct statuses ("timed_out" versus "canceled"), and a code that
+		// merged them could not be split again without a protocol change.
 		var coded *Error
-		if errors.As(err, &coded) {
+		switch {
+		case errors.As(err, &coded) && coded.Code != "":
 			response.Error.Code = coded.Code
+		case errors.Is(err, context.DeadlineExceeded):
+			response.Error.Code = "timed_out"
+		case errors.Is(err, context.Canceled):
+			response.Error.Code = "canceled"
 		}
 	}
 	return peer.write(response)

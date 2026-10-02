@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"sync"
@@ -37,6 +38,40 @@ func (writer *gatedWriter) String() string {
 	writer.mu.Lock()
 	defer writer.mu.Unlock()
 	return writer.buffer.String()
+}
+
+func TestReplyCodesCancellationErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		code string
+	}{
+		{name: "canceled", err: context.Canceled, code: "canceled"},
+		{name: "wrapped canceled", err: fmt.Errorf("step: %w", context.Canceled), code: "canceled"},
+		{name: "deadline exceeded", err: context.DeadlineExceeded, code: "timed_out"},
+		{name: "wrapped deadline exceeded", err: fmt.Errorf("step: %w", context.DeadlineExceeded), code: "timed_out"},
+		{name: "explicit code", err: Coded("custom", context.Canceled), code: "custom"},
+		{name: "empty explicit code", err: Coded("", context.Canceled), code: "canceled"},
+		{name: "uncoded failure", err: errors.New("failed")},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var output bytes.Buffer
+			if err := (&peer{out: &output}).reply("request", map[string]any{"ignored": true}, test.err); err != nil {
+				t.Fatal(err)
+			}
+			var response outgoingResponse
+			if err := json.Unmarshal(output.Bytes(), &response); err != nil {
+				t.Fatal(err)
+			}
+			if response.Error == nil || response.Error.Code != test.code || response.Error.Message != test.err.Error() {
+				t.Fatalf("response error = %+v, want code %q and message %q", response.Error, test.code, test.err)
+			}
+			if response.Result != nil {
+				t.Fatalf("response result = %#v, want nil", response.Result)
+			}
+		})
+	}
 }
 
 // The host waits for a shutdown reply before considering the plugin closed, so serve must not

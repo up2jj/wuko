@@ -158,7 +158,7 @@ func TestHarnessDemultiplexesConcurrentCallsAndCallbacks(t *testing.T) {
 			case <-releases[request.Config.Name]:
 				return sdk.Result{Outputs: map[string]any{"value": value}}, nil
 			case <-ctx.Done():
-				return sdk.Result{}, sdk.Coded("canceled", ctx.Err())
+				return sdk.Result{}, ctx.Err()
 			}
 		},
 	}, sdk.WithHostCallbacks(sdk.HostFunctionCall)); err != nil {
