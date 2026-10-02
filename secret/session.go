@@ -72,6 +72,15 @@ type Session struct {
 	env      map[string]string
 	cache    map[string]*cacheEntry
 	resolved []string
+
+	// authMu serializes authentication so two workflow branches cannot run a login command
+	// against the same session - and the same stdin - at once. authenticated records the
+	// providers already brought up, and authFailed the requests already refused, so a session
+	// reused by a dependency plan or by repeated child-workflow invocations shells out to each
+	// provider CLI once instead of once per preparation.
+	authMu        sync.Mutex
+	authenticated map[string]struct{}
+	authFailed    map[string]error
 }
 
 // NewSession constructs a provider session without performing authentication.
@@ -103,16 +112,52 @@ func NewSession(ctx context.Context, options Options) *Session {
 
 // EnsureAuth checks configured providers in declaration order, optionally authenticates, and
 // verifies each provider once more after a login attempt.
+//
+// Each provider is brought up at most once per session. A provider that authenticated stays
+// authenticated whatever login configuration got it there, so success is remembered per
+// provider; a refusal is remembered against the exact request, leaving a different login
+// configuration free to make its own attempt.
 func (session *Session) EnsureAuth(config Config) error {
 	if err := config.Validate(); err != nil {
 		return err
 	}
+	if len(config.EnsureAuth) == 0 {
+		return nil
+	}
+	session.authMu.Lock()
+	defer session.authMu.Unlock()
 	for _, auth := range config.EnsureAuth {
-		if err := session.ensureProvider(auth); err != nil {
-			return fmt.Errorf("authenticating secret provider %s: %w", auth.Provider, err)
+		if _, done := session.authenticated[auth.Provider]; done {
+			continue
 		}
+		request := authRequestKey(auth)
+		if err, refused := session.authFailed[request]; refused {
+			return err
+		}
+		if err := session.ensureProvider(auth); err != nil {
+			err = fmt.Errorf("authenticating secret provider %s: %w", auth.Provider, err)
+			if session.authFailed == nil {
+				session.authFailed = make(map[string]error)
+			}
+			session.authFailed[request] = err
+			return err
+		}
+		if session.authenticated == nil {
+			session.authenticated = make(map[string]struct{})
+		}
+		session.authenticated[auth.Provider] = struct{}{}
 	}
 	return nil
+}
+
+// authRequestKey identifies one ensure-auth request by value. AuthConfig holds a pointer, so it
+// is not comparable in a way that reflects its contents.
+func authRequestKey(auth AuthConfig) string {
+	encoded, err := json.Marshal(auth)
+	if err != nil {
+		return fmt.Sprintf("%s\x00%+v", auth.Provider, auth.Login)
+	}
+	return string(encoded)
 }
 
 func (session *Session) ensureProvider(auth AuthConfig) error {

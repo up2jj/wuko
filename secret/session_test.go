@@ -270,6 +270,86 @@ func TestEnsureAuthRunsFallbackWhenStatusFails(t *testing.T) {
 	}
 }
 
+func TestEnsureAuthChecksEachProviderOncePerSession(t *testing.T) {
+	checks := 0
+	runner := &fakeRunner{run: func(command Command) (string, error) {
+		if command.Name != "op" {
+			return "", fmt.Errorf("unexpected command %s", command.Name)
+		}
+		checks++
+		return "signed in", nil
+	}}
+	session := NewSession(t.Context(), Options{Runner: runner, BaseEnv: map[string]string{}})
+	config := Config{EnsureAuth: []AuthConfig{{Provider: "op"}}}
+	// A dependency plan and repeated child-workflow invocations share one session and each
+	// prepare their workflow, so the provider CLI must not be consulted again every time.
+	for range 3 {
+		if err := session.EnsureAuth(config); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if checks != 1 {
+		t.Fatalf("provider status checks = %d, want 1", checks)
+	}
+}
+
+func TestEnsureAuthReportsRepeatedRefusalWithoutRetrying(t *testing.T) {
+	attempts := 0
+	runner := &fakeRunner{run: func(command Command) (string, error) {
+		attempts++
+		return "", fmt.Errorf("not signed in")
+	}}
+	session := NewSession(t.Context(), Options{Runner: runner, BaseEnv: map[string]string{}})
+	config := Config{EnsureAuth: []AuthConfig{{Provider: "op"}}}
+	first := session.EnsureAuth(config)
+	if first == nil {
+		t.Fatal("expected the unauthenticated provider to be refused")
+	}
+	second := session.EnsureAuth(config)
+	if second == nil || second.Error() != first.Error() {
+		t.Fatalf("second refusal = %v, want %v", second, first)
+	}
+	if attempts != 1 {
+		t.Fatalf("provider invocations = %d, want 1", attempts)
+	}
+}
+
+func TestEnsureAuthSerializesConcurrentCallers(t *testing.T) {
+	var mu sync.Mutex
+	active, peak := 0, 0
+	runner := &fakeRunner{run: func(command Command) (string, error) {
+		mu.Lock()
+		active++
+		peak = max(peak, active)
+		mu.Unlock()
+		defer func() {
+			mu.Lock()
+			active--
+			mu.Unlock()
+		}()
+		return "signed in", nil
+	}}
+	session := NewSession(t.Context(), Options{Runner: runner, BaseEnv: map[string]string{}})
+	// Parallel branches share one session, and a login command reads the session's single
+	// stdin, so two of them must never be in flight at once.
+	var group sync.WaitGroup
+	for range 8 {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			if err := session.EnsureAuth(Config{EnsureAuth: []AuthConfig{{Provider: "op"}}}); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	group.Wait()
+	mu.Lock()
+	defer mu.Unlock()
+	if peak != 1 {
+		t.Fatalf("concurrent provider invocations = %d, want 1", peak)
+	}
+}
+
 func TestNativeLoginStoresAccountScopedOPSession(t *testing.T) {
 	signedIn := false
 	var checkEnv map[string]string
