@@ -523,6 +523,7 @@ Each linked guide contains multiple examples for every step.
 | `key_value` | Persist JSON-compatible values between runs | [Data steps](docs/steps-data.md#key_value) |
 | `changed` | Detect changed files or structured inputs | [Data steps](docs/steps-data.md#changed) |
 | `once` | Run a named block once per successful persisted key | [Execution and composition](docs/execution.md#idempotency-across-runs) |
+| `run_workflow` | Run a discovered workflow and consume its declared outputs | [Execution and composition](docs/execution.md#running-child-workflows) |
 | `require_tool` | Require an executable and optionally validate its version | [System steps](docs/steps-system.md#require_tool) |
 | `tcp_probe` | Inspect TCP listeners without platform-specific commands | [System steps](docs/steps-system.md#tcp_probe) |
 | `multiplexer` | Label and annotate the current tmux, cmux, or Herdr context | [System steps](docs/steps-system.md#multiplexer) |
@@ -591,6 +592,7 @@ Use controls to run independent work or repeat a block over runtime data.
 | Pattern | Use it to | Examples |
 | --- | --- | --- |
 | `depends_on` | Run another discovered workflow first and consume its declared outputs | [Workflow prerequisites](docs/execution.md#workflow-prerequisites) |
+| `run_workflow` | Invoke a discovered workflow at a specific step, including inside bounded parallel controls | [Running child workflows](docs/execution.md#running-child-workflows) |
 | `targets` | Divide one workflow into named executable variants selected as `wuko run NAME TARGET` | [Workflow targets](docs/execution.md#workflow-targets) |
 | `invokable: false` | Keep a workflow available as a prerequisite without allowing direct invocation | [Workflow prerequisites](docs/execution.md#workflow-prerequisites) |
 | `require` | Split one workflow across files while keeping the same state and step sequence | [Splitting a workflow across files](docs/execution.md#splitting-a-workflow-across-files) |

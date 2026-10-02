@@ -1,0 +1,30 @@
+version: 1
+name: release
+description: Run the build workflow for several targets
+
+vars:
+  targets: [linux, darwin]
+
+steps:
+  - id: builds
+    foreach:
+      items: vars.targets
+      max_concurrency: 2
+      collect: '{"target": foreach.item, "artifact": steps.build.artifact}'
+      steps:
+        - id: build
+          type: run_workflow
+          with:
+            workflow: build-artifacts
+            vars:
+              target: {expr: foreach.item}
+
+  - id: report
+    type: lua
+    with:
+      args:
+        builds: {expr: steps.builds.results}
+      source: |
+        for _, build in ipairs(wuko.args.builds) do
+          print(build.target .. ": " .. build.artifact)
+        end

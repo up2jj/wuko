@@ -129,31 +129,35 @@ type ProgressEvent struct {
 	Time            time.Time
 	WorkflowName    string
 	Depth           int
-	StepID          string
-	StepType        string
-	Index           int
-	Total           int
-	Attempt         int
-	MaxAttempts     int
-	GroupSize       int
-	Started         int
-	Succeeded       int
-	ControlKind     string
-	Action          string
-	Iteration       int
-	Iterations      int
-	MaxConcurrency  int
-	FailFast        bool
-	Timeout         time.Duration
-	Duration        time.Duration
-	RetryDelay      time.Duration
-	Poll            int
-	PollDelay       time.Duration
-	Matched         bool
-	Polls           int
-	PollWait        time.Duration
-	Error           error
-	Stats           RunStats
+	// ChildWorkflow distinguishes a run_workflow occurrence from a composite action on the
+	// workflow lifecycle events. Both are reported below the selected workflow's depth, and a
+	// reader debugging a call chain needs to know which of the two to look for.
+	ChildWorkflow  bool
+	StepID         string
+	StepType       string
+	Index          int
+	Total          int
+	Attempt        int
+	MaxAttempts    int
+	GroupSize      int
+	Started        int
+	Succeeded      int
+	ControlKind    string
+	Action         string
+	Iteration      int
+	Iterations     int
+	MaxConcurrency int
+	FailFast       bool
+	Timeout        time.Duration
+	Duration       time.Duration
+	RetryDelay     time.Duration
+	Poll           int
+	PollDelay      time.Duration
+	Matched        bool
+	Polls          int
+	PollWait       time.Duration
+	Error          error
+	Stats          RunStats
 }
 
 func report(options Options, event ProgressEvent) {
@@ -167,9 +171,9 @@ func report(options Options, event ProgressEvent) {
 	event.ParentStepRunID = options.parentStepRunID
 	event.StepRunID = options.stepRunID
 	if options.Progress != nil {
-		if options.runtime != nil {
-			options.runtime.reportMu.Lock()
-			defer options.runtime.reportMu.Unlock()
+		if options.runtime != nil && options.runtime.coordination != nil {
+			options.runtime.coordination.reportMu.Lock()
+			defer options.runtime.coordination.reportMu.Unlock()
 		}
 		options.Progress(event)
 		return
@@ -202,18 +206,23 @@ func redactStepStats(stats StepStats, redact func(error) error) StepStats {
 	return stats
 }
 
-// runRuntime holds the state one root run shares across concurrent branches.
-// Its three locks are deliberately separate: a single lock covering both the
+// runCoordination holds the locks shared by a root invocation and blocking child workflows.
+// The locks are deliberately separate: a single lock covering both the
 // output writers and the reporting callbacks would deadlock any callback that
 // writes to Options.Stdout or Options.Stderr, because those writers take the
 // very same lock and sync.Mutex is not reentrant.
-type runRuntime struct {
+type runCoordination struct {
 	// writeMu serializes writes to the wrapped Stdout and Stderr so parallel
 	// branches interleave at Write granularity rather than tearing.
 	writeMu sync.Mutex
 	// reportMu serializes the Progress and Diagnostics callbacks. One lock covers
 	// both so progress and trace events stay mutually ordered.
 	reportMu sync.Mutex
+}
+
+// runRuntime owns one workflow occurrence's managed-resource and background lifecycles.
+type runRuntime struct {
+	coordination *runCoordination
 	// cleanups is the run-level managed-resource scope, released once the root run
 	// finishes. Background control bodies scope their own iteration instead.
 	cleanups   cleanupScope
@@ -312,10 +321,10 @@ func prepareRunOptions(options Options) Options {
 	if options.runtime != nil {
 		return options
 	}
-	runtime := &runRuntime{}
+	runtime := &runRuntime{coordination: &runCoordination{}}
 	options.runtime = runtime
-	options.Stdout = synchronizeWriter(&runtime.writeMu, options.Stdout)
-	options.Stderr = synchronizeWriter(&runtime.writeMu, options.Stderr)
+	options.Stdout = synchronizeWriter(&runtime.coordination.writeMu, options.Stdout)
+	options.Stderr = synchronizeWriter(&runtime.coordination.writeMu, options.Stderr)
 	return options
 }
 

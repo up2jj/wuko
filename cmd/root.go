@@ -60,6 +60,7 @@ import (
 	processstep "github.com/up2jj/wuko/steps/process"
 	requiretoolstep "github.com/up2jj/wuko/steps/require_tool"
 	"github.com/up2jj/wuko/steps/review"
+	runworkflowstep "github.com/up2jj/wuko/steps/runworkflow"
 	scaffoldstep "github.com/up2jj/wuko/steps/scaffold"
 	semverstep "github.com/up2jj/wuko/steps/semver"
 	setstep "github.com/up2jj/wuko/steps/set"
@@ -149,6 +150,9 @@ type dependencies struct {
 	viewText          func(context.Context, io.Reader, io.Writer, tui.TextViewerConfig) error
 	reinstallWorkflow func(*cobra.Command, workflow.Source) error
 	debug             *bool
+	// workflowCache is shared by every child-workflow invoker built during one command
+	// execution. A nil cache stays correct and simply memoizes nothing.
+	workflowCache *workflowInvocationCache
 }
 
 func Execute() error {
@@ -225,6 +229,7 @@ func registerBuiltinSteps(registry *step.Registry) error {
 		inputstep.Register, passwordstep.Register, choice.Register, pathstep.Register, review.Register, tablestep.Register,
 		confirm.Register, assertstep.Register, setstep.Register, transformstep.Register, templatestep.Register, importvarsstep.Register, decodestep.Register, jsonpathstep.Register, editstep.Register, markdowneditstep.Register, extractstep.Register, semverstep.Register, httpstep.Register, tcpprobestep.Register, filestep.Register, scaffoldstep.Register, tempstep.Register, globstep.Register, watchstep.Register, cachestep.Register, changedstep.Register, requiretoolstep.Register,
 		dockerstep.Register, gitstep.Register, githubprstep.Register, githubactionsstep.Register, githubreleasestep.Register, keyvaluestep.Register, luastep.Register, logwaitstep.Register, multiplexerstep.Register, timestep.Register, shell.Register, processstep.Register, agentstep.Register, devenvstep.RegisterTask,
+		runworkflowstep.Register,
 	} {
 		if err := register(registry); err != nil {
 			return err
@@ -238,11 +243,15 @@ func workflowEngine(deps dependencies) *engine.Engine {
 		deps.registry,
 		engine.WithExecutors(deps.executors),
 		engine.WithElevatedExecutor(deps.elevatedExecutor),
+		engine.WithWorkflowInvoker(commandWorkflowInvoker{deps: deps}),
 		engine.WithBackgroundControl(observe.NewControl(nil)),
 	)
 }
 
 func newRootCmd(deps dependencies) *cobra.Command {
+	if deps.workflowCache == nil {
+		deps.workflowCache = &workflowInvocationCache{}
+	}
 	if deps.registry == nil {
 		deps.registry = step.NewRegistry()
 	}

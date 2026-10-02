@@ -29,6 +29,7 @@ type Engine struct {
 	registry           *step.Registry
 	executors          *executor.Registry
 	elevatedExecutor   process.Executor
+	workflowInvoker    WorkflowInvoker
 	backgroundControls []BackgroundControl
 }
 
@@ -51,11 +52,20 @@ func WithElevatedExecutor(executor process.Executor) Option {
 	return func(engine *Engine) { engine.elevatedExecutor = executor }
 }
 
+// WithWorkflowInvoker supplies the host capability used by the run_workflow step.
+func WithWorkflowInvoker(invoker WorkflowInvoker) Option {
+	return func(engine *Engine) { engine.workflowInvoker = invoker }
+}
+
 type Options struct {
 	// InvocationID correlates this run with its surrounding reporting session. When empty, the
 	// run remains valid and reporters may supply an invocation identity at delivery time.
 	InvocationID correlation.InvocationID
 	Vars         map[string]any
+	// DeclaredVars names caller-supplied variables whose values are not yet known, so that
+	// validating a workflow written to be driven by its caller does not report them unknown.
+	// A run resolves every variable and leaves this empty.
+	DeclaredVars []string
 	Env          map[string]string
 	// Dependencies contains outputs from direct prerequisite workflows keyed by alias.
 	Dependencies map[string]map[string]any
@@ -128,6 +138,16 @@ type Options struct {
 	// themselves are carried, not just their names, because a nested once has to
 	// publish what it is waiting for on every claim its ancestors hold.
 	onceClaims map[string]*storepkg.Claim
+	// workflowRoot marks a nested run_workflow occurrence as the owner of an independent
+	// background-service and cleanup lifecycle even though reporting coordination is shared.
+	workflowRoot        bool
+	workflowInvoker     WorkflowInvoker
+	workflowEnvironment *workflowInvocationEnvironment
+	// callerName and callerPath identify the innermost enclosing workflow file. A composite
+	// action executes as a synthetic definition with no path of its own, so without these a
+	// run_workflow call made from inside an action could not name the workflow it came from.
+	callerName string
+	callerPath string
 }
 
 // State carries one workflow's mutable values and is deliberately unsynchronized.
@@ -168,6 +188,11 @@ func New(registry *step.Registry, options ...Option) *Engine {
 }
 
 func (e *Engine) Validate(ctx context.Context, definition *workflow.Definition, options Options) (validateErr error) {
+	options = prepareWorkflowEnvironment(options)
+	options = recordCaller(options, definition)
+	if options.workflowInvoker == nil {
+		options.workflowInvoker = e.workflowInvoker
+	}
 	if options.ElevatedExecutor == nil {
 		options.ElevatedExecutor = e.elevatedExecutor
 	}
@@ -469,7 +494,8 @@ func (e *Engine) validateStepsRaw(ctx context.Context, definition *workflow.Defi
 			traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusSucceeded, started, "", nil)
 			continue
 		}
-		request := makeRequest(ctx, definition, workflowStep.ID, options, state, 1, 1, "validation")
+		_, workflowAware := runner.(step.WorkflowAware)
+		request := makeRequest(ctx, definition, workflowStep.ID, options, state, 1, 1, "validation", workflowAware)
 		if err := validator.Validate(ctx, request); err != nil {
 			traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusFailed, started, "validating runner", err)
 			return fmt.Errorf("step %q: %w", workflowStep.ID, err)
@@ -491,6 +517,11 @@ func (e *Engine) RunValidated(ctx context.Context, definition *workflow.Definiti
 }
 
 func (e *Engine) run(ctx context.Context, definition *workflow.Definition, options Options, validate bool) (runState *State, runErr error) {
+	options = prepareWorkflowEnvironment(options)
+	options = recordCaller(options, definition)
+	if options.workflowInvoker == nil {
+		options.workflowInvoker = e.workflowInvoker
+	}
 	if options.ElevatedExecutor == nil {
 		options.ElevatedExecutor = e.elevatedExecutor
 	}
@@ -499,8 +530,12 @@ func (e *Engine) run(ctx context.Context, definition *workflow.Definition, optio
 	if session := definition.SecretSession(); session != nil {
 		defer func() { runErr = session.RedactError(runErr) }()
 	}
-	rootRun := options.runtime == nil
+	rootRun := options.runtime == nil || options.workflowRoot
+	// workflowRoot is cleared below so nested action runs do not inherit it, but the lifecycle
+	// events still have to say that this occurrence is a child workflow rather than an action.
+	childWorkflow := options.workflowRoot
 	options = prepareRunOptions(options)
+	options.workflowRoot = false
 	if rootRun {
 		options.runtime.background = newBackgroundSupervisor(ctx)
 		options.services = options.runtime.background
@@ -550,6 +585,7 @@ func (e *Engine) run(ctx context.Context, definition *workflow.Definition, optio
 	report(options, ProgressEvent{
 		Kind: WorkflowStarted, Status: StatusRunning, Time: startedAt,
 		WorkflowName: definition.Name, Depth: options.depth, Total: total,
+		ChildWorkflow: childWorkflow,
 	})
 	var mainErr error
 	defer func() {
@@ -565,6 +601,7 @@ func (e *Engine) run(ctx context.Context, definition *workflow.Definition, optio
 			Kind: WorkflowFinished, Status: status, Time: finishedAt,
 			WorkflowName: definition.Name, Depth: options.depth, Total: total,
 			Duration: stats.Duration, Error: runErr, Stats: stats,
+			ChildWorkflow: childWorkflow,
 		})
 	}()
 
@@ -987,6 +1024,9 @@ func (e *Engine) executeStep(ctx context.Context, definition *workflow.Definitio
 		StepType: kind, Index: index, Total: total,
 	})
 	var execute stepExecutor
+	// An action step's own request never invokes a workflow: the steps inside the action get
+	// their own requests, and each is bound according to its own runner.
+	workflowAware := false
 	cleanup := func() {}
 	if workflowStep.Action != nil {
 		prepareStarted := time.Now()
@@ -1039,6 +1079,7 @@ func (e *Engine) executeStep(ctx context.Context, definition *workflow.Definitio
 			return outcome
 		}
 		traceStep(options, definition, workflowStep, diagnostic.PhaseRunner, diagnostic.StatusSucceeded, runnerStarted, "", nil)
+		_, workflowAware = runner.(step.WorkflowAware)
 		outputSchema, schemaErr := e.registry.OutputSchemaForConfig(ctx, workflowStep.Type, raw)
 		if schemaErr != nil {
 			stepErr := fmt.Errorf("workflow %q step %q (%s): resolving output contract: %w", definition.Name, workflowStep.ID, workflowStep.Type, schemaErr)
@@ -1062,7 +1103,7 @@ func (e *Engine) executeStep(ctx context.Context, definition *workflow.Definitio
 		}
 	}
 	attempt, maximum := max(options.attempt, 1), max(options.maxAttempts, 1)
-	request := makeRequest(ctx, definition, workflowStep.ID, options, state, attempt, max(maximum, attempt), operationID)
+	request := makeRequest(ctx, definition, workflowStep.ID, options, state, attempt, max(maximum, attempt), operationID, workflowAware)
 	if previous, ok := options.previousPass[workflowStep.ID]; ok {
 		request.PreviousAttempt = &previous
 	}
@@ -1295,7 +1336,7 @@ func runStatsIdentity(options Options) RunStats {
 }
 
 func initialState(definition *workflow.Definition, options Options) (*State, error) {
-	vars, environment, err := workflow.PrepareValues(definition, workflow.LoadOptions{Vars: options.Vars, Env: options.Env, BaseEnv: options.BaseEnv, EnvironmentLoaders: options.EnvironmentLoaders, RunDir: options.RunDir, SecretSession: definition.SecretSession(), Providers: options.Providers})
+	vars, environment, err := workflow.PrepareValues(definition, workflow.LoadOptions{Vars: options.Vars, DeclaredVars: options.DeclaredVars, Env: options.Env, BaseEnv: options.BaseEnv, EnvironmentLoaders: options.EnvironmentLoaders, RunDir: options.RunDir, SecretSession: definition.SecretSession(), Providers: options.Providers})
 	if err != nil {
 		return nil, err
 	}
@@ -1313,10 +1354,17 @@ func templateData(definition *workflow.Definition, runDir string, state *State) 
 	return data
 }
 
-func makeRequest(ctx context.Context, definition *workflow.Definition, stepID string, options Options, state *State, attempt, maxAttempts int, operationID string) step.Request {
+// makeRequest builds one step request. workflowAware carries whether the receiving runner
+// invokes child workflows: the binding embeds a full copy of Options, so attaching it to every
+// request would allocate half a kilobyte per step for a capability almost no step uses.
+func makeRequest(ctx context.Context, definition *workflow.Definition, stepID string, options Options, state *State, attempt, maxAttempts int, operationID string, workflowAware bool) step.Request {
 	var resolveSecret func(string) (string, error)
 	if session := definition.SecretSession(); session != nil {
 		resolveSecret = session.Resolve
+	}
+	var workflows step.WorkflowRunner
+	if workflowAware {
+		workflows = boundWorkflowRunner{invoker: options.workflowInvoker, definition: definition, options: options, operationID: operationID}
 	}
 	return step.Request{
 		StepID: stepID, WorkflowName: definition.Name, WorkflowSource: definition.Location.Source, WorkflowDir: definition.Dir,
@@ -1331,8 +1379,9 @@ func makeRequest(ctx context.Context, definition *workflow.Definition, stepID st
 		}),
 		Executor: options.Executor, ElevatedExecutor: options.ElevatedExecutor,
 		ElevationAllowed: options.ElevationAllowed, InsideExecutor: options.insideExecutor,
-		Services: reportingServiceLauncher{launcher: options.services, options: options, workflowName: definition.Name},
-		Secret:   resolveSecret, Helpers: definition.Helpers(), HelperContext: ctx,
+		Services:  reportingServiceLauncher{launcher: options.services, options: options, workflowName: definition.Name},
+		Workflows: workflows,
+		Secret:    resolveSecret, Helpers: definition.Helpers(), HelperContext: ctx,
 	}
 }
 
@@ -1383,7 +1432,10 @@ func (e *Engine) validateAction(ctx context.Context, definition *workflow.Defini
 		Stdin: options.Stdin, Stdout: options.Stdout, Stderr: options.Stderr, Interactive: options.Interactive,
 		Diagnostics: options.Diagnostics, runID: options.runID, parentRunID: options.parentRunID,
 		parentStepRunID: options.parentStepRunID, depth: options.depth + 1, runtime: options.runtime,
-		onceClaims: options.onceClaims,
+		workflowEnvironment: options.workflowEnvironment,
+		callerName:          options.callerName,
+		callerPath:          options.callerPath,
+		onceClaims:          options.onceClaims,
 	})
 }
 
@@ -1417,8 +1469,11 @@ func (e *Engine) prepareActionExecutor(definition *workflow.Definition, workflow
 			Diagnostics:     options.Diagnostics,
 			operationPrefix: request.OperationID, parentRunID: options.runID,
 			parentStepRunID: options.stepRunID, depth: options.depth + 1, runtime: options.runtime,
-			cleanups:   options.cleanups,
-			onceClaims: options.onceClaims,
+			workflowEnvironment: options.workflowEnvironment,
+			callerName:          options.callerName,
+			callerPath:          options.callerPath,
+			cleanups:            options.cleanups,
+			onceClaims:          options.onceClaims,
 		})
 		if err != nil {
 			return step.Result{}, err

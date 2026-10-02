@@ -97,6 +97,11 @@ type Request struct {
 	// Services registers ready, lifecycle-managed background work in the nearest workflow or
 	// executor scope. It is nil when a runner is invoked outside the engine.
 	Services ServiceLauncher
+	// Workflows invokes another discovered workflow through the host that owns this engine.
+	// It is nil when a runner is invoked directly, and the engine populates it only for
+	// runners that implement WorkflowAware. A host that supports no workflow calls still
+	// supplies a binding, whose calls report that invocation is unavailable.
+	Workflows WorkflowRunner
 	// PreviousAttempt is the most recent failed attempt that produced a complete result.
 	// It is nil on the first attempt and remains immutable for the duration of Run.
 	PreviousAttempt *Result
@@ -107,6 +112,27 @@ type Request struct {
 	Helpers helper.Set
 	// HelperContext cancels helper RPCs with the current operation.
 	HelperContext context.Context
+}
+
+// WorkflowCall identifies one blocking child-workflow invocation. Vars contains only values
+// explicitly supplied by the calling step; mutable parent state is deliberately not inherited.
+type WorkflowCall struct {
+	Workflow string
+	Target   string
+	Vars     map[string]any
+	// DeferredVars names variables the caller supplies whose values depend on runtime
+	// expressions. Validation receives the names without values so a child that reads a
+	// variable it does not itself declare still validates, rather than reporting it unknown.
+	// A run supplies every value in Vars and leaves this empty.
+	DeferredVars []string
+}
+
+// WorkflowRunner is the deliberately small host capability consumed by workflow-invoking steps.
+// Validation resolves static references without executing them; Run blocks until the child and
+// all of its lifecycle work have completed.
+type WorkflowRunner interface {
+	ValidateWorkflow(context.Context, WorkflowCall) error
+	RunWorkflow(context.Context, WorkflowCall) (map[string]any, error)
 }
 
 // ResolveSecret resolves a secret or reports missing engine wiring.
@@ -270,6 +296,13 @@ type ExecutorAware interface {
 // executor provider to expose its target filesystem.
 type ExecutorFileSystem interface {
 	ExecutorFileSystem()
+}
+
+// WorkflowAware marks a runner that invokes child workflows through Request.Workflows.
+// The engine binds the host to a request only for runners that declare the need, so the
+// overwhelming majority of steps - which never call a workflow - do not pay for the binding.
+type WorkflowAware interface {
+	WorkflowAware()
 }
 
 // ObservationError reports that a failed runner still produced a complete, usable observation.

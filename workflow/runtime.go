@@ -33,7 +33,12 @@ var providerReservedRoots = map[string]struct{}{
 // LoadOptions supplies the pre-run values used to resolve composite action references.
 type LoadOptions struct {
 	Vars map[string]any
-	Env  map[string]string
+	// DeclaredVars names caller-supplied variables whose values are not yet known. Preparation
+	// adds each one the workflow does not itself declare, so a workflow written to be driven by
+	// its caller validates without the loader having to invent a value for it. A name already
+	// present in Vars or in the workflow's own vars keeps its value.
+	DeclaredVars []string
+	Env          map[string]string
 	// Target selects one declared workflow target before preparation. Empty selects a legacy
 	// workflow without targets and is rejected for workflows that declare targets.
 	Target string
@@ -84,6 +89,11 @@ func PrepareValues(definition *Definition, options LoadOptions) (map[string]any,
 	vars := CloneMap(definition.Vars)
 	for key, value := range options.Vars {
 		vars[key] = Clone(value)
+	}
+	for _, name := range options.DeclaredVars {
+		if _, known := vars[name]; !known {
+			vars[name] = nil
+		}
 	}
 	host := hostEnvironment()
 	if options.BaseEnv != nil {

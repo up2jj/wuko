@@ -30,9 +30,9 @@ func trace(options Options, event diagnostic.Event) {
 	event.ParentRunID = options.parentRunID
 	event.ParentStepRunID = options.parentStepRunID
 	event.StepRunID = options.stepRunID
-	if options.runtime != nil {
-		options.runtime.reportMu.Lock()
-		defer options.runtime.reportMu.Unlock()
+	if options.runtime != nil && options.runtime.coordination != nil {
+		options.runtime.coordination.reportMu.Lock()
+		defer options.runtime.coordination.reportMu.Unlock()
 	}
 	options.Diagnostics(event)
 }

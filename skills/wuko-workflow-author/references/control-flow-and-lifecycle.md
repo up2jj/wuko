@@ -14,6 +14,11 @@ Use this guidance when a workflow uses dependencies, templates, returns, schedul
 - Templates always return strings. Preserve boolean, number, array, and object action inputs with `expr`; keep reusable typed configuration in `vars`. Quote or encode rendered values for their destination format, because templates do not provide shell, JSON, YAML, or HTML escaping.
 - Prefer direct `.vars`, `.env`, `.steps`, and `.inputs` access over clever `printf`, deeply nested `range`/`with` blocks, or duplicated control flow. Move imperative transformation to Lua and keep executable shell behavior visible in the owning step.
 - Use `require` for local step files and keep required paths relative to the containing workflow file.
+- Use `run_workflow` when a directly invokable discovered workflow must run at a particular step.
+  Keep `workflow` and optional `target` static, pass only explicit `vars`, and read declared child
+  outputs directly from `.steps.<id>`. The call blocks; use `concurrent`, `foreach`, or `matrix` for
+  bounded parallel calls. Do not use it from remote/stdin workflows, executor scopes, remote or
+  plugin actions, or to start a child's cron schedule.
 
 ## Returns, recovery, and cleanup
 

@@ -7,12 +7,13 @@ concurrency, scheduling, failure policies, file composition, and remote reuse.
 
 ## Choosing a composition mechanism
 
-Wuko offers four deliberately different ways to compose automation. Choose based on the boundary
+Wuko offers five deliberately different ways to compose automation. Choose based on the boundary
 you need, not merely where the YAML lives:
 
 | Mechanism | Use it when | Boundary and data flow |
 | --- | --- | --- |
 | `depends_on` | Another discovered workflow is a prerequisite | Runs the prerequisite first in its own workflow state; only declared typed workflow outputs cross through `.dependencies` |
+| `run_workflow` | A discovered workflow must run at one step in the caller | Blocks that step until the child finishes and publishes declared outputs directly under the step ID |
 | `targets` | One logical workflow has named execution variants | Selects one target as the ordinary workflow root; targets share workflow identity and templates but use their selected steps and target overrides |
 | `require` | One workflow is too large for one file | Inserts the fragment's steps into the current workflow; steps share the same IDs, variables, environment, state, and execution flow |
 | `uses` | A step-sized capability should be reusable behind a stable interface | Invokes a composite action with declared inputs and outputs; internal steps and variables are isolated from the caller |
@@ -64,10 +65,10 @@ steps:
       args: ["{{ .steps.build.artifact }}"]
 ```
 
-As a quick rule: choose `depends_on` for orchestration between discovered workflows, `targets` for
-named variants of one workflow, `require` for file organization within one workflow, and `uses`
-for reusable encapsulated behavior. Do not use `require` to simulate an action interface, or wrap a
-simple file split in a separate dependency.
+As a quick rule: choose `depends_on` for prerequisite orchestration, `run_workflow` for invocation
+at a particular step, `targets` for named variants of one workflow, `require` for file organization
+within one workflow, and `uses` for reusable encapsulated behavior. Do not use `require` to
+simulate an action interface, or wrap a simple file split in a separate dependency.
 
 ## Workflow targets
 
@@ -339,6 +340,83 @@ wuko run release --var target=linux --env MODE=production
 
 Runnable chain, diamond, conditional-output, early-return, and scheduling examples live in
 [`examples/dependencies/`](../examples/dependencies/).
+
+## Running child workflows
+
+`run_workflow` is a blocking step that invokes another workflow through normal local discovery.
+The child must be directly invokable. Its dependency graph, steps, `finally`, managed-resource
+cleanup, and declared outputs all finish before the step returns:
+
+```yaml
+- id: build
+  type: run_workflow
+  with:
+    workflow: build-artifacts
+    target: linux
+    vars:
+      revision: {expr: steps.revision.sha}
+```
+
+`workflow` is a required static name and `target` is an optional static target. File, HTTPS,
+GitHub, and templated selectors are not accepted. `vars` contains only explicit child-variable
+overrides. Ordinary strings use normal recursive template rendering; an exact `{expr: ...}` value
+keeps its evaluated type, while `{literal: ...}` forces an expression-shaped object to remain
+literal. These wrappers may appear inside nested objects and arrays.
+
+On success, declared child outputs are the step output directly, without an `outputs` wrapper:
+
+```yaml
+- id: publish
+  type: shell
+  with:
+    args: ["{{ .steps.build.artifact }}", "{{ .steps.build.digest }}"]
+```
+
+Child variables, step results, dependency values, and environment mutations do not escape. The
+child starts from its own declarations plus the original invocation environment, CLI `--env`
+overlays, providers, and secrets; it does not inherit parent workflow variables, workflow `env`,
+or an active `env` block.
+
+The same isolation applies to the run directory. A child is always discovered and executed
+against the directory the command was invoked from, so a call placed inside a `working_directory`
+or `worktree` block runs in the original directory rather than the scoped one. Pass the scoped
+path as a variable when the child needs it.
+
+A failure commits no step output and is reported as:
+
+```text
+workflow "parent" step "build" (run_workflow): running workflow "build-artifacts" target "linux": <child error>
+```
+
+Use `try`/`catch` for recovery. The catch binding reports the invoking step ID and
+`type: run_workflow`; partial child outputs are never available.
+
+The step itself is sequential and blocking. Put fixed calls in `concurrent`, or call it from
+`foreach`/`matrix` for runtime fan-out. Because each iteration remains active until its child
+finishes, the surrounding `max_concurrency` is also the child-workflow concurrency limit:
+
+```yaml
+- id: builds
+  foreach:
+    items: vars.targets
+    max_concurrency: 4
+    collect: '{"target": foreach.item, "artifact": steps.build.artifact}'
+    steps:
+      - id: build
+        type: run_workflow
+        with:
+          workflow: build-artifacts
+          vars:
+            target: {expr: foreach.item}
+```
+
+Cancellation and enclosing timeouts propagate into the child. Parallel calls are non-interactive;
+a sequential call retains ordinary interactive behavior. Invocation cycles fail validation.
+`run_workflow` is rejected inside executor scopes and from remote, stdin, remote-action, or plugin
+provenance so it cannot cross into trusted local workflow discovery. A child's `cron` declaration
+does not start a schedule: that child runs exactly once. `wuko tree` and dry-run show the call as a
+leaf and never execute it. A complete runnable example is in
+[`examples/run-workflow/`](../examples/run-workflow/).
 
 ## Conditions
 

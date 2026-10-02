@@ -78,6 +78,7 @@ External workflow cancellation always takes precedence over `fail_fast`:
 | Structure | Queued work after cancellation | Active work | Result commit |
 | --- | --- | --- | --- |
 | Sequential steps | Later steps do not start | Current step is canceled | Earlier commits are retained internally, but failed runs do not return partial state |
+| `run_workflow` | The caller remains blocked | The active child, its dependencies, and lifecycle work receive cancellation | No child output is committed to the invoking step |
 | `concurrent` | Queued children do not execute | All children receive cancellation | No child results from the group are committed |
 | `batch` | Queued chunks do not execute | All iterations receive cancellation | No parent aggregate is committed |
 | `foreach` | Queued iterations do not execute | All iterations receive cancellation | No parent aggregate is committed |
@@ -138,6 +139,11 @@ The earliest applicable deadline wins:
 - a batch, foreach, or matrix timeout starts after expression evaluation and expansion, then covers
   queueing, iterations, retries, polling, and nested concurrent groups;
 - workflow cancellation covers the complete active execution tree.
+
+A `run_workflow` call uses the invoking step's context. A surrounding step, attempt, concurrent,
+foreach, or matrix deadline therefore cancels the child. Wuko waits for the child's `finally` and
+managed cleanup before the step returns, subject to the same graceful-shutdown budget as the rest
+of the active workflow tree.
 
 ## Partial work and idempotency
 

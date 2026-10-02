@@ -1,0 +1,16 @@
+version: 1
+name: build-artifacts
+description: Produce one target-specific artifact
+
+vars:
+  target: linux
+
+outputs:
+  artifact:
+    type: string
+    value: '"dist/app-" + vars.target + ".tar.gz"'
+
+steps:
+  - return:
+      outputs:
+        artifact: '"dist/app-" + vars.target + ".tar.gz"'

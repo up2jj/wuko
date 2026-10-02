@@ -37,7 +37,7 @@ func (progress *Progress) Report(event engine.ProgressEvent) {
 		label := "Workflow"
 		marker := progress.paint("36", "◆")
 		if event.Depth > 0 {
-			label = "Action"
+			label = nestedLabel(event)
 			marker = progress.paint("36", "◇")
 		}
 		fmt.Fprintf(progress.writer, "%s%s %s %s · %s\n", indent, marker, label, event.WorkflowName, count(event.Total, "step"))
@@ -198,7 +198,7 @@ func (progress *Progress) Report(event engine.ProgressEvent) {
 		parts := runSummary(event.Stats)
 		label := "Workflow"
 		if event.Depth > 0 {
-			label = "Action"
+			label = nestedLabel(event)
 		}
 		fmt.Fprintf(progress.writer, "%s%s %s %s %s in %s", indent, progress.statusMarker(event.Status), label, event.WorkflowName, statusLabel(event.Status), formatDuration(event.Duration))
 		if len(parts) > 0 {
@@ -206,6 +206,16 @@ func (progress *Progress) Report(event engine.ProgressEvent) {
 		}
 		fmt.Fprintln(progress.writer)
 	}
+}
+
+// nestedLabel names a workflow lifecycle event reported below the selected workflow. A child
+// workflow invoked by run_workflow and a composite action both nest, and calling both "Action"
+// sends anyone tracing a call chain looking for an action that does not exist.
+func nestedLabel(event engine.ProgressEvent) string {
+	if event.ChildWorkflow {
+		return "Workflow"
+	}
+	return "Action"
 }
 
 func (progress *Progress) statusMarker(status engine.ExecutionStatus) string {

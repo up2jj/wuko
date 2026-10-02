@@ -362,6 +362,16 @@ func Find(cwd, homeDir, configDir, name string) (Source, error) {
 	if err != nil {
 		return Source{}, err
 	}
+	return SelectSource(sources, name)
+}
+
+// SelectSource returns the source matching name among already discovered sources.
+// Callers that discover once and resolve several names use it instead of Find, which
+// rediscovers - and so re-parses every workflow file - on each call.
+func SelectSource(sources []Source, name string) (Source, error) {
+	if !ValidWorkflowSelector(name) {
+		return Source{}, fmt.Errorf("invalid workflow name %q", name)
+	}
 	for _, source := range sources {
 		if source.Name == name {
 			return source, nil

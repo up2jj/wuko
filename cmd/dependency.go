@@ -11,10 +11,19 @@ import (
 )
 
 func resolveDependencyPlan(ctx context.Context, root *workflow.Definition, loader *workflow.Loader, options workflow.LoadOptions, cwd, homeDir, configDir string) (*workflow.DependencyPlan, error) {
+	return resolveDependencyPlanWith(ctx, root, loader, options, func() ([]workflow.Source, error) {
+		return workflow.Discover(cwd, homeDir, configDir)
+	})
+}
+
+// resolveDependencyPlanWith takes discovery as a callback so a caller that repeats the same
+// resolution - a child-workflow invocation inside a loop, say - can serve it from a cache
+// instead of re-reading and re-parsing every discoverable workflow file.
+func resolveDependencyPlanWith(ctx context.Context, root *workflow.Definition, loader *workflow.Loader, options workflow.LoadOptions, discover func() ([]workflow.Source, error)) (*workflow.DependencyPlan, error) {
 	if len(root.DependsOn) == 0 {
 		return workflow.ResolveDependencyPlan(ctx, root, nil)
 	}
-	sources, err := workflow.Discover(cwd, homeDir, configDir)
+	sources, err := discover()
 	if err != nil {
 		return nil, err
 	}
@@ -97,6 +106,17 @@ func preflightDefinition(ctx context.Context, definition *workflow.Definition, e
 }
 
 func executeDependencyPlan(ctx context.Context, plan *workflow.DependencyPlan, engineFor func() *engine.Engine, optionsFor func(*workflow.Definition, map[string]map[string]any) engine.Options) (*engine.State, error) {
+	return executePlan(ctx, plan, engineFor, optionsFor, true)
+}
+
+// executeInvokedDependencyPlan runs a plan for a caller that already names the root workflow in
+// its own error - a run_workflow step does - so the root failure is returned unlabelled instead
+// of repeating the name a third time.
+func executeInvokedDependencyPlan(ctx context.Context, plan *workflow.DependencyPlan, engineFor func() *engine.Engine, optionsFor func(*workflow.Definition, map[string]map[string]any) engine.Options) (*engine.State, error) {
+	return executePlan(ctx, plan, engineFor, optionsFor, false)
+}
+
+func executePlan(ctx context.Context, plan *workflow.DependencyPlan, engineFor func() *engine.Engine, optionsFor func(*workflow.Definition, map[string]map[string]any) engine.Options, labelRoot bool) (*engine.State, error) {
 	if err := validatePluginDeclarations(plan); err != nil {
 		return nil, err
 	}
@@ -106,6 +126,9 @@ func executeDependencyPlan(ctx context.Context, plan *workflow.DependencyPlan, e
 		options.Dependencies = dependencyValues(node, states, options.DryRun)
 		state, err := engineFor().RunValidated(ctx, node.Definition, options)
 		if err != nil {
+			if node == plan.Root && !labelRoot {
+				return nil, err
+			}
 			return nil, fmt.Errorf("workflow %q: %w", node.Definition.Name, err)
 		}
 		states[node] = state
