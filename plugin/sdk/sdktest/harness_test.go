@@ -19,6 +19,46 @@ type testConfig struct {
 	Name string `json:"name"`
 }
 
+func TestHarnessCallbackResultPreservesJSONNumber(t *testing.T) {
+	want := json.Number("9007199254740993")
+	plugin, err := sdk.New("acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sdk.RegisterStep(plugin, "number", sdk.StepHandler[struct{}]{
+		Run: func(ctx context.Context, request sdk.RunRequest[struct{}]) (sdk.Result, error) {
+			value, err := request.Host.CallFunction(ctx, "number", []any{want})
+			if err != nil {
+				return sdk.Result{}, err
+			}
+			if value != want {
+				return sdk.Result{}, fmt.Errorf("callback value = %#v (%T), want %#v", value, value, want)
+			}
+			return sdk.Result{Outputs: map[string]any{"value": value}}, nil
+		},
+	}, sdk.WithHostCallbacks(sdk.HostFunctionCall)); err != nil {
+		t.Fatal(err)
+	}
+	// The argument check lives in the callback and travels back as an error rather than through a
+	// variable shared with the test goroutine.
+	host := Start(t, plugin, WithCallbacks(Callbacks{
+		CallFunction: func(_ context.Context, _ string, args []any) (any, error) {
+			if len(args) != 1 || args[0] != want {
+				return nil, fmt.Errorf("callback args = %#v, want [%#v]", args, want)
+			}
+			return want, nil
+		},
+	}))
+
+	var result sdk.Result
+	if err := host.CallStep(StepRequest{Type: "acme.number"}).Await().DecodeResult(&result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Outputs["value"] != want {
+		t.Fatalf("result value = %#v (%T), want %#v", result.Outputs["value"], result.Outputs["value"], want)
+	}
+}
+
 func TestHarnessFramesEventsCallbacksAndCancellation(t *testing.T) {
 	plugin, err := sdk.New("acme")
 	if err != nil {

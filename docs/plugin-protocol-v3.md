@@ -77,6 +77,16 @@ no host client or output streams because Wuko does not enable callbacks or execu
 handler. `sdk.RunRequest.Ready` reports service startup; calling it for a step without a `Service`
 handler returns an error instead of invoking a nil function.
 
+Every dynamic JSON value the SDK hands a handler decodes numbers as `json.Number`, never
+`float64`: `with` fields typed `any`, `map[string]any`, or `[]any`, `sdk.StepContext.Vars`,
+`PresetVars`, `Inputs`, `Steps`, `Dependencies`, `Bindings`, `Providers`, `sdk.Result.Outputs` and
+`Variables`, `plugin.start` configuration, helper arguments, and `Host.CallFunction` results. A
+`float64` cannot hold an integer past 2^53, so `with: {id: 9007199254740993}` would otherwise
+reach the plugin rounded. Fields with a concrete Go type keep decoding into that type, so declare
+`int64` or `float64` where the shape is known and type-switch on `json.Number` only where it is
+not. Plugins written against an earlier SDK that assert `value.(float64)` on these values must
+switch to `json.Number` and its `Int64`, `Float64`, or `String` methods.
+
 The `Host` methods are also checked against the step's `sdk.WithHostCallbacks` declaration before
 the SDK writes a callback frame. An undeclared callback therefore fails locally as well as at the
 Wuko boundary. `Host.Secret` requires `sdk.HostFunctionCall`, because secrets use

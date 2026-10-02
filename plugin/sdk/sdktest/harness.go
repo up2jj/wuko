@@ -565,7 +565,7 @@ func (harness *Harness) handleCallback(request callbackRequest) {
 		var params struct {
 			Content string `json:"content"`
 		}
-		if err := json.Unmarshal(request.Params, &params); err != nil {
+		if err := decodeCallbackParams(request.Params, &params); err != nil {
 			callbackErr = fmt.Errorf("decoding template validation callback: %w", err)
 		} else if harness.callbacks.ValidateTemplate == nil {
 			callbackErr = fmt.Errorf("template validation callback is not configured")
@@ -577,7 +577,7 @@ func (harness *Harness) handleCallback(request callbackRequest) {
 			Content string         `json:"content"`
 			Extra   map[string]any `json:"extra"`
 		}
-		if err := json.Unmarshal(request.Params, &params); err != nil {
+		if err := decodeCallbackParams(request.Params, &params); err != nil {
 			callbackErr = fmt.Errorf("decoding template render callback: %w", err)
 		} else if harness.callbacks.RenderTemplate == nil {
 			callbackErr = fmt.Errorf("template render callback is not configured")
@@ -591,7 +591,7 @@ func (harness *Harness) handleCallback(request callbackRequest) {
 			Name string `json:"name"`
 			Args []any  `json:"args"`
 		}
-		if err := json.Unmarshal(request.Params, &params); err != nil {
+		if err := decodeCallbackParams(request.Params, &params); err != nil {
 			callbackErr = fmt.Errorf("decoding function callback: %w", err)
 		} else if harness.callbacks.CallFunction == nil {
 			callbackErr = fmt.Errorf("function callback is not configured")
@@ -685,6 +685,18 @@ type responseFrame struct {
 	ID     string          `json:"id"`
 	Result json.RawMessage `json:"result,omitempty"`
 	Error  *ResponseError  `json:"error,omitempty"`
+}
+
+// decodeCallbackParams mirrors the host: Wuko decodes callback payloads with UseNumber, so the
+// fakes must hand a test the json.Number a workflow helper would really receive instead of a
+// float64 that has already rounded an integer past 2^53.
+func decodeCallbackParams(raw json.RawMessage, target any) error {
+	if len(raw) == 0 {
+		raw = []byte("{}")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	return decoder.Decode(target)
 }
 
 func decodeFrame(data []byte, target any) error {

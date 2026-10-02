@@ -346,6 +346,11 @@ func (c *client) writeResponse(frame outgoingResponseFrame) {
 func decodeFrame(data []byte, target any) error {
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
+	// json.Number is the number a workflow sees everywhere else, so host callback payloads that
+	// carry dynamic values — the arguments of host.function.call and the extra data of
+	// host.template.render — must not round an integer past 2^53 on the way in. Frame envelopes
+	// keep their payloads in json.RawMessage, where UseNumber has no effect.
+	decoder.UseNumber()
 	if err := decoder.Decode(target); err != nil {
 		return err
 	}

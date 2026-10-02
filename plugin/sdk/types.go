@@ -341,6 +341,10 @@ func decodeConfig[Config any](raw json.RawMessage) (Config, error) {
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
+	// A Config field typed any, map[string]any, or []any must see the same dynamic value shapes
+	// as the request context does, so numbers stay json.Number here too: decoding a workflow's
+	// `with: {id: 9007199254740993}` into float64 would silently round it.
+	decoder.UseNumber()
 	if err := decoder.Decode(&config); err != nil {
 		return config, err
 	}

@@ -236,6 +236,24 @@ func TestExecutorRunResultUsesLanguageNeutralFieldNames(t *testing.T) {
 	}
 }
 
+func TestDecodeFramePreservesDynamicJSONNumbers(t *testing.T) {
+	const raw = "9007199254740993"
+	want := json.Number(raw)
+	var params struct {
+		Args  []any          `json:"args"`
+		Extra map[string]any `json:"extra"`
+	}
+	if err := decodeFrame([]byte(`{"args":[`+raw+`],"extra":{"large":`+raw+`}}`), &params); err != nil {
+		t.Fatal(err)
+	}
+	if len(params.Args) != 1 || params.Args[0] != want {
+		t.Fatalf("args = %#v, want [json.Number(%q)]", params.Args, raw)
+	}
+	if params.Extra["large"] != want {
+		t.Fatalf("extra value = %#v (%T), want json.Number(%q)", params.Extra["large"], params.Extra["large"], raw)
+	}
+}
+
 type memoryTransport struct{ manifest, archive []byte }
 
 type synchronizedBuffer struct {

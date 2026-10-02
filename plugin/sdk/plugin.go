@@ -508,7 +508,7 @@ func decodeParams(raw json.RawMessage, target any) error {
 	if len(raw) == 0 {
 		raw = []byte("{}")
 	}
-	if err := json.Unmarshal(raw, target); err != nil {
+	if err := decodeJSON(raw, target); err != nil {
 		return fmt.Errorf("decoding request parameters: %w", err)
 	}
 	return nil

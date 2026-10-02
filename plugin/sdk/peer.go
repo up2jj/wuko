@@ -327,7 +327,7 @@ func callHost(ctx context.Context, method string, params map[string]any, result 
 			return &Error{Code: response.Error.Code, Err: errors.New(response.Error.Message)}
 		}
 		if result != nil {
-			return json.Unmarshal(response.Result, result)
+			return decodeJSON(response.Result, result)
 		}
 		return nil
 	case <-ctx.Done():
