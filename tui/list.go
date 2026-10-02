@@ -325,24 +325,6 @@ func (m selectionModel) updateActionMenu(message tea.Msg) (tea.Model, tea.Cmd) {
 	case "esc":
 		m.actionMode = false
 		m.actionError = ""
-	case "up", "k":
-		m.actionCursor = max(m.actionCursor-1, 0)
-		m.actionError = ""
-	case "down", "j":
-		m.actionCursor = min(m.actionCursor+1, max(len(actions)-1, 0))
-		m.actionError = ""
-	case "home":
-		m.actionCursor = 0
-		m.actionError = ""
-	case "end":
-		m.actionCursor = max(len(actions)-1, 0)
-		m.actionError = ""
-	case "pgup":
-		m.actionCursor = max(m.actionCursor-m.actionPageSize(), 0)
-		m.actionError = ""
-	case "pgdown":
-		m.actionCursor = min(m.actionCursor+m.actionPageSize(), max(len(actions)-1, 0))
-		m.actionError = ""
 	case "enter":
 		if len(actions) == 0 {
 			return m, nil
@@ -357,80 +339,26 @@ func (m selectionModel) updateActionMenu(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.filter = m.list.FilterValue()
 		m.done = true
 		return m, tea.Quit
+	default:
+		palette := m.actionPalette()
+		if cursor, moved := palette.move(keyMessage.String()); moved {
+			m.actionCursor = cursor
+			m.actionError = ""
+		}
 	}
 	return m, nil
 }
 
 func (m selectionModel) actionMenuView() string {
-	var view strings.Builder
-	view.WriteString(interactiveStyles.message.Render("Actions — "+m.actionOption.Label) + "\n")
-	if m.actionOption.Description != "" {
-		view.WriteString(interactiveStyles.description.Render(m.actionOption.Description) + "\n")
-	}
-	if m.actionOption.Path != "" {
-		view.WriteString(interactiveStyles.description.Render(m.actionOption.Path) + "\n")
-	}
-	view.WriteByte('\n')
-	start, end := m.actionVisibleRange()
-	for index := start; index < end; index++ {
-		action := m.actionOption.Actions[index]
-		prefix := "  "
-		if index == m.actionCursor {
-			prefix = interactiveStyles.cursor.Render("> ")
-		}
-		label := action.Label
-		description := action.Description
-		if action.Disabled {
-			label = interactiveStyles.disabled.Render(label)
-			if description != "" {
-				description += " • "
-			}
-			description += "disabled: " + action.DisabledReason
-			description = interactiveStyles.disabled.Render(description)
-		} else if index == m.actionCursor {
-			label = interactiveStyles.selected.Render(label)
-			description = interactiveStyles.description.Render(description)
-		} else {
-			label = interactiveStyles.content.Render(label)
-			description = interactiveStyles.description.Render(description)
-		}
-		line := prefix + label
-		if description != "" {
-			line += " " + interactiveStyles.description.Render("—") + " " + description
-		}
-		view.WriteString(ansi.Truncate(line, max(m.width, 1), "…") + "\n")
-	}
-	if m.actionError != "" {
-		view.WriteString(interactiveStyles.error.Render(m.actionError) + "\n")
-	}
-	view.WriteString(renderHelpText(wrapHelp([]string{"↑/↓ move", "enter select", "esc back", cancelHelp}, m.width)))
-	return view.String()
+	return m.actionPalette().view()
 }
 
-func (m selectionModel) actionVisibleRange() (int, int) {
-	page := m.actionPageSize()
-	length := len(m.actionOption.Actions)
-	if length <= page {
-		return 0, length
+func (m selectionModel) actionPalette() actionPalette {
+	return actionPalette{
+		Title: m.actionOption.Label, Description: m.actionOption.Description, Path: m.actionOption.Path,
+		Actions: m.actionOption.Actions, Cursor: m.actionCursor, Error: m.actionError,
+		Width: m.width, Height: m.height,
 	}
-	start := max(m.actionCursor-page/2, 0)
-	start = min(start, length-page)
-	return start, start + page
-}
-
-func (m selectionModel) actionPageSize() int {
-	headerLines := 2
-	if m.actionOption.Description != "" {
-		headerLines++
-	}
-	if m.actionOption.Path != "" {
-		headerLines++
-	}
-	if m.actionError != "" {
-		headerLines++
-	}
-	helpLines := strings.Count(wrapHelp([]string{"↑/↓ move", "enter select", "esc back", cancelHelp}, m.width), "\n")
-	return max(m.height-headerLines-helpLines, 1)
 }
 
 type multiSelectionModel struct {

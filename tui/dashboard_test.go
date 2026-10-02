@@ -85,6 +85,42 @@ func TestDashboardGlobalExitKeysWorkInsideMenu(t *testing.T) {
 	}
 }
 
+func TestDashboardUsesWorkflowActionPalette(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	var tracker sync.WaitGroup
+	dashboard := newDashboardModel(ctx, cancel, DashboardConfig{
+		Title: "Test", Groups: []DashboardGroup{{ID: "static", Widgets: []DashboardWidget{{
+			ID: "one", Title: "One", Actions: []DashboardAction{{ID: "build", Label: "Build"}, {ID: "deploy", Label: "Deploy"}},
+		}}}},
+		Render: func(_, _ string, _ map[string]any, _ DashboardState, _ map[string]DashboardState) (string, error) {
+			return "ready", nil
+		},
+	}, &tracker)
+	updated, _ := dashboard.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
+	dashboard = updated.(dashboardModel)
+	updated, _ = dashboard.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	dashboard = updated.(dashboardModel)
+
+	workflowPicker := newSelectionModel("Workflows", []Option{{
+		Label: "One", Actions: []SelectionAction{{Label: "Build"}, {Label: "Deploy"}},
+	}})
+	updated, _ = workflowPicker.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
+	workflowPicker = updated.(selectionModel)
+	updated, _ = workflowPicker.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	workflowPicker = updated.(selectionModel)
+
+	if got, want := dashboard.View().Content, workflowPicker.View().Content; got != want {
+		t.Fatalf("dashboard action palette differs from workflow picker\n--- dashboard ---\n%s\n--- workflow ---\n%s", got, want)
+	}
+	if !strings.Contains(dashboard.View().Content, "Actions — One") || !strings.Contains(dashboard.View().Content, "> ") {
+		t.Fatalf("dashboard action palette = %q", dashboard.View().Content)
+	}
+	if strings.Contains(dashboard.View().Content, "Build —") {
+		t.Fatalf("dashboard action without a description has a dangling separator: %q", dashboard.View().Content)
+	}
+}
+
 func newTwoGroupDashboard(t *testing.T, every time.Duration) dashboardModel {
 	t.Helper()
 	ctx, cancel := context.WithCancel(t.Context())

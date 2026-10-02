@@ -487,8 +487,8 @@ callback outputs displayed in the dashboard. A callback step ID may not shadow a
 step, callbacks cannot contain another dashboard or an explicit `return`, and interactive callback
 steps are unavailable.
 
-Use Tab and Shift+Tab to move widget focus, Enter to open the focused widget's action menu, `r` to
-refresh every refreshable group, arrows or `j`/`k` to scroll, and `q` or Escape to close the
+Use Tab and Shift+Tab to move widget focus, Enter or `a` to open the focused widget's action menu,
+`r` to refresh every refreshable group, arrows or `j`/`k` to scroll, and `q` or Escape to close the
 dashboard successfully. Confirmation text is itself a live template. Only one action runs at a
 time; its group pauses while it runs and refreshes afterward. `refresh_groups` on an action names
 additional groups to refresh. Refresh callbacks otherwise run concurrently up to

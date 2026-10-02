@@ -214,10 +214,6 @@ func (m dashboardModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			ref := m.focusedWidget()
 			actions := m.config.Groups[ref.group].Widgets[ref.widget].Actions
 			switch message.String() {
-			case "up", "k":
-				m.menuIndex = max(m.menuIndex-1, 0)
-			case "down", "j":
-				m.menuIndex = min(m.menuIndex+1, max(len(actions)-1, 0))
 			case "enter":
 				if len(actions) > 0 && !m.actionRun {
 					job := dashboardJob{kind: dashboardActionJob, group: ref.group, widget: ref.widget, action: m.menuIndex, refreshGroups: slices.Clone(actions[m.menuIndex].RefreshGroups)}
@@ -238,6 +234,10 @@ func (m dashboardModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			case "esc":
 				m.menu = false
+			default:
+				if cursor, moved := m.actionPalette().move(message.String()); moved {
+					m.menuIndex = cursor
+				}
 			}
 			return m, tea.Batch(commands...)
 		}
@@ -260,7 +260,7 @@ func (m dashboardModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			if len(m.widgets) > 0 {
 				m.focus = (m.focus - 1 + len(m.widgets)) % len(m.widgets)
 			}
-		case "enter":
+		case "enter", "a":
 			if len(m.widgets) > 0 && !m.actionRun {
 				ref := m.focusedWidget()
 				if len(m.config.Groups[ref.group].Widgets[ref.widget].Actions) > 0 {
@@ -290,6 +290,11 @@ func (m dashboardModel) View() tea.View {
 	if m.done {
 		return tea.NewView("")
 	}
+	if m.menu {
+		view := tea.NewView(m.actionPalette().view())
+		view.AltScreen = true
+		return view
+	}
 	lines := strings.Split(m.renderPage(), "\n")
 	start := min(m.offset, max(len(lines)-1, 0))
 	end := min(start+m.pageSize(), len(lines))
@@ -298,10 +303,7 @@ func (m dashboardModel) View() tea.View {
 		visible += "\n"
 		end++
 	}
-	help := "↑/↓ scroll  tab focus  enter actions  r refresh  q quit"
-	if m.menu {
-		help = "↑/↓ choose  enter run  esc back"
-	}
+	help := "↑/↓ scroll  tab focus  enter/a actions  r refresh  q quit"
 	if m.confirm {
 		help = "y/enter confirm  n/esc cancel"
 	}
@@ -524,9 +526,6 @@ func (m dashboardModel) renderPage() string {
 		page.WriteString(m.renderWidgetGrid(groupIndex))
 		page.WriteString("\n\n")
 	}
-	if m.menu {
-		page.WriteString(m.renderActionMenu())
-	}
 	if m.confirm {
 		page.WriteString(interactiveStyles.error.Bold(true).Render(m.confirmText + " [y/N]"))
 		page.WriteByte('\n')
@@ -590,23 +589,14 @@ func latestActionLine(widget DashboardWidget, states map[string]DashboardState) 
 	return line
 }
 
-func (m dashboardModel) renderActionMenu() string {
+func (m dashboardModel) actionPalette() actionPalette {
 	ref := m.focusedWidget()
 	widget := m.config.Groups[ref.group].Widgets[ref.widget]
-	var view strings.Builder
-	view.WriteString(interactiveStyles.message.Render("Actions for " + widget.Title))
-	view.WriteByte('\n')
+	actions := make([]SelectionAction, len(widget.Actions))
 	for index, action := range widget.Actions {
-		marker := "  "
-		style := interactiveStyles.content
-		if index == m.menuIndex {
-			marker = "› "
-			style = interactiveStyles.selected
-		}
-		view.WriteString(style.Render(marker + action.Label))
-		view.WriteByte('\n')
+		actions[index] = SelectionAction{Label: action.Label}
 	}
-	return view.String()
+	return actionPalette{Title: widget.Title, Actions: actions, Cursor: m.menuIndex, Width: m.width, Height: m.height}
 }
 
 func (m dashboardModel) focusedWidget() dashboardWidgetRef {
