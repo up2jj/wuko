@@ -15,6 +15,7 @@ import (
 	"github.com/up2jj/wuko/helper"
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/provider"
+	"github.com/up2jj/wuko/workflow"
 	"gopkg.in/yaml.v3"
 )
 
@@ -102,6 +103,9 @@ type Request struct {
 	// runners that implement WorkflowAware. A host that supports no workflow calls still
 	// supplies a binding, whose calls report that invocation is unavailable.
 	Workflows WorkflowRunner
+	// InlineWorkflows validates and executes isolated step sequences against the workflow state
+	// captured for this request. It is populated only for runners implementing InlineWorkflowAware.
+	InlineWorkflows InlineWorkflowRunner
 	// PreviousAttempt is the most recent failed attempt that produced a complete result.
 	// It is nil on the first attempt and remains immutable for the duration of Run.
 	PreviousAttempt *Result
@@ -133,6 +137,24 @@ type WorkflowCall struct {
 type WorkflowRunner interface {
 	ValidateWorkflow(context.Context, WorkflowCall) error
 	RunWorkflow(context.Context, WorkflowCall) (map[string]any, error)
+}
+
+// InlineWorkflowCall describes one isolated callback owned by a long-lived step. Bindings add
+// callback-local template and expression roots, while declared outputs form the only data that
+// crosses back to the caller.
+type InlineWorkflowCall struct {
+	Name     string
+	Steps    []workflow.Step
+	Finally  []workflow.Step
+	Outputs  map[string]string
+	Bindings map[string]any
+}
+
+// InlineWorkflowRunner is the engine capability consumed by steps that run embedded callbacks.
+// Every call starts from the immutable state visible when the owning step began.
+type InlineWorkflowRunner interface {
+	ValidateInlineWorkflow(context.Context, InlineWorkflowCall) error
+	RunInlineWorkflow(context.Context, InlineWorkflowCall) (map[string]any, error)
 }
 
 // ResolveSecret resolves a secret or reports missing engine wiring.
@@ -303,6 +325,11 @@ type ExecutorFileSystem interface {
 // overwhelming majority of steps - which never call a workflow - do not pay for the binding.
 type WorkflowAware interface {
 	WorkflowAware()
+}
+
+// InlineWorkflowAware asks the engine to bind isolated inline execution to this runner's request.
+type InlineWorkflowAware interface {
+	InlineWorkflowAware()
 }
 
 // ObservationError reports that a failed runner still produced a complete, usable observation.

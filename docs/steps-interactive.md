@@ -416,6 +416,90 @@ The step is display-only and publishes no outputs or variables. With non-interac
 prints the message, headers, and every row once, without pagination controls. Rows are never
 silently truncated or capped.
 
+## `dashboard`
+
+Keep an interactive terminal dashboard open as one ordinary workflow step. Each group contains a
+responsive grid of template-backed widgets and may own a refresh callback made from normal Wuko
+steps. The callback runs immediately, then again after `every`; omit `every` for manual refreshes.
+
+```yaml
+- id: started
+  type: time
+  with: {format: "15:04:05"}
+
+- id: monitor
+  type: dashboard
+  with:
+    title: Local system
+    max_concurrency: 4
+    groups:
+      - id: machine
+        title: Machine
+        columns: 2
+        refresh:
+          every: 3s
+          steps:
+            - id: uptime
+              type: shell
+              with: {script: uptime}
+            - id: disk
+              type: shell
+              with: {script: "df -h / | tail -1"}
+          outputs:
+            uptime: steps.uptime.stdout
+            disk: steps.disk.stdout
+        widgets:
+          - id: load
+            title: Load
+            template: |-
+              Started at {{ .steps.started.value }}
+              {{ .data.uptime }}
+              Last action: {{ (index .actions "processes").status }}
+            actions:
+              - id: processes
+                label: Capture busiest processes
+                confirm: Capture the current process list?
+                steps:
+                  - id: ps
+                    type: shell
+                    with: {script: "ps -Ao pid,%cpu,comm -r | head -6"}
+                outputs:
+                  summary: steps.ps.stdout
+          - id: disk
+            title: Root filesystem
+            template: |-
+              {{ .data.disk }}
+```
+
+Dashboard templates retain every root visible when the step begins, including `.vars`, `.steps`,
+`.inputs`, `.dependencies`, `.workflow`, and `.run`. They additionally receive live roots:
+
+- `.data` is the current group refresh output map.
+- `.refresh` contains `status`, `data`, `error`, `updated_at`, and `duration`.
+- `.actions.<id>` contains the same fields for that widget's latest action run.
+
+Refresh and action callbacks use ordinary inline `steps`, optional `finally`, and an `outputs` map
+whose values are Expr expressions. Each invocation starts from an isolated snapshot of all state
+that existed before the dashboard step. An action also receives the focused group's latest refresh
+map as the `data` root, so its steps can use `{{ .data.name }}` and its expressions can use
+`data.name`. Callback state never leaks into the surrounding workflow except through the declared
+callback outputs displayed in the dashboard. A callback step ID may not shadow an earlier workflow
+step, callbacks cannot contain another dashboard or an explicit `return`, and interactive callback
+steps are unavailable.
+
+Use Tab and Shift+Tab to move widget focus, Enter to open the focused widget's action menu, `r` to
+refresh every refreshable group, arrows or `j`/`k` to scroll, and `q` or Escape to close the
+dashboard successfully. Confirmation text is itself a live template. Only one action runs at a
+time; its group pauses while it runs and refreshes afterward. `refresh_groups` on an action names
+additional groups to refresh. Refresh callbacks otherwise run concurrently up to
+`max_concurrency`, which defaults to 4. A failed refresh replaces that group's widgets with the
+error while other groups continue.
+
+The dashboard requires an interactive terminal and fails instead of falling back in a
+non-interactive run. Closing it publishes `steps.<id>.groups`, keyed by group ID, with each group's
+final refresh status/data and nested widget action statuses. Ctrl+C cancels the workflow rather
+than closing the step successfully.
+
 ## `tui_confirm`
 
 Collect a boolean decision. `default` selects the initial interactive answer; it does not answer a

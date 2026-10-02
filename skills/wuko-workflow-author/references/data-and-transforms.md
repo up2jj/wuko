@@ -12,6 +12,12 @@ Use this guidance when a workflow gathers input, produces typed data, transforms
 - Use `select_all: true` in multiple mode to initialize every enabled choice as selected; it is incompatible with a `max_selected` smaller than the enabled choice count. Use `auto_select_single: true` in single-select mode when an interactive dynamic selector should bypass the picker if exactly one enabled choice remains; non-interactive runs do not infer a value and retain their normal required or optional behavior.
 - Multiple choices preserve selection order and may use `min_selected` and `max_selected`; explicit bounds supersede `required`. Optional single choices expose `selected` to distinguish no selection from a selected null value. Dynamic object choices retain the selected source object in `item`, or ordered source objects in `items` for multiple selection, while the configured variable continues to contain only mapped scalar values.
 - Keep path patterns relative to the picker root and supply prompt variables explicitly in non-interactive runs.
+- Use `dashboard` when one interactive step should continuously present grouped, template-backed
+  widgets. Put normal Wuko steps in each group's `refresh`, declare the displayed values in its
+  `outputs`, and use widget `actions` for focused operations. Widget templates retain the workflow
+  roots visible before the dashboard and add `.data`, `.refresh`, and `.actions`; action callbacks
+  also receive the current group `data` root. Dashboard callbacks are isolated, non-interactive
+  inline workflows, so do not reuse an earlier step ID or put `dashboard`/`return` inside them.
 
 ## Typed values and structured data
 

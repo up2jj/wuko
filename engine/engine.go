@@ -143,6 +143,10 @@ type Options struct {
 	workflowRoot        bool
 	workflowInvoker     WorkflowInvoker
 	workflowEnvironment *workflowInvocationEnvironment
+	initialState        *State
+	// openParentReferences relaxes variable reference checks for inline callbacks validated
+	// before the enclosing workflow has run: earlier steps may still write variables.
+	openParentReferences bool
 	// callerName and callerPath identify the innermost enclosing workflow file. A composite
 	// action executes as a synthetic definition with no path of its own, so without these a
 	// run_workflow call made from inside an action could not name the workflow it came from.
@@ -468,7 +472,7 @@ func (e *Engine) validateStepsRaw(ctx context.Context, definition *workflow.Defi
 			traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusSucceeded, started, "", nil)
 			continue
 		}
-		if err := validateTemplates(options.renderer, workflowStep.With, rawSourceStep(workflowStep.Type)); err != nil {
+		if err := validateStepTemplates(options.renderer, workflowStep.With, workflowStep.Type); err != nil {
 			traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusFailed, started, "validating templates", err)
 			return fmt.Errorf("step %q template: %w", workflowStep.ID, err)
 		}
@@ -495,7 +499,8 @@ func (e *Engine) validateStepsRaw(ctx context.Context, definition *workflow.Defi
 			continue
 		}
 		_, workflowAware := runner.(step.WorkflowAware)
-		request := makeRequest(ctx, definition, workflowStep.ID, options, state, 1, 1, "validation", workflowAware)
+		_, inlineWorkflowAware := runner.(step.InlineWorkflowAware)
+		request := e.makeRequest(ctx, definition, workflowStep.ID, options, state, 1, 1, "validation", workflowAware, inlineWorkflowAware)
 		if err := validator.Validate(ctx, request); err != nil {
 			traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusFailed, started, "validating runner", err)
 			return fmt.Errorf("step %q: %w", workflowStep.ID, err)
@@ -1027,6 +1032,7 @@ func (e *Engine) executeStep(ctx context.Context, definition *workflow.Definitio
 	// An action step's own request never invokes a workflow: the steps inside the action get
 	// their own requests, and each is bound according to its own runner.
 	workflowAware := false
+	inlineWorkflowAware := false
 	cleanup := func() {}
 	if workflowStep.Action != nil {
 		prepareStarted := time.Now()
@@ -1044,7 +1050,7 @@ func (e *Engine) executeStep(ctx context.Context, definition *workflow.Definitio
 		renderStarted := time.Now()
 		traceStep(options, definition, workflowStep, diagnostic.PhaseRender, diagnostic.StatusStarted, time.Time{}, "rendering step configuration", nil)
 		data := templateData(definition, options.RunDir, state)
-		rendered, err := renderValue(options.renderer, workflowStep.With, data, rawSourceStep(workflowStep.Type))
+		rendered, err := renderStepValue(options.renderer, workflowStep.With, data, workflowStep.Type)
 		if err != nil {
 			traceStep(options, definition, workflowStep, diagnostic.PhaseRender, diagnostic.StatusFailed, renderStarted, "", err)
 			stepErr := fmt.Errorf("workflow %q step %q (%s): rendering configuration: %w", definition.Name, workflowStep.ID, workflowStep.Type, err)
@@ -1080,6 +1086,7 @@ func (e *Engine) executeStep(ctx context.Context, definition *workflow.Definitio
 		}
 		traceStep(options, definition, workflowStep, diagnostic.PhaseRunner, diagnostic.StatusSucceeded, runnerStarted, "", nil)
 		_, workflowAware = runner.(step.WorkflowAware)
+		_, inlineWorkflowAware = runner.(step.InlineWorkflowAware)
 		outputSchema, schemaErr := e.registry.OutputSchemaForConfig(ctx, workflowStep.Type, raw)
 		if schemaErr != nil {
 			stepErr := fmt.Errorf("workflow %q step %q (%s): resolving output contract: %w", definition.Name, workflowStep.ID, workflowStep.Type, schemaErr)
@@ -1103,7 +1110,7 @@ func (e *Engine) executeStep(ctx context.Context, definition *workflow.Definitio
 		}
 	}
 	attempt, maximum := max(options.attempt, 1), max(options.maxAttempts, 1)
-	request := makeRequest(ctx, definition, workflowStep.ID, options, state, attempt, max(maximum, attempt), operationID, workflowAware)
+	request := e.makeRequest(ctx, definition, workflowStep.ID, options, state, attempt, max(maximum, attempt), operationID, workflowAware, inlineWorkflowAware)
 	if previous, ok := options.previousPass[workflowStep.ID]; ok {
 		request.PreviousAttempt = &previous
 	}
@@ -1336,6 +1343,9 @@ func runStatsIdentity(options Options) RunStats {
 }
 
 func initialState(definition *workflow.Definition, options Options) (*State, error) {
+	if options.initialState != nil {
+		return cloneState(options.initialState), nil
+	}
 	vars, environment, err := workflow.PrepareValues(definition, workflow.LoadOptions{Vars: options.Vars, DeclaredVars: options.DeclaredVars, Env: options.Env, BaseEnv: options.BaseEnv, EnvironmentLoaders: options.EnvironmentLoaders, RunDir: options.RunDir, SecretSession: definition.SecretSession(), Providers: options.Providers})
 	if err != nil {
 		return nil, err
@@ -1357,7 +1367,7 @@ func templateData(definition *workflow.Definition, runDir string, state *State) 
 // makeRequest builds one step request. workflowAware carries whether the receiving runner
 // invokes child workflows: the binding embeds a full copy of Options, so attaching it to every
 // request would allocate half a kilobyte per step for a capability almost no step uses.
-func makeRequest(ctx context.Context, definition *workflow.Definition, stepID string, options Options, state *State, attempt, maxAttempts int, operationID string, workflowAware bool) step.Request {
+func (e *Engine) makeRequest(ctx context.Context, definition *workflow.Definition, stepID string, options Options, state *State, attempt, maxAttempts int, operationID string, workflowAware, inlineWorkflowAware bool) step.Request {
 	var resolveSecret func(string) (string, error)
 	if session := definition.SecretSession(); session != nil {
 		resolveSecret = session.Resolve
@@ -1365,6 +1375,10 @@ func makeRequest(ctx context.Context, definition *workflow.Definition, stepID st
 	var workflows step.WorkflowRunner
 	if workflowAware {
 		workflows = boundWorkflowRunner{invoker: options.workflowInvoker, definition: definition, options: options, operationID: operationID}
+	}
+	var inlineWorkflows step.InlineWorkflowRunner
+	if inlineWorkflowAware {
+		inlineWorkflows = boundInlineWorkflowRunner{engine: e, definition: definition, options: options, state: cloneState(state), operationID: operationID}
 	}
 	return step.Request{
 		StepID: stepID, WorkflowName: definition.Name, WorkflowSource: definition.Location.Source, WorkflowDir: definition.Dir,
@@ -1380,8 +1394,8 @@ func makeRequest(ctx context.Context, definition *workflow.Definition, stepID st
 		Executor: options.Executor, ElevatedExecutor: options.ElevatedExecutor,
 		ElevationAllowed: options.ElevationAllowed, InsideExecutor: options.insideExecutor,
 		Services:  reportingServiceLauncher{launcher: options.services, options: options, workflowName: definition.Name},
-		Workflows: workflows,
-		Secret:    resolveSecret, Helpers: definition.Helpers(), HelperContext: ctx,
+		Workflows: workflows, InlineWorkflows: inlineWorkflows,
+		Secret: resolveSecret, Helpers: definition.Helpers(), HelperContext: ctx,
 	}
 }
 

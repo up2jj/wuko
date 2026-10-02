@@ -82,6 +82,9 @@ func (e *Engine) validateDataReferences(ctx context.Context, definition *workflo
 		validator.expressionRoots[name] = struct{}{}
 	}
 	validator.initial = newReferenceScope(state, stepSchemas)
+	if options.openParentReferences {
+		validator.initial.roots["vars"] = openReference
+	}
 	return validator.validateDefinition()
 }
 
@@ -1077,6 +1080,11 @@ func (validator *referenceValidator) validateAction(action *workflow.Action, cal
 }
 
 func (validator *referenceValidator) validateStepConfiguration(stepID, stepType string, raw map[string]any, scope *referenceScope) error {
+	// Dashboard owns nested workflow fragments and live templates. Static fields are checked here;
+	// callback workflows are checked by the runner against the captured parent state.
+	if stepType == "dashboard" {
+		return validator.validateDashboardTemplateValue("with", raw, scope, nil)
+	}
 	if err := validator.validateTemplateValue("with", raw, scope, rawSourceStep(stepType)); err != nil {
 		return err
 	}
@@ -1175,6 +1183,41 @@ func (validator *referenceValidator) validateStepConfiguration(stepID, stepType 
 		}
 	case "extract", "decode", "jsonpath", "table":
 		return validator.validateLookup("from", stringValue(raw, "from"), scope)
+	}
+	return nil
+}
+
+func (validator *referenceValidator) validateDashboardTemplateValue(label string, value any, scope *referenceScope, path []string) error {
+	if deferredStepTemplateSubtree("dashboard", path) {
+		last := path[len(path)-1]
+		if last != "template" && last != "confirm" {
+			return nil
+		}
+		text, _ := value.(string)
+		live := scope.clone()
+		live.roots["data"] = openReference
+		live.roots["refresh"] = openReference
+		live.roots["actions"] = openReference
+		return validator.validateTemplateWithRoots(label, text, live, validator.templateRoots, false)
+	}
+	switch typed := value.(type) {
+	case string:
+		return validator.validateTemplate(label, typed, scope)
+	case []any:
+		for index, item := range typed {
+			if err := validator.validateDashboardTemplateValue(fmt.Sprintf("%s item %d", label, index), item, scope, append(path, fmt.Sprint(index))); err != nil {
+				return err
+			}
+		}
+	case map[string]any:
+		if _, expression := typed["expr"].(string); expression && len(typed) == 1 {
+			return nil
+		}
+		for _, key := range slices.Sorted(maps.Keys(typed)) {
+			if err := validator.validateDashboardTemplateValue(label+" field "+key, typed[key], scope, append(path, key)); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
