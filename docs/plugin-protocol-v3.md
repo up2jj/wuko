@@ -56,6 +56,43 @@ normal composite-action engine. It may call
 built-in steps or steps registered by the same plugin. A plugin action has borrowed-directory
 semantics: it has no package directory and cannot read files beside the executable.
 
+## Testing Go plugins
+
+The `github.com/up2jj/wuko/plugin/sdk/sdktest` package runs an `sdk.Plugin` through the real JSONL
+transport while keeping the test in process. It performs initialization and clean shutdown,
+generates request IDs, routes concurrent events, and answers declared host callbacks through typed
+fakes:
+
+```go
+host := sdktest.Start(t, plugin, sdktest.WithCallbacks(sdktest.Callbacks{
+	CallFunction: func(_ context.Context, name string, args []any) (any, error) {
+		return fakeFunction(name, args)
+	},
+}))
+
+call := host.CallStep(sdktest.StepRequest{
+	Type:    "acme.server",
+	With:    map[string]any{"address": "127.0.0.1:0"},
+	Context: sdk.StepContext{StepID: "server"},
+})
+ready := call.AwaitEvent("ready")
+var result sdk.Result
+if err := ready.DecodeResult(&result); err != nil {
+	t.Fatal(err)
+}
+
+call.Cancel()
+if response := call.Await(); response.Error != nil {
+	t.Fatal(response.Error)
+}
+```
+
+`StepRequest.Operation` selects the method: it defaults to `StepRun` and also accepts `StepValidate`,
+`StepCleanup`, and `StepService`. Awaiting one named event does not discard other events from that
+call, so tests may wait for readiness before inspecting earlier stdout or stderr. `Start` registers
+`Harness.Close` with the test; calling `Close` explicitly is only necessary when the test needs to
+assert shutdown behavior before returning.
+
 ## Wire additions
 
 Initialization adds a sorted list of local action names:
