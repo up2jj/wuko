@@ -20,7 +20,7 @@ import (
 	"github.com/up2jj/wuko/workflow"
 )
 
-const scaffoldSDKFallbackVersion = "v0.16.0"
+const scaffoldSDKFallbackVersion = "v0.17.0"
 
 var (
 	pluginNamePattern = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
