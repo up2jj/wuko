@@ -8,7 +8,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net/http"
 	"net/url"
 	"os"
 	"path"
@@ -33,18 +32,13 @@ func IsRemoteLocator(locator string) bool {
 func (loader *Loader) DecodeRemote(ctx context.Context, locator string, options LoadOptions) (*Definition, func(), error) {
 	location := diagnostic.Location{Source: diagnostic.SafeURLString(locator)}
 	fetchStarted := traceStart(options.Diagnostics, diagnostic.PhaseWorkflowFetch, location, "", "", "", "fetching remote workflow")
-	payload, description, err := loader.fetchWorkflow(ctx, locator)
+	path, description, cleanup, bytesFetched, err := loader.materializeRemoteLocator(ctx, locator, options)
 	if err != nil {
 		traceFinish(options.Diagnostics, fetchStarted, diagnostic.PhaseWorkflowFetch, diagnostic.StatusFailed, location, "", "", "", "", err)
 		return nil, func() {}, err
 	}
 	location.Source = description
-	traceFinish(options.Diagnostics, fetchStarted, diagnostic.PhaseWorkflowFetch, diagnostic.StatusSucceeded, location, "", "", "", "", nil, countAttr("bytes", len(payload)))
-
-	path, cleanup, err := materializeRemoteWorkflow(payload, description, options.RejectRemoteArchives)
-	if err != nil {
-		return nil, func() {}, fmt.Errorf("materializing workflow %s: %w", description, err)
-	}
+	traceFinish(options.Diagnostics, fetchStarted, diagnostic.PhaseWorkflowFetch, diagnostic.StatusSucceeded, location, "", "", "", "", nil, countAttr("bytes", bytesFetched))
 	transferred := false
 	defer func() {
 		if !transferred {
@@ -60,6 +54,51 @@ func (loader *Loader) DecodeRemote(ctx context.Context, locator string, options 
 	remapDefinitionLocations(definition, filepath.Dir(path), description)
 	transferred = true
 	return definition, cleanup, nil
+}
+
+func (loader *Loader) materializeRemoteLocator(ctx context.Context, raw string, options LoadOptions) (string, string, func(), int, error) {
+	locator, recognized, err := ParseGitHubWorkflowLocator(raw)
+	if err != nil {
+		return "", "", func() {}, 0, err
+	}
+	if recognized {
+		if locator.isTree() {
+			return "", "", func() {}, 0, fmt.Errorf("GitHub tree locator %q selects a directory; use wuko run --pick", raw)
+		}
+		// A repository-root workflow would make the whole repository its package, so it is
+		// fetched alone through the contents API, as is any workflow when archives are rejected.
+		directory := path.Dir(locator.path)
+		if directory == "." || options.RejectRemoteArchives {
+			payload, description, err := loader.fetchGitHubWorkflowFile(ctx, locator, options)
+			if err != nil {
+				return "", "", func() {}, 0, err
+			}
+			workflowPath, cleanup, err := materializeRemoteWorkflow(payload, description, options.RejectRemoteArchives)
+			if err != nil {
+				return "", "", func() {}, 0, fmt.Errorf("materializing workflow %s: %w", description, err)
+			}
+			return workflowPath, description, cleanup, len(payload), nil
+		}
+		snapshot, cleanup, written, err := loader.snapshotGitHubRepositoryScope(ctx, locator, directory, options)
+		if err != nil {
+			return "", "", func() {}, 0, err
+		}
+		workflowPath := filepath.Join(snapshot, filepath.FromSlash(path.Base(locator.path)))
+		if info, err := os.Stat(workflowPath); err != nil || !info.Mode().IsRegular() {
+			cleanup()
+			return "", "", func() {}, 0, fmt.Errorf("GitHub workflow %s does not contain %s", locator.repositoryString(), locator.path)
+		}
+		return workflowPath, diagnostic.SafeURLString(raw), cleanup, int(written), nil
+	}
+	payload, description, err := loader.fetchWorkflow(ctx, raw)
+	if err != nil {
+		return "", "", func() {}, 0, err
+	}
+	workflowPath, cleanup, err := materializeRemoteWorkflow(payload, description, options.RejectRemoteArchives)
+	if err != nil {
+		return "", "", func() {}, 0, fmt.Errorf("materializing workflow %s: %w", description, err)
+	}
+	return workflowPath, description, cleanup, len(payload), nil
 }
 
 // LoadMarketplacePackage downloads, verifies, materializes, and decodes one marketplace
@@ -155,16 +194,6 @@ func (loader *Loader) LoadRemote(ctx context.Context, locator string, options Lo
 
 func (loader *Loader) fetchWorkflow(ctx context.Context, locator string) ([]byte, string, error) {
 	switch {
-	case strings.HasPrefix(locator, "github:"):
-		remoteURL, err := githubWorkflowURL(locator)
-		if err != nil {
-			return nil, "", err
-		}
-		headers := make(http.Header)
-		headers.Set("Accept", "application/vnd.github.raw+json")
-		headers.Set("User-Agent", "wuko")
-		payload, err := loader.fetchWithHeaders(ctx, remoteURL, headers, "workflow")
-		return payload, locator, err
 	case strings.HasPrefix(locator, "https://") || strings.HasPrefix(locator, "http://"):
 		remoteURL, err := url.Parse(locator)
 		if err != nil {
@@ -184,50 +213,29 @@ func (loader *Loader) fetchWorkflow(ctx context.Context, locator string) ([]byte
 }
 
 func githubWorkflowURL(locator string) (*url.URL, error) {
-	value := strings.TrimPrefix(locator, "github:")
-	if value == "" {
-		return nil, fmt.Errorf("invalid GitHub workflow locator %q: owner/repo is required", locator)
+	parsed, recognized, err := ParseGitHubWorkflowLocator(locator)
+	if err != nil {
+		return nil, err
 	}
+	if !recognized || parsed.isTree() {
+		return nil, fmt.Errorf("invalid GitHub workflow locator %q", locator)
+	}
+	return githubWorkflowContentsURL(parsed)
+}
 
-	repository := value
-	workflowPath := defaultRemoteWorkflowFile
-	if before, after, found := strings.Cut(value, ":"); found {
-		repository, workflowPath = before, after
-		if workflowPath == "" {
-			return nil, fmt.Errorf("invalid GitHub workflow locator %q: path is empty", locator)
-		}
-	}
-	ownerRepo := repository
-	ref := ""
-	if before, after, found := strings.Cut(repository, "@"); found {
-		ownerRepo, ref = before, after
-		if ref == "" || strings.Contains(after, "@") {
-			return nil, fmt.Errorf("invalid GitHub workflow locator %q: ref is invalid", locator)
-		}
-	}
-	parts := strings.Split(ownerRepo, "/")
-	if len(parts) != 2 || !validGitHubPart(parts[0]) || !validGitHubPart(parts[1]) {
-		return nil, fmt.Errorf("invalid GitHub workflow locator %q: expected owner/repo[@ref][:path]", locator)
-	}
-	if err := validateRemotePath(workflowPath); err != nil {
-		return nil, fmt.Errorf("invalid GitHub workflow locator %q: %w", locator, err)
-	}
-	if strings.ContainsAny(ref, "\\\x00") || strings.TrimSpace(ref) != ref {
-		return nil, fmt.Errorf("invalid GitHub workflow locator %q: ref is invalid", locator)
-	}
-
-	segments := strings.Split(workflowPath, "/")
+func githubWorkflowContentsURL(parsed GitHubWorkflowLocator) (*url.URL, error) {
+	segments := strings.Split(parsed.path, "/")
 	encodedPath := make([]string, len(segments))
 	for i, segment := range segments {
 		encodedPath[i] = url.PathEscape(segment)
 	}
-	remoteURL, err := url.Parse(githubAPIBase + "/repos/" + url.PathEscape(parts[0]) + "/" + url.PathEscape(parts[1]) + "/contents/" + strings.Join(encodedPath, "/"))
+	remoteURL, err := url.Parse(githubAPIBase + "/repos/" + url.PathEscape(parsed.owner) + "/" + url.PathEscape(parsed.repository) + "/contents/" + strings.Join(encodedPath, "/"))
 	if err != nil {
 		return nil, fmt.Errorf("building GitHub workflow URL: %w", err)
 	}
-	if ref != "" {
+	if parsed.ref != "" {
 		query := remoteURL.Query()
-		query.Set("ref", ref)
+		query.Set("ref", parsed.ref)
 		remoteURL.RawQuery = query.Encode()
 	}
 	return remoteURL, nil
@@ -270,7 +278,7 @@ func materializeRemoteWorkflow(payload []byte, description string, rejectArchive
 		files = map[string]ActionFile{defaultRemoteWorkflowFile: {Data: manifest, Mode: 0o644}}
 	}
 
-	return materializeWorkflowFiles(manifest, files, description)
+	return materializeWorkflowFiles(defaultRemoteWorkflowFile, manifest, files, description)
 }
 
 func materializeRemoteWorkflowPackage(payload []byte, description string) (string, func(), error) {
@@ -284,10 +292,10 @@ func materializeRemoteWorkflowPackage(payload []byte, description string) (strin
 	if !archive {
 		return "", nil, fmt.Errorf("marketplace package must be a tar.gz archive")
 	}
-	return materializeWorkflowFiles(manifest, files, description)
+	return materializeWorkflowFiles(defaultRemoteWorkflowFile, manifest, files, description)
 }
 
-func materializeWorkflowFiles(manifest []byte, files map[string]ActionFile, description string) (string, func(), error) {
+func materializeWorkflowFiles(entry string, manifest []byte, files map[string]ActionFile, description string) (string, func(), error) {
 	if files == nil {
 		files = map[string]ActionFile{defaultRemoteWorkflowFile: {Data: manifest, Mode: 0o644}}
 	}
@@ -298,31 +306,46 @@ func materializeWorkflowFiles(manifest []byte, files map[string]ActionFile, desc
 	}
 	cleanup := func() { _ = os.RemoveAll(directory) }
 	for name, file := range files {
-		if err := validateArchivePath(name); err != nil {
+		if _, err := writeWorkflowFile(directory, name, file.Mode, bytes.NewReader(file.Data)); err != nil {
 			cleanup()
 			return "", nil, err
 		}
-		target := filepath.Join(directory, filepath.FromSlash(name))
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-			cleanup()
-			return "", nil, fmt.Errorf("creating directory for %s: %w", name, err)
-		}
-		mode := file.Mode.Perm()
-		if mode == 0 {
-			mode = 0o644
-		}
-		if err := os.WriteFile(target, file.Data, mode); err != nil {
-			cleanup()
-			return "", nil, fmt.Errorf("writing workflow file %s: %w", name, err)
-		}
 	}
 
-	workflowPath := filepath.Join(directory, defaultRemoteWorkflowFile)
+	workflowPath := filepath.Join(directory, filepath.FromSlash(entry))
 	if _, err := os.Stat(workflowPath); err != nil {
 		cleanup()
 		return "", nil, fmt.Errorf("locating materialized workflow: %w", err)
 	}
 	return workflowPath, cleanup, nil
+}
+
+// writeWorkflowFile writes one archive member below directory and returns the bytes written. The
+// name is validated so it cannot escape directory, and an existing file is never overwritten.
+func writeWorkflowFile(directory, name string, mode os.FileMode, content io.Reader) (int64, error) {
+	if err := validateArchivePath(name); err != nil {
+		return 0, err
+	}
+	target := filepath.Join(directory, filepath.FromSlash(name))
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return 0, fmt.Errorf("creating directory for %s: %w", name, err)
+	}
+	mode = mode.Perm()
+	if mode == 0 {
+		mode = 0o644
+	}
+	file, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
+	if err != nil {
+		return 0, fmt.Errorf("writing workflow file %s: %w", name, err)
+	}
+	written, err := io.Copy(file, content)
+	if closeErr := file.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return written, fmt.Errorf("writing workflow file %s: %w", name, err)
+	}
+	return written, nil
 }
 
 func decodeRemoteWorkflowPayload(payload []byte) ([]byte, map[string]ActionFile, bool, error) {

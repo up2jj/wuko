@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -36,9 +37,10 @@ func TestWorkflowPickerStatePersistsAndPrunesUnavailable(t *testing.T) {
 	configDir := t.TempDir()
 	available := filepath.Join(t.TempDir(), "available.yaml")
 	missing := filepath.Join(t.TempDir(), "missing.yaml")
+	const remote = "github:acme/automation@main:workflows/build/wuko.yaml"
 	state := workflowPickerState{
-		Pinned: []string{missing, available, available},
-		Recent: []string{missing, available, missing},
+		Pinned: []string{missing, available, available, remote},
+		Recent: []string{missing, available, missing, remote},
 		Sort:   workflowPickerSortRecent.String(),
 	}
 	if err := saveWorkflowPickerState(t.Context(), configDir, state); err != nil {
@@ -58,10 +60,10 @@ func TestWorkflowPickerStatePersistsAndPrunesUnavailable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(loaded.Pinned) != 1 || loaded.Pinned[0] != workflowPickerPath(available) {
+	if !slices.Equal(loaded.Pinned, []string{workflowPickerPath(available), remote}) {
 		t.Fatalf("pinned = %#v", loaded.Pinned)
 	}
-	if len(loaded.Recent) != 1 || loaded.Recent[0] != workflowPickerPath(available) {
+	if !slices.Equal(loaded.Recent, []string{workflowPickerPath(available), remote}) {
 		t.Fatalf("recent = %#v", loaded.Recent)
 	}
 	if loaded.sortMode() != workflowPickerSortRecent {
@@ -172,6 +174,10 @@ func TestWorkflowPickerActionsAreContextualAndOrdered(t *testing.T) {
 	plain := workflowPickerActions(workflow.Source{Name: "build", HasForm: true}, false, workflowPickerSortName)
 	if len(plain) != 9 || plain[1].Disabled || plain[7].Label != "Pin workflow" || plain[8].Label != "Sort by recent" {
 		t.Fatalf("plain actions = %#v", plain)
+	}
+	remote := workflowPickerActions(workflow.Source{Name: "build", Locator: "github:acme/automation@main:build/wuko.yaml"}, false, workflowPickerSortName)
+	if slices.ContainsFunc(remote, func(action tui.SelectionAction) bool { return action.Intent == tui.SelectionEditor }) {
+		t.Fatalf("remote actions include editor: %#v", remote)
 	}
 }
 

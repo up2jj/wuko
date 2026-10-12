@@ -94,7 +94,7 @@ func saveWorkflowPickerState(ctx context.Context, configDir string, state workfl
 func (state *workflowPickerState) reconcile(sources []workflow.Source) bool {
 	available := make(map[string]struct{}, len(sources))
 	for _, source := range sources {
-		available[workflowPickerPath(source.Path)] = struct{}{}
+		available[workflowPickerSourcePath(source)] = struct{}{}
 	}
 	pinned, pinnedChanged := filterWorkflowPaths(state.Pinned, available)
 	recent, recentChanged := filterWorkflowPaths(state.Recent, available)
@@ -129,6 +129,13 @@ func (state workflowPickerState) isPinned(path string) bool {
 	return slices.Contains(state.Pinned, workflowPickerPath(path))
 }
 
+func workflowPickerSourcePath(source workflow.Source) string {
+	if source.Locator != "" {
+		return source.Locator
+	}
+	return workflowPickerPath(source.Path)
+}
+
 func (state *workflowPickerState) markRecent(path string) {
 	path = workflowPickerPath(path)
 	recent := make([]string, 0, min(len(state.Recent)+1, workflowPickerRecentMax))
@@ -149,7 +156,7 @@ func sortWorkflowSources(sources []workflow.Source, state workflowPickerState, m
 		recentIndex[path] = index
 	}
 	slices.SortStableFunc(result, func(left, right workflow.Source) int {
-		leftPinned, rightPinned := state.isPinned(left.Path), state.isPinned(right.Path)
+		leftPinned, rightPinned := state.isPinned(workflowPickerSourcePath(left)), state.isPinned(workflowPickerSourcePath(right))
 		if leftPinned != rightPinned {
 			if leftPinned {
 				return -1
@@ -157,8 +164,8 @@ func sortWorkflowSources(sources []workflow.Source, state workflowPickerState, m
 			return 1
 		}
 		if mode == workflowPickerSortRecent {
-			leftIndex, leftFound := recentIndex[workflowPickerPath(left.Path)]
-			rightIndex, rightFound := recentIndex[workflowPickerPath(right.Path)]
+			leftIndex, leftFound := recentIndex[workflowPickerSourcePath(left)]
+			rightIndex, rightFound := recentIndex[workflowPickerSourcePath(right)]
 			if leftFound != rightFound {
 				if leftFound {
 					return -1
@@ -175,7 +182,7 @@ func sortWorkflowSources(sources []workflow.Source, state workflowPickerState, m
 		if comparison := strings.Compare(left.Name, right.Name); comparison != 0 {
 			return comparison
 		}
-		return strings.Compare(workflowPickerPath(left.Path), workflowPickerPath(right.Path))
+		return strings.Compare(workflowPickerSourcePath(left), workflowPickerSourcePath(right))
 	})
 	return result
 }
@@ -183,7 +190,7 @@ func sortWorkflowSources(sources []workflow.Source, state workflowPickerState, m
 func workflowPickerOptions(sources []workflow.Source, state workflowPickerState, selectedPath string, mode workflowPickerSort) []tui.Option {
 	options := make([]tui.Option, len(sources))
 	for index, source := range sources {
-		path := workflowPickerPath(source.Path)
+		path := workflowPickerSourcePath(source)
 		pinned := state.isPinned(path)
 		options[index] = workflowPickerOptionWithState(source, pinned, workflowPickerSelectionKey(source) == selectedPath)
 		options[index].Actions = workflowPickerActions(source, pinned, mode)
@@ -209,10 +216,14 @@ func workflowPickerActions(source workflow.Source, pinned bool, mode workflowPic
 		{Label: "Show tree", Description: "inspect the execution structure", Intent: tui.SelectionTree},
 		{Label: "Dry run", Description: "resolve and print steps without executing them", Intent: tui.SelectionDryRun},
 		{Label: "Print command", Description: "print a reproducible wuko run command", Intent: tui.SelectionAlternate},
-		{Label: "Edit workflow", Description: "open in $VISUAL or $EDITOR", Intent: tui.SelectionEditor},
-		{Label: pinLabel, Description: pinDescription, Intent: tui.SelectionTogglePin},
-		{Label: sortLabel, Description: "change the picker ordering", Intent: tui.SelectionToggleSort},
 	}
+	if source.Locator == "" {
+		actions = append(actions, tui.SelectionAction{Label: "Edit workflow", Description: "open in $VISUAL or $EDITOR", Intent: tui.SelectionEditor})
+	}
+	actions = append(actions,
+		tui.SelectionAction{Label: pinLabel, Description: pinDescription, Intent: tui.SelectionTogglePin},
+		tui.SelectionAction{Label: sortLabel, Description: "change the picker ordering", Intent: tui.SelectionToggleSort},
+	)
 	if source.MarketplaceURL != "" {
 		actions = append(actions,
 			tui.SelectionAction{Label: "Open marketplace", Description: "open the originating marketplace", Intent: tui.SelectionMarketplace},
@@ -245,11 +256,15 @@ func workflowPickerOptionWithState(source workflow.Source, pinned, selected bool
 	if pinned {
 		parts = append(parts, "[pinned]")
 	}
-	return tui.Option{Label: label, Description: strings.Join(parts, " • "), Path: source.Path, URL: source.MarketplaceURL, Value: source, Default: selected}
+	displayPath := source.Path
+	if source.Locator != "" {
+		displayPath = source.Locator
+	}
+	return tui.Option{Label: label, Description: strings.Join(parts, " • "), Path: displayPath, URL: source.MarketplaceURL, Value: source, Default: selected}
 }
 
 func workflowPickerSelectionKey(source workflow.Source) string {
-	return workflowPickerPath(source.Path) + "\x00" + source.Target
+	return workflowPickerSourcePath(source) + "\x00" + source.Target
 }
 
 func workflowDisplayName(source workflow.Source) string {
@@ -280,7 +295,9 @@ func filterWorkflowPaths(paths []string, available map[string]struct{}) ([]strin
 	normalized := normalizeWorkflowPaths(paths)
 	filtered := make([]string, 0, len(normalized))
 	for _, path := range normalized {
-		if _, exists := available[path]; exists {
+		// GitHub locators belong to the `run --pick` picker, which shares this state; local
+		// discovery cannot see them, so their absence is not evidence they are stale.
+		if _, exists := available[path]; exists || strings.HasPrefix(path, "github:") {
 			filtered = append(filtered, path)
 		}
 	}
@@ -290,6 +307,9 @@ func filterWorkflowPaths(paths []string, available map[string]struct{}) ([]strin
 func workflowPickerPath(path string) string {
 	if path == "" {
 		return ""
+	}
+	if strings.HasPrefix(path, "github:") {
+		return path
 	}
 	absolute, err := filepath.Abs(path)
 	if err == nil {

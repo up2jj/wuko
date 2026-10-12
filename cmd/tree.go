@@ -42,6 +42,7 @@ type treeWorkflowConfig struct {
 	variableFiles []string
 	environment   []string
 	workflowFile  string
+	remoteLocator string
 	targetName    string
 }
 
@@ -95,7 +96,12 @@ func renderWorkflowTree(command *cobra.Command, deps dependencies, args []string
 		if err != nil {
 			return fmt.Errorf("resolving workflow file %s: %w", config.workflowFile, err)
 		}
-		definition, err = loader.Load(command.Context(), path, options)
+		if config.remoteLocator != "" {
+			elevationAllowed = false
+			definition, err = loader.LoadMaterializedRemote(command.Context(), path, config.remoteLocator, options)
+		} else {
+			definition, err = loader.Load(command.Context(), path, options)
+		}
 		if err != nil {
 			return err
 		}
@@ -130,10 +136,14 @@ func renderWorkflowTree(command *cobra.Command, deps dependencies, args []string
 	// steps. Normal Wuko contexts have the built-in registry and use full preflight.
 	if deps.registry != nil && deps.registry.Len() > 0 {
 		if err := preflightDependencyPlan(command.Context(), plan, func() *engine.Engine { return workflowEngine(deps) }, func(definition *workflow.Definition, dependencies map[string]map[string]any) engine.Options {
+			localValueDir := ""
+			if elevationAllowed {
+				localValueDir = filepath.Join(definition.Dir, ".wuko", "values")
+			}
 			return engine.Options{Vars: vars, Env: env, BaseEnv: baseEnv, EnvironmentLoaders: environmentLoaders, Dependencies: dependencies, RunDir: cwd, Providers: providers,
 				Stdin: command.InOrStdin(), Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(), Diagnostics: reporter,
 				ElevationAllowed: elevationAllowed,
-				LocalValueDir:    filepath.Join(definition.Dir, ".wuko", "values"), GlobalValueDir: filepath.Join(configDir, "wuko", "values")}
+				LocalValueDir:    localValueDir, GlobalValueDir: filepath.Join(configDir, "wuko", "values")}
 		}); err != nil {
 			return err
 		}

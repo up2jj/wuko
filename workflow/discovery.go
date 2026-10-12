@@ -15,9 +15,11 @@ import (
 
 // Source identifies a discovered workflow and its precedence scope.
 type Source struct {
-	Name           string
-	Target         string
-	Path           string
+	Name   string
+	Target string
+	Path   string
+	// Locator is the stable remote selector when Path belongs to a temporary snapshot.
+	Locator        string
 	PackageDir     string
 	MarketplaceURL string
 	PackageVersion string

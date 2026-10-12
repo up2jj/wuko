@@ -150,7 +150,12 @@ func validateWorkflowSources(command *cobra.Command, deps dependencies, args []s
 		if len(args) == 2 {
 			loadOptions.Target = args[1]
 		}
-		definition, err := loader.Load(command.Context(), source.Path, loadOptions)
+		var definition *workflow.Definition
+		if source.Locator != "" {
+			definition, err = loader.LoadMaterializedRemote(command.Context(), source.Path, source.Locator, loadOptions)
+		} else {
+			definition, err = loader.Load(command.Context(), source.Path, loadOptions)
+		}
 		if err != nil {
 			if validationIssues.AddError(err) {
 				continue
@@ -165,11 +170,15 @@ func validateWorkflowSources(command *cobra.Command, deps dependencies, args []s
 			return err
 		}
 		optionsFor := func(definition *workflow.Definition, dependencies map[string]map[string]any) engine.Options {
+			localValueDir := ""
+			if source.Locator == "" {
+				localValueDir = filepath.Join(definition.Dir, ".wuko", "values")
+			}
 			return engine.Options{
 				Vars: vars, Env: env, BaseEnv: baseEnv, EnvironmentLoaders: environmentLoaders, Dependencies: dependencies, RunDir: cwd, Providers: providers,
 				Stdin: command.InOrStdin(), Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(),
-				LocalValueDir: filepath.Join(definition.Dir, ".wuko", "values"), GlobalValueDir: filepath.Join(configDir, "wuko", "values"),
-				ElevationAllowed: true,
+				LocalValueDir: localValueDir, GlobalValueDir: filepath.Join(configDir, "wuko", "values"),
+				ElevationAllowed: source.Locator == "",
 				Diagnostics:      reporter,
 			}
 		}

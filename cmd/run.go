@@ -24,6 +24,9 @@ func newRunCmd(deps dependencies) *cobra.Command {
 		Short: "Run a named or remotely located workflow",
 		Args:  cobra.MaximumNArgs(2),
 		RunE: func(command *cobra.Command, args []string) error {
+			if config.pick {
+				return runGitHubWorkflowPicker(command, deps, args, config)
+			}
 			return runWorkflow(command, deps, args, config)
 		},
 	}
@@ -35,6 +38,7 @@ func newRunCmd(deps dependencies) *cobra.Command {
 	addReporterFlag(command, &config.reporters)
 	command.Flags().StringVar(&config.reportJSON, "report-json", "", "write the final execution report as JSON")
 	command.Flags().StringVar(&config.workflowFile, "file", "", "run a workflow from a file path, or - for stdin")
+	command.Flags().BoolVar(&config.pick, "pick", false, "select a workflow from a GitHub repository or tree")
 	command.ValidArgsFunction = workflowCompletion(deps, true)
 	return command
 }
@@ -48,6 +52,8 @@ type runWorkflowConfig struct {
 	dryRun          bool
 	once            bool
 	workflowFile    string
+	remoteLocator   string
+	pick            bool
 	targetName      string
 	providerValues  map[string]map[string]any
 	nonInteractive  bool
@@ -164,6 +170,8 @@ func runWorkflow(command *cobra.Command, deps dependencies, args []string, confi
 				return fmt.Errorf("resolving workflow file %s: %w", config.workflowFile, err)
 			}
 			target.path = path
+			target.remote = config.remoteLocator != ""
+			target.locator = config.remoteLocator
 		}
 		if len(args) == 1 {
 			target.targetName = args[0]
@@ -342,6 +350,10 @@ type workflowRunTarget struct {
 }
 
 func (target workflowRunTarget) decode(ctx context.Context, loader *workflow.Loader, options workflow.LoadOptions) (*workflow.Definition, func(), error) {
+	if target.remote && target.path != "" {
+		definition, err := loader.DecodeMaterializedRemote(ctx, target.path, target.locator, options)
+		return definition, func() {}, err
+	}
 	if target.remote {
 		return loader.DecodeRemote(ctx, target.locator, options)
 	}

@@ -499,9 +499,9 @@ func runWorkflowPicker(command *cobra.Command, deps dependencies) error {
 		switch selection.Intent {
 		case tui.SelectionPrimary:
 			returnObserver := &returnDestinationObserver{}
-			runErr := runWorkflow(command, deps, nil, runWorkflowConfig{workflowFile: source.Path, targetName: source.Target, returnObserver: returnObserver})
+			runErr := runWorkflow(command, deps, nil, runWorkflowConfig{workflowFile: source.Path, remoteLocator: source.Locator, targetName: source.Target, returnObserver: returnObserver})
 			if runErr == nil {
-				pickerState.markRecent(source.Path)
+				pickerState.markRecent(workflowPickerSourcePath(source))
 				if err := saveWorkflowPickerState(command.Context(), config, pickerState); err != nil {
 					fmt.Fprintf(command.ErrOrStderr(), "Warning: cannot save workflow picker state: %v\n", err)
 				}
@@ -516,7 +516,7 @@ func runWorkflowPicker(command *cobra.Command, deps dependencies) error {
 				continue
 			}
 			returnObserver := &returnDestinationObserver{}
-			runErr := runWorkflowUI(command, deps, nil, uiWorkflowConfig{workflowFile: source.Path, targetName: source.Target, returnObserver: returnObserver})
+			runErr := runWorkflowUI(command, deps, nil, uiWorkflowConfig{workflowFile: source.Path, remoteLocator: source.Locator, targetName: source.Target, returnObserver: returnObserver})
 			resume, err := resumeAfterReturn(source, returnObserver, runErr)
 			if !resume {
 				return err
@@ -548,6 +548,10 @@ func runWorkflowPicker(command *cobra.Command, deps dependencies) error {
 				return nil
 			}
 		case tui.SelectionEditor:
+			if source.Locator != "" {
+				addNotice("remote workflows cannot be edited in place")
+				continue
+			}
 			if err := deps.openEditor(command.Context(), command.InOrStdin(), command.OutOrStdout(), command.ErrOrStderr(), source.Path); err != nil {
 				addNotice(err.Error())
 			}
@@ -555,7 +559,7 @@ func runWorkflowPicker(command *cobra.Command, deps dependencies) error {
 				return nil
 			}
 		case tui.SelectionTogglePin:
-			pickerState.togglePinned(source.Path)
+			pickerState.togglePinned(workflowPickerSourcePath(source))
 			if err := saveWorkflowPickerState(command.Context(), config, pickerState); err != nil {
 				fmt.Fprintf(command.ErrOrStderr(), "Warning: cannot save workflow picker state: %v\n", err)
 			}
@@ -581,6 +585,10 @@ func runWorkflowPicker(command *cobra.Command, deps dependencies) error {
 			target := ""
 			if source.Target != "" {
 				target = " " + shellQuote(source.Target)
+			}
+			if source.Locator != "" {
+				fmt.Fprintf(command.OutOrStdout(), "wuko run %s%s\n", shellQuote(source.Locator), target)
+				return nil
 			}
 			if source.Effective {
 				fmt.Fprintf(command.OutOrStdout(), "wuko run %s%s\n", shellQuote(source.Name), target)
@@ -623,10 +631,10 @@ func runWorkflowPickerInspection(command *cobra.Command, deps dependencies, sour
 		err = validateWorkflowSources(command, deps, nil, validateWorkflowConfig{sources: []workflow.Source{source}})
 	case tui.SelectionTree:
 		title = "Tree — " + label
-		err = renderWorkflowTree(command, deps, nil, treeWorkflowConfig{workflowFile: source.Path, targetName: source.Target})
+		err = renderWorkflowTree(command, deps, nil, treeWorkflowConfig{workflowFile: source.Path, remoteLocator: source.Locator, targetName: source.Target})
 	case tui.SelectionDryRun:
 		title = "Dry run — " + label
-		err = runWorkflow(command, deps, nil, runWorkflowConfig{workflowFile: source.Path, targetName: source.Target, dryRun: true})
+		err = runWorkflow(command, deps, nil, runWorkflowConfig{workflowFile: source.Path, remoteLocator: source.Locator, targetName: source.Target, dryRun: true})
 	default:
 		title = "Inspect — " + label
 		err = fmt.Errorf("unsupported workflow inspection")

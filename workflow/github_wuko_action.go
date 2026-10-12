@@ -162,15 +162,7 @@ const maxGitHubRepositoryArchive = 100 << 20
 // it. Reading the directory through the Git tree and blob endpoints instead costs one API request
 // per file, which exhausts the 60-request anonymous hourly budget on a package of any size.
 func (loader *Loader) fetchGitHubWukoAction(ctx context.Context, locator githubWukoActionLocator, token string) ([]byte, error) {
-	endpoint := "/repos/" + url.PathEscape(locator.owner) + "/" + url.PathEscape(locator.repository) + "/tarball"
-	if locator.ref != "" {
-		endpoint += "/" + escapeGitHubPath(locator.ref)
-	}
-	remoteURL, err := url.Parse(githubAPIBase + endpoint)
-	if err != nil {
-		return nil, fmt.Errorf("building GitHub API URL: %w", err)
-	}
-	response, err := loader.open(ctx, remoteURL, githubHeaders(token, "application/vnd.github+json"), "GitHub-hosted Wuko action archive")
+	response, err := loader.openGitHubTarball(ctx, locator.owner, locator.repository, locator.ref, token, "GitHub-hosted Wuko action archive")
 	if err != nil {
 		return nil, githubWukoActionFetchError(locator, response, err)
 	}
@@ -182,44 +174,95 @@ func (loader *Loader) fetchGitHubWukoAction(ctx context.Context, locator githubW
 	return zipActionFiles(files)
 }
 
+// openGitHubTarball requests the repository tarball for ref, or the default branch when ref is
+// empty. The caller closes the body of a successful response.
+func (loader *Loader) openGitHubTarball(ctx context.Context, owner, repository, ref, token, kind string) (*http.Response, error) {
+	endpoint := "/repos/" + url.PathEscape(owner) + "/" + url.PathEscape(repository) + "/tarball"
+	if ref != "" {
+		endpoint += "/" + escapeGitHubPath(ref)
+	}
+	remoteURL, err := url.Parse(githubAPIBase + endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("building GitHub API URL: %w", err)
+	}
+	return loader.open(ctx, remoteURL, githubHeaders(token, "application/vnd.github+json"), kind)
+}
+
 // readGitHubWukoActionArchive keeps the files under the action directory of a repository tarball.
-// GitHub wraps the repository in a single owner-repository-commit root directory, which is
-// stripped before the action directory is matched.
 func readGitHubWukoActionArchive(body io.Reader, locator githubWukoActionLocator) (map[string]ActionFile, error) {
-	overflow := fmt.Errorf("GitHub repository archive for %s exceeds %d-byte limit", locator.String(), maxGitHubRepositoryArchive)
+	files := make(map[string]ActionFile)
+	var total int64
+	err := walkGitHubArchiveScope(body, githubArchiveScope{
+		repository: locator.String(), directory: locator.directory, label: "GitHub-hosted Wuko action", maxEntries: maxEntries,
+	}, func(name string, mode os.FileMode, content io.Reader) error {
+		data, err := readArchiveFile(func() (io.ReadCloser, error) { return io.NopCloser(content), nil }, &total)
+		if err != nil {
+			return err
+		}
+		files[name] = ActionFile{Data: data, Mode: mode}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(files) == 0 {
+		return nil, fmt.Errorf("GitHub-hosted Wuko action directory %q contains no files in %s", locator.directory, locator.String())
+	}
+	return files, nil
+}
+
+// githubArchiveScope selects one directory of a repository tarball. An empty directory selects
+// the whole repository.
+type githubArchiveScope struct {
+	repository string
+	directory  string
+	label      string
+	maxEntries int
+}
+
+// walkGitHubArchiveScope streams the regular files under scope.directory of a repository tarball
+// to visit, with paths relative to that directory and normalized modes. GitHub wraps the repository
+// in a single owner-repository-commit root directory, which is stripped before the directory is
+// matched. Symlinks, duplicate paths, and more than scope.maxEntries entries are rejected, and the
+// compressed and decompressed streams are both bounded by maxGitHubRepositoryArchive.
+func walkGitHubArchiveScope(body io.Reader, scope githubArchiveScope, visit func(name string, mode os.FileMode, content io.Reader) error) error {
+	overflow := fmt.Errorf("GitHub repository archive for %s exceeds %d-byte limit", scope.repository, maxGitHubRepositoryArchive)
 	gz, err := gzip.NewReader(newLimitedReader(body, maxGitHubRepositoryArchive, overflow))
 	if err != nil {
-		return nil, fmt.Errorf("opening GitHub repository archive for %s: %w", locator.String(), err)
+		return fmt.Errorf("opening GitHub repository archive for %s: %w", scope.repository, err)
 	}
 	defer gz.Close()
 
 	reader := tar.NewReader(newLimitedReader(gz, maxGitHubRepositoryArchive, overflow))
-	prefix := locator.directory + "/"
-	files := make(map[string]ActionFile)
+	prefix := ""
+	if scope.directory != "" {
+		prefix = scope.directory + "/"
+	}
+	seen := make(map[string]struct{})
 	root := ""
 	entries := 0
-	directoryFound := false
-	var total int64
+	directoryFound := prefix == ""
 	for {
 		header, err := reader.Next()
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
-			return nil, fmt.Errorf("reading GitHub repository archive for %s: %w", locator.String(), err)
+			return fmt.Errorf("reading GitHub repository archive for %s: %w", scope.repository, err)
 		}
 		repositoryPath, err := githubArchivePath(header.Name, &root)
 		if err != nil {
-			return nil, fmt.Errorf("GitHub repository archive for %s: %w", locator.String(), err)
+			return fmt.Errorf("GitHub repository archive for %s: %w", scope.repository, err)
 		}
 		if repositoryPath == "" {
 			continue
 		}
-		if repositoryPath == locator.directory {
+		if repositoryPath == scope.directory {
 			if header.Typeflag != tar.TypeDir {
-				return nil, fmt.Errorf("GitHub-hosted Wuko action path %q must identify a directory", locator.directory)
+				return fmt.Errorf("%s path %q must identify a directory", scope.label, scope.directory)
 			}
 			directoryFound = true
+			continue
 		}
 		name, found := strings.CutPrefix(repositoryPath, prefix)
 		if !found {
@@ -227,35 +270,31 @@ func readGitHubWukoActionArchive(body io.Reader, locator githubWukoActionLocator
 		}
 		directoryFound = true
 		entries++
-		if entries > maxEntries {
-			return nil, fmt.Errorf("GitHub-hosted Wuko action directory exceeds %d-entry limit", maxEntries)
+		if entries > scope.maxEntries {
+			return fmt.Errorf("%s directory exceeds %d-entry limit", scope.label, scope.maxEntries)
 		}
 		if err := validateArchivePath(name); err != nil {
-			return nil, fmt.Errorf("GitHub-hosted Wuko action archive: %w", err)
+			return fmt.Errorf("%s archive: %w", scope.label, err)
 		}
 		switch header.Typeflag {
 		case tar.TypeDir:
 			continue
 		case tar.TypeReg, tar.TypeRegA:
 		default:
-			return nil, fmt.Errorf("GitHub-hosted Wuko action file %q is a symlink or is not a regular file", name)
+			return fmt.Errorf("%s file %q is a symlink or is not a regular file", scope.label, name)
 		}
-		if _, exists := files[name]; exists {
-			return nil, fmt.Errorf("GitHub-hosted Wuko action archive contains duplicate path %q", name)
+		if _, exists := seen[name]; exists {
+			return fmt.Errorf("%s archive contains duplicate path %q", scope.label, name)
 		}
-		content, err := readArchiveFile(func() (io.ReadCloser, error) { return io.NopCloser(reader), nil }, &total)
-		if err != nil {
-			return nil, fmt.Errorf("reading GitHub-hosted Wuko action file %q: %w", name, err)
+		seen[name] = struct{}{}
+		if err := visit(name, githubArchiveMode(header.FileInfo().Mode()), reader); err != nil {
+			return fmt.Errorf("reading %s file %q: %w", scope.label, name, err)
 		}
-		files[name] = ActionFile{Data: content, Mode: githubArchiveMode(header.FileInfo().Mode())}
 	}
 	if !directoryFound {
-		return nil, fmt.Errorf("GitHub-hosted Wuko action directory %q does not exist in %s", locator.directory, locator.String())
+		return fmt.Errorf("%s directory %q does not exist in %s", scope.label, scope.directory, scope.repository)
 	}
-	if len(files) == 0 {
-		return nil, fmt.Errorf("GitHub-hosted Wuko action directory %q contains no files in %s", locator.directory, locator.String())
-	}
-	return files, nil
+	return nil
 }
 
 // githubArchivePath strips the archive's single root directory and returns the repository-relative
@@ -327,6 +366,14 @@ func githubHeaders(token, accept string) http.Header {
 }
 
 func githubWukoActionFetchError(locator githubWukoActionLocator, response *http.Response, err error) error {
+	return githubFetchError("GitHub-hosted Wuko action "+locator.String(),
+		"raise it with uses.token, GH_TOKEN/GITHUB_TOKEN, or gh authentication",
+		"provide uses.token, set GH_TOKEN/GITHUB_TOKEN, or authenticate gh", response, err)
+}
+
+// githubFetchError explains a failed GitHub API request for subject. rateHint and accessHint tell
+// the user how to raise the rate limit and how to supply credentials.
+func githubFetchError(subject, rateHint, accessHint string, response *http.Response, err error) error {
 	status := 0
 	header := http.Header{}
 	if response != nil {
@@ -335,12 +382,12 @@ func githubWukoActionFetchError(locator githubWukoActionLocator, response *http.
 	// GitHub reports an exhausted rate limit as 403 or 429. Without this the message below would
 	// blame credentials for a limit that authenticating only raises.
 	if (status == http.StatusForbidden || status == http.StatusTooManyRequests) && header.Get("X-RateLimit-Remaining") == "0" {
-		return fmt.Errorf("accessing GitHub-hosted Wuko action %s: the GitHub API rate limit is exhausted; retry after it resets, or raise it with uses.token, GH_TOKEN/GITHUB_TOKEN, or gh authentication: %w", locator.String(), err)
+		return fmt.Errorf("accessing %s: the GitHub API rate limit is exhausted; retry after it resets, or %s: %w", subject, rateHint, err)
 	}
 	if status == http.StatusUnauthorized || status == http.StatusForbidden || status == http.StatusNotFound {
-		return fmt.Errorf("accessing GitHub-hosted Wuko action %s: repository or ref was not found or is not accessible; provide uses.token, set GH_TOKEN/GITHUB_TOKEN, or authenticate gh: %w", locator.String(), err)
+		return fmt.Errorf("accessing %s: repository or ref was not found or is not accessible; %s: %w", subject, accessHint, err)
 	}
-	return fmt.Errorf("accessing GitHub-hosted Wuko action %s: %w", locator.String(), err)
+	return fmt.Errorf("accessing %s: %w", subject, err)
 }
 
 func zipActionFiles(files map[string]ActionFile) ([]byte, error) {

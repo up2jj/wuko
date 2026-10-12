@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -184,8 +185,19 @@ func remapSource(source, root, logical string) string {
 	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
 		return source
 	}
-	if relative == "-" || filepath.ToSlash(relative) == defaultRemoteWorkflowFile {
+	relative = filepath.ToSlash(relative)
+	if relative == "-" || relative == defaultRemoteWorkflowFile || isGitHubWorkflowEntry(logical, relative) {
 		return logical
 	}
-	return logical + "::" + filepath.ToSlash(relative)
+	return logical + "::" + relative
+}
+
+// isGitHubWorkflowEntry reports whether relative is the entry file a GitHub workflow locator
+// selects. remapSource runs once per step, so the suffix check skips parsing for every other file.
+func isGitHubWorkflowEntry(logical, relative string) bool {
+	if strings.Contains(relative, "/") || !(strings.HasSuffix(logical, "/"+relative) || strings.HasSuffix(logical, ":"+relative)) {
+		return false
+	}
+	locator, recognized, err := ParseGitHubWorkflowLocator(logical)
+	return err == nil && recognized && !locator.isTree() && path.Base(locator.path) == relative
 }

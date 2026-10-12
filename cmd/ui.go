@@ -26,6 +26,7 @@ type uiWorkflowConfig struct {
 	environment    []string
 	reporters      []string
 	workflowFile   string
+	remoteLocator  string
 	targetName     string
 	noOpen         bool
 	returnObserver *returnDestinationObserver
@@ -96,6 +97,8 @@ func runWorkflowUI(command *cobra.Command, deps dependencies, args []string, con
 	}
 	if config.workflowFile != "" && len(args) == 0 {
 		target.targetName = config.targetName
+		target.remote = config.remoteLocator != ""
+		target.locator = config.remoteLocator
 	}
 	loader := deps.loader
 	if loader == nil {

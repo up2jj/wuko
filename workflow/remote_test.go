@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -333,28 +334,41 @@ func TestLoadRemoteRejectsInvalidWorkflowArchives(t *testing.T) {
 	}
 }
 
-func TestLoadRemoteGitHubUsesContentsAPIAndRawHeader(t *testing.T) {
+func TestLoadRemoteGitHubDownloadsWorkflowDirectoryWithCompanions(t *testing.T) {
 	t.Parallel()
 	workflowData := []byte("version: 1\nname: github\nsteps:\n  - id: run\n    type: shell\n    with: {command: true}\n")
+	tarball := makeGitHubTarball(t, "acme-workflows-0123456", []githubArchiveEntry{
+		{name: "ci/release file.yaml", data: workflowData},
+		{name: "ci/scripts/release.sh", data: []byte("#!/bin/sh\n"), mode: 0o755},
+		{name: "other/ignored.txt", data: []byte("ignored")},
+	})
 	client := testHTTPClient(func(request *http.Request) (*http.Response, error) {
-		if request.URL.EscapedPath() != "/repos/acme/workflows/contents/ci/release%20file.yaml" {
+		if request.URL.EscapedPath() != "/repos/acme/workflows/tarball/feature/release" {
 			return nil, fmt.Errorf("path = %q", request.URL.EscapedPath())
 		}
-		if request.URL.Query().Get("ref") != "feature/release" {
-			return nil, fmt.Errorf("ref = %q", request.URL.Query().Get("ref"))
-		}
-		if got := request.Header.Get("Accept"); got != "application/vnd.github.raw+json" {
+		if got := request.Header.Get("Accept"); got != "application/vnd.github+json" {
 			return nil, fmt.Errorf("Accept = %q", got)
 		}
-		return testResponse(http.StatusOK, workflowData), nil
+		return testResponse(http.StatusOK, tarball), nil
 	})
-	definition, cleanup, err := NewLoader(client).LoadRemote(t.Context(), "github:acme/workflows@feature/release:ci/release file.yaml", LoadOptions{})
+	loader := NewLoader(client)
+	loader.githubStoredTokenFn = func(context.Context, map[string]string) string { return "" }
+	definition, cleanup, err := loader.LoadRemote(t.Context(), "github:acme/workflows@feature/release:ci/release file.yaml", LoadOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer cleanup()
 	if definition.Name != "github" {
 		t.Fatalf("name = %q, want github", definition.Name)
+	}
+	if _, err := os.Stat(filepath.Join(definition.Dir, "scripts", "release.sh")); err != nil {
+		t.Fatalf("companion file is unavailable: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(definition.Dir, "ignored.txt")); !os.IsNotExist(err) {
+		t.Fatalf("file outside workflow directory was materialized: %v", err)
+	}
+	if definition.Location.Source != "github:acme/workflows@feature/release:ci/release file.yaml" {
+		t.Fatalf("source = %q", definition.Location.Source)
 	}
 }
 
@@ -363,6 +377,7 @@ func TestLoadRemoteRejectsInsecureURLAndReportsGitHubFailure(t *testing.T) {
 	loader := NewLoader(testHTTPClient(func(*http.Request) (*http.Response, error) {
 		return testResponse(http.StatusNotFound, nil), nil
 	}))
+	loader.githubStoredTokenFn = func(context.Context, map[string]string) string { return "" }
 	if _, _, err := loader.LoadRemote(t.Context(), "http://example.test/workflow", LoadOptions{}); err == nil || !strings.Contains(err.Error(), "HTTPS") {
 		t.Fatalf("insecure URL error = %v", err)
 	}

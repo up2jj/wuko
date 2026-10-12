@@ -1151,18 +1151,43 @@ separate prerequisite state.
 
 ## Remote workflows
 
-Run a public HTTPS URL or a GitHub locator:
+Run an HTTPS workflow, a GitHub locator, or an ordinary GitHub repository/blob URL:
 
 ```sh
 wuko run https://example.com/workflows/release.yaml
 wuko run github:acme/wuko-workflows
 wuko run github:acme/wuko-workflows@main:workflows/release.yaml
+wuko run https://github.com/acme/wuko-workflows/blob/main/workflows/release/wuko.yaml
 ```
 
 An HTTPS response may be YAML or a ZIP/tar.gz archive with exactly one root `wuko.yaml` or
-`wuko.yml`. GitHub and direct-YAML locators contain only the selected file; use an archive when the
-workflow requires companion files. Remote workflows are fetched without authentication and are
-not digest-pinned in schema version 1.
+`wuko.yml`. A GitHub workflow is downloaded from the repository archive without cloning. Its
+containing directory becomes the workflow package root, so sibling scripts, templates, required
+fragments, and local composite actions are available. Files outside that directory cannot be read
+by the workflow package. A workflow at the repository root is fetched alone, without the rest of
+the repository; move it into a subdirectory when it needs companion files. Set `GH_TOKEN` or `GITHUB_TOKEN`, or authenticate the `gh` CLI, to access a
+private repository. Pin a commit SHA when reproducibility matters.
+
+A repository can contain multiple workflow packages. Put each workflow in a directory with a
+`wuko.yaml` or `wuko.yml`, then open a picker for the whole repository or one subtree:
+
+```sh
+wuko run --pick https://github.com/acme/automation
+wuko run --pick https://github.com/acme/automation/tree/main/workflows
+wuko run --pick github:acme/automation@main:workflows
+```
+
+The repository archive is downloaded once to an isolated temporary directory and removed when the
+command exits. In a non-interactive environment, `--pick` prints reproducible `wuko run` commands
+instead of opening the terminal picker. GitHub blob URLs select one workflow and therefore cannot
+be combined with `--pick`.
+
+GitHub URLs use a one-segment ref because `/tree/` and `/blob/` URLs cannot distinguish a slash in a
+branch name from the repository path. Use the canonical syntax for such refs:
+
+```sh
+wuko run github:acme/automation@feature/new-deploy:workflows/deploy/wuko.yaml
+```
 
 ## Workflow installation
 

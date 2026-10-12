@@ -133,6 +133,14 @@ affects display order, not which definition wins.
   and makes the complete run non-interactive. Scheduled occurrences reload the same snapshot. Use
   `--file ./-` for a literal file named `-`. HTTP and `github:` locators also bypass local discovery
   and use the remote workflow loader, but none bypass `invokable: false`.
+- `wuko run --pick GITHUB` downloads one temporary GitHub repository snapshot and discovers only
+  package-root files named `wuko.yaml` or `wuko.yml`. A repository URL searches the whole tree; a
+  `/tree/REF/PATH` URL or `github:owner/repo@ref:path` selector limits discovery to one subtree.
+  A manifest inside another workflow's directory, such as a `testdata/` fixture, belongs to that
+  package and is not listed; only the selected root's own manifest does not hide nested ones. A
+  manifest that fails validation is listed as not invokable instead of failing discovery.
+  Interactive terminals open the picker with remote-only actions; non-interactive invocations print
+  canonical `wuko run github:...` commands. The snapshot is removed when the command exits.
 
 ## Implementation
 

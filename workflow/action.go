@@ -760,14 +760,20 @@ func (loader *Loader) fetchWithHeadersStatus(ctx context.Context, remoteURL *url
 		return nil, status, err
 	}
 	defer response.Body.Close()
+	payload, err := readResponseBody(response, remoteURL, kind)
+	return payload, response.StatusCode, err
+}
+
+// readResponseBody reads a successful response body up to the download limit.
+func readResponseBody(response *http.Response, remoteURL *url.URL, kind string) ([]byte, error) {
 	payload, err := io.ReadAll(io.LimitReader(response.Body, maxArchiveSize+1))
 	if err != nil {
-		return nil, response.StatusCode, fmt.Errorf("reading %s %s: %w", kind, safeURL(remoteURL), err)
+		return nil, fmt.Errorf("reading %s %s: %w", kind, safeURL(remoteURL), err)
 	}
 	if len(payload) > maxArchiveSize {
-		return nil, response.StatusCode, fmt.Errorf("%s %s exceeds %d-byte download limit", kind, safeURL(remoteURL), maxArchiveSize)
+		return nil, fmt.Errorf("%s %s exceeds %d-byte download limit", kind, safeURL(remoteURL), maxArchiveSize)
 	}
-	return payload, response.StatusCode, nil
+	return payload, nil
 }
 
 // open sends the request and returns a successful response whose body the caller must close. A

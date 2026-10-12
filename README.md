@@ -130,6 +130,8 @@ wuko run check
 wuko ui check
 wuko run check --var package=./cmd/...
 wuko run check --dry-run
+wuko run https://github.com/acme/automation/blob/main/workflows/build/wuko.yaml
+wuko run --pick https://github.com/acme/automation/tree/main/workflows
 wuko install https://example.com/workflows/release.yaml
 wuko install https://example.com/workflows
 wuko install --global https://example.com/workflows
@@ -174,6 +176,12 @@ path:
 ```sh
 wuko run --file ./workflows/release.yaml
 ```
+
+GitHub repositories can hold multiple self-contained workflow directories. Run a workflow from a
+normal repository/blob URL, or add `--pick` to a repository or tree URL to choose among every
+`wuko.yaml`/`wuko.yml` package below it. Wuko downloads a temporary repository archive rather than
+cloning, makes companion files in the selected workflow directory available, and removes the
+temporary files on exit. A workflow at the repository root is fetched alone, without companions. Private repositories use `GH_TOKEN`, `GITHUB_TOKEN`, or `gh` authentication.
 
 Use `-` to read a generated workflow from standard input:
 

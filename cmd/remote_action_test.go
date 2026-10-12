@@ -1,7 +1,9 @@
 package cmd
 
 import (
+	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"fmt"
 	"io"
 	"net/http"
@@ -131,14 +133,19 @@ steps:
 	}{
 		{name: "run https", command: "run", locator: "https://workflows.example.test/build.yaml"},
 		{name: "ui https", command: "ui", locator: "https://workflows.example.test/build.yaml"},
-		{name: "run github", command: "run", locator: "github:acme/workflows:build.yaml"},
-		{name: "ui github", command: "ui", locator: "github:acme/workflows:build.yaml"},
+		{name: "run github", command: "run", locator: "github:acme/workflows:ci/build.yaml"},
+		{name: "ui github", command: "ui", locator: "github:acme/workflows:ci/build.yaml"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
+			body := []byte(workflowData)
+			if strings.HasPrefix(tt.locator, "github:") {
+				t.Setenv("GH_TOKEN", "test-token")
+				body = commandGitHubTarball(t, "ci/build.yaml", body)
+			}
 			requests := 0
 			client := &http.Client{Transport: commandRoundTripFunc(func(*http.Request) (*http.Response, error) {
 				requests++
-				return &http.Response{StatusCode: http.StatusOK, Status: "200 OK", Body: io.NopCloser(strings.NewReader(workflowData)), Header: make(http.Header)}, nil
+				return &http.Response{StatusCode: http.StatusOK, Status: "200 OK", Body: io.NopCloser(bytes.NewReader(body)), Header: make(http.Header)}, nil
 			})}
 			root := t.TempDir()
 			command := newRootCmd(dependencies{
@@ -155,6 +162,70 @@ steps:
 				t.Fatalf("requests = %d, want 1", requests)
 			}
 		})
+	}
+}
+
+func commandGitHubTarball(t *testing.T, name string, data []byte) []byte {
+	return commandGitHubTarballEntries(t, map[string][]byte{name: data})
+}
+
+func commandGitHubTarballEntries(t *testing.T, files map[string][]byte) []byte {
+	t.Helper()
+	var buffer bytes.Buffer
+	gz := gzip.NewWriter(&buffer)
+	writer := tar.NewWriter(gz)
+	if err := writer.WriteHeader(&tar.Header{Name: "acme-workflows-0123456/", Mode: 0o755, Typeflag: tar.TypeDir}); err != nil {
+		t.Fatal(err)
+	}
+	for name, data := range files {
+		if err := writer.WriteHeader(&tar.Header{Name: "acme-workflows-0123456/" + name, Mode: 0o644, Size: int64(len(data)), Typeflag: tar.TypeReg}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := writer.Write(data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buffer.Bytes()
+}
+
+func TestRunPickGitHubListsCanonicalCommandsNonInteractively(t *testing.T) {
+	t.Setenv("GH_TOKEN", "test-token")
+	tarball := commandGitHubTarballEntries(t, map[string][]byte{
+		"workflows/build/wuko.yaml":  []byte("version: 1\nname: build\nsteps:\n  - id: run\n    type: shell\n    with: {command: true}\n"),
+		"workflows/deploy/wuko.yaml": []byte("version: 1\nname: deploy\ntargets:\n  prod:\n    steps:\n      - id: run\n        type: shell\n        with: {command: true}\n"),
+	})
+	requests := 0
+	client := &http.Client{Transport: commandRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+		requests++
+		if request.URL.EscapedPath() != "/repos/acme/automation/tarball/main" {
+			return nil, fmt.Errorf("unexpected URL %s", request.URL)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Status: "200 OK", Body: io.NopCloser(bytes.NewReader(tarball)), Header: make(http.Header)}, nil
+	})}
+	root := t.TempDir()
+	var output bytes.Buffer
+	command := newRootCmd(dependencies{
+		stdin: bytes.NewReader(nil), stdout: &output, stderr: io.Discard,
+		cwd: func() (string, error) { return root, nil }, homeDir: func() (string, error) { return "", nil }, configDir: func() (string, error) { return "", nil },
+		registry: step.NewRegistry(), loader: workflow.NewLoader(client), isInteractive: func(io.Reader) bool { return false },
+	})
+	command.SetArgs([]string{"run", "--pick", "https://github.com/acme/automation/tree/main/workflows"})
+	if err := command.ExecuteContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if requests != 1 {
+		t.Fatalf("requests = %d, want 1", requests)
+	}
+	want := "wuko run 'github:acme/automation@main:workflows/build/wuko.yaml'\n" +
+		"wuko run 'github:acme/automation@main:workflows/deploy/wuko.yaml' prod\n"
+	if output.String() != want {
+		t.Fatalf("output = %q, want %q", output.String(), want)
 	}
 }
 
