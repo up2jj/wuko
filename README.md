@@ -193,7 +193,7 @@ The [reference](docs/reference.md) describes every step and control, with links 
 ## Use Wuko with your tools
 
 - **GitHub Actions.** Run any workflow in CI with annotations, a job summary, and typed outputs:
-  `uses: up2jj/wuko@v0.17.0`. [GitHub Actions guide →](docs/github-actions.md)
+  `uses: up2jj/wuko@v0.18.0`. [GitHub Actions guide →](docs/github-actions.md)
 - **Git hooks.** Bind workflows to `pre-commit`, `commit-msg`, or `pre-push` with
   `wuko git hook init`. [Git hooks →](docs/git-hooks.md)
 - **Coding agents.** Hand tasks to Claude or Codex with `agent` steps, and install Wuko's authoring
