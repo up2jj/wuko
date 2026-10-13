@@ -8,11 +8,11 @@ Set Height 640
 Set Padding 20
 Set Margin 0
 Set Framerate 24
-Set TypingSpeed 35ms
+Set TypingSpeed 55ms
 Set LetterSpacing 0
 Set CursorBlink false
 Set Theme "Catppuccin Mocha"
-Set PlaybackSpeed 1.0
+Set PlaybackSpeed 0.7
 
 Hide
 Type `export WUKO_REPO="$PWD" HOME="$(mktemp -d)"`
@@ -37,6 +37,7 @@ Type "clear"
 Enter
 Show
 
+Sleep 800ms
 Type "wuko run commit"
 Enter
 Sleep 2s

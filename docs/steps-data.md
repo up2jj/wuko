@@ -5,6 +5,18 @@
 Data steps create, validate, select, import, or persist typed workflow values. Templates reference
 them through `.vars` and `.steps`; expressions use `vars` and `steps` without the leading dot.
 
+## Contents
+
+| Task | Steps |
+| --- | --- |
+| Create values | [`set`](#set) — assign a literal or expression · [`template`](#template) — render text to memory or a file |
+| Reshape values | [`transform`](#transform) — list, object, and aggregation pipelines ([list](#list-operations), [object](#object-operations), [tuple and join](#tuple-and-join-operations) operations, [result records](#terminal-result-records)) |
+| Check values | [`assert`](#assert) — stop unless an expression is true |
+| Load and decode | [`import_vars`](#import_vars) — JSON or TOML into variables · [`decode`](#decode) — JSON, YAML, TOML, or lines into a value · [`extract`](#extract) — records and markers from text |
+| Query and edit | [`jsonpath`](#jsonpath) — select values · [`edit`](#edit) — update structured files or values · [`markdown_edit`](#markdown_edit) — update Markdown by AST node |
+| Versions and time | [`semver`](#semver) — parse, compare, constrain, increment · [`time`](#time) — capture, parse, adjust, format |
+| Persist between runs | [`key_value`](#key_value) — JSON-compatible store · [`changed`](#changed) — detect changed files or inputs |
+
 ## `set`
 
 Assign a typed literal or evaluate an Expr expression. Exactly one of `value` or `expr` is
