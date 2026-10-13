@@ -768,7 +768,18 @@ func workflowFormOpener(t *testing.T) (func(string) error, <-chan error) {
 				clientErr <- err
 				return
 			}
+			body, readErr = io.ReadAll(response.Body)
 			_ = response.Body.Close()
+			if readErr != nil {
+				clientErr <- readErr
+				return
+			}
+			// The client follows the submit redirect, so a fast workflow's result page may
+			// already be delivered here, after which the server shuts down.
+			if strings.Contains(string(body), "Workflow complete") {
+				clientErr <- nil
+				return
+			}
 			for range 100 {
 				response, err = client.Get(target)
 				if err != nil {
