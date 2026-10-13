@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 const maxRPCLineBytes = 10 << 20
@@ -330,8 +331,16 @@ func (session *rpcSession) write(ctx context.Context, data []byte) error {
 		}
 		return err
 	case <-ctx.Done():
-		_ = session.input.Close()
-		<-done
+		// Interrupt the write instead of closing the pipe outright: the data can reach the
+		// worker before the goroutine reports it, and a request the worker already received
+		// must not be reported as unsent. Pipes without deadline support fall back to Close.
+		if session.input.SetWriteDeadline(time.Now()) != nil {
+			_ = session.input.Close()
+		}
+		if err := <-done; err == nil {
+			_ = session.input.SetWriteDeadline(time.Time{})
+			return nil
+		}
 		return ctx.Err()
 	}
 }
