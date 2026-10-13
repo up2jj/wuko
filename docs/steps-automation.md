@@ -1000,7 +1000,8 @@ Choose between installed agents with conditions:
 
 The selected CLI must already be installed and authenticated. Like `shell`, the step streams and
 captures `stdout`, `stderr`, and `exit_code`. See
-[`examples/clickup-task.yaml`](../examples/clickup-task.yaml) for a complete task-to-agent flow.
+[`examples/.wuko/workflows/start-task.yaml`](../examples/.wuko/workflows/start-task.yaml) for a complete
+task-to-agent flow.
 
 ## `lua`
 
