@@ -912,7 +912,15 @@ func sanitizeDashboardContent(value string) string {
 		}
 		return -1
 	}, value)
-	return strings.TrimSpace(value)
+	// Keep the first line's indentation: right-aligned content such as a sparkline starts with spaces.
+	value = strings.TrimRight(value, " \t\n")
+	for {
+		end := strings.IndexByte(value, '\n')
+		if end < 0 || strings.TrimSpace(value[:end]) != "" {
+			return value
+		}
+		value = value[end+1:]
+	}
 }
 
 func (m dashboardModel) result() DashboardResult {

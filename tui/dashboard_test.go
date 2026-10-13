@@ -58,6 +58,13 @@ func TestSanitizeDashboardContent(t *testing.T) {
 	}
 }
 
+func TestSanitizeDashboardContentPreservesFirstLineIndentation(t *testing.T) {
+	got := sanitizeDashboardContent("\n  \n    ▄▇\n  ████  \n\n")
+	if got != "    ▄▇\n  ████" {
+		t.Fatalf("sanitizeDashboardContent() = %q", got)
+	}
+}
+
 func TestDashboardCloseRequiresConfirmationAndEscapeDoesNotClose(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
