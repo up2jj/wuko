@@ -18,5 +18,5 @@ func WriteError(writer io.Writer, err error) bool {
 		return true
 	}
 	cwd, _ := os.Getwd()
-	return tui.WriteValidation(writer, err, cwd)
+	return tui.WriteValidationColor(writer, err, cwd, colorEnabled(writer))
 }

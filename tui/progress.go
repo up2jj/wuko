@@ -40,16 +40,16 @@ func (progress *Progress) Report(event engine.ProgressEvent) {
 			label = nestedLabel(event)
 			marker = progress.paint("36", "◇")
 		}
-		fmt.Fprintf(progress.writer, "%s%s %s %s · %s\n", indent, marker, label, event.WorkflowName, count(event.Total, "step"))
+		fmt.Fprintf(progress.writer, "%s%s %s %s %s\n", indent, marker, label, progress.name(event.WorkflowName), progress.dim("· "+count(event.Total, "step")))
 	case engine.StepStarted:
-		parts := []string{fmt.Sprintf("%s (%s)", event.StepID, event.StepType)}
+		details := []string{"(" + event.StepType + ")"}
 		if event.MaxAttempts > 1 {
-			parts = append(parts, fmt.Sprintf("up to %s", count(event.MaxAttempts, "attempt")))
+			details = append(details, fmt.Sprintf("up to %s", count(event.MaxAttempts, "attempt")))
 		}
 		if event.Timeout > 0 {
-			parts = append(parts, "timeout "+formatDuration(event.Timeout))
+			details = append(details, "timeout "+formatDuration(event.Timeout))
 		}
-		fmt.Fprintf(progress.writer, "%s%s [%d/%d] %s\n", indent, progress.paint("36", "→"), event.Index, event.Total, strings.Join(parts, " · "))
+		fmt.Fprintf(progress.writer, "%s%s %s %s %s\n", indent, progress.paint("36", "→"), progress.counter(event.Index, event.Total), progress.name(event.StepID), progress.dim(strings.Join(details, " · ")))
 	case engine.ConcurrentStarted:
 		parts := []string{count(event.GroupSize, "step"), fmt.Sprintf("max %d concurrent", event.MaxConcurrency)}
 		if event.Timeout > 0 {
@@ -62,12 +62,12 @@ func (progress *Progress) Report(event engine.ProgressEvent) {
 		}
 		fmt.Fprintf(progress.writer, "%s%s Concurrent · %s\n", indent, progress.paint("36", "⇉"), strings.Join(parts, " · "))
 	case engine.ConcurrentFinished:
-		line := fmt.Sprintf("%s%s Concurrent %s after %s", indent, progress.statusMarker(event.Status), statusLabel(event.Status), formatDuration(event.Duration))
+		line := fmt.Sprintf("%s%s Concurrent %s %s", indent, progress.statusMarker(event.Status), progress.status(event.Status), progress.after(event.Duration))
 		if event.Status != engine.StatusSucceeded {
 			line += " · " + workSummary(event.Started, event.Succeeded, event.GroupSize, "step")
 		}
 		if event.Error != nil {
-			line += ": " + singleLine(event.Error.Error())
+			line += progress.failure(event.Error)
 		}
 		fmt.Fprintln(progress.writer, line)
 	case engine.ControlStarted:
@@ -95,9 +95,9 @@ func (progress *Progress) Report(event engine.ProgressEvent) {
 				parts = append(parts, "wait for all")
 			}
 		}
-		fmt.Fprintf(progress.writer, "%s%s %s %s · %s\n", indent, progress.paint("36", "↻"), controlLabel(event.ControlKind), event.StepID, strings.Join(parts, " · "))
+		fmt.Fprintf(progress.writer, "%s%s %s %s %s\n", indent, progress.paint("36", "↻"), controlLabel(event.ControlKind), progress.name(event.StepID), progress.dim("· "+strings.Join(parts, " · ")))
 	case engine.ControlFinished:
-		line := fmt.Sprintf("%s%s %s %s %s after %s", indent, progress.statusMarker(event.Status), controlLabel(event.ControlKind), event.StepID, statusLabel(event.Status), formatDuration(event.Duration))
+		line := fmt.Sprintf("%s%s %s %s %s %s", indent, progress.statusMarker(event.Status), controlLabel(event.ControlKind), progress.name(event.StepID), progress.status(event.Status), progress.after(event.Duration))
 		if event.Status != engine.StatusSucceeded {
 			item := "iteration"
 			if event.ControlKind == "cancel_on" {
@@ -108,7 +108,7 @@ func (progress *Progress) Report(event engine.ProgressEvent) {
 			line += " · " + workSummary(event.Started, event.Succeeded, event.Iterations, item)
 		}
 		if event.Error != nil {
-			line += ": " + singleLine(event.Error.Error())
+			line += progress.failure(event.Error)
 		}
 		fmt.Fprintln(progress.writer, line)
 	case engine.BackgroundJoining:
@@ -116,7 +116,7 @@ func (progress *Progress) Report(event engine.ProgressEvent) {
 	case engine.BackgroundSourceFailed:
 		line := fmt.Sprintf("%s%s %s %s · source failed, still observing", indent, progress.paint("33", "!"), controlLabel(event.ControlKind), event.StepID)
 		if event.Error != nil {
-			line += ": " + singleLine(event.Error.Error())
+			line += progress.failure(event.Error)
 		}
 		fmt.Fprintln(progress.writer, line)
 	case engine.BackgroundTriggered:
@@ -140,9 +140,9 @@ func (progress *Progress) Report(event engine.ProgressEvent) {
 			if event.Status == engine.StatusSucceeded {
 				return
 			}
-			line := fmt.Sprintf("%s%s observe run %d %s after %s", indent, progress.statusMarker(event.Status), event.Iteration+1, statusLabel(event.Status), formatDuration(event.Duration))
+			line := fmt.Sprintf("%s%s observe run %d %s %s", indent, progress.statusMarker(event.Status), event.Iteration+1, progress.status(event.Status), progress.after(event.Duration))
 			if event.Error != nil {
-				line += ": " + singleLine(event.Error.Error())
+				line += progress.failure(event.Error)
 			}
 			fmt.Fprintln(progress.writer, line)
 			return
@@ -150,9 +150,9 @@ func (progress *Progress) Report(event engine.ProgressEvent) {
 		if event.Status == engine.StatusSucceeded {
 			return
 		}
-		line := fmt.Sprintf("%s%s iteration %d/%d %s after %s", indent, progress.statusMarker(event.Status), event.Iteration+1, event.Iterations, statusLabel(event.Status), formatDuration(event.Duration))
+		line := fmt.Sprintf("%s%s iteration %d/%d %s %s", indent, progress.statusMarker(event.Status), event.Iteration+1, event.Iterations, progress.status(event.Status), progress.after(event.Duration))
 		if event.Error != nil {
-			line += ": " + singleLine(event.Error.Error())
+			line += progress.failure(event.Error)
 		}
 		fmt.Fprintln(progress.writer, line)
 	case engine.AttemptStarted:
@@ -163,14 +163,13 @@ func (progress *Progress) Report(event engine.ProgressEvent) {
 		if event.Status == engine.StatusSucceeded {
 			return
 		}
-		label := statusLabel(event.Status)
-		line := fmt.Sprintf("%s%s attempt %d/%d %s after %s", childIndent, progress.statusMarker(event.Status), event.Attempt, event.MaxAttempts, label, formatDuration(event.Duration))
+		line := fmt.Sprintf("%s%s attempt %d/%d %s %s", childIndent, progress.statusMarker(event.Status), event.Attempt, event.MaxAttempts, progress.status(event.Status), progress.after(event.Duration))
 		if event.Error != nil {
-			line += ": " + singleLine(event.Error.Error())
+			line += progress.failure(event.Error)
 		}
 		fmt.Fprintln(progress.writer, line)
 	case engine.RetryScheduled:
-		fmt.Fprintf(progress.writer, "%s%s retrying with attempt %d/%d in %s\n", childIndent, progress.paint("33", "↻"), event.Attempt, event.MaxAttempts, formatDuration(event.RetryDelay))
+		fmt.Fprintf(progress.writer, "%s%s retrying with attempt %d/%d %s\n", childIndent, progress.paint("33", "↻"), event.Attempt, event.MaxAttempts, progress.dim("in "+formatDuration(event.RetryDelay)))
 	case engine.PollStarted:
 		fmt.Fprintf(progress.writer, "%s%s poll %d started\n", childIndent, progress.paint("2", "•"), event.Poll)
 	case engine.PollFinished:
@@ -180,29 +179,29 @@ func (progress *Progress) Report(event engine.ProgressEvent) {
 	case engine.PollScheduled:
 		line := fmt.Sprintf("%s%s poll %d did not match · poll %d in %s", childIndent, progress.paint("33", "↻"), event.Poll-1, event.Poll, formatDuration(event.PollDelay))
 		if event.Error != nil {
-			line += ": " + singleLine(event.Error.Error())
+			line += progress.failure(event.Error)
 		}
 		fmt.Fprintln(progress.writer, line)
 	case engine.StepFinished:
 		marker := progress.statusMarker(event.Status)
 		if event.Status == engine.StatusSkipped {
-			fmt.Fprintf(progress.writer, "%s%s [%d/%d] %s skipped\n", indent, marker, event.Index, event.Total, event.StepID)
+			fmt.Fprintf(progress.writer, "%s%s %s %s %s\n", indent, marker, progress.counter(event.Index, event.Total), progress.name(event.StepID), progress.status(event.Status))
 			return
 		}
-		line := fmt.Sprintf("%s%s [%d/%d] %s %s after %s", indent, marker, event.Index, event.Total, event.StepID, statusLabel(event.Status), formatDuration(event.Duration))
+		line := fmt.Sprintf("%s%s %s %s %s %s", indent, marker, progress.counter(event.Index, event.Total), progress.name(event.StepID), progress.status(event.Status), progress.after(event.Duration))
 		if event.Attempt > 1 {
-			line += fmt.Sprintf(" · %s", count(event.Attempt, "attempt"))
+			line += progress.dim(" · " + count(event.Attempt, "attempt"))
 		}
 		fmt.Fprintln(progress.writer, line)
 	case engine.WorkflowFinished:
-		parts := runSummary(event.Stats)
+		parts := progress.runSummary(event.Stats)
 		label := "Workflow"
 		if event.Depth > 0 {
 			label = nestedLabel(event)
 		}
-		fmt.Fprintf(progress.writer, "%s%s %s %s %s in %s", indent, progress.statusMarker(event.Status), label, event.WorkflowName, statusLabel(event.Status), formatDuration(event.Duration))
+		fmt.Fprintf(progress.writer, "%s%s %s %s %s %s", indent, progress.statusMarker(event.Status), label, progress.name(event.WorkflowName), progress.status(event.Status), progress.dim("in "+formatDuration(event.Duration)))
 		if len(parts) > 0 {
-			fmt.Fprintf(progress.writer, " · %s", strings.Join(parts, " · "))
+			fmt.Fprintf(progress.writer, "%s%s", progress.dim(" · "), strings.Join(parts, progress.dim(" · ")))
 		}
 		fmt.Fprintln(progress.writer)
 	}
@@ -221,16 +220,50 @@ func nestedLabel(event engine.ProgressEvent) string {
 func (progress *Progress) statusMarker(status engine.ExecutionStatus) string {
 	switch status {
 	case engine.StatusSucceeded:
-		return progress.paint("32", "✓")
+		return progress.paint(statusColor(status), "✓")
 	case engine.StatusSkipped:
-		return progress.paint("33", "⊘")
+		return progress.paint(statusColor(status), "⊘")
 	case engine.StatusTimedOut:
-		return progress.paint("35", "⏱")
+		return progress.paint(statusColor(status), "⏱")
 	case engine.StatusCanceled:
-		return progress.paint("33", "■")
+		return progress.paint(statusColor(status), "■")
 	default:
-		return progress.paint("31", "✗")
+		return progress.paint(statusColor(status), "✗")
 	}
+}
+
+func statusColor(status engine.ExecutionStatus) string {
+	switch status {
+	case engine.StatusSucceeded:
+		return "32"
+	case engine.StatusSkipped, engine.StatusCanceled:
+		return "33"
+	case engine.StatusTimedOut:
+		return "35"
+	default:
+		return "31"
+	}
+}
+
+// status renders a status word in its marker's color so outcomes stand out in long logs.
+func (progress *Progress) status(status engine.ExecutionStatus) string {
+	return progress.paint(statusColor(status), statusLabel(status))
+}
+
+func (progress *Progress) name(value string) string { return progress.paint("1", value) }
+
+func (progress *Progress) dim(value string) string { return progress.paint("2", value) }
+
+func (progress *Progress) counter(index, total int) string {
+	return progress.dim(fmt.Sprintf("[%d/%d]", index, total))
+}
+
+func (progress *Progress) after(duration time.Duration) string {
+	return progress.dim("after " + formatDuration(duration))
+}
+
+func (progress *Progress) failure(err error) string {
+	return ": " + progress.paint("31", singleLine(err.Error()))
 }
 
 func (progress *Progress) paint(code, value string) string {
@@ -240,21 +273,33 @@ func (progress *Progress) paint(code, value string) string {
 	return "\x1b[" + code + "m" + value + "\x1b[0m"
 }
 
-func runSummary(stats engine.RunStats) []string {
-	var parts []string
+func (progress *Progress) runSummary(stats engine.RunStats) []string {
+	parts := []string{}
 	for _, item := range []struct {
-		value int
-		name  string
+		value  int
+		status engine.ExecutionStatus
 	}{
-		{stats.Succeeded, "succeeded"},
-		{stats.Failed, "failed"},
-		{stats.Skipped, "skipped"},
-		{stats.Canceled, "canceled"},
+		{stats.Succeeded, engine.StatusSucceeded},
+		{stats.Failed, engine.StatusFailed},
+		{stats.Skipped, engine.StatusSkipped},
+		{stats.Canceled, engine.StatusCanceled},
 	} {
 		if item.value > 0 {
-			parts = append(parts, fmt.Sprintf("%d %s", item.value, item.name))
+			parts = append(parts, progress.paint(statusColor(item.status), fmt.Sprintf("%d %s", item.value, statusLabel(item.status))))
 		}
 	}
+	return append(parts, progress.dimAll(runDetails(stats))...)
+}
+
+func (progress *Progress) dimAll(values []string) []string {
+	for index, value := range values {
+		values[index] = progress.dim(value)
+	}
+	return values
+}
+
+func runDetails(stats engine.RunStats) []string {
+	var parts []string
 	terminal := stats.Succeeded + stats.Failed + stats.Skipped + stats.Canceled
 	if remaining := stats.Total - terminal; remaining > 0 {
 		parts = append(parts, fmt.Sprintf("%d not run", remaining))

@@ -54,6 +54,26 @@ func TestProgressUsesColorOnlyWhenEnabled(t *testing.T) {
 	}
 }
 
+func TestProgressColorsNamesStatusesAndDetails(t *testing.T) {
+	var output bytes.Buffer
+	progress := NewProgress(&output, true)
+	progress.Report(engine.ProgressEvent{Kind: engine.StepFinished, Status: engine.StatusFailed, StepID: "deploy", Index: 1, Total: 2, Duration: 2 * time.Second})
+	progress.Report(engine.ProgressEvent{Kind: engine.WorkflowFinished, Status: engine.StatusSucceeded, WorkflowName: "release", Duration: time.Second, Stats: engine.RunStats{Total: 1, Succeeded: 1, Attempts: 1}})
+	for _, want := range []string{
+		"\x1b[2m[1/2]\x1b[0m",
+		"\x1b[1mdeploy\x1b[0m",
+		"\x1b[31mfailed\x1b[0m",
+		"\x1b[2mafter 2s\x1b[0m",
+		"\x1b[1mrelease\x1b[0m",
+		"\x1b[32m1 succeeded\x1b[0m",
+		"\x1b[2m1 attempt\x1b[0m",
+	} {
+		if !strings.Contains(output.String(), want) {
+			t.Fatalf("output %q does not contain %q", output.String(), want)
+		}
+	}
+}
+
 func TestProgressRendersFailureTimeoutAndCancellation(t *testing.T) {
 	var output bytes.Buffer
 	progress := NewProgress(&output, false)

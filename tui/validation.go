@@ -13,6 +13,18 @@ import (
 // WriteValidation renders compiler-style diagnostics from the shared issue
 // model. It returns false when err is not a validation error.
 func WriteValidation(writer io.Writer, err error, relativeTo string) bool {
+	return WriteValidationColor(writer, err, relativeTo, false)
+}
+
+// WriteValidationColor renders the same diagnostics as WriteValidation, adding
+// ANSI color when color is true.
+func WriteValidationColor(writer io.Writer, err error, relativeTo string, color bool) bool {
+	paint := func(code, value string) string {
+		if !color || value == "" {
+			return value
+		}
+		return "\x1b[" + code + "m" + value + "\x1b[0m"
+	}
 	issues := validation.Issues(err)
 	if len(issues) == 0 {
 		return false
@@ -29,35 +41,36 @@ func WriteValidation(writer io.Writer, err error, relativeTo string) bool {
 			}
 		}
 		if location != "" {
-			location += ": "
+			location = paint("36", location) + ": "
 		}
-		fmt.Fprintf(writer, "%serror[%s]: %s\n", location, issue.Code, issue.Message)
+		fmt.Fprintf(writer, "%s%s %s\n", location, paint("1;31", "error["+string(issue.Code)+"]:"), paint("1", issue.Message))
 		if issue.Path != "" {
-			fmt.Fprintf(writer, "  path: %s\n", issue.Path)
+			fmt.Fprintf(writer, "  %s %s\n", paint("2", "path:"), issue.Path)
 		}
 		if issue.SourceLine != "" {
-			fmt.Fprintf(writer, "  | %s\n", issue.SourceLine)
+			gutter := paint("34", "|")
+			fmt.Fprintf(writer, "  %s %s\n", gutter, issue.SourceLine)
 			column := max(1, issue.Span.Column)
 			width := 1
 			if issue.Span.EndLine == issue.Span.Line && issue.Span.EndColumn >= column {
 				width = issue.Span.EndColumn - column + 1
 			}
 			width = min(width, max(1, utf8.RuneCountInString(issue.SourceLine)-column+1))
-			fmt.Fprintf(writer, "  | %s%s\n", strings.Repeat(" ", column-1), strings.Repeat("^", width))
+			fmt.Fprintf(writer, "  %s %s%s\n", gutter, strings.Repeat(" ", column-1), paint("1;31", strings.Repeat("^", width)))
 		}
 		if issue.Hint != "" {
-			fmt.Fprintf(writer, "  help: %s\n", issue.Hint)
+			fmt.Fprintf(writer, "  %s %s\n", paint("1;32", "help:"), issue.Hint)
 		}
 		for _, related := range issue.Related {
 			source := displaySource(validation.SanitizeSource(related.Span.Source), relativeTo)
 			if related.Span.Line > 0 {
 				source += fmt.Sprintf(":%d:%d", related.Span.Line, related.Span.Column)
 			}
-			fmt.Fprintf(writer, "  related: %s: %s\n", source, related.Message)
+			fmt.Fprintf(writer, "  %s %s: %s\n", paint("2", "related:"), paint("36", source), related.Message)
 		}
 	}
 	if len(issues) > 1 {
-		fmt.Fprintf(writer, "\n%d validation issues\n", len(issues))
+		fmt.Fprintf(writer, "\n%s\n", paint("1;31", fmt.Sprintf("%d validation issues", len(issues))))
 	}
 	return true
 }
