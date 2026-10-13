@@ -1,0 +1,60 @@
+version: 1
+name: commit
+description: Review changes and create a Conventional Commit
+
+steps:
+  - id: changes
+    type: git_diff
+    with: {source: unstaged}
+
+  - id: patch
+    type: shell
+    with: {command: git, args: [diff, --no-color]}
+
+  - id: review
+    type: tui_review
+    with:
+      variable: approved
+      message: "Review {{ .steps.changes.count }} changed file(s)"
+      content: "{{ .steps.patch.stdout }}"
+      format: diff
+      default: true
+
+  - id: kind
+    type: tui_choice
+    if: vars.approved
+    with:
+      variable: kind
+      message: Commit type
+      choices:
+        - {label: feat, description: A new feature, value: feat}
+        - {label: fix, description: A bug fix, value: fix}
+        - {label: docs, description: Documentation only, value: docs}
+
+  - id: subject
+    type: tui_input
+    if: vars.approved
+    with:
+      variable: subject
+      message: Commit subject
+      required: true
+
+  - id: message
+    type: git_conventional_commit
+    if: vars.approved
+    with:
+      operation: create
+      type: "{{ .vars.kind }}"
+      scope: api
+      subject: "{{ .vars.subject }}"
+
+  - id: commit
+    type: git_commit
+    if: vars.approved
+    with:
+      message: "{{ .steps.message.message }}"
+      paths: [.]
+
+  - id: history
+    type: shell
+    with: {command: git, args: [log, --oneline, --no-decorate, -3]}

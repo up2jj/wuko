@@ -1,6 +1,6 @@
 # Git changes and policy recipes
 
-[Back to the available steps](../README.md#available-steps)
+[Back to the step reference](reference.md#steps)
 
 `git_diff` turns Git changes into structured workflow data. `git_diff_check` applies Git's native
 whitespace and conflict-marker checks without shell scripts. They work together with ordinary Wuko

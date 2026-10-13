@@ -1,0 +1,31 @@
+version: 1
+name: recover
+description: Roll back a failed deployment and always clean up
+
+steps:
+  - id: deployment
+    try:
+      steps:
+        - id: migrate
+          type: shell
+          with: {script: sleep 0.6 && echo 'migrations applied'}
+        - id: deploy
+          type: shell
+          with: {script: sleep 0.8 && echo 'health check failed' >&2 && exit 1}
+    catch:
+      steps:
+        - id: rollback
+          type: shell
+          with:
+            script: sleep 0.6 && echo 'rolling back after {{ .error.step }} failed'
+
+  - id: report
+    type: shell
+    with:
+      command: printf
+      args: ['recovered: %s\n', '{{ .steps.deployment.recovered }}']
+
+finally:
+  - id: cleanup
+    type: shell
+    with: {script: echo 'removed temporary credentials'}

@@ -1,6 +1,6 @@
 # Text extraction
 
-[Back to the available steps](../README.md#available-steps)
+[Back to the step reference](reference.md#steps)
 
 The `extract` step turns one string into named, typed step outputs. Use a friendly `format` for a
 predictable line of text, or a Go regular expression with named captures for substring and

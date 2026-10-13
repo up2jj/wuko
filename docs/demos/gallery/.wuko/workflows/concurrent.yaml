@@ -1,0 +1,27 @@
+version: 1
+name: concurrent
+description: Run a dependency graph of checks in parallel
+
+steps:
+  - concurrent:
+      max_concurrency: 4
+      steps:
+        - id: deps
+          type: shell
+          with: {script: sleep 1 && echo modules ready}
+        - id: lint
+          needs: [deps]
+          type: shell
+          with: {script: sleep 2 && echo lint ok}
+        - id: unit
+          needs: [deps]
+          type: shell
+          with: {script: sleep 3 && echo 128 tests passed}
+        - id: fuzz
+          needs: [deps]
+          type: shell
+          with: {script: sleep 2.5 && echo no crashers}
+        - id: build
+          needs: [lint, unit, fuzz]
+          type: shell
+          with: {script: sleep 1 && echo dist/app built}

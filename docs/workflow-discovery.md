@@ -1,5 +1,27 @@
 # Workflow discovery
 
+[Back to the README](../README.md)
+
+## Ways to run a workflow
+
+| Source | Command |
+| --- | --- |
+| Picker over every discovered workflow | `wuko` |
+| Discovered name, optionally with a target | `wuko run check`, `wuko run deploy staging` |
+| Explicit file | `wuko run --file ./workflows/release.yaml` |
+| Standard input (always non-interactive) | `./generate-workflow \| wuko run --file -` |
+| HTTPS URL or GitHub blob URL | `wuko run https://github.com/acme/automation/blob/main/workflows/build/wuko.yaml` |
+| `github:` locator | `wuko run github:acme/automation@main:workflows/build/wuko.yaml` |
+| Pick from a GitHub repository or subtree | `wuko run --pick https://github.com/acme/automation/tree/main/workflows` |
+| Local browser form | `wuko ui check` |
+
+Remote GitHub workflows are fetched as a temporary repository archive rather than a clone; the
+selected workflow's directory is available as companion files, and the temporary files are removed
+on exit. Private repositories use `GH_TOKEN`, `GITHUB_TOKEN`, or an existing `gh auth login`
+session. The rest of this page describes how named workflows are found.
+
+## How discovery works
+
 Wuko workflow discovery turns the current working directory, home directory, and platform
 configuration directory into a list of selectable workflow sources. The same discovery rules are
 used by `wuko run NAME`, `wuko list`, `wuko validate`, shell completion, and the bare `wuko`

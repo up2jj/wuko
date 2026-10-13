@@ -1,6 +1,6 @@
 # System steps
 
-[Back to the available steps](../README.md#available-steps)
+[Back to the step reference](reference.md#steps)
 
 System steps provide portable filesystem, network, cache, temporary-resource, and container
 operations. Relative runtime paths normally resolve from the directory where Wuko was invoked.

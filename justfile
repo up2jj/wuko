@@ -58,6 +58,10 @@ screenshots: build
         vhs "$tape"
     done
 
+# Render one VHS demo, e.g. `just screenshot gallery-retry`.
+screenshot name: build
+    vhs docs/demos/{{ name }}.tape
+
 # Validate VHS tapes without rendering or modifying generated media.
 validate-screenshots:
     vhs validate 'docs/demos/*.tape'

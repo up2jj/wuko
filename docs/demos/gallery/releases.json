@@ -1,0 +1,146 @@
+[
+  {
+    "version": "0.16.1-nightly",
+    "channel": "nightly",
+    "downloads": 51,
+    "notes": "Nightly build"
+  },
+  {
+    "version": "0.16.0",
+    "channel": "stable",
+    "downloads": 6007,
+    "notes": "Process pools"
+  },
+  {
+    "version": "0.15.1-nightly",
+    "channel": "nightly",
+    "downloads": 50,
+    "notes": "Nightly build"
+  },
+  {
+    "version": "0.15.0",
+    "channel": "stable",
+    "downloads": 5570,
+    "notes": "TCP probes"
+  },
+  {
+    "version": "0.14.1-nightly",
+    "channel": "nightly",
+    "downloads": 49,
+    "notes": "Nightly build"
+  },
+  {
+    "version": "0.14.0",
+    "channel": "beta",
+    "downloads": 5133,
+    "notes": "Scoped executors"
+  },
+  {
+    "version": "0.13.1-nightly",
+    "channel": "nightly",
+    "downloads": 48,
+    "notes": "Nightly build"
+  },
+  {
+    "version": "0.13.0",
+    "channel": "stable",
+    "downloads": 4696,
+    "notes": "Native watches"
+  },
+  {
+    "version": "0.12.1-nightly",
+    "channel": "nightly",
+    "downloads": 47,
+    "notes": "Nightly build"
+  },
+  {
+    "version": "0.12.0",
+    "channel": "stable",
+    "downloads": 4259,
+    "notes": "Retry polling"
+  },
+  {
+    "version": "0.11.1-nightly",
+    "channel": "nightly",
+    "downloads": 46,
+    "notes": "Nightly build"
+  },
+  {
+    "version": "0.11.0",
+    "channel": "beta",
+    "downloads": 3822,
+    "notes": "Matrix controls"
+  },
+  {
+    "version": "0.10.1-nightly",
+    "channel": "nightly",
+    "downloads": 45,
+    "notes": "Nightly build"
+  },
+  {
+    "version": "0.10.0",
+    "channel": "stable",
+    "downloads": 3385,
+    "notes": "Git worktrees"
+  },
+  {
+    "version": "0.9.1-nightly",
+    "channel": "nightly",
+    "downloads": 44,
+    "notes": "Nightly build"
+  },
+  {
+    "version": "0.9.0",
+    "channel": "stable",
+    "downloads": 2948,
+    "notes": "Dashboard widgets"
+  },
+  {
+    "version": "0.8.1-nightly",
+    "channel": "nightly",
+    "downloads": 43,
+    "notes": "Nightly build"
+  },
+  {
+    "version": "0.8.0",
+    "channel": "beta",
+    "downloads": 2511,
+    "notes": "Browser forms"
+  },
+  {
+    "version": "0.7.1-nightly",
+    "channel": "nightly",
+    "downloads": 42,
+    "notes": "Nightly build"
+  },
+  {
+    "version": "0.7.0",
+    "channel": "stable",
+    "downloads": 2074,
+    "notes": "Workflow marketplaces"
+  },
+  {
+    "version": "0.6.1-nightly",
+    "channel": "nightly",
+    "downloads": 41,
+    "notes": "Nightly build"
+  },
+  {
+    "version": "0.6.0",
+    "channel": "stable",
+    "downloads": 1637,
+    "notes": "Plugin protocol v3"
+  },
+  {
+    "version": "0.5.1-nightly",
+    "channel": "nightly",
+    "downloads": 40,
+    "notes": "Nightly build"
+  },
+  {
+    "version": "0.5.0",
+    "channel": "beta",
+    "downloads": 1200,
+    "notes": "Faster startup"
+  }
+]

@@ -1,99 +1,56 @@
-# Wuko
+<h1 align="center">Wuko</h1>
 
-Wuko is a trusted, local workflow runner for development tasks. Workflows are strict, versioned
-YAML files made from independently registered Go step packages. They can prompt for input, work
-with typed data and files, call APIs, run scripts or containers, and start coding agents.
+<p align="center">
+  <strong>Interactive, typed, local-first workflows for developers.</strong><br>
+  Turn the scripts, checklists, and prompts around your code into readable YAML you can run,
+  validate, share, and reuse.
+</p>
 
-## Features
+<p align="center">
+  <a href="https://github.com/up2jj/wuko/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/up2jj/wuko/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://github.com/up2jj/wuko/releases"><img alt="Release" src="https://img.shields.io/github/v/release/up2jj/wuko"></a>
+  <a href="go.mod"><img alt="Go version" src="https://img.shields.io/github/go-mod/go-version/up2jj/wuko"></a>
+</p>
 
-- **Local-first workflows** — keep readable automation beside the code it changes.
-- **Interactive runs** — collect text, passwords, choices, filesystem paths, and confirmations, or
-  script PTY prompts before handing a live terminal to the user.
-- **Local browser forms** — collect typed variables, load dynamic choices, follow live progress,
-  and render explicit workflow results without changing standard runs.
-- **Typed workflow state** — use variables, step outputs, JSON/TOML imports, JSONPath, semantic
-  versions, templates, and expressions without converting everything to strings.
-- **Useful execution controls** — conditions, early successful returns, bounded and repeating attempts, polling,
-  concurrency, batch, foreach and matrix expansion, scoped working-directory blocks, scheduled runs, dry
-  runs, execution trees, and guaranteed cleanup.
-- **Portable operations** — use built-in HTTP, TCP listener probes, filesystem, glob, native watches,
-  cache, change detection, key-value, temporary resource, and Docker steps instead of
-  platform-specific shell commands.
-- **Extensible automation** — run Lua, direct commands, inline shell, or an external agent such as
-  Codex.
-- **Reusable definitions** — split steps across files, compose local actions, consume public remote
-  workflows, and load complete Wuko action packages from public or private GitHub repositories.
-- **Workflow and plugin marketplaces** — publish self-contained workflow packages and verified
-  multi-platform plugin releases, then install selections interactively or from CI. See
-  [Workflow marketplaces](docs/execution.md#workflow-marketplaces).
-- **Visible execution** — get live progress, retry and polling details, run statistics, and
-  redacted debug tracing.
+<p align="center">
+  <a href="#install">Install</a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="docs/gallery.md">Gallery</a> ·
+  <a href="docs/getting-started.md">Guide</a> ·
+  <a href="docs/reference.md">Reference</a> ·
+  <a href="#documentation">Docs</a>
+</p>
 
-## See Wuko in action
+![An interactive Wuko workflow: text input, a choice, a diff review, and the run](docs/assets/interactive-workflow.gif)
 
-The workflow picker and an end-to-end interactive run are recorded from deterministic, offline
-fixtures:
+## Why Wuko
 
-![Wuko workflow picker](docs/assets/workflow-picker.gif)
+- **Interactive when you want it, scriptable when you don't.** Prompts, choices, file pickers,
+  diff reviews, tables, and live dashboards, all skippable with `--var` for CI and scripts.
+- **Typed state, not string soup.** Step outputs, JSON, TOML, YAML, JSONPath, semantic versions,
+  and list or object transforms stay typed between steps.
+- **Real control flow.** Conditions, retries and polling, parallel DAGs, `foreach` and `matrix`,
+  `try`/`catch`, guaranteed cleanup, early returns, and cron schedules.
+- **Portable building blocks.** 60 built-in steps cover Git, GitHub, HTTP, files,
+  Docker, processes, Lua, and coding agents, so you write fewer platform-specific shell scripts.
+- **Fails before it runs.** Validation catches unknown steps, variables, and references with
+  source locations and suggestions. Use `--dry-run` and `wuko tree` to see what will happen.
+- **Shareable.** Compose workflows, reuse actions from GitHub, install from marketplaces, extend
+  with plugins, and run the same YAML locally, in Git hooks, or in GitHub Actions.
 
-![Wuko interactive workflow](docs/assets/interactive-workflow.gif)
-
-See [Screenshot and demo maintenance](docs/screenshots.md) for the VHS tapes, fixtures, and local
-regeneration commands.
-
-Wuko is not a GitHub Actions runtime. It is designed for local and interactive development
-automation; GitHub Actions is designed for repository-hosted CI/CD. A CI job may invoke Wuko, but
-the two workflow formats are separate.
-
-A GitHub-hosted Wuko action is likewise a Wuko composite action, not a GitHub Actions action. Point
-`uses.github` at a repository directory containing `action.yml` or `action.yaml`; Wuko downloads
-the complete directory, including scripts, templates, and binary files:
-
-```yaml
-- id: build
-  uses:
-    github: acme/private-wuko-actions@main:actions/build
-  with: {target: linux}
-```
-
-A scalar `uses` carries the same locator when no token is needed:
-
-```yaml
-- id: build
-  uses: acme/private-wuko-actions@main:actions/build
-  with: {target: linux}
-```
-
-Authentication may come from an explicit `uses.token`, `GH_TOKEN`, `GITHUB_TOKEN`, or an existing
-`gh auth login` session. See [GitHub-hosted Wuko actions](docs/execution.md#github-hosted-wuko-actions).
+Wuko is not a GitHub Actions runtime. It is for local and interactive development automation; a CI
+job can invoke Wuko, but the two workflow formats are separate.
 
 ## Install
 
-On macOS:
-
 ```sh
-brew install --cask up2jj/tap/wuko
+brew install --cask up2jj/tap/wuko      # macOS
+go install github.com/up2jj/wuko@latest # Go 1.26 or newer
 ```
-
-With Go 1.26 or newer:
-
-```sh
-go install github.com/up2jj/wuko@latest
-```
-
-For repository development:
-
-```sh
-just build
-just test
-```
-
-Run `just hooks` once to install the prek hooks. Use `prek run --all-files` to run every hook and
-`just snapshot` to build local release archives.
 
 ## Quick start
 
-Create `.wuko/workflows/check.yaml`:
+Create `.wuko/workflows/check.yaml` in your project:
 
 ```yaml
 version: 1
@@ -117,581 +74,162 @@ steps:
       args: ["tests exited with %s\n", "{{ .steps.tests.exit_code }}"]
 ```
 
-Then discover, inspect, validate, or run it:
+Then run it:
 
 ```sh
-wuko
-wuko list
-wuko tree check
-wuko validate check
-wuko validate check --format json
-wuko validate check --reporter github
-wuko run check
-wuko ui check
-wuko run check --var package=./cmd/...
-wuko run check --dry-run
-wuko run https://github.com/acme/automation/blob/main/workflows/build/wuko.yaml
-wuko run --pick https://github.com/acme/automation/tree/main/workflows
-wuko install https://example.com/workflows/release.yaml
-wuko install https://example.com/workflows
-wuko install --global https://example.com/workflows
-wuko install --global github:acme/workflows@main:release.yaml
-wuko uninstall release
-wuko uninstall --global --yes release
+wuko                                    # pick from every discovered workflow
+wuko run check                          # run by name
+wuko run check --var package=./cmd/...  # override a variable
+wuko run check --dry-run                # validate and preview without running
 ```
 
-Executable plugins can add language-neutral namespaced steps, executors, and helpers. Advanced v2
-plugins can also expose Wuko-managed services with scoped template, secret, and helper callbacks.
-Plugins can be installed directly or selected from a marketplace:
+Next: the [Getting started guide](docs/getting-started.md) walks from here to prompts, retries,
+parallel work, and composition. The [CLI cheatsheet](docs/cli.md) lists every command.
 
-```sh
-wuko plugin install --global --package acme https://github.com/acme/wuko-marketplace
-```
+## Gallery
 
-See [Executable plugins](docs/plugins.md) for authoring, publishing, the trust model, lifecycle,
-and [version-resolution rules](docs/plugins.md#version-resolution-and-conflicts).
+Every recording is generated from an offline workflow in [`docs/demos/gallery`](docs/demos/gallery).
+See all of them, with their YAML, in the [gallery](docs/gallery.md).
 
-Bare `wuko` opens a searchable picker in a terminal and shows each workflow's direct prerequisites.
-Press Enter to run the selected workflow or `a` to open its action palette. The palette can open a
-declared browser form, validate the workflow, show its execution tree, perform a dry run, print a
-reproducible command, edit or pin the workflow, change sorting, and manage marketplace installs.
-Validation, tree, and dry-run output opens in a scrollable viewer; Enter or Escape returns to the
-same picker selection and filter. Existing direct shortcuts remain available in expanded help.
-After editing or reinstalling, the picker refreshes automatically while retaining its last valid
-snapshot if rediscovery fails. Pins, successful-run history, and the sort preference are stored
-globally, and unavailable workflows are pruned. A workflow launched here can return to the same
-picker filter and selection after cleanup:
+<table>
+  <tr>
+    <td width="50%"><a href="docs/gallery.md#workflow-picker"><img src="docs/assets/workflow-picker.gif" alt="Workflow picker"></a><br><b>Workflow picker</b>: search, run, and inspect workflows</td>
+    <td width="50%"><a href="docs/gallery.md#parallel-dependency-graph"><img src="docs/assets/gallery/concurrent.gif" alt="Concurrent steps"></a><br><b>Parallel DAG</b>: run dependent checks concurrently</td>
+  </tr>
+  <tr>
+    <td><a href="docs/gallery.md#validated-prompts"><img src="docs/assets/gallery/prompts.gif" alt="Prompts"></a><br><b>Prompts</b>: validated input, secrets, and confirmation</td>
+    <td><a href="docs/gallery.md#live-dashboard"><img src="docs/assets/gallery/dashboard.gif" alt="Dashboard"></a><br><b>Dashboard</b>: refreshing widgets with actions</td>
+  </tr>
+  <tr>
+    <td><a href="docs/gallery.md#retries-with-backoff"><img src="docs/assets/gallery/retry.gif" alt="Retries"></a><br><b>Retries</b>: back off and try again</td>
+    <td><a href="docs/gallery.md#validation-before-execution"><img src="docs/assets/gallery/validate.gif" alt="Validation"></a><br><b>Validation</b>: mistakes caught before anything runs</td>
+  </tr>
+</table>
+
+## Examples
+
+**Ask, then act.** Interactive steps store answers in variables; pass `--var approved=true` to skip
+the prompt. [Interactive steps →](docs/steps-interactive.md)
 
 ```yaml
-- return:
-    to: picker
-    outputs: {}
+- id: approval
+  type: tui_confirm
+  with:
+    variable: approved
+    message: Deploy to production?
+    default: false
+
+- id: deploy
+  type: shell
+  if: vars.approved
+  with: {command: ./deploy, args: [production]}
 ```
 
-Direct `wuko run` and `wuko ui` commands treat that destination as an ordinary successful return.
-`wuko run NAME` searches the nearest
-`.wuko/workflows/` directory first, then the user workflow directories. Use `--file` for an explicit
-path:
-
-```sh
-wuko run --file ./workflows/release.yaml
-```
-
-GitHub repositories can hold multiple self-contained workflow directories. Run a workflow from a
-normal repository/blob URL, or add `--pick` to a repository or tree URL to choose among every
-`wuko.yaml`/`wuko.yml` package below it. Wuko downloads a temporary repository archive rather than
-cloning, makes companion files in the selected workflow directory available, and removes the
-temporary files on exit. A workflow at the repository root is fetched alone, without companions. Private repositories use `GH_TOKEN`, `GITHUB_TOKEN`, or `gh` authentication.
-
-Use `-` to read a generated workflow from standard input:
-
-```sh
-./generate-workflow | wuko run --file -
-```
-
-Stdin workflows resolve `require` entries, template files, and local actions from the current
-working directory. They are always non-interactive, and a scheduled stdin workflow reuses the
-YAML snapshot read at startup. Use `--file ./-` to select a literal file named `-`.
-
-See [Workflow discovery](docs/workflow-discovery.md) for search order, shadowing, and
-non-interactive behavior.
-
-`wuko install SOURCE` saves a standalone workflow under the current project’s `.wuko/workflows/`
-directory. Use `--global` to save it under `~/.wuko/workflows/` instead. `SOURCE` may be a local
-YAML file, an HTTPS URL, or a `github:` locator. An HTTPS repository URL, including a normal
-GitHub repository URL, is also checked for a versioned marketplace manifest. When found,
-Wuko opens a picker unless packages are selected explicitly with repeatable `--package` flags:
-
-```sh
-wuko install https://github.com/acme/wuko-marketplace
-wuko install --global --package release --package lint https://github.com/acme/wuko-marketplace
-```
-
-Marketplace packages are stored under a repository-named subdirectory and preserve their complete
-package tree, including JSON sidecars and local scripts. Use `wuko marketplace init` to create a
-marketplace manifest and `wuko marketplace build` to publish only new or changed workflow packages
-and plugin releases from `.wuko/workflows/` and `.wuko/plugin-sources/`. Set `package_version` in the
-package root `wuko.yaml` to publish a package release version; the picker displays it separately
-from the workflow schema `version`.
-Install and uninstall also accept the `--var`, `--var-file`, and `--env` flags for lifecycle hooks.
-
-For example, install a marketplace directly from a GitHub repository page:
-
-```sh
-wuko install --global https://github.com/up2jj/wuko-marketplace
-```
-
-Workflows may declare optional installation lifecycle steps:
+**Retry flaky work.** `attempt` bounds, retries, or polls any block of steps.
+[Attempts →](docs/execution.md#attempts)
 
 ```yaml
-install:
-  - id: setup
-    type: shell
-    with: {script: echo setup}
-
-uninstall:
-  - id: cleanup
-    type: shell
-    with: {script: echo cleanup}
+- id: publish
+  attempt:
+    max_attempts: 4
+    initial_delay: 1s
+    backoff_multiplier: 2
+    steps:
+      - {id: upload, type: shell, with: {command: ./upload}}
 ```
 
-Install hooks run from the staged package root before the package is committed. Uninstall hooks run
-after confirmation and before the complete package directory is removed. `wuko uninstall` asks for
-confirmation; use `--yes` for non-interactive use. Without `--global`, uninstall targets the
-current project’s workflow copy.
-
-## GitHub Actions
-
-Use the repository's composite action to install a pinned Wuko release and run a workflow with
-GitHub error annotations, a job summary, and typed outputs:
+**Fan out.** Run a dependency graph in parallel, or every combination of a matrix.
+[Workflow controls →](docs/workflow-control.md)
 
 ```yaml
-permissions:
-  contents: read
-  pull-requests: read
-  actions: read
+- concurrent:
+    steps:
+      - {id: deps, type: shell, with: {command: go, args: [mod, download]}}
+      - {id: lint, needs: [deps], type: shell, with: {command: golangci-lint, args: [run]}}
+      - {id: test, needs: [deps], type: shell, with: {command: go, args: [test, ./...]}}
+```
 
+**Work with typed data.** Decode, query, reshape, and version values without `jq` or `sed`.
+[Data steps →](docs/steps-data.md)
+
+```yaml
+- id: config
+  type: decode
+  with: {format: json, path: package.json}
+
+- id: next
+  type: semver
+  with: {operation: increment, version: "{{ .steps.config.value.version }}", part: minor}
+```
+
+**Recover and clean up.** `try`/`catch` handles failures; `finally` always runs.
+[Finally cleanup →](docs/finally.md)
+
+```yaml
 steps:
-  - uses: actions/checkout@v6
-
-  - name: Run Wuko checks
-    uses: up2jj/wuko@v0.17.0
-    with:
-      workflow: check
-      vars: |
-        package=./cmd/...
-        race=true
-    env:
-      API_TOKEN: ${{ secrets.API_TOKEN }}
-```
-
-The action automatically exports the job's `github.token` as `GH_TOKEN` while Wuko runs, so
-GitHub-backed steps and direct `gh` commands work without repeating token wiring. The token keeps
-exactly the access granted to the job through `permissions`; the action does not broaden it. For
-example, a workflow can discover its pull request without declaring authentication:
-
-```yaml
-version: 1
-name: check
-steps:
-  - id: pull_request
-    type: github_pr
-    with:
-      operation: find
-```
-
-Override the job token when an integration needs different credentials, such as access to another
-repository:
-
-```yaml
-- name: Run cross-repository release workflow
-  uses: up2jj/wuko@v0.17.0
-  with:
-    workflow: release
-    token: ${{ secrets.WUKO_GITHUB_TOKEN }}
-```
-
-The `outputs` output carries the workflow's complete return map as JSON, so a later step can read a
-single value. Wuko writes it only for a successful run whose workflow ends in a `return`; any other
-run leaves the output empty, and `fromJSON('')` fails the job. Guard the consuming step when the
-return is conditional:
-
-```yaml
-- name: Build the release archive
-  id: wuko
-  uses: up2jj/wuko@v0.17.0
-  with:
-    workflow: build
-
-- uses: actions/upload-artifact@v4
-  if: steps.wuko.outputs.outputs != ''
-  with:
-    path: ${{ fromJSON(steps.wuko.outputs.outputs).artifact }}
-```
-
-Execution metadata is separate from workflow return values. The action writes `status`,
-`execution-id`, `duration-ms`, `failed-step`, and a versioned JSON `report` before a failed Wuko
-invocation exits. `execution-id` identifies the complete invocation, including failures during
-discovery, loading, or validation. `status` is `succeeded`, `failed`, `timed_out`, or `canceled`.
-`failed-step` is empty unless an unsuccessful top-level step with an ID was recorded.
-
-The metadata describes the Wuko invocation, not the action step. It is empty when the action fails
-before Wuko starts - a failed install, both or neither of `workflow` and `definition`, or a missing
-`working-directory` - and `status` can still read `succeeded` when the invocation itself succeeded
-but the run reporters failed to publish their results. Treat a non-empty `status` other than
-`succeeded` as a Wuko failure, and `steps.<id>.outcome` as the authoritative step result.
-
-Use `continue-on-error` when later steps should inspect a failed run without failing the job at
-that point:
-
-```yaml
-- name: Run Wuko checks
-  id: wuko
-  continue-on-error: true
-  uses: up2jj/wuko@v0.17.0
-  with:
-    workflow: check
-
-- name: Inspect the failure
-  if: steps.wuko.outcome == 'failure' && steps.wuko.outputs.status != ''
-  env:
-    WUKO_REPORT: ${{ steps.wuko.outputs.report }}
-    WUKO_FAILED_STEP: ${{ steps.wuko.outputs.failed-step }}
-  run: |
-    echo "Failed step: $WUKO_FAILED_STEP"
-    jq . <<<"$WUKO_REPORT"
-```
-
-Guarding on `outcome` rather than `status == 'failed'` also covers a timed-out or canceled
-invocation, and the `status != ''` test skips the step when the action failed before Wuko produced
-any metadata.
-
-Without `continue-on-error`, use `if: failure()` on a following diagnostic step. Workflow outputs
-remain empty on failure even though execution metadata is available.
-
-`workflow` accepts a discovered name, a local file, an HTTPS URL, or a `github:` locator. Use
-`target` to select a workflow target and `working-directory` to change the run directory. The
-optional `vars` input accepts one `key=value` assignment per line. Wuko preserves JSON values
-such as booleans, numbers, arrays, and objects; unquoted values are strings:
-
-```yaml
-vars: |
-  package=./cmd/...
-  race=true
-  retries=3
-  platforms=["linux","darwin"]
-```
-
-For generated or deeply nested values, pass one JSON object instead. A value whose first
-non-whitespace character is `{` is loaded as a typed variable file:
-
-```yaml
-vars: |
-  {
-    "revision": ${{ toJSON(github.sha) }},
-    "matrix": {"os":["linux","darwin"]}
-  }
-```
-
-Pass secrets through the action's `env` block rather than interpolating them into variables or the
-workflow definition.
-
-For a small workflow constructed by the GitHub workflow itself, provide an inline definition:
-
-```yaml
-- name: Run inline Wuko workflow
-  id: wuko
-  uses: up2jj/wuko@v0.17.0
-  with:
-    definition: |
-      version: 1
-      name: checks
-      steps:
-        - id: tests
-          type: shell
-          with:
-            command: go
-            args: [test, ./...]
-        - return:
-            outputs:
-              revision: 'vars.revision'
-    vars: |
-      revision=${{ toJSON(github.sha) }}
-```
-
-Exactly one of `workflow` and `definition` is required. Inline definitions use the working
-directory as the base for relative `require` entries, templates, and local actions. The action runs
-once even when the definition declares `cron`. Pin the action to a release tag or full commit SHA;
-`version` can override the Wuko binary version recorded by that action revision.
-
-When Wuko is already installed, the equivalent lower-level invocation remains available:
-
-```yaml
-- name: Run Wuko checks
-  id: wuko
-  run: wuko run check --once --reporter plain --reporter github
-```
-
-Write the same canonical report to a local file with `--report-json`. Wuko atomically replaces the
-file when the invocation finishes, including failure paths; the parent directory must already
-exist:
-
-```sh
-wuko run check --once --report-json ./wuko-report.json
-```
-
-The `github` reporter is never enabled automatically outside the composite action. With no
-`--reporter` flags, `wuko run` uses only the default plain reporter.
-
-## Workflow building blocks
-
-Every workflow has a schema version, name, and ordered steps. It may also define a description,
-variables, environment values, templates, a cron schedule, and cleanup steps:
-
-```yaml
-version: 1
-name: release
-description: Build and publish a release
-cron: "0 9 * * 1-5"
-timezone: Europe/Warsaw
-
-vars:
-  target: linux
-
-env:
-  API_TOKEN: "{{ .env.API_TOKEN }}"
-
-steps:
-  - id: build
-    attempt:
-      timeout: 5m
-      max_attempts: 3
-      when: 'error.exit_code == 75 || error.stderr contains "rate limit"'
-      steps:
-        - id: build_command
-          type: shell
-          with:
-            command: ./build
-            args: ["{{ .vars.target }}"]
-    defer:
-      - id: remove_build
-        type: shell
-        with: {command: ./remove-build}
-
-  - id: publish
-    type: shell
-    if: steps.build.steps.build_command.exit_code == 0
-    with:
-      command: ./publish
-      args: ["{{ .steps.build.steps.build_command.stdout }}"]
-
+  - id: release
+    try:
+      steps: [{id: deploy, type: shell, with: {command: ./deploy}}]
+    catch:
+      steps: [{id: rollback, type: shell, with: {command: ./rollback}}]
 finally:
-  - id: cleanup
-    type: shell
-    with:
-      command: ./cleanup
+  - {id: cleanup, type: shell, with: {command: ./cleanup}}
 ```
 
-Steps run in declaration order. A successful step publishes outputs under `.steps.<id>` for Go
-templates and `steps.<id>` for expressions. Variables live under `.vars`/`vars`. A failed step
-stops ordinary execution. Cleanup attached with `defer` is registered after its owner succeeds,
-then runs in reverse owner order before `finally`.
+## What's in the box
 
-Execution providers can add read-only roots across templates, expressions, Lua, actions, and
-dependencies. Under GitHub Actions, Wuko automatically exposes `.github`; see
-[Templates and execution provider contexts](docs/templates.md#execution-provider-contexts).
+| Area | Built in |
+| --- | --- |
+| [Interactive](docs/steps-interactive.md) | `tui_input`, `tui_password`, `tui_choice`, `tui_path`, `tui_confirm`, `tui_review`, `tui_table`, `dashboard`, [browser forms](docs/forms.md) |
+| [Data](docs/steps-data.md) | `set`, `template`, `transform`, `decode`, `jsonpath`, `edit`, `markdown_edit`, [`extract`](docs/extract.md), `semver`, `time`, `assert`, `import_vars`, `key_value`, `changed` |
+| [Git and GitHub](docs/steps-system.md#git_revision) | `git_diff`, `git_log`, `git_commit`, `git_conventional_commit`, [worktrees](docs/worktrees.md), squash, rebase, merge, branch checks, `github_pr`, `github_release`, `github_actions` |
+| [Files and system](docs/steps-system.md) | `file`, `glob`, `scaffold`, `watch`, `log_wait`, `temp`, `cache`, `require_tool`, `tcp_probe`, `multiplexer` |
+| [Network, processes, and automation](docs/steps-automation.md) | `http`, [`docker`](docs/docker-operations.md), `shell` (including scripted PTY sessions), `process`, `process_call`, `lua`, `agent` |
+| [Controls](docs/workflow-control.md) | `if`, `attempt`, `concurrent`, `foreach`, `batch`, `matrix`, `loop`, `try`/`catch`, `cancel_on`, `observe`, `return`, `defer`, `finally`, `cron`, [`executor`](docs/executors.md) |
+| [Composition](docs/execution.md#choosing-a-composition-mechanism) | `depends_on`, `run_workflow`, `targets`, `require`, `uses` composite actions, `once` |
 
-A workflow can require other discovered workflows and consume their declared typed outputs:
+The [reference](docs/reference.md) describes every step and control, with links to examples.
 
-```yaml
-version: 1
-name: release
-depends_on:
-  build: build-artifacts
-steps:
-  - id: publish
-    type: shell
-    with:
-      command: ./publish.sh
-      args: ["{{ .dependencies.build.artifact }}"]
-```
+## Use Wuko with your tools
 
-Prerequisites form sequential chains, shared prerequisites run once per invocation, and failures
-stop dependent workflows. See [Workflow prerequisites](docs/execution.md#workflow-prerequisites)
-for output contracts, validation rules, scheduling behavior, and runnable examples.
-
-See the [Documentation](#documentation) section for detailed workflow syntax and execution
-guides.
-
-## Available steps
-
-Each linked guide contains multiple examples for every step.
-
-| Step | Use it to | Examples |
-| --- | --- | --- |
-| `tui_input` | Collect editable text or typed JSON/lists | [Interactive steps](docs/steps-interactive.md#tui_input) |
-| `tui_password` | Collect masked text | [Interactive steps](docs/steps-interactive.md#tui_password) |
-| `tui_choice` | Select bounded static/dynamic values with defaults or select-all | [Interactive steps](docs/steps-interactive.md#tui_choice) |
-| `tui_path` | Select one or many files/directories | [Interactive steps](docs/steps-interactive.md#tui_path) |
-| `tui_review` | Review plain text or a colored unified diff | [Interactive steps](docs/steps-interactive.md#tui_review) |
-| `tui_table` | Browse object-backed data in a paginated table | [Interactive steps](docs/steps-interactive.md#tui_table) |
-| `dashboard` | Monitor grouped template widgets and run contextual actions | [Interactive steps](docs/steps-interactive.md#dashboard) |
-| `tui_confirm` | Collect a boolean decision | [Interactive steps](docs/steps-interactive.md#tui_confirm) |
-| `set` | Assign a literal or expression result | [Data steps](docs/steps-data.md#set) |
-| `template` | Render inline or packaged templates to memory or a file | [Data steps](docs/steps-data.md#template) |
-| `transform` | Run deterministic list, object, aggregation, and tuple pipelines | [Data steps](docs/steps-data.md#transform) |
-| `assert` | Stop unless an expression is true | [Data steps](docs/steps-data.md#assert) |
-| `import_vars` | Load JSON or TOML into workflow state | [Data steps](docs/steps-data.md#import_vars) |
-| `decode` | Convert JSON, YAML, TOML, or lines into a typed value | [Data steps](docs/steps-data.md#decode) |
-| `jsonpath` | Select values with RFC 9535 JSONPath | [Data steps](docs/steps-data.md#jsonpath) |
-| `edit` | Update structured files or values with RFC 9535 JSONPath | [Data steps](docs/steps-data.md#edit) |
-| `markdown_edit` | Update Markdown by semantic AST nodes while preserving unrelated source | [Data steps](docs/steps-data.md#markdown_edit) |
-| `extract` | Extract typed records and marker fields from text | [Text extraction](docs/extract.md) |
-| `semver` | Parse, compare, constrain, or increment versions | [Data steps](docs/steps-data.md#semver) |
-| `time` | Capture, parse, adjust, and format an explicit time value | [Data steps](docs/steps-data.md#time) |
-| `key_value` | Persist JSON-compatible values between runs | [Data steps](docs/steps-data.md#key_value) |
-| `changed` | Detect changed files or structured inputs | [Data steps](docs/steps-data.md#changed) |
-| `once` | Run a named block once per successful persisted key | [Execution and composition](docs/execution.md#idempotency-across-runs) |
-| `run_workflow` | Run a discovered workflow and consume its declared outputs | [Execution and composition](docs/execution.md#running-child-workflows) |
-| `require_tool` | Require an executable and optionally validate its version | [System steps](docs/steps-system.md#require_tool) |
-| `tcp_probe` | Inspect TCP listeners without platform-specific commands | [System steps](docs/steps-system.md#tcp_probe) |
-| `multiplexer` | Label and annotate the current tmux, cmux, or Herdr context | [System steps](docs/steps-system.md#multiplexer) |
-| `git_revision` | Read the current or a selected Git commit as structured data | [System steps](docs/steps-system.md#git_revision) |
-| `git_merge_base` | Find the unambiguous common ancestor of two Git revisions | [System steps](docs/steps-system.md#git_merge_base) |
-| `git_log` | Read bounded, structured Git history for automation | [System steps](docs/steps-system.md#git_log) |
-| `git_diff` | Inspect committed, staged, or unstaged changes as structured data | [System steps](docs/steps-system.md#git_diff) |
-| `git_diff_check` | Reject Git whitespace errors and conflict markers, including pushed commits | [System steps](docs/steps-system.md#git_diff_check) |
-| `git_worktree` | List, ensure, and safely remove persistent branch worktrees | [Persistent Git worktrees](docs/worktrees.md#git_worktree) |
-| `git_squash` | Squash branch work into one explicitly messaged commit | [Persistent Git worktrees](docs/worktrees.md#git_squash) |
-| `git_rebase` | Rebase the current worktree branch onto a target | [Persistent Git worktrees](docs/worktrees.md#git_rebase) |
-| `git_merge` | Fast-forward or explicitly merge a branch into a clean target | [Persistent Git worktrees](docs/worktrees.md#git_merge) |
-| `git_clean` | Assert that a Git working tree is clean | [System steps](docs/steps-system.md#git_clean) |
-| `git_branch` | Assert local branch existence with an extensible operation schema | [System steps](docs/steps-system.md#git_branch) |
-| `git_remote_branch` | Assert local remote-tracking branch existence | [System steps](docs/steps-system.md#git_remote_branch) |
-| `git_branch_name` | Assert that a string is a valid Git branch name | [System steps](docs/steps-system.md#git_branch_name) |
-| `git_on_branch` | Assert the repository's current branch | [System steps](docs/steps-system.md#git_on_branch) |
-| `git_conventional_commit` | Create or validate a Conventional Commit message | [System steps](docs/steps-system.md#git_conventional_commit) |
-| `git_commit` | Stage selected paths and create a Git commit | [System steps](docs/steps-system.md#git_commit) |
-| `github_pr` | Find an open GitHub pull request from CI metadata or a Git branch | [System steps](docs/steps-system.md#github_pr) |
-| `github_release` | Check GitHub repository drift since the latest stable release | [System steps](docs/steps-system.md#github_release) |
-| `github_actions` | Watch one GitHub Actions run to completion through `gh` | [System steps](docs/steps-system.md#github_actions) |
-| `file` | Perform shell-independent filesystem operations | [System steps](docs/steps-system.md#file) |
-| `scaffold` | Render a packaged template directory tree | [System steps](docs/steps-system.md#scaffold) |
-| `glob` | Discover regular files with portable patterns | [System steps](docs/steps-system.md#glob) |
-| `watch` | Wait for native filesystem events | [System steps](docs/steps-system.md#watch) |
-| `log_wait` | Follow a growing log until a regex matches | [System steps](docs/steps-system.md#log_wait) |
-| `temp` | Create automatically cleaned files, directories, or FIFOs | [System steps](docs/steps-system.md#temp) |
-| `cache` | Restore and save directory caches | [System steps](docs/steps-system.md#cache) |
-| `http` | Make structured HTTP API calls | [System steps](docs/steps-system.md#http) |
-| `docker` | Run containers and manage Docker files and resources | [System steps](docs/steps-system.md#docker) |
-| `shell` | Run argv commands, inline shell, or scripted PTY interactions | [Automation steps](docs/steps-automation.md#shell) |
-| `process` | Run a readiness-gated, lifecycle-managed service | [Automation steps](docs/steps-automation.md#process) |
-| `process_call` | Send a correlated JSONL request to one process or a process pool | [Automation steps](docs/steps-automation.md#calling-a-process) |
-| `agent` | Start an external coding agent with a prompt | [Automation steps](docs/steps-automation.md#agent) |
-| `lua` | Run typed in-process automation | [Automation steps](docs/steps-automation.md#lua) |
-
-## Workflow controls
-
-Use controls to run independent work or repeat a block over runtime data.
-
-| Control | Use it to | Examples |
-| --- | --- | --- |
-| `if` | Run a step or sequential block only when an expression is true | [Execution and composition](docs/execution.md#conditions) |
-| `env` | Apply an environment overlay to a block | [Execution and composition](docs/execution.md#scoped-environments) |
-| `working_directory` | Run a block from an existing directory | [Execution and composition](docs/execution.md#scoped-working-directories) |
-| `concurrent` | Run a bounded fixed DAG of parallel steps | [Execution and composition](docs/execution.md#concurrency) |
-| `batch` | Process a runtime list in fixed-size chunks | [Workflow controls](docs/workflow-control.md#batch) |
-| `foreach` | Run a block once per item in a runtime list | [Workflow controls](docs/workflow-control.md#foreach) |
-| `matrix` | Run every combination of named dimensions | [Workflow controls](docs/workflow-control.md#matrix) |
-| `loop` | Repeat a sequential block until an expression is true | [Workflow controls](docs/workflow-control.md#loop) |
-| `try` / `catch` | Recover from a failed or timed-out sequential block | [Workflow controls](docs/workflow-control.md#try-and-catch) |
-| `cancel_on` | Race a sequential body against one or more named monitors and record the winner | [Workflow controls](docs/workflow-control.md#cancel-on) |
-| `attempt` | Bound, repeat, or poll a body of steps | [Execution and composition](docs/execution.md#attempts) |
-| `return` | Finish successfully early and publish explicit outputs | [Early successful return](docs/return.md) |
-| `defer` | Attach cleanup to a successful step | [Finally cleanup](docs/finally.md) |
-| `finally` | Run workflow-level cleanup after the main phase | [Finally cleanup](docs/finally.md) |
-| `install` | Run steps before an installed workflow is committed | [Workflow installation](docs/execution.md#workflow-installation) |
-| `uninstall` | Run steps before an installed workflow is removed | [Workflow installation](docs/execution.md#workflow-installation) |
-| `marketplace init/build` | Create, rebuild, or check a workflow and plugin marketplace | [Workflow installation](docs/execution.md#workflow-marketplaces) |
-| `marketplace plugin init/add/update` | Create a latest-protocol plugin scaffold and manage marketplace plugin releases | [Executable plugins](docs/plugins.md#create-and-publish-a-marketplace-plugin) |
-| `cron` | Run a workflow on a schedule | [Execution and composition](docs/execution.md#scheduled-runs) |
-
-## Workflow composition
-
-| Pattern | Use it to | Examples |
-| --- | --- | --- |
-| `depends_on` | Run another discovered workflow first and consume its declared outputs | [Workflow prerequisites](docs/execution.md#workflow-prerequisites) |
-| `run_workflow` | Invoke a discovered workflow at a specific step, including inside bounded parallel controls | [Running child workflows](docs/execution.md#running-child-workflows) |
-| `targets` | Divide one workflow into named executable variants selected as `wuko run NAME TARGET` | [Workflow targets](docs/execution.md#workflow-targets) |
-| `invokable: false` | Keep a workflow available as a prerequisite without allowing direct invocation | [Workflow prerequisites](docs/execution.md#workflow-prerequisites) |
-| `require` | Split one workflow across files while keeping the same state and step sequence | [Splitting a workflow across files](docs/execution.md#splitting-a-workflow-across-files) |
-| `uses` | Reuse a composite action with explicit inputs, isolated internals, and declared outputs | [Composite actions](docs/execution.md#composite-actions) |
-
-See [Choosing a composition mechanism](docs/execution.md#choosing-a-composition-mechanism) for a
-side-by-side comparison and examples.
-
-## Git hooks
-
-Wuko can install project workflows as client-side Git hooks. Generate and review a starter
-manifest with example workflows, then install the local dispatchers explicitly:
-
-```sh
-wuko git hook init
-wuko git hook install
-```
-
-Or commit hook bindings directly in `.wuko/git-hooks.yaml`:
-
-```yaml
-version: 1
-hooks:
-  pre-commit:
-    - workflow: git-check
-      target: staged
-  commit-msg:
-    - workflow: git-commit-message
-  pre-push:
-    - workflow: git-check
-      target: pushed
-```
-
-```sh
-wuko git hook install
-wuko git hook status
-```
-
-Existing hooks are never replaced implicitly. Use `wuko git hook install --chain` to preserve an
-existing hook and run it before Wuko, or add `wuko git hook run HOOK -- "$@"` to an existing hook
-manually. See [Git hooks](docs/git-hooks.md) for the execution context, supported hooks, worktree
-behavior, and uninstall recovery.
-
-## Agent skills
-
-Wuko can install its bundled skills for supported coding-agent CLIs found on `PATH`:
-
-```sh
-wuko agent list
-wuko agent install claude
-wuko agent install
-```
-
-Claude skills are installed under `~/.claude/skills/`; Codex skills are installed under
-`~/.agents/skills/`. Reinstalling replaces the bundled skill files.
+- **GitHub Actions.** Run any workflow in CI with annotations, a job summary, and typed outputs:
+  `uses: up2jj/wuko@v0.17.0`. [GitHub Actions guide →](docs/github-actions.md)
+- **Git hooks.** Bind workflows to `pre-commit`, `commit-msg`, or `pre-push` with
+  `wuko git hook init`. [Git hooks →](docs/git-hooks.md)
+- **Coding agents.** Hand tasks to Claude or Codex with `agent` steps, and install Wuko's authoring
+  skills with `wuko agent install`. [Automation steps →](docs/steps-automation.md#agent)
+- **Remote workflows and marketplaces.** Run workflows from GitHub, reuse actions from private
+  repositories, and install packages with `wuko install`.
+  [Discovery →](docs/workflow-discovery.md) · [Marketplaces →](docs/execution.md#workflow-marketplaces)
+- **Plugins.** Add namespaced steps, executors, and helpers in any language.
+  [Executable plugins →](docs/plugins.md)
 
 ## Documentation
 
-- [Execution and composition](docs/execution.md)
-- [Executable plugins](docs/plugins.md)
-- [Technology-neutral plugin protocol v1](docs/plugin-protocol.md)
-- [Technology-neutral plugin protocol v2](docs/plugin-protocol-v2.md)
-- [ClickUp task agent example](docs/clickup-task-example.md)
-- [Interactive steps](docs/steps-interactive.md)
-- [Data steps](docs/steps-data.md)
-- [System steps](docs/steps-system.md)
-- [Git changes and policy recipes](docs/git-changes.md)
-- [Persistent Git worktrees](docs/worktrees.md)
-- [Automation steps](docs/steps-automation.md)
-- [Filesystem operation reference](docs/filesystem-operations.md)
-- [Docker operation reference](docs/docker-operations.md)
-- [Workflow controls](docs/workflow-control.md)
-- [Early successful return](docs/return.md)
-- [Workflow discovery](docs/workflow-discovery.md)
-- [Git hooks](docs/git-hooks.md)
-- [Templates](docs/templates.md)
-- [Template, Expr, Lua, and plugin-defined functions](docs/template-functions.md)
-- [Secrets](docs/secrets.md)
-- [Variable imports](docs/variable-imports.md)
-- [Finally cleanup](docs/finally.md)
-- [Graceful shutdown](docs/graceful-shutdown.md)
-- [Screenshot and demo maintenance](docs/screenshots.md)
+| Start here | Write workflows | Run and share | Extend |
+| --- | --- | --- | --- |
+| [Getting started](docs/getting-started.md) | [Templates](docs/templates.md) | [Workflow discovery](docs/workflow-discovery.md) | [Executable plugins](docs/plugins.md) |
+| [Demo gallery](docs/gallery.md) | [Functions](docs/template-functions.md) | [Execution and composition](docs/execution.md) | [Plugin protocol v1](docs/plugin-protocol.md) |
+| [CLI cheatsheet](docs/cli.md) | [Workflow controls](docs/workflow-control.md) | [GitHub Actions](docs/github-actions.md) | [Plugin protocol v2](docs/plugin-protocol-v2.md) |
+| [Reference](docs/reference.md) | [Early return](docs/return.md) | [Git hooks](docs/git-hooks.md) | [Plugin protocol v3](docs/plugin-protocol-v3.md) |
+| [Validation](docs/validation.md) | [Cleanup with finally](docs/finally.md) | [Executor scopes](docs/executors.md) | [ClickUp agent example](docs/clickup-task-example.md) |
+| | [Variable imports](docs/variable-imports.md) | [Graceful shutdown](docs/graceful-shutdown.md) | |
+| | [Secrets](docs/secrets.md) | [Persistent Git worktrees](docs/worktrees.md) | |
+| | [Browser forms](docs/forms.md) | [Git change recipes](docs/git-changes.md) | |
+
+**Step guides:** [Interactive](docs/steps-interactive.md) · [Data](docs/steps-data.md) ·
+[System](docs/steps-system.md) · [Automation](docs/steps-automation.md) ·
+[Text extraction](docs/extract.md) · [Filesystem operations](docs/filesystem-operations.md) ·
+[Docker operations](docs/docker-operations.md)
 
 ## Trust model
 
-Workflows and composite actions are trusted code. Lua, shell, agent, Docker, and command-based action
-sources can access local resources with the permissions granted to Wuko. Review publishers, pin
-immutable remote action releases with SHA-256, and do not mount the Docker socket for untrusted
-workflows. Safe archive extraction is not an execution sandbox, and Wuko does not provide a
-secrets store. Local file workflows and local path actions may explicitly run `shell` and `process`
-steps as root with `with.elevated: true`; this is arbitrary sudo execution, not a restricted helper.
-Remote, stdin, and executor-scoped definitions cannot elevate. See
-[Elevated shell and process commands](docs/steps-automation.md#elevated-shell-and-process-commands).
+Workflows, composite actions, and plugins are trusted code: shell, Lua, Docker, agent, and HTTP
+steps can reach anything Wuko can. Review publishers and pin remote sources. Read the
+[trust model](docs/security.md) before running workflows from someone else.
+
+## Contributing
+
+Bug reports and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the
+development loop and [Screenshot and demo maintenance](docs/screenshots.md) for re-recording the
+gallery.

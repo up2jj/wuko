@@ -1,6 +1,6 @@
 # Interactive steps
 
-[Back to the available steps](../README.md#available-steps)
+[Back to the step reference](reference.md#steps)
 
 Interactive input steps write their result to `.steps.<id>` and to the variable named by
 `with.variable`. Single-value steps expose `value`; multiple choice and path selections expose

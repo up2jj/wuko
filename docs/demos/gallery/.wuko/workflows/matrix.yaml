@@ -1,0 +1,25 @@
+version: 1
+name: matrix
+description: Fan out over every OS and architecture
+
+steps:
+  - id: builds
+    matrix:
+      axes:
+        os: [linux, darwin, windows]
+        arch: [amd64, arm64]
+      max_concurrency: 3
+      collect: trim(steps.build.stdout)
+      steps:
+        - id: build
+          type: shell
+          with:
+            script: sleep 1 && echo dist/app-{{ .matrix.os }}-{{ .matrix.arch }}
+
+  - id: summary
+    type: shell
+    with:
+      script: |
+        {{- range .steps.builds.results }}
+        echo "built {{ . }}"
+        {{- end }}

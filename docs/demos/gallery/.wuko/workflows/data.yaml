@@ -1,0 +1,42 @@
+version: 1
+name: data
+description: Query, reshape, and version typed data
+
+vars:
+  services:
+    - {name: api, version: 1.4.2, healthy: true}
+    - {name: worker, version: 2.0.0-rc.1, healthy: false}
+    - {name: web, version: 0.9.7, healthy: true}
+
+steps:
+  - id: healthy
+    type: transform
+    with:
+      from: vars.services
+      operations:
+        - filter: item.healthy
+        - map: item.name
+        - sort
+
+  - id: api_version
+    type: jsonpath
+    with:
+      from: vars.services
+      query: $[?@.name == 'api'].version
+      result: one
+
+  - id: next
+    type: semver
+    with:
+      operation: increment
+      version: "{{ .steps.api_version.value }}"
+      part: minor
+
+  - id: report
+    type: shell
+    with:
+      command: printf
+      args:
+        - 'healthy: %s\nnext api release: %s\n'
+        - '{{ .steps.healthy.value | join ", " }}'
+        - '{{ .steps.next.version }}'

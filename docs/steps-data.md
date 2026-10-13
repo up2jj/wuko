@@ -1,6 +1,6 @@
 # Data steps
 
-[Back to the available steps](../README.md#available-steps)
+[Back to the step reference](reference.md#steps)
 
 Data steps create, validate, select, import, or persist typed workflow values. Templates reference
 them through `.vars` and `.steps`; expressions use `vars` and `steps` without the leading dot.

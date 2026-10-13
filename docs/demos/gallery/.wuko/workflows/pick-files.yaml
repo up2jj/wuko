@@ -1,0 +1,31 @@
+version: 1
+name: pick-files
+description: Pick files interactively and back them up
+
+steps:
+  - id: sources
+    type: tui_path
+    with:
+      variable: sources
+      message: Select files to back up
+      root: project
+      multiple: true
+
+  - id: backup_dir
+    type: file
+    with: {operation: mkdir, path: backup, recursive: true}
+
+  - id: backup
+    foreach:
+      items: vars.sources
+      steps:
+        - id: copy
+          type: file
+          with:
+            operation: copy
+            path: project/{{ .foreach.item }}
+            destination: backup/{{ .foreach.item }}
+
+  - id: listing
+    type: shell
+    with: {command: ls, args: [-1, backup]}

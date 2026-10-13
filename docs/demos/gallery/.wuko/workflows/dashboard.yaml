@@ -1,0 +1,52 @@
+version: 1
+name: dashboard
+description: Monitor live data with refreshing widgets
+
+steps:
+  - id: monitor
+    type: dashboard
+    with:
+      title: Release health
+      groups:
+        - id: service
+          title: Service
+          columns: 2
+          refresh:
+            every: 1s
+            steps:
+              - id: clock
+                type: shell
+                with: {script: date +%s}
+              - id: sample
+                type: lua
+                with:
+                  args: {t: "{{ .steps.clock.stdout }}"}
+                  source: |
+                    local t = tonumber(wuko.args.t)
+                    local samples = {}
+                    for i = 1, 40 do samples[i] = 50 + math.floor(40 * math.sin((t + i) / 3)) end
+                    wuko.output("samples", samples)
+                    wuko.output("latency", samples[40])
+            outputs:
+              samples: steps.sample.samples
+              latency: steps.sample.latency
+          widgets:
+            - id: latency
+              title: Latency (ms)
+              template: |-
+                {{ .data.samples | sparkline .widget.width .widget.height }}
+            - id: status
+              title: Status
+              template: |-
+                Version   0.17.0
+                Replicas  3/3 ready
+                Latency   {{ .data.latency }} ms
+                Last action: {{ (index .actions "restart").status }}
+              actions:
+                - id: restart
+                  label: Restart a replica
+                  confirm: Restart one replica?
+                  steps:
+                    - id: restart
+                      type: shell
+                      with: {script: sleep 1}

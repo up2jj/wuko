@@ -1,6 +1,6 @@
 # Automation steps
 
-[Back to the available steps](../README.md#available-steps)
+[Back to the step reference](reference.md#steps)
 
 Automation steps run local programs, coding agents, or in-process Lua.
 Wrap a step in an `attempt` control when an operation can hang or fail transiently.

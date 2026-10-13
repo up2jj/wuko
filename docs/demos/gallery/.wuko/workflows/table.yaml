@@ -1,0 +1,28 @@
+version: 1
+name: table
+description: Decode JSON, filter it, and browse it as a table
+
+steps:
+  - id: releases
+    type: decode
+    with:
+      format: json
+      path: releases.json
+
+  - id: stable
+    type: transform
+    with:
+      from: steps.releases.value
+      operations:
+        - filter: item.channel != "nightly"
+
+  - id: browse
+    type: tui_table
+    with:
+      message: Stable releases
+      from: steps.stable.value
+      columns:
+        - {header: Version, field: version}
+        - {header: Channel, field: channel}
+        - {header: Downloads, field: downloads}
+        - {header: Notes, field: notes}

@@ -36,9 +36,11 @@ jobs:
         run: vhs validate 'docs/demos/*.tape'
       - name: verify VHS demo assets
         run: |
-          test -s docs/assets/workflow-picker.gif
-          test -s docs/assets/interactive-workflow.gif
-          test -s docs/assets/workflow-tree.png
+          missing=0
+          for asset in $(awk '/^(Output|Screenshot) /{print $2}' docs/demos/*.tape); do
+            test -s "$asset" || { echo "missing VHS asset: $asset"; missing=1; }
+          done
+          exit "$missing"
       - name: gofmt
         run: |
           test -z "$(gofmt -l .)" || { echo "Unformatted files:"; gofmt -l .; exit 1; }

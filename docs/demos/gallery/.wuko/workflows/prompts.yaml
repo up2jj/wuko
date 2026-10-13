@@ -1,0 +1,33 @@
+version: 1
+name: prompts
+description: Collect validated input, a secret, and a confirmation
+
+steps:
+  - id: service
+    type: tui_input
+    with:
+      variable: service
+      message: Service name
+      validation:
+        pattern: '^[a-z][a-z0-9-]+$'
+        message: Use lowercase letters, numbers, and hyphens
+
+  - id: token
+    type: tui_password
+    with:
+      variable: token
+      message: Deploy token
+
+  - id: confirm
+    type: tui_confirm
+    with:
+      variable: approved
+      message: Deploy {{ .vars.service }} now?
+      default: false
+
+  - id: deploy
+    type: shell
+    if: vars.approved
+    with:
+      command: printf
+      args: ['Deploying %s with a %d-character token\n', '{{ .vars.service }}', '{{ len .vars.token }}']

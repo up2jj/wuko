@@ -1,0 +1,18 @@
+version: 1
+name: deploy
+description: Deploy the current build
+
+vars:
+  target: staging
+
+steps:
+  - id: build
+    type: shell
+    with: {script: echo dist/app}
+
+  - id: deploy
+    type: shell
+    if: vars.targt == "production"
+    with:
+      command: echo
+      args: [deploying, "{{ .steps.build.stdout }}"]

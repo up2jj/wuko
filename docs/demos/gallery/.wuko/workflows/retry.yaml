@@ -1,0 +1,23 @@
+version: 1
+name: retry
+description: Retry a flaky step with backoff until it succeeds
+
+steps:
+  - id: counter
+    type: temp
+    with: {kind: file}
+
+  - id: publish
+    attempt:
+      max_attempts: 4
+      initial_delay: 500ms
+      backoff_multiplier: 2
+      steps:
+        - id: upload
+          type: shell
+          with:
+            script: |
+              echo x >> '{{ .steps.counter.path }}'
+              n=$(wc -l < '{{ .steps.counter.path }}' | tr -d ' ')
+              if [ "$n" -lt 3 ]; then echo "upload attempt $n: 503 Service Unavailable" >&2; exit 1; fi
+              echo "upload attempt $n: published"
