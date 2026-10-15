@@ -1,0 +1,158 @@
+defmodule WukoPlugin.Release do
+  require Record
+  Record.defrecordp(:file_info, Record.extract(:file_info, from_lib: "kernel/include/file.hrl"))
+
+  @epoch {{1980, 1, 1}, {0, 0, 0}}
+  @namespace "{{NS}}"
+  @entry "wuko-plugin-{{NS}}"
+
+  def run([version]) when version != "" do
+    if String.trim(version) != version do
+      raise "version must not contain surrounding whitespace"
+    end
+
+    Mix.Task.run("escript.build")
+    normalize_escript!(@entry)
+    {os, label} = operating_system()
+    arch = architecture()
+    stage = Path.join(File.cwd!(), ".release-#{System.unique_integer([:positive])}")
+
+    try do
+      archive_name = "#{@entry}_#{label}_#{arch}.tar.gz"
+      relative_archive = Path.join("dist", archive_name)
+      archive = Path.join(stage, relative_archive)
+      tarball = archive(File.read!(@entry))
+      File.mkdir_p!(Path.dirname(archive))
+      File.write!(archive, tarball)
+
+      artifact = %{
+        os: os,
+        arch: arch,
+        path: String.replace(relative_archive, "\\", "/"),
+        format: "tar.gz",
+        entry: @entry,
+        sha256: :sha256 |> :crypto.hash(tarball) |> Base.encode16(case: :lower)
+      }
+
+      manifest = %{
+        version: 1,
+        namespace: @namespace,
+        plugin_version: version,
+        protocol: "{{PROTOCOL}}",
+        artifacts: [artifact]
+      }
+
+      manifest_json = Jason.encode_to_iodata!(manifest, pretty: true)
+      File.write!(Path.join(stage, "plugin.json"), [manifest_json, "\n"])
+      replace!(Path.join(File.cwd!(), "dist"), Path.join(stage, "dist"))
+      replace!(Path.join(File.cwd!(), "plugin.json"), Path.join(stage, "plugin.json"))
+      IO.puts("released plugin #{@namespace} #{version} for 1 platform")
+    after
+      File.rm_rf(stage)
+    end
+  end
+
+  def run(_args), do: raise("usage: mix run tools/release.exs VERSION")
+
+  defp operating_system do
+    case :os.type() do
+      {:unix, :darwin} -> {"darwin", "Darwin"}
+      {:unix, :linux} -> {"linux", "Linux"}
+      other -> raise "unsupported release operating system: #{inspect(other)}"
+    end
+  end
+
+  defp architecture do
+    architecture = :erlang.system_info(:system_architecture) |> List.to_string()
+
+    cond do
+      String.contains?(architecture, ["aarch64", "arm64"]) -> "arm64"
+      String.contains?(architecture, "x86_64") -> "amd64"
+      true -> raise "unsupported release architecture: #{architecture}"
+    end
+  end
+
+  defp archive(executable) do
+    padding = rem(512 - rem(byte_size(executable), 512), 512)
+    tar = tar_header(byte_size(executable)) <> executable <> :binary.copy(<<0>>, padding + 1024)
+    :zlib.gzip(tar)
+  end
+
+  # Mix escripts are ZIP archives with a launcher preamble, and every ZIP entry records the build
+  # time. Rebuild the archive from its decoded entries with fixed metadata so the executable hash
+  # depends only on its contents; patching raw bytes could corrupt compressed data that happens to
+  # contain a ZIP signature.
+  defp normalize_escript!(path) do
+    {:ok, sections} = :escript.extract(String.to_charlist(path), [])
+    {:archive, archive} = List.keyfind(sections, :archive, 0)
+    {:ok, entries} = :zip.extract(archive, [:memory])
+
+    entries =
+      entries
+      |> Enum.sort_by(&elem(&1, 0))
+      |> Enum.map(fn {name, data} -> {name, data, fixed_file_info(data)} end)
+
+    {:ok, {_name, normalized}} = :zip.create(~c"escript", entries, [:memory])
+    sections = List.keyreplace(sections, :archive, 0, {:archive, normalized})
+    :ok = :escript.create(String.to_charlist(path), sections)
+    File.chmod!(path, 0o755)
+  end
+
+  defp fixed_file_info(data) do
+    file_info(
+      size: byte_size(data),
+      type: :regular,
+      access: :read_write,
+      mode: 0o644,
+      mtime: @epoch,
+      atime: @epoch,
+      ctime: @epoch,
+      uid: 0,
+      gid: 0
+    )
+  end
+
+  defp tar_header(size) do
+    header =
+      text_field(@entry, 100) <>
+        octal_field(0o755, 8) <>
+        octal_field(0, 8) <>
+        octal_field(0, 8) <>
+        octal_field(size, 12) <>
+        octal_field(0, 12) <>
+        :binary.copy(" ", 8) <>
+        "0" <>
+        :binary.copy(<<0>>, 100) <>
+        "ustar\0" <>
+        "00" <>
+        text_field("wuko", 32) <>
+        text_field("wuko", 32) <>
+        octal_field(0, 8) <>
+        octal_field(0, 8) <>
+        :binary.copy(<<0>>, 155) <>
+        :binary.copy(<<0>>, 12)
+
+    checksum = header |> :binary.bin_to_list() |> Enum.sum()
+    binary_part(header, 0, 148) <> checksum_field(checksum) <> binary_part(header, 156, 356)
+  end
+
+  defp text_field(value, width) do
+    if byte_size(value) > width, do: raise("tar field is too long: #{value}")
+    value <> :binary.copy(<<0>>, width - byte_size(value))
+  end
+
+  defp octal_field(value, width) do
+    encoded = Integer.to_string(value, 8)
+    String.pad_leading(encoded, width - 1, "0") <> <<0>>
+  end
+
+  defp checksum_field(value),
+    do: String.pad_leading(Integer.to_string(value, 8), 6, "0") <> <<0, 32>>
+
+  defp replace!(target, staged) do
+    File.rm_rf!(target)
+    File.rename!(staged, target)
+  end
+end
+
+WukoPlugin.Release.run(System.argv())

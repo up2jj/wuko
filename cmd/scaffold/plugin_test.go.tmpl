@@ -2,11 +2,10 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
-	"io"
 	"testing"
 
 	"github.com/up2jj/wuko/plugin/sdk"
+	"github.com/up2jj/wuko/plugin/sdk/sdktest"
 )
 
 func TestUppercase(t *testing.T) {
@@ -70,31 +69,16 @@ func TestPluginRegistersWithSDK(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	input, inputWriter := io.Pipe()
-	outputReader, output := io.Pipe()
-	done := make(chan error, 1)
-	go func() { done <- plugin.Serve(t.Context(), input, output) }()
-	encoder := json.NewEncoder(inputWriter)
-	decoder := json.NewDecoder(outputReader)
-	if err := encoder.Encode(map[string]any{"id": "initialize", "method": "initialize", "params": map[string]any{"protocol": sdk.Protocol}}); err != nil {
+	host := sdktest.Start(t, plugin)
+	if initialized := host.Initialization(); initialized.Protocol != sdk.Protocol || initialized.Namespace != "{{NS}}" {
+		t.Fatalf("initialize result = %#v", initialized)
+	}
+	response := host.CallStep(sdktest.StepRequest{Type: "{{NS}}.uppercase", With: map[string]any{"value": "hello"}}).Await()
+	var result sdk.Result
+	if err := response.DecodeResult(&result); err != nil {
 		t.Fatal(err)
 	}
-	var response struct {
-		Result struct {
-			Protocol  string `json:"protocol"`
-			Namespace string `json:"namespace"`
-		} `json:"result"`
-	}
-	if err := decoder.Decode(&response); err != nil {
-		t.Fatal(err)
-	}
-	if response.Result.Protocol != sdk.Protocol || response.Result.Namespace != "{{NS}}" {
-		t.Fatalf("initialize result = %#v", response.Result)
-	}
-	if err := inputWriter.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := <-done; err != nil {
-		t.Fatal(err)
+	if result.Outputs["value"] != "HELLO" {
+		t.Fatalf("result = %#v", result)
 	}
 }

@@ -1,0 +1,21 @@
+version: 1
+name: plugin-release
+description: Build the {{NS}} plugin release bundle
+
+vars:
+  version: ""
+
+outputs:
+  bundle: {type: string, value: '"."'}
+
+steps:
+  - id: require_version
+    type: assert
+    with:
+      expr: vars.version != ""
+      message: release version is required
+  - id: package
+    type: shell
+    with:
+      command: ./build-release
+      args: ["{{ .vars.version }}"]

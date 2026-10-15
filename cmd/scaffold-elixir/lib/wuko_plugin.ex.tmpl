@@ -1,0 +1,71 @@
+defmodule WukoPlugin do
+  @protocol "{{PROTOCOL}}"
+  @namespace "{{NS}}"
+  @step @namespace <> ".uppercase"
+
+  def main(_args), do: loop()
+
+  defp loop do
+    case IO.read(:stdio, :line) do
+      :eof ->
+        :ok
+
+      {:error, reason} ->
+        raise "reading protocol input: #{inspect(reason)}"
+
+      line ->
+        case Jason.decode(line) do
+          {:ok, request} ->
+            {response, stop?} = dispatch(request)
+            IO.puts(Jason.encode!(response))
+            if stop?, do: :ok, else: loop()
+
+          {:error, reason} ->
+            IO.puts(:stderr, "ignoring invalid protocol frame: #{Exception.message(reason)}")
+            loop()
+        end
+    end
+  end
+
+  def dispatch(%{"id" => id, "method" => "initialize", "params" => %{"protocol" => @protocol}}) do
+    result = %{
+      "protocol" => @protocol,
+      "namespace" => @namespace,
+      "lifecycle" => false,
+      "steps" => [%{"type" => @step}],
+      "executors" => [],
+      "helpers" => [],
+      "actions" => []
+    }
+
+    {%{"id" => id, "result" => result}, false}
+  end
+
+  def dispatch(%{"id" => id, "method" => "step.validate", "params" => params}) do
+    case value(params) do
+      {:ok, _value} -> {%{"id" => id, "result" => %{}}, false}
+      {:error, message} -> {error(id, "invalid_config", message), false}
+    end
+  end
+
+  def dispatch(%{"id" => id, "method" => "step.run", "params" => params}) do
+    case value(params) do
+      {:ok, value} ->
+        {%{"id" => id, "result" => %{"outputs" => %{"value" => String.upcase(value)}}}, false}
+
+      {:error, message} ->
+        {error(id, "invalid_config", message), false}
+    end
+  end
+
+  def dispatch(%{"id" => id, "method" => "shutdown"}), do: {%{"id" => id, "result" => %{}}, true}
+  def dispatch(%{"id" => id}), do: {error(id, "method_not_found", "unsupported method"), false}
+
+  defp value(%{"type" => @step, "with" => %{"value" => value}})
+       when is_binary(value) and value != "", do: {:ok, value}
+
+  defp value(_params), do: {:error, "uppercase.value must be a non-empty string"}
+
+  defp error(id, code, message),
+    do: %{"id" => id, "error" => %{"code" => code, "message" => message}}
+end

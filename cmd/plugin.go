@@ -32,11 +32,26 @@ var (
 	releaseVersionPattern = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+(?:-(?:alpha|beta|rc)(?:[.-]?[0-9]+)?)?$`)
 )
 
-// scaffoldAssets holds the plugin starter tree written by `wuko plugin init`. Every template is
-// stored with a .tmpl suffix so this module never tries to compile the generated plugin's code.
+// scaffoldAssets holds the plugin starter trees written by `wuko marketplace plugin init`. Every
+// template is stored with a .tmpl suffix so this module never tries to compile generated code.
 //
-//go:embed scaffold
+//go:embed scaffold scaffold-generic scaffold-elixir
 var scaffoldAssets embed.FS
+
+// pluginScaffoldTemplates lists the selectable templates in display order with their embedded roots.
+var pluginScaffoldTemplates = []struct{ name, root string }{
+	{"generic", "scaffold-generic"},
+	{"go", "scaffold"},
+	{"elixir", "scaffold-elixir"},
+}
+
+func pluginScaffoldTemplateNames() []string {
+	names := make([]string, 0, len(pluginScaffoldTemplates))
+	for _, template := range pluginScaffoldTemplates {
+		names = append(names, template.name)
+	}
+	return names
+}
 
 func newPluginCmd(deps dependencies) *cobra.Command {
 	command := &cobra.Command{Use: "plugin", Short: "Install and manage executable plugins"}
@@ -281,7 +296,22 @@ func newPluginUninstallCmd(deps dependencies) *cobra.Command {
 }
 
 func newPluginInitCmd() *cobra.Command {
-	return &cobra.Command{Use: "init NAMESPACE [DIRECTORY]", Short: "Create a standalone Go executable plugin", Example: "  wuko marketplace plugin init hello\n  wuko marketplace plugin init hello ./plugins/hello", Args: cobra.RangeArgs(1, 2), RunE: func(command *cobra.Command, args []string) error {
+	var template string
+	var listTemplates bool
+	command := &cobra.Command{Use: "init [NAMESPACE] [DIRECTORY]", Short: "Create a plugin project from an embedded template", Example: "  wuko marketplace plugin init hello --template go\n  wuko marketplace plugin init hello ./plugins/hello --template elixir\n  wuko marketplace plugin init --list-templates", Args: func(command *cobra.Command, args []string) error {
+		if listTemplates {
+			return cobra.NoArgs(command, args)
+		}
+		return cobra.RangeArgs(1, 2)(command, args)
+	}, RunE: func(command *cobra.Command, args []string) error {
+		if listTemplates {
+			for _, name := range pluginScaffoldTemplateNames() {
+				if _, err := fmt.Fprintln(command.OutOrStdout(), name); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
 		namespace := args[0]
 		if !pluginNamePattern.MatchString(namespace) {
 			return fmt.Errorf("invalid plugin namespace %q", namespace)
@@ -297,36 +327,59 @@ func newPluginInitCmd() *cobra.Command {
 			}
 			directory = filepath.Join(cwd, directory)
 		}
-		if err := writeGoPluginScaffold(directory, namespace); err != nil {
+		if err := writePluginScaffold(directory, namespace, template); err != nil {
 			return err
 		}
-		fmt.Fprintf(command.OutOrStdout(), "Initialized Go plugin %s in %s\nRun `go mod tidy` there to resolve the pinned Wuko SDK before building.\n", namespace, directory)
+		fmt.Fprintf(command.OutOrStdout(), "Initialized %s plugin %s in %s\n", template, namespace, directory)
+		if template == "go" {
+			fmt.Fprintln(command.OutOrStdout(), "Run `go mod tidy` there to resolve the pinned Wuko SDK before building.")
+		}
 		return nil
 	}}
+	command.Flags().StringVarP(&template, "template", "t", "generic", "project template: generic, go, or elixir")
+	command.Flags().BoolVar(&listTemplates, "list-templates", false, "list available project templates")
+	_ = command.RegisterFlagCompletionFunc("template", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
+		return pluginScaffoldTemplateNames(), cobra.ShellCompDirectiveNoFileComp
+	})
+	return command
 }
 
 func writeGoPluginScaffold(directory, namespace string) error {
+	return writePluginScaffold(directory, namespace, "go")
+}
+
+func writePluginScaffold(directory, namespace, template string) error {
+	index := slices.IndexFunc(pluginScaffoldTemplates, func(candidate struct{ name, root string }) bool { return candidate.name == template })
+	if index < 0 {
+		return fmt.Errorf("unknown plugin template %q; available templates: %s", template, strings.Join(pluginScaffoldTemplateNames(), ", "))
+	}
+	root := pluginScaffoldTemplates[index].root
 	if entries, err := os.ReadDir(directory); err == nil && len(entries) > 0 {
 		return fmt.Errorf("directory %s is not empty", directory)
 	} else if err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Join(directory, "examples"), 0755); err != nil {
+	if err := os.MkdirAll(directory, 0755); err != nil {
 		return err
 	}
-	files, err := scaffoldFiles()
+	files, err := scaffoldFiles(root)
 	if err != nil {
 		return err
 	}
 	for name, content := range files {
 		content = strings.ReplaceAll(content, "{{NS}}", namespace)
+		content = strings.ReplaceAll(content, "{{MODULE_NS}}", strings.ReplaceAll(namespace, "-", "_"))
 		content = strings.ReplaceAll(content, "{{PROTOCOL}}", pluginpkg.Protocol)
 		content = strings.ReplaceAll(content, "{{SDK_VERSION}}", scaffoldSDKVersion())
 		target := filepath.Join(directory, name)
 		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
 			return err
 		}
-		if err := os.WriteFile(target, []byte(content), 0644); err != nil {
+		mode := os.FileMode(0o644)
+		if name == "build-release" {
+			mode = 0o755
+		}
+		if err := os.WriteFile(target, []byte(content), mode); err != nil {
 			return err
 		}
 	}
@@ -353,9 +406,9 @@ func resolveScaffoldSDKVersion(buildVersion, cliVersion string) string {
 // scaffoldFiles returns the plugin starter tree, keyed by the path each file takes in the
 // generated project. The sources live under scaffold/ as real files rather than string literals
 // so they stay gofmt-clean and reviewable; TestScaffoldIsFormatted holds that.
-func scaffoldFiles() (map[string]string, error) {
+func scaffoldFiles(root string) (map[string]string, error) {
 	files := make(map[string]string)
-	err := fs.WalkDir(scaffoldAssets, "scaffold", func(path string, entry fs.DirEntry, err error) error {
+	err := fs.WalkDir(scaffoldAssets, root, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil || entry.IsDir() {
 			return err
 		}
@@ -363,7 +416,7 @@ func scaffoldFiles() (map[string]string, error) {
 		if err != nil {
 			return err
 		}
-		files[scaffoldTargetPath(path)] = string(content)
+		files[scaffoldTargetPath(root, path)] = string(content)
 		return nil
 	})
 	if err != nil {
@@ -375,8 +428,8 @@ func scaffoldFiles() (map[string]string, error) {
 // scaffoldTargetPath maps an embedded template to its path in the generated project. The .tmpl
 // suffix keeps the templates out of this module's build, and the dot- prefix carries a leading
 // dot that go:embed would otherwise skip.
-func scaffoldTargetPath(path string) string {
-	target := strings.TrimSuffix(strings.TrimPrefix(path, "scaffold/"), ".tmpl")
+func scaffoldTargetPath(root, path string) string {
+	target := strings.TrimSuffix(strings.TrimPrefix(path, root+"/"), ".tmpl")
 	directory, name := filepath.Split(target)
 	return directory + strings.Replace(name, "dot-", ".", 1)
 }

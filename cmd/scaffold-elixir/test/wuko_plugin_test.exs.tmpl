@@ -1,0 +1,14 @@
+defmodule WukoPluginTest do
+  use ExUnit.Case, async: true
+
+  test "uppercases a configured value" do
+    {response, false} =
+      WukoPlugin.dispatch(%{
+        "id" => "run",
+        "method" => "step.run",
+        "params" => %{"type" => "{{NS}}.uppercase", "with" => %{"value" => "hello"}}
+      })
+
+    assert response["result"]["outputs"]["value"] == "HELLO"
+  end
+end

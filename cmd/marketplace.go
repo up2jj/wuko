@@ -23,7 +23,7 @@ func newMarketplaceCmd(deps dependencies) *cobra.Command {
 		Use:   "marketplace",
 		Short: "Create and build workflow and plugin marketplaces",
 	}
-	marketplace.AddCommand(newMarketplaceInitCmd(deps), newMarketplacePluginCmd(deps), newMarketplaceBuildCmd(deps))
+	marketplace.AddCommand(newMarketplaceInitCmd(deps), newMarketplaceWorkflowCmd(deps), newMarketplacePluginCmd(deps), newMarketplaceBuildCmd(deps))
 	return marketplace
 }
 

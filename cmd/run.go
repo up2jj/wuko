@@ -59,6 +59,30 @@ type runWorkflowConfig struct {
 	nonInteractive  bool
 	defaultReporter reporterpkg.Reporter
 	returnObserver  *returnDestinationObserver
+	resultObserver  func(*engine.State)
+}
+
+// runLocalWorkflowForOutputs executes one trusted local workflow with the supplied directory as
+// its run directory and returns its declared outputs. It is shared by command flows that use a
+// workflow as an implementation detail instead of exposing the general `run` command surface.
+func runLocalWorkflowForOutputs(command *cobra.Command, deps dependencies, path, runDir string, variables []string) (map[string]any, error) {
+	localDeps := deps
+	localDeps.cwd = func() (string, error) { return runDir, nil }
+	var outputs map[string]any
+	err := runWorkflow(command, localDeps, nil, runWorkflowConfig{
+		variables:    variables,
+		workflowFile: path,
+		once:         true,
+		resultObserver: func(state *engine.State) {
+			if state != nil {
+				outputs = state.Outputs
+			}
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return outputs, nil
 }
 
 type returnDestinationObserver struct {
@@ -119,6 +143,11 @@ func runWorkflow(command *cobra.Command, deps dependencies, args []string, confi
 	var workflowName string
 	var runState *engine.State
 	var attemptErr error
+	defer func() {
+		if config.resultObserver != nil {
+			config.resultObserver(runState)
+		}
+	}()
 	defer func() {
 		state := completedRunState(runState, attemptErr, runErr)
 		runErr = errors.Join(runErr, reporters.complete(command.Context(), workflowName, state, runErr, config.dryRun))

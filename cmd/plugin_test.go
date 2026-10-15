@@ -158,19 +158,83 @@ func TestGoPluginScaffoldPinsSDKAndOmitsTransport(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(directory, "protocol.go")); !os.IsNotExist(err) {
 		t.Fatalf("hand-written protocol.go still exists: %v", err)
 	}
-	// The scaffold ships a require without a go.sum, so every recipe that compiles has to resolve
-	// the pinned SDK first; otherwise the first `just build` dies on a missing go.sum entry.
-	recipes, err := os.ReadFile(filepath.Join(directory, "justfile"))
+	if _, err := os.Stat(filepath.Join(directory, "justfile")); !os.IsNotExist(err) {
+		t.Fatalf("scaffold still depends on a justfile: %v", err)
+	}
+	readme, err := os.ReadFile(filepath.Join(directory, "README.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(recipes), "deps:\n\tgo mod tidy\n") {
-		t.Fatalf("justfile = %q, want a go mod tidy recipe", recipes)
-	}
-	for _, recipe := range []string{"build: deps", "test: deps", "vet: deps", "release version: deps"} {
-		if !strings.Contains(string(recipes), recipe) {
-			t.Fatalf("justfile = %q, want %q", recipes, recipe)
+	for _, command := range []string{"go mod tidy", "go fmt ./...", "go vet ./...", "go test ./...", "wuko marketplace plugin release"} {
+		if !strings.Contains(string(readme), command) {
+			t.Fatalf("README = %q, want native command %q", readme, command)
 		}
+	}
+}
+
+func TestPluginScaffoldTemplates(t *testing.T) {
+	tests := []struct {
+		name      string
+		files     []string
+		contains  map[string]string
+		forbidden string
+	}{
+		{name: "generic", files: []string{"README.md", "plugin.json", "wuko.release.yaml", "build-release", ".gitignore"}, contains: map[string]string{"README.md": "language-neutral", "plugin.json": pluginpkg.Protocol, "wuko.release.yaml": "./build-release"}, forbidden: "justfile"},
+		{name: "elixir", files: []string{"README.md", "plugin.json", "wuko.release.yaml", "mix.exs", "lib/wuko_plugin.ex", "tools/release.exs", "test/test_helper.exs", "test/wuko_plugin_test.exs", ".gitignore", ".formatter.exs"}, contains: map[string]string{"mix.exs": ":wuko_plugin_acme_tools", "lib/wuko_plugin.ex": pluginpkg.Protocol, "wuko.release.yaml": "mix", "tools/release.exs": pluginpkg.Protocol}, forbidden: "justfile"},
+		{name: "go", files: []string{"README.md", "plugin.json", "wuko.release.yaml", "go.mod", "main.go", "tools/release/main.go"}, contains: map[string]string{"main.go": "plugin/sdk", "plugin_test.go": "plugin/sdk/sdktest", "wuko.release.yaml": "./tools/release"}, forbidden: "justfile"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			directory := filepath.Join(t.TempDir(), "plugin")
+			if err := writePluginScaffold(directory, "acme-tools", test.name); err != nil {
+				t.Fatal(err)
+			}
+			for _, name := range test.files {
+				if _, err := os.Stat(filepath.Join(directory, filepath.FromSlash(name))); err != nil {
+					t.Fatalf("missing %s: %v", name, err)
+				}
+			}
+			for name, want := range test.contains {
+				data, err := os.ReadFile(filepath.Join(directory, filepath.FromSlash(name)))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !strings.Contains(string(data), want) {
+					t.Fatalf("%s = %q, want %q", name, data, want)
+				}
+			}
+			if _, err := os.Stat(filepath.Join(directory, test.forbidden)); !os.IsNotExist(err) {
+				t.Fatalf("unexpected %s: %v", test.forbidden, err)
+			}
+			definition, err := workflow.NewLoader(nil).Decode(filepath.Join(directory, pluginReleaseWorkflowName), workflow.LoadOptions{RunDir: directory})
+			if err != nil {
+				t.Fatalf("release workflow: %v", err)
+			}
+			if output, ok := definition.Outputs["bundle"]; !ok || output.Type != "string" {
+				t.Fatalf("release workflow bundle output = %#v", output)
+			}
+		})
+	}
+}
+
+func TestGenericPluginScaffoldReleaseEntrypointIsExecutable(t *testing.T) {
+	directory := filepath.Join(t.TempDir(), "plugin")
+	if err := writePluginScaffold(directory, "acme", "generic"); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(filepath.Join(directory, "build-release"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm()&0o111 == 0 {
+		t.Fatalf("build-release mode = %v, want executable", info.Mode().Perm())
+	}
+}
+
+func TestPluginScaffoldRejectsUnknownTemplate(t *testing.T) {
+	err := writePluginScaffold(filepath.Join(t.TempDir(), "plugin"), "acme", "unknown")
+	if err == nil || !strings.Contains(err.Error(), "available templates") {
+		t.Fatalf("error = %v", err)
 	}
 }
 
@@ -331,13 +395,22 @@ func assertScaffoldDeclarations(t *testing.T, value any) {
 func TestPluginInitLivesUnderMarketplace(t *testing.T) {
 	root, home := t.TempDir(), t.TempDir()
 	destination := filepath.Join(root, "wuko-plugin-acme")
+	var output bytes.Buffer
 	command := marketplaceTestCommand(root, home, nil)
+	command.SetOut(&output)
 	command.SetArgs([]string{"marketplace", "plugin", "init", "acme", destination})
 	if err := command.ExecuteContext(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(destination, "plugin.json")); err != nil {
 		t.Fatalf("plugin scaffold was not created: %v", err)
+	}
+	readme, err := os.ReadFile(filepath.Join(destination, "README.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(readme), "language-neutral") || !strings.Contains(output.String(), "Initialized generic plugin") {
+		t.Fatalf("default template output = %q, README = %q", output.String(), readme)
 	}
 	command = marketplaceTestCommand(root, home, nil)
 	pluginCommand, _, err := command.Find([]string{"plugin"})
@@ -348,6 +421,20 @@ func TestPluginInitLivesUnderMarketplace(t *testing.T) {
 		if child.Name() == "init" {
 			t.Fatal("legacy plugin init command remains available")
 		}
+	}
+}
+
+func TestPluginInitListsTemplates(t *testing.T) {
+	root, home := t.TempDir(), t.TempDir()
+	var output bytes.Buffer
+	command := marketplaceTestCommand(root, home, nil)
+	command.SetOut(&output)
+	command.SetArgs([]string{"marketplace", "plugin", "init", "--list-templates"})
+	if err := command.ExecuteContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if output.String() != "generic\ngo\nelixir\n" {
+		t.Fatalf("templates = %q", output.String())
 	}
 }
 

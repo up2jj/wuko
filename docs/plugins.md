@@ -2,14 +2,20 @@
 
 Wuko plugins are persistent executables that exchange newline-delimited JSON with Wuko over stdin and stdout. A plugin may expose namespaced steps, executors, helpers shared by Expr, Go templates, and Lua, and v3 static composite actions. Its stderr is reserved for diagnostics.
 
-Create a standard-library-only Go plugin project:
+Create a project from an embedded language preset:
 
 ```sh
-wuko marketplace plugin init acme
-wuko marketplace plugin init acme ./plugins/acme
+wuko marketplace plugin init acme --template go
+wuko marketplace plugin init acme ./plugins/acme --template elixir
+wuko marketplace plugin init acme --template generic
+wuko marketplace plugin init --list-templates
 ```
 
-The generated project contains a working `acme.uppercase` step, an `acme.local` executor, tests, a `justfile`, an example workflow, and a release-manifest template.
+`generic` is the default and documents the language-neutral protocol and bundle contract. The Go
+template contains a working `acme.uppercase` step, an `acme.local` executor, SDK-backed tests, an
+example workflow, and a release helper. The Elixir template contains a Mix escript with an example
+step. Every template includes a conventional `wuko.release.yaml`; it owns the native build recipe
+and returns the completed bundle directory. No template requires a `justfile`.
 
 New projects always implement Wuko's newest protocol, currently [plugin protocol
 v3](plugin-protocol-v3.md). The generated concurrent reader handles cancellation and responses to
@@ -95,19 +101,17 @@ wuko marketplace init
 ```
 
 This creates a `manifest.json` plus `.wuko/workflows/` and `.wuko/plugin-sources/` source
-directories. Create the example Go plugin next to the marketplace and build its complete release:
+directories. Create the example Go plugin next to the marketplace and resolve its SDK dependency:
 
 ```sh
 cd ..
-wuko marketplace plugin init hello
+wuko marketplace plugin init hello --template go
 cd wuko-plugin-hello
 go mod tidy
-go test ./...
-just release 0.1.0
 ```
 
-The scaffold pins `github.com/up2jj/wuko` but ships no `go.sum`, so the first build needs
-`go mod tidy`. Every `just` recipe that compiles runs it first.
+The Go scaffold pins `github.com/up2jj/wuko` but ships no `go.sum`, so the first build needs
+`go mod tidy`. It uses `plugin/sdk` for transport and `plugin/sdk/sdktest` for protocol-level tests.
 
 The generated release helper uses only the Go toolchain and standard library. It cross-compiles
 with CGO disabled for Darwin and Linux on amd64 and arm64, creates deterministic `tar.gz` archives,
@@ -123,21 +127,24 @@ wuko-plugin-hello/
     └── wuko-plugin-hello_Linux_arm64.tar.gz
 ```
 
-Import and publish the release:
+Build and publish the release through its conventional workflow:
 
 ```sh
 cd ../wuko-marketplace
-wuko marketplace plugin add \
+wuko marketplace plugin release \
+  --version 0.1.0 \
   --description "A simple uppercase step" \
   ../wuko-plugin-hello
-wuko marketplace build
 wuko marketplace build --check
 ```
 
-`plugin add` accepts the same local, HTTPS, and pinned `github:` sources as direct installation. It
-downloads every declared platform archive, validates its digest and safe executable structure,
-and commits the import atomically without executing any binary. Imported sources and published
-files have separate locations:
+For a local plugin project, `plugin release` runs its root `wuko.release.yaml` with the project as
+the run directory and passes `--version` as `vars.version`. The workflow must return a string output
+named `bundle` identifying a directory inside the project. Wuko then validates every declared
+archive and digest, verifies the resulting manifest version, adds or updates the imported source,
+and rebuilds the marketplace transactionally. A first release requires `--description`; later
+releases preserve it unless the flag is supplied. Imported sources and published files have
+separate locations:
 
 ```text
 .wuko/plugin-sources/hello/      # maintainer source, including build-only provenance metadata
@@ -158,22 +165,34 @@ git commit -m "feat: add hello plugin"
 git push
 ```
 
-A public GitHub repository can be installed through its normal repository URL. To publish an
-update, build the new release and replace the import transactionally:
+A public GitHub repository can be installed through its normal repository URL. To build and
+publish an update transactionally:
 
 ```sh
-cd ../wuko-plugin-hello
-just release 0.2.0
-
 cd ../wuko-marketplace
-wuko marketplace plugin update hello ../wuko-plugin-hello
-wuko marketplace build
+wuko marketplace plugin release --version 0.2.0 ../wuko-plugin-hello
 wuko marketplace build --check
 ```
 
-The fetched namespace must match `hello`. The existing description is preserved unless
-`--description` is supplied; explicitly passing an empty description clears it. Failed validation
-leaves the previous import intact.
+The namespace comes from `plugin.json`, and its version must match `--version`. Releases reject
+semantic-version downgrades and changed artifacts under an already-published version; repeating an
+identical version is a no-op.
+The existing description is preserved unless `--description` is supplied, and failed validation or
+marketplace generation leaves the previous source and published catalog intact. The lower-level
+`plugin add` and `plugin update` commands remain available when a maintainer intentionally wants to
+change imported source without rebuilding immediately.
+
+HTTPS and pinned `github:` sources are already-built bundles and are never executed. A local
+already-built bundle can be published explicitly with `--skip-build`; `--version` is optional in
+that mode and acts as an assertion when supplied.
+
+Remove a maintained plugin source, then explicitly rebuild to clean its generated files:
+
+```sh
+wuko marketplace plugin remove hello --yes
+wuko marketplace build
+wuko marketplace build --check
+```
 
 Marketplace repositories distribute native executable code. SHA-256 verification protects file
 integrity, but it does not establish publisher identity, make a plugin safe, or provide a sandbox.
@@ -269,11 +288,12 @@ one of those versions is accepted on that answer, and one that fails the handsha
 process. This negotiation does not change strict v1 behavior: after v1 is selected, its
 declarations, contexts, events, and request direction remain unchanged.
 
-`wuko marketplace plugin init` always generates the newest protocol supported by that Wuko
-release. It has no protocol-selection flag. The current scaffold pins the matching Wuko Go module
-and uses `plugin/sdk` for the v3 bidirectional transport, request-scoped cancellation, serialized
-writes, declarations, and host callbacks. The starter retains bounded executor streaming and
-process-group cleanup. See the [v2 service and callback examples](plugin-protocol-v2.md#complete-service-sequence).
+`wuko marketplace plugin init` always targets the newest protocol supported by that Wuko release.
+It has a project-template flag, not a protocol-selection flag. The Go template pins the matching
+Wuko module and uses `plugin/sdk` for the v3 bidirectional transport, request-scoped cancellation,
+serialized writes, declarations, and host callbacks. It retains bounded executor streaming and
+process-group cleanup. Other language templates implement the same wire contract. See the
+[v2 service and callback examples](plugin-protocol-v2.md#complete-service-sequence).
 
 ## Lifecycle
 

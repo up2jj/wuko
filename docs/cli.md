@@ -62,6 +62,7 @@ wuko uninstall --global --yes release
 
 wuko marketplace init                # create a marketplace manifest
 wuko marketplace build               # publish new or changed packages and plugins
+wuko marketplace workflow --help     # add or remove workflow package sources
 wuko marketplace plugin --help       # scaffold and manage marketplace plugins
 ```
 

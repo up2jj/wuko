@@ -1272,6 +1272,16 @@ wuko marketplace build
 wuko marketplace build --check
 ```
 
+Maintainers can add and remove validated workflow source packages without copying directories by
+hand. These commands change source only, so follow them with an explicit build:
+
+```sh
+wuko marketplace workflow add ../workflows/release
+wuko marketplace workflow remove release --yes
+wuko marketplace build
+wuko marketplace build --check
+```
+
 `build` discovers package directories containing a root `wuko.yaml` or `wuko.yml` below
 `.wuko/workflows/`. Every regular file in the package directory is included in a deterministic
 `tar.gz` archive. The package source digest and archive digest are recorded in the manifest.
@@ -1281,13 +1291,17 @@ unsafe paths, duplicate files, oversized packages, and packages without a root m
 The root workflow may declare `package_version` separately from its workflow schema `version`; the
 package version is copied into the manifest, shown in the picker, and checked against the archive.
 
-Plugin maintainers create Go scaffolds with `wuko marketplace plugin init`, import complete releases
-with `wuko marketplace plugin add`, and replace them with `wuko marketplace plugin update`. Imported
-manifests and all declared platform archives live under `.wuko/plugin-sources/<namespace>/`, which is
-deliberately separate from the `.wuko/plugins/` installation root; build validates
-and copies only those public release files beneath `plugins/<namespace>/`. It never executes
-foreign-platform binaries. `build --check` validates that the manifest and all generated workflow
-and plugin files are current without modifying them, making it suitable for CI. See
+Plugin maintainers scaffold generic, Go, or Elixir projects with `wuko marketplace plugin init
+--template ...`. Each project carries a conventional `wuko.release.yaml` that uses its native
+toolchain and returns a `bundle` directory. For local projects, `wuko marketplace plugin release`
+runs that trusted workflow, validates and transactionally adds or updates its bundle, and rebuilds
+the catalog. Remote sources are treated only as completed bundles and are never executed. The lower-level
+`plugin add` and `plugin update` commands remain available for source-only changes. Imported manifests
+and all declared platform archives live under `.wuko/plugin-sources/<namespace>/`, which is deliberately
+separate from the `.wuko/plugins/` installation root; build validates and copies only those public
+release files beneath `plugins/<namespace>/`. It never executes foreign-platform binaries.
+`build --check` validates that the manifest and all generated workflow and plugin files are current
+without modifying them, making it suitable for CI. See
 [Executable plugins](plugins.md#create-and-publish-a-marketplace-plugin) for the complete maintainer
 workflow and [version-resolution rules](plugins.md#version-resolution-and-conflicts).
 

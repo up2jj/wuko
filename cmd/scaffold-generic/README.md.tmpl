@@ -1,0 +1,15 @@
+# wuko-plugin-{{NS}}
+
+This is a language-neutral Wuko executable-plugin scaffold targeting `{{PROTOCOL}}`.
+
+Implement an executable named `wuko-plugin-{{NS}}` that reserves stdin and stdout for newline-delimited JSON protocol frames and writes diagnostics to stderr. The host starts with an `initialize` request and expects the same protocol plus namespace, step, executor, helper, action, and lifecycle declarations.
+
+Customize the generated `build-release` entrypoint used by `wuko.release.yaml`. It receives the semantic version as its only argument and must package each supported OS/architecture executable as a safe `tar.gz`, replace the placeholders in `plugin.json`, and leave the completed bundle in this directory. From a marketplace repository, build and publish in one command:
+
+```sh
+wuko marketplace plugin release --version 0.1.0 --description "Describe the plugin" /path/to/wuko-plugin-{{NS}}
+```
+
+The workflow's `bundle` output must identify a directory inside the plugin project containing `plugin.json` and every archive named by its `artifacts` array. Each archive entry must be a regular executable file at the declared root-relative `entry`; symlinks and escaping paths are rejected.
+
+See the protocol reference at https://github.com/up2jj/wuko/blob/main/docs/plugin-protocol-v3.md.

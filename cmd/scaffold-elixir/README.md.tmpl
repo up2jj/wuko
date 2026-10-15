@@ -1,0 +1,18 @@
+# wuko-plugin-{{NS}}
+
+An Elixir Wuko plugin targeting `{{PROTOCOL}}`. It includes one example step, `{{NS}}.uppercase`.
+
+```sh
+mix deps.get
+mix format --check-formatted
+mix test
+mix escript.build
+```
+
+The escript is named `wuko-plugin-{{NS}}` and requires a compatible Erlang/Elixir runtime on the target host. The generated `wuko.release.yaml` fetches dependencies, formats and tests the project, then uses `tools/release.exs` to build, package, hash, and describe the current platform. From a marketplace repository, build and publish in one command:
+
+```sh
+wuko marketplace plugin release --version 0.1.0 --description "Describe the plugin" ../wuko-plugin-{{NS}}
+```
+
+The executable reserves stdout for protocol frames and sends diagnostics to stderr. For a fully standalone distribution or additional target platforms, replace the workflow's escript packaging step with a tool such as Burrito while retaining its `bundle` output and the same `plugin.json` release contract.
