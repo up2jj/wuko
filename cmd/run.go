@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -60,6 +61,10 @@ type runWorkflowConfig struct {
 	defaultReporter reporterpkg.Reporter
 	returnObserver  *returnDestinationObserver
 	resultObserver  func(*engine.State)
+	// stepStderr additionally receives the stderr that steps stream, and progressObserver every
+	// progress event, so an embedding command can explain a failure in its own error.
+	stepStderr       io.Writer
+	progressObserver func(engine.ProgressEvent)
 }
 
 // runLocalWorkflowForOutputs executes one trusted local workflow with the supplied directory as
@@ -69,6 +74,7 @@ func runLocalWorkflowForOutputs(command *cobra.Command, deps dependencies, path,
 	localDeps := deps
 	localDeps.cwd = func() (string, error) { return runDir, nil }
 	var outputs map[string]any
+	tail := &stderrTail{}
 	err := runWorkflow(command, localDeps, nil, runWorkflowConfig{
 		variables:    variables,
 		workflowFile: path,
@@ -78,8 +84,19 @@ func runLocalWorkflowForOutputs(command *cobra.Command, deps dependencies, path,
 				outputs = state.Outputs
 			}
 		},
+		stepStderr: tail,
+		progressObserver: func(event engine.ProgressEvent) {
+			// Each step or retry starts a fresh tail so a failure shows its own output, not that of
+			// an earlier step that succeeded.
+			if event.Kind == engine.StepStarted || event.Kind == engine.AttemptStarted {
+				tail.Reset()
+			}
+		},
 	})
 	if err != nil {
+		if lines := tail.Lines(); lines != "" {
+			return nil, fmt.Errorf("%w\nlast stderr lines:\n  %s", err, strings.ReplaceAll(lines, "\n", "\n  "))
+		}
 		return nil, err
 	}
 	return outputs, nil
@@ -135,6 +152,13 @@ func runWorkflow(command *cobra.Command, deps dependencies, args []string, confi
 			return err
 		}
 		additionalReporters = append(additionalReporters, fileReporter)
+	}
+	if config.progressObserver != nil {
+		additionalReporters = append(additionalReporters, reporterpkg.Funcs{ProgressFunc: config.progressObserver})
+	}
+	stepStderr := command.ErrOrStderr()
+	if config.stepStderr != nil {
+		stepStderr = io.MultiWriter(stepStderr, config.stepStderr)
 	}
 	reporters, err := newRunReportersWithDefault(command, deps, cwd, config.reporters, config.defaultReporter, additionalReporters...)
 	if err != nil {
@@ -268,7 +292,7 @@ func runWorkflow(command *cobra.Command, deps dependencies, args []string, confi
 			Vars:         vars, Env: env, BaseEnv: baseEnv, EnvironmentLoaders: environmentLoaders, RunDir: cwd, Stdin: stdin, Providers: providers,
 			Dependencies:  dependencies,
 			LocalValueDir: localValueDir, GlobalValueDir: filepath.Join(configDir, "wuko", "values"),
-			Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(),
+			Stdout: command.OutOrStdout(), Stderr: stepStderr,
 			Interactive: isInteractive, DryRun: config.dryRun, Progress: reporters.Progress,
 			ElevationAllowed: elevationAllowed,
 			Diagnostics:      reporters.Diagnostic,

@@ -20,6 +20,7 @@ import (
 	"github.com/spf13/cobra"
 	pluginpkg "github.com/up2jj/wuko/plugin"
 	"github.com/up2jj/wuko/step"
+	"github.com/up2jj/wuko/steps/shell"
 	"github.com/up2jj/wuko/tui"
 	"github.com/up2jj/wuko/workflow"
 )
@@ -524,6 +525,44 @@ steps:
 	}
 	if _, err := os.Stat(filepath.Join(root, ".wuko", "plugin-sources", "acme")); !os.IsNotExist(err) {
 		t.Fatalf("failed workflow release changed marketplace: %v", err)
+	}
+}
+
+func TestMarketplacePluginReleaseReportsFailedBuildStepStderr(t *testing.T) {
+	root, home := t.TempDir(), t.TempDir()
+	source := filepath.Join(t.TempDir(), "plugin")
+	writeMarketplacePluginRelease(t, source, "acme", "1.0.0")
+	failing := `version: 1
+name: plugin-release
+outputs:
+  bundle: {type: string, value: '"."'}
+steps:
+  - id: deps
+    type: shell
+    with: {script: 'echo "fetching deps" >&2'}
+  - id: build
+    type: shell
+    with: {script: 'printf "compiling\\n\\033[31merror: undefined function\\033[0m\\n" >&2; exit 3'}
+`
+	if err := os.WriteFile(filepath.Join(source, pluginReleaseWorkflowName), []byte(failing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	registry := step.NewRegistry()
+	if err := shell.Register(registry); err != nil {
+		t.Fatal(err)
+	}
+	command := newRootCmd(dependencies{
+		stdin: bytes.NewReader(nil), stdout: &bytes.Buffer{}, stderr: &bytes.Buffer{},
+		cwd: func() (string, error) { return root, nil }, homeDir: func() (string, error) { return home, nil },
+		configDir: func() (string, error) { return filepath.Join(home, "config"), nil }, registry: registry,
+	})
+	command.SetArgs([]string{"marketplace", "plugin", "release", "--version", "1.0.0", "--description", "Acme", source})
+	err := command.ExecuteContext(t.Context())
+	if err == nil || !strings.HasSuffix(err.Error(), "exited with status 3\nlast stderr lines:\n  compiling\n  error: undefined function") {
+		t.Fatalf("failed build error = %v", err)
+	}
+	if strings.Contains(err.Error(), "fetching deps") {
+		t.Fatalf("failed build error includes an earlier step's stderr: %v", err)
 	}
 }
 
