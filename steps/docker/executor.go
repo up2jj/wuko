@@ -310,11 +310,12 @@ func (session *dockerExecutorSession) startLocked(ctx context.Context) error {
 	if workspace.Enabled {
 		workingDir = workspace.Target
 	}
-	environment := environmentList(session.request.Env)
+	// The session environment is applied per exec rather than baked into the
+	// container, so a scoped unset can remove inherited variables.
 	created, err := session.client.ContainerCreate(ctx, client.ContainerCreateOptions{
 		Config: &container.Config{
 			Image: session.config.Image, Entrypoint: []string{init.Command}, Cmd: append([]string(nil), init.Args...),
-			WorkingDir: workingDir, User: session.config.User, Env: environment,
+			WorkingDir: workingDir, User: session.config.User,
 			Labels: map[string]string{
 				managedLabel: "true", ownerHostLabel: session.ownerHost, ownerPIDLabel: strconv.Itoa(os.Getpid()),
 				workflowLabel: session.request.WorkflowName, stepLabel: "executor:docker",
@@ -405,6 +406,10 @@ func (session *dockerExecutorSession) Run(ctx context.Context, options process.O
 	if user == "" {
 		user = session.config.User
 	}
+	environment := options.Env
+	if environment == nil {
+		environment = session.request.Env
+	}
 	command := append([]string{options.Command}, options.Args...)
 	var service *serviceExec
 	if options.Started != nil {
@@ -416,7 +421,7 @@ func (session *dockerExecutorSession) Run(ctx context.Context, options process.O
 	}
 	created, err := session.client.ExecCreate(ctx, session.containerID, client.ExecCreateOptions{
 		User: user, AttachStdin: options.Stdin != nil, AttachStdout: true, AttachStderr: true,
-		Env: environmentList(options.Env), WorkingDir: workingDir, Cmd: command,
+		Env: environmentList(environment), WorkingDir: workingDir, Cmd: command,
 	})
 	if err != nil {
 		return process.Result{}, fmt.Errorf("creating Docker exec for %s: %w", options.Command, err)

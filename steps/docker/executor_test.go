@@ -485,3 +485,39 @@ func TestDockerServiceScriptsRecordAndStopTheService(t *testing.T) {
 		})
 	}
 }
+
+func TestDockerExecutorAppliesEnvironmentPerExec(t *testing.T) {
+	client := &fakeClient{output: multiplexedOutput("", "")}
+	providerValue, err := NewExecutor(map[string]any{"image": "alpine"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := providerValue.(*ExecutorProvider)
+	provider.newClient = func() (dockerClient, error) { return client, nil }
+	session, err := provider.Open(t.Context(), executor.Request{RunDir: t.TempDir(), Env: map[string]string{"BASE": "workflow", "TOKEN": "secret"}, Stdout: io.Discard, Stderr: io.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close(t.Context())
+	for _, test := range []struct {
+		name string
+		env  map[string]string
+		want []string
+	}{
+		{"scoped removal", map[string]string{"BASE": "workflow"}, []string{"BASE=workflow"}},
+		{"inherit when omitted", nil, []string{"BASE=workflow", "TOKEN=secret"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := session.Run(t.Context(), process.Options{Command: "env", Env: test.env, Stdout: io.Discard, Stderr: io.Discard}); err != nil {
+				t.Fatal(err)
+			}
+			got := slices.Sorted(slices.Values(client.execOptions.Env))
+			if !slices.Equal(got, test.want) {
+				t.Fatalf("exec env = %v, want %v", got, test.want)
+			}
+		})
+	}
+	if len(client.created.Config.Env) != 0 {
+		t.Fatalf("container env = %v, want none so scoped removals apply", client.created.Config.Env)
+	}
+}

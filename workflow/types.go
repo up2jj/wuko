@@ -164,7 +164,7 @@ type Step struct {
 	Type             string              `yaml:"type,omitempty"`
 	Uses             ActionSource        `yaml:"uses,omitempty"`
 	Require          *string             `yaml:"require,omitempty"`
-	Env              Environment         `yaml:"env,omitempty"`
+	Env              ScopedEnvironment   `yaml:"env,omitempty"`
 	WorkingDirectory string              `yaml:"working_directory,omitempty"`
 	Worktree         *WorktreeGroup      `yaml:"worktree,omitempty"`
 	Executor         *ExecutorScope      `yaml:"executor,omitempty"`
@@ -330,13 +330,8 @@ func (workflowStep Step) validateBlock() error {
 		}
 		return nil
 	case workflowStep.IsEnvironmentBlock():
-		if len(workflowStep.Env) == 0 {
-			return fmt.Errorf("env block must contain at least one variable")
-		}
-		for name := range workflowStep.Env {
-			if !environmentPattern.MatchString(name) {
-				return fmt.Errorf("invalid environment name %q", name)
-			}
+		if err := workflowStep.Env.Validate(); err != nil {
+			return err
 		}
 		if workflowStep.ID != "" || workflowStep.Type != "" || !workflowStep.Uses.Empty() || workflowStep.Require != nil || workflowStep.Worktree != nil || workflowStep.Executor != nil || workflowStep.Finally != nil || workflowStep.Defer != nil || workflowStep.IsWorkingDirectoryBlock() || workflowStep.Concurrent != nil || workflowStep.Batch != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil || workflowStep.Loop != nil || workflowStep.Once != nil || workflowStep.Observe != nil || workflowStep.Return != nil || workflowStep.SHA256 != "" || workflowStep.If != "" || workflowStep.Attempt != nil || workflowStep.With != nil {
 			return fmt.Errorf("env block cannot be combined with other step fields")

@@ -474,13 +474,15 @@ Use `env` with `steps` when several descendants need the same environment overla
 ```
 
 An env block is transparent: it has no ID or outputs, and only its executable descendants appear
-in progress and run statistics. Its string-valued entries overlay the effective host, workflow,
-and invocation environment. Nested env blocks override enclosing keys, while keys they do not set
+in progress and run statistics. Its entries overlay the effective host, workflow, and invocation
+environment. Nested env blocks override enclosing keys, while keys they do not set
 remain inherited. The previous environment is restored when the block exits, including after
-failure, cancellation, or an early `return`. Env blocks do not unset inherited variables.
+failure, cancellation, or an early `return`. Set an entry to YAML `null` to remove that variable;
+`""` keeps it present with an empty value, and `"null"` sets literal text.
 
 Values are rendered together when the block is entered, against the enclosing environment and all
-state committed by earlier sequential steps. Entries in the same block cannot refer to one another:
+state committed by earlier sequential steps. Entries in the same assignment map cannot refer to
+one another:
 
 ```yaml
 - env:
@@ -492,6 +494,48 @@ state committed by earlier sequential steps. Entries in the same block cannot re
       with: {command: ./publish}
 ```
 
+Use a list of operations when ordering matters. Each operation contains exactly one `set` or
+`unset` field. The flat map above is shorthand for one `set` operation:
+
+```yaml
+- env:
+    - unset: ["AWS_*", LEGACY_TOKEN]
+    - set:
+        AWS_REGION: "{{ .vars.region }}"
+        DEBUG: null
+        TOKEN: {expr: 'vars.keep_token ? env.TOKEN : nil'}
+    - unset: {expr: vars.extra_cleanup}
+  steps:
+    - id: publish
+      type: shell
+      with: {command: ./publish}
+```
+
+Operations run top to bottom, once on entry. Each operation sees the environment produced by
+previous operations; entries inside one `set` operation share its pre-operation snapshot.
+Putting `unset` before `set` lets selected values replace removed ones. Putting it afterward
+removes matching values even if this block just assigned them. All operations resolve against a
+private snapshot before any child runs, so an error leaves the enclosing environment untouched.
+
+`set` accepts a nonempty assignment map. Values may be template strings, YAML null, or an exact
+`{expr: ...}` object returning a string or `nil`. Expressions returning booleans, numbers, arrays,
+or objects fail rather than being converted to strings. Environment names remain literal.
+
+`unset` accepts a nonempty string list or `{expr: ...}` returning a list of strings. List entries
+may use templates such as `"{{ .vars.prefix }}_*"`; expression results are used directly without
+another template pass. An expression returning `[]` is a no-op. Selectors match whole environment
+names case-sensitively using Go `path.Match` syntax: `*`, `?`, character classes such as `[A-Z]`,
+and exact names. Quote wildcard patterns in YAML. Empty or malformed patterns fail; duplicates
+and unmatched selectors are harmless. An unset-only operation list is valid.
+
+This syntax applies only to scoped blocks. Workflow-level and target-level `env` remain string-only.
+There is no sibling `unset` field, and flat-map keys named `set` or `unset` remain ordinary variable
+names. Removal affects Wuko's inherited environment snapshot; explicit step overrides and
+executor/runtime-provided values may introduce variables afterward.
+
+See [`examples/scoped-environment.yaml`](../examples/scoped-environment.yaml) for runnable examples
+of both operation orders.
+
 The overlay reaches nested conditions, controls, executor sessions, and composite-action execution.
 Independent concurrent branches receive independent environment snapshots. A `defer` attached to a
 successful child retains the environment active when that child ran, even though its cleanup runs
@@ -500,7 +544,9 @@ after the env block has exited; workflow-level `finally` remains outside the blo
 Composite-action sources are resolved while loading the workflow, before runtime blocks are entered.
 Consequently, a child step's `uses` URL, path, or source command uses only the workflow and invocation
 environment. The already-resolved action's inputs and child steps do receive the scoped overlay.
-Structural output such as `wuko tree` and `--dry-run` lists scoped variable names but never values.
+Structural output such as `wuko tree` and `--dry-run` lists names and operations without values.
+Literal unset patterns appear in declaration order; templated and expression-based selectors show
+`<dynamic>` without exposing their contents or resolved values.
 
 The block boundary also provides the execution scope for future secret bindings without exposing a
 credential to the whole workflow.

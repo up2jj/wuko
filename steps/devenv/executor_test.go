@@ -164,6 +164,53 @@ func TestRunTaskPassesMultipleRootsAndOptions(t *testing.T) {
 	}
 }
 
+func TestSessionEnvironmentPreservesScopedRemovals(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		env  map[string]string
+		want map[string]string
+	}{
+		{"inherit when omitted", nil, map[string]string{"TOKEN": "original", "KEEP": "yes"}},
+		{"complete snapshot", map[string]string{"KEEP": "yes"}, map[string]string{"KEEP": "yes"}},
+		{"empty snapshot", map[string]string{}, map[string]string{}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			command := &recordedCommand{}
+			session := &session{
+				command: command.run, root: "/workspace", active: true, secretMode: "disabled",
+				request: executor.Request{Env: map[string]string{"TOKEN": "original", "KEEP": "yes"}},
+			}
+			if _, err := session.Run(t.Context(), process.Options{Command: "echo", Env: test.env}); err != nil {
+				t.Fatal(err)
+			}
+			if !maps.Equal(command.options.Env, test.want) {
+				t.Fatalf("environment = %#v, want %#v", command.options.Env, test.want)
+			}
+			command.options.Env["MUTATION"] = "isolated"
+			if _, exists := test.env["MUTATION"]; exists {
+				t.Fatal("mutated command environment")
+			}
+			if session.request.Env["TOKEN"] != "original" || session.request.Env["MUTATION"] != "" {
+				t.Fatalf("mutated session environment: %#v", session.request.Env)
+			}
+		})
+	}
+}
+
+func TestRunTaskUsesStepEnvironmentSnapshot(t *testing.T) {
+	command := &recordedCommand{}
+	session := &session{
+		command: command.run, root: "/workspace", active: true, secretMode: "disabled",
+		request: executor.Request{Env: map[string]string{"TOKEN": "original", "KEEP": "yes"}},
+	}
+	if _, err := session.RunTask(t.Context(), executor.TaskRequest{Name: "app:build", Env: map[string]string{"KEEP": "yes"}}); err != nil {
+		t.Fatal(err)
+	}
+	if want := map[string]string{"KEEP": "yes"}; !maps.Equal(command.options.Env, want) {
+		t.Fatalf("environment = %#v, want %#v", command.options.Env, want)
+	}
+}
+
 func TestRunTaskAcceptsLegacyNameAndDefaultsMode(t *testing.T) {
 	command := &recordedCommand{}
 	session := &session{command: command.run, active: true, secretMode: "disabled"}

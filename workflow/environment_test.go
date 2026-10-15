@@ -23,11 +23,11 @@ steps:
 		t.Fatal(err)
 	}
 	block := definition.Steps[0]
-	if !block.IsEnvironmentBlock() || block.IsConditionalBlock() || block.Env["GOOS"] != "linux" || block.Env["CGO_ENABLED"] != "0" {
+	if !block.IsEnvironmentBlock() || block.IsConditionalBlock() || *block.Env[0].Set["GOOS"].Literal != "linux" || *block.Env[0].Set["CGO_ENABLED"].Literal != "0" {
 		t.Fatalf("env block = %#v", block)
 	}
 	nested := block.Steps[0]
-	if !nested.IsEnvironmentBlock() || nested.Env["GOARCH"] != "arm64" || nested.Steps[0].ID != "build" {
+	if !nested.IsEnvironmentBlock() || *nested.Env[0].Set["GOARCH"].Literal != "arm64" || nested.Steps[0].ID != "build" {
 		t.Fatalf("nested env block = %#v", nested)
 	}
 }
@@ -39,7 +39,7 @@ func TestEnvironmentBlockValidation(t *testing.T) {
 		want string
 	}{
 		{name: "non object", body: "  - env: value\n    steps: [{id: run, type: shell}]\n", want: "environment must be an object"},
-		{name: "numeric value", body: "  - env: {PORT: 8080}\n    steps: [{id: run, type: shell}]\n", want: "environment names and values must be strings"},
+		{name: "numeric value", body: "  - env: {PORT: 8080}\n    steps: [{id: run, type: shell}]\n", want: "environment values must be strings"},
 		{name: "empty environment", body: "  - env: {}\n    steps: [{id: run, type: shell}]\n", want: "at least one variable"},
 		{name: "invalid name", body: "  - env: {'NOT VALID': value}\n    steps: [{id: run, type: shell}]\n", want: "invalid environment name"},
 		{name: "empty steps", body: "  - env: {MODE: test}\n    steps: []\n", want: "at least one step"},

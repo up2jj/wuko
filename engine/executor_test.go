@@ -40,7 +40,7 @@ func (executor *recordingExecutor) Run(_ context.Context, options process.Option
 func TestExecutorScopeReceivesEnvironmentBlock(t *testing.T) {
 	scoped := &recordingExecutor{}
 	definition := testDefinition(t, "env-executor", workflow.Step{
-		Env: workflow.Environment{"MODE": "scoped"}, Steps: []workflow.Step{{
+		Env: workflow.ScopedEnvironmentValues(workflow.Environment{"MODE": "scoped"}), Steps: []workflow.Step{{
 			Executor: &workflow.ExecutorScope{Type: "recording", With: map[string]any{}},
 			Steps:    []workflow.Step{{ID: "run", Type: "shell", With: map[string]any{"command": "printenv", "args": []any{"MODE"}}}},
 		}},
@@ -52,6 +52,37 @@ func TestExecutorScopeReceivesEnvironmentBlock(t *testing.T) {
 	}
 	if len(scoped.environments) != 1 || scoped.environments[0]["MODE"] != "scoped" {
 		t.Fatalf("executor environments = %#v", scoped.environments)
+	}
+}
+
+func TestExecutorScopesPreserveEnvironmentRemovals(t *testing.T) {
+	for _, inside := range []bool{false, true} {
+		t.Run(fmt.Sprintf("environment-inside-executor=%v", inside), func(t *testing.T) {
+			scoped := &recordingExecutor{}
+			run := workflow.Step{ID: "run", Type: "shell", With: map[string]any{"command": "inspect"}}
+			environment := workflow.Step{Env: scopedEnvironment(t, `[{unset: [TOKEN]}]`), Steps: []workflow.Step{run}}
+			executor := workflow.Step{Executor: &workflow.ExecutorScope{Type: "recording", With: map[string]any{}}}
+			outer := environment
+			if inside {
+				executor.Steps = []workflow.Step{environment}
+				outer = executor
+			} else {
+				executor.Steps = []workflow.Step{run}
+				outer.Steps = []workflow.Step{executor}
+			}
+			definition := testDefinition(t, "removal-executor", outer)
+			if _, err := executorTestEngine(t, scoped).Run(t.Context(), definition, Options{
+				BaseEnv: map[string]string{"TOKEN": "original", "KEEP": "yes"}, Stdout: io.Discard, Stderr: io.Discard,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if len(scoped.environments) != 1 {
+				t.Fatalf("environments = %#v", scoped.environments)
+			}
+			if _, present := scoped.environments[0]["TOKEN"]; present || scoped.environments[0]["KEEP"] != "yes" {
+				t.Fatalf("executor environment = %#v", scoped.environments[0])
+			}
+		})
 	}
 }
 

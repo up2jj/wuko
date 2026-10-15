@@ -12,6 +12,7 @@ import (
 
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
+	"gopkg.in/yaml.v3"
 )
 
 func TestTreeCommandDisplaysWorkflowAndRemoteActionSteps(t *testing.T) {
@@ -343,7 +344,7 @@ func TestWorkflowTreeDisplaysWorkingDirectoryBlock(t *testing.T) {
 
 func TestWorkflowTreeDisplaysEnvironmentBlockNames(t *testing.T) {
 	definition := &workflow.Definition{Name: "scoped", Steps: []workflow.Step{
-		{Env: workflow.Environment{"TOKEN": "secret", "GOOS": "linux"}, Steps: []workflow.Step{{ID: "build", Type: "shell"}}},
+		{Env: workflow.ScopedEnvironmentValues(workflow.Environment{"TOKEN": "secret", "GOOS": "linux"}), Steps: []workflow.Step{{ID: "build", Type: "shell"}}},
 	}}
 	var output bytes.Buffer
 	if err := writeWorkflowTree(&output, definition); err != nil {
@@ -355,6 +356,30 @@ func TestWorkflowTreeDisplaysEnvironmentBlockNames(t *testing.T) {
 	}
 	if strings.Contains(output.String(), "secret") {
 		t.Fatalf("tree exposed environment value: %q", output.String())
+	}
+}
+
+func TestWorkflowTreeDisplaysOrderedEnvironmentOperations(t *testing.T) {
+	var definition workflow.Definition
+	if err := yaml.Unmarshal([]byte(`version: 1
+name: scoped
+steps:
+  - env:
+      - unset: ["AWS_*", "{{ .vars.private_selector }}"]
+      - set: {TOKEN: secret, REMOVE: null}
+      - unset: {expr: vars.private_list}
+    steps:
+      - {id: build, type: shell}
+`), &definition); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	if err := writeWorkflowTree(&output, &definition); err != nil {
+		t.Fatal(err)
+	}
+	want := "scoped\n└── env: [unset: AWS_*, <dynamic>; set: REMOVE, TOKEN; unset: <dynamic>]\n    └── build (shell)\n"
+	if output.String() != want {
+		t.Fatalf("tree = %q, want %q", output.String(), want)
 	}
 }
 

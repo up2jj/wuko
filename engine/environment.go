@@ -2,13 +2,17 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
+	"path"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/expr-lang/expr"
 	"github.com/up2jj/wuko/diagnostic"
+	wukoexpr "github.com/up2jj/wuko/expression"
 	"github.com/up2jj/wuko/workflow"
 )
 
@@ -25,21 +29,14 @@ func (e *Engine) validateEnvironmentBlock(ctx context.Context, definition *workf
 		})
 		return err
 	}
-	for _, name := range slices.Sorted(maps.Keys(block.Env)) {
-		if err := validateTemplates(options.renderer, block.Env[name], false); err != nil {
-			return fail(fmt.Errorf("env %q template: %w", name, err))
-		}
+	if err := validateEnvironmentTemplates(options.renderer, block.Env); err != nil {
+		return fail(err)
 	}
-	environment, resolved, renderErr := renderEnvironmentOverlay(options.renderer, block.Env, templateData(definition, options.RunDir, state), state.Env)
+	environment, resolved, err := renderEnvironmentOverlay(options.renderer, block.Env, templateData(definition, options.RunDir, state), state.Env, true)
+	if err != nil {
+		return fail(err)
+	}
 	childOptions := options
-	if renderErr != nil {
-		environment = maps.Clone(state.Env)
-		if environment == nil {
-			environment = make(map[string]string, len(block.Env))
-		}
-		maps.Copy(environment, block.Env)
-		resolved = false
-	}
 	childOptions.scopedEnv = maps.Clone(environment)
 	if !resolved {
 		childOptions.deferContextValidation = true
@@ -66,7 +63,7 @@ func (e *Engine) executeEnvironmentBlock(ctx context.Context, definition *workfl
 		Phase: diagnostic.PhaseRender, Status: diagnostic.StatusStarted, Time: started,
 		WorkflowName: definition.Name, Location: block.Location, Message: "rendering env block",
 	})
-	environment, _, err := renderEnvironmentOverlay(options.renderer, block.Env, templateData(definition, options.RunDir, state), state.Env)
+	environment, _, err := renderEnvironmentOverlay(options.renderer, block.Env, templateData(definition, options.RunDir, state), state.Env, false)
 	if err != nil {
 		trace(options, diagnostic.Event{
 			Phase: diagnostic.PhaseRender, Status: diagnostic.StatusFailed, Time: time.Now(), Duration: time.Since(started),
@@ -76,7 +73,7 @@ func (e *Engine) executeEnvironmentBlock(ctx context.Context, definition *workfl
 	}
 	trace(options, diagnostic.Event{
 		Phase: diagnostic.PhaseRender, Status: diagnostic.StatusSucceeded, Time: time.Now(), Duration: time.Since(started),
-		WorkflowName: definition.Name, Location: block.Location, Message: fmt.Sprintf("%d variables", len(block.Env)),
+		WorkflowName: definition.Name, Location: block.Location, Message: fmt.Sprintf("%d environment operations", len(block.Env)),
 	})
 
 	childOptions := options
@@ -91,23 +88,153 @@ func (e *Engine) executeEnvironmentBlock(ctx context.Context, definition *workfl
 	return e.executeSequence(ctx, definition, block.Steps, childOptions, state, stats, firstIndex, total)
 }
 
-func renderEnvironmentOverlay(renderer *workflow.Renderer, overlay workflow.Environment, data map[string]any, base map[string]string) (map[string]string, bool, error) {
-	rendered := make(map[string]string, len(overlay))
-	resolved := true
-	for _, name := range slices.Sorted(maps.Keys(overlay)) {
-		value, err := renderer.Render(overlay[name], data)
-		if err != nil {
-			return nil, false, fmt.Errorf("rendering environment %q: %w", name, err)
+// validateEnvironmentTemplates checks syntax without evaluating runtime values.
+func validateEnvironmentTemplates(renderer *workflow.Renderer, overlay workflow.ScopedEnvironment) error {
+	return overlay.WalkSources(func(label, source string, isExpression bool) error {
+		if isExpression {
+			if _, err := wukoexpr.Compile(source, expr.AllowUndefinedVariables()); err != nil {
+				return fmt.Errorf("%s: %w", label, err)
+			}
+			return nil
 		}
-		if strings.Contains(value, "<no value>") {
-			resolved = false
+		if err := renderer.Validate(source); err != nil {
+			return fmt.Errorf("%s template: %w", label, err)
 		}
-		rendered[name] = value
-	}
+		return nil
+	})
+}
+
+// renderEnvironmentOverlay resolves operations on a private snapshot. Validation
+// keeps known assignments/removals while deferring values not yet available.
+func renderEnvironmentOverlay(renderer *workflow.Renderer, overlay workflow.ScopedEnvironment, data map[string]any, base map[string]string, deferUnresolved bool) (map[string]string, bool, error) {
 	environment := maps.Clone(base)
 	if environment == nil {
-		environment = make(map[string]string, len(rendered))
+		environment = make(map[string]string)
 	}
-	maps.Copy(environment, rendered)
+	data = maps.Clone(data)
+	resolved := true
+	// The template view of env is rebuilt only when an operation reads it after a change.
+	stale := true
+	snapshot := func() {
+		if stale {
+			data["env"] = workflow.EnvironmentValues(environment)
+			stale = false
+		}
+	}
+	for index, operation := range overlay {
+		if operation.Set != nil {
+			snapshot()
+			// Every entry sees the same pre-operation snapshot.
+			for _, name := range slices.Sorted(maps.Keys(operation.Set)) {
+				declaration := operation.Set[name]
+				var value any
+				var err error
+				switch {
+				case declaration.Expression != "":
+					value, err = wukoexpr.Eval(declaration.Expression, data)
+				case declaration.Literal != nil:
+					var rendered string
+					rendered, err = renderer.Render(*declaration.Literal, data)
+					if err == nil && deferUnresolved && strings.Contains(rendered, "<no value>") {
+						err = errUnresolvedEnvironment
+					}
+					value = rendered
+				}
+				if err != nil {
+					if !deferUnresolved {
+						return nil, false, fmt.Errorf("env operation %d set %q: %w", index+1, name, err)
+					}
+					resolved = false
+					environment[name] = ""
+					continue
+				}
+				switch typed := value.(type) {
+				case nil:
+					delete(environment, name)
+				case string:
+					environment[name] = typed
+				default:
+					return nil, false, fmt.Errorf("env operation %d set %q: expression must return a string or nil", index+1, name)
+				}
+			}
+			stale = true
+			continue
+		}
+		if operation.Unset.Expression != "" || slices.ContainsFunc(operation.Unset.Patterns, isEnvironmentTemplate) {
+			snapshot()
+		}
+		patterns, unsetResolved, err := resolveEnvironmentUnset(renderer, operation.Unset, data, deferUnresolved)
+		if err != nil {
+			return nil, false, fmt.Errorf("env operation %d unset: %w", index+1, err)
+		}
+		resolved = resolved && unsetResolved
+		for item, pattern := range patterns {
+			if err := workflow.ValidateEnvironmentPattern(pattern); err != nil {
+				if deferUnresolved && !unsetResolved {
+					continue
+				}
+				return nil, false, fmt.Errorf("env operation %d unset item %d: %w", index+1, item+1, err)
+			}
+			if !strings.ContainsAny(pattern, `*?[\`) {
+				if _, ok := environment[pattern]; ok {
+					delete(environment, pattern)
+					stale = true
+				}
+				continue
+			}
+			for name := range environment {
+				if matches, _ := path.Match(pattern, name); matches {
+					delete(environment, name)
+					stale = true
+				}
+			}
+		}
+	}
 	return environment, resolved, nil
+}
+
+var errUnresolvedEnvironment = errors.New("value depends on data not available during validation")
+
+func isEnvironmentTemplate(pattern string) bool { return strings.Contains(pattern, "{{") }
+
+func resolveEnvironmentUnset(renderer *workflow.Renderer, unset *workflow.EnvironmentUnset, data map[string]any, deferUnresolved bool) ([]string, bool, error) {
+	if unset.Expression != "" {
+		value, err := wukoexpr.Eval(unset.Expression, data)
+		if err != nil {
+			if deferUnresolved {
+				return nil, false, nil
+			}
+			return nil, false, err
+		}
+		switch typed := value.(type) {
+		case []string:
+			return typed, true, nil
+		case []any:
+			patterns := make([]string, len(typed))
+			for i, item := range typed {
+				pattern, ok := item.(string)
+				if !ok {
+					return nil, true, fmt.Errorf("expression must return a list of strings (item %d is not a string)", i+1)
+				}
+				patterns[i] = pattern
+			}
+			return patterns, true, nil
+		default:
+			return nil, true, fmt.Errorf("expression must return a list of strings")
+		}
+	}
+	patterns := make([]string, 0, len(unset.Patterns))
+	resolved := true
+	for i, pattern := range unset.Patterns {
+		rendered, err := renderer.Render(pattern, data)
+		if err != nil {
+			if deferUnresolved {
+				resolved = false
+				continue
+			}
+			return nil, false, fmt.Errorf("item %d template: %w", i+1, err)
+		}
+		patterns = append(patterns, rendered)
+	}
+	return patterns, resolved, nil
 }

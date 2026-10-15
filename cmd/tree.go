@@ -348,7 +348,7 @@ func writeTreeStepsWithFollowing(writer io.Writer, steps []workflow.Step, prefix
 			continue
 		}
 		if workflowStep.IsEnvironmentBlock() {
-			label := "env: " + strings.Join(slices.Sorted(maps.Keys(workflowStep.Env)), ", ")
+			label := workflowStep.Env.Label()
 			if workflowStep.ID != "" {
 				label = fmt.Sprintf("%s (%s)", workflowStep.ID, label)
 			}

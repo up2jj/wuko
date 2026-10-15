@@ -52,7 +52,7 @@ func environmentRegistry(t *testing.T) *step.Registry {
 
 func TestEnvironmentBlockScopesRequestValidation(t *testing.T) {
 	definition := &workflow.Definition{Version: 1, Name: "validation", Steps: []workflow.Step{{
-		Env: workflow.Environment{"MODE": "scoped"}, Steps: []workflow.Step{{
+		Env: workflow.ScopedEnvironmentValues(workflow.Environment{"MODE": "scoped"}), Steps: []workflow.Step{{
 			ID: "inside", Type: "capture_env", With: map[string]any{"name": "MODE", "expected": "scoped"},
 		}},
 	}}}
@@ -76,7 +76,7 @@ func TestEnvironmentBlockRestoresEnvironmentBeforeFinallyAfterFailure(t *testing
 	}
 	definition := &workflow.Definition{
 		Version: 1, Name: "failure", Steps: []workflow.Step{{
-			Env: workflow.Environment{"MODE": "scoped"}, Steps: []workflow.Step{{ID: "fail", Type: "fail", With: map[string]any{}}},
+			Env: workflow.ScopedEnvironmentValues(workflow.Environment{"MODE": "scoped"}), Steps: []workflow.Step{{ID: "fail", Type: "fail", With: map[string]any{}}},
 		}},
 		Finally: []workflow.Step{{ID: "cleanup", Type: "capture_finally_env", With: map[string]any{}}},
 	}
@@ -100,11 +100,11 @@ func TestEnvironmentBlockScopesNestsAndRestoresEnvironment(t *testing.T) {
 		Version: 1, Name: "scoped", Env: workflow.Environment{"MODE": "workflow"},
 		Steps: []workflow.Step{
 			{ID: "prepare", Type: "literal", With: map[string]any{"value": "ready"}},
-			{Env: workflow.Environment{"MODE": "outer", "DERIVED": "{{ .steps.prepare.value }}:{{ .env.BASE }}", "SIBLING": "{{ .env.MODE }}"}, Steps: []workflow.Step{
+			{Env: workflow.ScopedEnvironmentValues(workflow.Environment{"MODE": "outer", "DERIVED": "{{ .steps.prepare.value }}:{{ .env.BASE }}", "SIBLING": "{{ .env.MODE }}"}), Steps: []workflow.Step{
 				envCapture("outer", "MODE"),
 				{ID: "derived", Type: "capture_env", With: map[string]any{"name": "DERIVED", "expected": "ready:host"}},
 				envCapture("sibling", "SIBLING"),
-				{Env: workflow.Environment{"MODE": "inner"}, Steps: []workflow.Step{envCapture("inner", "MODE")}},
+				{Env: workflow.ScopedEnvironmentValues(workflow.Environment{"MODE": "inner"}), Steps: []workflow.Step{envCapture("inner", "MODE")}},
 				envCapture("restored_outer", "MODE"),
 			}},
 			envCapture("outside", "MODE"),
@@ -138,7 +138,7 @@ func TestEnvironmentBlockPreservesEnvironmentForDeferredSteps(t *testing.T) {
 	owner.Defer = []workflow.Step{envCapture("cleanup", "MODE")}
 	definition := &workflow.Definition{
 		Version: 1, Name: "deferred", Steps: []workflow.Step{
-			{Env: workflow.Environment{"MODE": "scoped"}, Steps: []workflow.Step{owner}},
+			{Env: workflow.ScopedEnvironmentValues(workflow.Environment{"MODE": "scoped"}), Steps: []workflow.Step{owner}},
 			envCapture("outside", "MODE"),
 		},
 	}
@@ -159,8 +159,8 @@ func TestEnvironmentBlockPreservesEnvironmentForDeferredSteps(t *testing.T) {
 func TestEnvironmentBlockIsolatedAcrossConcurrentBranches(t *testing.T) {
 	definition := &workflow.Definition{Version: 1, Name: "parallel", Steps: []workflow.Step{{
 		Concurrent: &workflow.ConcurrentGroup{MaxConcurrency: 2, FailFast: true, Steps: []workflow.Step{
-			{Env: workflow.Environment{"MODE": "one"}, Steps: []workflow.Step{envCapture("one", "MODE")}},
-			{Env: workflow.Environment{"MODE": "two"}, Steps: []workflow.Step{envCapture("two", "MODE")}},
+			{Env: workflow.ScopedEnvironmentValues(workflow.Environment{"MODE": "one"}), Steps: []workflow.Step{envCapture("one", "MODE")}},
+			{Env: workflow.ScopedEnvironmentValues(workflow.Environment{"MODE": "two"}), Steps: []workflow.Step{envCapture("two", "MODE")}},
 		}},
 	}}}
 	state, err := New(environmentRegistry(t)).Run(t.Context(), definition, Options{
@@ -178,7 +178,7 @@ func TestEnvironmentBlockIsolatedAcrossConcurrentBranches(t *testing.T) {
 
 func TestEnvironmentBlockPropagatesIntoFanoutControls(t *testing.T) {
 	definition := &workflow.Definition{Version: 1, Name: "fanout", Steps: []workflow.Step{{
-		Env: workflow.Environment{"MODE": "scoped"}, Steps: []workflow.Step{
+		Env: workflow.ScopedEnvironmentValues(workflow.Environment{"MODE": "scoped"}), Steps: []workflow.Step{
 			{ID: "each", Foreach: &workflow.ForeachGroup{
 				Items: "[1]", Collect: "steps.foreach_child.value", MaxConcurrency: 1, FailFast: true,
 				Steps: []workflow.Step{envCapture("foreach_child", "MODE")},
@@ -209,7 +209,7 @@ func TestEnvironmentBlockPropagatesIntoCompositeAction(t *testing.T) {
 		Steps: []workflow.Step{envCapture("inside", "MODE")},
 	}
 	definition := &workflow.Definition{Version: 1, Name: "caller", Steps: []workflow.Step{{
-		Env: workflow.Environment{"MODE": "scoped"}, Steps: []workflow.Step{{
+		Env: workflow.ScopedEnvironmentValues(workflow.Environment{"MODE": "scoped"}), Steps: []workflow.Step{{
 			ID: "call", Uses: workflow.ActionSource{URL: "https://example.test/action"}, Action: action, With: map[string]any{},
 		}},
 	}}}
@@ -226,7 +226,7 @@ func TestEnvironmentBlockPropagatesIntoCompositeAction(t *testing.T) {
 
 func TestEnvironmentBlockReportsRenderedVariable(t *testing.T) {
 	definition := &workflow.Definition{Version: 1, Name: "invalid", Steps: []workflow.Step{{
-		Env: workflow.Environment{"BROKEN": `{{ template "missing" . }}`}, Steps: []workflow.Step{envCapture("inside", "BROKEN")},
+		Env: workflow.ScopedEnvironmentValues(workflow.Environment{"BROKEN": `{{ template "missing" . }}`}), Steps: []workflow.Step{envCapture("inside", "BROKEN")},
 	}}}
 	_, err := New(environmentRegistry(t)).Run(t.Context(), definition, Options{RunDir: t.TempDir(), Stdout: io.Discard, Stderr: io.Discard})
 	if err == nil || !strings.Contains(err.Error(), "BROKEN") || !strings.Contains(err.Error(), "template") {
@@ -236,7 +236,7 @@ func TestEnvironmentBlockReportsRenderedVariable(t *testing.T) {
 
 func TestEnvironmentBlockDryRunListsNamesWithoutValues(t *testing.T) {
 	definition := testDefinition(t, "dry", workflow.Step{
-		Env: workflow.Environment{"TOKEN": "secret", "GOOS": "linux"}, Steps: []workflow.Step{envCapture("run", "GOOS")},
+		Env: workflow.ScopedEnvironmentValues(workflow.Environment{"TOKEN": "secret", "GOOS": "linux"}), Steps: []workflow.Step{envCapture("run", "GOOS")},
 	})
 	var output strings.Builder
 	if _, err := New(environmentRegistry(t)).Run(t.Context(), definition, Options{DryRun: true, Stdout: &output, Stderr: io.Discard}); err != nil {

@@ -95,7 +95,7 @@ func (r *TaskRunner) Run(ctx context.Context, request step.Request) (step.Result
 	}
 	result, err := taskRunner.RunTask(ctx, executor.TaskRequest{
 		Name: r.config.Name, Names: r.config.Names, Mode: r.config.Mode, Inputs: r.config.Inputs,
-		ShowOutput: r.config.ShowOutput, CaptureLimit: r.captureLimit,
+		ShowOutput: r.config.ShowOutput, CaptureLimit: r.captureLimit, Env: request.Env,
 		Stdin: request.Stdin, Stdout: request.Stdout, Stderr: request.Stderr,
 	})
 	outputs := map[string]any{

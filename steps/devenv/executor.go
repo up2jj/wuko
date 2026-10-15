@@ -299,19 +299,23 @@ func (s *session) RunTask(ctx context.Context, request executor.TaskRequest) (pr
 		args = append(args, "--input-json", string(encoded))
 	}
 	return s.Run(ctx, process.Options{
-		Command: "devenv", Args: args, Dir: s.root, Env: s.request.Env,
+		Command: "devenv", Args: args, Dir: s.root, Env: request.Env,
 		Stdin: request.Stdin, Stdout: request.Stdout, Stderr: request.Stderr,
 		CaptureLimit: request.CaptureLimit,
 	})
 }
 
 func (s *session) wrapOptions(options process.Options) process.Options {
-	environment := maps.Clone(s.request.Env)
+	// A supplied environment is a complete snapshot, including scoped removals.
+	// Only callers omitting it inherit the session's original environment.
+	environment := options.Env
 	if environment == nil {
-		environment = make(map[string]string)
+		environment = s.request.Env
 	}
-	maps.Copy(environment, options.Env)
-	options.Env = environment
+	options.Env = maps.Clone(environment)
+	if options.Env == nil {
+		options.Env = make(map[string]string)
+	}
 	if options.Dir == "" {
 		options.Dir = s.root
 	}

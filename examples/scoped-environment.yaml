@@ -1,0 +1,42 @@
+version: 1
+name: scoped-environment
+description: Remove and replace environment variables in an explicit order
+
+vars:
+  region: eu-west-1
+  extra_cleanup: [LEGACY_TOKEN]
+
+env:
+  AWS_REGION: inherited
+  AWS_TOKEN: example-token
+  LEGACY_TOKEN: example-token
+
+steps:
+  - env:
+      - unset: ["AWS_*"]
+      - set:
+          AWS_REGION: "{{ .vars.region }}"
+          EMPTY: ""
+          DEBUG: null
+      - unset: {expr: vars.extra_cleanup}
+    steps:
+      - id: selected_region
+        type: shell
+        with:
+          command: /bin/sh
+          args:
+            - -c
+            - 'test "${AWS_TOKEN+x}" = "" && test "${LEGACY_TOKEN+x}" = "" && printf "Region after cleanup and replacement: %s\n" "$AWS_REGION"'
+
+  - env:
+      - set:
+          AWS_REGION: {expr: vars.region}
+      - unset: ["AWS_*"]
+    steps:
+      - id: final_cleanup
+        type: shell
+        with:
+          command: /bin/sh
+          args:
+            - -c
+            - 'test "${AWS_REGION+x}" = "" && test "${AWS_TOKEN+x}" = "" && printf "Final cleanup removed all AWS variables\n"'

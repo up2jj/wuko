@@ -564,10 +564,14 @@ func (validator *referenceValidator) validateStep(step workflow.Step, scope *ref
 	case step.IsExecutorBlock():
 		return validator.validateExecutor(step, scope)
 	case step.IsEnvironmentBlock():
-		for _, name := range slices.Sorted(maps.Keys(step.Env)) {
-			if err := validator.validateTemplate("env "+fmt.Sprintf("%q", name), step.Env[name], scope); err != nil {
-				return nil, nil, err
+		err := step.Env.WalkSources(func(label, source string, isExpression bool) error {
+			if isExpression {
+				return validator.validateExpression(label, source, scope)
 			}
+			return validator.validateTemplate(label, source, scope)
+		})
+		if err != nil {
+			return nil, nil, err
 		}
 		return validator.validateSteps(step.Steps, scope)
 	case step.IsWorkingDirectoryBlock():
