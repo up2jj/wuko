@@ -194,5 +194,8 @@ exist:
 wuko run check --once --report-json ./wuko-report.json
 ```
 
+Use `--report-json -` instead when a caller should consume the report directly from stdout; Wuko
+routes terminal and workflow output to stderr in that mode.
+
 The `github` reporter is never enabled automatically outside the composite action. With no
 `--reporter` flags, `wuko run` uses only the default plain reporter.

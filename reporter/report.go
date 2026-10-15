@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -116,6 +117,36 @@ func milliseconds(duration time.Duration) int64 {
 	return max(0, duration.Milliseconds())
 }
 
+// JSONWriter writes one compact execution report to a stream when the invocation finishes.
+type JSONWriter struct {
+	writer io.Writer
+}
+
+// NewJSONWriter constructs a stream-backed execution report writer.
+func NewJSONWriter(writer io.Writer) (*JSONWriter, error) {
+	if writer == nil {
+		return nil, fmt.Errorf("execution report writer is required")
+	}
+	return &JSONWriter{writer: writer}, nil
+}
+
+func (*JSONWriter) Progress(engine.ProgressEvent) {}
+
+func (*JSONWriter) Diagnostic(diagnostic.Event) {}
+
+// Finish writes one compact JSON document followed by a newline.
+func (reporter *JSONWriter) Finish(_ context.Context, outcome Outcome) error {
+	data, err := json.Marshal(NewExecutionReport(outcome))
+	if err != nil {
+		return fmt.Errorf("encoding execution report: %w", err)
+	}
+	// One Write keeps the document intact for a reader; io.Writer reports any short write.
+	if _, err := reporter.writer.Write(append(data, '\n')); err != nil {
+		return fmt.Errorf("writing execution report: %w", err)
+	}
+	return nil
+}
+
 // JSONFile writes one canonical execution report to a local file when the invocation finishes.
 type JSONFile struct {
 	path string
@@ -172,3 +203,4 @@ func (reporter *JSONFile) Finish(_ context.Context, outcome Outcome) error {
 }
 
 var _ Reporter = (*JSONFile)(nil)
+var _ Reporter = (*JSONWriter)(nil)

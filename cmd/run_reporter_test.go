@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -153,6 +154,125 @@ steps:
 	}
 	if report.Outputs == nil || (*report.Outputs)["artifact"] != "dist/app.tar.gz" {
 		t.Fatalf("report outputs = %#v", report.Outputs)
+	}
+}
+
+func TestRunCommandStreamsExecutionReportAndRoutesWorkflowOutputToStderr(t *testing.T) {
+	root := t.TempDir()
+	workflowPath := filepath.Join(root, "check.yaml")
+	writeWorkflowData(t, workflowPath, `version: 1
+name: check
+steps:
+  - id: announce
+    type: shell
+    with: {script: "printf step-output"}
+  - return:
+      outputs:
+        answer: "42"
+`)
+	registry := step.NewRegistry()
+	if err := shell.Register(registry); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	command := newRootCmd(dependencies{
+		stdin: bytes.NewReader(nil), stdout: &stdout, stderr: &stderr,
+		cwd: func() (string, error) { return root, nil }, homeDir: func() (string, error) { return root, nil },
+		configDir: func() (string, error) { return root, nil }, registry: registry,
+	})
+	command.SetArgs([]string{"run", "--file", workflowPath, "--report-json", "-"})
+	if err := command.ExecuteContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	report := decodeStreamExecutionReport(t, stdout.Bytes())
+	if report.Status != "succeeded" || report.Outputs == nil || (*report.Outputs)["answer"] != float64(42) {
+		t.Fatalf("report = %#v", report)
+	}
+	if strings.Contains(stdout.String(), "step-output") || strings.Contains(stdout.String(), "Workflow check") {
+		t.Fatalf("stdout contains terminal output: %q", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "step-output") || !strings.Contains(stderr.String(), "Workflow check succeeded") {
+		t.Fatalf("stderr = %q, want step output and progress", stderr.String())
+	}
+}
+
+func TestRunCommandStreamsReportsForFailurePreflightAndDryRun(t *testing.T) {
+	root := t.TempDir()
+	registry := step.NewRegistry()
+	if err := shell.Register(registry); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name       string
+		workflow   string
+		extraArgs  []string
+		wantStatus string
+		wantStep   string
+		wantDryRun bool
+		wantError  bool
+		wantEmpty  bool
+	}{
+		{
+			name: "failure", wantStatus: "failed", wantStep: "explode", wantError: true,
+			workflow: "version: 1\nname: check\nsteps:\n  - id: explode\n    type: shell\n    with: {script: 'printf failure-output >&2; exit 7'}\n",
+		},
+		{
+			name: "preflight", wantStatus: "failed", wantError: true, extraArgs: []string{"--var", "invalid"},
+			workflow: "version: 1\nname: check\nsteps:\n  - return: {outputs: {}}\n",
+		},
+		{
+			name: "dry run", wantStatus: "succeeded", wantDryRun: true, extraArgs: []string{"--dry-run"},
+			workflow: "version: 1\nname: check\nsteps:\n  - return: {outputs: {}}\n",
+		},
+		{
+			name: "empty outputs", wantStatus: "succeeded", wantEmpty: true,
+			workflow: "version: 1\nname: check\nsteps:\n  - return: {outputs: {}}\n",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			workflowPath := filepath.Join(root, strings.ReplaceAll(test.name, " ", "-")+".yaml")
+			writeWorkflowData(t, workflowPath, test.workflow)
+			var stdout, stderr bytes.Buffer
+			command := newRootCmd(dependencies{
+				stdin: bytes.NewReader(nil), stdout: &stdout, stderr: &stderr,
+				cwd: func() (string, error) { return root, nil }, homeDir: func() (string, error) { return root, nil },
+				configDir: func() (string, error) { return root, nil }, registry: registry,
+			})
+			args := []string{"run", "--file", workflowPath, "--report-json", "-"}
+			args = append(args, test.extraArgs...)
+			command.SetArgs(args)
+			err := command.ExecuteContext(t.Context())
+			if (err != nil) != test.wantError {
+				t.Fatalf("Execute() error = %v, wantError %v", err, test.wantError)
+			}
+			report := decodeStreamExecutionReport(t, stdout.Bytes())
+			if string(report.Status) != test.wantStatus || report.FailedStep != test.wantStep || report.DryRun != test.wantDryRun {
+				t.Fatalf("report = %#v", report)
+			}
+			if test.wantDryRun && report.Outputs != nil {
+				t.Fatalf("dry-run outputs = %#v, want omitted", report.Outputs)
+			}
+			if test.wantEmpty && (report.Outputs == nil || len(*report.Outputs) != 0) {
+				t.Fatalf("outputs = %#v, want empty object", report.Outputs)
+			}
+		})
+	}
+}
+
+func TestRunCommandReportsStreamWriteFailure(t *testing.T) {
+	root := t.TempDir()
+	workflowPath := filepath.Join(root, "check.yaml")
+	writeWorkflowData(t, workflowPath, "version: 1\nname: check\nsteps:\n  - return: {outputs: {}}\n")
+	command := newRootCmd(dependencies{
+		stdin: bytes.NewReader(nil), stdout: failingCommandWriter{}, stderr: io.Discard,
+		cwd: func() (string, error) { return root, nil }, homeDir: func() (string, error) { return root, nil },
+		configDir: func() (string, error) { return root, nil }, registry: step.NewRegistry(),
+	})
+	command.SetArgs([]string{"run", "--file", workflowPath, "--report-json", "-"})
+	err := command.ExecuteContext(t.Context())
+	if err == nil || !strings.Contains(err.Error(), "writing execution report: unavailable") {
+		t.Fatalf("Execute() error = %v, want report write failure", err)
 	}
 }
 
@@ -320,11 +440,81 @@ func readExecutionReport(t *testing.T, path string) reporter.ExecutionReport {
 	return report
 }
 
+func decodeStreamExecutionReport(t *testing.T, data []byte) reporter.ExecutionReport {
+	t.Helper()
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	var report reporter.ExecutionReport
+	if err := decoder.Decode(&report); err != nil {
+		t.Fatalf("decoding execution report %q: %v", data, err)
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		t.Fatalf("execution report has trailing data %q: %v", data, err)
+	}
+	return report
+}
+
+type failingCommandWriter struct{}
+
+func (failingCommandWriter) Write([]byte) (int, error) { return 0, errors.New("unavailable") }
+
 func sequenceClock(instants ...time.Time) func() time.Time {
 	index := 0
 	return func() time.Time {
 		instant := instants[min(index, len(instants)-1)]
 		index++
 		return instant
+	}
+}
+
+func TestRunCommandStreamsReportForSetupFailures(t *testing.T) {
+	root := t.TempDir()
+	workflowPath := filepath.Join(root, "check.yaml")
+	writeWorkflowData(t, workflowPath, "version: 1\nname: check\nsteps:\n  - return: {outputs: {}}\n")
+	tests := []struct {
+		name string
+		cwd  func() (string, error)
+		args []string
+		want string
+	}{
+		{name: "directories", cwd: func() (string, error) { return "", errors.New("no cwd") }, want: "no cwd"},
+		{name: "unknown reporter", cwd: func() (string, error) { return root, nil }, args: []string{"--reporter", "bogus"}, want: "bogus"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var stdout bytes.Buffer
+			command := newRootCmd(dependencies{
+				stdin: bytes.NewReader(nil), stdout: &stdout, stderr: io.Discard,
+				cwd: test.cwd, homeDir: func() (string, error) { return root, nil },
+				configDir: func() (string, error) { return root, nil }, registry: step.NewRegistry(),
+			})
+			command.SetArgs(append([]string{"run", "--file", workflowPath, "--report-json", "-"}, test.args...))
+			err := command.ExecuteContext(t.Context())
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("Execute() error = %v, want %q", err, test.want)
+			}
+			report := decodeStreamExecutionReport(t, stdout.Bytes())
+			if report.Status != "failed" || report.InvocationID == "" {
+				t.Fatalf("report = %#v, want failed report with invocation ID", report)
+			}
+		})
+	}
+}
+
+func TestRunCommandRejectsPickWithStreamedReport(t *testing.T) {
+	var stdout bytes.Buffer
+	root := t.TempDir()
+	command := newRootCmd(dependencies{
+		stdin: bytes.NewReader(nil), stdout: &stdout, stderr: io.Discard,
+		cwd: func() (string, error) { return root, nil }, homeDir: func() (string, error) { return root, nil },
+		configDir: func() (string, error) { return root, nil }, registry: step.NewRegistry(),
+	})
+	command.SetArgs([]string{"run", "--pick", "github:owner/repo", "--report-json", "-"})
+	err := command.ExecuteContext(t.Context())
+	if err == nil || !strings.Contains(err.Error(), "--pick cannot be used with --report-json -") {
+		t.Fatalf("Execute() error = %v, want --pick rejection", err)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
 	}
 }

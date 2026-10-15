@@ -1,7 +1,9 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
+	"maps"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -9,12 +11,35 @@ import (
 	"github.com/up2jj/wuko/workflow"
 )
 
+const workflowListSchemaVersion = 1
+
+type workflowListDocument struct {
+	SchemaVersion int                  `json:"schema_version"`
+	Workflows     []workflowListSource `json:"workflows"`
+}
+
+type workflowListSource struct {
+	Name           string            `json:"name"`
+	Target         string            `json:"target"`
+	Description    string            `json:"description"`
+	Scope          string            `json:"scope"`
+	Path           string            `json:"path"`
+	Invokable      bool              `json:"invokable"`
+	HasForm        bool              `json:"has_form"`
+	DependsOn      map[string]string `json:"depends_on"`
+	PackageVersion string            `json:"package_version"`
+}
+
 func newListCmd(deps dependencies) *cobra.Command {
-	return &cobra.Command{
+	var format string
+	command := &cobra.Command{
 		Use:   "list",
 		Short: "List effective workflows",
 		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
+			if format != "text" && format != "json" {
+				return fmt.Errorf("format must be text or json")
+			}
 			cwd, home, config, err := directories(deps)
 			if err != nil {
 				return err
@@ -28,6 +53,12 @@ func newListCmd(deps dependencies) *cobra.Command {
 				return err
 			}
 			diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusSucceeded, Duration: time.Since(started), Attributes: []diagnostic.Attribute{diagnostic.Attr("workflows", fmt.Sprint(len(sources)))}})
+			if format == "json" {
+				if err := json.NewEncoder(command.OutOrStdout()).Encode(newWorkflowListDocument(sources)); err != nil {
+					return fmt.Errorf("encoding workflow list: %w", err)
+				}
+				return nil
+			}
 			for _, source := range sources {
 				if err := writeWorkflowSource(command.OutOrStdout(), source); err != nil {
 					return err
@@ -36,4 +67,25 @@ func newListCmd(deps dependencies) *cobra.Command {
 			return nil
 		},
 	}
+	command.Flags().StringVar(&format, "format", "text", "workflow list output format: text or json")
+	_ = command.RegisterFlagCompletionFunc("format", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
+		return []string{"text", "json"}, cobra.ShellCompDirectiveNoFileComp
+	})
+	return command
+}
+
+func newWorkflowListDocument(sources []workflow.Source) workflowListDocument {
+	workflows := make([]workflowListSource, 0, len(sources))
+	for _, source := range sources {
+		dependencies := maps.Clone(source.DependsOn)
+		if dependencies == nil {
+			dependencies = make(map[string]string)
+		}
+		workflows = append(workflows, workflowListSource{
+			Name: source.Name, Target: source.Target, Description: source.Description,
+			Scope: source.Scope, Path: source.Path, Invokable: source.Invokable,
+			HasForm: source.HasForm, DependsOn: dependencies, PackageVersion: source.PackageVersion,
+		})
+	}
+	return workflowListDocument{SchemaVersion: workflowListSchemaVersion, Workflows: workflows}
 }

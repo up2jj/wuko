@@ -108,7 +108,9 @@ affects display order, not which definition wins.
   HTTPS, and `github:` selectors and to all equivalent `wuko ui` selectors.
 - `wuko list` displays effective sources as tab-separated name, scope, description, and path. A
   workflow with prerequisites has an additional trailing `depends on ...` field; a workflow with
-  `invokable: false` has a trailing `not directly invokable` field.
+  `invokable: false` has a trailing `not directly invokable` field. `wuko list --format json`
+  emits the same effective sources as a versioned document for tools and agents, including
+  dependency-only workflows.
 - `wuko validate NAME` and `wuko tree NAME` use effective discovery; without a name, `validate`
   validates every effective workflow. Both inspection commands accept dependency-only workflows.
 - Bare `wuko` calls `DiscoverAll`. In an interactive terminal it shows effective and shadowed
@@ -163,6 +165,35 @@ affects display order, not which definition wins.
   manifest that fails validation is listed as not invokable instead of failing discovery.
   Interactive terminals open the picker with remote-only actions; non-interactive invocations print
   canonical `wuko run github:...` commands. The snapshot is removed when the command exits.
+
+## JSON list format
+
+`wuko list --format json` writes one schema-versioned document to stdout. Diagnostics remain on
+stderr. Entries retain discovery's deterministic name-then-target order:
+
+```json
+{
+  "schema_version": 1,
+  "workflows": [
+    {
+      "name": "deploy",
+      "target": "production",
+      "description": "Deploy production",
+      "scope": "local",
+      "path": "/project/.wuko/workflows/deploy.yaml",
+      "invokable": true,
+      "has_form": false,
+      "depends_on": {},
+      "package_version": ""
+    }
+  ]
+}
+```
+
+Every field is present. Missing strings are empty, workflows without prerequisites use an empty
+`depends_on` object, and an empty discovery result uses `"workflows": []`. The document describes
+effective sources only and deliberately omits internal locator, package-directory, marketplace,
+and precedence fields.
 
 ## Implementation
 

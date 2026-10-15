@@ -1055,6 +1055,19 @@ execution, timeout, and graceful-cancellation failures:
 wuko run check --once --report-json ./wuko-report.json
 ```
 
+Use `--report-json -` to return the report directly on stdout without saving a file. In this mode,
+stdout contains exactly one compact JSON document; Wuko routes prompts, workflow output, progress,
+and diagnostics to stderr so interactive runs remain usable and stdout stays machine-readable:
+
+```sh
+wuko run check --once --report-json -
+```
+
+The report is still written on failure before the command returns its non-zero status, including
+setup failures such as an unknown `--reporter`. `--pick` cannot be combined with `--report-json -`,
+because the picker may run several workflows or none. Keep stdin
+and stderr attached to the terminal when an interactive workflow needs to prompt the user.
+
 The version 2 report is a compact, safe projection. It contains no raw causes, source excerpts,
 environment, inputs, variables, or intermediate step outputs. Validation failures may include the
 same safe `validation_issues` projection emitted by `wuko validate --format json`:

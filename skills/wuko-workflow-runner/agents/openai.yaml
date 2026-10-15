@@ -1,4 +1,4 @@
 interface:
   display_name: "Wuko Workflow Runner"
-  short_description: "Preview and run Wuko workflows safely"
-  default_prompt: "Use $wuko-workflow-runner to preview and safely run an existing Wuko workflow."
+  short_description: "Discover, run, and collect Wuko workflow outputs"
+  default_prompt: "Use $wuko-workflow-runner to discover, preview, run, and return outputs from a Wuko workflow."

@@ -1,8 +1,10 @@
 package reporter
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -129,6 +131,61 @@ func TestNewExecutionReportPreservesUnsuccessfulStatuses(t *testing.T) {
 	}
 }
 
+func TestJSONWriterWritesOneCompactReport(t *testing.T) {
+	var output bytes.Buffer
+	reporter, err := NewJSONWriter(&output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reporter.Finish(t.Context(), Outcome{
+		InvocationID: "invocation", WorkflowName: "check", Status: engine.StatusSucceeded,
+		Outputs: map[string]any{"answer": 42},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(output.String(), "\n") != 1 || !strings.HasSuffix(output.String(), "\n") {
+		t.Fatalf("output = %q, want one compact JSON line", output.String())
+	}
+	var report ExecutionReport
+	if err := json.Unmarshal(output.Bytes(), &report); err != nil {
+		t.Fatalf("decoding report: %v", err)
+	}
+	if report.SchemaVersion != ExecutionReportSchemaVersion || report.Outputs == nil || (*report.Outputs)["answer"] != float64(42) {
+		t.Fatalf("report = %#v", report)
+	}
+}
+
+func TestNewJSONWriterRequiresWriter(t *testing.T) {
+	_, err := NewJSONWriter(nil)
+	if err == nil || !strings.Contains(err.Error(), "writer is required") {
+		t.Fatalf("NewJSONWriter() error = %v, want required writer", err)
+	}
+}
+
+func TestJSONWriterReportsEncodingAndWriteFailures(t *testing.T) {
+	tests := []struct {
+		name    string
+		writer  io.Writer
+		outcome Outcome
+		want    string
+	}{
+		{name: "encoding", writer: io.Discard, outcome: Outcome{Status: engine.StatusSucceeded, Outputs: map[string]any{"invalid": func() {}}}, want: "encoding execution report"},
+		{name: "write", writer: failingReportWriter{}, outcome: Outcome{Status: engine.StatusFailed}, want: "writing execution report: unavailable"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			reporter, err := NewJSONWriter(test.writer)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = reporter.Finish(t.Context(), test.outcome)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("Finish() error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
 func TestJSONFileAtomicallyOverwritesWithPrivatePrettyReport(t *testing.T) {
 	directory := t.TempDir()
 	path := filepath.Join(directory, "report.json")
@@ -223,3 +280,7 @@ func assertNoTemporaryReports(t *testing.T, directory, destination string) {
 		t.Fatalf("temporary reports remain: %v", matches)
 	}
 }
+
+type failingReportWriter struct{}
+
+func (failingReportWriter) Write([]byte) (int, error) { return 0, errors.New("unavailable") }

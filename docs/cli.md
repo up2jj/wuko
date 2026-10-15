@@ -11,6 +11,7 @@ invocation environment.
 ```sh
 wuko                              # searchable picker (non-interactive: prints workflows)
 wuko list                         # effective workflows: name, scope, description, path
+wuko list --format json           # versioned workflow discovery document
 wuko tree check                   # execution tree
 wuko validate                     # validate every discovered workflow
 wuko validate check --format json # versioned machine-readable diagnostics
@@ -33,6 +34,7 @@ wuko run check --env API_URL=http://localhost:8080
 wuko run check --dry-run                 # validate and print steps without running them
 wuko run check --once                    # ignore a declared cron schedule
 wuko run check --report-json report.json # versioned execution report
+wuko run check --once --report-json -    # report JSON on stdout; terminal output on stderr
 wuko run check --reporter plain --reporter github
 wuko ui check                            # run through the local browser form
 ```

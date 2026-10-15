@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/up2jj/wuko/correlation"
 	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/engine"
 	reporterpkg "github.com/up2jj/wuko/reporter"
@@ -26,6 +27,11 @@ func newRunCmd(deps dependencies) *cobra.Command {
 		Args:  cobra.MaximumNArgs(2),
 		RunE: func(command *cobra.Command, args []string) error {
 			if config.pick {
+				// The picker is an interactive loop that can run several workflows or none, so it
+				// cannot honor the single-report stdout contract of --report-json -.
+				if config.reportJSON == "-" {
+					return fmt.Errorf("--pick cannot be used with --report-json -")
+				}
 				return runGitHubWorkflowPicker(command, deps, args, config)
 			}
 			return runWorkflow(command, deps, args, config)
@@ -37,7 +43,7 @@ func newRunCmd(deps dependencies) *cobra.Command {
 	command.Flags().BoolVar(&config.dryRun, "dry-run", false, "validate and print steps without running them")
 	command.Flags().BoolVar(&config.once, "once", false, "run immediately once, ignoring a declared cron schedule")
 	addReporterFlag(command, &config.reporters)
-	command.Flags().StringVar(&config.reportJSON, "report-json", "", "write the final execution report as JSON")
+	command.Flags().StringVar(&config.reportJSON, "report-json", "", "write the final execution report as JSON to a path, or - for stdout")
 	command.Flags().StringVar(&config.workflowFile, "file", "", "run a workflow from a file path, or - for stdin")
 	command.Flags().BoolVar(&config.pick, "pick", false, "select a workflow from a GitHub repository or tree")
 	command.ValidArgsFunction = workflowCompletion(deps, true)
@@ -137,12 +143,30 @@ func (observer *returnDestinationObserver) requested(destination workflow.Return
 }
 
 func runWorkflow(command *cobra.Command, deps dependencies, args []string, config runWorkflowConfig) (runErr error) {
+	workflowOutput := command.OutOrStdout()
+	var additionalReporters []reporterpkg.Reporter
+	reportsReady := false
+	if config.reportJSON == "-" {
+		streamReporter, err := reporterpkg.NewJSONWriter(command.OutOrStdout())
+		if err != nil {
+			return err
+		}
+		additionalReporters = append(additionalReporters, streamReporter)
+		workflowOutput = command.ErrOrStderr()
+		// A failure before the reporters exist still owes the caller its one stdout report.
+		defer func() {
+			if runErr != nil && !reportsReady {
+				runErr = errors.Join(runErr, streamReporter.Finish(context.WithoutCancel(command.Context()), reporterpkg.Outcome{
+					InvocationID: correlation.NewInvocationID(), Status: engine.StatusFailed, Err: runErr, DryRun: config.dryRun,
+				}))
+			}
+		}()
+	}
 	cwd, home, configDir, err := directories(deps)
 	if err != nil {
 		return err
 	}
-	var additionalReporters []reporterpkg.Reporter
-	if config.reportJSON != "" {
+	if config.reportJSON != "" && config.reportJSON != "-" {
 		path := config.reportJSON
 		if !filepath.IsAbs(path) {
 			path = filepath.Join(cwd, path)
@@ -164,6 +188,7 @@ func runWorkflow(command *cobra.Command, deps dependencies, args []string, confi
 	if err != nil {
 		return err
 	}
+	reportsReady = true
 	var workflowName string
 	var runState *engine.State
 	var attemptErr error
@@ -263,7 +288,7 @@ func runWorkflow(command *cobra.Command, deps dependencies, args []string, confi
 		isInteractive = false
 	}
 	loadOptions := workflow.LoadOptions{Vars: vars, Env: env, BaseEnv: baseEnv, EnvironmentLoaders: environmentLoaders, RunDir: cwd, Diagnostics: reporters.Diagnostic, Providers: providers,
-		Stdin: stdin, Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(), Interactive: isInteractive,
+		Stdin: stdin, Stdout: workflowOutput, Stderr: command.ErrOrStderr(), Interactive: isInteractive,
 		EnsureSecretAuth: true}
 	definition, cleanup, err := target.load(command.Context(), loader, loadOptions)
 	if err != nil {
@@ -292,7 +317,7 @@ func runWorkflow(command *cobra.Command, deps dependencies, args []string, confi
 			Vars:         vars, Env: env, BaseEnv: baseEnv, EnvironmentLoaders: environmentLoaders, RunDir: cwd, Stdin: stdin, Providers: providers,
 			Dependencies:  dependencies,
 			LocalValueDir: localValueDir, GlobalValueDir: filepath.Join(configDir, "wuko", "values"),
-			Stdout: command.OutOrStdout(), Stderr: stepStderr,
+			Stdout: workflowOutput, Stderr: stepStderr,
 			Interactive: isInteractive, DryRun: config.dryRun, Progress: reporters.Progress,
 			ElevationAllowed: elevationAllowed,
 			Diagnostics:      reporters.Diagnostic,
@@ -300,7 +325,7 @@ func runWorkflow(command *cobra.Command, deps dependencies, args []string, confi
 	}
 	optionsFor := func(definition *workflow.Definition, dependencies map[string]map[string]any) engine.Options {
 		if config.dryRun {
-			fmt.Fprintf(command.OutOrStdout(), "Workflow %s (%s)\n", definition.Name, workflowDisplaySource(definition))
+			fmt.Fprintf(workflowOutput, "Workflow %s (%s)\n", definition.Name, workflowDisplaySource(definition))
 		}
 		return preflightOptionsFor(definition, dependencies)
 	}
