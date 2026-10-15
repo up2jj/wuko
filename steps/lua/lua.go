@@ -100,7 +100,7 @@ func (r *Runner) Validate(_ context.Context, request step.Request) error {
 	if err != nil {
 		return err
 	}
-	state := newState()
+	state := newState("")
 	defer state.Close()
 	if _, err := state.Load(bytes.NewReader([]byte(source)), name); err != nil {
 		return fmt.Errorf("compiling Lua %s: %w", name, err)
@@ -121,7 +121,7 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 		return step.Result{}, err
 	}
 	runtime := &runtime{request: request, args: args, outputs: make(map[string]any), variables: make(map[string]any), doHTTP: r.doHTTP}
-	state := newState()
+	state := newState(moduleRoot(request))
 	defer state.Close()
 	state.SetContext(ctx)
 	wuko, err := runtime.module(state)
@@ -161,6 +161,9 @@ func (r *Runner) source(request step.Request) (string, string, error) {
 	}
 	path := r.config.File
 	if !filepath.IsAbs(path) {
+		if request.WorkflowDirBorrowed {
+			return "", "", fmt.Errorf("file %q requires a packaged action: this action carries no files of its own", r.config.File)
+		}
 		path = filepath.Join(request.WorkflowDir, path)
 	}
 	data, err := os.ReadFile(path)
@@ -170,13 +173,33 @@ func (r *Runner) source(request step.Request) (string, string, error) {
 	return string(data), path, nil
 }
 
-func newState() *glua.LState {
+// moduleRoot returns the directory whose Lua modules a step may require. A borrowed directory
+// belongs to the calling workflow, so an action without files of its own gets no module root.
+func moduleRoot(request step.Request) string {
+	if request.WorkflowDirBorrowed {
+		return ""
+	}
+	return request.WorkflowDir
+}
+
+func newState(workflowDir string) *glua.LState {
 	state := glua.NewState(glua.Options{SkipOpenLibs: true})
 	glua.OpenBase(state)
 	glua.OpenTable(state)
 	glua.OpenString(state)
 	glua.OpenMath(state)
 	glua.OpenPackage(state)
+	if workflowDir != "" {
+		module := state.GetGlobal("package")
+		paths := []string{
+			filepath.Join(workflowDir, "?.lua"),
+			filepath.Join(workflowDir, "?", "init.lua"),
+			filepath.Join(workflowDir, "lua", "?.lua"),
+			filepath.Join(workflowDir, "lua", "?", "init.lua"),
+			state.GetField(module, "path").String(),
+		}
+		state.SetField(module, "path", glua.LString(strings.Join(paths, ";")))
+	}
 	return state
 }
 

@@ -72,7 +72,7 @@ steps:
 	}
 }
 
-func TestLocalActionResolvesCompanionLuaFromActionRoot(t *testing.T) {
+func TestLocalActionResolvesCompanionLuaModulesFromActionRoot(t *testing.T) {
 	dir := t.TempDir()
 	actionDir := filepath.Join(dir, "action")
 	if err := os.MkdirAll(filepath.Join(actionDir, "scripts"), 0o755); err != nil {
@@ -89,7 +89,13 @@ steps:
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(actionDir, "scripts", "action.lua"), []byte(`wuko.output("value", "from-local-action")`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(actionDir, "scripts", "action.lua"), []byte(`wuko.output("value", require("deploy").value)`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(actionDir, "deploy.lua"), []byte(`return {value = "from-local-action"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "deploy.lua"), []byte(`return {value = "from-caller"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	workflowPath := filepath.Join(dir, "workflow.yaml")
@@ -283,7 +289,7 @@ func TestCompositeActionDryRunPrintsNestedPlan(t *testing.T) {
 	}
 }
 
-func TestPackagedActionResolvesRelativeLuaFileFromActionRoot(t *testing.T) {
+func TestPackagedActionResolvesRelativeLuaModulesFromActionRoot(t *testing.T) {
 	registry := newTestRegistry(t, nil)
 	if err := luastep.Register(registry); err != nil {
 		t.Fatal(err)
@@ -292,9 +298,15 @@ func TestPackagedActionResolvesRelativeLuaFileFromActionRoot(t *testing.T) {
 		Version: 1, Name: "packaged",
 		Outputs: map[string]workflow.ActionOutput{"result": {Value: "steps.script.value"}},
 		Steps:   []workflow.Step{{ID: "script", Type: "lua", With: map[string]any{"file": "scripts/action.lua"}}},
-		Files:   map[string]workflow.ActionFile{"scripts/action.lua": {Data: []byte(`wuko.output("value", "from-package")`), Mode: 0o644}},
+		Files: map[string]workflow.ActionFile{
+			"scripts/action.lua": {Data: []byte(`wuko.output("value", require("deploy").value)`), Mode: 0o644},
+			"lua/deploy.lua":     {Data: []byte(`return {value = "from-package"}`), Mode: 0o644},
+		},
 	}
 	definition := testDefinition(t, "caller", workflow.Step{ID: "remote", Uses: workflow.ActionSource{URL: "https://example.test/package"}, Action: action, With: map[string]any{}})
+	if err := os.WriteFile(filepath.Join(definition.Dir, "deploy.lua"), []byte(`return {value = "from-caller"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	state, err := New(registry).Run(t.Context(), definition, Options{RunDir: t.TempDir(), Stdout: io.Discard, Stderr: io.Discard})
 	if err != nil {
 		t.Fatal(err)

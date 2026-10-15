@@ -1019,6 +1019,51 @@ Run a file:
       task: "{{ .vars.task_name }}"
 ```
 
+Load reusable Lua modules with `require` without setting `package.path`. For example, save
+`deploy.lua` beside the workflow YAML (or in its `lua/` directory):
+
+```lua
+local M = {}
+
+function M.image(name, tag)
+  return name .. ":" .. tag
+end
+
+return M
+```
+
+Then require it from an inline or file-based Lua step:
+
+```yaml
+- id: image
+  type: lua
+  with:
+    source: |
+      local deploy = require("deploy")
+      wuko.output("image", deploy.image("api", "v1"))
+```
+
+Wuko prepends these search patterns to the existing `package.path`, in this order:
+
+1. `<workflow-dir>/?.lua`
+2. `<workflow-dir>/?/init.lua`
+3. `<workflow-dir>/lua/?.lua`
+4. `<workflow-dir>/lua/?/init.lua`
+
+Here `<workflow-dir>` is the directory containing the workflow YAML, regardless of the Lua script's
+location or the execution working directory. Inside a composite action it is the action's own
+directory, including companion files bundled with packaged actions. A remote action loaded as a
+standalone YAML manifest carries no files of its own, so it gets no workflow module roots and cannot
+load the caller's modules or `file:` scripts. Dotted names work normally:
+`require("tools.deploy")` searches for `tools/deploy.lua` and `tools/deploy/init.lua` in these roots.
+Existing search paths, including those initialized from `LUA_PATH`, remain available afterward.
+`LUA_PATH` is read from the environment wuko itself starts with, not from workflow or step `env:`;
+set it in your shell (for example, `LUA_PATH='/opt/lua/?.lua;;' wuko run ...`) to add search paths.
+
+Modules are cached within a Lua step execution. Each execution gets a fresh Lua state, so module
+globals and cached modules do not persist between steps or retries. Validation compiles the entry
+script without executing it or loading its required modules; missing modules fail at runtime.
+
 Produce typed outputs and variables inline:
 
 ```yaml
