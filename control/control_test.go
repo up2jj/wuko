@@ -201,6 +201,25 @@ func TestRunFailurePoliciesAndTimeout(t *testing.T) {
 	}
 }
 
+// The deadline can pass between the last iteration succeeding and Run inspecting the context;
+// a group whose every iteration succeeded has not timed out.
+func TestRunSucceedsWhenEveryIterationSucceedsAtTheDeadline(t *testing.T) {
+	iterations, err := Foreach([]int{0, 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outcomes, err := Run(t.Context(), iterations, Policy{MaxConcurrency: 2, Timeout: 10 * time.Millisecond}, nil, func(ctx context.Context, iteration Iteration) (int, error) {
+		<-ctx.Done()
+		return iteration.Index, nil
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v, want success when every iteration succeeded", err)
+	}
+	if outcomes[1].Value != 1 {
+		t.Fatalf("outcomes = %#v", outcomes)
+	}
+}
+
 func TestRunFailFastDoesNotStartQueuedIteration(t *testing.T) {
 	iterations, err := Foreach([]int{0, 1})
 	if err != nil {

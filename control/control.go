@@ -341,7 +341,7 @@ func Run[T any](ctx context.Context, iterations []Iteration, policy Policy, obse
 	if err := ctx.Err(); err != nil {
 		return outcomes, err
 	}
-	if policy.Timeout > 0 && runCtx.Err() == context.DeadlineExceeded {
+	if policy.Timeout > 0 && runCtx.Err() == context.DeadlineExceeded && !allSucceeded(outcomes) {
 		return outcomes, fmt.Errorf("timed out after %s: %w", policy.Timeout, context.DeadlineExceeded)
 	}
 	iterationErrors := make([]error, 0, len(outcomes))
@@ -358,6 +358,17 @@ func Run[T any](ctx context.Context, iterations []Iteration, policy Policy, obse
 		}
 	}
 	return outcomes, errors.Join(iterationErrors...)
+}
+
+// allSucceeded reports whether every iteration started and finished without error. The
+// deadline may pass after the last one succeeds, and that group has not timed out.
+func allSucceeded[T any](outcomes []Outcome[T]) bool {
+	for _, outcome := range outcomes {
+		if !outcome.Started || outcome.Err != nil {
+			return false
+		}
+	}
+	return true
 }
 
 func asSlice(value any) ([]any, bool) {
