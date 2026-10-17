@@ -146,6 +146,16 @@ func TestProgressRendersControlLifecycle(t *testing.T) {
 	}
 }
 
+func TestProgressOmitsUnknownLoopIterationCount(t *testing.T) {
+	var output bytes.Buffer
+	progress := NewProgress(&output, false)
+	progress.Report(engine.ProgressEvent{Kind: engine.ControlStarted, ControlKind: "loop", StepID: "wait", MaxConcurrency: 1})
+	want := "↻ Loop wait · max 1 concurrent · wait for all\n"
+	if output.String() != want {
+		t.Fatalf("output = %q, want %q", output.String(), want)
+	}
+}
+
 func TestProgressRendersCancelOnLifecycle(t *testing.T) {
 	var output bytes.Buffer
 	progress := NewProgress(&output, false)

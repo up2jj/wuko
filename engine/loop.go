@@ -59,7 +59,7 @@ func (e *Engine) executeLoop(ctx context.Context, definition *workflow.Definitio
 	for iterations < group.MaxIterations {
 		if err := loopCtx.Err(); err != nil {
 			finish(statusFromError(err), err, nested)
-			reportLoopFinished(options, definition, workflowStep, group, started, iterations, err)
+			reportLoopFinished(options, definition, workflowStep, group, started, iterations, iterations, err)
 			outcome.err = err
 			return outcome
 		}
@@ -74,7 +74,7 @@ func (e *Engine) executeLoop(ctx context.Context, definition *workflow.Definitio
 		mergeRunStats(&nested, bodyStats)
 		if bodyErr != nil {
 			finish(statusFromError(bodyErr), bodyErr, nested)
-			reportLoopFinished(options, definition, workflowStep, group, started, iterations, bodyErr)
+			reportLoopFinished(options, definition, workflowStep, group, started, iterations, iterations-1, bodyErr)
 			outcome.err = bodyErr
 			return outcome
 		}
@@ -83,7 +83,7 @@ func (e *Engine) executeLoop(ctx context.Context, definition *workflow.Definitio
 		if err != nil {
 			err = fmt.Errorf("evaluating loop until: %w", err)
 			finish(StatusFailed, err, nested)
-			reportLoopFinished(options, definition, workflowStep, group, started, iterations, err)
+			reportLoopFinished(options, definition, workflowStep, group, started, iterations, iterations, err)
 			outcome.err = err
 			return outcome
 		}
@@ -95,14 +95,14 @@ func (e *Engine) executeLoop(ctx context.Context, definition *workflow.Definitio
 			}
 			outcome.result = step.Result{Outputs: outputs}
 			finish(StatusSucceeded, nil, nested)
-			reportLoopFinished(options, definition, workflowStep, group, started, iterations, nil)
+			reportLoopFinished(options, definition, workflowStep, group, started, iterations, iterations, nil)
 			return outcome
 		}
 
 		if iterations == group.MaxIterations {
 			err := fmt.Errorf("loop exceeded max_iterations %d", group.MaxIterations)
 			finish(StatusFailed, err, nested)
-			reportLoopFinished(options, definition, workflowStep, group, started, iterations, err)
+			reportLoopFinished(options, definition, workflowStep, group, started, iterations, iterations, err)
 			outcome.err = err
 			return outcome
 		}
@@ -110,7 +110,7 @@ func (e *Engine) executeLoop(ctx context.Context, definition *workflow.Definitio
 		delay, err := loopDelay(group.Delay, definition, options, state)
 		if err != nil {
 			finish(StatusFailed, err, nested)
-			reportLoopFinished(options, definition, workflowStep, group, started, iterations, err)
+			reportLoopFinished(options, definition, workflowStep, group, started, iterations, iterations, err)
 			outcome.err = err
 			return outcome
 		}
@@ -126,7 +126,7 @@ func (e *Engine) executeLoop(ctx context.Context, definition *workflow.Definitio
 			case <-loopCtx.Done():
 				err := loopCtx.Err()
 				finish(statusFromError(err), err, nested)
-				reportLoopFinished(options, definition, workflowStep, group, started, iterations, err)
+				reportLoopFinished(options, definition, workflowStep, group, started, iterations, iterations, err)
 				outcome.err = err
 				return outcome
 			}
@@ -160,13 +160,15 @@ func loopDelay(delay workflow.LoopDelay, definition *workflow.Definition, option
 	return parsed, nil
 }
 
-func reportLoopFinished(options Options, definition *workflow.Definition, workflowStep workflow.Step, group *workflow.LoopGroup, started time.Time, iterations int, err error) {
+// reportLoopFinished reports how many iterations ran and how many of their bodies succeeded;
+// they differ only when the last body failed.
+func reportLoopFinished(options Options, definition *workflow.Definition, workflowStep workflow.Step, group *workflow.LoopGroup, started time.Time, iterations, succeeded int, err error) {
 	finished := time.Now()
 	report(options, ProgressEvent{
 		Kind: ControlFinished, Status: statusFromError(err), Time: finished,
 		WorkflowName: definition.Name, Depth: options.depth, StepID: workflowStep.ID,
 		ControlKind: "loop", Iterations: iterations, Started: iterations,
-		Succeeded: iterations, MaxConcurrency: 1,
+		Succeeded: succeeded, MaxConcurrency: 1,
 		Timeout: durationValue(group.Timeout), Duration: finished.Sub(started), Error: err,
 	})
 	if err != nil {

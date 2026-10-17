@@ -81,7 +81,11 @@ func (progress *Progress) Report(event engine.ProgressEvent) {
 		} else if event.ControlKind == "try" {
 			item = "phase"
 		}
-		parts := []string{count(event.Iterations, item)}
+		var parts []string
+		// A loop repeats until its condition holds, so its iteration count is unknown at start.
+		if event.ControlKind != "loop" {
+			parts = append(parts, count(event.Iterations, item))
+		}
 		if event.ControlKind != "try" {
 			parts = append(parts, fmt.Sprintf("max %d concurrent", event.MaxConcurrency))
 		}
