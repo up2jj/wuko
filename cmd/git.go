@@ -179,7 +179,8 @@ func newGitHookRunCmd(deps dependencies) *cobra.Command {
 			stack := appendHookStack(deps.getenv(gitHookStackEnvironment), name)
 			if preserved, found, err := githook.PreservedPath(command.Context(), repository, name); err != nil {
 				return err
-			} else if found {
+			} else if found && executableFile(preserved) {
+				// Git ignores a hook without the execute bit, so a preserved one is skipped too.
 				child := exec.CommandContext(command.Context(), preserved, args[1:]...)
 				child.Dir, child.Stdin, child.Stdout, child.Stderr = repository.Root, bytes.NewReader(input), command.OutOrStdout(), command.ErrOrStderr()
 				child.Env = environmentWith(os.Environ(), gitHookStackEnvironment, stack)
@@ -349,4 +350,11 @@ func environmentWith(environment []string, name, value string) []string {
 		}
 	}
 	return append(result, prefix+value)
+}
+
+// executableFile reports whether path is a file with any execute bit set, the test Git itself
+// applies before running a hook.
+func executableFile(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir() && info.Mode().Perm()&0o111 != 0
 }

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -166,13 +167,20 @@ func Uninstall(ctx context.Context, repository Repository, names []string) ([]St
 		targets = append(targets, target{name: name, path: path, record: record})
 	}
 	var statuses []Status
+	// A failure part way through must still record the hooks already removed: their records
+	// would otherwise fail verification on every later install or uninstall.
+	failed := func(err error) ([]Status, error) {
+		return nil, errors.Join(err, saveState(repository, state))
+	}
 	for _, item := range targets {
 		if err := os.Remove(item.path); err != nil && !os.IsNotExist(err) {
-			return nil, fmt.Errorf("removing Git hook %s: %w", item.name, err)
+			return failed(fmt.Errorf("removing Git hook %s: %w", item.name, err))
 		}
 		if item.record.Chained {
 			if err := os.Rename(backupPath(item.path), item.path); err != nil {
-				return nil, fmt.Errorf("restoring preserved Git hook %s: %w", item.name, err)
+				// The dispatcher is gone but the user's hook was not restored; keep the record
+				// so a retry can still restore it from the backup.
+				return failed(fmt.Errorf("restoring preserved Git hook %s: %w", item.name, err))
 			}
 		}
 		delete(state.Hooks, item.name)

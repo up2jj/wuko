@@ -276,6 +276,42 @@ func TestGitHookInitRefusesExistingFilesWithoutMutation(t *testing.T) {
 	}
 }
 
+// Git ignores a hook file without the execute bit, so chaining one must not turn it into a
+// failure that blocks every push.
+func TestGitHookRunSkipsNonExecutablePreservedHook(t *testing.T) {
+	root := initGitHookRepository(t)
+	writeGitHookWorkflow(t, root, "check", "true", nil)
+	writeGitHookManifest(t, root, "pre-push:\n    - workflow: check")
+	repository, err := githook.Discover(t.Context(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hookPath, err := repository.HookPath(t.Context(), "pre-push")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(hookPath, []byte("#!/bin/sh\nexit 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	executable := filepath.Join(root, "wuko")
+	if err := os.WriteFile(executable, []byte("binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := githook.LoadManifest(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := githook.Install(t.Context(), repository, executable, manifest, true); err != nil {
+		t.Fatal(err)
+	}
+	command := newRootCmd(gitHookTestDependencies(t, root, io.Discard, io.Discard, func(string) string { return "" }))
+	command.SetIn(strings.NewReader(""))
+	command.SetArgs([]string{"git", "hook", "run", "pre-push", "--", "origin", "url"})
+	if err := command.ExecuteContext(t.Context()); err != nil {
+		t.Fatalf("hook run error = %v, want the ignored preserved hook skipped", err)
+	}
+}
+
 func TestGitHookRunExecutesPreservedHookBeforeLoadingManifest(t *testing.T) {
 	root := initGitHookRepository(t)
 	writeGitHookWorkflow(t, root, "check", "true", nil)
