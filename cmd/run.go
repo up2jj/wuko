@@ -327,7 +327,7 @@ func runWorkflow(command *cobra.Command, deps dependencies, args []string, confi
 			LocalValueDir: localValueDir, GlobalValueDir: filepath.Join(configDir, "wuko", "values"),
 			Stdout: workflowOutput, Stderr: stepStderr,
 			Interactive: isInteractive, DryRun: config.dryRun, Progress: reporters.Progress,
-			ElevationAllowed: elevationAllowed,
+			ElevationAllowed: elevationAllowed && installedWorkflowMayElevate(definition.Path),
 			Diagnostics:      reporters.Diagnostic,
 		}
 	}

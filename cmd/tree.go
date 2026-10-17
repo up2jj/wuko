@@ -147,7 +147,7 @@ func renderWorkflowTree(command *cobra.Command, deps dependencies, args []string
 			}
 			return engine.Options{Vars: vars, Env: env, BaseEnv: baseEnv, EnvironmentLoaders: environmentLoaders, Dependencies: dependencies, RunDir: cwd, Providers: providers,
 				Stdin: command.InOrStdin(), Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(), Diagnostics: reporter,
-				ElevationAllowed: elevationAllowed,
+				ElevationAllowed: elevationAllowed && installedWorkflowMayElevate(definition.Path),
 				LocalValueDir:    localValueDir, GlobalValueDir: filepath.Join(configDir, "wuko", "values")}
 		}); err != nil {
 			return err

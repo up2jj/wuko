@@ -181,7 +181,7 @@ func validateWorkflowSources(command *cobra.Command, deps dependencies, args []s
 				Vars: vars, Env: env, BaseEnv: baseEnv, EnvironmentLoaders: environmentLoaders, Dependencies: dependencies, RunDir: cwd, Providers: providers,
 				Stdin: command.InOrStdin(), Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(),
 				LocalValueDir: localValueDir, GlobalValueDir: filepath.Join(configDir, "wuko", "values"),
-				ElevationAllowed: source.Locator == "",
+				ElevationAllowed: source.Locator == "" && installedWorkflowMayElevate(definition.Path),
 				Diagnostics:      reporter,
 			}
 		}

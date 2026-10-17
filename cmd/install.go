@@ -366,6 +366,20 @@ func installedWorkflowElevationAllowed(directory, name string, packaged bool) bo
 	return !marker.Remote
 }
 
+// installedWorkflowMayElevate applies install provenance to the workflow defined at path: a
+// marketplace package or a file installed from a remote locator is not local code and may not
+// elevate, wherever it is run from. A workflow with no install record is authored in place.
+func installedWorkflowMayElevate(path string) bool {
+	if path == "" {
+		return true
+	}
+	directory := filepath.Dir(path)
+	if _, err := os.Lstat(filepath.Join(directory, workflow.WorkflowPackageMarkerName)); err == nil {
+		return false
+	}
+	return installedWorkflowElevationAllowed(directory, strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)), false)
+}
+
 type marketplacePackageInstallMarker struct {
 	Version        int    `json:"version"`
 	Marketplace    string `json:"marketplace"`

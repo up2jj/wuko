@@ -11,7 +11,9 @@ you run as trusted code.
   permissions granted to Wuko.
 - Local file workflows and local path actions may explicitly run `shell` and `process` steps as root
   with `with.elevated: true`. This is arbitrary sudo execution, not a restricted helper. Remote,
-  stdin, and executor-scoped definitions cannot elevate. See
+  stdin, and executor-scoped definitions cannot elevate. Neither can workflows installed from a
+  remote locator or a marketplace, however they are run: by name, as a dependency, or through
+  `run_workflow`. Such workflows also cannot use `run_workflow` themselves. See
   [Elevated shell and process commands](steps-automation.md#elevated-shell-and-process-commands).
 - Safe archive extraction is not an execution sandbox.
 - Do not mount the Docker socket for untrusted workflows.

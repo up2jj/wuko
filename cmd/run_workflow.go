@@ -116,7 +116,9 @@ func (invoker commandWorkflowInvoker) prepare(ctx context.Context, invocation en
 	}
 	globalValueDir := filepath.Join(configDir, "wuko", "values")
 	optionsFor := func(definition *workflow.Definition, dependencies map[string]map[string]any) engine.Options {
-		return invocation.EngineOptions(dependencies, filepath.Join(definition.Dir, ".wuko", "values"), globalValueDir)
+		options := invocation.EngineOptions(dependencies, filepath.Join(definition.Dir, ".wuko", "values"), globalValueDir)
+		options.ElevationAllowed = options.ElevationAllowed && installedWorkflowMayElevate(definition.Path)
+		return options
 	}
 	return preparedInvocation{plan: plan, ctx: nested, optionsFor: optionsFor, key: validationKey(source, invocation)}, nil
 }
