@@ -12,6 +12,7 @@ import (
 	"github.com/up2jj/wuko/correlation"
 	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/engine"
+	"github.com/up2jj/wuko/internal/fsutil"
 	"github.com/up2jj/wuko/validation"
 )
 
@@ -181,23 +182,8 @@ func (reporter *JSONFile) Finish(_ context.Context, outcome Outcome) error {
 	}
 	data = append(data, '\n')
 
-	directory := filepath.Dir(reporter.path)
-	temporary, err := os.CreateTemp(directory, "."+filepath.Base(reporter.path)+".*")
-	if err != nil {
-		return fmt.Errorf("creating temporary execution report: %w", err)
-	}
-	temporaryPath := temporary.Name()
-	defer os.Remove(temporaryPath)
-
-	if _, err := temporary.Write(data); err != nil {
-		_ = temporary.Close()
-		return fmt.Errorf("writing temporary execution report: %w", err)
-	}
-	if err := temporary.Close(); err != nil {
-		return fmt.Errorf("closing temporary execution report: %w", err)
-	}
-	if err := os.Rename(temporaryPath, reporter.path); err != nil {
-		return fmt.Errorf("replacing execution report %s: %w", reporter.path, err)
+	if err := fsutil.WriteFileAtomic(reporter.path, data, 0o600); err != nil {
+		return fmt.Errorf("replacing execution report: %w", err)
 	}
 	return nil
 }

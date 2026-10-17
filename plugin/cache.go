@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/up2jj/wuko/internal/filelock"
+	"github.com/up2jj/wuko/internal/fsutil"
 )
 
 const releaseDirectory = ".wuko-release"
@@ -336,27 +337,7 @@ func writeAtomic(path string, data []byte) error {
 	if info, err := os.Stat(path); err == nil {
 		mode = info.Mode().Perm()
 	}
-	file, err := os.CreateTemp(filepath.Dir(path), ".wuko-write-")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(file.Name())
-	if err := file.Chmod(mode); err != nil {
-		_ = file.Close()
-		return err
-	}
-	if _, err := file.Write(data); err != nil {
-		_ = file.Close()
-		return err
-	}
-	if err := file.Sync(); err != nil {
-		_ = file.Close()
-		return err
-	}
-	if err := file.Close(); err != nil {
-		return err
-	}
-	return os.Rename(file.Name(), path)
+	return fsutil.WriteFileAtomic(path, data, mode)
 }
 
 func (s *releaseStore) seed(ctx context.Context, release Release) error {

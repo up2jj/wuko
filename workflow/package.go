@@ -15,6 +15,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/up2jj/wuko/internal/fsutil"
 )
 
 const (
@@ -239,43 +241,7 @@ func writePackageBytesAtomically(filename string, data []byte) error {
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		return fmt.Errorf("creating package output directory %s: %w", directory, err)
 	}
-	file, err := os.CreateTemp(directory, "."+filepath.Base(filename)+"-*")
-	if err != nil {
-		return fmt.Errorf("creating temporary package archive: %w", err)
-	}
-	temporary := file.Name()
-	removeTemporary := true
-	defer func() {
-		_ = file.Close()
-		if removeTemporary {
-			_ = os.Remove(temporary)
-		}
-	}()
-	if err := file.Chmod(0o644); err != nil {
-		return fmt.Errorf("setting package archive permissions: %w", err)
-	}
-	if _, err := file.Write(data); err != nil {
-		return fmt.Errorf("writing package archive: %w", err)
-	}
-	if err := file.Sync(); err != nil {
-		return fmt.Errorf("syncing package archive: %w", err)
-	}
-	if err := file.Close(); err != nil {
-		return fmt.Errorf("closing package archive: %w", err)
-	}
-	if err := os.Rename(temporary, filename); err != nil {
-		return fmt.Errorf("replacing package archive %s: %w", filename, err)
-	}
-	removeTemporary = false
-	directoryFile, err := os.Open(directory)
-	if err != nil {
-		return fmt.Errorf("opening package output directory: %w", err)
-	}
-	defer directoryFile.Close()
-	if err := directoryFile.Sync(); err != nil {
-		return fmt.Errorf("syncing package output directory: %w", err)
-	}
-	return nil
+	return fsutil.WriteFileAtomic(filename, data, 0o644)
 }
 
 func digestBytes(data []byte) string {

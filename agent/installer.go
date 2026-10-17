@@ -11,6 +11,8 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+
+	"github.com/up2jj/wuko/internal/fsutil"
 )
 
 // Definition describes a supported coding agent that can consume Wuko skills.
@@ -123,31 +125,6 @@ func copySkill(source fs.FS, skillName, destination string) error {
 		if err != nil {
 			return fmt.Errorf("reading %s: %w", sourcePath, err)
 		}
-		return atomicWrite(target, data)
+		return fsutil.WriteFileAtomic(target, data, 0o644)
 	})
-}
-
-func atomicWrite(target string, data []byte) error {
-	temporary, err := os.CreateTemp(filepath.Dir(target), ".wuko-skill-*")
-	if err != nil {
-		return fmt.Errorf("creating temporary file: %w", err)
-	}
-	temporaryName := temporary.Name()
-	defer os.Remove(temporaryName)
-
-	if err := temporary.Chmod(0o644); err != nil {
-		_ = temporary.Close()
-		return fmt.Errorf("setting file permissions: %w", err)
-	}
-	if _, err := temporary.Write(data); err != nil {
-		_ = temporary.Close()
-		return fmt.Errorf("writing temporary file: %w", err)
-	}
-	if err := temporary.Close(); err != nil {
-		return fmt.Errorf("closing temporary file: %w", err)
-	}
-	if err := os.Rename(temporaryName, target); err != nil {
-		return fmt.Errorf("replacing %s: %w", target, err)
-	}
-	return nil
 }

@@ -272,7 +272,7 @@ func TestJSONFileCleansTemporaryFileWhenRenameFails(t *testing.T) {
 
 func assertNoTemporaryReports(t *testing.T, directory, destination string) {
 	t.Helper()
-	matches, err := filepath.Glob(filepath.Join(directory, "."+filepath.Base(destination)+".*"))
+	matches, err := filepath.Glob(filepath.Join(directory, "."+filepath.Base(destination)+"-*"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -15,6 +15,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/up2jj/wuko/diagnostic"
+	"github.com/up2jj/wuko/internal/fsutil"
 	pluginpkg "github.com/up2jj/wuko/plugin"
 	"github.com/up2jj/wuko/workflow"
 )
@@ -598,44 +599,9 @@ func staleMarketplaceFiles(cwd string, previous, current workflow.MarketplaceMan
 }
 
 func writeJSONAtomically(path string, value any) error {
-	directory := filepath.Dir(path)
-	file, err := os.CreateTemp(directory, "."+filepath.Base(path)+"-*")
+	data, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {
-		return fmt.Errorf("creating temporary file for %s: %w", path, err)
-	}
-	temporary := file.Name()
-	removeTemporary := true
-	defer func() {
-		_ = file.Close()
-		if removeTemporary {
-			_ = os.Remove(temporary)
-		}
-	}()
-	if err := file.Chmod(0o644); err != nil {
-		return fmt.Errorf("setting permissions on %s: %w", path, err)
-	}
-	encoder := json.NewEncoder(file)
-	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(value); err != nil {
 		return fmt.Errorf("encoding %s: %w", path, err)
 	}
-	if err := file.Sync(); err != nil {
-		return fmt.Errorf("syncing %s: %w", path, err)
-	}
-	if err := file.Close(); err != nil {
-		return fmt.Errorf("closing %s: %w", path, err)
-	}
-	if err := os.Rename(temporary, path); err != nil {
-		return fmt.Errorf("replacing %s: %w", path, err)
-	}
-	removeTemporary = false
-	directoryFile, err := os.Open(directory)
-	if err != nil {
-		return fmt.Errorf("opening marketplace directory: %w", err)
-	}
-	defer directoryFile.Close()
-	if err := directoryFile.Sync(); err != nil {
-		return fmt.Errorf("syncing marketplace directory: %w", err)
-	}
-	return nil
+	return fsutil.WriteFileAtomic(path, append(data, '\n'), 0o644)
 }

@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/up2jj/wuko/internal/filelock"
+	"github.com/up2jj/wuko/internal/fsutil"
 )
 
 var namePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
@@ -541,53 +542,13 @@ func (s *Store) read() (map[string]any, error) {
 	return values, nil
 }
 
-func (s *Store) write(values map[string]any) (resultErr error) {
+func (s *Store) write(values map[string]any) error {
 	data, err := json.MarshalIndent(values, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encoding store: %w", err)
 	}
 	data = append(data, '\n')
-	dir := filepath.Dir(s.path)
-	temporary, err := os.CreateTemp(dir, ".wuko-values-*")
-	if err != nil {
-		return fmt.Errorf("creating temporary store: %w", err)
-	}
-	temporaryPath := temporary.Name()
-	open := true
-	defer func() {
-		_ = os.Remove(temporaryPath)
-		if open {
-			err = temporary.Close()
-		}
-		if resultErr == nil && err != nil {
-			resultErr = fmt.Errorf("closing temporary store: %w", err)
-		}
-	}()
-	if err := temporary.Chmod(0o600); err != nil {
-		return fmt.Errorf("setting store permissions: %w", err)
-	}
-	if _, err := temporary.Write(data); err != nil {
-		return fmt.Errorf("writing temporary store: %w", err)
-	}
-	if err := temporary.Sync(); err != nil {
-		return fmt.Errorf("syncing temporary store: %w", err)
-	}
-	if err := temporary.Close(); err != nil {
-		return fmt.Errorf("closing temporary store: %w", err)
-	}
-	open = false
-	if err := os.Rename(temporaryPath, s.path); err != nil {
-		return fmt.Errorf("replacing store %s: %w", s.path, err)
-	}
-	directory, err := os.Open(dir)
-	if err != nil {
-		return fmt.Errorf("opening store directory: %w", err)
-	}
-	defer directory.Close()
-	if err := directory.Sync(); err != nil {
-		return fmt.Errorf("syncing store directory: %w", err)
-	}
-	return nil
+	return fsutil.WriteFileAtomic(s.path, data, 0o600)
 }
 
 func validateKey(key string) error {
