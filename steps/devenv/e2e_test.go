@@ -281,6 +281,9 @@ func recordedInvocations(t *testing.T, dir string) []invocation {
 
 func devenvEngine(t *testing.T) *engine.Engine {
 	t.Helper()
+	if throughPlugin {
+		return pluginDevenvEngine(t)
+	}
 	steps := step.NewRegistry()
 	for _, register := range []func(*step.Registry) error{devenvstep.RegisterTask, assertstep.Register} {
 		if err := register(steps); err != nil {
@@ -298,9 +301,10 @@ func devenvEngine(t *testing.T) *engine.Engine {
 // after it. Executor blocks accept only process-backed steps, so `assert` has to sit
 // outside the block and read the committed outputs from workflow state.
 func devenvDefinition(executorWith map[string]any, task map[string]any, assertions ...workflow.Step) *workflow.Definition {
+	executorType, taskType := devenvTypes()
 	steps := []workflow.Step{{
-		Executor: &workflow.ExecutorScope{Type: "devenv", With: executorWith},
-		Steps:    []workflow.Step{{ID: "task", Type: "devenv_task", With: task}},
+		Executor: &workflow.ExecutorScope{Type: executorType, With: executorWith},
+		Steps:    []workflow.Step{{ID: "task", Type: taskType, With: task}},
 	}}
 	return &workflow.Definition{Version: 1, Name: "devenv-e2e", Steps: append(steps, assertions...)}
 }
@@ -360,7 +364,9 @@ func TestDevenvTaskDecodesTypedValueEndToEnd(t *testing.T) {
 	if got := recordedArgv(t, dir); !slices.Equal(got, want) {
 		t.Fatalf("recorded argv = %#v, want %#v", got, want)
 	}
-	if outputs := taskOutputs(t, state); outputs["value_decoded"] != true || outputs["exit_code"] != 0 {
+	// The exit code is compared by value: through a plugin it is decoded from JSON as an int64,
+	// which workflow expressions treat exactly as the in-process int.
+	if outputs := taskOutputs(t, state); outputs["value_decoded"] != true || fmt.Sprint(outputs["exit_code"]) != "0" {
 		t.Fatalf("outputs = %#v", outputs)
 	}
 }
