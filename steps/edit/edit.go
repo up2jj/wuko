@@ -220,6 +220,7 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 		if err != nil {
 			return step.Result{}, fmt.Errorf("editing %s: %w", file.path, err)
 		}
+		patched = matchLineEndings(file.data, patched)
 		verified, err := decodeDocument(patched, file.format)
 		if err != nil {
 			return step.Result{}, fmt.Errorf("verifying edited %s: %w", file.path, err)
@@ -697,4 +698,16 @@ func readFile(ctx context.Context, filesystem executor.FileSystem, path string, 
 		return nil, err
 	}
 	return data, nil
+}
+
+// matchLineEndings gives text inserted by an edit the line endings of a file that uses CRLF
+// throughout; the structural patchers write LF. A file with any bare LF is left as it is, since
+// it has no single convention to follow. The edited document is decoded again afterwards, so a
+// conversion that changed a value would fail verification instead of being written.
+func matchLineEndings(original, patched []byte) []byte {
+	crlf := bytes.Count(original, []byte("\r\n"))
+	if crlf == 0 || crlf != bytes.Count(original, []byte("\n")) {
+		return patched
+	}
+	return bytes.ReplaceAll(bytes.ReplaceAll(patched, []byte("\r\n"), []byte("\n")), []byte("\n"), []byte("\r\n"))
 }

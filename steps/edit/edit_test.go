@@ -618,3 +618,36 @@ func BenchmarkApplyTextEdits(b *testing.B) {
 		})
 	}
 }
+
+func TestStructuralEditKeepsCRLFLineEndings(t *testing.T) {
+	tests := []struct {
+		file, input string
+	}{
+		{file: "config.yaml", input: "name: demo\r\nservices:\r\n  api: 1\r\n"},
+		{file: "config.toml", input: "name = \"demo\"\r\n\r\n[services]\r\napi = 1\r\n"},
+		{file: "config.json", input: "{\r\n  \"name\": \"demo\",\r\n  \"services\": {\r\n    \"api\": 1\r\n  }\r\n}\r\n"},
+	}
+	for _, test := range tests {
+		t.Run(test.file, func(t *testing.T) {
+			directory := t.TempDir()
+			path := filepath.Join(directory, test.file)
+			if err := os.WriteFile(path, []byte(test.input), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			runner := newRunner(t, map[string]any{
+				"operation": "set", "from": map[string]any{"file": test.file},
+				"path": "$.services.worker", "value": 2, "missing": "create",
+			})
+			if _, err := runner.Run(t.Context(), step.Request{RunDir: directory}); err != nil {
+				t.Fatal(err)
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Count(string(data), "\n") != strings.Count(string(data), "\r\n") || !strings.Contains(string(data), "worker") {
+				t.Fatalf("edited file mixes line endings: %q", data)
+			}
+		})
+	}
+}
