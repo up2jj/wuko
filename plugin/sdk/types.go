@@ -262,18 +262,32 @@ type ExecutorRequest[Config any] struct {
 	Context ExecutorContext
 }
 
+// TerminalSize is the character grid of a terminal.
+type TerminalSize struct {
+	Rows uint16 `json:"rows"`
+	Cols uint16 `json:"cols"`
+}
+
 type Command struct {
-	Command      string            `json:"command"`
-	Args         []string          `json:"args"`
-	Dir          string            `json:"dir"`
-	Env          map[string]string `json:"env"`
-	Stdin        []byte            `json:"-"`
-	CaptureLimit int64             `json:"capture_limit"`
-	StdoutPolicy int               `json:"stdout_policy"`
-	StderrPolicy int               `json:"stderr_policy"`
-	Stdout       io.Writer         `json:"-"`
-	Stderr       io.Writer         `json:"-"`
-	Started      func()            `json:"-"`
+	Command string            `json:"command"`
+	Args    []string          `json:"args"`
+	Dir     string            `json:"dir"`
+	Env     map[string]string `json:"env"`
+	// Stdin is the command's input, or nil when it has none. For an executor registered with
+	// Stdin or TTY it is read from the host as the command consumes it; otherwise the host sent
+	// it whole with the request.
+	Stdin io.Reader `json:"-"`
+	// TTY is the starting size when the command runs in a terminal. Stdin then carries the
+	// terminal's input, Stdout receives the terminal's single output stream, and Resize
+	// delivers each later size; the host keeps the user's terminal and the capture.
+	TTY          *TerminalSize       `json:"-"`
+	Resize       <-chan TerminalSize `json:"-"`
+	CaptureLimit int64               `json:"capture_limit"`
+	StdoutPolicy int                 `json:"stdout_policy"`
+	StderrPolicy int                 `json:"stderr_policy"`
+	Stdout       io.Writer           `json:"-"`
+	Stderr       io.Writer           `json:"-"`
+	Started      func()              `json:"-"`
 }
 
 type CommandResult struct {

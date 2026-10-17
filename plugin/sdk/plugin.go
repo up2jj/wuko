@@ -1,6 +1,7 @@
 package sdk
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -465,6 +466,8 @@ func (plugin *Plugin) callExecutor(ctx context.Context, req wireRequest, peer *p
 			Dir          string            `json:"dir"`
 			Env          map[string]string `json:"env"`
 			Stdin        string            `json:"stdin"`
+			StdinStream  bool              `json:"stdin_stream"`
+			TTY          *TerminalSize     `json:"tty"`
 			CaptureLimit int64             `json:"capture_limit"`
 			StdoutPolicy int               `json:"stdout_policy"`
 			StderrPolicy int               `json:"stderr_policy"`
@@ -485,11 +488,23 @@ func (plugin *Plugin) callExecutor(ctx context.Context, req wireRequest, peer *p
 			plugin.mu.Unlock()
 			return map[string]any{}, err
 		}
-		stdin, err := base64.StdEncoding.DecodeString(params.Stdin)
-		if err != nil {
-			return nil, fmt.Errorf("decoding stdin: %w", err)
+		var stdin io.Reader
+		switch {
+		case params.StdinStream || params.TTY != nil:
+			stdin = &inputReader{ctx: ctx}
+		case params.Stdin != "":
+			data, err := base64.StdEncoding.DecodeString(params.Stdin)
+			if err != nil {
+				return nil, fmt.Errorf("decoding stdin: %w", err)
+			}
+			stdin = bytes.NewReader(data)
 		}
-		command := Command{Command: params.Command, Args: params.Args, Dir: params.Dir, Env: params.Env, Stdin: stdin, CaptureLimit: params.CaptureLimit, StdoutPolicy: params.StdoutPolicy, StderrPolicy: params.StderrPolicy, Stdout: eventWriter{peer: peer, id: req.ID, event: "stdout"}, Stderr: eventWriter{peer: peer, id: req.ID, event: "stderr"}, Started: func() { _ = peer.event(req.ID, "started", nil) }}
+		command := Command{Command: params.Command, Args: params.Args, Dir: params.Dir, Env: params.Env, Stdin: stdin, TTY: params.TTY, CaptureLimit: params.CaptureLimit, StdoutPolicy: params.StdoutPolicy, StderrPolicy: params.StderrPolicy, Stdout: eventWriter{peer: peer, id: req.ID, event: "stdout"}, Stderr: eventWriter{peer: peer, id: req.ID, event: "stderr"}, Started: func() { _ = peer.event(req.ID, "started", nil) }}
+		if params.TTY != nil {
+			resize, release := peer.watchResize(req.ID)
+			defer release()
+			command.Resize = resize
+		}
 		return session.Run(ctx, command)
 	}
 	var params struct {

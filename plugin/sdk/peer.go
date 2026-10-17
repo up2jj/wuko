@@ -46,6 +46,7 @@ type peer struct {
 	active    map[string]context.CancelFunc
 	callbacks map[string]chan wireResponse
 	abandoned map[string]struct{}
+	resizes   map[string]chan TerminalSize
 	next      atomic.Uint64
 	wg        sync.WaitGroup
 }
@@ -54,7 +55,7 @@ type requestContextKey struct{}
 type peerContextKey struct{}
 
 func serve(root context.Context, input io.Reader, output io.Writer, dispatch func(context.Context, wireRequest, *peer) (any, error)) error {
-	protocolPeer := &peer{out: output, active: make(map[string]context.CancelFunc), callbacks: make(map[string]chan wireResponse), abandoned: make(map[string]struct{})}
+	protocolPeer := &peer{out: output, active: make(map[string]context.CancelFunc), callbacks: make(map[string]chan wireResponse), abandoned: make(map[string]struct{}), resizes: make(map[string]chan TerminalSize)}
 	// A shutdown reply waits for the in-flight requests and so cannot be one of them: adding it
 	// to wg would make it wait on itself. Without a counter of its own, a cancel arriving between
 	// the shutdown request and its reply lets the process exit before the reply is written, and
@@ -110,7 +111,7 @@ func serve(root context.Context, input io.Reader, output io.Writer, dispatch fun
 				ID     string `json:"id"`
 				Method string `json:"method"`
 			}
-			if err := json.Unmarshal(line, &envelope); err != nil || envelope.ID == "" && envelope.Method != "cancel" {
+			if err := json.Unmarshal(line, &envelope); err != nil || envelope.ID == "" && envelope.Method != "cancel" && envelope.Method != "resize" {
 				return fmt.Errorf("malformed protocol frame")
 			}
 			if envelope.Method == "" {
@@ -128,6 +129,17 @@ func serve(root context.Context, input io.Reader, output io.Writer, dispatch fun
 				return fmt.Errorf("decoding request: %w", err)
 			}
 			if request.ID == "" {
+				if request.Method == "resize" {
+					var params struct {
+						ID string `json:"id"`
+						TerminalSize
+					}
+					if err := json.Unmarshal(request.Params, &params); err != nil || params.ID == "" {
+						return fmt.Errorf("invalid resize notification")
+					}
+					protocolPeer.resize(params.ID, params.TerminalSize)
+					continue
+				}
 				if request.Method != "cancel" {
 					return fmt.Errorf("notification %q is unsupported", request.Method)
 				}
@@ -215,6 +227,36 @@ func (peer *peer) cancelAll() {
 	for _, cancel := range cancels {
 		cancel()
 	}
+}
+
+// watchResize registers the call whose terminal size changes are delivered on the returned
+// channel until release.
+func (peer *peer) watchResize(id string) (<-chan TerminalSize, func()) {
+	sizes := make(chan TerminalSize, 1)
+	peer.mu.Lock()
+	peer.resizes[id] = sizes
+	peer.mu.Unlock()
+	return sizes, func() {
+		peer.mu.Lock()
+		delete(peer.resizes, id)
+		peer.mu.Unlock()
+	}
+}
+
+// resize delivers the newest size without blocking the protocol loop: a size the handler has not
+// taken yet is stale and is replaced. A size for a call that has finished is dropped.
+func (peer *peer) resize(id string, size TerminalSize) {
+	peer.mu.Lock()
+	defer peer.mu.Unlock()
+	sizes := peer.resizes[id]
+	if sizes == nil {
+		return
+	}
+	select {
+	case <-sizes:
+	default:
+	}
+	sizes <- size
 }
 
 func (peer *peer) deliver(response wireResponse) bool {
@@ -356,4 +398,43 @@ func mustJSON(value any) json.RawMessage {
 		panic(err)
 	}
 	return encoded
+}
+
+// inputReader reads a call's streamed input from the host one host.input.read at a time, so the
+// host never sends more than the command consumes.
+type inputReader struct {
+	ctx     context.Context
+	pending []byte
+	eof     bool
+}
+
+func (reader *inputReader) Read(data []byte) (int, error) {
+	if len(data) == 0 {
+		return 0, nil
+	}
+	for len(reader.pending) == 0 {
+		if reader.eof {
+			return 0, io.EOF
+		}
+		var result struct {
+			Data      string `json:"data"`
+			EOF       bool   `json:"eof"`
+			Sensitive bool   `json:"sensitive"`
+		}
+		if err := callHost(reader.ctx, "host.input.read", map[string]any{}, &result); err != nil {
+			return 0, err
+		}
+		if result.EOF {
+			reader.eof = true
+			continue
+		}
+		decoded, err := base64.StdEncoding.DecodeString(result.Data)
+		if err != nil {
+			return 0, fmt.Errorf("decoding host input: %w", err)
+		}
+		reader.pending = decoded
+	}
+	count := copy(data, reader.pending)
+	reader.pending = reader.pending[count:]
+	return count, nil
 }

@@ -128,6 +128,9 @@ type callOptions struct {
 	event       func(eventFrame) error
 	host        hostCall
 	drainCancel time.Duration
+	// id preassigns the request id, for a caller that addresses notifications to the call
+	// while it runs. It must come from nextID.
+	id string
 }
 type eventFrame struct {
 	ID      string          `json:"id"`
@@ -414,7 +417,10 @@ func (c *client) call(ctx context.Context, method string, params, result any, ev
 }
 
 func (c *client) callWithOptions(ctx context.Context, method string, params, result any, options callOptions) error {
-	id := strconv.FormatUint(c.next.Add(1), 10)
+	id := options.id
+	if id == "" {
+		id = c.nextID()
+	}
 	response := make(chan responseFrame, 1)
 	state, err := c.register(ctx, id, response, options)
 	if err != nil {
@@ -433,6 +439,8 @@ func (c *client) callWithOptions(ctx context.Context, method string, params, res
 		return c.drainAfterCancel(ctx, id, state, response, options.drainCancel, result)
 	}
 }
+
+func (c *client) nextID() string { return strconv.FormatUint(c.next.Add(1), 10) }
 
 // register reserves an id for the call and publishes the sinks the reader delivers into.
 func (c *client) register(ctx context.Context, id string, response chan responseFrame, options callOptions) (*callState, error) {

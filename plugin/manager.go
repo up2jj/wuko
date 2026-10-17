@@ -1157,53 +1157,6 @@ type pluginSession struct {
 }
 
 func (s *pluginSession) CancelStopsProcess() bool { return s.declaration.CancelStopsProcess }
-func (s *pluginSession) Run(ctx context.Context, o process.Options) (process.Result, error) {
-	if o.TTY || o.Interactions != nil || o.Interact || o.StdinOutlivesProcess {
-		return process.Result{}, fmt.Errorf("plugin executors do not support TTY, interactions, or streaming stdin")
-	}
-	if !o.StdoutPolicy.Valid() || !o.StderrPolicy.Valid() {
-		return process.Result{}, fmt.Errorf("invalid output policy")
-	}
-	var stdin []byte
-	var err error
-	if o.Stdin != nil {
-		stdin, err = io.ReadAll(o.Stdin)
-		if err != nil {
-			return process.Result{}, err
-		}
-	}
-	params := map[string]any{"session": s.id, "command": o.Command, "args": o.Args, "dir": o.Dir, "env": o.Env, "stdin": base64.StdEncoding.EncodeToString(stdin), "capture_limit": o.CaptureLimit, "stdout_policy": o.StdoutPolicy, "stderr_policy": o.StderrPolicy}
-	var wireResult executorRunResult
-	stdout, stderr := o.Stdout, o.Stderr
-	if !o.StdoutPolicy.Streams() {
-		stdout = nil
-	}
-	if !o.StderrPolicy.Streams() {
-		stderr = nil
-	}
-	err = s.plugin.client.call(ctx, "executor.run", params, &wireResult, streamEvents(stdout, stderr, o.Started))
-	result := wireResult.processResult()
-	if !o.StdoutPolicy.Captures() {
-		result.Stdout = ""
-	}
-	if !o.StderrPolicy.Captures() {
-		result.Stderr = ""
-	}
-	if o.CaptureLimit > 0 {
-		if int64(len(result.Stdout)) > o.CaptureLimit {
-			result.Stdout = result.Stdout[:o.CaptureLimit]
-			result.StdoutTruncated = true
-		}
-		if int64(len(result.Stderr)) > o.CaptureLimit {
-			result.Stderr = result.Stderr[:o.CaptureLimit]
-			result.StderrTruncated = true
-		}
-	}
-	if err == nil && result.ExitCode != 0 {
-		err = &process.ExitError{Command: o.Command, Code: result.ExitCode}
-	}
-	return result, err
-}
 func (s *pluginSession) Close(ctx context.Context) error {
 	return s.plugin.client.call(ctx, "executor.close", map[string]any{"session": s.id}, &struct{}{}, nil)
 }

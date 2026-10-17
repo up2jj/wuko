@@ -1,15 +1,22 @@
 package plugin
 
 import (
+	"bufio"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"path/filepath"
+	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/up2jj/wuko/executor"
 	"github.com/up2jj/wuko/plugin/sdk"
+	"github.com/up2jj/wuko/process"
+	"github.com/up2jj/wuko/ptyinteract"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
 )
@@ -237,5 +244,148 @@ func TestPluginExecutorWithoutFileSystemExposesNone(t *testing.T) {
 	}
 	if _, err := executor.FileSystemFor(session); err == nil {
 		t.Fatal("FileSystemFor() found a filesystem the plugin did not declare")
+	}
+}
+
+// scriptSession runs every command with run.
+type scriptSession struct {
+	run func(context.Context, sdk.Command) (sdk.CommandResult, error)
+}
+
+func (s scriptSession) Run(ctx context.Context, command sdk.Command) (sdk.CommandResult, error) {
+	return s.run(ctx, command)
+}
+func (scriptSession) Close(context.Context) error { return nil }
+
+func scriptExecutor(handler sdk.ExecutorHandler[map[string]any], run func(context.Context, sdk.Command) (sdk.CommandResult, error)) sdk.ExecutorHandler[map[string]any] {
+	handler.Open = func(context.Context, sdk.ExecutorRequest[map[string]any]) (sdk.ExecutorSession, error) {
+		return scriptSession{run: run}, nil
+	}
+	return handler
+}
+
+// catCommand copies stdin to stdout and reports what it read.
+func catCommand(_ context.Context, command sdk.Command) (sdk.CommandResult, error) {
+	if command.Stdin == nil {
+		return sdk.CommandResult{Stdout: "<no stdin>"}, nil
+	}
+	data, err := io.ReadAll(command.Stdin)
+	return sdk.CommandResult{Stdout: string(data)}, err
+}
+
+func TestPluginExecutorStdin(t *testing.T) {
+	large := strings.Repeat("0123456789abcdef", 16<<10)
+	for _, test := range []struct {
+		name     string
+		streamed bool
+		stdin    io.Reader
+		want     string
+	}{
+		{name: "streamed", streamed: true, stdin: strings.NewReader(large), want: large},
+		{name: "sent whole", stdin: strings.NewReader("whole"), want: "whole"},
+		{name: "none", streamed: true, want: "<no stdin>"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, session := openTestExecutor(t, scriptExecutor(sdk.ExecutorHandler[map[string]any]{Stdin: test.streamed}, catCommand))
+			result, err := session.Run(t.Context(), process.Options{Command: "cat", Stdin: test.stdin, StdoutPolicy: process.OutputCapture})
+			if err != nil || result.Stdout != test.want {
+				t.Fatalf("Run() = %d bytes, %v; want %d bytes", len(result.Stdout), err, len(test.want))
+			}
+		})
+	}
+}
+
+func TestPluginExecutorStdinThatOutlivesTheCommand(t *testing.T) {
+	_, session := openTestExecutor(t, scriptExecutor(sdk.ExecutorHandler[map[string]any]{Stdin: true}, func(_ context.Context, command sdk.Command) (sdk.CommandResult, error) {
+		line, err := bufio.NewReader(command.Stdin).ReadString('\n')
+		return sdk.CommandResult{Stdout: line}, err
+	}))
+	reader, writer := io.Pipe()
+	defer writer.Close()
+	go func() { _, _ = writer.Write([]byte("first\n")) }()
+	done := make(chan struct{})
+	var result process.Result
+	var err error
+	go func() {
+		defer close(done)
+		result, err = session.Run(t.Context(), process.Options{Command: "head", Stdin: reader, StdinOutlivesProcess: true, StdoutPolicy: process.OutputCapture})
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run() waited for stdin that outlives the command")
+	}
+	if err != nil || result.Stdout != "first\n" {
+		t.Fatalf("Run() = %q, %v", result.Stdout, err)
+	}
+}
+
+func TestPluginExecutorRejectsUndeclaredStreams(t *testing.T) {
+	_, session := openTestExecutor(t, scriptExecutor(sdk.ExecutorHandler[map[string]any]{}, catCommand))
+	for name, options := range map[string]process.Options{
+		"stdin outliving the command": {Command: "cat", Stdin: strings.NewReader("x"), StdinOutlivesProcess: true},
+		"tty":                         {Command: "sh", TTY: true},
+	} {
+		if _, err := session.Run(t.Context(), options); err == nil {
+			t.Fatalf("Run() with %s succeeded on an executor that did not declare it", name)
+		}
+	}
+}
+
+func TestPluginExecutorTTYRunsInteractions(t *testing.T) {
+	_, session := openTestExecutor(t, scriptExecutor(sdk.ExecutorHandler[map[string]any]{TTY: true}, func(_ context.Context, command sdk.Command) (sdk.CommandResult, error) {
+		if command.TTY == nil || command.Resize == nil {
+			return sdk.CommandResult{}, errors.New("command is not a TTY run")
+		}
+		command.Started()
+		fmt.Fprintf(command.Stdout, "size=%dx%d\r\nlogin:", command.TTY.Rows, command.TTY.Cols)
+		name, err := bufio.NewReader(command.Stdin).ReadString('\r')
+		if err != nil {
+			return sdk.CommandResult{}, err
+		}
+		fmt.Fprintf(command.Stdout, "\r\nhello %s\n", strings.TrimSpace(name))
+		return sdk.CommandResult{ExitCode: 4}, nil
+	}))
+	plan, err := ptyinteract.Compile([]ptyinteract.Spec{{HasExpect: true, Expect: "login:", Send: "bob", Newline: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var started atomic.Bool
+	result, err := session.Run(t.Context(), process.Options{Command: "login", TTY: true, Interactions: plan, StdoutPolicy: process.OutputCapture, Started: func() { started.Store(true) }})
+	var exitErr *process.ExitError
+	if !errors.As(err, &exitErr) || exitErr.Code != 4 || result.ExitCode != 4 {
+		t.Fatalf("Run() = %+v, %v; want exit code 4", result, err)
+	}
+	for _, want := range []string{"size=24x80", "hello bob"} {
+		if !strings.Contains(result.Stdout, want) {
+			t.Fatalf("captured output = %q, want %q", result.Stdout, want)
+		}
+	}
+	if !started.Load() {
+		t.Fatal("Started was not called")
+	}
+}
+
+func TestPluginExecutorTTYCancellationStopsTheCommand(t *testing.T) {
+	stopped := make(chan struct{})
+	_, session := openTestExecutor(t, scriptExecutor(sdk.ExecutorHandler[map[string]any]{TTY: true}, func(ctx context.Context, command sdk.Command) (sdk.CommandResult, error) {
+		fmt.Fprint(command.Stdout, "waiting:")
+		<-ctx.Done()
+		close(stopped)
+		return sdk.CommandResult{}, ctx.Err()
+	}))
+	plan, err := ptyinteract.Compile([]ptyinteract.Spec{{HasExpect: true, Expect: "never", Send: "x"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
+	defer cancel()
+	if _, err := session.Run(ctx, process.Options{Command: "wait", TTY: true, Interactions: plan}); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Run() = %v, want the deadline", err)
+	}
+	select {
+	case <-stopped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the plugin's command was not canceled")
 	}
 }
