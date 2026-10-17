@@ -8,6 +8,7 @@ import (
 	"slices"
 	"time"
 
+	controlpkg "github.com/up2jj/wuko/control"
 	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/workflow"
 )
@@ -121,8 +122,16 @@ func (e *Engine) runConcurrentGraph(ctx context.Context, definition *workflow.De
 			status[index] = 1
 			running++
 			go func() {
-				outcome := e.executeConcurrentBranch(runCtx, definition, group.Steps[index], options, branchSnapshot, indexes[index], total)
-				completed <- concurrentCompletion{index: index, outcome: outcome}
+				// A panic in the engine itself must still deliver a completion, or the
+				// scheduler would wait forever for this branch.
+				var outcome concurrentBranchOutcome
+				defer func() {
+					if failure := controlpkg.RecoveredPanic(recover()); failure != nil {
+						outcome = concurrentBranchOutcome{err: failure, started: true}
+					}
+					completed <- concurrentCompletion{index: index, outcome: outcome}
+				}()
+				outcome = e.executeConcurrentBranch(runCtx, definition, group.Steps[index], options, branchSnapshot, indexes[index], total)
 			}()
 		}
 		if running == 0 {

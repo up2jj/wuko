@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/expr-lang/expr"
+	controlpkg "github.com/up2jj/wuko/control"
 	"github.com/up2jj/wuko/correlation"
 	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/executor"
@@ -1150,7 +1151,7 @@ func (options Options) cleanupScope() *cleanupScope {
 
 func managedExecutor(options Options, stepID string, runner step.Runner, outputs step.OutputSchema) stepExecutor {
 	return func(ctx context.Context, request step.Request) (step.Result, error) {
-		result, err := runner.Run(ctx, request)
+		result, err := runContained(ctx, runner, request)
 		if err != nil {
 			return result, err
 		}
@@ -1176,6 +1177,17 @@ func managedExecutor(options Options, stepID string, runner step.Runner, outputs
 		})
 		return result, contractErr
 	}
+}
+
+// runContained runs a step and turns a panic into the step's error, so a faulty runner fails its
+// own step and the run still reaches cleanup, finally blocks and the final report.
+func runContained(ctx context.Context, runner step.Runner, request step.Request) (result step.Result, err error) {
+	defer func() {
+		if failure := controlpkg.RecoveredPanic(recover()); failure != nil {
+			result, err = step.Result{}, failure
+		}
+	}()
+	return runner.Run(ctx, request)
 }
 
 func commitStepResult(state *State, stepID string, result step.Result) {

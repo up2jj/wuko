@@ -474,7 +474,9 @@ func TestCancellationOnlyMatchesStatusFromError(t *testing.T) {
 	}
 }
 
-func TestCancelOnFailsStepWhenParticipantPanics(t *testing.T) {
+// A panicking runner fails its own step like any other error, so the race records it as the
+// winning failed outcome instead of crashing or escalating past the cancel_on step.
+func TestCancelOnRecordsPanickingParticipantAsFailedOutcome(t *testing.T) {
 	monitorStarted := make(chan struct{})
 	monitorCanceled := make(chan struct{})
 	registry := newTestRegistry(t, map[string]step.Builder{
@@ -494,12 +496,13 @@ func TestCancelOnFailsStepWhenParticipantPanics(t *testing.T) {
 		},
 	})
 	definition := cancelOnDefinition(t, []workflow.Step{{ID: "deployment_finished", Type: "monitor", With: map[string]any{}}}, []workflow.Step{{ID: "deploy", Type: "body", With: map[string]any{}}}, "")
-	_, err := New(registry).Run(t.Context(), definition, Options{})
-	if err == nil || !strings.Contains(err.Error(), "body step exploded") {
-		t.Fatalf("error = %v, want the recovered panic reported against the step", err)
+	state, err := New(registry).Run(t.Context(), definition, Options{})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(err.Error(), "deployment_watch") {
-		t.Fatalf("error = %v, want the cancel_on step named", err)
+	output := state.Steps["deployment_watch"].(map[string]any)
+	if output["ok"] != false || output["status"] != "failed" || !strings.Contains(fmt.Sprint(output["error"]), "body step exploded") {
+		t.Fatalf("outcome = %#v, want the recovered panic recorded as a failure", output)
 	}
 	// The panic must cancel and join the losers rather than leave them running.
 	<-monitorCanceled
