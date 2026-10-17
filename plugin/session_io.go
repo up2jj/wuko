@@ -114,6 +114,9 @@ func (s *pluginSession) runTTY(ctx context.Context, o process.Options) (process.
 	}
 	params := s.runParams(o)
 	params["tty"] = map[string]any{"rows": size.Rows, "cols": size.Cols}
+	// The host captures and applies the output policy to the terminal stream itself, so the
+	// plugin streams all of it.
+	params["stdout_policy"], params["stderr_policy"], params["capture_limit"] = process.OutputInherit, process.OutputInherit, 0
 	callCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	session := &remoteTTY{client: s.plugin.client, id: s.plugin.client.nextID(), input: newHostInput(), output: newOutputQueue(), exited: make(chan error, 1), cancel: cancel}
