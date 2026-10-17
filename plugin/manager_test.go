@@ -325,7 +325,8 @@ func TestWorkflowPluginStartAndStopOnce(t *testing.T) {
 		if result.Outputs["value"] != "HELLO" {
 			t.Fatal(result)
 		}
-		if result.Outputs["large_integer"] != json.Number("9007199254740993") {
+		// Exact past 2^53, and a number workflow conditions compare as one.
+		if result.Outputs["large_integer"] != int64(9007199254740993) {
 			t.Fatalf("large integer output = %#v", result.Outputs["large_integer"])
 		}
 	}

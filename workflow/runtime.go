@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"maps"
@@ -8,6 +9,7 @@ import (
 	"reflect"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/up2jj/wuko/diagnostic"
@@ -289,4 +291,42 @@ func hostEnvironment() map[string]string {
 		}
 	}
 	return result
+}
+
+// RuntimeValue turns the json.Number values that decoding JSON with UseNumber produces into
+// the plain numbers workflow state carries, so conditions and expressions compare them as
+// numbers. Integers stay exact as int64 or uint64 rather than rounding through float64.
+// Values that crossed a boundary as JSON - a once record read back from its store, a plugin
+// step's result - pass through here before they reach state.
+func RuntimeValue(value any) any {
+	switch typed := value.(type) {
+	case json.Number:
+		if integer, err := typed.Int64(); err == nil {
+			return integer
+		}
+		if unsigned, err := strconv.ParseUint(string(typed), 10, 64); err == nil {
+			return unsigned
+		}
+		number, err := typed.Float64()
+		if err != nil {
+			// A magnitude no Go number holds still has to leave as a JSON shape,
+			// because json.Number is not one of the types workflow state carries.
+			return typed.String()
+		}
+		return number
+	case []any:
+		converted := make([]any, len(typed))
+		for i, item := range typed {
+			converted[i] = RuntimeValue(item)
+		}
+		return converted
+	case map[string]any:
+		converted := make(map[string]any, len(typed))
+		for name, item := range typed {
+			converted[name] = RuntimeValue(item)
+		}
+		return converted
+	default:
+		return value
+	}
 }

@@ -297,7 +297,7 @@ func (m *Manager) LoadHelpers(ctx context.Context, sources map[string]workflow.R
 				if err := plugin.client.call(callCtx, "helper.call", map[string]any{"name": localName, "args": args}, &response, nil); err != nil {
 					return nil, err
 				}
-				return response.Value, nil
+				return workflow.RuntimeValue(response.Value), nil
 			}
 		}
 	}
@@ -849,10 +849,23 @@ func (s *pluginStep) Run(ctx context.Context, request step.Request) (_ step.Resu
 			defer func() { err = errors.Join(err, terminal.release()) }()
 		}
 		err = s.plugin.client.callWithOptions(ctx, "step.run", params, &result, options)
-		return result, err
+		return runtimeResult(result), err
 	}
 	err = s.plugin.client.call(ctx, "step.run", params, &result, streamEvents(request.Stdout, request.Stderr, nil))
-	return result, err
+	return runtimeResult(result), err
+}
+
+// runtimeResult turns the numbers a plugin returned into the ones workflow state carries. The
+// result is decoded with UseNumber so no integer rounds through float64, and json.Number itself
+// would compare as a string in conditions.
+func runtimeResult(result step.Result) step.Result {
+	if result.Outputs != nil {
+		result.Outputs, _ = workflow.RuntimeValue(result.Outputs).(map[string]any)
+	}
+	if result.Variables != nil {
+		result.Variables, _ = workflow.RuntimeValue(result.Variables).(map[string]any)
+	}
+	return result
 }
 
 type serviceOptionsResult struct {
@@ -911,7 +924,7 @@ func (s *pluginStep) runService(ctx context.Context, request step.Request) (step
 				return nil
 			}
 			ready.Store(true)
-			reportStartup(serviceStartup{result: result})
+			reportStartup(serviceStartup{result: runtimeResult(result)})
 			return nil
 		}
 		var final step.Result

@@ -2,11 +2,9 @@ package engine
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
-	"strconv"
 	"strings"
 	"time"
 
@@ -283,47 +281,10 @@ func decodeOnceRecord(key string, value any) (step.Result, error) {
 	if !stepsOK || !varsOK {
 		return step.Result{}, fmt.Errorf("record for key %q has an invalid outcome", key)
 	}
-	decodedSteps, _ := onceRuntimeValue(steps).(map[string]any)
-	decodedVars, _ := onceRuntimeValue(variables).(map[string]any)
+	decodedSteps, _ := workflow.RuntimeValue(steps).(map[string]any)
+	decodedVars, _ := workflow.RuntimeValue(variables).(map[string]any)
 	return step.Result{
 		Outputs:   map[string]any{"steps": decodedSteps, "vars": decodedVars},
 		Variables: decodedVars,
 	}, nil
-}
-
-// onceRuntimeValue turns the json.Number values a store round-trip produces back into
-// the plain numbers workflow state carries. Both the recording run and every replay
-// decode through here, so a recorded outcome supports the same numeric conditions the
-// body's own variables did.
-func onceRuntimeValue(value any) any {
-	switch typed := value.(type) {
-	case json.Number:
-		if integer, err := typed.Int64(); err == nil {
-			return integer
-		}
-		if unsigned, err := strconv.ParseUint(string(typed), 10, 64); err == nil {
-			return unsigned
-		}
-		number, err := typed.Float64()
-		if err != nil {
-			// A magnitude no Go number holds still has to leave as a JSON shape,
-			// because json.Number is not one of the types workflow state carries.
-			return typed.String()
-		}
-		return number
-	case []any:
-		converted := make([]any, len(typed))
-		for i, item := range typed {
-			converted[i] = onceRuntimeValue(item)
-		}
-		return converted
-	case map[string]any:
-		converted := make(map[string]any, len(typed))
-		for name, item := range typed {
-			converted[name] = onceRuntimeValue(item)
-		}
-		return converted
-	default:
-		return value
-	}
 }
