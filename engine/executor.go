@@ -110,6 +110,7 @@ func (e *Engine) executeExecutorBlock(ctx context.Context, definition *workflow.
 func executorRequest(definition *workflow.Definition, options Options, state *State) executor.Request {
 	return executor.Request{
 		WorkflowName: definition.Name,
+		WorkflowDir:  definition.Dir,
 		RunDir:       options.RunDir,
 		Env:          maps.Clone(state.Env),
 		Stdout:       options.Stdout,

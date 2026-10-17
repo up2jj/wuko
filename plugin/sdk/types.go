@@ -309,6 +309,10 @@ type ExecutorContext struct {
 type ExecutorRequest[Config any] struct {
 	Config  Config
 	Context ExecutorContext
+	// Stdout and Stderr (v4) reach the workflow's output while Open runs, for progress such as
+	// building an environment. They are always non-nil and discard output during Validate.
+	Stdout io.Writer
+	Stderr io.Writer
 }
 
 // TerminalSize is the character grid of a terminal.

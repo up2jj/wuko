@@ -12,6 +12,7 @@ import (
 // Request describes the workflow context used to open an executor session.
 type Request struct {
 	WorkflowName string
+	WorkflowDir  string
 	RunDir       string
 	Env          map[string]string
 	Stdout       io.Writer

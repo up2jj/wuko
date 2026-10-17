@@ -42,7 +42,7 @@ type registeredStep struct {
 type registeredExecutor struct {
 	declaration executorDeclaration
 	validate    func(context.Context, json.RawMessage, ExecutorContext) error
-	open        func(context.Context, json.RawMessage, ExecutorContext) (ExecutorSession, error)
+	open        func(context.Context, json.RawMessage, ExecutorContext, io.Writer, io.Writer) (ExecutorSession, error)
 }
 
 type stepDeclaration struct {
@@ -244,14 +244,14 @@ func RegisterExecutor[Config any](plugin *Plugin, name string, handler ExecutorH
 		if handler.Validate == nil {
 			return nil
 		}
-		return handler.Validate(ctx, ExecutorRequest[Config]{Config: config, Context: executorContext})
+		return handler.Validate(ctx, ExecutorRequest[Config]{Config: config, Context: executorContext, Stdout: io.Discard, Stderr: io.Discard})
 	}
-	registered.open = func(ctx context.Context, raw json.RawMessage, executorContext ExecutorContext) (ExecutorSession, error) {
+	registered.open = func(ctx context.Context, raw json.RawMessage, executorContext ExecutorContext, stdout, stderr io.Writer) (ExecutorSession, error) {
 		config, err := decodeConfig[Config](raw)
 		if err != nil {
 			return nil, err
 		}
-		return handler.Open(ctx, ExecutorRequest[Config]{Config: config, Context: executorContext})
+		return handler.Open(ctx, ExecutorRequest[Config]{Config: config, Context: executorContext, Stdout: stdout, Stderr: stderr})
 	}
 	plugin.mu.Lock()
 	defer plugin.mu.Unlock()
@@ -534,7 +534,7 @@ func (plugin *Plugin) callExecutor(ctx context.Context, req wireRequest, peer *p
 	if req.Method == "executor.validate" {
 		return map[string]any{}, executor.validate(ctx, params.With, params.Context)
 	}
-	session, err := executor.open(ctx, params.With, params.Context)
+	session, err := executor.open(ctx, params.With, params.Context, eventWriter{peer: peer, id: req.ID, event: "stdout"}, eventWriter{peer: peer, id: req.ID, event: "stderr"})
 	if err != nil {
 		return nil, err
 	}

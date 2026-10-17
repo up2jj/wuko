@@ -561,3 +561,31 @@ func TestPluginStepRunsInItsOwnPluginsExecutor(t *testing.T) {
 		t.Fatalf("Validate() before the session exists = %v", err)
 	}
 }
+
+func TestPluginExecutorOpenStreamsOutputAndSeesWorkflowDir(t *testing.T) {
+	plugin, err := sdk.New("acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sdk.RegisterExecutor(plugin, "env", sdk.ExecutorHandler[map[string]any]{Open: func(_ context.Context, request sdk.ExecutorRequest[map[string]any]) (sdk.ExecutorSession, error) {
+		fmt.Fprintf(request.Stdout, "building in %s\n", request.Context.WorkflowDir)
+		fmt.Fprint(request.Stderr, "warning\n")
+		return localSession{}, nil
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	manager := attachSDK(t, plugin)
+	provider, err := manager.ResolveExecutor(t.Context(), "acme.env", map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr strings.Builder
+	session, err := provider.Open(t.Context(), executor.Request{WorkflowDir: "/work/flow", Stdout: &stdout, Stderr: &stderr})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close(context.Background())
+	if stdout.String() != "building in /work/flow\n" || stderr.String() != "warning\n" {
+		t.Fatalf("open output = %q, %q", stdout.String(), stderr.String())
+	}
+}

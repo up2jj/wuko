@@ -1187,7 +1187,7 @@ type pluginExecutor struct {
 func (p *pluginExecutor) SupportsFileSystem() bool { return p.declaration.FileSystem }
 
 func (p *pluginExecutor) Validate(ctx context.Context, r executor.Request) error {
-	return p.plugin.client.call(ctx, "executor.validate", map[string]any{"type": p.name, "with": p.raw, "context": executorContext(r)}, &struct{}{}, nil)
+	return p.plugin.client.call(ctx, "executor.validate", map[string]any{"type": p.name, "with": p.raw, "context": executorContext(r, p.plugin.protocol)}, &struct{}{}, nil)
 }
 func (p *pluginExecutor) Open(ctx context.Context, r executor.Request) (executor.Session, error) {
 	if err := p.plugin.start(ctx); err != nil {
@@ -1196,7 +1196,9 @@ func (p *pluginExecutor) Open(ctx context.Context, r executor.Request) (executor
 	var result struct {
 		Session string `json:"session"`
 	}
-	if err := p.plugin.client.call(ctx, "executor.open", map[string]any{"type": p.name, "with": p.raw, "context": executorContext(r)}, &result, nil); err != nil {
+	// Opening can take a while, such as building an environment, and its progress belongs on
+	// the workflow's output.
+	if err := p.plugin.client.call(ctx, "executor.open", map[string]any{"type": p.name, "with": p.raw, "context": executorContext(r, p.plugin.protocol)}, &result, streamEvents(r.Stdout, r.Stderr, nil)); err != nil {
 		return nil, err
 	}
 	if result.Session == "" {
@@ -1208,8 +1210,12 @@ func (p *pluginExecutor) Open(ctx context.Context, r executor.Request) (executor
 	}
 	return session, nil
 }
-func executorContext(r executor.Request) map[string]any {
-	return map[string]any{"workflow_name": r.WorkflowName, "run_dir": r.RunDir, "env": r.Env}
+func executorContext(r executor.Request, protocol string) map[string]any {
+	context := map[string]any{"workflow_name": r.WorkflowName, "run_dir": r.RunDir, "env": r.Env}
+	if protocol == ProtocolV4 {
+		context["workflow_dir"] = r.WorkflowDir
+	}
+	return context
 }
 
 type pluginSession struct {
