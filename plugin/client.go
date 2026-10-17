@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os/exec"
 	"strconv"
 	"sync"
@@ -472,7 +473,7 @@ func (c *client) send(id, method string, params any) error {
 
 func (c *client) decodeResponse(frame responseFrame, result any) error {
 	if frame.Error != nil {
-		return errors.New(frame.Error.Message)
+		return &remoteError{code: frame.Error.Code, message: frame.Error.Message}
 	}
 	if result == nil {
 		return nil
@@ -551,6 +552,25 @@ func (c *client) drainAfterCancel(ctx context.Context, id string, state *callSta
 	}
 }
 
+// remoteError is an error a plugin answered with. It reads exactly as the plugin's message, and
+// keeps the stable code so the ones with a standard meaning still match it with errors.Is.
+type remoteError struct {
+	code    string
+	message string
+}
+
+func (err *remoteError) Error() string { return err.message }
+
+func (err *remoteError) Is(target error) bool {
+	switch err.code {
+	case "not_found":
+		return target == fs.ErrNotExist
+	case "exists":
+		return target == fs.ErrExist
+	}
+	return false
+}
+
 func (c *client) readError() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -572,6 +592,10 @@ func (c *client) close(ctx context.Context) error {
 	var result any
 	shutdownErr := c.call(ctx, "shutdown", map[string]any{}, &result, nil)
 	_ = c.stdin.Close()
+	if c.cmd == nil {
+		// An attached plugin is not this host's process to wait on or signal.
+		return shutdownErr
+	}
 	wait := make(chan error, 1)
 	go func() { wait <- c.cmd.Wait() }()
 	select {

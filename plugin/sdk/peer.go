@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -262,6 +263,10 @@ func (peer *peer) reply(id string, result any, err error) error {
 		switch {
 		case errors.As(err, &coded) && coded.Code != "":
 			response.Error.Code = coded.Code
+		case errors.Is(err, fs.ErrNotExist):
+			response.Error.Code = "not_found"
+		case errors.Is(err, fs.ErrExist):
+			response.Error.Code = "exists"
 		case errors.Is(err, context.DeadlineExceeded):
 			response.Error.Code = "timed_out"
 		case errors.Is(err, context.Canceled):

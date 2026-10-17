@@ -47,8 +47,10 @@ type Manager struct {
 	failures     map[string]error
 	loading      map[string]*loadState
 	temporary    []string
-	generation   uint64
-	closed       bool
+	// attached holds the namespaces registered by Attach, which no workflow declares.
+	attached   map[string]bool
+	generation uint64
+	closed     bool
 }
 
 // loadState is the in-flight gate for one namespace. Loading a plugin downloads a
@@ -79,6 +81,8 @@ type stepDeclaration struct {
 	Service       bool                     `json:"service,omitempty"`
 	HostCallbacks []string                 `json:"host_callbacks,omitempty"`
 	Outputs       *outputSchemaDeclaration `json:"outputs,omitempty"`
+	// Executor (v4) lets the step run inside executor blocks; see pluginStep.executorSession.
+	Executor bool `json:"executor,omitempty"`
 }
 
 // outputSchemaDeclaration is the language-neutral plugin wire representation.
@@ -111,6 +115,11 @@ func (schema outputSchemaDeclaration) stepSchema() step.OutputSchema {
 type executorDeclaration struct {
 	Type               string `json:"type"`
 	CancelStopsProcess bool   `json:"cancel_stops_process"`
+	// FileSystem, Stdin, and TTY (v4) advertise optional session capabilities: the
+	// executor.fs.* methods, stdin streamed through host.input.read, and TTY runs.
+	FileSystem bool `json:"filesystem,omitempty"`
+	Stdin      bool `json:"stdin,omitempty"`
+	TTY        bool `json:"tty,omitempty"`
 }
 
 // executorRunResult defines the language-neutral wire format in snake_case.
@@ -158,7 +167,7 @@ func NewManager(config Config) *Manager {
 	if config.Stderr == nil {
 		config.Stderr = io.Discard
 	}
-	return &Manager{config: config, store: &releaseStore{config: config}, declarations: make(map[string]workflow.ResolvedPluginSource), plugins: make(map[string]*runningPlugin), failures: make(map[string]error), loading: make(map[string]*loadState)}
+	return &Manager{config: config, store: &releaseStore{config: config}, declarations: make(map[string]workflow.ResolvedPluginSource), plugins: make(map[string]*runningPlugin), failures: make(map[string]error), loading: make(map[string]*loadState), attached: make(map[string]bool)}
 }
 
 func (m *Manager) ResolveStep(ctx context.Context, name string, raw map[string]any) (step.Runner, error) {
@@ -169,7 +178,7 @@ func (m *Manager) ResolveStep(ctx context.Context, name string, raw map[string]a
 	if err != nil {
 		return nil, fmt.Errorf("unknown step type %q", name)
 	}
-	if err := requirePluginDeclaration(ctx, namespace); err != nil {
+	if err := m.requireDeclaration(ctx, namespace); err != nil {
 		return nil, err
 	}
 	plugin, err := m.load(ctx, namespace)
@@ -203,7 +212,7 @@ func (m *Manager) ResolveOutputSchema(ctx context.Context, name string) (step.Ou
 	if err != nil {
 		return step.OutputSchema{}, false, nil
 	}
-	if err := requirePluginDeclaration(ctx, namespace); err != nil {
+	if err := m.requireDeclaration(ctx, namespace); err != nil {
 		return step.OutputSchema{}, false, err
 	}
 	plugin, err := m.load(ctx, namespace)
@@ -229,7 +238,7 @@ func (m *Manager) ResolveExecutor(ctx context.Context, name string, raw map[stri
 	if err != nil {
 		return nil, fmt.Errorf("unknown executor type %q", name)
 	}
-	if err := requirePluginDeclaration(ctx, namespace); err != nil {
+	if err := m.requireDeclaration(ctx, namespace); err != nil {
 		return nil, err
 	}
 	plugin, err := m.load(ctx, namespace)
@@ -243,6 +252,10 @@ func (m *Manager) ResolveExecutor(ctx context.Context, name string, raw map[stri
 	}
 	return nil, fmt.Errorf("plugin %q does not declare executor type %q", namespace, name)
 }
+
+// hostTerminalAcquire is the v4 host callback a step declares to take over the user's
+// terminal; declaring it also permits host.terminal.release.
+const hostTerminalAcquire = "host.terminal.acquire"
 
 var helperNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 var actionNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
@@ -293,14 +306,14 @@ func (m *Manager) LoadAction(ctx context.Context, namespace, name string) (json.
 	if !validNamespace(namespace) || !actionNamePattern.MatchString(name) {
 		return nil, fmt.Errorf("invalid plugin action %q", namespace+"/"+name)
 	}
-	if err := requirePluginDeclaration(ctx, namespace); err != nil {
+	if err := m.requireDeclaration(ctx, namespace); err != nil {
 		return nil, err
 	}
 	loaded, err := m.load(ctx, namespace)
 	if err != nil {
 		return nil, err
 	}
-	if loaded.protocol != ProtocolV3 {
+	if !supportsActions(loaded.protocol) {
 		return nil, fmt.Errorf("plugin %q uses %s and cannot expose actions", namespace, loaded.protocol)
 	}
 	if !slices.Contains(loaded.initialized.Actions, name) {
@@ -350,6 +363,9 @@ func (m *Manager) configureSources(sources map[string]workflow.ResolvedPluginSou
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for namespace, source := range sources {
+		if m.attached[namespace] {
+			continue
+		}
 		canonical, err := source.CanonicalSource()
 		if err != nil {
 			return err
@@ -369,6 +385,40 @@ func (m *Manager) configureSources(sources map[string]workflow.ResolvedPluginSou
 		}
 		m.declarations[namespace] = source
 	}
+	return nil
+}
+
+// Attach registers a plugin that is already running and speaks the protocol over the given
+// streams, as though namespace had been declared and loaded from a pinned release. It lets a
+// plugin implementation be exercised in process against the real host; the steps, executors,
+// and helpers of an attached namespace need no plugins: declaration. The manager owns the
+// connection afterwards and shuts it down on Close.
+func (m *Manager) Attach(ctx context.Context, namespace string, toPlugin io.WriteCloser, fromPlugin io.Reader) error {
+	if !validNamespace(namespace) {
+		return fmt.Errorf("invalid plugin namespace %q", namespace)
+	}
+	c := newClient(nil, toPlugin)
+	go c.read(fromPlugin)
+	var initialized initializeResult
+	err := c.call(ctx, "initialize", map[string]any{"protocol": Protocol, "host_version": m.config.HostVersion}, &initialized, nil)
+	if err == nil && (initialized.Protocol != Protocol || initialized.Namespace != namespace) {
+		err = fmt.Errorf("handshake namespace or protocol mismatch")
+	}
+	if err == nil {
+		err = validateInitializeDeclarations(namespace, Protocol, initialized)
+	}
+	if err != nil {
+		closeClient(c)
+		return fmt.Errorf("attaching plugin %q: %w", namespace, err)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed || m.plugins[namespace] != nil || m.loading[namespace] != nil {
+		go closeClient(c)
+		return fmt.Errorf("attaching plugin %q: the namespace is already in use", namespace)
+	}
+	m.plugins[namespace] = &runningPlugin{namespace: namespace, protocol: Protocol, client: c, initialized: initialized}
+	m.attached[namespace] = true
 	return nil
 }
 
@@ -514,7 +564,7 @@ func (m *Manager) bring(ctx context.Context, namespace string, declaration workf
 		return nil, directory, err
 	}
 	plugin := &runningPlugin{namespace: namespace, protocol: protocol, client: c, initialized: initialized, startWith: startWith}
-	if protocol == ProtocolV3 {
+	if supportsActions(protocol) {
 		for _, name := range initialized.Actions {
 			if _, err := plugin.loadAction(ctx, name); err != nil {
 				closeClient(c)
@@ -532,7 +582,7 @@ func launchInitialized(ctx context.Context, path, namespace, protocol, hostVersi
 	// offered.
 	negotiating := protocol == ""
 	if negotiating {
-		protocols = []string{ProtocolV3, ProtocolV2, ProtocolV1}
+		protocols = []string{ProtocolV4, ProtocolV3, ProtocolV2, ProtocolV1}
 	}
 	var attempts []error
 	for _, candidate := range protocols {
@@ -575,9 +625,13 @@ func validateInitializeDeclarations(namespace, protocol string, initialized init
 		if protocol == ProtocolV1 && (item.Service || len(item.HostCallbacks) != 0) {
 			return fmt.Errorf("plugin %q declares v2 step capabilities with protocol v1", namespace)
 		}
+		if protocol != ProtocolV4 && item.Executor {
+			return fmt.Errorf("plugin %q declares v4 step capabilities with protocol %s", namespace, protocol)
+		}
 		seenCallbacks := make(map[string]bool)
 		for _, callback := range item.HostCallbacks {
-			if seenCallbacks[callback] || (callback != "host.template.validate" && callback != "host.template.render" && callback != "host.function.call") {
+			known := callback == "host.template.validate" || callback == "host.template.render" || callback == "host.function.call" || (callback == hostTerminalAcquire && protocol == ProtocolV4)
+			if seenCallbacks[callback] || !known {
 				return fmt.Errorf("plugin %q has invalid or duplicate host callback %q", namespace, callback)
 			}
 			seenCallbacks[callback] = true
@@ -593,6 +647,9 @@ func validateInitializeDeclarations(namespace, protocol string, initialized init
 		if seen[item.Type] || !validDeclarationType(namespace, item.Type) {
 			return fmt.Errorf("plugin %q has invalid or duplicate declaration %q", namespace, item.Type)
 		}
+		if protocol != ProtocolV4 && (item.FileSystem || item.Stdin || item.TTY) {
+			return fmt.Errorf("plugin %q declares v4 executor capabilities with protocol %s", namespace, protocol)
+		}
 		seen[item.Type] = true
 	}
 	seenHelpers := make(map[string]bool)
@@ -607,7 +664,7 @@ func validateInitializeDeclarations(namespace, protocol string, initialized init
 		}
 		seenHelpers[item.Name] = true
 	}
-	if protocol != ProtocolV3 && len(initialized.Actions) != 0 {
+	if !supportsActions(protocol) && len(initialized.Actions) != 0 {
 		return fmt.Errorf("plugin %q declares actions with protocol %s", namespace, protocol)
 	}
 	seenActions := make(map[string]bool, len(initialized.Actions))
@@ -718,6 +775,7 @@ func (m *Manager) teardown(ctx context.Context, reason string, permanent bool) e
 	if !permanent {
 		clear(m.declarations)
 		clear(m.plugins)
+		clear(m.attached)
 		clear(m.failures)
 		m.temporary = nil
 		// Loads that started before this reset belong to the scope being dropped; the bump
@@ -1158,7 +1216,13 @@ func cloneWith(value map[string]any) (map[string]any, error) {
 	return result, nil
 }
 
-func requirePluginDeclaration(ctx context.Context, namespace string) error {
+func (m *Manager) requireDeclaration(ctx context.Context, namespace string) error {
+	m.mu.Lock()
+	attached := m.attached[namespace]
+	m.mu.Unlock()
+	if attached {
+		return nil
+	}
 	if _, exists := workflow.ResolvedPluginsFromContext(ctx)[namespace]; !exists {
 		return fmt.Errorf("plugin %q must be declared in plugins.%s", namespace, namespace)
 	}

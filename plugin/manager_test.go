@@ -56,7 +56,13 @@ func runProtocolHelper() {
 		var result any = map[string]any{}
 		switch request.Method {
 		case "initialize":
-			result = initializeResult{Protocol: Protocol, Namespace: namespace, Lifecycle: true, Steps: []stepDeclaration{{Type: namespace + ".uppercase"}}, Helpers: []helperDeclaration{{Name: "slug"}, {Name: "nullable"}}, Actions: []string{"build"}}
+			// Like the SDK, the helper also answers the previous protocol it is a superset of;
+			// anything older gets the newest protocol, which a pinned host rejects.
+			protocol := Protocol
+			if parameters, _ := request.Params.(map[string]any); parameters["protocol"] == ProtocolV3 {
+				protocol = ProtocolV3
+			}
+			result = initializeResult{Protocol: protocol, Namespace: namespace, Lifecycle: true, Steps: []stepDeclaration{{Type: namespace + ".uppercase"}}, Helpers: []helperDeclaration{{Name: "slug"}, {Name: "nullable"}}, Actions: []string{"build"}}
 		case "action.get":
 			result = map[string]any{"action": map[string]any{"version": 1, "name": "build", "steps": []any{map[string]any{"id": "run", "type": "shell", "with": map[string]any{"command": "true"}}}}}
 		case "plugin.start":

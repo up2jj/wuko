@@ -16,11 +16,12 @@ const (
 	ProtocolV1 = "wuko.plugin/v1"
 	ProtocolV2 = "wuko.plugin/v2"
 	ProtocolV3 = "wuko.plugin/v3"
+	ProtocolV4 = "wuko.plugin/v4"
 
 	// Protocol is the newest protocol emitted by plugin init. Older protocols remain
 	// supported for installed and development plugins, but new scaffolds always move
 	// forward with the host's latest contract.
-	Protocol = ProtocolV3
+	Protocol = ProtocolV4
 )
 
 type Manifest struct {
@@ -83,7 +84,13 @@ func ParseManifest(data []byte) (Manifest, error) {
 }
 
 func supportedProtocol(protocol string) bool {
-	return protocol == ProtocolV1 || protocol == ProtocolV2 || protocol == ProtocolV3
+	return protocol == ProtocolV1 || protocol == ProtocolV2 || protocol == ProtocolV3 || protocol == ProtocolV4
+}
+
+// supportsActions reports whether a protocol lets a plugin advertise static composite actions,
+// which v3 introduced and every later protocol keeps.
+func supportsActions(protocol string) bool {
+	return protocol == ProtocolV3 || protocol == ProtocolV4
 }
 
 func (manifest Manifest) CurrentArtifact() (Artifact, error) {

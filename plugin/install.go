@@ -377,7 +377,7 @@ func verifyExecutable(ctx context.Context, path, namespace, protocol string, std
 			validationErr = validateInitializeDeclarations(namespace, protocol, initialized)
 		}
 	}
-	if callErr == nil && validationErr == nil && protocol == ProtocolV3 {
+	if callErr == nil && validationErr == nil && supportsActions(protocol) {
 		for _, name := range initialized.Actions {
 			var result struct {
 				Action json.RawMessage `json:"action"`

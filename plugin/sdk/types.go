@@ -8,7 +8,12 @@ import (
 	"io"
 )
 
-const Protocol = "wuko.plugin/v3"
+// Protocol is the newest protocol the SDK speaks. A plugin that uses no v4 capability also
+// answers a host that offers ProtocolV3, so rebuilding a plugin pinned to v3 keeps it working.
+const Protocol = "wuko.plugin/v4"
+
+// ProtocolV3 is the previous protocol, still answered for plugins without v4 capabilities.
+const ProtocolV3 = "wuko.plugin/v3"
 
 // Error is a protocol error with a stable machine-readable code.
 type Error struct {
@@ -139,6 +144,8 @@ const (
 	HostTemplateValidate HostCapability = "host.template.validate"
 	HostTemplateRender   HostCapability = "host.template.render"
 	HostFunctionCall     HostCapability = "host.function.call"
+	// HostTerminal (v4) lets a step take over the user's terminal with Host.Terminal.
+	HostTerminal HostCapability = "host.terminal.acquire"
 )
 
 // Host exposes plugin-to-host callbacks. Methods reject calls whose capability
@@ -285,6 +292,14 @@ type ExecutorHandler[Config any] struct {
 	Validate           func(context.Context, ExecutorRequest[Config]) error
 	Open               func(context.Context, ExecutorRequest[Config]) (ExecutorSession, error)
 	CancelStopsProcess bool
+	// FileSystem (v4) declares that every session implements ExecutorFileSystem, so file
+	// steps run against the session's target instead of being rejected.
+	FileSystem bool
+	// Stdin (v4) declares that sessions read Command.Stdin as a stream, which the host
+	// supplies on demand instead of reading it in full before the command starts.
+	Stdin bool
+	// TTY (v4) declares that sessions run commands with Command.TTY set in a terminal.
+	TTY bool
 }
 
 type hostClient struct {

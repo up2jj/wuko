@@ -48,11 +48,17 @@ type stepDeclaration struct {
 	Service       bool             `json:"service,omitempty"`
 	HostCallbacks []HostCapability `json:"host_callbacks,omitempty"`
 	Outputs       *OutputSchema    `json:"outputs,omitempty"`
+	// Executor (v4) lets the step run inside executor blocks.
+	Executor bool `json:"executor,omitempty"`
 }
 
 type executorDeclaration struct {
 	Type               string `json:"type"`
 	CancelStopsProcess bool   `json:"cancel_stops_process"`
+	// FileSystem, Stdin, and TTY (v4) advertise the optional session capabilities.
+	FileSystem bool `json:"filesystem,omitempty"`
+	Stdin      bool `json:"stdin,omitempty"`
+	TTY        bool `json:"tty,omitempty"`
 }
 
 func New(namespace string) (*Plugin, error) {
@@ -68,6 +74,9 @@ func New(namespace string) (*Plugin, error) {
 		sessions:  make(map[string]ExecutorSession),
 	}, nil
 }
+
+// Namespace returns the namespace the plugin was created with.
+func (plugin *Plugin) Namespace() string { return plugin.namespace }
 
 func (plugin *Plugin) RegisterAction(name string, action Action) error {
 	snapshot, err := snapshotAction(name, action)
@@ -223,7 +232,7 @@ func RegisterExecutor[Config any](plugin *Plugin, name string, handler ExecutorH
 		return fmt.Errorf("executor %q requires an Open handler", name)
 	}
 	qualified := plugin.namespace + "." + name
-	registered := registeredExecutor{declaration: executorDeclaration{Type: qualified, CancelStopsProcess: handler.CancelStopsProcess}}
+	registered := registeredExecutor{declaration: executorDeclaration{Type: qualified, CancelStopsProcess: handler.CancelStopsProcess, FileSystem: handler.FileSystem, Stdin: handler.Stdin, TTY: handler.TTY}}
 	registered.validate = func(ctx context.Context, raw json.RawMessage, executorContext ExecutorContext) error {
 		config, err := decodeConfig[Config](raw)
 		if err != nil {
@@ -299,7 +308,15 @@ func (plugin *Plugin) dispatch(ctx context.Context, req wireRequest, peer *peer)
 		if err := decodeParams(req.Params, &params); err != nil {
 			return nil, err
 		}
-		if params.Protocol != Protocol {
+		plugin.mu.RLock()
+		requiresV4 := plugin.requiresV4Locked()
+		plugin.mu.RUnlock()
+		switch {
+		case params.Protocol == Protocol:
+		case params.Protocol == ProtocolV3 && requiresV4 != "":
+			return nil, fmt.Errorf("protocol %q cannot carry %s; declare %q", params.Protocol, requiresV4, Protocol)
+		case params.Protocol == ProtocolV3:
+		default:
 			return nil, fmt.Errorf("unsupported protocol %q", params.Protocol)
 		}
 		plugin.mu.RLock()
@@ -318,7 +335,7 @@ func (plugin *Plugin) dispatch(ctx context.Context, req wireRequest, peer *peer)
 		actions := sortedKeys(plugin.actions)
 		lifecycle := plugin.lifecycle != nil
 		plugin.mu.RUnlock()
-		return map[string]any{"protocol": Protocol, "namespace": plugin.namespace, "lifecycle": lifecycle, "steps": steps, "executors": executors, "helpers": helpers, "actions": actions}, nil
+		return map[string]any{"protocol": params.Protocol, "namespace": plugin.namespace, "lifecycle": lifecycle, "steps": steps, "executors": executors, "helpers": helpers, "actions": actions}, nil
 	case "action.get":
 		var params struct {
 			Name string `json:"name"`
@@ -502,6 +519,22 @@ func (plugin *Plugin) callExecutor(ctx context.Context, req wireRequest, peer *p
 	plugin.sessions[id] = session
 	plugin.mu.Unlock()
 	return map[string]any{"session": id}, nil
+}
+
+// requiresV4Locked names the first registration that only protocol v4 can carry, or returns
+// the empty string when the plugin also fits v3.
+func (plugin *Plugin) requiresV4Locked() string {
+	for _, name := range sortedKeys(plugin.steps) {
+		if declaration := plugin.steps[name].declaration; declaration.Executor || slices.Contains(declaration.HostCallbacks, HostTerminal) {
+			return fmt.Sprintf("step %q", declaration.Type)
+		}
+	}
+	for _, name := range sortedKeys(plugin.executors) {
+		if declaration := plugin.executors[name].declaration; declaration.FileSystem || declaration.Stdin || declaration.TTY {
+			return fmt.Sprintf("executor %q", declaration.Type)
+		}
+	}
+	return ""
 }
 
 func decodeParams(raw json.RawMessage, target any) error {
