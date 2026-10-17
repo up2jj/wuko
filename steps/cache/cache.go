@@ -488,6 +488,10 @@ func extractArchive(ctx context.Context, input io.Reader, staged []stagedTarget)
 	defer gzipReader.Close()
 	reader := tar.NewReader(gzipReader)
 	seen := make(map[string]bool)
+	// links holds the symbolic links restored so far, by cleaned archive name. The path checks
+	// below are lexical, so they are only sound while no restored link is traversed: an entry
+	// below a link, or a link target routed through one, could resolve outside the target.
+	links := make(map[string]bool)
 	roots := make([]bool, len(staged))
 	directories := make([]directoryMetadata, 0)
 	for {
@@ -521,6 +525,9 @@ func extractArchive(ctx context.Context, input io.Reader, staged []stagedTarget)
 		if !containsPath(staged[index].stage, destination) {
 			return fmt.Errorf("cache archive path %q escapes its target", header.Name)
 		}
+		if link := restoredLinkAncestor(links, path.Dir(cleanName)); link != "" {
+			return fmt.Errorf("cache archive path %q is inside restored symbolic link %q", cleanName, link)
+		}
 		switch header.Typeflag {
 		case tar.TypeDir:
 			if err := os.MkdirAll(destination, 0o700); err != nil {
@@ -541,6 +548,10 @@ func extractArchive(ctx context.Context, input io.Reader, staged []stagedTarget)
 			if err := validateArchiveSymlink(relative, header.Linkname); err != nil {
 				return fmt.Errorf("cache archive symbolic link %q: %w", cleanName, err)
 			}
+			if link := restoredLinkAncestor(links, path.Dir(cleanName)+"/"+header.Linkname); link != "" {
+				return fmt.Errorf("cache archive symbolic link %q resolves through restored symbolic link %q", cleanName, link)
+			}
+			links[cleanName] = true
 			if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
 				return fmt.Errorf("creating restored parent directory: %w", err)
 			}
@@ -626,6 +637,30 @@ func validateFilesystemSymlink(root, linkPath, target string) error {
 		return fmt.Errorf("cached symbolic link %s escapes its cache path", linkPath)
 	}
 	return nil
+}
+
+// restoredLinkAncestor returns the restored link that name is, or lies below, walking it
+// component by component without cleaning, since a ".." after a link is resolved from the
+// link's target rather than lexically.
+func restoredLinkAncestor(links map[string]bool, name string) string {
+	current := ""
+	for _, component := range strings.Split(name, "/") {
+		switch component {
+		case "", ".":
+			continue
+		case "..":
+			current = path.Dir(current)
+			if current == "." {
+				current = ""
+			}
+			continue
+		}
+		current = path.Join(current, component)
+		if links[current] {
+			return current
+		}
+	}
+	return ""
 }
 
 func validateArchiveSymlink(relative, target string) error {

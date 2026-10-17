@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"context"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -283,6 +284,67 @@ func TestRejectsCorruptAndHostileArchivesWithoutReplacingTargets(t *testing.T) {
 		t.Fatalf("escaping symlink error = %v", err)
 	}
 	assertFile(t, filepath.Join(root, "vendor", "sentinel"), "original", 0o644)
+}
+
+func TestRejectsSymlinkChainsThatEscapeStaging(t *testing.T) {
+	tests := []struct {
+		name    string
+		headers []*tar.Header
+	}{
+		{name: "link through restored link", headers: []*tar.Header{
+			{Name: "0", Typeflag: tar.TypeDir, Mode: 0o755},
+			{Name: "0/b", Typeflag: tar.TypeDir, Mode: 0o755},
+			{Name: "0/b/c", Typeflag: tar.TypeSymlink, Linkname: "..", Mode: 0o777},
+			{Name: "0/d", Typeflag: tar.TypeSymlink, Linkname: "b/c/..", Mode: 0o777},
+			{Name: "0/d/escaped", Typeflag: tar.TypeReg, Mode: 0o644},
+		}},
+		{name: "dangling chain left behind", headers: []*tar.Header{
+			{Name: "0", Typeflag: tar.TypeDir, Mode: 0o755},
+			{Name: "0/b", Typeflag: tar.TypeDir, Mode: 0o755},
+			{Name: "0/b/c", Typeflag: tar.TypeSymlink, Linkname: "..", Mode: 0o777},
+			{Name: "0/d", Typeflag: tar.TypeSymlink, Linkname: "b/c/..", Mode: 0o777},
+			{Name: "1", Typeflag: tar.TypeDir, Mode: 0o755},
+		}},
+		{name: "entry below restored link", headers: []*tar.Header{
+			{Name: "0", Typeflag: tar.TypeDir, Mode: 0o755},
+			{Name: "0/up", Typeflag: tar.TypeSymlink, Linkname: ".", Mode: 0o777},
+			{Name: "0/up/escaped", Typeflag: tar.TypeReg, Mode: 0o644},
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeFile(t, filepath.Join(root, "go.sum"), "checksum\n", 0o644)
+			writeFile(t, filepath.Join(root, "vendor", "sentinel"), "original", 0o644)
+			if err := os.MkdirAll(filepath.Join(root, "build"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			runner := newRunner(t, root, "restore")
+			config, err := resolveConfig(root, runner.(*Runner).config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			key, err := deriveKey(t.Context(), config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			archivePath := filepath.Join(root, "store", key+".tar.gz")
+			if err := os.MkdirAll(filepath.Dir(archivePath), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			writeArchive(t, archivePath, test.headers)
+			if _, err := runner.Run(t.Context(), step.Request{RunDir: root}); err == nil || !strings.Contains(err.Error(), "symbolic link") {
+				t.Errorf("restore error = %v, want a rejected symbolic link", err)
+			}
+			_ = filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+				if err == nil && entry.Name() == "escaped" {
+					t.Errorf("archive entry was written at %s", path)
+				}
+				return nil
+			})
+			assertFile(t, filepath.Join(root, "vendor", "sentinel"), "original", 0o644)
+		})
+	}
 }
 
 func TestCommitRestoreRollsBackEarlierTargets(t *testing.T) {
