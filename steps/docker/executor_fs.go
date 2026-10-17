@@ -52,31 +52,29 @@ func (session *dockerExecutorSession) ReadFile(ctx context.Context, path string,
 	}
 	defer copied.Content.Close()
 	reader := tar.NewReader(copied.Content)
-	for {
-		header, err := reader.Next()
-		if errors.Is(err, io.EOF) {
-			return nil, fmt.Errorf("reading %s in Docker container %s: archive is empty", path, session.containerID)
-		}
-		if err != nil {
-			return nil, fmt.Errorf("reading %s in Docker container %s: %w", path, session.containerID, err)
-		}
-		if header.Typeflag != tar.TypeReg {
-			return nil, fmt.Errorf("reading %s in Docker container %s: not a regular file", path, session.containerID)
-		}
-		var content io.Reader = reader
-		if maximum > 0 {
-			limit := maximum
-			if maximum < math.MaxInt64 {
-				limit++
-			}
-			content = io.LimitReader(reader, limit)
-		}
-		data, err := io.ReadAll(content)
-		if err != nil {
-			return nil, fmt.Errorf("reading %s in Docker container %s: %w", path, session.containerID, err)
-		}
-		return data, nil
+	header, err := reader.Next()
+	if errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("reading %s in Docker container %s: archive is empty", path, session.containerID)
 	}
+	if err != nil {
+		return nil, fmt.Errorf("reading %s in Docker container %s: %w", path, session.containerID, err)
+	}
+	if header.Typeflag != tar.TypeReg {
+		return nil, fmt.Errorf("reading %s in Docker container %s: not a regular file", path, session.containerID)
+	}
+	var content io.Reader = reader
+	if maximum > 0 {
+		limit := maximum
+		if maximum < math.MaxInt64 {
+			limit++
+		}
+		content = io.LimitReader(reader, limit)
+	}
+	data, err := io.ReadAll(content)
+	if err != nil {
+		return nil, fmt.Errorf("reading %s in Docker container %s: %w", path, session.containerID, err)
+	}
+	return data, nil
 }
 
 func (session *dockerExecutorSession) WriteFile(ctx context.Context, path string, data []byte, options executor.WriteOptions) error {

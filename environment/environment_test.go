@@ -465,5 +465,3 @@ func TestMarkerSearchStopsAtHomeDirectory(t *testing.T) {
 }
 
 func foundLookup(name string, _ map[string]string) (string, error) { return "/bin/" + name, nil }
-
-func missingLookup(string, map[string]string) (string, error) { return "", exec.ErrNotFound }

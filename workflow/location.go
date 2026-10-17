@@ -58,10 +58,6 @@ func yamlRoot(data []byte) *yaml.Node {
 	return document.Content[0]
 }
 
-func annotateSteps(steps []Step, sequence *yaml.Node, source string) {
-	annotateStepsAt(steps, sequence, source, "steps")
-}
-
 func annotateStepsAt(steps []Step, sequence *yaml.Node, source string, base validation.Path) {
 	if sequence == nil || sequence.Kind != yaml.SequenceNode {
 		return

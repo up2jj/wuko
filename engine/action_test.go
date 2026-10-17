@@ -160,11 +160,9 @@ func TestCompositeActionRetryKeepsInnerOperationIDsStable(t *testing.T) {
 }
 
 type actionCaptureRunner struct {
-	workflowName string
-	stepID       string
-	value        any
-	order        *[]string
-	request      *step.Request
+	value   any
+	order   *[]string
+	request *step.Request
 }
 
 func (runner actionCaptureRunner) Run(_ context.Context, request step.Request) (step.Result, error) {

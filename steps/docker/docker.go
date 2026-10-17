@@ -161,7 +161,7 @@ func New(raw map[string]any) (step.Runner, error) {
 		config:  config,
 		present: present,
 		newClient: func() (dockerClient, error) {
-			return client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+			return client.New(client.FromEnv)
 		},
 		runCommand: defaultCommandRunner,
 		waitHealth: waitForHealthPoll,

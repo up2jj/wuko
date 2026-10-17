@@ -91,7 +91,7 @@ func NewExecutor(raw map[string]any) (executor.Provider, error) {
 	provider := &ExecutorProvider{
 		config: config,
 		newClient: func() (dockerClient, error) {
-			return client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+			return client.New(client.FromEnv)
 		},
 	}
 	if err := validateExecutorConfig(config); err != nil {

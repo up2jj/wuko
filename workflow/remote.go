@@ -476,7 +476,7 @@ func unpackRemoteTarGzip(payload []byte) (map[string]ActionFile, error) {
 		if header.Typeflag == tar.TypeDir {
 			continue
 		}
-		if header.Typeflag != tar.TypeReg && header.Typeflag != tar.TypeRegA {
+		if header.Typeflag != tar.TypeReg {
 			return nil, fmt.Errorf("archive entry %q is not a regular file or directory", header.Name)
 		}
 		content, err := readArchiveFile(func() (io.ReadCloser, error) { return io.NopCloser(reader), nil }, &total)

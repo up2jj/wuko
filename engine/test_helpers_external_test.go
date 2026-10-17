@@ -17,16 +17,6 @@ func testDefinition(t *testing.T, name string, steps ...workflow.Step) *workflow
 	}
 }
 
-func testAction(t *testing.T, name string, steps ...workflow.Step) *workflow.Action {
-	t.Helper()
-	return &workflow.Action{
-		Version: 1,
-		Name:    name,
-		Dir:     t.TempDir(),
-		Steps:   steps,
-	}
-}
-
 func newTestRegistry(t *testing.T, builders map[string]step.Builder) *step.Registry {
 	t.Helper()
 	registry := step.NewRegistry()

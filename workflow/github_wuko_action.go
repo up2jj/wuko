@@ -279,7 +279,7 @@ func walkGitHubArchiveScope(body io.Reader, scope githubArchiveScope, visit func
 		switch header.Typeflag {
 		case tar.TypeDir:
 			continue
-		case tar.TypeReg, tar.TypeRegA:
+		case tar.TypeReg:
 		default:
 			return fmt.Errorf("%s file %q is a symlink or is not a regular file", scope.label, name)
 		}

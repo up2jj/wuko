@@ -359,7 +359,9 @@ func TestDashboardResizeRerendersWithoutRefreshing(t *testing.T) {
 	}, &tracker)
 	initialRenders := renders
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 60, Height: 16})
-	model = updated.(dashboardModel)
+	if _, ok := updated.(dashboardModel); !ok {
+		t.Fatal("resize returned a different model type")
+	}
 	if renders <= initialRenders {
 		t.Fatal("resize did not rerender the widget template")
 	}

@@ -620,12 +620,12 @@ func TestFailedMigrationKeepsInlinePinAndExistingLock(t *testing.T) {
 }
 
 func TestUnsafeCachedArchiveCannotEstablishPin(t *testing.T) {
-	manifest, archive := releaseBytes(t, "acme", "unsafe")
+	manifest, _ := releaseBytes(t, "acme", "unsafe")
 	var object Manifest
 	if err := json.Unmarshal(manifest, &object); err != nil {
 		t.Fatal(err)
 	}
-	archive = makeArchive(t, "../wuko-plugin-acme", 0700, []byte("bad"))
+	archive := makeArchive(t, "../wuko-plugin-acme", 0700, []byte("bad"))
 	object.Artifacts[0].SHA256 = digest(archive)
 	manifest, err := json.Marshal(object)
 	if err != nil {

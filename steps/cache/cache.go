@@ -527,7 +527,7 @@ func extractArchive(ctx context.Context, input io.Reader, staged []stagedTarget)
 				return fmt.Errorf("creating restored directory %s: %w", destination, err)
 			}
 			directories = append(directories, directoryMetadata{path: destination, mode: os.FileMode(header.Mode).Perm(), modTime: header.ModTime})
-		case tar.TypeReg, tar.TypeRegA:
+		case tar.TypeReg:
 			if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
 				return fmt.Errorf("creating restored parent directory: %w", err)
 			}

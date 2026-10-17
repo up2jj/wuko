@@ -296,6 +296,8 @@ func darwinProcInfo(call, pid, flavor int, argument uint64, data []byte) (int, e
 		pointer = unsafe.Pointer(&data[0])
 	}
 	result, _, errno := unix.Syscall6(
+		// proc_info has no libSystem wrapper in x/sys/unix, so the raw syscall is the only route.
+		//lint:ignore SA1019 no supported alternative exists for proc_info
 		unix.SYS_PROC_INFO,
 		uintptr(call), uintptr(pid), uintptr(flavor), uintptr(argument),
 		uintptr(pointer), uintptr(len(data)),

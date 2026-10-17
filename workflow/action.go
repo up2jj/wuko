@@ -878,10 +878,6 @@ func archivedActionSource(source string, files map[string]ActionFile) string {
 	return source + "::action.yml"
 }
 
-func decodeAction(data []byte, description, dir string, files map[string]ActionFile, logicalSource, localFileRoot string) (*Action, error) {
-	return decodeActionWithRenderer(data, description, dir, files, logicalSource, localFileRoot, nil)
-}
-
 func decodeActionWithRenderer(data []byte, description, dir string, files map[string]ActionFile, logicalSource, localFileRoot string, renderer *Renderer) (*Action, error) {
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	decoder.KnownFields(true)
@@ -1127,7 +1123,7 @@ func unpackTarGzip(payload []byte) ([]byte, map[string]ActionFile, error) {
 		if header.Typeflag == tar.TypeDir {
 			continue
 		}
-		if header.Typeflag != tar.TypeReg && header.Typeflag != tar.TypeRegA {
+		if header.Typeflag != tar.TypeReg {
 			return nil, nil, fmt.Errorf("archive entry %q is not a regular file or directory", header.Name)
 		}
 		content, err := readArchiveFile(func() (io.ReadCloser, error) { return io.NopCloser(reader), nil }, &total)

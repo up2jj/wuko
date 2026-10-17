@@ -132,8 +132,7 @@ func TestConcurrentReplicaReadinessOutputAndShutdown(t *testing.T) {
 }
 
 type immediateExitExecutor struct {
-	starts   atomic.Int64
-	restarts int64
+	starts atomic.Int64
 }
 
 func (executor *immediateExitExecutor) Run(_ context.Context, options processpkg.Options) (processpkg.Result, error) {

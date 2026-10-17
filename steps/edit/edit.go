@@ -320,9 +320,7 @@ func (r *Runner) result(value any, file *fileSource, matches []*spec.LocatedNode
 	for i := range matches {
 		paths[i] = matches[i].Path.String()
 	}
-	for i := range replacements {
-		values[i] = replacements[i]
-	}
+	copy(values, replacements)
 	outputs := map[string]any{
 		"value": value, "paths": paths, "replacements": values, "count": len(matches),
 		"changed": changedCount > 0, "changed_count": changedCount,

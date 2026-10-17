@@ -268,7 +268,3 @@ func renderValue(renderer *workflow.Renderer, value any, data map[string]any, sk
 		return value, nil
 	}
 }
-
-func environmentAsAny(values map[string]string) map[string]any {
-	return workflow.EnvironmentValues(values)
-}

@@ -21,13 +21,6 @@ import (
 
 type stepExecutor func(context.Context, step.Request) (step.Result, error)
 
-type stepExecution struct {
-	result    step.Result
-	attempts  []AttemptStats
-	retryWait time.Duration
-	err       error
-}
-
 type httpRetryError interface {
 	error
 	HTTPRequestMethod() string
