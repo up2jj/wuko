@@ -234,13 +234,23 @@ func TestCacheRepairsDamageWithoutChangingPin(t *testing.T) {
 			manager := resolutionManager(t, t.TempDir(), transport)
 			dir := t.TempDir()
 			origin := workflow.PluginOrigin{Dir: dir}
-			if _, err := manager.ResolvePluginSources(t.Context(), origin, acmeSource()); err != nil {
+			source := acmeSource()
+			if _, err := manager.ResolvePluginSources(t.Context(), origin, source); err != nil {
 				t.Fatal(err)
 			}
 			lock := mustRead(t, filepath.Join(dir, LockfileName))
 			cached, _ := manager.store.directory(digest(manifest))
+			// Resolution repairs a damaged manifest; archive damage is found when the
+			// plugin is brought up, which hashes the archive before extracting it.
+			resolveAndBring := func() error {
+				if _, err := manager.ResolvePluginSources(t.Context(), origin, source); err != nil {
+					return err
+				}
+				_, err := manager.store.pinned(t.Context(), "acme", source["acme"].Source, digest(manifest))
+				return err
+			}
 			mustWrite(t, filepath.Join(cached, file), []byte("damaged"))
-			if _, err := manager.ResolvePluginSources(t.Context(), origin, acmeSource()); err != nil {
+			if err := resolveAndBring(); err != nil {
 				t.Fatal(err)
 			}
 			if transport.count("/plugin.tar.gz") != 2 {
@@ -252,13 +262,67 @@ func TestCacheRepairsDamageWithoutChangingPin(t *testing.T) {
 			mustWrite(t, filepath.Join(cached, file), []byte("damaged"))
 			nextManifest, nextArchive := releaseBytes(t, "acme", "2")
 			transport.replace(map[string][]byte{"/plugin.json": nextManifest, "/plugin.tar.gz": nextArchive})
-			if _, err := manager.ResolvePluginSources(t.Context(), origin, acmeSource()); err == nil || !strings.Contains(err.Error(), "sha256 mismatch") {
+			if err := resolveAndBring(); err == nil || !strings.Contains(err.Error(), "sha256 mismatch") {
 				t.Fatalf("error = %v", err)
 			}
 			if !bytes.Equal(lock, mustRead(t, filepath.Join(dir, LockfileName))) {
 				t.Fatal("failed repair changed pin")
 			}
 		})
+	}
+}
+
+func TestLockedResolutionDoesNotHashArchive(t *testing.T) {
+	manifest, archive := releaseBytes(t, "acme", "1")
+	transport := transportFor(manifest, archive)
+	cache, dir := t.TempDir(), t.TempDir()
+	manager := resolutionManager(t, cache, transport)
+	origin := workflow.PluginOrigin{Dir: dir}
+	if _, err := manager.ResolvePluginSources(t.Context(), origin, acmeSource()); err != nil {
+		t.Fatal(err)
+	}
+	cached, _ := manager.store.directory(digest(manifest))
+	// Same-size garbage only fails a full hash, and offline repair is impossible.
+	mustWrite(t, filepath.Join(cached, "artifact.tar.gz"), bytes.Repeat([]byte{'x'}, len(archive)))
+	transport.replace(nil)
+	offline := resolutionManager(t, cache, transport)
+	resolved, err := offline.ResolvePluginSources(t.Context(), origin, acmeSource())
+	if err != nil {
+		t.Fatalf("locked resolution read the archive: %v", err)
+	}
+	if resolved["acme"].SHA256 != digest(manifest) {
+		t.Fatalf("pin = %s", resolved["acme"].SHA256)
+	}
+	if _, err := offline.store.pinned(t.Context(), "acme", acmeSource()["acme"].Source, digest(manifest)); err == nil {
+		t.Fatal("bringing up a corrupted archive must still fail")
+	}
+}
+
+func TestLockedResolutionFetchesMissingRelease(t *testing.T) {
+	manifest, archive := releaseBytes(t, "acme", "1")
+	transport := transportFor(manifest, archive)
+	cache, dir := t.TempDir(), t.TempDir()
+	manager := resolutionManager(t, cache, transport)
+	origin := workflow.PluginOrigin{Dir: dir}
+	if _, err := manager.ResolvePluginSources(t.Context(), origin, acmeSource()); err != nil {
+		t.Fatal(err)
+	}
+	cached, _ := manager.store.directory(digest(manifest))
+	if err := os.Remove(filepath.Join(cached, "artifact.tar.gz")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.ResolvePluginSources(t.Context(), origin, acmeSource()); err != nil {
+		t.Fatal(err)
+	}
+	if transport.count("/plugin.tar.gz") != 2 {
+		t.Fatal("missing archive was not fetched during resolution")
+	}
+	transport.replace(nil)
+	if err := os.Remove(filepath.Join(cached, "artifact.tar.gz")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.ResolvePluginSources(t.Context(), origin, acmeSource()); err == nil {
+		t.Fatal("unavailable release must fail resolution")
 	}
 }
 

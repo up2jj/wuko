@@ -213,7 +213,11 @@ func (m *Manager) resolveRequests(ctx context.Context, origin workflow.PluginOri
 			resolvedDigest = selected[entry.key()]
 		} else {
 			var release Release
-			if remote {
+			if !remote && exists && !update && pin != "" {
+				// Existing pins are only checked for presence; bring verifies archive bytes.
+				release.ManifestDigest = pin
+				err = m.store.present(ctx, namespace, fetchSource, pin)
+			} else if remote {
 				release, err = m.store.fresh(ctx, namespace, fetchSource)
 			} else if update || pin == "" {
 				release, err = m.store.obtain(ctx, namespace, fetchSource, "")

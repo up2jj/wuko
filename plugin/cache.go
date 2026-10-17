@@ -79,21 +79,7 @@ func readReleaseFile(path string) ([]byte, error) {
 }
 
 func readCachedRelease(directory, namespace, pin, source string) (Release, error) {
-	manifestData, err := readReleaseFile(filepath.Join(directory, "plugin.json"))
-	if err != nil {
-		return Release{}, err
-	}
-	if digest(manifestData) != pin {
-		return Release{}, fmt.Errorf("cached manifest sha256 mismatch")
-	}
-	manifest, err := ParseManifest(manifestData)
-	if err != nil {
-		return Release{}, err
-	}
-	if manifest.Namespace != namespace {
-		return Release{}, fmt.Errorf("plugin declaration namespace %q conflicts with manifest namespace %q", namespace, manifest.Namespace)
-	}
-	artifact, err := manifest.CurrentArtifact()
+	manifest, manifestData, artifact, err := readCachedManifest(directory, namespace, pin)
 	if err != nil {
 		return Release{}, err
 	}
@@ -105,6 +91,50 @@ func readCachedRelease(directory, namespace, pin, source string) (Release, error
 		return Release{}, fmt.Errorf("cached artifact sha256 mismatch")
 	}
 	return Release{Manifest: manifest, ManifestData: manifestData, ManifestDigest: pin, Artifact: artifact, ArtifactData: data, CanonicalSource: diagnosticPluginSource(source)}, nil
+}
+
+// readCachedManifest verifies the small manifest half of a cached release.
+func readCachedManifest(directory, namespace, pin string) (Manifest, []byte, Artifact, error) {
+	manifestData, err := readReleaseFile(filepath.Join(directory, "plugin.json"))
+	if err != nil {
+		return Manifest{}, nil, Artifact{}, err
+	}
+	if digest(manifestData) != pin {
+		return Manifest{}, nil, Artifact{}, fmt.Errorf("cached manifest sha256 mismatch")
+	}
+	manifest, err := ParseManifest(manifestData)
+	if err != nil {
+		return Manifest{}, nil, Artifact{}, err
+	}
+	if manifest.Namespace != namespace {
+		return Manifest{}, nil, Artifact{}, fmt.Errorf("plugin declaration namespace %q conflicts with manifest namespace %q", namespace, manifest.Namespace)
+	}
+	artifact, err := manifest.CurrentArtifact()
+	if err != nil {
+		return Manifest{}, nil, Artifact{}, err
+	}
+	return manifest, manifestData, artifact, nil
+}
+
+// present confirms a pinned release is available without reading its archive. pinned
+// hashes the archive before any plugin starts, so resolution only checks the manifest
+// and that a plausible archive file exists, falling back to a full obtain otherwise.
+func (s *releaseStore) present(ctx context.Context, namespace, source, pin string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	directory, err := s.directory(pin)
+	if err != nil {
+		return err
+	}
+	if _, _, _, err := readCachedManifest(directory, namespace, pin); err == nil {
+		info, statErr := os.Lstat(filepath.Join(directory, "artifact.tar.gz"))
+		if statErr == nil && info.Mode().IsRegular() && info.Size() > 0 && info.Size() <= maxArchiveBytes {
+			return nil
+		}
+	}
+	_, err = s.pinned(ctx, namespace, source, pin)
+	return err
 }
 
 func writeRelease(directory string, release Release) error {
