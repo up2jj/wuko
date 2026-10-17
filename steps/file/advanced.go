@@ -859,18 +859,6 @@ func protectRunDirectory(verb, runDir, candidate string) error {
 	}
 }
 
-func sameFile(first, second string) (bool, error) {
-	firstInfo, err := os.Stat(first)
-	if err != nil {
-		return false, err
-	}
-	secondInfo, err := os.Stat(second)
-	if err != nil {
-		return false, err
-	}
-	return os.SameFile(firstInfo, secondInfo), nil
-}
-
 func physicalPath(value string) (string, error) {
 	resolved, err := filepath.EvalSymlinks(value)
 	if err == nil {
