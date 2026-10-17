@@ -459,10 +459,18 @@ func (session *Session) Redact(value string) string {
 	values := append([]string(nil), session.resolved...)
 	session.mu.Unlock()
 	for _, secret := range values {
-		if secret != "" {
-			value = strings.ReplaceAll(value, secret, "<redacted>")
-			if encoded, err := json.Marshal(secret); err == nil && len(encoded) >= 2 {
-				value = strings.ReplaceAll(value, string(encoded[1:len(encoded)-1]), "<redacted>")
+		if secret == "" {
+			continue
+		}
+		value = strings.ReplaceAll(value, secret, "<redacted>")
+		if encoded, err := json.Marshal(secret); err == nil && len(encoded) >= 2 {
+			value = strings.ReplaceAll(value, string(encoded[1:len(encoded)-1]), "<redacted>")
+		}
+		// A secret placed in a URL reaches errors percent-encoded: net/http reports the full
+		// request URL, so a token with +, / or = would otherwise pass through unmatched.
+		for _, escaped := range []string{url.QueryEscape(secret), url.PathEscape(secret)} {
+			if escaped != secret {
+				value = strings.ReplaceAll(value, escaped, "<redacted>")
 			}
 		}
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -179,6 +180,21 @@ func TestRedactPreservesUnwrapAndEscapedDiagnostics(t *testing.T) {
 	}
 	if got := session.Redact(`{"value":"line one\nline two"}`); got != `{"value":"<redacted>"}` {
 		t.Fatalf("diagnostic = %s", got)
+	}
+}
+
+func TestRedactCoversURLEncodedSecrets(t *testing.T) {
+	const token = "ab+c/d=e f"
+	runner := &fakeRunner{run: func(Command) (string, error) { return token, nil }}
+	session := NewSession(t.Context(), Options{Runner: runner, BaseEnv: map[string]string{}})
+	if _, err := session.Resolve("op://Production/API/token"); err != nil {
+		t.Fatal(err)
+	}
+	for _, encoded := range []string{token, url.QueryEscape(token), url.PathEscape(token)} {
+		message := `Get "https://api.example.com/v1/` + encoded + `?token=` + encoded + `": dial tcp: lookup failed`
+		if got := session.Redact(message); strings.Contains(got, "ab") {
+			t.Errorf("Redact(%q) = %q, leaked the secret", message, got)
+		}
 	}
 }
 
