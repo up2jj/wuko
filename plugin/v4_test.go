@@ -8,17 +8,20 @@ import (
 	"io"
 	"io/fs"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/creack/pty"
 	"github.com/up2jj/wuko/executor"
 	"github.com/up2jj/wuko/plugin/sdk"
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/ptyinteract"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
+	"golang.org/x/term"
 )
 
 // attachSDK serves an SDK plugin in process and attaches it to a fresh manager, so the real host
@@ -387,5 +390,94 @@ func TestPluginExecutorTTYCancellationStopsTheCommand(t *testing.T) {
 	case <-stopped:
 	case <-time.After(5 * time.Second):
 		t.Fatal("the plugin's command was not canceled")
+	}
+}
+
+// terminalStep reads keystrokes up to "q" from a raw terminal, or reports that it fell back.
+func terminalStep(t *testing.T, release bool) *Manager {
+	t.Helper()
+	plugin, err := sdk.New("acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sdk.RegisterStep(plugin, "attach", sdk.StepHandler[map[string]any]{Run: func(ctx context.Context, request sdk.RunRequest[map[string]any]) (sdk.Result, error) {
+		terminal, err := request.Host.Terminal(ctx, sdk.TerminalOptions{Raw: true})
+		if errors.Is(err, sdk.ErrTerminalUnavailable) {
+			return sdk.Result{Outputs: map[string]any{"interactive": request.Context.Interactive, "typed": "<fallback>"}}, nil
+		}
+		if err != nil {
+			return sdk.Result{}, err
+		}
+		typed, err := bufio.NewReader(terminal.Input).ReadString('q')
+		if err != nil {
+			return sdk.Result{}, err
+		}
+		if release {
+			if err := terminal.Release(ctx); err != nil {
+				return sdk.Result{}, err
+			}
+		}
+		return sdk.Result{Outputs: map[string]any{"interactive": request.Context.Interactive, "typed": typed, "rows": int(terminal.Size.Rows)}}, nil
+	}}, sdk.WithHostCallbacks(sdk.HostTerminal)); err != nil {
+		t.Fatal(err)
+	}
+	return attachSDK(t, plugin)
+}
+
+func TestPluginStepBorrowsAndRestoresTheTerminal(t *testing.T) {
+	for _, release := range []bool{true, false} {
+		t.Run(fmt.Sprintf("released by plugin %v", release), func(t *testing.T) {
+			manager := terminalStep(t, release)
+			master, terminal, err := pty.Open()
+			if err != nil {
+				t.Skipf("no pseudo-terminal: %v", err)
+			}
+			defer master.Close()
+			defer terminal.Close()
+			if err := pty.Setsize(master, &pty.Winsize{Rows: 33, Cols: 90}); err != nil {
+				t.Fatal(err)
+			}
+			before, err := term.GetState(int(terminal.Fd()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			runner, err := manager.ResolveStep(t.Context(), "acme.attach", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			go func() {
+				// Raw mode is in place once the plugin holds the terminal, so input typed now
+				// arrives unbuffered and unechoed.
+				time.Sleep(100 * time.Millisecond)
+				_, _ = master.Write([]byte("abq"))
+			}()
+			go func() { _, _ = io.Copy(io.Discard, master) }()
+			result, err := runner.Run(t.Context(), step.Request{StepID: "attach", Interactive: true, Stdin: terminal})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Outputs["typed"] != "abq" || result.Outputs["interactive"] != true || fmt.Sprint(result.Outputs["rows"]) != "33" {
+				t.Fatalf("outputs = %#v", result.Outputs)
+			}
+			after, err := term.GetState(int(terminal.Fd()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(before, after) {
+				t.Fatal("the terminal mode was not restored")
+			}
+		})
+	}
+}
+
+func TestPluginStepTerminalIsUnavailableWhenNotInteractive(t *testing.T) {
+	manager := terminalStep(t, true)
+	runner, err := manager.ResolveStep(t.Context(), "acme.attach", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runner.Run(t.Context(), step.Request{StepID: "attach", Stdin: strings.NewReader("abq")})
+	if err != nil || result.Outputs["typed"] != "<fallback>" || result.Outputs["interactive"] != false {
+		t.Fatalf("Run() = %#v, %v; want the fallback", result.Outputs, err)
 	}
 }

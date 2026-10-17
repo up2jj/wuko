@@ -243,6 +243,16 @@ func (peer *peer) watchResize(id string) (<-chan TerminalSize, func()) {
 	}
 }
 
+// watchResize registers the size changes of the request ctx belongs to.
+func watchResize(ctx context.Context) (<-chan TerminalSize, func()) {
+	protocolPeer, ok := ctx.Value(peerContextKey{}).(*peer)
+	id, hasID := ctx.Value(requestContextKey{}).(string)
+	if !ok || !hasID {
+		return nil, func() {}
+	}
+	return protocolPeer.watchResize(id)
+}
+
 // resize delivers the newest size without blocking the protocol loop: a size the handler has not
 // taken yet is stale and is replaced. A size for a call that has finished is dropped.
 func (peer *peer) resize(id string, size TerminalSize) {

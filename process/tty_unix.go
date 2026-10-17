@@ -137,7 +137,7 @@ func (sink ttySink) WriteSensitive(data []byte) error { return sink.session.Writ
 
 func driveTTY(ctx context.Context, session TTYSession, terminal *os.File, options Options) (result Result, runErr error) {
 	handoff := options.Interactions == nil || options.Interact
-	stopResize := startTTYResize(terminal, session)
+	stopResize := startTTYResize(terminal, func(size TerminalSize) { _ = session.Resize(size) })
 	defer stopResize()
 
 	stdout := newCaptureBuffer(options.CaptureLimit)
@@ -304,7 +304,7 @@ func exitCode(err error) (int, bool) {
 	return 0, false
 }
 
-func startTTYResize(terminal *os.File, session TTYSession) func() {
+func startTTYResize(terminal *os.File, resized func(TerminalSize)) func() {
 	if terminal == nil {
 		return func() {}
 	}
@@ -319,7 +319,7 @@ func startTTYResize(terminal *os.File, session TTYSession) func() {
 			select {
 			case <-resizeSignals:
 				if size, err := pty.GetsizeFull(terminal); err == nil {
-					_ = session.Resize(TerminalSize{Rows: size.Rows, Cols: size.Cols})
+					resized(TerminalSize{Rows: size.Rows, Cols: size.Cols})
 				}
 			case <-resizeStop:
 				return
@@ -346,4 +346,68 @@ func drainTTYOutput(session TTYSession, outputDone <-chan error) error {
 		_ = session.CloseOutput()
 		return <-outputDone
 	}
+}
+
+// HostTerminal is the user's terminal lent to a command that runs elsewhere, such as in a plugin,
+// for as long as it is held: its input is readable, its size changes are reported, and Release
+// restores it.
+type HostTerminal struct {
+	file       *os.File
+	input      cancelreader.CancelReader
+	state      *term.State
+	stopResize func()
+	released   sync.Once
+	releaseErr error
+}
+
+// AcquireTerminal lends the terminal behind stdin, which must be a file-backed terminal. Raw
+// mode passes every keystroke through unprocessed, as a PTY handoff does; without it the
+// terminal keeps line editing and echo. resized is called with each new size.
+func AcquireTerminal(stdin io.Reader, raw bool, resized func(TerminalSize)) (*HostTerminal, TerminalSize, error) {
+	file, ok := stdin.(*os.File)
+	if !ok || !term.IsTerminal(int(file.Fd())) {
+		return nil, TerminalSize{}, fmt.Errorf("the terminal requires file-backed terminal stdin")
+	}
+	current, err := pty.GetsizeFull(file)
+	if err != nil {
+		return nil, TerminalSize{}, fmt.Errorf("reading terminal size: %w", err)
+	}
+	input, err := cancelreader.NewReader(file)
+	if err != nil {
+		return nil, TerminalSize{}, fmt.Errorf("preparing terminal input: %w", err)
+	}
+	terminal := &HostTerminal{file: file, input: input}
+	if raw {
+		terminal.state, err = term.MakeRaw(int(file.Fd()))
+		if err != nil {
+			_ = input.Close()
+			return nil, TerminalSize{}, fmt.Errorf("enabling raw terminal mode: %w", err)
+		}
+	}
+	terminal.stopResize = startTTYResize(file, resized)
+	return terminal, TerminalSize{Rows: current.Rows, Cols: current.Cols}, nil
+}
+
+// Read returns the terminal's input until Release.
+func (terminal *HostTerminal) Read(data []byte) (int, error) { return terminal.input.Read(data) }
+
+// Release ends a pending Read and restores the terminal. It is safe to call more than once; a
+// Read still running must have returned before the input is closed, which the caller ensures
+// by waiting for its reader after Release cancels it.
+func (terminal *HostTerminal) Release() error {
+	terminal.released.Do(func() {
+		terminal.stopResize()
+		terminal.input.Cancel()
+		if terminal.state != nil {
+			if err := term.Restore(int(terminal.file.Fd()), terminal.state); err != nil {
+				terminal.releaseErr = fmt.Errorf("restoring terminal mode: %w", err)
+			}
+		}
+	})
+	return terminal.releaseErr
+}
+
+// Close releases the input once its reader has stopped.
+func (terminal *HostTerminal) Close() error {
+	return errors.Join(terminal.Release(), terminal.input.Close())
 }

@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
+	"sync"
 	"time"
 )
 
@@ -69,6 +71,8 @@ type StepContext struct {
 	MaxAttempts         int                       `json:"max_attempts"`
 	OperationID         string                    `json:"operation_id"`
 	PreviousAttempt     *Result                   `json:"previous_attempt,omitempty"`
+	// Interactive (v4) reports that the run reads from a user, so Host.Terminal may succeed.
+	Interactive bool `json:"interactive,omitempty"`
 }
 
 // ValidateRequest contains the capabilities available while validating a step.
@@ -158,7 +162,35 @@ type Host interface {
 	CallFunction(context.Context, string, []any) (any, error)
 	// Secret requires the HostFunctionCall capability.
 	Secret(context.Context, string) (string, error)
+	// Terminal (v4) borrows the user's terminal for the running step and requires the
+	// HostTerminal capability. It fails with an error matching ErrTerminalUnavailable when the
+	// run cannot lend one, for example in CI, so the step can fall back to plain output.
+	Terminal(context.Context, TerminalOptions) (*Terminal, error)
 }
+
+// ErrTerminalUnavailable reports that the run has no terminal to lend.
+var ErrTerminalUnavailable = errors.New("the terminal is unavailable")
+
+// TerminalOptions configures Host.Terminal.
+type TerminalOptions struct {
+	// Raw passes every keystroke through unprocessed, as a full-screen program or a remote
+	// shell expects; without it the user's terminal keeps line editing and echo.
+	Raw bool
+}
+
+// Terminal is the user's terminal lent to a running step. The step's Stdout already reaches
+// it; Input carries the user's keystrokes and Resize each later size until Release, which the
+// host also performs when the step ends.
+type Terminal struct {
+	Size   TerminalSize
+	Input  io.Reader
+	Resize <-chan TerminalSize
+
+	release func(context.Context) error
+}
+
+// Release returns the terminal to the host, which restores its mode.
+func (terminal *Terminal) Release(ctx context.Context) error { return terminal.release(ctx) }
 
 // OutputSchema describes one result value. A zero value is a scalar.
 type OutputSchema struct {
@@ -220,7 +252,7 @@ func WithHostCallbacks(callbacks ...HostCapability) StepOption {
 		seen := make(map[HostCapability]bool, len(callbacks))
 		for _, callback := range callbacks {
 			switch callback {
-			case HostTemplateValidate, HostTemplateRender, HostFunctionCall:
+			case HostTemplateValidate, HostTemplateRender, HostFunctionCall, HostTerminal:
 			default:
 				return fmt.Errorf("unsupported host callback %q", callback)
 			}
@@ -407,6 +439,30 @@ func (host hostClient) Secret(ctx context.Context, reference string) (string, er
 		return "", fmt.Errorf("host returned a non-string secret")
 	}
 	return secret, nil
+}
+
+func (host hostClient) Terminal(ctx context.Context, options TerminalOptions) (*Terminal, error) {
+	if err := host.require(HostTerminal); err != nil {
+		return nil, err
+	}
+	var size TerminalSize
+	if err := callHost(ctx, string(HostTerminal), map[string]any{"raw": options.Raw}, &size); err != nil {
+		var coded *Error
+		if errors.As(err, &coded) && coded.Code == "terminal_unavailable" {
+			return nil, fmt.Errorf("%w: %w", ErrTerminalUnavailable, err)
+		}
+		return nil, err
+	}
+	resize, stopResize := watchResize(ctx)
+	var once sync.Once
+	var releaseErr error
+	return &Terminal{Size: size, Input: &inputReader{ctx: ctx}, Resize: resize, release: func(releaseCtx context.Context) error {
+		once.Do(func() {
+			stopResize()
+			releaseErr = callHost(releaseCtx, "host.terminal.release", map[string]any{}, nil)
+		})
+		return releaseErr
+	}}, nil
 }
 
 func decodeConfig[Config any](raw json.RawMessage) (Config, error) {

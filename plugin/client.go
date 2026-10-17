@@ -339,7 +339,12 @@ func (c *client) handleHostCall(id, method string, params json.RawMessage) {
 	}
 	result, err := c.runHostCall(parentCtx, host, method, params)
 	if err != nil {
-		c.writeResponse(outgoingResponseFrame{ID: id, Error: &wireError{Code: "host_callback", Message: err.Error()}})
+		code := "host_callback"
+		var coded *hostCallError
+		if errors.As(err, &coded) {
+			code = coded.code
+		}
+		c.writeResponse(outgoingResponseFrame{ID: id, Error: &wireError{Code: code, Message: err.Error()}})
 		return
 	}
 	if result == nil {
@@ -347,6 +352,16 @@ func (c *client) handleHostCall(id, method string, params json.RawMessage) {
 	}
 	c.writeResponse(outgoingResponseFrame{ID: id, Result: result})
 }
+
+// hostCallError is a callback failure with a code of its own, for one the plugin is expected to
+// handle rather than report.
+type hostCallError struct {
+	code string
+	err  error
+}
+
+func (err *hostCallError) Error() string { return err.err.Error() }
+func (err *hostCallError) Unwrap() error { return err.err }
 
 func (c *client) writeResponse(frame outgoingResponseFrame) {
 	data, err := json.Marshal(frame)

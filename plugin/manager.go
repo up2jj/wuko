@@ -819,7 +819,7 @@ func (s *pluginStep) Validate(ctx context.Context, request step.Request) error {
 	}
 	return s.plugin.client.call(ctx, "step.validate", params, &struct{}{}, nil)
 }
-func (s *pluginStep) Run(ctx context.Context, request step.Request) (step.Result, error) {
+func (s *pluginStep) Run(ctx context.Context, request step.Request) (_ step.Result, err error) {
 	if err := s.plugin.start(ctx); err != nil {
 		return step.Result{}, err
 	}
@@ -829,10 +829,17 @@ func (s *pluginStep) Run(ctx context.Context, request step.Request) (step.Result
 	var result step.Result
 	params := map[string]any{"type": s.name, "with": s.raw, "context": stepContext(request, s.plugin.protocol)}
 	if s.plugin.protocol != ProtocolV1 {
-		err := s.plugin.client.callWithOptions(ctx, "step.run", params, &result, callOptions{event: streamEvents(request.Stdout, request.Stderr, nil), host: s.hostCallbacks(request)})
+		options := callOptions{event: streamEvents(request.Stdout, request.Stderr, nil), host: s.hostCallbacks(request)}
+		if slices.Contains(s.declaration.HostCallbacks, hostTerminalAcquire) {
+			terminal := &stepTerminal{client: s.plugin.client, id: s.plugin.client.nextID(), request: request}
+			options.id = terminal.id
+			options.host = terminal.callbacks(options.host)
+			defer func() { err = errors.Join(err, terminal.release()) }()
+		}
+		err = s.plugin.client.callWithOptions(ctx, "step.run", params, &result, options)
 		return result, err
 	}
-	err := s.plugin.client.call(ctx, "step.run", params, &result, streamEvents(request.Stdout, request.Stderr, nil))
+	err = s.plugin.client.call(ctx, "step.run", params, &result, streamEvents(request.Stdout, request.Stderr, nil))
 	return result, err
 }
 
@@ -957,6 +964,9 @@ func stepContext(r step.Request, protocol string) map[string]any {
 		result["bindings"] = r.Bindings
 		result["providers"] = r.Providers.Values
 		result["helpers"] = r.Helpers.Names()
+		if protocol == ProtocolV4 {
+			result["interactive"] = r.Interactive
+		}
 		if r.PreviousAttempt != nil {
 			result["previous_attempt"] = map[string]any{"outputs": r.PreviousAttempt.Outputs, "variables": r.PreviousAttempt.Variables}
 		}
