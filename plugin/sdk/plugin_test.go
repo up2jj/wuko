@@ -116,7 +116,7 @@ func TestRegisteredStepRunProvidesStreamsAndSafeReadiness(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = plugin.steps["work"].run(t.Context(), nil, StepContext{}, nil, nil, nil)
+	_, err = plugin.steps["work"].run(t.Context(), nil, StepContext{}, nil, nil, nil, nil)
 	if err == nil || !strings.Contains(err.Error(), "readiness is unavailable") {
 		t.Fatalf("run error = %v", err)
 	}

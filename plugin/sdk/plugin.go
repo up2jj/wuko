@@ -34,7 +34,7 @@ type Plugin struct {
 type registeredStep struct {
 	declaration stepDeclaration
 	validate    func(context.Context, json.RawMessage, StepContext) error
-	run         func(context.Context, json.RawMessage, StepContext, io.Writer, io.Writer, func(Result) error) (Result, error)
+	run         func(context.Context, json.RawMessage, StepContext, io.Writer, io.Writer, func(Result) error, ExecutorSession) (Result, error)
 	cleanup     func(context.Context, json.RawMessage, Result) error
 	service     func(context.Context, json.RawMessage, StepContext) (Service, error)
 }
@@ -172,7 +172,7 @@ func RegisterStep[Config any](plugin *Plugin, name string, handler StepHandler[C
 	// The capability set is immutable once registration returns, so it is built once and shared
 	// read-only by every concurrent validate and run instead of being rebuilt per invocation.
 	host := newHostClient(settings.hostCallbacks)
-	registered := registeredStep{declaration: stepDeclaration{Type: qualified, Cleanup: handler.Cleanup != nil, Service: handler.Service != nil, HostCallbacks: settings.hostCallbacks, Outputs: settings.outputs}}
+	registered := registeredStep{declaration: stepDeclaration{Type: qualified, Cleanup: handler.Cleanup != nil, Service: handler.Service != nil, HostCallbacks: settings.hostCallbacks, Outputs: settings.outputs, Executor: settings.executor}}
 	registered.validate = func(ctx context.Context, raw json.RawMessage, stepContext StepContext) error {
 		if handler.Validate == nil {
 			_, err := decodeConfig[Config](raw)
@@ -184,7 +184,7 @@ func RegisterStep[Config any](plugin *Plugin, name string, handler StepHandler[C
 		}
 		return handler.Validate(ctx, ValidateRequest[Config]{Config: config, Context: stepContext, Host: host})
 	}
-	registered.run = func(ctx context.Context, raw json.RawMessage, stepContext StepContext, stdout, stderr io.Writer, ready func(Result) error) (Result, error) {
+	registered.run = func(ctx context.Context, raw json.RawMessage, stepContext StepContext, stdout, stderr io.Writer, ready func(Result) error, executor ExecutorSession) (Result, error) {
 		config, err := decodeConfig[Config](raw)
 		if err != nil {
 			return Result{}, err
@@ -195,7 +195,7 @@ func RegisterStep[Config any](plugin *Plugin, name string, handler StepHandler[C
 		if stderr == nil {
 			stderr = io.Discard
 		}
-		return handler.Run(ctx, RunRequest[Config]{Config: config, Context: stepContext, Host: host, Stdout: stdout, Stderr: stderr, ready: ready})
+		return handler.Run(ctx, RunRequest[Config]{Config: config, Context: stepContext, Host: host, Stdout: stdout, Stderr: stderr, Executor: executor, ready: ready})
 	}
 	if handler.Cleanup != nil {
 		registered.cleanup = func(ctx context.Context, raw json.RawMessage, result Result) error {
@@ -451,7 +451,16 @@ func (plugin *Plugin) callStep(ctx context.Context, req wireRequest, peer *peer)
 		if step.declaration.Service {
 			ready = func(result Result) error { return peer.eventResult(req.ID, "ready", result) }
 		}
-		return step.run(ctx, params.With, params.Context, stdout, stderr, ready)
+		var executor ExecutorSession
+		if params.Context.ExecutorSession != "" {
+			plugin.mu.RLock()
+			executor = plugin.sessions[params.Context.ExecutorSession]
+			plugin.mu.RUnlock()
+			if executor == nil || !step.declaration.Executor {
+				return nil, fmt.Errorf("step %q cannot use executor session %q", params.Type, params.Context.ExecutorSession)
+			}
+		}
+		return step.run(ctx, params.With, params.Context, stdout, stderr, ready, executor)
 	default:
 		panic("unreachable")
 	}

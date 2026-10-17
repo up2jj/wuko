@@ -73,6 +73,9 @@ type StepContext struct {
 	PreviousAttempt     *Result                   `json:"previous_attempt,omitempty"`
 	// Interactive (v4) reports that the run reads from a user, so Host.Terminal may succeed.
 	Interactive bool `json:"interactive,omitempty"`
+	// ExecutorSession (v4) names the session of this plugin's executor that a step registered
+	// WithExecutorAccess runs inside; RunRequest.Executor is that session.
+	ExecutorSession string `json:"executor_session,omitempty"`
 }
 
 // ValidateRequest contains the capabilities available while validating a step.
@@ -90,7 +93,11 @@ type RunRequest[Config any] struct {
 	Host    Host
 	Stdout  io.Writer
 	Stderr  io.Writer
-	ready   func(Result) error
+	// Executor is the session, opened by this plugin's own executor, that a step registered
+	// WithExecutorAccess runs inside, or nil when it runs outside every executor block. The host
+	// refuses to run such a step inside another plugin's executor.
+	Executor ExecutorSession
+	ready    func(Result) error
 }
 
 // Ready reports that a service step has completed startup. It returns an error
@@ -220,6 +227,7 @@ func OpenObject(fields map[string]OutputSchema) OutputSchema {
 type stepOptions struct {
 	outputs       *OutputSchema
 	hostCallbacks []HostCapability
+	executor      bool
 }
 
 type StepOption func(*stepOptions) error
@@ -245,6 +253,15 @@ func cloneOutputSchema(schema OutputSchema) OutputSchema {
 		result.Items = &items
 	}
 	return result
+}
+
+// WithExecutorAccess (v4) lets the step run inside executor blocks of this plugin's executors,
+// where RunRequest.Executor is the block's session.
+func WithExecutorAccess() StepOption {
+	return func(options *stepOptions) error {
+		options.executor = true
+		return nil
+	}
 }
 
 func WithHostCallbacks(callbacks ...HostCapability) StepOption {

@@ -481,3 +481,83 @@ func TestPluginStepTerminalIsUnavailableWhenNotInteractive(t *testing.T) {
 		t.Fatalf("Run() = %#v, %v; want the fallback", result.Outputs, err)
 	}
 }
+
+// taskSession is a native session with a capability no protocol method carries.
+type taskSession struct {
+	scriptSession
+	name string
+}
+
+func (s *taskSession) task(name string) string { return s.name + ":" + name }
+
+func TestPluginStepRunsInItsOwnPluginsExecutor(t *testing.T) {
+	plugin, err := sdk.New("acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sdk.RegisterExecutor(plugin, "shell", sdk.ExecutorHandler[map[string]any]{Open: func(_ context.Context, request sdk.ExecutorRequest[map[string]any]) (sdk.ExecutorSession, error) {
+		return &taskSession{name: fmt.Sprint(request.Config["name"])}, nil
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := sdk.RegisterStep(plugin, "task", sdk.StepHandler[map[string]any]{Run: func(_ context.Context, request sdk.RunRequest[map[string]any]) (sdk.Result, error) {
+		session, ok := request.Executor.(*taskSession)
+		if !ok {
+			return sdk.Result{Outputs: map[string]any{"ran": "outside"}}, nil
+		}
+		return sdk.Result{Outputs: map[string]any{"ran": session.task("build")}}, nil
+	}}, sdk.WithExecutorAccess()); err != nil {
+		t.Fatal(err)
+	}
+	other, err := sdk.New("other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sdk.RegisterExecutor(other, "box", sdk.ExecutorHandler[map[string]any]{Open: func(context.Context, sdk.ExecutorRequest[map[string]any]) (sdk.ExecutorSession, error) {
+		return localSession{}, nil
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	manager := attachSDK(t, plugin)
+	foreignManager := attachSDK(t, other)
+
+	runner, err := manager.ResolveStep(t.Context(), "acme.task", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := runner.(step.ExecutorAware); !ok {
+		t.Fatal("the step is not executor-aware")
+	}
+	open := func(manager *Manager, name string) executor.Session {
+		provider, err := manager.ResolveExecutor(t.Context(), name, map[string]any{"name": "dev"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		session, err := provider.Open(t.Context(), executor.Request{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = session.Close(context.Background()) })
+		return session
+	}
+
+	for _, test := range []struct {
+		name    string
+		request step.Request
+		want    string
+	}{
+		{name: "own executor", request: step.Request{InsideExecutor: true, Executor: open(manager, "acme.shell")}, want: "dev:build"},
+		{name: "outside executors", request: step.Request{Executor: process.LocalExecutor{}}, want: "outside"},
+	} {
+		result, err := runner.Run(t.Context(), test.request)
+		if err != nil || result.Outputs["ran"] != test.want {
+			t.Fatalf("%s: Run() = %#v, %v; want %q", test.name, result.Outputs, err, test.want)
+		}
+	}
+	if _, err := runner.Run(t.Context(), step.Request{InsideExecutor: true, Executor: open(foreignManager, "other.box")}); err == nil || !strings.Contains(err.Error(), `runs only inside executors of plugin "acme"`) {
+		t.Fatalf("Run() inside another plugin's executor = %v", err)
+	}
+	if err := runner.(step.Validator).Validate(t.Context(), step.Request{InsideExecutor: true}); err != nil {
+		t.Fatalf("Validate() before the session exists = %v", err)
+	}
+}

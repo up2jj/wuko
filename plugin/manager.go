@@ -198,8 +198,13 @@ func (m *Manager) ResolveStep(ctx context.Context, name string, raw map[string]a
 		return nil, fmt.Errorf("plugin %q does not declare step type %q", namespace, name)
 	}
 	base := &pluginStep{plugin: plugin, declaration: *declaration, name: name, raw: raw}
-	if declaration.Cleanup {
+	switch {
+	case declaration.Cleanup && declaration.Executor:
+		return &cleaningExecutorPluginStep{cleaningPluginStep: &cleaningPluginStep{pluginStep: base}}, nil
+	case declaration.Cleanup:
 		return &cleaningPluginStep{pluginStep: base}, nil
+	case declaration.Executor:
+		return &executorPluginStep{pluginStep: base}, nil
 	}
 	return base, nil
 }
@@ -813,7 +818,11 @@ type pluginStep struct {
 }
 
 func (s *pluginStep) Validate(ctx context.Context, request step.Request) error {
-	params := map[string]any{"type": s.name, "with": s.raw, "context": stepContext(request, s.plugin.protocol)}
+	// Validation precedes the executor's session, so it is checked again when the step runs.
+	params, _ := s.params(request)
+	if params == nil {
+		params = map[string]any{"type": s.name, "with": s.raw, "context": stepContext(request, s.plugin.protocol)}
+	}
 	if s.plugin.protocol != ProtocolV1 {
 		return s.plugin.client.callWithOptions(ctx, "step.validate", params, &struct{}{}, callOptions{host: s.hostCallbacks(request)})
 	}
@@ -827,7 +836,10 @@ func (s *pluginStep) Run(ctx context.Context, request step.Request) (_ step.Resu
 		return s.runService(ctx, request)
 	}
 	var result step.Result
-	params := map[string]any{"type": s.name, "with": s.raw, "context": stepContext(request, s.plugin.protocol)}
+	params, err := s.params(request)
+	if err != nil {
+		return step.Result{}, err
+	}
 	if s.plugin.protocol != ProtocolV1 {
 		options := callOptions{event: streamEvents(request.Stdout, request.Stderr, nil), host: s.hostCallbacks(request)}
 		if slices.Contains(s.declaration.HostCallbacks, hostTerminalAcquire) {
@@ -943,6 +955,46 @@ func decodeNumber(data []byte, target any) error {
 	decoder.UseNumber()
 	return decoder.Decode(target)
 }
+
+// params builds a step request, naming the executor session the step runs in when it declared
+// executor access.
+func (s *pluginStep) params(request step.Request) (map[string]any, error) {
+	context := stepContext(request, s.plugin.protocol)
+	if s.declaration.Executor && request.InsideExecutor {
+		session, err := s.executorSession(request.Executor)
+		if err != nil {
+			return nil, err
+		}
+		context["executor_session"] = session
+	}
+	return map[string]any{"type": s.name, "with": s.raw, "context": context}, nil
+}
+
+// executorSession resolves the session an executor-aware step runs in. The step reaches it inside
+// its own plugin, where the session is a native object; a session from another executor would be
+// an id the plugin cannot resolve, so that is refused rather than run on the host instead.
+func (s *pluginStep) executorSession(target process.Executor) (string, error) {
+	var session *pluginSession
+	switch target := target.(type) {
+	case *pluginSession:
+		session = target
+	case *fileSystemPluginSession:
+		session = target.pluginSession
+	}
+	if session == nil || session.plugin != s.plugin {
+		return "", fmt.Errorf("step type %q runs only inside executors of plugin %q", s.name, s.plugin.namespace)
+	}
+	return session.id, nil
+}
+
+// executorPluginStep is a step whose plugin declared that it runs inside its own executors.
+type executorPluginStep struct{ *pluginStep }
+
+func (*executorPluginStep) ExecutorAware() {}
+
+type cleaningExecutorPluginStep struct{ *cleaningPluginStep }
+
+func (*cleaningExecutorPluginStep) ExecutorAware() {}
 
 type cleaningPluginStep struct{ *pluginStep }
 
