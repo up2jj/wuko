@@ -84,6 +84,9 @@ func (e *Engine) executeExecutorBlock(ctx context.Context, definition *workflow.
 	childOptions.Executor = session
 	childOptions.insideExecutor = true
 	serviceScope := newBackgroundSupervisor(ctx)
+	// Every job is joined before this returns; releasing the scope's context detaches it from
+	// the run's, which a block repeated by a loop would otherwise accumulate until the run ends.
+	defer serviceScope.cancel(errBackgroundStopped)
 	childOptions.services = serviceScope
 	childOptions.defers = newDeferStack(block.Steps)
 	statsStart := len(stats.Steps)
