@@ -207,7 +207,7 @@ func (r *Runner) perform(ctx context.Context, store *storepkg.Store, request ste
 		cleared, err := store.Clear(ctx)
 		return step.Result{Outputs: map[string]any{"cleared": int64(cleared)}}, err
 	default:
-		panic("validated key-value operation")
+		return step.Result{}, fmt.Errorf("unsupported key-value operation %q", r.config.Operation)
 	}
 }
 

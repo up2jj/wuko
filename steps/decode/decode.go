@@ -200,7 +200,7 @@ func (r *Runner) decode(text string) (any, error) {
 	case "lines":
 		return decodeLines(text, r.config.Trim, r.config.OmitEmpty), nil
 	default:
-		panic("validated decode format")
+		return nil, fmt.Errorf("unsupported decode format %q", r.config.Format)
 	}
 }
 

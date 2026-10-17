@@ -95,7 +95,7 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 		stored, size, err := save(ctx, archivePath, config.targets)
 		return step.Result{Outputs: map[string]any{"key": key, "stored": stored, "size": size}}, err
 	default:
-		panic("validated cache operation")
+		return step.Result{}, fmt.Errorf("unsupported cache operation %q", config.operation)
 	}
 }
 

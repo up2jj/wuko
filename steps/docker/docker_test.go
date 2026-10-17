@@ -23,6 +23,7 @@ import (
 	"github.com/muesli/cancelreader"
 	"github.com/opencontainers/image-spec/specs-go/v1"
 
+	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -139,6 +140,10 @@ func TestRunReturnsContainerExitCode(t *testing.T) {
 	result, err := runner.Run(t.Context(), step.Request{StepID: "failed"})
 	if err == nil || !strings.Contains(err.Error(), "exited with status 17") {
 		t.Fatalf("Run() error = %v, want exit status error", err)
+	}
+	var exitErr *process.ExitError
+	if !errors.As(err, &exitErr) || exitErr.Code != 17 {
+		t.Fatalf("Run() error = %#v, want *process.ExitError with code 17", err)
 	}
 	if got := result.Outputs["exit_code"]; got != 17 {
 		t.Fatalf("exit_code = %#v, want 17", got)

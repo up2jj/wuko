@@ -204,7 +204,7 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 	case operationTouch:
 		return r.touch(ctx, path)
 	default:
-		panic("validated file operation")
+		return step.Result{}, fmt.Errorf("unsupported file operation %q", r.config.Operation)
 	}
 }
 

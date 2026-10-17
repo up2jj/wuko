@@ -71,7 +71,7 @@ func (r *Runner) runEngineOperation(ctx context.Context, request step.Request) (
 	case operationVerifyDigest:
 		return r.verifyDigest(ctx, dockerClient)
 	default:
-		panic("validated Docker operation")
+		return step.Result{}, fmt.Errorf("unsupported Docker operation %q", operation(r.config))
 	}
 }
 

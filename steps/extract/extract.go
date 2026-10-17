@@ -799,7 +799,7 @@ func convert(value, kind string) (any, error) {
 		}
 		return normalizeJSON(result), nil
 	default:
-		panic("validated capture type")
+		return nil, fmt.Errorf("unsupported capture type %q", kind)
 	}
 }
 

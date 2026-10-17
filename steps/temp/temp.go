@@ -83,7 +83,7 @@ func (runner *Runner) Run(ctx context.Context, _ step.Request) (step.Result, err
 			return step.Result{}, err
 		}
 	default:
-		panic("validated temp kind")
+		return step.Result{}, fmt.Errorf("unsupported temp kind %q", runner.config.Kind)
 	}
 
 	if err := ctx.Err(); err != nil {

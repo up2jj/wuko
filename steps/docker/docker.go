@@ -24,6 +24,7 @@ import (
 	"github.com/muesli/cancelreader"
 	"github.com/opencontainers/image-spec/specs-go/v1"
 
+	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
 )
@@ -321,7 +322,9 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (result step.Res
 
 	outputs := dockerOutputs(stdout, stderr, status)
 	if status != 0 {
-		return step.Result{Outputs: outputs}, fmt.Errorf("Docker container for step %q exited with status %d", request.StepID, status)
+		// The exit status is typed the way shell steps report it, so callers can read the code
+		// with errors.As whichever step ran the command.
+		return step.Result{Outputs: outputs}, fmt.Errorf("docker run for step %q: %w", request.StepID, &process.ExitError{Command: "container", Code: int(status)})
 	}
 	return step.Result{Outputs: outputs}, nil
 }
