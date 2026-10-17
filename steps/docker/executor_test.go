@@ -398,6 +398,39 @@ func TestDockerExecutorSignalsCanceledServiceInsideTheContainer(t *testing.T) {
 	}
 }
 
+// A canceled one-shot exec is reaped by removing the container only when nothing else runs in
+// it: removing a shared container would kill every sibling service and exec with it.
+func TestDockerExecutorCanceledExecKeepsContainerWhileAServiceRuns(t *testing.T) {
+	client := &fakeClient{blockingAttaches: 2}
+	session := dockerServiceSession(t, client, map[string]any{"image": "alpine:3.22"})
+	serviceCtx, stopService := context.WithCancel(t.Context())
+	defer stopService()
+	started := make(chan struct{})
+	serviceDone := make(chan error, 1)
+	go func() {
+		_, err := session.Run(serviceCtx, process.Options{
+			Command: "./bin/api", Started: func() { close(started) }, Stdout: io.Discard, Stderr: io.Discard,
+		})
+		serviceDone <- err
+	}()
+	select {
+	case <-started:
+	case <-time.After(10 * time.Second):
+		t.Fatal("service exec never started")
+	}
+
+	probeCtx, cancelProbe := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancelProbe()
+	if _, err := session.Run(probeCtx, process.Options{Command: "curl", Stdout: io.Discard, Stderr: io.Discard}); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("probe Run() error = %v, want its deadline", err)
+	}
+	if client.removed {
+		t.Fatal("a timed-out probe removed the container its service still runs in")
+	}
+	stopService()
+	<-serviceDone
+}
+
 func TestDockerExecutorWithoutAShellLeavesServicesUnsupervised(t *testing.T) {
 	client := &fakeClient{}
 	session := dockerServiceSession(t, client, map[string]any{

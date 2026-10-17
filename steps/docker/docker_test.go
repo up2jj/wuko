@@ -353,7 +353,11 @@ type fakeClient struct {
 	execCreates             int
 	execAttaches            int
 	execStreamBlocks        bool
-	execPeer                net.Conn
+	// blockingAttaches makes that many leading attaches block, for tests that keep several
+	// execs running at once; execStreamBlocks alone blocks only the first.
+	blockingAttaches int
+	execPeer         net.Conn
+	execPeers        []net.Conn
 }
 
 func (f *fakeClient) ImageInspect(_ context.Context, _ string, options ...client.ImageInspectOption) (client.ImageInspectResult, error) {
@@ -459,12 +463,13 @@ func (f *fakeClient) ExecAttach(context.Context, string, client.ExecAttachOption
 	f.execAttaches++
 	// Only the first attach models a live stream. Later ones are the short helper execs a
 	// session runs to stop a service, which finish on their own.
-	if f.execStreamBlocks && f.execAttaches == 1 {
+	if (f.execStreamBlocks && f.execAttaches == 1) || f.execAttaches <= f.blockingAttaches {
 		// Model a real hijacked stream: reads and writes both block on the same
 		// connection and only unblock when the caller closes it. The peer is kept
 		// open so nothing completes on its own.
 		local, peer := net.Pipe()
 		f.execPeer = peer
+		f.execPeers = append(f.execPeers, peer)
 		return client.ExecAttachResult{HijackedResponse: client.HijackedResponse{Conn: local, Reader: bufio.NewReader(local)}}, nil
 	}
 	connA, connB := net.Pipe()

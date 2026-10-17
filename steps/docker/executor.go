@@ -280,6 +280,9 @@ type dockerExecutorSession struct {
 	mappings    []pathMapping
 	closed      bool
 	services    int
+	// active counts the execs currently running in the container, so a canceled one-shot exec
+	// knows whether removing the container would take siblings down with it.
+	active int
 }
 
 func (session *dockerExecutorSession) startLocked(ctx context.Context) error {
@@ -398,6 +401,16 @@ func (session *dockerExecutorSession) Run(ctx context.Context, options process.O
 	if err := session.startLocked(ctx); err != nil {
 		return process.Result{}, err
 	}
+	session.active++
+	defer func() {
+		// Deferred after the unlock above, so it runs first: the lock is still held exactly
+		// when locked says so.
+		if !locked {
+			session.mu.Lock()
+			defer session.mu.Unlock()
+		}
+		session.active--
+	}()
 	workingDir, err := session.translatePath(options.Dir)
 	if err != nil {
 		return process.Result{}, err
@@ -464,8 +477,9 @@ func (session *dockerExecutorSession) Run(ctx context.Context, options process.O
 	case copyErr = <-copyDone:
 	case <-ctx.Done():
 		// Closing the stream only detaches, so the exec must be signaled through the container
-		// before the stream goes away. A one-shot exec is instead reaped by removing the
-		// container, which a shared service session must keep open for its siblings.
+		// before the stream goes away. Docker has no API to kill a one-shot exec, so it is
+		// reaped by removing the container, but only while it is the container's sole exec;
+		// otherwise it is left to end with the session rather than kill its siblings.
 		var stopErr error
 		if service != nil {
 			stopErr = session.stopService(ctx, *service, options)
@@ -475,7 +489,9 @@ func (session *dockerExecutorSession) Run(ctx context.Context, options process.O
 		if options.Started == nil {
 			cleanupCtx, cancel := detachedCleanupContext(ctx)
 			session.mu.Lock()
-			removeErr = session.removeLocked(cleanupCtx)
+			if session.active == 1 {
+				removeErr = session.removeLocked(cleanupCtx)
+			}
 			session.mu.Unlock()
 			cancel()
 		}
