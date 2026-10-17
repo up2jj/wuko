@@ -328,17 +328,19 @@ type Command struct {
 	Args    []string          `json:"args"`
 	Dir     string            `json:"dir"`
 	Env     map[string]string `json:"env"`
-	// Stdin is the command's input, or nil when it has none. For an executor registered with
-	// Stdin or TTY it is read from the host as the command consumes it; otherwise the host sent
-	// it whole with the request.
-	Stdin io.Reader `json:"-"`
-	// TTY is the starting size when the command runs in a terminal. Stdin then carries the
+	// Stdin is the command's whole input when the host sent it with the request, which it does
+	// for executors registered without Stdin or TTY.
+	Stdin []byte `json:"-"`
+	// Input (v4) reads the command's input in every mode, or is nil when it has none. For an
+	// executor registered with Stdin or TTY it is read from the host as the command consumes it.
+	Input io.Reader `json:"-"`
+	// TTY is the starting size when the command runs in a terminal. Input then carries the
 	// terminal's input, Stdout receives the terminal's single output stream, and Resize
 	// delivers each later size; the host keeps the user's terminal and the capture.
 	TTY    *TerminalSize       `json:"-"`
 	Resize <-chan TerminalSize `json:"-"`
-	// StdinOutlivesProcess reports that streamed Stdin stays open past the command's own
-	// lifetime, so its exit must be reported without waiting for Stdin to end.
+	// StdinOutlivesProcess reports that streamed Input stays open past the command's own
+	// lifetime, so its exit must be reported without waiting for Input to end.
 	StdinOutlivesProcess bool      `json:"-"`
 	CaptureLimit         int64     `json:"capture_limit"`
 	StdoutPolicy         int       `json:"stdout_policy"`
@@ -403,7 +405,7 @@ type ExecutorHandler[Config any] struct {
 	// FileSystem (v4) declares that every session implements ExecutorFileSystem, so file
 	// steps run against the session's target instead of being rejected.
 	FileSystem bool
-	// Stdin (v4) declares that sessions read Command.Stdin as a stream, which the host
+	// Stdin (v4) declares that sessions read Command.Input as a stream, which the host
 	// supplies on demand instead of reading it in full before the command starts.
 	Stdin bool
 	// TTY (v4) declares that sessions run commands with Command.TTY set in a terminal.

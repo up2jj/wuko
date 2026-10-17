@@ -269,10 +269,10 @@ func scriptExecutor(handler sdk.ExecutorHandler[map[string]any], run func(contex
 
 // catCommand copies stdin to stdout and reports what it read.
 func catCommand(_ context.Context, command sdk.Command) (sdk.CommandResult, error) {
-	if command.Stdin == nil {
+	if command.Input == nil {
 		return sdk.CommandResult{Stdout: "<no stdin>"}, nil
 	}
-	data, err := io.ReadAll(command.Stdin)
+	data, err := io.ReadAll(command.Input)
 	return sdk.CommandResult{Stdout: string(data)}, err
 }
 
@@ -303,7 +303,7 @@ func TestPluginExecutorStdinThatOutlivesTheCommand(t *testing.T) {
 		if !command.StdinOutlivesProcess {
 			return sdk.CommandResult{}, errors.New("the command was not told its stdin outlives it")
 		}
-		line, err := bufio.NewReader(command.Stdin).ReadString('\n')
+		line, err := bufio.NewReader(command.Input).ReadString('\n')
 		return sdk.CommandResult{Stdout: line}, err
 	}))
 	reader, writer := io.Pipe()
@@ -345,7 +345,7 @@ func TestPluginExecutorTTYRunsInteractions(t *testing.T) {
 		}
 		command.Started()
 		fmt.Fprintf(command.Stdout, "size=%dx%d\r\nlogin:", command.TTY.Rows, command.TTY.Cols)
-		name, err := bufio.NewReader(command.Stdin).ReadString('\r')
+		name, err := bufio.NewReader(command.Input).ReadString('\r')
 		if err != nil {
 			return sdk.CommandResult{}, err
 		}

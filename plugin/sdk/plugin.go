@@ -499,18 +499,18 @@ func (plugin *Plugin) callExecutor(ctx context.Context, req wireRequest, peer *p
 			plugin.mu.Unlock()
 			return map[string]any{}, err
 		}
-		var stdin io.Reader
+		stdin, err := base64.StdEncoding.DecodeString(params.Stdin)
+		if err != nil {
+			return nil, fmt.Errorf("decoding stdin: %w", err)
+		}
+		var input io.Reader
 		switch {
 		case params.StdinStream || params.TTY != nil:
-			stdin = &inputReader{ctx: ctx}
-		case params.Stdin != "":
-			data, err := base64.StdEncoding.DecodeString(params.Stdin)
-			if err != nil {
-				return nil, fmt.Errorf("decoding stdin: %w", err)
-			}
-			stdin = bytes.NewReader(data)
+			input = &inputReader{ctx: ctx}
+		case len(stdin) != 0:
+			input = bytes.NewReader(stdin)
 		}
-		command := Command{Command: params.Command, Args: params.Args, Dir: params.Dir, Env: params.Env, Stdin: stdin, TTY: params.TTY, StdinOutlivesProcess: params.StdinOutlive, CaptureLimit: params.CaptureLimit, StdoutPolicy: params.StdoutPolicy, StderrPolicy: params.StderrPolicy, Stdout: eventWriter{peer: peer, id: req.ID, event: "stdout"}, Stderr: eventWriter{peer: peer, id: req.ID, event: "stderr"}, Started: func() { _ = peer.event(req.ID, "started", nil) }}
+		command := Command{Command: params.Command, Args: params.Args, Dir: params.Dir, Env: params.Env, Stdin: stdin, Input: input, TTY: params.TTY, StdinOutlivesProcess: params.StdinOutlive, CaptureLimit: params.CaptureLimit, StdoutPolicy: params.StdoutPolicy, StderrPolicy: params.StderrPolicy, Stdout: eventWriter{peer: peer, id: req.ID, event: "stdout"}, Stderr: eventWriter{peer: peer, id: req.ID, event: "stderr"}, Started: func() { _ = peer.event(req.ID, "started", nil) }}
 		if params.TTY != nil {
 			resize, release := peer.watchResize(req.ID)
 			defer release()

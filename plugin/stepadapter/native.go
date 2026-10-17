@@ -19,7 +19,8 @@ import (
 type Registration struct {
 	Builder step.Builder
 	// Cleanup must be true when runners built by Builder implement step.Cleaner and their
-	// successful results need cleaning up.
+	// successful results need cleaning up. As in process, a runner that does not implement it
+	// for its configuration has nothing to clean.
 	Cleanup bool
 	// Outputs is the step's static output schema, as in step.Registration. Nil leaves it
 	// undeclared, which the host treats as open.
@@ -111,7 +112,7 @@ func Register(plugin *sdk.Plugin, name string, registration Registration, option
 			}
 			cleaner, ok := runner.(step.Cleaner)
 			if !ok {
-				return pluginError(fmt.Errorf("step %q declared cleanup but its runner does not implement step.Cleaner", name))
+				return nil
 			}
 			return pluginError(cleaner.Cleanup(ctx, step.Result{
 				Outputs: normalizeMap(request.Result.Outputs), Variables: normalizeMap(request.Result.Variables),
@@ -244,7 +245,7 @@ type nativeSession struct {
 func (s *nativeSession) Run(ctx context.Context, command sdk.Command) (sdk.CommandResult, error) {
 	options := process.Options{
 		Command: command.Command, Args: command.Args, Dir: command.Dir, Env: command.Env,
-		Stdin: command.Stdin, StdinOutlivesProcess: command.StdinOutlivesProcess,
+		Stdin: command.Input, StdinOutlivesProcess: command.StdinOutlivesProcess,
 		Stdout: command.Stdout, Stderr: command.Stderr, Started: command.Started, CaptureLimit: command.CaptureLimit,
 		StdoutPolicy: process.OutputPolicy(command.StdoutPolicy), StderrPolicy: process.OutputPolicy(command.StderrPolicy),
 	}
