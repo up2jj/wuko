@@ -11,6 +11,7 @@ Use the repository's `justfile` as the command entry point:
 - `just build` builds `./wuko`.
 - `just run -- --help` runs the CLI from source with arguments.
 - `just test` runs `go test ./...`.
+- `just test-short` skips the slow tests that compile generated plugin modules.
 - `just vet` runs Go's static checks.
 - `just lint` runs staticcheck (configured in `staticcheck.conf`).
 - `just fmt` formats all Go sources with `gofmt`.

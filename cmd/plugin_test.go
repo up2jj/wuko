@@ -41,9 +41,31 @@ func TestMain(main *testing.M) {
 	if err := os.Setenv("WUKO_PLUGIN_CACHE_DIR", cacheRoot); err != nil {
 		panic(err)
 	}
+	goBuildCache, err = os.MkdirTemp("", "wuko-plugin-test-gocache-")
+	if err != nil {
+		panic(err)
+	}
 	code := main.Run()
 	_ = os.RemoveAll(cacheRoot)
+	_ = os.RemoveAll(goBuildCache)
 	os.Exit(code)
+}
+
+// goBuildCache is one Go build cache shared by the tests that compile generated plugins. Each
+// used to start from an empty cache, rebuilding the module and its dependencies from scratch.
+var goBuildCache string
+
+// goCommand runs the go tool in directory with the shared build cache. Tests that need it
+// compile a whole module, so they are skipped in short mode.
+func goCommand(t *testing.T, directory string, args ...string) *exec.Cmd {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("compiles a generated plugin module")
+	}
+	command := exec.Command("go", args...)
+	command.Dir = directory
+	command.Env = append(command.Environ(), "GOCACHE="+goBuildCache)
+	return command
 }
 
 func runCommandPluginHelper() {
@@ -77,9 +99,7 @@ func TestGoPluginScaffoldBuilds(t *testing.T) {
 		t.Fatal(err)
 	}
 	useLocalWukoModule(t, directory)
-	command := exec.Command("go", "test", "./...")
-	command.Dir = directory
-	command.Env = append(command.Environ(), "GOCACHE="+filepath.Join(t.TempDir(), "cache"))
+	command := goCommand(t, directory, "test", "./...")
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("generated plugin tests: %v\n%s", err, output)
 	}
@@ -279,9 +299,7 @@ func TestGoPluginScaffoldCancelsExecutorProcessGroup(t *testing.T) {
 	}
 	useLocalWukoModule(t, directory)
 	binary := filepath.Join(directory, "wuko-plugin-acme")
-	build := exec.Command("go", "build", "-o", binary, ".")
-	build.Dir = directory
-	build.Env = append(build.Environ(), "GOCACHE="+filepath.Join(t.TempDir(), "cache"))
+	build := goCommand(t, directory, "build", "-o", binary, ".")
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("building generated plugin: %v\n%s", err, output)
 	}
@@ -547,9 +565,7 @@ func TestGoPluginScaffoldBuildsCompleteRelease(t *testing.T) {
 		t.Fatal(err)
 	}
 	useLocalWukoModule(t, directory)
-	command := exec.Command("go", "run", "./tools/release", "-version", "1.2.3")
-	command.Dir = directory
-	command.Env = append(command.Environ(), "GOCACHE="+filepath.Join(t.TempDir(), "cache"))
+	command := goCommand(t, directory, "run", "./tools/release", "-version", "1.2.3")
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("generated release helper: %v\n%s", err, output)
 	}
@@ -561,9 +577,7 @@ func TestGoPluginScaffoldBuildsCompleteRelease(t *testing.T) {
 		t.Fatalf("manifest = %#v", bundle.Manifest)
 	}
 	firstDigest := pluginpkg.DigestBundle(bundle)
-	command = exec.Command("go", "run", "./tools/release", "-version", "1.2.3")
-	command.Dir = directory
-	command.Env = append(command.Environ(), "GOCACHE="+filepath.Join(t.TempDir(), "cache"))
+	command = goCommand(t, directory, "run", "./tools/release", "-version", "1.2.3")
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("second generated release: %v\n%s", err, output)
 	}

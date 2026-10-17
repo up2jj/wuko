@@ -18,6 +18,10 @@ install:
 test:
     go test ./...
 
+# Run the test suite without the tests that compile generated plugin modules.
+test-short:
+    go test -short ./...
+
 # Run the test suite under the race detector (what CI and the pre-push hook run).
 test-race:
     go test -race ./...
