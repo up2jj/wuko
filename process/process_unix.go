@@ -144,21 +144,31 @@ func (LocalExecutor) Run(ctx context.Context, options Options) (Result, error) {
 
 	stdout := newCaptureBuffer(options.CaptureLimit)
 	stderr := newCaptureBuffer(options.CaptureLimit)
-	command.Stdout = outputWriter(options.StdoutPolicy, options.Stdout, &stdout)
-	command.Stderr = outputWriter(options.StderrPolicy, options.Stderr, &stderr)
+	stdoutPipe, err := pipeOutput(&command.Stdout, outputWriter(options.StdoutPolicy, options.Stdout, &stdout))
+	if err != nil {
+		return Result{}, fmt.Errorf("creating stdout pipe for %s: %w", options.Command, err)
+	}
+	stderrPipe, err := pipeOutput(&command.Stderr, outputWriter(options.StderrPolicy, options.Stderr, &stderr))
+	if err != nil {
+		stdoutPipe.abandon()
+		return Result{}, fmt.Errorf("creating stderr pipe for %s: %w", options.Command, err)
+	}
 	if err := command.Start(); err != nil {
+		stdoutPipe.abandon()
+		stderrPipe.abandon()
 		if options.User != "" {
 			return Result{}, fmt.Errorf("starting %s as user %q: %w", options.Command, options.User, err)
 		}
 		return Result{}, fmt.Errorf("starting %s: %w", options.Command, err)
 	}
+	stdoutPipe.started()
+	stderrPipe.started()
 	if options.Started != nil {
 		options.Started()
 	}
 	wait := make(chan error, 1)
 	go func() { wait <- command.Wait() }()
 
-	var err error
 	canceled := false
 	select {
 	case err = <-wait:
@@ -166,6 +176,13 @@ func (LocalExecutor) Run(ctx context.Context, options Options) (Result, error) {
 		canceled = true
 		err = terminateProcess(command.Process.Pid, wait, options)
 	}
+	// The command has exited, but a child it backgrounded may still run in its process group
+	// and hold the output pipes open. A step owns everything it started, so the leftovers are
+	// stopped before the output is drained; otherwise they would outlive the step and their
+	// pipes would stall it.
+	stopLeftoverGroup(command.Process.Pid, options)
+	stdoutPipe.drain()
+	stderrPipe.drain()
 	result := Result{Stdout: stdout.String(), Stderr: stderr.String(), ExitCode: 0, StdoutTruncated: stdout.truncated, StderrTruncated: stderr.truncated}
 	if canceled {
 		return result, ctx.Err()
@@ -694,6 +711,98 @@ func writerOrDiscard(writer io.Writer) io.Writer {
 		return io.Discard
 	}
 	return writer
+}
+
+// outputPipe copies a child's output stream to a writer through a pipe the caller owns. Handing
+// os/exec an *os.File keeps Cmd.Wait from joining the copy, so Wait reports the command's exit
+// as soon as it happens even while a backgrounded child still holds the pipe.
+type outputPipe struct {
+	reader *os.File
+	writer *os.File
+	done   chan struct{}
+}
+
+// pipeOutput attaches writer to target. Writers os/exec can pass to the child directly, files
+// and the discard sink, need no pipe and yield a nil outputPipe, whose methods are no-ops.
+func pipeOutput(target *io.Writer, writer io.Writer) (*outputPipe, error) {
+	if _, isFile := writer.(*os.File); isFile || writer == io.Discard || writer == nil {
+		if writer == io.Discard {
+			writer = nil
+		}
+		*target = writer
+		return nil, nil
+	}
+	reader, pipeWriter, err := os.Pipe()
+	if err != nil {
+		return nil, err
+	}
+	pipe := &outputPipe{reader: reader, writer: pipeWriter, done: make(chan struct{})}
+	go func() {
+		defer close(pipe.done)
+		_, _ = io.Copy(writer, reader)
+	}()
+	*target = pipeWriter
+	return pipe, nil
+}
+
+// started releases the parent's copy of the write end, so the copy sees EOF once every
+// process holding it has exited.
+func (pipe *outputPipe) started() {
+	if pipe != nil {
+		_ = pipe.writer.Close()
+	}
+}
+
+// abandon releases both ends when the command never started.
+func (pipe *outputPipe) abandon() {
+	if pipe != nil {
+		_ = pipe.writer.Close()
+		_ = pipe.reader.Close()
+		<-pipe.done
+	}
+}
+
+// drain waits for the copy to finish. A process that left the group, and so survived
+// stopLeftoverGroup, can keep the pipe open indefinitely; after the grace period the read
+// end is closed so the step is not held hostage by it.
+func (pipe *outputPipe) drain() {
+	if pipe == nil {
+		return
+	}
+	timer := time.NewTimer(terminationGracePeriod)
+	defer timer.Stop()
+	select {
+	case <-pipe.done:
+	case <-timer.C:
+		_ = pipe.reader.Close()
+		<-pipe.done
+	}
+	_ = pipe.reader.Close()
+}
+
+// stopLeftoverGroup terminates what remains of a process group after its leader exited, with
+// the configured signal and SIGKILL escalation after the grace period.
+func stopLeftoverGroup(processID int, options Options) {
+	if !processGroupAlive(processID) {
+		return
+	}
+	terminationSignal := options.TerminationSignal
+	if terminationSignal == 0 {
+		terminationSignal = syscall.SIGTERM
+	}
+	gracePeriod := options.TerminationGracePeriod
+	if gracePeriod == 0 {
+		gracePeriod = terminationGracePeriod
+	}
+	_ = signalProcessGroup(processID, terminationSignal)
+	deadline := time.Now().Add(gracePeriod)
+	for processGroupAlive(processID) {
+		if time.Now().After(deadline) {
+			_ = signalProcessGroup(processID, syscall.SIGKILL)
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func outputWriter(policy OutputPolicy, stream io.Writer, capture io.Writer) io.Writer {

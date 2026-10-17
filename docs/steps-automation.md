@@ -663,6 +663,11 @@ native process credentials and does not authenticate or elevate. The boolean
 outputs `stdout_truncated` and `stderr_truncated` report whether capture reached its configured
 bound.
 
+A step owns the processes it starts. When the command exits, anything it left running in the
+background (for example `my-server &`) is sent the termination signal, then `SIGKILL` after the
+grace period, and the step reports the command's own exit status. Run long-lived services with the
+`process` step instead.
+
 ### Elevated shell and process commands
 
 Set `elevated: true` on a `shell` or `process` step to run its command as root through `sudo`:

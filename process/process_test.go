@@ -118,6 +118,48 @@ func TestParseUserID(t *testing.T) {
 	}
 }
 
+func TestRunStopsBackgroundedChildWhenCommandExits(t *testing.T) {
+	tests := []struct {
+		name     string
+		script   string
+		wantCode int
+	}{
+		{name: "success", script: `sleep 30 & echo "$$ $!"`},
+		{name: "failure", script: `sleep 30 & echo "$$ $!"; exit 3`, wantCode: 3},
+		{name: "ignores TERM", script: `sh -c 'trap "" TERM; while :; do sleep 10; done' & echo "$$ $!"`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			started := time.Now()
+			result, err := Run(t.Context(), Options{
+				Command: "sh", Args: []string{"-c", test.script}, Env: testEnvironment(),
+				StdoutPolicy: OutputCapture,
+			})
+			fields := strings.Fields(result.Stdout)
+			if len(fields) != 2 {
+				t.Fatalf("stdout = %q, error = %v", result.Stdout, err)
+			}
+			leader, _ := strconv.Atoi(fields[0])
+			t.Cleanup(func() { _ = syscall.Kill(-leader, syscall.SIGKILL) })
+			if test.wantCode == 0 && err != nil {
+				t.Fatalf("Run() error = %v, want success", err)
+			}
+			var exitErr *ExitError
+			if test.wantCode != 0 && (!errors.As(err, &exitErr) || exitErr.Code != test.wantCode) {
+				t.Fatalf("Run() error = %v, want exit status %d", err, test.wantCode)
+			}
+			// A TERM-ignoring child costs one grace period before SIGKILL; anything slower means
+			// Run waited on the inherited pipe instead of stopping the group.
+			if elapsed := time.Since(started); elapsed > terminationGracePeriod+time.Second {
+				t.Fatalf("Run() took %s", elapsed)
+			}
+			if waitForProcessGroupExit(leader, time.Second) {
+				t.Fatalf("backgrounded child in group %d outlived the command", leader)
+			}
+		})
+	}
+}
+
 func TestRunKillsStubbornProcessGroupOnCancellation(t *testing.T) {
 	ready := &processReadyWriter{ready: make(chan [2]int, 1)}
 	ctx, cancel := context.WithCancel(t.Context())
