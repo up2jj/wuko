@@ -428,7 +428,18 @@ func preflight(plan *treePlan, onConflict string) (created, skipped, overwritten
 	return created, skipped, overwritten, nil
 }
 
-func apply(ctx context.Context, plan *treePlan) error {
+func apply(ctx context.Context, plan *treePlan) (resultErr error) {
+	// New directories stay private while files are installed and receive their source mode
+	// afterwards, deepest first; deferred so a failure part way does not leave them at 0700.
+	var created []*plannedEntry
+	defer func() {
+		for index := len(created) - 1; index >= 0; index-- {
+			directory := created[index]
+			if err := os.Chmod(directory.destination, directory.mode); err != nil && resultErr == nil {
+				resultErr = fmt.Errorf("setting scaffold directory mode for %s: %w", directory.destination, err)
+			}
+		}
+	}()
 	for index, directory := range plan.dirs {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -444,6 +455,7 @@ func apply(ctx context.Context, plan *treePlan) error {
 		if err := os.Mkdir(directory.destination, 0o700); err != nil {
 			return fmt.Errorf("creating scaffold directory %s: %w", directory.destination, err)
 		}
+		created = append(created, directory)
 	}
 	for _, file := range plan.files {
 		if err := ctx.Err(); err != nil {
@@ -454,15 +466,6 @@ func apply(ctx context.Context, plan *treePlan) error {
 		}
 		if err := installFile(ctx, file.staged, file.destination, file.mode, file.outcome == conflictOverwrite); err != nil {
 			return err
-		}
-	}
-	for index := len(plan.dirs) - 1; index >= 0; index-- {
-		directory := plan.dirs[index]
-		if directory.exists {
-			continue
-		}
-		if err := os.Chmod(directory.destination, directory.mode); err != nil {
-			return fmt.Errorf("setting scaffold directory mode for %s: %w", directory.destination, err)
 		}
 	}
 	return nil

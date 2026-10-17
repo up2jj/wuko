@@ -371,3 +371,28 @@ func mustWriteBytes(t *testing.T, path string, content []byte, mode os.FileMode)
 		t.Fatal(err)
 	}
 }
+
+// A scaffold that fails part way must not leave the directories it created at the private
+// mode they are made with while files are installed.
+func TestApplyFailureStillSetsCreatedDirectoryModes(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "project")
+	plan := &treePlan{
+		dirs: []*plannedEntry{
+			{relative: ".", destination: root, mode: 0o755, directory: true},
+			{relative: "src", destination: filepath.Join(root, "src"), mode: 0o750, directory: true},
+		},
+		files: []*plannedEntry{{relative: "src/main.go", staged: filepath.Join(t.TempDir(), "missing"), destination: filepath.Join(root, "src", "main.go"), mode: 0o644}},
+	}
+	if err := apply(t.Context(), plan); err == nil {
+		t.Fatal("apply succeeded with a missing staged file")
+	}
+	for _, directory := range plan.dirs {
+		info, err := os.Stat(directory.destination)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode().Perm() != directory.mode {
+			t.Errorf("%s mode = %v, want %v", directory.relative, info.Mode().Perm(), directory.mode)
+		}
+	}
+}
