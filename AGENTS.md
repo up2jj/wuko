@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-Wuko is a Go 1.26 CLI for trusted YAML workflows. `main.go` is the entry point; `cmd/` defines Cobra commands and wires dependencies. Execution lives in `engine/`; `workflow/` parses definitions; `step/` provides shared contracts. Built-in operations are feature packages under `steps/` (for example, `steps/http/`). Terminal UI code belongs in `tui/`. Documentation is in `docs/`, runnable YAML in `examples/`, embedded agent skills in `skills/`, and CI configuration in `.github/`.
+Wuko is a Go 1.26 CLI for trusted YAML workflows. `main.go` is the entry point; `cmd/` defines Cobra commands and wires dependencies. Execution lives in `engine/`; `workflow/` parses definitions; `step/` provides shared contracts. Built-in operations are feature packages under `steps/` (for example, `steps/http/`). Executable plugins are hosted by `plugin/`; `plugin/sdk` is the standard-library SDK, `plugin/stepadapter` serves native steps and executors from a plugin, and `plugin/plugintest` runs one in process against the real host. Terminal UI code belongs in `tui/`. Documentation is in `docs/`, runnable YAML in `examples/`, embedded agent skills in `skills/`, and CI configuration in `.github/`.
 
 ## Build, Test, and Development Commands
 

@@ -12,7 +12,7 @@ wuko marketplace plugin release --version 0.1.0 --description "Describe the plug
 
 The workflow's `bundle` output must identify a directory inside the plugin project containing `plugin.json` and every archive named by its `artifacts` array. Each archive entry must be a regular executable file at the declared root-relative `entry`; symlinks and escaping paths are rejected.
 
-See the protocol reference at https://github.com/up2jj/wuko/blob/main/docs/plugin-protocol-v3.md.
+See the protocol reference at https://github.com/up2jj/wuko/blob/main/docs/plugin-protocol-v4.md.
 
 Consuming workflows must declare this plugin's manifest source. Run `wuko plugin lock FILE` to
 create `wuko.lock` beside the workflow, commit both files, and use `wuko run --file FILE --frozen-lockfile` in CI. Local bundle paths are relative to the workflow;

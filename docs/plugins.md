@@ -18,7 +18,7 @@ step. Every template includes a conventional `wuko.release.yaml`; it owns the na
 and returns the completed bundle directory. No template requires a `justfile`.
 
 New projects always implement Wuko's newest protocol, currently [plugin protocol
-v3](plugin-protocol-v3.md). The generated concurrent reader handles cancellation and responses to
+v4](plugin-protocol-v4.md). The generated concurrent reader handles cancellation and responses to
 plugin-to-host callbacks while operations run. The [protocol v1](plugin-protocol.md) reference
 remains available for maintaining existing plugins.
 
@@ -329,21 +329,22 @@ action-reference templates, so they may start a plugin when those values call a 
 
 ## Protocol selection
 
-Release manifests may declare `wuko.plugin/v1`, `wuko.plugin/v2`, or `wuko.plugin/v3`. Wuko records that value in
+Release manifests may declare `wuko.plugin/v1`, `wuko.plugin/v2`, `wuko.plugin/v3`, or
+`wuko.plugin/v4`. Wuko records that value in
 installation markers and uses it for the handshake. Marker version 2 also records the executable
 digest. Legacy markers without `marker_version` remain readable as marker version 1; a missing
 `protocol` in a legacy marker continues to mean v1. Legacy markers do not gain executable-integrity
 checking until the plugin is reinstalled.
 
 A directly discovered development executable, or an executable found only through `PATH`, may not
-have a release manifest or marker. Wuko offers v3, then v2, then v1; an executable that answers with
+have a release manifest or marker. Wuko offers v4, then v3, then v2, then v1; an executable that answers with
 one of those versions is accepted on that answer, and one that fails the handshake outright is retried in a fresh
 process. This negotiation does not change strict v1 behavior: after v1 is selected, its
 declarations, contexts, events, and request direction remain unchanged.
 
 `wuko marketplace plugin init` always targets the newest protocol supported by that Wuko release.
 It has a project-template flag, not a protocol-selection flag. The Go template pins the matching
-Wuko module and uses `plugin/sdk` for the v3 bidirectional transport, request-scoped cancellation,
+Wuko module and uses `plugin/sdk` for the v4 bidirectional transport, request-scoped cancellation,
 serialized writes, declarations, and host callbacks. It retains bounded executor streaming and
 process-group cleanup. Other language templates implement the same wire contract. See the
 [v2 service and callback examples](plugin-protocol-v2.md#complete-service-sequence).
@@ -356,12 +357,15 @@ Version 1 excludes TTY interaction, streaming stdin, native task graphs, host-ma
 nested executor calls from plugin steps, filesystem access from plugin executors, and template or
 secret callbacks beyond declared helper calls. Version 2 adds only managed step services and
 request-scoped host callbacks; it does not lift the other restrictions. Version 3 adds static
-structured actions and otherwise preserves the v2 runtime contract.
+structured actions and otherwise preserves the v2 runtime contract. Version 4 lifts the
+execution-environment restrictions for plugins that declare them: an executor filesystem,
+streamed stdin, TTY runs, borrowing the user's terminal, and steps that run inside their own
+plugin's executors. See [protocol v4](plugin-protocol-v4.md).
 
 A v2 step's `host_callbacks` list is the boundary for what it can reach back into: `secret` is
 available only to a step that declares `host.function.call`, and `host.template.render` alone
 renders with `secret` denied rather than granting it indirectly. The list is declared by the
-plugin itself during `initialize`, so locking the plugin manifest pins what it may ask for. Because a plugin step
-cannot run through the host executor, plugin steps are rejected inside `executor:` blocks; because
-a plugin executor exposes no filesystem, `file` and `edit` are rejected during validation inside a
-plugin executor's scope.
+plugin itself during `initialize`, so locking the plugin manifest pins what it may ask for. Unless
+it declares v4 executor access, a plugin step is rejected inside `executor:` blocks, and one that
+declares it runs only inside its own plugin's executors. Unless a plugin executor declares a v4
+filesystem, `file` and `edit` are rejected during validation inside its scope.

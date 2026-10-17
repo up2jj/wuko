@@ -1,5 +1,7 @@
 # Plugin protocol v3 and the Go SDK
 
+[Protocol v4](plugin-protocol-v4.md) extends this contract with execution-environment capabilities.
+
 `wuko.plugin/v3` keeps all v2 framing, lifecycle, service, callback, step, executor, and helper
 behavior and adds immutable static composite actions. New Go plugins should use
 `github.com/up2jj/wuko/plugin/sdk`; the SDK owns the JSONL transport and uses only the Go standard

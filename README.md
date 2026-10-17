@@ -211,7 +211,7 @@ The [reference](docs/reference.md) describes every step and control, with links 
 | [Getting started](docs/getting-started.md) | [Templates](docs/templates.md) | [Workflow discovery](docs/workflow-discovery.md) | [Executable plugins](docs/plugins.md) |
 | [Demo gallery](docs/gallery.md) | [Functions](docs/template-functions.md) | [Execution and composition](docs/execution.md) | [Plugin protocol v1](docs/plugin-protocol.md) |
 | [CLI cheatsheet](docs/cli.md) | [Workflow controls](docs/workflow-control.md) | [GitHub Actions](docs/github-actions.md) | [Plugin protocol v2](docs/plugin-protocol-v2.md) |
-| [Reference](docs/reference.md) | [Early return](docs/return.md) | [Git hooks](docs/git-hooks.md) | [Plugin protocol v3](docs/plugin-protocol-v3.md) |
+| [Reference](docs/reference.md) | [Early return](docs/return.md) | [Git hooks](docs/git-hooks.md) | [Plugin protocol v4](docs/plugin-protocol-v4.md) |
 | [Validation](docs/validation.md) | [Cleanup with finally](docs/finally.md) | [Executor scopes](docs/executors.md) |  |
 | | [Variable imports](docs/variable-imports.md) | [Graceful shutdown](docs/graceful-shutdown.md) | |
 | | [Secrets](docs/secrets.md) | [Persistent Git worktrees](docs/worktrees.md) | |

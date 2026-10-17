@@ -41,7 +41,7 @@ then v2, then v1. Once v2 is selected, answering with something Wuko did not off
 wrong namespace, fails the handshake.
 
 `wuko marketplace plugin init` always generates the newest supported protocol, currently
-[v3](plugin-protocol-v3.md). Its
+[v4](plugin-protocol-v4.md). Its
 standard-library-only scaffold includes the required bidirectional reader loop, serialized writes,
 request cancellation, callback-response routing, and bounded executor output. Existing v1 plugins
 remain supported, but the initializer does not generate older protocol versions.

@@ -372,7 +372,8 @@ returning `{}`:
 ```
 
 Protocol v1 does not support TTYs, interactive exchanges, streaming stdin, native task graphs, or
-executor filesystem access.
+executor filesystem access. [Protocol v4](plugin-protocol-v4.md) adds each of them for executors
+that declare it.
 
 ## Ordering and lifecycle
 
