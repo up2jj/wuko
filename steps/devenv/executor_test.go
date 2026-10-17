@@ -80,6 +80,31 @@ func TestOpenActivatesConfiguredProfilesOutsideDevenv(t *testing.T) {
 	}
 }
 
+// devenv shell must start in the project root to find its configuration, so a step's own
+// working directory is entered inside the shell rather than lost.
+func TestOpenRunsCommandInStepWorkingDirectoryOutsideDevenv(t *testing.T) {
+	root := t.TempDir()
+	command := &recordedCommand{}
+	provider := &ExecutorProvider{config: ExecutorConfig{Directory: root}, command: command.run}
+	session, err := provider.Open(t.Context(), executor.Request{RunDir: root, Env: map[string]string{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close(t.Context())
+	sub := filepath.Join(root, "sub dir")
+	if _, err := session.Run(t.Context(), process.Options{Command: "pwd", Dir: sub}); err != nil {
+		t.Fatal(err)
+	}
+	physicalRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"shell", "--", "sh", "-c", `cd -- "$1" && shift && exec "$@"`, "sh", sub, "pwd"}
+	if command.options.Dir != physicalRoot || !slices.Equal(command.options.Args, want) {
+		t.Fatalf("devenv command = dir %q args %#v, want dir %q args %#v", command.options.Dir, command.options.Args, physicalRoot, want)
+	}
+}
+
 // Process commands stay profile-scoped inside an active devenv shell. Without the
 // --profile flags devenv looks at a different, unprofiled process manager and reports
 // "No process manager is running", so an active session with both profiles and processes

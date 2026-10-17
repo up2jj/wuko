@@ -338,6 +338,11 @@ func (s *session) wrapOptions(options process.Options) process.Options {
 		devenvArgs = append(devenvArgs, "--profile", profile)
 	}
 	devenvArgs = append(devenvArgs, "shell", "--")
+	if options.Dir != s.root {
+		// devenv shell has to start in the project root to find its configuration, so the
+		// step's own working directory is entered inside the shell.
+		devenvArgs = append(devenvArgs, "sh", "-c", `cd -- "$1" && shift && exec "$@"`, "sh", options.Dir)
+	}
 	devenvArgs = append(devenvArgs, commandArgs...)
 	options.Command = "devenv"
 	options.Args = devenvArgs
