@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 )
 
 const maxArchiveBytes int64 = 128 << 20
@@ -324,10 +325,23 @@ func parseGitHub(source string) (owner, repo, ref, manifestPath string, err erro
 	return parts[0], parts[1], ref, manifestPath, err
 }
 
+// transientError marks a download failure that says nothing about the plugin itself, such as a
+// dropped connection or a server error, so the manager does not remember it for the rest of
+// the run and a later load can try again.
+type transientError struct{ err error }
+
+func (failure transientError) Error() string { return failure.err.Error() }
+func (failure transientError) Unwrap() error { return failure.err }
+
 func download(ctx context.Context, address string, client *http.Client, origin string) ([]byte, error) {
 	safeAddress := safeHTTPSAddress(address)
 	if client == nil {
-		client = &http.Client{CheckRedirect: func(request *http.Request, via []*http.Request) error {
+		// The body may be a large archive, so only the connection setup and the wait for
+		// response headers are bounded; the run's context bounds the transfer itself.
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.TLSHandshakeTimeout = 30 * time.Second
+		transport.ResponseHeaderTimeout = 30 * time.Second
+		client = &http.Client{Transport: transport, CheckRedirect: func(request *http.Request, via []*http.Request) error {
 			if request.URL.Scheme != "https" || request.URL.Host != origin {
 				return fmt.Errorf("plugin redirect left original origin")
 			}
@@ -345,16 +359,22 @@ func download(ctx context.Context, address string, client *http.Client, origin s
 	if err != nil {
 		var urlErr *url.Error
 		if errors.As(err, &urlErr) {
-			return nil, fmt.Errorf("downloading %s: %v", safeAddress, urlErr.Err)
+			// url.Error.Err carries no URL, so wrapping it keeps the address redacted while
+			// leaving context cancellation detectable.
+			err = urlErr.Err
 		}
-		return nil, fmt.Errorf("downloading %s: %w", safeAddress, err)
+		return nil, transientError{fmt.Errorf("downloading %s: %w", safeAddress, err)}
 	}
 	defer response.Body.Close()
 	if response.Request.URL.Scheme != "https" || response.Request.URL.Host != origin || response.Request.URL.User != nil {
 		return nil, fmt.Errorf("plugin redirect left original origin")
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, fmt.Errorf("downloading %s: %s", safeAddress, response.Status)
+		failure := fmt.Errorf("downloading %s: %s", safeAddress, response.Status)
+		if response.StatusCode >= 500 || response.StatusCode == http.StatusTooManyRequests {
+			return nil, transientError{failure}
+		}
+		return nil, failure
 	}
 	limited := io.LimitReader(response.Body, maxArchiveBytes+1)
 	data, err := io.ReadAll(limited)

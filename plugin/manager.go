@@ -440,9 +440,12 @@ func (m *Manager) load(ctx context.Context, namespace string) (*runningPlugin, e
 		m.mu.Lock()
 		switch {
 		case err != nil:
-			// Context errors are transient: a run canceled mid-download must not poison the
-			// namespace for the cleanup scope, which runs with cancellation stripped.
-			if !m.closed && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			// Context and transport errors are transient: a run canceled mid-download must not
+			// poison the namespace for the cleanup scope, which runs with cancellation stripped,
+			// and a dropped connection must not defeat a retry. A load overtaken by Reset
+			// belongs to a scope that is already gone.
+			var transient transientError
+			if !m.closed && m.generation == generation && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) && !errors.As(err, &transient) {
 				m.failures[namespace] = err
 			}
 		case m.closed || m.generation != generation:
