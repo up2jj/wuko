@@ -255,7 +255,7 @@ func TestRejectsOperationAfterTerminalResult(t *testing.T) {
 }
 
 func TestReferencesExposeCallbackLocals(t *testing.T) {
-	path, references, err := References(map[string]any{
+	declared, err := references(map[string]any{
 		"from": "steps.release.results",
 		"operations": []any{
 			map[string]any{"filter": "item.enabled && vars.ready"},
@@ -265,11 +265,12 @@ func TestReferencesExposeCallbackLocals(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if path != "steps.release.results" || len(references) != 2 {
-		t.Fatalf("path = %q, references = %#v", path, references)
+	if len(declared.Lookups) != 1 || declared.Lookups[0].Path != "steps.release.results" || len(declared.Expressions) != 2 {
+		t.Fatalf("references = %#v", declared)
 	}
-	if !reflect.DeepEqual(references[0].Locals, []string{"index", "item"}) || len(references[1].Locals) != 0 {
-		t.Fatalf("locals = %#v, %#v", references[0].Locals, references[1].Locals)
+	expressions := declared.Expressions
+	if !reflect.DeepEqual(expressions[0].Locals, []string{"index", "item"}) || len(expressions[1].Locals) != 0 {
+		t.Fatalf("locals = %#v, %#v", expressions[0].Locals, expressions[1].Locals)
 	}
 }
 

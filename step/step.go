@@ -430,6 +430,32 @@ type Registration struct {
 	// consulted with that step's own raw configuration; Outputs stands for callers that
 	// have none, and must remain the union of everything ConfigOutputs can return.
 	ConfigOutputs func(raw map[string]any) OutputSchema
+	// References reports what a configuration reads from workflow state, so validation can
+	// reject a reference to an unknown step, variable or input before anything runs. Steps
+	// whose fields are only ordinary templates need none; the engine checks those itself.
+	References func(raw map[string]any) (References, error)
+}
+
+// References lists the workflow state a step configuration reads outside its templates.
+type References struct {
+	// Lookups are dotted paths into the workflow state, such as "steps.fetch.body".
+	Lookups []LookupReference
+	// Expressions are Expr sources evaluated against the workflow state.
+	Expressions []ExpressionReference
+}
+
+// LookupReference is one dotted state path and the field it was configured in.
+type LookupReference struct {
+	Label string
+	Path  string
+}
+
+// ExpressionReference is one Expr source and the names the step binds around it, which are
+// local to the expression rather than workflow state.
+type ExpressionReference struct {
+	Label  string
+	Source string
+	Locals []string
 }
 
 // OutputSchemaResolver resolves optional schemas for dynamically provided step
@@ -524,6 +550,20 @@ func (r *Registry) OutputSchemaForConfig(ctx context.Context, name string, raw m
 		}
 	}
 	return r.OutputSchema(ctx, name)
+}
+
+// References reports what one registered step's configuration reads from workflow state. The
+// bool is false for a step that declares nothing beyond its templates.
+func (r *Registry) References(name string, raw map[string]any) (References, bool, error) {
+	if r == nil {
+		return References{}, false, nil
+	}
+	definition, ok := r.definitions[name]
+	if !ok || definition.References == nil {
+		return References{}, false, nil
+	}
+	references, err := definition.References(raw)
+	return references, true, err
 }
 
 // Definitions returns a copy for contract tests and documentation tooling.

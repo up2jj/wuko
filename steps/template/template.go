@@ -5,8 +5,10 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -53,6 +55,7 @@ func Register(registry *step.Registry) error {
 		Builder:       New,
 		Outputs:       step.ClosedOutputs("content", "path", "size", "mode", "created"),
 		ConfigOutputs: configOutputs,
+		References:    references,
 	})
 }
 
@@ -232,20 +235,21 @@ func compileExpression(name, text string) (*vm.Program, error) {
 	return program, nil
 }
 
-// Expressions returns the typed data expressions declared by one template step.
-func Expressions(raw map[string]any) map[string]string {
+// references reports the expressions bound by data, so workflow validation can check what they
+// read before the step runs.
+func references(raw map[string]any) (step.References, error) {
 	data, _ := raw["data"].(map[string]any)
-	result := make(map[string]string)
-	for name, value := range data {
-		binding, ok := value.(map[string]any)
+	var result step.References
+	for _, name := range slices.Sorted(maps.Keys(data)) {
+		binding, ok := data[name].(map[string]any)
 		if !ok || len(binding) != 1 {
 			continue
 		}
 		if source, ok := binding["expr"].(string); ok {
-			result[name] = source
+			result.Expressions = append(result.Expressions, step.ExpressionReference{Label: fmt.Sprintf("data %q expr", name), Source: source})
 		}
 	}
-	return result
+	return result, nil
 }
 
 // program returns the compiled expression bound to one data name, compiling text that was

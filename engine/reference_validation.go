@@ -12,8 +12,6 @@ import (
 	"github.com/expr-lang/expr/parser"
 	"github.com/up2jj/wuko/provider"
 	"github.com/up2jj/wuko/step"
-	templatestep "github.com/up2jj/wuko/steps/template"
-	transformstep "github.com/up2jj/wuko/steps/transform"
 	"github.com/up2jj/wuko/validation"
 	"github.com/up2jj/wuko/workflow"
 )
@@ -37,6 +35,7 @@ type deferredReferences struct {
 }
 
 type referenceValidator struct {
+	registry        *step.Registry
 	definition      *workflow.Definition
 	renderer        *workflow.Renderer
 	initial         *referenceScope
@@ -69,7 +68,7 @@ func (e *Engine) validateDataReferences(ctx context.Context, definition *workflo
 		return err
 	}
 	validator := &referenceValidator{
-		definition: definition, renderer: options.renderer,
+		registry: e.registry, definition: definition, renderer: options.renderer,
 		actions: make(map[*workflow.Action]struct{}), controls: e.backgroundControls,
 		templateRoots: maps.Clone(baseTemplateRoots), expressionRoots: maps.Clone(baseExpressionRoots),
 	}
@@ -1054,7 +1053,7 @@ func (validator *referenceValidator) validateAction(action *workflow.Action, cal
 	inner.InheritSecretSession(validator.definition)
 	inner.InheritHelpers(validator.definition)
 	child := &referenceValidator{
-		definition: inner, renderer: renderer, initial: scope, actions: validator.actions,
+		registry: validator.registry, definition: inner, renderer: renderer, initial: scope, actions: validator.actions,
 		controls: validator.controls, templateRoots: validator.templateRoots, expressionRoots: validator.expressionRoots,
 	}
 	if err := child.validateNamedTemplates(); err != nil {
@@ -1092,16 +1091,13 @@ func (validator *referenceValidator) validateStepConfiguration(stepID, stepType 
 	if err := validator.validateTemplateValue("with", raw, scope, rawSourceStep(stepType)); err != nil {
 		return err
 	}
+	if err := validator.validateDeclaredReferences(stepType, raw, scope); err != nil {
+		return err
+	}
 	switch stepType {
 	case "assert", "set":
 		return validator.validateRawExpression("expr", raw, "expr", scope)
 	case "template":
-		expressions := templatestep.Expressions(raw)
-		for _, name := range slices.Sorted(maps.Keys(expressions)) {
-			if err := validator.validateExpression(fmt.Sprintf("data %q expr", name), expressions[name], scope); err != nil {
-				return err
-			}
-		}
 		// The step binds its parameters below .data, which at render time is copied over the
 		// ordinary roots and helpers. A workflow that already provides one named data would
 		// have it silently shadowed inside every template this step renders.
@@ -1120,26 +1116,6 @@ func (validator *referenceValidator) validateStepConfiguration(stepID, stepType 
 		// An inline source is a body read once, not a configuration value repeated across
 		// steps, so it is walked without being retained in the renderer's cache.
 		return validator.validateTemplateWithRoots("source", source, locals, roots, false)
-	case "transform":
-		path, references, err := transformstep.References(raw)
-		if err != nil {
-			return err
-		}
-		if path != "" {
-			if err := validator.validateLookup("from", path, scope); err != nil {
-				return err
-			}
-		}
-		for _, reference := range references {
-			locals := scope.clone()
-			for _, name := range reference.Locals {
-				locals.roots[name] = openReference
-			}
-			if err := validator.validateExpression(reference.Label, reference.Source, locals); err != nil {
-				return err
-			}
-		}
-		return nil
 	case "key_value":
 		locals := scope.clone()
 		locals.roots["current"] = openReference
@@ -1187,6 +1163,33 @@ func (validator *referenceValidator) validateStepConfiguration(stepID, stepType 
 		}
 	case "extract", "decode", "jsonpath", "table":
 		return validator.validateLookup("from", stringValue(raw, "from"), scope)
+	}
+	return nil
+}
+
+// validateDeclaredReferences checks the state a step reports reading through its registration,
+// which is how a step keeps its own configuration grammar out of the engine.
+func (validator *referenceValidator) validateDeclaredReferences(stepType string, raw map[string]any, scope *referenceScope) error {
+	references, declared, err := validator.registry.References(stepType, raw)
+	if err != nil || !declared {
+		return err
+	}
+	for _, lookup := range references.Lookups {
+		if err := validator.validateLookup(lookup.Label, lookup.Path, scope); err != nil {
+			return err
+		}
+	}
+	for _, reference := range references.Expressions {
+		locals := scope
+		if len(reference.Locals) > 0 {
+			locals = scope.clone()
+			for _, name := range reference.Locals {
+				locals.roots[name] = openReference
+			}
+		}
+		if err := validator.validateExpression(reference.Label, reference.Source, locals); err != nil {
+			return err
+		}
 	}
 	return nil
 }

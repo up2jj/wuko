@@ -132,34 +132,26 @@ type Runner struct {
 	operations    []operation
 }
 
-// ExpressionReference describes one transform expression and the callback-local
-// names that should be excluded from workflow reference validation.
-type ExpressionReference struct {
-	Label  string
-	Source string
-	Locals []string
-}
-
-// References decodes a transform configuration into its dotted source and Expr
-// references. The engine uses this to validate workflow data dependencies without
-// duplicating transform's operation grammar.
-func References(raw map[string]any) (string, []ExpressionReference, error) {
+// references decodes a configuration into its dotted source and Expr references, with the
+// callback-local names each expression binds, so workflow validation can check them without
+// duplicating the operation grammar.
+func references(raw map[string]any) (step.References, error) {
 	var config config
 	if err := step.DecodeConfig(raw, &config); err != nil {
-		return "", nil, err
+		return step.References{}, err
 	}
-	references := make([]ExpressionReference, 0)
+	expressions := make([]step.ExpressionReference, 0)
 	if config.From.expr != "" {
-		references = append(references, ExpressionReference{Label: "from.expr", Source: config.From.expr})
+		expressions = append(expressions, step.ExpressionReference{Label: "from.expr", Source: config.From.expr})
 	}
 	for index, rawOperation := range config.Operations {
 		operation, err := parseOperation(index, rawOperation)
 		if err != nil {
-			return "", nil, err
+			return step.References{}, err
 		}
 		for _, name := range slices.Sorted(maps.Keys(operation.expressions)) {
 			expression := operation.expressions[name]
-			references = append(references, ExpressionReference{
+			expressions = append(expressions, step.ExpressionReference{
 				Label:  fmt.Sprintf("operation %d (%s) %s", index+1, operation.name, name),
 				Source: expression.source,
 				Locals: slices.Clone(expression.locals),
@@ -167,7 +159,7 @@ func References(raw map[string]any) (string, []ExpressionReference, error) {
 		}
 		for _, name := range slices.Sorted(maps.Keys(operation.operands)) {
 			if expression := operation.operands[name].expression; expression != nil {
-				references = append(references, ExpressionReference{
+				expressions = append(expressions, step.ExpressionReference{
 					Label:  fmt.Sprintf("operation %d (%s) %s", index+1, operation.name, expression.label),
 					Source: expression.source,
 				})
@@ -175,20 +167,25 @@ func References(raw map[string]any) (string, []ExpressionReference, error) {
 		}
 		for operandIndex, operand := range operation.operandList {
 			if operand.expression != nil {
-				references = append(references, ExpressionReference{
+				expressions = append(expressions, step.ExpressionReference{
 					Label:  fmt.Sprintf("operation %d (%s) with[%d]", index+1, operation.name, operandIndex),
 					Source: operand.expression.source,
 				})
 			}
 		}
 	}
-	return config.From.path, references, nil
+	result := step.References{Expressions: expressions}
+	if config.From.path != "" {
+		result.Lookups = []step.LookupReference{{Label: "from", Path: config.From.path}}
+	}
+	return result, nil
 }
 
 func Register(registry *step.Registry) error {
 	return registry.RegisterDefinition("transform", step.Registration{
-		Builder: New,
-		Outputs: step.ClosedObject(map[string]step.OutputSchema{"value": step.OpenObject()}),
+		Builder:    New,
+		Outputs:    step.ClosedObject(map[string]step.OutputSchema{"value": step.OpenObject()}),
+		References: references,
 	})
 }
 
