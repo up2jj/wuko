@@ -152,17 +152,8 @@ func syncMarketplacePublicationDirectories(files []marketplacePublicationFile) e
 		directories[filepath.Dir(file.target)] = struct{}{}
 	}
 	for _, directory := range slices.Sorted(maps.Keys(directories)) {
-		handle, err := os.Open(directory)
-		if err != nil {
-			return fmt.Errorf("opening marketplace publication directory %s: %w", directory, err)
-		}
-		syncErr := handle.Sync()
-		closeErr := handle.Close()
-		if syncErr != nil {
-			return fmt.Errorf("syncing marketplace publication directory %s: %w", directory, syncErr)
-		}
-		if closeErr != nil {
-			return fmt.Errorf("closing marketplace publication directory %s: %w", directory, closeErr)
+		if err := fsutil.SyncDirectory(directory); err != nil {
+			return fmt.Errorf("syncing marketplace publication: %w", err)
 		}
 	}
 	return nil

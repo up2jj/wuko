@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/up2jj/wuko/internal/fsutil"
 	"github.com/up2jj/wuko/process"
 )
 
@@ -164,15 +165,7 @@ func (LocalFileSystem) WriteFile(ctx context.Context, path string, data []byte, 
 			return fmt.Errorf("removing temporary file for %s: %w", path, err)
 		}
 	}
-	handle, err := os.Open(directory)
-	if err != nil {
-		return fmt.Errorf("opening %s: %w", directory, err)
-	}
-	defer handle.Close()
-	if err := handle.Sync(); err != nil {
-		return fmt.Errorf("syncing %s: %w", directory, err)
-	}
-	return nil
+	return fsutil.SyncDirectory(directory)
 }
 
 // MkdirAll chmods the leaf after creating it, because MkdirAll applies the process umask

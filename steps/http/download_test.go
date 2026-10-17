@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync/atomic"
-	"syscall"
 	"testing"
 
 	"github.com/up2jj/wuko/step"
@@ -229,14 +228,5 @@ func TestDirectorySyncToleratesOnlyUnsupportedFilesystems(t *testing.T) {
 	if err := syncDirectory(filepath.Join(t.TempDir(), "missing")); err == nil {
 		t.Fatal("syncing a missing directory reported no error")
 	}
-	// A filesystem that cannot sync a directory must not fail a download whose file
-	// is already installed, since a retry would only report the destination exists.
-	for _, unsupported := range []error{syscall.EINVAL, syscall.ENOTSUP, syscall.ENOSYS} {
-		if !directorySyncUnsupported(fmt.Errorf("syncing directory: %w", unsupported)) {
-			t.Errorf("%v is not treated as unsupported", unsupported)
-		}
-	}
-	if directorySyncUnsupported(syscall.EIO) {
-		t.Error("a real I/O error must still fail the write")
-	}
+	// Which errors count as an unsupported filesystem is covered by internal/fsutil.
 }

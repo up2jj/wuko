@@ -7,7 +7,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"syscall"
+
+	"github.com/up2jj/wuko/internal/fsutil"
 )
 
 type downloadTarget struct {
@@ -131,23 +132,6 @@ func installDownload(source, destination string, overwrite bool) error {
 	return renameDownloadNoReplace(source, destination)
 }
 
-// syncDirectory flushes a directory entry so a rename into it survives a crash.
-// Filesystems that cannot do this -- several network ones -- report it rather than
-// silently skipping it, and refusing something the filesystem never offered is not
-// a durability failure. Treating it as one would fail a step whose file is already
-// installed, which a retry cannot then repeat: the destination now exists.
 func syncDirectory(path string) error {
-	directory, err := os.Open(path)
-	if err != nil {
-		return fmt.Errorf("opening directory %s: %w", path, err)
-	}
-	defer directory.Close()
-	if err := directory.Sync(); err != nil && !directorySyncUnsupported(err) {
-		return fmt.Errorf("syncing directory %s: %w", path, err)
-	}
-	return nil
-}
-
-func directorySyncUnsupported(err error) bool {
-	return errors.Is(err, syscall.EINVAL) || errors.Is(err, syscall.ENOTSUP) || errors.Is(err, syscall.ENOSYS)
+	return fsutil.SyncDirectory(path)
 }

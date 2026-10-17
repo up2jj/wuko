@@ -40,13 +40,5 @@ func WriteFileAtomic(path string, data []byte, perm os.FileMode) (resultErr erro
 		return fmt.Errorf("replacing %s: %w", path, err)
 	}
 	renamed = true
-	dir, err := os.Open(directory)
-	if err != nil {
-		return fmt.Errorf("opening directory of %s: %w", path, err)
-	}
-	defer dir.Close()
-	if err := dir.Sync(); err != nil {
-		return fmt.Errorf("syncing directory of %s: %w", path, err)
-	}
-	return nil
+	return SyncDirectory(directory)
 }

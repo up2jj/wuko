@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/up2jj/wuko/engine"
+	"github.com/up2jj/wuko/internal/fsutil"
 	"github.com/up2jj/wuko/marketplace"
 	"github.com/up2jj/wuko/provider"
 	"github.com/up2jj/wuko/tui"
@@ -715,15 +716,7 @@ func replaceWorkflowFile(stage, target string) error {
 	if err := os.Rename(stage, target); err != nil {
 		return err
 	}
-	directory, err := os.Open(filepath.Dir(target))
-	if err != nil {
-		return fmt.Errorf("opening workflow directory: %w", err)
-	}
-	defer directory.Close()
-	if err := directory.Sync(); err != nil {
-		return fmt.Errorf("syncing workflow directory: %w", err)
-	}
-	return nil
+	return fsutil.SyncDirectory(filepath.Dir(target))
 }
 
 func lifecycleEngineOptions(command *cobra.Command, deps dependencies, definition *workflow.Definition, vars map[string]any, env, baseEnv map[string]string, environmentLoaders []string, providers provider.Set, runDir, configDir string, elevationAllowed bool) engine.Options {

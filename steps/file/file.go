@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/up2jj/wuko/executor"
+	"github.com/up2jj/wuko/internal/fsutil"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -632,15 +633,7 @@ func atomicWrite(ctx context.Context, destination string, source io.Reader, mode
 }
 
 func syncDirectory(path string) error {
-	dir, err := os.Open(path)
-	if err != nil {
-		return fmt.Errorf("opening destination directory: %w", err)
-	}
-	defer dir.Close()
-	if err := dir.Sync(); err != nil {
-		return fmt.Errorf("syncing destination directory: %w", err)
-	}
-	return nil
+	return fsutil.SyncDirectory(path)
 }
 
 func renamePath(source, destination string, overwrite bool) error {
