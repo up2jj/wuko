@@ -20,7 +20,14 @@ const releaseDirectory = ".wuko-release"
 type releaseStore struct {
 	config    Config
 	freshMu   sync.Mutex
-	freshPins map[string]string
+	freshPins map[string]*freshResolution
+}
+
+// freshResolution lets concurrent callers share one manifest fetch per source.
+type freshResolution struct {
+	done chan struct{}
+	pin  string
+	err  error
 }
 
 func (s *releaseStore) root() (string, error) {
@@ -111,21 +118,50 @@ func writeRelease(directory string, release Release) error {
 }
 
 // fresh fetches a manifest once per invocation, even when its archive is cached.
+// Callers for the same source share that fetch so they agree on one release, while
+// unrelated sources resolve in parallel. Failed fetches are not remembered.
 func (s *releaseStore) fresh(ctx context.Context, namespace, source string) (Release, error) {
-	s.freshMu.Lock()
-	defer s.freshMu.Unlock()
 	key := namespace + "\x00" + source
-	if pin := s.freshPins[key]; pin != "" {
-		return s.pinned(ctx, namespace, source, pin)
-	}
-	release, err := s.obtain(ctx, namespace, source, "")
-	if err == nil {
-		if s.freshPins == nil {
-			s.freshPins = make(map[string]string)
+	for {
+		s.freshMu.Lock()
+		entry, shared := s.freshPins[key]
+		if !shared {
+			entry = &freshResolution{done: make(chan struct{})}
+			if s.freshPins == nil {
+				s.freshPins = make(map[string]*freshResolution)
+			}
+			s.freshPins[key] = entry
 		}
-		s.freshPins[key] = release.ManifestDigest
+		s.freshMu.Unlock()
+		if !shared {
+			return s.resolveFresh(ctx, key, namespace, source, entry)
+		}
+		select {
+		case <-entry.done:
+		case <-ctx.Done():
+			return Release{}, ctx.Err()
+		}
+		if entry.err == nil {
+			return s.pinned(ctx, namespace, source, entry.pin)
+		}
 	}
-	return release, err
+}
+
+func (s *releaseStore) resolveFresh(ctx context.Context, key, namespace, source string, entry *freshResolution) (release Release, err error) {
+	defer func() {
+		if err == nil {
+			entry.pin = release.ManifestDigest
+		} else {
+			entry.err = err
+			s.freshMu.Lock()
+			if s.freshPins[key] == entry {
+				delete(s.freshPins, key)
+			}
+			s.freshMu.Unlock()
+		}
+		close(entry.done)
+	}()
+	return s.obtain(ctx, namespace, source, "")
 }
 
 func (s *releaseStore) reset() {

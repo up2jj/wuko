@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/up2jj/wuko/internal/filelock"
 	"github.com/up2jj/wuko/workflow"
@@ -647,5 +648,102 @@ func TestLockedResolutionDoesNotTakeDirectoryLock(t *testing.T) {
 	}
 	if _, err := os.Stat(lockGuard); !os.IsNotExist(err) {
 		t.Fatalf("locked resolution created %s: %v", lockGuard, err)
+	}
+}
+
+// stallingTransport holds requests for one path until released, honoring cancellation.
+type stallingTransport struct {
+	inner   http.RoundTripper
+	path    string
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (s *stallingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.URL.Path == s.path {
+		select {
+		case s.entered <- struct{}{}:
+		default:
+		}
+		select {
+		case <-s.release:
+		case <-req.Context().Done():
+			return nil, req.Context().Err()
+		}
+	}
+	return s.inner.RoundTrip(req)
+}
+
+func TestFreshResolutionDoesNotSerializeUnrelatedSources(t *testing.T) {
+	acmeManifest, acmeArchive := releaseBytes(t, "acme", "1")
+	slowManifest, slowArchive := releaseBytes(t, "slow", "1")
+	transport := transportFor(acmeManifest, acmeArchive)
+	transport.bodies["/slow/plugin.json"] = slowManifest
+	transport.bodies["/slow/plugin.tar.gz"] = slowArchive
+	stalling := &stallingTransport{inner: transport, path: "/slow/plugin.json", entered: make(chan struct{}, 1), release: make(chan struct{})}
+	cache := t.TempDir()
+	store := &releaseStore{config: Config{CacheDir: func() (string, error) { return cache, nil }, HTTPClient: &http.Client{Transport: stalling}}}
+
+	const slowSource = "https://plugins.test/slow/plugin.json"
+	results := make(chan error, 2)
+	for range 2 {
+		go func() {
+			_, err := store.fresh(t.Context(), "slow", slowSource)
+			results <- err
+		}()
+	}
+	<-stalling.entered
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	if _, err := store.fresh(ctx, "acme", "https://plugins.test/plugin.json"); err != nil {
+		t.Fatalf("unrelated source waited on a stalled fetch: %v", err)
+	}
+	close(stalling.release)
+	for range 2 {
+		if err := <-results; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if count := transport.count("/slow/plugin.json"); count != 1 {
+		t.Fatalf("shared source manifest fetched %d times, want 1", count)
+	}
+}
+
+func TestFreshResolutionRetriesAfterFailure(t *testing.T) {
+	manifest, archive := releaseBytes(t, "acme", "1")
+	transport := &releaseTransport{bodies: map[string][]byte{}, counts: make(map[string]int)}
+	manager := resolutionManager(t, t.TempDir(), transport)
+	if _, err := manager.store.fresh(t.Context(), "acme", "https://plugins.test/plugin.json"); err == nil {
+		t.Fatal("expected unavailable source to fail")
+	}
+	transport.replace(map[string][]byte{"/plugin.json": manifest, "/plugin.tar.gz": archive})
+	release, err := manager.store.fresh(t.Context(), "acme", "https://plugins.test/plugin.json")
+	if err != nil {
+		t.Fatalf("failed fetch was remembered: %v", err)
+	}
+	if release.ManifestDigest != digest(manifest) {
+		t.Fatalf("pin = %s, want %s", release.ManifestDigest, digest(manifest))
+	}
+}
+
+func TestFreshResolutionWaiterHonorsCancellation(t *testing.T) {
+	manifest, archive := releaseBytes(t, "acme", "1")
+	stalling := &stallingTransport{inner: transportFor(manifest, archive), path: "/plugin.json", entered: make(chan struct{}, 1), release: make(chan struct{})}
+	cache := t.TempDir()
+	store := &releaseStore{config: Config{CacheDir: func() (string, error) { return cache, nil }, HTTPClient: &http.Client{Transport: stalling}}}
+	leader := make(chan error, 1)
+	go func() {
+		_, err := store.fresh(t.Context(), "acme", "https://plugins.test/plugin.json")
+		leader <- err
+	}()
+	<-stalling.entered
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := store.fresh(ctx, "acme", "https://plugins.test/plugin.json"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("waiter error = %v, want context.Canceled", err)
+	}
+	close(stalling.release)
+	if err := <-leader; err != nil {
+		t.Fatal(err)
 	}
 }
