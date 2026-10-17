@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/up2jj/wuko/control"
+	"github.com/up2jj/wuko/process"
 )
 
 const maxFrameSize = 10 << 20
@@ -136,7 +137,10 @@ type eventFrame struct {
 }
 
 type client struct {
-	cmd     *exec.Cmd
+	cmd *exec.Cmd
+	// untrack releases the plugin's process group from the forced-shutdown sweep once the
+	// plugin has been reaped. It is nil for clients built without launching a process.
+	untrack func()
 	stdin   io.WriteCloser
 	writeMu sync.Mutex
 	mu      sync.Mutex
@@ -172,6 +176,7 @@ func launch(ctx context.Context, path string, stderr io.Writer) (*client, error)
 		return nil, fmt.Errorf("launching plugin: %w", err)
 	}
 	c := newClient(cmd, stdin)
+	c.untrack = process.TrackGroup(cmd.Process.Pid)
 	go c.read(stdout)
 	return c, nil
 }
@@ -560,6 +565,10 @@ func (c *client) notify(method string, params any) {
 }
 
 func (c *client) close(ctx context.Context) error {
+	if c.untrack != nil {
+		// Deferred so it runs only after the plugin has been waited on.
+		defer c.untrack()
+	}
 	var result any
 	shutdownErr := c.call(ctx, "shutdown", map[string]any{}, &result, nil)
 	_ = c.stdin.Close()

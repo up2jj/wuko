@@ -185,8 +185,10 @@ func executeWithSignals(signals <-chan os.Signal, gracePeriod time.Duration, exe
 	case err := <-done:
 		return err
 	case received := <-signals:
+		process.KillTrackedGroups()
 		return fmt.Errorf("%w after receiving %s during graceful shutdown", ErrForcedShutdown, received)
 	case <-timer.C:
+		process.KillTrackedGroups()
 		return fmt.Errorf("%w after graceful shutdown exceeded %s", ErrForcedShutdown, gracePeriod)
 	}
 }

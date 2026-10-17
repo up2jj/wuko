@@ -163,6 +163,7 @@ func (LocalExecutor) Run(ctx context.Context, options Options) (Result, error) {
 	}
 	stdoutPipe.started()
 	stderrPipe.started()
+	defer TrackGroup(command.Process.Pid)()
 	if options.Started != nil {
 		options.Started()
 	}
@@ -230,6 +231,8 @@ func runTTY(ctx context.Context, options Options, credential *syscall.Credential
 		}
 		return Result{}, fmt.Errorf("starting %s with TTY: %w", options.Command, err)
 	}
+	// Setsid makes the child the leader of a new session and process group.
+	defer TrackGroup(command.Process.Pid)()
 	if options.Started != nil {
 		options.Started()
 	}
