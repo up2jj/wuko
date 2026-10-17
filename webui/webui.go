@@ -15,6 +15,8 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -303,6 +305,7 @@ func (s *session) submit(response http.ResponseWriter, request *http.Request) {
 	if len(fieldErrs) > 0 {
 		s.fieldErrs = fieldErrs
 		data := s.pageDataLocked()
+		data.Fields, data.Raw = resubmittedFields(s.fields, values, fieldErrs, request.PostForm)
 		s.mu.Unlock()
 		response.Header().Set("Content-Type", "text/html; charset=utf-8")
 		response.WriteHeader(http.StatusUnprocessableEntity)
@@ -370,11 +373,36 @@ type pageData struct {
 	Title, Description string
 	Phase              phase
 	Fields             []form.ResolvedField
-	Errors             map[string]string
-	CSRF               string
-	ResultTitle        string
-	ResultHTML         template.HTML
-	Result             Result
+	// Raw holds the text submitted for fields that failed validation, keyed by variable, so a
+	// rejected page shows what was typed rather than a value that could not be parsed.
+	Raw         map[string]string
+	Errors      map[string]string
+	CSRF        string
+	ResultTitle string
+	ResultHTML  template.HTML
+	Result      Result
+}
+
+// resubmittedFields prepares a rejected submission for display: accepted fields show their
+// submitted value and rejected ones their raw text. Secrets are never echoed back. The frozen
+// fields are copied, not changed, so the next submission is validated against the originals.
+func resubmittedFields(fields []form.ResolvedField, values map[string]any, fieldErrs map[string]string, posted url.Values) ([]form.ResolvedField, map[string]string) {
+	shown := slices.Clone(fields)
+	raw := make(map[string]string)
+	for index := range shown {
+		field := &shown[index]
+		if field.Secret {
+			continue
+		}
+		if value, ok := values[field.Variable]; ok {
+			field.Value = value
+			continue
+		}
+		if _, rejected := fieldErrs[field.Variable]; rejected && len(field.Options) == 0 && field.Type != form.TypeBoolean {
+			raw[field.Variable] = posted.Get("field_" + strconv.Itoa(index))
+		}
+	}
+	return shown, raw
 }
 
 func (s *session) pageDataLocked() pageData {
@@ -468,8 +496,14 @@ func appScript(response http.ResponseWriter, _ *http.Request) {
 var pageTemplate = template.Must(template.New("page").Funcs(template.FuncMap{
 	"fieldName":  func(index int) string { return "field_" + fmt.Sprint(index) },
 	"fieldError": func(errors map[string]string, variable string) string { return errors[variable] },
-	"stringValue": func(field form.ResolvedField) string {
-		if field.Secret || field.Value == nil {
+	"stringValue": func(raw map[string]string, field form.ResolvedField) string {
+		if field.Secret {
+			return ""
+		}
+		if text, ok := raw[field.Variable]; ok {
+			return text
+		}
+		if field.Value == nil {
 			return ""
 		}
 		if field.Type == form.TypeArray || field.Type == form.TypeObject {
@@ -505,9 +539,9 @@ const pageHTML = `<!doctype html>
 {{range $index,$field := .Fields}}<div class="field"><label for="{{fieldName $index}}">{{$field.Label}}{{if $field.Required}} *{{end}}</label>{{if $field.Description}}<div class="description">{{$field.Description}}</div>{{end}}
 {{if $field.Options}}{{if eq $field.Type "array"}}{{range $choiceIndex,$choice := $field.Options}}<label class="choice"><input type="checkbox" name="{{fieldName $index}}" value="{{$choiceIndex}}" {{if selected $field $choice}}checked{{end}} {{if $choice.Disabled}}disabled{{end}}> <span>{{$choice.Label}}{{if $choice.Description}} — {{$choice.Description}}{{end}}{{if $choice.Disabled}} ({{$choice.Reason}}){{end}}</span></label>{{end}}{{else}}<select id="{{fieldName $index}}" name="{{fieldName $index}}"><option value="">Select…</option>{{range $choiceIndex,$choice := $field.Options}}<option value="{{$choiceIndex}}" {{if selected $field $choice}}selected{{end}} {{if $choice.Disabled}}disabled{{end}}>{{$choice.Label}}{{if $choice.Description}} — {{$choice.Description}}{{end}}</option>{{end}}</select>{{end}}
 {{else if eq $field.Type "boolean"}}<label class="choice"><input id="{{fieldName $index}}" type="checkbox" name="{{fieldName $index}}" value="true" {{if checked $field}}checked{{end}}> <span>{{$field.Label}}</span></label>
-{{else if eq $field.Type "number"}}<input id="{{fieldName $index}}" type="number" step="any" name="{{fieldName $index}}" value="{{stringValue $field}}">
-{{else if or (eq $field.Type "array") (eq $field.Type "object")}}<textarea id="{{fieldName $index}}" name="{{fieldName $index}}">{{stringValue $field}}</textarea>
-{{else}}<input id="{{fieldName $index}}" type="{{if $field.Secret}}password{{else}}text{{end}}" name="{{fieldName $index}}" value="{{stringValue $field}}">{{end}}
+{{else if eq $field.Type "number"}}<input id="{{fieldName $index}}" type="number" step="any" name="{{fieldName $index}}" value="{{stringValue $.Raw $field}}">
+{{else if or (eq $field.Type "array") (eq $field.Type "object")}}<textarea id="{{fieldName $index}}" name="{{fieldName $index}}">{{stringValue $.Raw $field}}</textarea>
+{{else}}<input id="{{fieldName $index}}" type="{{if $field.Secret}}password{{else}}text{{end}}" name="{{fieldName $index}}" value="{{stringValue $.Raw $field}}">{{end}}
 {{with fieldError $.Errors $field.Variable}}<div class="error">{{.}}</div>{{end}}</div>{{end}}<button type="submit">Run workflow</button></form>
 {{else}}<h2>{{.ResultTitle}}</h2><div>{{.ResultHTML}}</div><p class="muted">Status: {{.Result.Status}} · {{.Result.Duration}}</p>{{end}}</section></main>
 {{if or (eq .Phase "loading") (eq .Phase "running")}}<script src="app.js"></script>{{end}}

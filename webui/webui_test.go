@@ -189,3 +189,33 @@ func TestRunWaitsForExecutionWorkerAfterCancellation(t *testing.T) {
 		t.Fatalf("Run() error = %v, want context.Canceled", err)
 	}
 }
+
+// A rejected submission must come back with what the user typed, not reset to the defaults.
+func TestRejectedSubmissionKeepsEnteredValues(t *testing.T) {
+	fields := []form.ResolvedField{
+		{Field: form.Field{Variable: "name", Label: "Name", Type: form.TypeString}, Value: "default"},
+		{Field: form.Field{Variable: "replicas", Label: "Replicas", Type: form.TypeNumber}, Value: 1},
+		{Field: form.Field{Variable: "token", Label: "Token", Type: form.TypeString, Secret: true}},
+	}
+	posted := url.Values{"field_0": {"edited"}, "field_1": {"many"}, "field_2": {"hunter2"}}
+	values, fieldErrs := form.Submit(fields, posted)
+	if len(fieldErrs) == 0 {
+		t.Fatal("the invalid number was accepted")
+	}
+	shown, raw := resubmittedFields(fields, values, fieldErrs, posted)
+	var page strings.Builder
+	if err := pageTemplate.Execute(&page, pageData{Phase: phaseReady, Fields: shown, Raw: raw, Errors: fieldErrs}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`value="edited"`, `value="many"`} {
+		if !strings.Contains(page.String(), want) {
+			t.Errorf("page does not keep %s", want)
+		}
+	}
+	if strings.Contains(page.String(), "hunter2") {
+		t.Error("page echoed a secret back")
+	}
+	if fields[0].Value != "default" {
+		t.Error("resubmission changed the frozen fields")
+	}
+}
