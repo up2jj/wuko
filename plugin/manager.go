@@ -8,7 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"maps"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -247,7 +249,7 @@ func (m *Manager) ResolveExecutor(ctx context.Context, name string, raw map[stri
 	}
 	for _, declaration := range plugin.initialized.Executors {
 		if declaration.Type == name {
-			return &pluginExecutor{plugin: plugin, name: name, raw: raw, cancelStops: declaration.CancelStopsProcess}, nil
+			return &pluginExecutor{plugin: plugin, name: name, raw: raw, declaration: declaration}, nil
 		}
 	}
 	return nil, fmt.Errorf("plugin %q does not declare executor type %q", namespace, name)
@@ -1115,8 +1117,12 @@ type pluginExecutor struct {
 	plugin      *runningPlugin
 	name        string
 	raw         map[string]any
-	cancelStops bool
+	declaration executorDeclaration
 }
+
+// SupportsFileSystem reports whether the plugin declared the executor.fs.* methods, which the
+// engine requires before it lets file steps into the executor's scope.
+func (p *pluginExecutor) SupportsFileSystem() bool { return p.declaration.FileSystem }
 
 func (p *pluginExecutor) Validate(ctx context.Context, r executor.Request) error {
 	return p.plugin.client.call(ctx, "executor.validate", map[string]any{"type": p.name, "with": p.raw, "context": executorContext(r)}, &struct{}{}, nil)
@@ -1134,7 +1140,11 @@ func (p *pluginExecutor) Open(ctx context.Context, r executor.Request) (executor
 	if result.Session == "" {
 		return nil, fmt.Errorf("plugin returned an empty executor session")
 	}
-	return &pluginSession{plugin: p.plugin, id: result.Session, cancelStops: p.cancelStops}, nil
+	session := &pluginSession{plugin: p.plugin, id: result.Session, declaration: p.declaration}
+	if p.declaration.FileSystem {
+		return &fileSystemPluginSession{pluginSession: session}, nil
+	}
+	return session, nil
 }
 func executorContext(r executor.Request) map[string]any {
 	return map[string]any{"workflow_name": r.WorkflowName, "run_dir": r.RunDir, "env": r.Env}
@@ -1143,10 +1153,10 @@ func executorContext(r executor.Request) map[string]any {
 type pluginSession struct {
 	plugin      *runningPlugin
 	id          string
-	cancelStops bool
+	declaration executorDeclaration
 }
 
-func (s *pluginSession) CancelStopsProcess() bool { return s.cancelStops }
+func (s *pluginSession) CancelStopsProcess() bool { return s.declaration.CancelStopsProcess }
 func (s *pluginSession) Run(ctx context.Context, o process.Options) (process.Result, error) {
 	if o.TTY || o.Interactions != nil || o.Interact || o.StdinOutlivesProcess {
 		return process.Result{}, fmt.Errorf("plugin executors do not support TTY, interactions, or streaming stdin")
@@ -1228,3 +1238,67 @@ func (m *Manager) requireDeclaration(ctx context.Context, namespace string) erro
 	}
 	return nil
 }
+
+// fileSystemPluginSession is a session whose plugin declared filesystem access. It is a type of
+// its own because executor.FileSystemFor detects the capability by interface, and a session
+// that only failed every call would still be mistaken for one that has a filesystem.
+type fileSystemPluginSession struct{ *pluginSession }
+
+// maxFileFrameData bounds the file bytes one frame carries once base64-encoded, leaving room
+// for the rest of the frame.
+const maxFileFrameData = (maxFrameSize - 64<<10) / 4 * 3
+
+type fileInfoResult struct {
+	Size    int64  `json:"size"`
+	Mode    uint32 `json:"mode"`
+	ModTime string `json:"mod_time"`
+}
+
+func (s *fileSystemPluginSession) Stat(ctx context.Context, path string) (executor.FileInfo, error) {
+	var result fileInfoResult
+	if err := s.plugin.client.call(ctx, "executor.fs.stat", map[string]any{"session": s.id, "path": path}, &result, nil); err != nil {
+		return executor.FileInfo{}, err
+	}
+	info := executor.FileInfo{Size: result.Size, Mode: fs.FileMode(result.Mode)}
+	if result.ModTime != "" {
+		modified, err := time.Parse(time.RFC3339Nano, result.ModTime)
+		if err != nil {
+			return executor.FileInfo{}, fmt.Errorf("plugin returned an invalid modification time for %s: %w", path, err)
+		}
+		info.ModTime = modified
+	}
+	return info, nil
+}
+
+func (s *fileSystemPluginSession) ReadFile(ctx context.Context, path string, maximum int64) ([]byte, error) {
+	var result struct {
+		Data string `json:"data"`
+	}
+	if err := s.plugin.client.call(ctx, "executor.fs.read", map[string]any{"session": s.id, "path": path, "maximum": maximum}, &result, nil); err != nil {
+		return nil, err
+	}
+	data, err := base64.StdEncoding.DecodeString(result.Data)
+	if err != nil {
+		return nil, fmt.Errorf("plugin returned malformed contents for %s: %w", path, err)
+	}
+	// The bound is the caller's protection against an oversized file, so it holds even when
+	// the plugin ignored it.
+	if maximum > 0 && maximum < math.MaxInt64 && int64(len(data)) > maximum+1 {
+		data = data[:maximum+1]
+	}
+	return data, nil
+}
+
+func (s *fileSystemPluginSession) WriteFile(ctx context.Context, path string, data []byte, options executor.WriteOptions) error {
+	if len(data) > maxFileFrameData {
+		return fmt.Errorf("writing %s: %d bytes exceed the %d a plugin executor accepts in one write", path, len(data), maxFileFrameData)
+	}
+	params := map[string]any{"session": s.id, "path": path, "data": base64.StdEncoding.EncodeToString(data), "mode": uint32(options.Mode), "replace": options.Replace}
+	return s.plugin.client.call(ctx, "executor.fs.write", params, &struct{}{}, nil)
+}
+
+func (s *fileSystemPluginSession) MkdirAll(ctx context.Context, path string, mode fs.FileMode) error {
+	return s.plugin.client.call(ctx, "executor.fs.mkdir", map[string]any{"session": s.id, "path": path, "mode": uint32(mode)}, &struct{}{}, nil)
+}
+
+var _ executor.FileSystem = (*fileSystemPluginSession)(nil)

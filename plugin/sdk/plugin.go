@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
+	"math"
 	"regexp"
 	"slices"
 	"strings"
@@ -386,6 +388,8 @@ func (plugin *Plugin) dispatch(ctx context.Context, req wireRequest, peer *peer)
 		return plugin.callStep(ctx, req, peer)
 	case "executor.validate", "executor.open", "executor.run", "executor.close":
 		return plugin.callExecutor(ctx, req, peer)
+	case "executor.fs.stat", "executor.fs.read", "executor.fs.write", "executor.fs.mkdir":
+		return plugin.callExecutorFileSystem(ctx, req)
 	default:
 		return nil, Coded("method_not_found", fmt.Errorf("unknown method %q", req.Method))
 	}
@@ -535,6 +539,67 @@ func (plugin *Plugin) requiresV4Locked() string {
 		}
 	}
 	return ""
+}
+
+// maxFileFrameData bounds the file bytes a reply carries once base64-encoded, leaving room for
+// the rest of the frame.
+const maxFileFrameData = (maxProtocolFrame - 64<<10) / 4 * 3
+
+func (plugin *Plugin) callExecutorFileSystem(ctx context.Context, req wireRequest) (any, error) {
+	var params struct {
+		Session string `json:"session"`
+		Path    string `json:"path"`
+		Maximum int64  `json:"maximum"`
+		Data    string `json:"data"`
+		Mode    uint32 `json:"mode"`
+		Replace bool   `json:"replace"`
+	}
+	if err := decodeParams(req.Params, &params); err != nil {
+		return nil, err
+	}
+	plugin.mu.RLock()
+	session := plugin.sessions[params.Session]
+	plugin.mu.RUnlock()
+	if session == nil {
+		return nil, fmt.Errorf("unknown executor session %q", params.Session)
+	}
+	filesystem, ok := session.(ExecutorFileSystem)
+	if !ok {
+		return nil, fmt.Errorf("executor session %q does not implement ExecutorFileSystem", params.Session)
+	}
+	switch req.Method {
+	case "executor.fs.stat":
+		info, err := filesystem.Stat(ctx, params.Path)
+		if err != nil {
+			return nil, err
+		}
+		result := map[string]any{"size": info.Size, "mode": uint32(info.Mode)}
+		if !info.ModTime.IsZero() {
+			result["mod_time"] = info.ModTime.Format(time.RFC3339Nano)
+		}
+		return result, nil
+	case "executor.fs.read":
+		data, err := filesystem.ReadFile(ctx, params.Path, params.Maximum)
+		if err != nil {
+			return nil, err
+		}
+		if params.Maximum > 0 && params.Maximum < math.MaxInt64 && int64(len(data)) > params.Maximum+1 {
+			data = data[:params.Maximum+1]
+		}
+		// A reply too large to frame would be dropped, leaving the host waiting forever.
+		if len(data) > maxFileFrameData {
+			return nil, fmt.Errorf("reading %s: %d bytes exceed the %d one reply carries", params.Path, len(data), maxFileFrameData)
+		}
+		return map[string]any{"data": base64.StdEncoding.EncodeToString(data)}, nil
+	case "executor.fs.write":
+		data, err := base64.StdEncoding.DecodeString(params.Data)
+		if err != nil {
+			return nil, fmt.Errorf("decoding file contents: %w", err)
+		}
+		return map[string]any{}, filesystem.WriteFile(ctx, params.Path, data, WriteOptions{Mode: fs.FileMode(params.Mode), Replace: params.Replace})
+	default:
+		return map[string]any{}, filesystem.MkdirAll(ctx, params.Path, fs.FileMode(params.Mode))
+	}
 }
 
 func decodeParams(raw json.RawMessage, target any) error {

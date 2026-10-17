@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
+	"time"
 )
 
 // Protocol is the newest protocol the SDK speaks. A plugin that uses no v4 capability also
@@ -280,6 +282,34 @@ type CommandResult struct {
 	ExitCode        int    `json:"exit_code"`
 	StdoutTruncated bool   `json:"stdout_truncated"`
 	StderrTruncated bool   `json:"stderr_truncated"`
+}
+
+// FileInfo describes one path on an executor session's target. Mode carries the bits of
+// os.FileInfo.Mode, so a symbolic link reports fs.ModeSymlink rather than its target's mode.
+type FileInfo struct {
+	Size    int64
+	Mode    fs.FileMode
+	ModTime time.Time
+}
+
+// WriteOptions controls how WriteFile installs a file: with Mode, and over an existing file
+// only when Replace is set.
+type WriteOptions struct {
+	Mode    fs.FileMode
+	Replace bool
+}
+
+// ExecutorFileSystem is implemented by the sessions of an executor registered with
+// ExecutorHandler.FileSystem. Paths arrive resolved against the host's run directory, so a
+// session translates them as it translates a command's working directory. Stat and ReadFile
+// report a missing path with an error matching fs.ErrNotExist, and WriteFile reports a
+// destination that exists without Replace with one matching fs.ErrExist; both reach the host
+// as those errors. A positive maximum lets ReadFile stop after maximum+1 bytes.
+type ExecutorFileSystem interface {
+	Stat(context.Context, string) (FileInfo, error)
+	ReadFile(context.Context, string, int64) ([]byte, error)
+	WriteFile(context.Context, string, []byte, WriteOptions) error
+	MkdirAll(context.Context, string, fs.FileMode) error
 }
 
 // ExecutorSession is returned by Open and receives commands until Close.
