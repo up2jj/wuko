@@ -418,6 +418,13 @@ func (runner *Runner) waitRunning(ctx context.Context, request step.Request, pro
 }
 
 func (runner *Runner) shutdown(scopeCtx context.Context, request step.Request, label string, process runningProcess) error {
+	// An attached instance that already exited, such as a replacement that died before it was
+	// ready, has nothing to shut down, and its exit may already have been consumed, so waiting
+	// for it would only stall for the full timeout. A detached launcher exits by design while
+	// its child runs on, so its shutdown command must still run.
+	if !runner.config.Detached && process.finished.Load() {
+		return nil
+	}
 	if runner.config.Shutdown.Command != nil {
 		timeout := duration(runner.config.Shutdown.Timeout, 10*time.Second)
 		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(scopeCtx), timeout)

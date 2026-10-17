@@ -23,7 +23,7 @@ func TestBuiltinStepReferencesAreValidated(t *testing.T) {
 		{stepType: "assert", with: map[string]any{"expr": "vars.missing == 1"}},
 		{stepType: "set", with: map[string]any{"expr": "vars.missing", "variable": "copy"}},
 		{stepType: "shell", with: map[string]any{"argv": map[string]any{"expr": "vars.missing"}}},
-		{stepType: "process", with: map[string]any{"argv": map[string]any{"expr": "vars.missing"}, "ready": map[string]any{"log": "ready"}}},
+		{stepType: "process", with: map[string]any{"argv": map[string]any{"expr": "vars.missing"}, "readiness": map[string]any{"log": map[string]any{"pattern": "ready"}}}},
 		{stepType: "extract", with: map[string]any{"from": "vars.missing", "pattern": "(?P<value>.*)"}},
 		{stepType: "decode", with: map[string]any{"from": "vars.missing", "format": "json"}},
 		{stepType: "jsonpath", with: map[string]any{"from": "vars.missing", "path": "$.value"}},

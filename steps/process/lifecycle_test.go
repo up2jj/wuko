@@ -258,3 +258,30 @@ func TestProbeTimeoutWidensForElevatedProcesses(t *testing.T) {
 		})
 	}
 }
+
+// A replacement instance that dies before it is ready has nothing left to shut down; waiting
+// for an exit that was already consumed would stall every restart for the shutdown timeout.
+func TestProcessReplacementExitingBeforeReadinessDoesNotWaitForShutdownTimeout(t *testing.T) {
+	directory := t.TempDir()
+	marker := filepath.Join(directory, "launched")
+	runner := mustRunner(t, map[string]any{
+		"script":    `if [ -e "$1" ]; then exit 1; fi; : > "$1"; echo ready; sleep 0.05; exit 1`,
+		"args":      []any{marker},
+		"readiness": map[string]any{"log": map[string]any{"pattern": "ready", "timeout": "2s"}},
+		"restart":   map[string]any{"policy": "always", "backoff": "1ms", "max_restarts": 1},
+		"shutdown":  map[string]any{"timeout": "5s", "command": map[string]any{"command": "true"}},
+	})
+	services := newTestServices(t)
+	started := time.Now()
+	if _, err := runner.Run(t.Context(), step.Request{StepID: "worker", Services: services, RunDir: directory, Env: map[string]string{}, Stdout: io.Discard, Stderr: io.Discard}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-services.done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("restart budget was not exhausted")
+	}
+	if elapsed := time.Since(started); elapsed > 3*time.Second {
+		t.Fatalf("restarts took %s, want no wait for the shutdown timeout", elapsed)
+	}
+}
