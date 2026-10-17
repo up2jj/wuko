@@ -52,6 +52,11 @@ type Options struct {
 	Interact bool
 	// Terminal customizes the outer terminal while the user controls the child PTY.
 	Terminal *TerminalAppearance
+	// RemoteTerminal, with TTY, bridges the child's PTY to a terminal on the far side of a
+	// connection instead of the user's: Stdin carries its input, Stdout receives the PTY's
+	// output, and sizes come from RemoteTerminal. Handoff and interactions are the far side's
+	// to perform, so they cannot be combined with it.
+	RemoteTerminal *RemoteTerminal
 	// CaptureLimit bounds each captured output stream. Zero means unlimited. Output written to
 	// Stdout and Stderr is unaffected.
 	CaptureLimit int64
@@ -117,6 +122,9 @@ func (LocalExecutor) Run(ctx context.Context, options Options) (Result, error) {
 	}
 	if options.Interact && options.Interactions == nil {
 		return Result{}, fmt.Errorf("PTY user handoff requires interactions")
+	}
+	if options.RemoteTerminal != nil && (!options.TTY || options.Interactions != nil) {
+		return Result{}, fmt.Errorf("a remote terminal requires TTY without interactions")
 	}
 	if _, isFile := options.Stdin.(*os.File); options.StdinOutlivesProcess && !isFile {
 		return Result{}, fmt.Errorf("stdin that outlives %s must be an *os.File", options.Command)

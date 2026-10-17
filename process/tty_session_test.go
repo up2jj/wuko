@@ -90,3 +90,37 @@ func TestTTYStartSizeWithoutHandoffIsDefault(t *testing.T) {
 		t.Fatal("TTYStartSize() accepted a handoff without a terminal")
 	}
 }
+
+func TestRunTTYBridgesARemoteTerminal(t *testing.T) {
+	input, typed := io.Pipe()
+	defer typed.Close()
+	resize := make(chan TerminalSize, 1)
+	go func() {
+		_, _ = typed.Write([]byte("bob\r"))
+	}()
+	var streamed bytes.Buffer
+	result, err := Run(t.Context(), Options{
+		Command: "sh", Args: []string{"-c", `test -t 0 || exit 9; stty size; IFS= read -r name; printf 'hello=%s\n' "$name"; exit 3`},
+		Env: testEnvironment(), Stdin: input, Stdout: &streamed, TTY: true, CaptureLimit: 1 << 20,
+		RemoteTerminal: &RemoteTerminal{Size: TerminalSize{Rows: 30, Cols: 100}, Resize: resize},
+	})
+	var exitErr *ExitError
+	if !errors.As(err, &exitErr) || result.ExitCode != 3 {
+		t.Fatalf("Run() = %+v, %v; want exit code 3", result, err)
+	}
+	for _, want := range []string{"30 100", "hello=bob"} {
+		if !strings.Contains(result.Stdout, want) || !strings.Contains(streamed.String(), want) {
+			t.Fatalf("output = %q, want %q", result.Stdout, want)
+		}
+	}
+}
+
+func TestRemoteTerminalRejectsInteractions(t *testing.T) {
+	plan, err := ptyinteract.Compile([]ptyinteract.Spec{{Send: "x"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Run(t.Context(), Options{Command: "true", TTY: true, Interactions: plan, RemoteTerminal: &RemoteTerminal{}}); err == nil {
+		t.Fatal("Run() combined a remote terminal with interactions")
+	}
+}

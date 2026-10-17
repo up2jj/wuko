@@ -47,6 +47,12 @@ type TTYSession interface {
 	CloseOutput() error
 }
 
+// RemoteTerminal describes the far-side terminal a bridged PTY starts at and follows.
+type RemoteTerminal struct {
+	Size   TerminalSize
+	Resize <-chan TerminalSize
+}
+
 // TTYStartSize validates the stdin of a TTY run and reports the size its child terminal should
 // start with: the user's terminal when the run hands off to the user, 80x24 otherwise.
 func TTYStartSize(options Options) (TerminalSize, error) {
@@ -83,8 +89,12 @@ func ttyTerminal(options Options) (*os.File, TerminalSize, error) {
 }
 
 func runTTY(ctx context.Context, options Options, credential *syscall.Credential) (Result, error) {
-	terminal, size, err := ttyTerminal(options)
-	if err != nil {
+	var terminal *os.File
+	var size TerminalSize
+	var err error
+	if options.RemoteTerminal != nil {
+		size = options.RemoteTerminal.Size
+	} else if terminal, size, err = ttyTerminal(options); err != nil {
 		return Result{}, err
 	}
 	command := exec.Command(options.Command, options.Args...)
@@ -106,7 +116,68 @@ func runTTY(ctx context.Context, options Options, credential *syscall.Credential
 	}
 	wait := make(chan error, 1)
 	go func() { wait <- command.Wait() }()
-	return driveTTY(ctx, &localTTY{ptmx: ptmx, pid: command.Process.Pid, wait: wait, options: options}, terminal, options)
+	session := &localTTY{ptmx: ptmx, pid: command.Process.Pid, wait: wait, options: options}
+	if options.RemoteTerminal != nil {
+		return bridgeTTY(ctx, session, options)
+	}
+	return driveTTY(ctx, session, terminal, options)
+}
+
+// bridgeTTY connects a local PTY to a remote terminal. Its input is copied from Stdin without
+// being waited for: the far side owns that stream and ends it when the command is done.
+func bridgeTTY(ctx context.Context, session *localTTY, options Options) (Result, error) {
+	stdout := newCaptureBuffer(options.CaptureLimit)
+	outputDone := make(chan error, 1)
+	go func() {
+		_, copyErr := io.Copy(outputWriter(options.StdoutPolicy, options.Stdout, &stdout), session)
+		outputDone <- copyErr
+	}()
+	if options.Stdin != nil {
+		go func() { _, _ = io.Copy(session, options.Stdin) }()
+	}
+	resizeStop := make(chan struct{})
+	resizeDone := make(chan struct{})
+	go func() {
+		defer close(resizeDone)
+		for {
+			select {
+			case size, ok := <-options.RemoteTerminal.Resize:
+				if !ok {
+					return
+				}
+				_ = session.Resize(size)
+			case <-resizeStop:
+				return
+			}
+		}
+	}()
+	var err error
+	canceled := false
+	select {
+	case err = <-session.Exited():
+	case <-ctx.Done():
+		canceled = true
+		err = session.Terminate()
+	}
+	close(resizeStop)
+	<-resizeDone
+	outputErr := drainTTYOutput(session, outputDone)
+	result := Result{Stdout: stdout.String(), StdoutTruncated: stdout.truncated}
+	var runErr error
+	if !expectedPTYStreamError(outputErr) {
+		runErr = fmt.Errorf("reading terminal output: %w", outputErr)
+	}
+	if canceled {
+		return result, errors.Join(ctx.Err(), runErr)
+	}
+	if err == nil {
+		return result, runErr
+	}
+	if code, ok := exitCode(err); ok {
+		result.ExitCode = code
+		return result, errors.Join(&ExitError{Command: options.Command, Code: code, Err: err}, runErr)
+	}
+	return result, errors.Join(fmt.Errorf("waiting for %s: %w", options.Command, err), runErr)
 }
 
 // localTTY is a child running on a PTY this process allocated.
