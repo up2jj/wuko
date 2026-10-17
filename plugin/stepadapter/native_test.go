@@ -2,12 +2,16 @@ package stepadapter_test
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
+	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -19,6 +23,7 @@ import (
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/ptyinteract"
 	"github.com/up2jj/wuko/step"
+	"golang.org/x/term"
 )
 
 // hostSession runs commands on the host and exposes a task graph, a capability the protocol
@@ -227,5 +232,77 @@ func TestRegisterLendsTheTerminalToNativeRunners(t *testing.T) {
 				t.Fatalf("Run() = %#v, %v; want %q", result.Outputs, err, test.want)
 			}
 		})
+	}
+}
+
+// syncBuffer is a writer the test can poll while a run streams into it.
+type syncBuffer struct {
+	mu   sync.Mutex
+	data bytes.Buffer
+}
+
+func (buffer *syncBuffer) Write(data []byte) (int, error) {
+	buffer.mu.Lock()
+	defer buffer.mu.Unlock()
+	return buffer.data.Write(data)
+}
+
+func (buffer *syncBuffer) String() string {
+	buffer.mu.Lock()
+	defer buffer.mu.Unlock()
+	return buffer.data.String()
+}
+
+// The user's terminal is a PTY pair here: what is typed into its master must reach a shell
+// running on the plugin's own PTY, a resize must follow it there, and the terminal must come
+// back in the mode it started in.
+func TestRegisterExecutorHandsTheUsersTerminalToTTYRuns(t *testing.T) {
+	session, _ := newNativePlugin(t)
+	master, terminal, err := pty.Open()
+	if err != nil {
+		t.Skipf("no pseudo-terminal: %v", err)
+	}
+	defer master.Close()
+	defer terminal.Close()
+	go func() { _, _ = io.Copy(io.Discard, master) }()
+	if err := pty.Setsize(master, &pty.Winsize{Rows: 30, Cols: 100}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := term.GetState(int(terminal.Fd()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output syncBuffer
+	go func() {
+		deadline := time.Now().Add(10 * time.Second)
+		for !strings.Contains(output.String(), "30 100") {
+			if time.Now().After(deadline) {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		_ = pty.Setsize(master, &pty.Winsize{Rows: 40, Cols: 120})
+		_ = syscall.Kill(os.Getpid(), syscall.SIGWINCH)
+		time.Sleep(200 * time.Millisecond)
+		_, _ = master.Write([]byte("bob\r"))
+	}()
+	result, err := session.Run(t.Context(), process.Options{
+		Command: "sh", Args: []string{"-c", `stty size; IFS= read -r name; stty size; printf 'hello=%s\n' "$name"`},
+		Env: environment(), TTY: true, Stdin: terminal, Stdout: &output, CaptureLimit: 1 << 20,
+	})
+	if err != nil {
+		t.Fatalf("Run() = %+v, %v", result, err)
+	}
+	for _, want := range []string{"30 100", "40 120", "hello=bob"} {
+		if !strings.Contains(result.Stdout, want) {
+			t.Fatalf("TTY output = %q, want %q", result.Stdout, want)
+		}
+	}
+	after, err := term.GetState(int(terminal.Fd()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(before, after) {
+		t.Fatal("the terminal mode was not restored")
 	}
 }
