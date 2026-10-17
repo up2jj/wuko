@@ -2,21 +2,21 @@ package cmd
 
 import (
 	"fmt"
-	"github.com/up2jj/wuko/marketplace"
 	"os"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
+	"github.com/up2jj/wuko/marketplace"
 	"github.com/up2jj/wuko/workflow"
 )
 
 func newMarketplaceCmd(deps dependencies) *cobra.Command {
-	marketplace := &cobra.Command{
+	command := &cobra.Command{
 		Use:   "marketplace",
 		Short: "Create and build workflow and plugin marketplaces",
 	}
-	marketplace.AddCommand(newMarketplaceInitCmd(deps), newMarketplaceWorkflowCmd(deps), newMarketplacePluginCmd(deps), newMarketplaceBuildCmd(deps))
-	return marketplace
+	command.AddCommand(newMarketplaceInitCmd(deps), newMarketplaceWorkflowCmd(deps), newMarketplacePluginCmd(deps), newMarketplaceBuildCmd(deps))
+	return command
 }
 
 func newMarketplaceInitCmd(deps dependencies) *cobra.Command {

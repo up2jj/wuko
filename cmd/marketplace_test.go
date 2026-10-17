@@ -8,7 +8,6 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"github.com/up2jj/wuko/marketplace"
 	"io"
 	"net/http"
 	"os"
@@ -19,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+	"github.com/up2jj/wuko/marketplace"
 	pluginpkg "github.com/up2jj/wuko/plugin"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/steps/shell"

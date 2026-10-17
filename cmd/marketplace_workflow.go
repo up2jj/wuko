@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/up2jj/wuko/marketplace"
 	"os"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
 	"github.com/up2jj/wuko/diagnostic"
+	"github.com/up2jj/wuko/marketplace"
 	"github.com/up2jj/wuko/workflow"
 )
 

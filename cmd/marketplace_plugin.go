@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/up2jj/wuko/marketplace"
 	"io"
 	"os"
 	"path/filepath"
@@ -12,6 +11,7 @@ import (
 
 	"github.com/Masterminds/semver/v3"
 	"github.com/spf13/cobra"
+	"github.com/up2jj/wuko/marketplace"
 	pluginpkg "github.com/up2jj/wuko/plugin"
 )
 
