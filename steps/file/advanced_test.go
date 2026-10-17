@@ -3,6 +3,7 @@ package file
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -393,5 +394,30 @@ func TestFilesystemDocumentationExamplesDecode(t *testing.T) {
 	}
 	if checked < 17 {
 		t.Fatalf("checked %d documented file examples, want at least 17", checked)
+	}
+}
+
+// shrinkingReader models a file truncated after it was measured: reads past its new length
+// return nothing.
+type shrinkingReader struct{ data []byte }
+
+func (reader shrinkingReader) ReadAt(buffer []byte, offset int64) (int, error) {
+	if offset >= int64(len(reader.data)) {
+		return 0, io.EOF
+	}
+	count := copy(buffer, reader.data[offset:])
+	if count < len(buffer) {
+		return count, io.EOF
+	}
+	return count, nil
+}
+
+func TestReadTailReturnsOnlyBytesPresentAfterTruncation(t *testing.T) {
+	content, err := readTail(t.Context(), shrinkingReader{data: []byte("line one\nline two\n")}, 0, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "line one\nline two\n" {
+		t.Fatalf("content = %q, want only the bytes that remain", content)
 	}
 }

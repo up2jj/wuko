@@ -418,19 +418,9 @@ func (r *Runner) tail(ctx context.Context, filePath string) (step.Result, error)
 		limit, _ = parseSize(r.config.MaxBytes)
 	}
 	readSize := min(info.Size(), limit)
-	content := make([]byte, readSize)
-	for offset := int64(0); offset < readSize; {
-		if err := ctx.Err(); err != nil {
-			return step.Result{}, err
-		}
-		count, readErr := input.ReadAt(content[offset:], info.Size()-readSize+offset)
-		offset += int64(count)
-		if readErr != nil && !errors.Is(readErr, io.EOF) {
-			return step.Result{}, fmt.Errorf("reading file %s: %w", filePath, readErr)
-		}
-		if count == 0 {
-			break
-		}
+	content, err := readTail(ctx, input, info.Size()-readSize, readSize)
+	if err != nil {
+		return step.Result{}, fmt.Errorf("reading file %s: %w", filePath, err)
 	}
 	startInBuffer := 0
 	if r.config.Bytes == "" {
@@ -445,6 +435,28 @@ func (r *Runner) tail(ctx context.Context, filePath string) (step.Result, error)
 	return step.Result{Outputs: map[string]any{
 		"path": filePath, "content": string(content), "size": int64(len(content)), "truncated": absoluteStart > 0,
 	}}, nil
+}
+
+// readTail reads up to size bytes starting at start. A file truncated since it was measured
+// ends the read early, and only the bytes actually read are returned rather than the zeroed
+// remainder of the buffer.
+func readTail(ctx context.Context, input io.ReaderAt, start, size int64) ([]byte, error) {
+	content := make([]byte, size)
+	offset := int64(0)
+	for offset < size {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		count, err := input.ReadAt(content[offset:], start+offset)
+		offset += int64(count)
+		if err != nil && !errors.Is(err, io.EOF) {
+			return nil, err
+		}
+		if count == 0 {
+			break
+		}
+	}
+	return content[:offset], nil
 }
 
 func tailLineStart(content []byte, lines int) int {
