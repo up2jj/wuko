@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/up2jj/wuko/marketplace"
 	"os"
 	"path/filepath"
 
@@ -35,7 +36,7 @@ func newMarketplaceWorkflowAddCmd(deps dependencies) *cobra.Command {
 			if loader == nil {
 				loader = workflow.NewLoader(nil)
 			}
-			name, target, err := addMarketplaceWorkflow(marketplaceDecodeContext(command.Context()), cwd, args[0], loader, diagnosticsFor(command, deps, cwd))
+			name, target, err := addMarketplaceWorkflow(marketplace.DecodeContext(command.Context()), cwd, args[0], loader, diagnosticsFor(command, deps, cwd))
 			if err != nil {
 				return err
 			}
@@ -65,7 +66,7 @@ func newMarketplaceWorkflowRemoveCmd(deps dependencies) *cobra.Command {
 			if loader == nil {
 				loader = workflow.NewLoader(nil)
 			}
-			directory, err := findMarketplaceWorkflow(marketplaceDecodeContext(command.Context()), cwd, name, loader, diagnosticsFor(command, deps, cwd))
+			directory, err := findMarketplaceWorkflow(marketplace.DecodeContext(command.Context()), cwd, name, loader, diagnosticsFor(command, deps, cwd))
 			if err != nil {
 				return err
 			}
@@ -171,23 +172,23 @@ func findMarketplaceWorkflow(ctx context.Context, cwd, name string, loader *work
 		}
 		return "", fmt.Errorf("checking marketplace workflow directory: %w", err)
 	}
-	packages, err := discoverMarketplacePackages(root)
+	packages, err := marketplace.DiscoverPackages(root)
 	if err != nil {
 		return "", err
 	}
 	var found string
 	for _, item := range packages {
-		definition, err := loader.DecodeContext(ctx, item.manifestPath, workflow.LoadOptions{RunDir: cwd, Diagnostics: reporter})
+		definition, err := loader.DecodeContext(ctx, item.ManifestPath, workflow.LoadOptions{RunDir: cwd, Diagnostics: reporter})
 		if err != nil {
-			return "", fmt.Errorf("validating marketplace workflow source %s: %w", item.directory, err)
+			return "", fmt.Errorf("validating marketplace workflow source %s: %w", item.Directory, err)
 		}
 		if definition.Name != name {
 			continue
 		}
 		if found != "" {
-			return "", fmt.Errorf("workflow name %q is declared by both %s and %s", name, found, item.directory)
+			return "", fmt.Errorf("workflow name %q is declared by both %s and %s", name, found, item.Directory)
 		}
-		found = item.directory
+		found = item.Directory
 	}
 	if found == "" {
 		return "", fmt.Errorf("%w: %q", errMarketplaceWorkflowNotFound, name)

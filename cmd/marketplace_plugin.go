@@ -1,11 +1,10 @@
 package cmd
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/up2jj/wuko/marketplace"
 	"io"
 	"os"
 	"path/filepath"
@@ -14,26 +13,9 @@ import (
 	"github.com/Masterminds/semver/v3"
 	"github.com/spf13/cobra"
 	pluginpkg "github.com/up2jj/wuko/plugin"
-	"github.com/up2jj/wuko/workflow"
 )
 
-const (
-	marketplacePluginSourceName = ".wuko-marketplace-source.json"
-	pluginReleaseWorkflowName   = "wuko.release.yaml"
-)
-
-// marketplacePluginSourceRoot resolves the directory holding imported plugin releases. It must not
-// be the local plugin installation root, because an imported release contains no executable and
-// would make local plugin discovery fail for that namespace.
-func marketplacePluginSourceRoot(cwd string) string {
-	return filepath.Join(cwd, filepath.FromSlash(workflow.MarketplacePluginSourceDir))
-}
-
-type marketplacePluginSource struct {
-	Version     int    `json:"version"`
-	Source      string `json:"source"`
-	Description string `json:"description,omitempty"`
-}
+const pluginReleaseWorkflowName = "wuko.release.yaml"
 
 func newMarketplacePluginCmd(deps dependencies) *cobra.Command {
 	command := &cobra.Command{Use: "plugin", Short: "Create and manage marketplace plugins"}
@@ -76,7 +58,7 @@ func newMarketplacePluginRemoveCmd(deps dependencies) *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("finding current directory: %w", err)
 			}
-			target := filepath.Join(marketplacePluginSourceRoot(cwd), namespace)
+			target := filepath.Join(marketplace.PluginSourceRoot(cwd), namespace)
 			info, err := os.Lstat(target)
 			if err != nil {
 				if os.IsNotExist(err) {
@@ -229,7 +211,7 @@ func releaseMarketplacePlugin(command *cobra.Command, deps dependencies, source,
 	if err != nil {
 		return fmt.Errorf("finding current directory: %w", err)
 	}
-	root := marketplacePluginSourceRoot(cwd)
+	root := marketplace.PluginSourceRoot(cwd)
 	target := filepath.Join(root, bundle.Manifest.Namespace)
 	_, statErr := os.Stat(target)
 	update := statErr == nil
@@ -251,7 +233,7 @@ func releaseMarketplacePlugin(command *cobra.Command, deps dependencies, source,
 		if err != nil {
 			return fmt.Errorf("loading previous marketplace plugin %q: %w", bundle.Manifest.Namespace, err)
 		}
-		previousSource, err := readMarketplacePluginSource(target)
+		previousSource, err := marketplace.ReadPluginSource(target)
 		if err != nil {
 			return err
 		}
@@ -295,7 +277,7 @@ func releaseMarketplacePlugin(command *cobra.Command, deps dependencies, source,
 		return fmt.Errorf("creating plugin release staging directory: %w", err)
 	}
 	defer os.RemoveAll(stage)
-	metadata := marketplacePluginSource{Version: 1, Source: marketplacePluginProvenance(bundle.CanonicalSource), Description: description}
+	metadata := marketplace.PluginSource{Version: 1, Source: marketplacePluginProvenance(bundle.CanonicalSource), Description: description}
 	if err := writeMarketplacePluginBundle(stage, bundle, metadata); err != nil {
 		return err
 	}
@@ -330,15 +312,15 @@ func releaseMarketplacePlugin(command *cobra.Command, deps dependencies, source,
 }
 
 func publishMarketplaceForPluginRelease(command *cobra.Command, deps dependencies, cwd string) (bool, error) {
-	build, err := buildMarketplaceManifest(marketplaceDecodeContext(command.Context()), cwd, deps.loader, diagnosticsFor(command, deps, cwd))
+	build, err := marketplace.BuildManifest(marketplace.DecodeContext(command.Context()), cwd, deps.loader, diagnosticsFor(command, deps, cwd))
 	if err != nil {
 		return false, fmt.Errorf("building marketplace for plugin release: %w", err)
 	}
-	defer build.cleanup()
-	if !build.changed {
+	defer build.Cleanup()
+	if !build.Changed {
 		return false, nil
 	}
-	if err := publishMarketplaceBuild(cwd, filepath.Join(cwd, "manifest.json"), build); err != nil {
+	if err := marketplace.Publish(cwd, filepath.Join(cwd, "manifest.json"), build); err != nil {
 		return false, fmt.Errorf("publishing marketplace for plugin release: %w", err)
 	}
 	return true, nil
@@ -407,7 +389,7 @@ func importMarketplacePlugin(ctx context.Context, stdout io.Writer, deps depende
 	if err != nil {
 		return fmt.Errorf("finding current directory: %w", err)
 	}
-	root := marketplacePluginSourceRoot(cwd)
+	root := marketplace.PluginSourceRoot(cwd)
 	target := filepath.Join(root, namespace)
 	info, statErr := os.Stat(target)
 	if update {
@@ -420,7 +402,7 @@ func importMarketplacePlugin(ctx context.Context, stdout io.Writer, deps depende
 		if !info.IsDir() {
 			return fmt.Errorf("marketplace plugin %q exists as a non-directory", namespace)
 		}
-		previous, err := readMarketplacePluginSource(target)
+		previous, err := marketplace.ReadPluginSource(target)
 		if err != nil {
 			return err
 		}
@@ -440,7 +422,7 @@ func importMarketplacePlugin(ctx context.Context, stdout io.Writer, deps depende
 		return fmt.Errorf("creating plugin import staging directory: %w", err)
 	}
 	defer os.RemoveAll(stage)
-	if err := writeMarketplacePluginBundle(stage, bundle, marketplacePluginSource{Version: 1, Source: marketplacePluginProvenance(bundle.CanonicalSource), Description: description}); err != nil {
+	if err := writeMarketplacePluginBundle(stage, bundle, marketplace.PluginSource{Version: 1, Source: marketplacePluginProvenance(bundle.CanonicalSource), Description: description}); err != nil {
 		return err
 	}
 	backup, err := replaceImportedPlugin(stage, target, update)
@@ -465,7 +447,7 @@ func marketplacePluginProvenance(source string) string {
 	return "local"
 }
 
-func writeMarketplacePluginBundle(directory string, bundle pluginpkg.Bundle, source marketplacePluginSource) error {
+func writeMarketplacePluginBundle(directory string, bundle pluginpkg.Bundle, source marketplace.PluginSource) error {
 	if err := os.WriteFile(filepath.Join(directory, "plugin.json"), bundle.ManifestData, 0o644); err != nil {
 		return fmt.Errorf("writing imported plugin manifest: %w", err)
 	}
@@ -478,34 +460,10 @@ func writeMarketplacePluginBundle(directory string, bundle pluginpkg.Bundle, sou
 			return fmt.Errorf("writing imported plugin artifact %s/%s: %w", artifact.OS, artifact.Arch, err)
 		}
 	}
-	if err := writeJSONAtomically(filepath.Join(directory, marketplacePluginSourceName), source); err != nil {
+	if err := marketplace.WriteJSON(filepath.Join(directory, marketplace.PluginSourceName), source); err != nil {
 		return fmt.Errorf("writing marketplace plugin source metadata: %w", err)
 	}
 	return nil
-}
-
-func readMarketplacePluginSource(directory string) (marketplacePluginSource, error) {
-	filename := filepath.Join(directory, marketplacePluginSourceName)
-	data, err := os.ReadFile(filename)
-	if err != nil {
-		return marketplacePluginSource{}, fmt.Errorf("reading marketplace plugin source metadata: %w", err)
-	}
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	var source marketplacePluginSource
-	if err := decoder.Decode(&source); err != nil {
-		return marketplacePluginSource{}, fmt.Errorf("decoding marketplace plugin source metadata: %w", err)
-	}
-	var extra any
-	if err := decoder.Decode(&extra); err == nil {
-		return marketplacePluginSource{}, fmt.Errorf("decoding marketplace plugin source metadata: multiple JSON values are not supported")
-	} else if !errors.Is(err, io.EOF) {
-		return marketplacePluginSource{}, fmt.Errorf("decoding marketplace plugin source metadata: %w", err)
-	}
-	if source.Version != 1 || source.Source == "" || strings.TrimSpace(source.Description) != source.Description {
-		return marketplacePluginSource{}, fmt.Errorf("invalid marketplace plugin source metadata")
-	}
-	return source, nil
 }
 
 func replaceImportedPlugin(stage, target string, update bool) (string, error) {

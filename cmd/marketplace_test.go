@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"github.com/up2jj/wuko/marketplace"
 	"io"
 	"net/http"
 	"os"
@@ -200,7 +201,7 @@ func TestMarketplacePluginAddBuildAndCheck(t *testing.T) {
 	if _, err := pluginpkg.LoadBundle(filepath.Join(root, "plugins", "acme")); err != nil {
 		t.Fatalf("published bundle: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(root, "plugins", "acme", marketplacePluginSourceName)); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(root, "plugins", "acme", marketplace.PluginSourceName)); !os.IsNotExist(err) {
 		t.Fatalf("source metadata was published: %v", err)
 	}
 
@@ -209,12 +210,12 @@ func TestMarketplacePluginAddBuildAndCheck(t *testing.T) {
 	if err := command.ExecuteContext(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	metadata, err := readMarketplacePluginSource(imported)
+	metadata, err := marketplace.ReadPluginSource(imported)
 	if err != nil {
 		t.Fatal(err)
 	}
 	metadata.Description = "Changed"
-	if err := writeJSONAtomically(filepath.Join(imported, marketplacePluginSourceName), metadata); err != nil {
+	if err := marketplace.WriteJSON(filepath.Join(imported, marketplace.PluginSourceName), metadata); err != nil {
 		t.Fatal(err)
 	}
 	before, err := os.ReadFile(filepath.Join(root, "manifest.json"))
@@ -347,7 +348,7 @@ func TestMarketplacePluginReleaseUpsertsBuildsAndRemoves(t *testing.T) {
 	if err := command.ExecuteContext(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	metadata, err := readMarketplacePluginSource(filepath.Join(root, ".wuko", "plugin-sources", "acme"))
+	metadata, err := marketplace.ReadPluginSource(filepath.Join(root, ".wuko", "plugin-sources", "acme"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -639,7 +640,7 @@ func TestMarketplacePluginImportRejectsCorruptionAndDuplicatesTransactionally(t 
 	if err := command.ExecuteContext(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	metadata, err := readMarketplacePluginSource(filepath.Join(root, ".wuko", "plugin-sources", "acme"))
+	metadata, err := marketplace.ReadPluginSource(filepath.Join(root, ".wuko", "plugin-sources", "acme"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -931,19 +932,19 @@ func TestMarketplaceBuildPublicationFailureRestoresPublishedFiles(t *testing.T) 
 	if err := os.WriteFile(filepath.Join(packageDir, "defaults.json"), []byte(`{"target":"production"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	build, err := buildMarketplaceManifest(t.Context(), root, nil, nil)
+	build, err := marketplace.BuildManifest(t.Context(), root, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer build.cleanup()
-	stagedArchive := build.replacements["packages/release.tar.gz"]
+	defer build.Cleanup()
+	stagedArchive := build.Replacements["packages/release.tar.gz"]
 	if stagedArchive == "" {
 		t.Fatal("changed archive was not staged")
 	}
 	if err := os.Remove(stagedArchive); err != nil {
 		t.Fatal(err)
 	}
-	if err := publishMarketplaceBuild(root, manifestPath, build); err == nil {
+	if err := marketplace.Publish(root, manifestPath, build); err == nil {
 		t.Fatal("publication succeeded with a missing staged archive")
 	}
 

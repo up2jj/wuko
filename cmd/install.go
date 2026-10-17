@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/up2jj/wuko/marketplace"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -325,7 +326,7 @@ func installPreparedWorkflow(command *cobra.Command, deps dependencies, config w
 	// installing, would run its uninstall hook as root.
 	// Keyed on the installed filename so that uninstall finds it from the path it resolves.
 	marker := workflowInstallMarker{Version: workflowInstallMarkerVersion, Name: sourceDefinition.Name, Source: prepared.source, Remote: !prepared.elevationAllowed}
-	if err := writeJSONAtomically(workflowInstallMarkerPath(workflowDir, sourceDefinition.Name), marker); err != nil {
+	if err := marketplace.WriteJSON(workflowInstallMarkerPath(workflowDir, sourceDefinition.Name), marker); err != nil {
 		return fmt.Errorf("recording workflow provenance for %q: %w", definition.Name, err)
 	}
 	_, err = fmt.Fprintf(command.OutOrStdout(), "installed %s in %s\n", definition.Name, target)
@@ -419,7 +420,7 @@ func installPreparedMarketplacePackage(command *cobra.Command, deps dependencies
 		return fmt.Errorf("running install hook for workflow package %q: %w", definition.Name, err)
 	}
 	marker := marketplacePackageInstallMarker{Version: marketplaceInstallMarkerVersion, Marketplace: canonicalURL, Name: name, PackageVersion: prepared.item.PackageVersion, Source: prepared.item.Source, SHA256: prepared.item.SHA256}
-	if err := writeJSONAtomically(filepath.Join(stage, workflow.WorkflowPackageMarkerName), marker); err != nil {
+	if err := marketplace.WriteJSON(filepath.Join(stage, workflow.WorkflowPackageMarkerName), marker); err != nil {
 		return fmt.Errorf("writing workflow package marker: %w", err)
 	}
 	backup, err := replaceMarketplacePackage(stage, target, config.reinstall)
@@ -545,7 +546,7 @@ func prepareMarketplaceDirectory(root, repositoryName, canonicalURL string) (str
 }
 
 func writeMarketplaceMarker(directory, canonicalURL string) error {
-	return writeJSONAtomically(filepath.Join(directory, marketplaceMarkerName), marketplaceInstallMarker{Version: marketplaceInstallMarkerVersion, URL: canonicalURL})
+	return marketplace.WriteJSON(filepath.Join(directory, marketplaceMarkerName), marketplaceInstallMarker{Version: marketplaceInstallMarkerVersion, URL: canonicalURL})
 }
 
 func isHTTPSURL(source string) bool {
