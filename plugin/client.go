@@ -15,6 +15,8 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/up2jj/wuko/control"
 )
 
 const maxFrameSize = 10 << 20
@@ -179,6 +181,13 @@ func newClient(cmd *exec.Cmd, stdin io.WriteCloser) *client {
 }
 
 func (c *client) read(reader io.Reader) {
+	// The reader runs on its own goroutine, so a panic here would take the host down with it;
+	// failing the client instead hands the error to every caller still waiting on a response.
+	defer func() {
+		if failure := control.RecoveredPanic(recover()); failure != nil {
+			c.fail(fmt.Errorf("reading plugin frames: %w", failure))
+		}
+	}()
 	scanner := bufio.NewScanner(reader)
 	// maxFrameSize bounds the JSON a writer may emit; the terminating newline is framing on top
 	// of it, so the scanner needs room for both or it rejects the largest permitted frame.
@@ -319,7 +328,7 @@ func (c *client) handleHostCall(id, method string, params json.RawMessage) {
 		c.writeResponse(outgoingResponseFrame{ID: id, Error: &wireError{Code: "unknown_parent", Message: "host callback parent is unknown or completed"}})
 		return
 	}
-	result, err := host(parentCtx, method, params)
+	result, err := c.runHostCall(parentCtx, host, method, params)
 	if err != nil {
 		c.writeResponse(outgoingResponseFrame{ID: id, Error: &wireError{Code: "host_callback", Message: err.Error()}})
 		return
@@ -359,6 +368,17 @@ func decodeFrame(data []byte, target any) error {
 		return fmt.Errorf("trailing JSON data")
 	}
 	return nil
+}
+
+// runHostCall answers a plugin callback with the host's handler, turning a panic into the
+// callback's error so one faulty handler cannot crash the host process.
+func (c *client) runHostCall(ctx context.Context, host hostCall, method string, params json.RawMessage) (result any, err error) {
+	defer func() {
+		if failure := control.RecoveredPanic(recover()); failure != nil {
+			result, err = nil, failure
+		}
+	}()
+	return host(ctx, method, params)
 }
 
 func (c *client) fail(err error) {

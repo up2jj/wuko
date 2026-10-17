@@ -674,3 +674,45 @@ func (r *workflowTestRenderer) overlay(extra map[string]any) map[string]any {
 	maps.Copy(data, extra)
 	return data
 }
+
+func TestPanickingHostCallbackAnswersWithAnError(t *testing.T) {
+	client, scanner, encoder := newPipeClient(t)
+	host := func(context.Context, string, json.RawMessage) (any, error) {
+		panic("handler exploded")
+	}
+	pluginDone := make(chan error, 1)
+	go func() {
+		if !scanner.Scan() {
+			pluginDone <- io.EOF
+			return
+		}
+		var parent requestFrame
+		_ = json.Unmarshal(scanner.Bytes(), &parent)
+		if err := encoder.Encode(requestFrame{ID: "cb", Method: "host.function.call", Params: map[string]any{"parent_id": parent.ID, "name": "boom"}}); err != nil {
+			pluginDone <- err
+			return
+		}
+		if !scanner.Scan() {
+			pluginDone <- io.EOF
+			return
+		}
+		var response responseFrame
+		if err := json.Unmarshal(scanner.Bytes(), &response); err != nil {
+			pluginDone <- err
+			return
+		}
+		if response.Error == nil || response.Error.Code != "host_callback" || !strings.Contains(response.Error.Message, "handler exploded") {
+			pluginDone <- fmt.Errorf("callback response = %#v", response.Error)
+			return
+		}
+		result, _ := json.Marshal(map[string]any{"ok": true})
+		pluginDone <- encoder.Encode(responseFrame{ID: parent.ID, Result: result})
+	}()
+	var result map[string]any
+	if err := client.callWithOptions(t.Context(), "step.run", map[string]any{}, &result, callOptions{host: host}); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-pluginDone; err != nil {
+		t.Fatal(err)
+	}
+}
