@@ -106,8 +106,7 @@ func NewExecutionReport(outcome Outcome) ExecutionReport {
 
 func firstFailedStep(steps []engine.StepStats) string {
 	for _, stats := range steps {
-		switch stats.Status {
-		case engine.StatusFailed, engine.StatusTimedOut, engine.StatusCanceled:
+		if stats.Status.Unsuccessful() {
 			return stats.ID
 		}
 	}

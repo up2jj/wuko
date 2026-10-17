@@ -63,7 +63,7 @@ func newGitHookReporter(command *cobra.Command, deps dependencies, runDir, hookN
 }
 
 func (reporter *gitHookReporter) Progress(event engine.ProgressEvent) {
-	if event.Kind != engine.WorkflowFinished || event.Depth != 0 || !failedExecutionStatus(event.Status) {
+	if event.Kind != engine.WorkflowFinished || event.Depth != 0 || !event.Status.Unsuccessful() {
 		return
 	}
 	stats, found := firstGitHookFailedStep(event.Stats.Steps)
@@ -154,13 +154,9 @@ func (reporter *gitHookReporter) formatLocation(location diagnostic.Location) st
 	return source
 }
 
-func failedExecutionStatus(status engine.ExecutionStatus) bool {
-	return status == engine.StatusFailed || status == engine.StatusTimedOut || status == engine.StatusCanceled
-}
-
 func firstGitHookFailedStep(steps []engine.StepStats) (engine.StepStats, bool) {
 	for _, stats := range steps {
-		if !failedExecutionStatus(stats.Status) {
+		if !stats.Status.Unsuccessful() {
 			continue
 		}
 		for _, iteration := range stats.Iterations {

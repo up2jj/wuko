@@ -412,7 +412,7 @@ func (reporter *Reporter) stepSummary(stats engine.RunStats, redacted bool) stri
 
 	failed := false
 	for _, step := range stats.Steps {
-		if !unsuccessful(step.Status) {
+		if !step.Status.Unsuccessful() {
 			continue
 		}
 		if !failed {
@@ -493,10 +493,6 @@ func statusLabel(status engine.ExecutionStatus) string {
 	default:
 		return "✗ failed"
 	}
-}
-
-func unsuccessful(status engine.ExecutionStatus) bool {
-	return status == engine.StatusFailed || status == engine.StatusTimedOut || status == engine.StatusCanceled
 }
 
 func stepCount(value int) string {

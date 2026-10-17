@@ -53,6 +53,12 @@ const (
 	StatusSkipped   ExecutionStatus = "skipped"
 )
 
+// Unsuccessful reports whether a finished step or run ended without succeeding. Skipped is not
+// a failure: the step's condition chose not to run it.
+func (status ExecutionStatus) Unsuccessful() bool {
+	return status == StatusFailed || status == StatusTimedOut || status == StatusCanceled
+}
+
 // AttemptStats records the outcome and wall-clock duration of one step attempt.
 type AttemptStats struct {
 	Number    int
