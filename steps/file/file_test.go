@@ -237,6 +237,40 @@ func TestChmodAndSymlinkRejection(t *testing.T) {
 	}
 }
 
+func TestRemoveRefusesTheRunDirectoryAndItsAncestors(t *testing.T) {
+	parent := t.TempDir()
+	runDir := filepath.Join(parent, "project")
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(runDir, alias); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct{ path, runDir string }{
+		{path: ".", runDir: runDir},
+		{path: "..", runDir: runDir},
+		{path: runDir, runDir: runDir},
+		{path: parent, runDir: runDir},
+		// The run directory reached through a symlink is still the run directory.
+		{path: runDir, runDir: alias},
+	}
+	for _, test := range tests {
+		t.Run(test.path+" from "+test.runDir, func(t *testing.T) {
+			runner, err := New(map[string]any{"operation": "remove", "path": test.path, "recursive": true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := runner.Run(t.Context(), step.Request{RunDir: test.runDir}); err == nil || !strings.Contains(err.Error(), "run directory") {
+				t.Errorf("error = %v, want the run directory protected", err)
+			}
+			if _, err := os.Stat(runDir); err != nil {
+				t.Fatalf("run directory was removed: %v", err)
+			}
+		})
+	}
+}
+
 func TestRejectsUnsafeRemovalAndCanceledOperation(t *testing.T) {
 	runner, err := New(map[string]any{"operation": "remove", "path": string(filepath.Separator), "recursive": true})
 	if err != nil {

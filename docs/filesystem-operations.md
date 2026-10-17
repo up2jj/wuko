@@ -110,8 +110,8 @@ Both output the resolved source and destination plus `size` and `mode`.
 ## Remove
 
 `remove` deletes a file, link, or empty directory. Set `recursive: true` for a non-empty directory.
-Missing paths succeed with `removed: false`. Wuko refuses to remove a filesystem root or the run
-directory.
+Missing paths succeed with `removed: false`. Wuko refuses to remove a filesystem root, the run
+directory, or a directory that contains it, however the path is spelled.
 
 ```yaml
 - id: clean

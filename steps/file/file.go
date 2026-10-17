@@ -424,13 +424,14 @@ func (r *Runner) remove(ctx context.Context, runDir, path string) (step.Result, 
 	if rootPath(path) {
 		return step.Result{}, fmt.Errorf("refusing to remove filesystem root %s", path)
 	}
-	resolvedRunDir, err := resolvePath("", runDir)
-	if err == nil && filepath.Clean(path) == resolvedRunDir {
-		return step.Result{}, fmt.Errorf("refusing to remove run directory %s", path)
-	}
 	info, err := os.Lstat(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return step.Result{Outputs: map[string]any{"path": path, "removed": false}}, nil
+	}
+	if err == nil && info.IsDir() {
+		if err := protectRunDirectory("remove", runDir, path); err != nil {
+			return step.Result{}, err
+		}
 	}
 	if err != nil {
 		return step.Result{}, fmt.Errorf("inspecting path %s: %w", path, err)

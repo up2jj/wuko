@@ -809,21 +809,42 @@ func parseTimestamp(value string, now time.Time) (time.Time, error) {
 }
 
 func validateDestructivePath(runDir, candidate string) error {
+	return protectRunDirectory("replace", runDir, candidate)
+}
+
+// protectRunDirectory refuses an existing candidate that is the run directory or one of its
+// ancestors, whose removal would take the run directory with it. Paths are compared by file
+// identity, so a symlinked or differently spelled path to the same directory is caught too.
+func protectRunDirectory(verb, runDir, candidate string) error {
 	if rootPath(candidate) {
-		return fmt.Errorf("refusing to replace filesystem root %s", candidate)
+		return fmt.Errorf("refusing to %s filesystem root %s", verb, candidate)
+	}
+	if runDir == "" {
+		return nil
 	}
 	resolvedRunDir, err := resolvePath("", runDir)
 	if err != nil {
 		return fmt.Errorf("resolving run directory: %w", err)
 	}
-	same, err := sameFile(candidate, resolvedRunDir)
+	physicalRunDir, err := physicalPath(resolvedRunDir)
 	if err != nil {
-		return fmt.Errorf("comparing replacement path %s with run directory: %w", candidate, err)
+		return fmt.Errorf("resolving run directory: %w", err)
 	}
-	if same {
-		return fmt.Errorf("refusing to replace run directory %s", candidate)
+	candidateInfo, err := os.Stat(candidate)
+	if err != nil {
+		return fmt.Errorf("comparing %s with run directory: %w", candidate, err)
 	}
-	return nil
+	for directory := physicalRunDir; ; directory = filepath.Dir(directory) {
+		if info, err := os.Stat(directory); err == nil && os.SameFile(candidateInfo, info) {
+			if directory == physicalRunDir {
+				return fmt.Errorf("refusing to %s run directory %s", verb, candidate)
+			}
+			return fmt.Errorf("refusing to %s %s, which contains the run directory", verb, candidate)
+		}
+		if filepath.Dir(directory) == directory {
+			return nil
+		}
+	}
 }
 
 func sameFile(first, second string) (bool, error) {
