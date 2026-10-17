@@ -200,7 +200,7 @@ func (e *Engine) Validate(ctx context.Context, definition *workflow.Definition, 
 	if options.ElevatedExecutor == nil {
 		options.ElevatedExecutor = e.elevatedExecutor
 	}
-	ctx = workflow.ContextWithPlugins(ctx, definition.Plugins)
+	ctx = definition.PluginContext(ctx)
 	options.secretSession = definition.SecretSession()
 	// Command preflight calls Validate outside Run, so it redacts its own
 	// result; Run's redaction of the same error is idempotent.
@@ -530,7 +530,7 @@ func (e *Engine) run(ctx context.Context, definition *workflow.Definition, optio
 	if options.ElevatedExecutor == nil {
 		options.ElevatedExecutor = e.elevatedExecutor
 	}
-	ctx = workflow.ContextWithPlugins(ctx, definition.Plugins)
+	ctx = definition.PluginContext(ctx)
 	options.secretSession = definition.SecretSession()
 	if session := definition.SecretSession(); session != nil {
 		defer func() { runErr = session.RedactError(runErr) }()
@@ -653,7 +653,7 @@ func (e *Engine) RunSteps(ctx context.Context, definition *workflow.Definition, 
 	if definition == nil {
 		return nil, fmt.Errorf("workflow definition is required")
 	}
-	ctx = workflow.ContextWithPlugins(ctx, definition.Plugins)
+	ctx = definition.PluginContext(ctx)
 	if len(steps) == 0 {
 		return nil, nil
 	}
@@ -1438,6 +1438,7 @@ func (e *Engine) validateAction(ctx context.Context, definition *workflow.Defini
 	inner := &workflow.Definition{Version: 1, Name: workflowStep.Action.Name, Timezone: definition.Timezone, Templates: workflowStep.Action.Templates, Plugins: definition.Plugins, Dir: dir, DirBorrowed: workflowStep.Action.DirBorrowed, Steps: workflowStep.Action.Steps, Finally: workflowStep.Action.Finally, Vars: map[string]any{}, Env: workflow.Environment{}, Location: workflowStep.Action.Location}
 	inner.InheritSecretSession(definition)
 	inner.InheritHelpers(definition)
+	inner.InheritPluginResolution(definition)
 	return e.Validate(ctx, inner, Options{
 		InvocationID: options.InvocationID,
 		inputs:       inputs, BaseEnv: state.Env, EnvironmentLoaders: slices.Clone(state.EnvironmentLoaders), RunDir: options.RunDir, Providers: state.Providers.Clone(),
@@ -1472,6 +1473,7 @@ func (e *Engine) prepareActionExecutor(definition *workflow.Definition, workflow
 	inner := &workflow.Definition{Version: 1, Name: workflowStep.Action.Name, Timezone: definition.Timezone, Templates: workflowStep.Action.Templates, Plugins: definition.Plugins, Dir: dir, DirBorrowed: workflowStep.Action.DirBorrowed, Steps: workflowStep.Action.Steps, Finally: workflowStep.Action.Finally, Vars: map[string]any{}, Env: workflow.Environment{}, Location: workflowStep.Action.Location}
 	inner.InheritSecretSession(definition)
 	inner.InheritHelpers(definition)
+	inner.InheritPluginResolution(definition)
 	execute := func(ctx context.Context, request step.Request) (step.Result, error) {
 		innerState, err := e.Run(ctx, inner, Options{
 			InvocationID: options.InvocationID,

@@ -22,19 +22,10 @@ v3](plugin-protocol-v3.md). The generated concurrent reader handles cancellation
 plugin-to-host callbacks while operations run. The [protocol v1](plugin-protocol.md) reference
 remains available for maintaining existing plugins.
 
-## Local discovery
+## Declared plugins and local lockfiles
 
-A reference such as `type: acme.uppercase` searches for `wuko-plugin-acme` in this order:
-
-1. The workflow's authoritative `plugins.acme` declaration.
-2. The nearest ancestor `.wuko/plugins/acme/` directory.
-3. `~/.wuko/plugins/acme/`.
-4. `$XDG_CONFIG_HOME/wuko/plugins/acme/`.
-5. `PATH`.
-
-Installed and `PATH` plugins need no workflow declaration. An invalid higher-precedence installation is reported instead of being skipped. Referencing a namespaced type never initiates a network request unless the workflow explicitly declares that namespace.
-
-## Pinned workflow plugins
+Every plugin namespace must be declared by the workflow that uses it. Installed binaries and
+`PATH` never implicitly select a plugin. For example:
 
 ```yaml
 version: 1
@@ -42,8 +33,7 @@ name: plugin-example
 
 plugins:
   acme:
-    source: github:acme/wuko-plugin-acme@0123456789abcdef
-    sha256: 8421e8f400000000000000000000000000000000000000000000000000000000
+    source: github:acme/wuko-plugin-acme@v1.2.0
     with:
       endpoint: production
 
@@ -54,9 +44,78 @@ steps:
       value: hello
 ```
 
-`sha256` pins `plugin.json`; the manifest separately pins every platform archive. HTTPS and `github:owner/repository@ref[:path]` sources are supported. GitHub sources require a ref. A URL without an explicit manifest filename resolves to `plugin.json`. Artifacts must remain below the manifest directory and on the original HTTPS origin, or in the same GitHub repository and ref. An HTTPS query is forwarded to same-origin manifest and artifact requests for signed or authenticated sources, but is stripped from persisted provenance, diagnostics, and command output. URL fragments are rejected.
+`with` is passed to `plugin.start`. HTTPS and `github:owner/repository@ref[:path]` sources are
+supported; GitHub sources require a ref. A source without a manifest filename resolves to
+`plugin.json`. Local bundle directories and `plugin.json` paths are also supported, relative to
+the declaring workflow file. A local rebuild requires an explicit pin update.
 
-`with` is passed to `plugin.start`. Dependencies declaring the same namespace must use identical source, manifest digest, and start parameters.
+Local workflows share `wuko.lock` with the other workflows in their directory. Wuko does not
+search parent directories for a lockfile. Stdin workflows use their base directory. The lock
+records the canonical source, namespace, and SHA-256 of the original manifest bytes:
+
+```yaml
+version: 1
+plugins:
+  - namespace: acme
+    source: github:acme/wuko-plugin-acme@v1.2.0:plugin.json
+    sha256: 8421e8f400000000000000000000000000000000000000000000000000000000
+```
+
+The digest above is illustrative. Wuko generates actual pins; the manifest separately pins each
+platform archive. Different sources and versions coexist in one lockfile, while identical
+namespace/source pairs share a pin. Configuration values are never stored in the lockfile.
+
+```sh
+wuko plugin lock build.yaml test.yaml deploy.yaml
+wuko run --file build.yaml
+wuko run --file build.yaml --frozen-lockfile
+wuko plugin lock deploy.yaml --update
+wuko plugin lock legacy.yaml --migrate
+```
+
+Normal local execution creates missing pins but never refreshes existing ones. `plugin lock`
+verifies selected files and their dependency declarations without initializing plugin processes.
+`--update` intentionally refreshes the selected sources. `--migrate` moves legacy inline plugin
+`sha256` values into the lockfile and removes them from YAML after verification; it cannot be
+combined with `--update`. Inline plugin SHA fields are otherwise rejected.
+
+Commit `wuko.lock` with the workflows. First resolution establishes the release identity; later
+runs enforce it. `validate`, `tree`, and `run --dry-run` require existing pins. The persistent
+`--frozen-lockfile` flag requires existing pins throughout local dependency and child-workflow
+execution, without modifying the lock. It still allows verified downloads and cache repair.
+
+Artifacts must remain below the manifest directory and on the original HTTPS origin, or in the
+same GitHub repository and ref. An HTTPS query is forwarded to same-origin requests, but omitted
+from lockfiles, persisted provenance, diagnostics, and command output. Fragments are rejected.
+
+## Remote workflows
+
+Remote workflow invocations ignore local lockfiles, even malformed ones, and never create or
+modify them. They fetch each plugin manifest once per invocation and reuse a cached archive only
+if its digest matches that manifest. A changed manifest selects a new cached release; the source
+is trusted anew for each invocation. A bundle packaged with a remote workflow must stay inside
+that package. Packaged `wuko.lock` files are not imported.
+
+`--frozen-lockfile` is rejected for remote workflows. For locked execution, save the workflow
+locally, run `wuko plugin lock FILE`, and then run the local file with the frozen flag. Remote
+manifests must remain available even when plugin archives are already cached.
+
+## Shared verified cache
+
+Wuko stores original manifests and platform archives under
+`os.UserCacheDir()/wuko/plugins/v1/<manifest-sha256>/<os>-<arch>/`. This is normally
+`~/Library/Caches/wuko/plugins` on macOS and `$XDG_CACHE_HOME/wuko/plugins` or
+`~/.cache/wuko/plugins` on Linux. `WUKO_PLUGIN_CACHE_DIR` overrides the plugin cache root.
+
+All projects share the cache. Wuko verifies bytes on reuse, extracts into a private temporary
+run directory, and cleans that directory up after the command. Cache publication and lockfile
+updates are protected against concurrent writers. Damaged entries are repaired from the declared
+source; a failed download or checksum mismatch fails resolution without changing existing pins.
+
+After checking the shared cache, Wuko can import matching verified bundle bytes from the nearest
+project/ancestor installation, then home and OS config installations. Unrelated or invalid
+installations are skipped. Old installations lacking original bundle bytes need a one-time
+verified fetch. Bare executables and installation markers alone are never sufficient.
 
 ## Install and uninstall
 
@@ -69,7 +128,7 @@ wuko plugin uninstall acme
 wuko plugin uninstall --global --yes acme
 ```
 
-Installation downloads only the current-platform archive, verifies both digests, safely extracts regular files, performs the pure `initialize` handshake, and atomically publishes the installation. It does not call `plugin.start`. A marketplace selection is prepared in full and committed as one transaction, so a failed plugin does not leave earlier selections installed.
+Installation prefetches only the current-platform archive, verifies both digests, safely extracts regular files, performs the pure `initialize` handshake, and atomically publishes the installation. It does not call `plugin.start`. Original manifest/archive bytes are retained and imported into the shared cache. Workflows still need explicit declarations and local pins. Uninstall removes the selected installation but leaves independently cached releases available. A marketplace selection is prepared in full and committed as one transaction, so a failed plugin does not leave earlier selections installed.
 
 Marketplace repositories are also accepted. An interactive terminal opens a searchable picker;
 scripts select namespaces with repeatable `--package` flags:
@@ -157,6 +216,11 @@ unchanged files and timestamps and removes a stale generated plugin file only wh
 its previously recorded digest. `--check` performs the same validation and comparison without
 writing; use it in CI.
 
+Marketplace commands never create or refresh plugin pins. A workflow package that declares
+`plugins:` must already have a committed `wuko.lock` (run `wuko plugin lock FILE` in the package);
+otherwise the build fails with a missing-pin error. The committed lock is published inside the
+package archive, so installers get exactly the pinned plugin releases.
+
 Commit the imported source, generated catalog, and published files:
 
 ```sh
@@ -200,33 +264,22 @@ Install plugins only from maintainers you trust.
 
 ## Version resolution and conflicts
 
-A marketplace is an installation source, not a runtime version solver. Wuko runs at most one
-plugin process for a namespace during a command and never automatically chooses the newest version.
+A marketplace is an installation source, not a runtime version solver. Wuko never automatically
+chooses the newest release. Every workflow declares its sources; local workflows pin them in
+`wuko.lock`, while remote runs resolve the manifests served during that invocation.
 
-| Workflow situation | Selected plugin | Conflict behavior |
-| --- | --- | --- |
-| `plugins.acme` declares a source and digest | That exact remote release | Installed project/global versions are ignored |
-| No `plugins.acme` declaration | First valid project, home, config, or `PATH` candidate | An invalid higher-precedence candidate blocks fallback |
-| Multiple workflows declare the same source, digest, and `with` | One shared process | No conflict |
-| Declarations differ by source or digest | None | Command fails with both source identities and abbreviated digests |
-| Declarations use the same release but different `with` | None | Command fails without printing configuration values |
-| Project and global installations both exist | Project installation | Shadowing is intentional; versions are not compared |
+| Situation | Behavior |
+| --- | --- |
+| Namespace is not declared | Fail, even if installed or on `PATH` |
+| Local source has a lock entry | Use that manifest digest; download only missing or damaged content |
+| Local source has no lock entry | Normal execution adds it; frozen/read-only commands fail |
+| Several workflows use the same namespace/source/digest/`with` | Share one process during the command |
+| Workflows in one command conflict by source, digest, or `with` | Fail; configuration values stay redacted |
+| Separate commands use different releases | Both releases coexist in the cache |
+| A remote workflow is run | Fetch its plugin manifests; leave local lockfiles untouched |
 
-An explicit declaration is authoritative and reproducible:
-
-```yaml
-plugins:
-  acme:
-    source: github:acme/wuko-plugin-acme@v1.2.0
-    sha256: 8421e8f400000000000000000000000000000000000000000000000000000000
-    with:
-      endpoint: production
-```
-
-Without that declaration, a namespaced step or executor uses ambient local discovery. A
-marketplace-installed plugin participates exactly like any other local installation. Installed
-manifest version labels are informational during resolution; source and digest establish the
-identity of pinned releases. Incompatible parallel APIs must use different namespaces.
+Incompatible parallel APIs within one command must use different namespaces. Project and global
+installations can supply matching content, but do not override declarations or lockfile pins.
 
 ## Helpers
 
@@ -265,7 +318,7 @@ Helpers accept any number of JSON-compatible arguments. The plugin owns argument
 does not send workflow roots or other ambient context. Go-template pipelines append their piped
 value to the argument list according to normal Go-template rules.
 
-Only plugins explicitly pinned in the workflow's `plugins:` map contribute helpers. This lets Wuko
+Only plugins explicitly declared in the workflow's `plugins:` map contribute helpers. This lets Wuko
 initialize helper declarations before parsing templates. A remote workflow carries these
 declarations itself, so its caller does not redeclare them. Composite actions inherit the calling
 workflow's helper set, while dependency workflows keep their own sets.
@@ -308,7 +361,7 @@ structured actions and otherwise preserves the v2 runtime contract.
 A v2 step's `host_callbacks` list is the boundary for what it can reach back into: `secret` is
 available only to a step that declares `host.function.call`, and `host.template.render` alone
 renders with `secret` denied rather than granting it indirectly. The list is declared by the
-plugin itself during `initialize`, so pinning a plugin by `sha256:` pins what it may ask for. Because a plugin step
+plugin itself during `initialize`, so locking the plugin manifest pins what it may ask for. Because a plugin step
 cannot run through the host executor, plugin steps are rejected inside `executor:` blocks; because
 a plugin executor exposes no filesystem, `file` and `edit` are rejected during validation inside a
 plugin executor's scope.

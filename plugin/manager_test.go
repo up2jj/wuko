@@ -26,7 +26,16 @@ func TestMain(main *testing.M) {
 		runProtocolHelper()
 		os.Exit(0)
 	}
-	os.Exit(main.Run())
+	cacheRoot, err := os.MkdirTemp("", "wuko-plugin-test-cache-")
+	if err != nil {
+		panic(err)
+	}
+	if err := os.Setenv("WUKO_PLUGIN_CACHE_DIR", cacheRoot); err != nil {
+		panic(err)
+	}
+	code := main.Run()
+	_ = os.RemoveAll(cacheRoot)
+	os.Exit(code)
 }
 
 func runProtocolHelper() {
@@ -84,18 +93,18 @@ func TestLoadActionIsValidatedCachedAndDoesNotStartLifecycle(t *testing.T) {
 	archive := makeArchive(t, "wuko-plugin-acme", 0755, script)
 	manifestData, _ := json.Marshal(Manifest{Version: 1, Namespace: "acme", PluginVersion: "1.0.0", Protocol: ProtocolV3, Artifacts: []Artifact{{OS: runtime.GOOS, Arch: runtime.GOARCH, Path: "plugin.tar.gz", Format: "tar.gz", Entry: "wuko-plugin-acme", SHA256: digest(archive)}}})
 	var diagnostics synchronizedBuffer
-	manager := NewManager(Config{HTTPClient: &http.Client{Transport: memoryTransport{manifest: manifestData, archive: archive}}, Stderr: &diagnostics})
+	manager := NewManager(Config{CacheDir: testCache(t), HTTPClient: &http.Client{Transport: memoryTransport{manifest: manifestData, archive: archive}}, Stderr: &diagnostics})
 	t.Cleanup(func() { _ = manager.Close(context.Background(), "completed") })
-	sources := map[string]workflow.PluginSource{"acme": {Source: "https://plugins.test/plugin.json", SHA256: digest(manifestData), With: map[string]any{"mode": "actions"}}}
+	sources := map[string]workflow.ResolvedPluginSource{"acme": {Source: "https://plugins.test/plugin.json", SHA256: digest(manifestData), With: map[string]any{"mode": "actions"}}}
 	if _, err := manager.LoadHelpers(t.Context(), sources); err != nil {
 		t.Fatal(err)
 	}
-	first, err := manager.LoadAction(t.Context(), "acme", "build")
+	first, err := manager.LoadAction(workflow.ContextWithResolvedPlugins(t.Context(), sources), "acme", "build")
 	if err != nil {
 		t.Fatal(err)
 	}
 	first[0] = 'x'
-	second, err := manager.LoadAction(t.Context(), "acme", "build")
+	second, err := manager.LoadAction(workflow.ContextWithResolvedPlugins(t.Context(), sources), "acme", "build")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,8 +160,8 @@ func TestWorkflowPluginHelpersStartAndCall(t *testing.T) {
 	archive := makeArchive(t, "wuko-plugin-acme", 0755, script)
 	manifestData, _ := json.Marshal(Manifest{Version: 1, Namespace: "acme", PluginVersion: "1.0.0", Protocol: Protocol, Artifacts: []Artifact{{OS: runtime.GOOS, Arch: runtime.GOARCH, Path: "plugin.tar.gz", Format: "tar.gz", Entry: "wuko-plugin-acme", SHA256: digest(archive)}}})
 	var diagnostics synchronizedBuffer
-	manager := NewManager(Config{HTTPClient: &http.Client{Transport: memoryTransport{manifest: manifestData, archive: archive}}, Stderr: &diagnostics})
-	sources := map[string]workflow.PluginSource{"acme": {Source: "https://plugins.test/plugin.json", SHA256: digest(manifestData), With: map[string]any{"mode": "helpers"}}}
+	manager := NewManager(Config{CacheDir: testCache(t), HTTPClient: &http.Client{Transport: memoryTransport{manifest: manifestData, archive: archive}}, Stderr: &diagnostics})
+	sources := map[string]workflow.ResolvedPluginSource{"acme": {Source: "https://plugins.test/plugin.json", SHA256: digest(manifestData), With: map[string]any{"mode": "helpers"}}}
 	helpers, err := manager.LoadHelpers(t.Context(), sources)
 	if err != nil {
 		t.Fatal(err)
@@ -202,24 +211,24 @@ func TestPluginHelperDeclarations(t *testing.T) {
 }
 
 func TestPluginDeclarationConflictsReportIdentityWithoutConfigurationValues(t *testing.T) {
-	manager := NewManager(Config{})
+	manager := NewManager(Config{CacheDir: testCache(t)})
 	digestA := strings.Repeat("a", 64)
 	digestB := strings.Repeat("b", 64)
-	if err := manager.configureSources(map[string]workflow.PluginSource{"acme": {Source: "github:acme/plugin@v1", SHA256: digestA, With: map[string]any{"token": "first-secret"}}}); err != nil {
+	if err := manager.configureSources(map[string]workflow.ResolvedPluginSource{"acme": {Source: "github:acme/plugin@v1", SHA256: digestA, With: map[string]any{"token": "first-secret"}}}); err != nil {
 		t.Fatal(err)
 	}
-	err := manager.configureSources(map[string]workflow.PluginSource{"acme": {Source: "github:acme/plugin@v2", SHA256: digestB, With: map[string]any{"token": "second-secret"}}})
+	err := manager.configureSources(map[string]workflow.ResolvedPluginSource{"acme": {Source: "github:acme/plugin@v2", SHA256: digestB, With: map[string]any{"token": "second-secret"}}})
 	if err == nil || !strings.Contains(err.Error(), "github:acme/plugin@v1:plugin.json") || !strings.Contains(err.Error(), digestA[:12]) || strings.Contains(err.Error(), "secret") {
 		t.Fatalf("source conflict error = %v", err)
 	}
 
-	manager = NewManager(Config{})
-	base := workflow.PluginSource{Source: "github:acme/plugin@v1", SHA256: digestA, With: map[string]any{"token": "first-secret"}}
-	if err := manager.configureSources(map[string]workflow.PluginSource{"acme": base}); err != nil {
+	manager = NewManager(Config{CacheDir: testCache(t)})
+	base := workflow.ResolvedPluginSource{Source: "github:acme/plugin@v1", SHA256: digestA, With: map[string]any{"token": "first-secret"}}
+	if err := manager.configureSources(map[string]workflow.ResolvedPluginSource{"acme": base}); err != nil {
 		t.Fatal(err)
 	}
 	base.With = map[string]any{"token": "second-secret"}
-	err = manager.configureSources(map[string]workflow.PluginSource{"acme": base})
+	err = manager.configureSources(map[string]workflow.ResolvedPluginSource{"acme": base})
 	if err == nil || !strings.Contains(err.Error(), "conflicting workflow configuration") || strings.Contains(err.Error(), "secret") {
 		t.Fatalf("configuration conflict error = %v", err)
 	}
@@ -289,9 +298,9 @@ func TestWorkflowPluginStartAndStopOnce(t *testing.T) {
 	archive := makeArchive(t, "wuko-plugin-acme", 0755, script)
 	manifestData, _ := json.Marshal(Manifest{Version: 1, Namespace: "acme", PluginVersion: "1.0.0", Protocol: Protocol, Artifacts: []Artifact{{OS: runtime.GOOS, Arch: runtime.GOARCH, Path: "plugin.tar.gz", Format: "tar.gz", Entry: "wuko-plugin-acme", SHA256: digest(archive)}}})
 	var diagnostics synchronizedBuffer
-	manager := NewManager(Config{HTTPClient: &http.Client{Transport: memoryTransport{manifest: manifestData, archive: archive}}, Stderr: &diagnostics})
+	manager := NewManager(Config{CacheDir: testCache(t), HTTPClient: &http.Client{Transport: memoryTransport{manifest: manifestData, archive: archive}}, Stderr: &diagnostics})
 	registry := step.NewRegistry(step.WithResolver(manager.ResolveStep))
-	ctx := workflow.ContextWithPlugins(context.Background(), map[string]workflow.PluginSource{"acme": {Source: "https://plugins.test/plugin.json", SHA256: digest(manifestData), With: map[string]any{"mode": "test"}}})
+	ctx := workflow.ContextWithResolvedPlugins(context.Background(), map[string]workflow.ResolvedPluginSource{"acme": {Source: "https://plugins.test/plugin.json", SHA256: digest(manifestData), With: map[string]any{"mode": "test"}}})
 	runner, err := registry.BuildContext(ctx, "acme.uppercase", map[string]any{"value": "hello"})
 	if err != nil {
 		t.Fatal(err)
@@ -322,43 +331,17 @@ func TestWorkflowPluginStartAndStopOnce(t *testing.T) {
 	}
 }
 
-func TestLocalResolutionPrecedence(t *testing.T) {
+func TestUndeclaredPluginCannotUseAmbientExecutable(t *testing.T) {
 	root := t.TempDir()
-	cwd := filepath.Join(root, "project", "nested")
-	home := filepath.Join(root, "home")
-	config := filepath.Join(root, "config")
-	if err := os.MkdirAll(cwd, 0700); err != nil {
+	if err := os.MkdirAll(filepath.Join(root, ".wuko", "plugins", "acme"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	makeExecutable := func(directory string) string {
-		t.Helper()
-		if err := os.MkdirAll(directory, 0700); err != nil {
-			t.Fatal(err)
-		}
-		target := filepath.Join(directory, "wuko-plugin-acme")
-		if err := os.WriteFile(target, []byte("x"), 0700); err != nil {
-			t.Fatal(err)
-		}
-		return target
+	if err := os.WriteFile(filepath.Join(root, ".wuko", "plugins", "acme", "wuko-plugin-acme"), []byte("#!/bin/sh\nexit 99\n"), 0700); err != nil {
+		t.Fatal(err)
 	}
-	projectPath := makeExecutable(filepath.Join(root, "project", ".wuko", "plugins", "acme"))
-	homePath := makeExecutable(filepath.Join(home, ".wuko", "plugins", "acme"))
-	configPath := makeExecutable(filepath.Join(config, "wuko", "plugins", "acme"))
-	pathPath := makeExecutable(filepath.Join(root, "path"))
-	manager := NewManager(Config{CWD: func() (string, error) { return cwd, nil }, HomeDir: func() (string, error) { return home, nil }, ConfigDir: func() (string, error) { return config, nil }, LookPath: func(string) (string, error) { return pathPath, nil }})
-	for _, expected := range []string{projectPath, homePath, configPath, pathPath} {
-		actual, err := manager.findLocal("acme")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if actual != expected {
-			t.Fatalf("path = %s, want %s", actual, expected)
-		}
-		if expected != pathPath {
-			if err := os.RemoveAll(filepath.Dir(expected)); err != nil {
-				t.Fatal(err)
-			}
-		}
+	manager := NewManager(Config{CacheDir: testCache(t), CWD: func() (string, error) { return root, nil }})
+	if _, err := manager.ResolveStep(t.Context(), "acme.uppercase", nil); err == nil || !strings.Contains(err.Error(), "must be declared") {
+		t.Fatalf("error = %v", err)
 	}
 }
 
@@ -374,10 +357,10 @@ func TestManagerResetReleasesRunScopedState(t *testing.T) {
 	archive := makeArchive(t, "wuko-plugin-acme", 0755, script)
 	manifestData, _ := json.Marshal(Manifest{Version: 1, Namespace: "acme", PluginVersion: "1.0.0", Protocol: Protocol, Artifacts: []Artifact{{OS: runtime.GOOS, Arch: runtime.GOARCH, Path: "plugin.tar.gz", Format: "tar.gz", Entry: "wuko-plugin-acme", SHA256: digest(archive)}}})
 	var diagnostics synchronizedBuffer
-	manager := NewManager(Config{HTTPClient: &http.Client{Transport: memoryTransport{manifest: manifestData, archive: archive}}, Stderr: &diagnostics})
+	manager := NewManager(Config{CacheDir: testCache(t), HTTPClient: &http.Client{Transport: memoryTransport{manifest: manifestData, archive: archive}}, Stderr: &diagnostics})
 	load := func(mode string) {
 		t.Helper()
-		sources := map[string]workflow.PluginSource{"acme": {Source: "https://plugins.test/plugin.json", SHA256: digest(manifestData), With: map[string]any{"mode": mode}}}
+		sources := map[string]workflow.ResolvedPluginSource{"acme": {Source: "https://plugins.test/plugin.json", SHA256: digest(manifestData), With: map[string]any{"mode": mode}}}
 		helpers, err := manager.LoadHelpers(t.Context(), sources)
 		if err != nil {
 			t.Fatal(err)
@@ -479,15 +462,15 @@ func pluginFixture(t *testing.T, namespace string) (manifest, archive []byte) {
 func TestConcurrentLoadsOfDistinctPluginsDoNotSerialize(t *testing.T) {
 	namespaces := []string{"acme", "beta"}
 	bodies := map[string][]byte{}
-	sources := map[string]workflow.PluginSource{}
+	sources := map[string]workflow.ResolvedPluginSource{}
 	for _, namespace := range namespaces {
 		manifest, archive := pluginFixture(t, namespace)
 		bodies["/"+namespace+".json"] = manifest
 		bodies["/"+namespace+".tar.gz"] = archive
-		sources[namespace] = workflow.PluginSource{Source: "https://plugins.test/" + namespace + ".json", SHA256: digest(manifest)}
+		sources[namespace] = workflow.ResolvedPluginSource{Source: "https://plugins.test/" + namespace + ".json", SHA256: digest(manifest)}
 	}
 	transport := newBarrierTransport(len(namespaces), bodies)
-	manager := NewManager(Config{HTTPClient: &http.Client{Transport: transport}, Stderr: io.Discard})
+	manager := NewManager(Config{CacheDir: testCache(t), HTTPClient: &http.Client{Transport: transport}, Stderr: io.Discard})
 	t.Cleanup(func() { _ = manager.Close(context.Background(), "completed") })
 	if err := manager.configureSources(sources); err != nil {
 		t.Fatal(err)
@@ -511,9 +494,9 @@ func TestConcurrentLoadsOfDistinctPluginsDoNotSerialize(t *testing.T) {
 func TestConcurrentLoadsOfOnePluginLaunchItOnce(t *testing.T) {
 	manifest, archive := pluginFixture(t, "acme")
 	transport := newBarrierTransport(1, map[string][]byte{"/acme.json": manifest, "/acme.tar.gz": archive})
-	manager := NewManager(Config{HTTPClient: &http.Client{Transport: transport}, Stderr: io.Discard})
+	manager := NewManager(Config{CacheDir: testCache(t), HTTPClient: &http.Client{Transport: transport}, Stderr: io.Discard})
 	t.Cleanup(func() { _ = manager.Close(context.Background(), "completed") })
-	if err := manager.configureSources(map[string]workflow.PluginSource{"acme": {Source: "https://plugins.test/acme.json", SHA256: digest(manifest)}}); err != nil {
+	if err := manager.configureSources(map[string]workflow.ResolvedPluginSource{"acme": {Source: "https://plugins.test/acme.json", SHA256: digest(manifest)}}); err != nil {
 		t.Fatal(err)
 	}
 	loaded := make(chan *runningPlugin, 8)
@@ -540,4 +523,10 @@ func TestConcurrentLoadsOfOnePluginLaunchItOnce(t *testing.T) {
 	if count := transport.downloadCount("/acme.tar.gz"); count != 1 {
 		t.Fatalf("plugin archive was downloaded %d times", count)
 	}
+}
+
+func testCache(t *testing.T) func() (string, error) {
+	t.Helper()
+	root := t.TempDir()
+	return func() (string, error) { return root, nil }
 }

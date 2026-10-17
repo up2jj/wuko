@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"path"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -29,7 +30,6 @@ var pluginNamespacePattern = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 // PluginSource declares an authoritative workflow-scoped plugin release manifest.
 type PluginSource struct {
 	Source string         `yaml:"source" json:"source"`
-	SHA256 string         `yaml:"sha256" json:"sha256"`
 	With   map[string]any `yaml:"with,omitempty" json:"with,omitempty"`
 }
 
@@ -37,7 +37,12 @@ func (source *PluginSource) UnmarshalYAML(node *yaml.Node) error {
 	if node.Kind != yaml.MappingNode {
 		return fmt.Errorf("plugin declaration must be an object")
 	}
-	if err := rejectUnknownFields(node, "plugin declaration", map[string]bool{"source": true, "sha256": true, "with": true}); err != nil {
+	for i := 0; i < len(node.Content); i += 2 {
+		if node.Content[i].Value == "sha256" {
+			return fmt.Errorf("inline plugin sha256 is no longer supported; run wuko plugin lock FILE --migrate")
+		}
+	}
+	if err := rejectUnknownFields(node, "plugin declaration", map[string]bool{"source": true, "with": true}); err != nil {
 		return err
 	}
 	type plain PluginSource
@@ -45,12 +50,8 @@ func (source *PluginSource) UnmarshalYAML(node *yaml.Node) error {
 		return err
 	}
 	source.Source = strings.TrimSpace(source.Source)
-	source.SHA256 = strings.ToLower(strings.TrimSpace(source.SHA256))
 	if source.Source == "" {
 		return fmt.Errorf("plugin source must not be empty")
-	}
-	if !validSHA256(source.SHA256) {
-		return fmt.Errorf("plugin sha256 must be 64 lowercase hexadecimal characters")
 	}
 	if _, err := source.CanonicalSource(); err != nil {
 		return err
@@ -58,7 +59,7 @@ func (source *PluginSource) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
-// CanonicalSource normalizes the two supported workflow-scoped remote locator forms.
+// CanonicalSource normalizes remote locators and explicit local bundle paths.
 func (source PluginSource) CanonicalSource() (string, error) {
 	if strings.HasPrefix(source.Source, "github:") {
 		value := strings.TrimPrefix(source.Source, "github:")
@@ -77,8 +78,20 @@ func (source PluginSource) CanonicalSource() (string, error) {
 		}
 		return "github:" + value, nil
 	}
+	if !strings.HasPrefix(source.Source, "https://") {
+		// A Windows volume such as C: is part of an absolute local path, not a URL scheme.
+		volume := filepath.VolumeName(source.Source)
+		if source.Source == "" || strings.Contains(source.Source[len(volume):], ":") {
+			return "", fmt.Errorf("plugin source must be a local bundle, HTTPS, or github:owner/repository@ref[:path]")
+		}
+		local := filepath.Clean(source.Source)
+		if filepath.Ext(local) != ".json" {
+			local = filepath.Join(local, "plugin.json")
+		}
+		return local, nil
+	}
 	parsed, err := url.Parse(source.Source)
-	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil {
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" {
 		return "", fmt.Errorf("workflow plugin source must be HTTPS or github:owner/repository@ref[:path]")
 	}
 	if parsed.Path == "" || strings.HasSuffix(parsed.Path, "/") || !strings.Contains(path.Base(parsed.Path), ".") {
@@ -90,16 +103,4 @@ func (source PluginSource) CanonicalSource() (string, error) {
 // ValidPluginNamespace reports whether namespace is suitable for a namespaced plugin type.
 func ValidPluginNamespace(namespace string) bool {
 	return pluginNamespacePattern.MatchString(namespace)
-}
-
-func validSHA256(value string) bool {
-	if len(value) != 64 {
-		return false
-	}
-	for _, character := range value {
-		if !strings.ContainsRune("0123456789abcdef", character) {
-			return false
-		}
-	}
-	return true
 }

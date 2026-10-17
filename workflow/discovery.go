@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"gopkg.in/yaml.v3"
 	"maps"
 	"os"
 	"path/filepath"
@@ -423,4 +424,46 @@ func discoveryLocations(cwd, homeDir, configDir string) []discoveryLocation {
 		locations = append(locations, discoveryLocation{dir: clean, scope: scope})
 	}
 	return locations
+}
+
+// FindForPluginLock discovers a dependency by its header without resolving plugins,
+// templates, or legacy plugin SHA fields. Plugin locking must precede those phases.
+func FindForPluginLock(cwd, homeDir, configDir, name string) (string, error) {
+	if !ValidWorkflowName(name) {
+		return "", fmt.Errorf("invalid workflow name %q", name)
+	}
+	for _, location := range discoveryLocations(cwd, homeDir, configDir) {
+		files, err := discoverWorkflowFiles(location.dir)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return "", err
+		}
+		for _, file := range files {
+			// Loose files are named by their filename, so unrelated files are never parsed.
+			if file.packageDir == "" && file.name != name {
+				continue
+			}
+			data, err := os.ReadFile(file.path)
+			if err != nil {
+				return "", err
+			}
+			var header struct {
+				Name    string               `yaml:"name"`
+				Targets map[string]yaml.Node `yaml:"targets"`
+			}
+			if err := yaml.Unmarshal(data, &header); err != nil {
+				return "", fmt.Errorf("reading workflow %s: %w", file.path, err)
+			}
+			if file.packageDir != "" && header.Name != name {
+				continue
+			}
+			if len(header.Targets) > 0 {
+				return "", fmt.Errorf("workflow %q declares targets and cannot be used as a dependency", name)
+			}
+			return file.path, nil
+		}
+	}
+	return "", fmt.Errorf("workflow %q not found", name)
 }

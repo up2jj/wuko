@@ -15,7 +15,7 @@ import (
 
 type fakePluginHelpers struct{}
 
-func (fakePluginHelpers) LoadHelpers(context.Context, map[string]workflow.PluginSource) (helper.Set, error) {
+func (fakePluginHelpers) LoadHelpers(context.Context, map[string]workflow.ResolvedPluginSource) (helper.Set, error) {
 	return helper.Set{"acme_slug": func(_ context.Context, args []any) (any, error) {
 		return strings.ToLower(strings.ReplaceAll(args[0].(string), " ", "-")), nil
 	}}, nil
@@ -43,7 +43,6 @@ name: caller
 plugins:
   acme:
     source: https://example.test/plugin.json
-    sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 steps:
   - id: local
     uses: ./actions/echo

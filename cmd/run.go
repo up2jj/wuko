@@ -143,6 +143,11 @@ func (observer *returnDestinationObserver) requested(destination workflow.Return
 }
 
 func runWorkflow(command *cobra.Command, deps dependencies, args []string, config runWorkflowConfig) (runErr error) {
+	initialContext := command.Context()
+	defer command.SetContext(initialContext)
+	if config.dryRun {
+		command.SetContext(workflow.ContextWithPluginLockPolicy(command.Context(), workflow.PluginLockPolicy{ReadOnly: true}))
+	}
 	workflowOutput := command.OutOrStdout()
 	var additionalReporters []reporterpkg.Reporter
 	reportsReady := false
@@ -290,6 +295,9 @@ func runWorkflow(command *cobra.Command, deps dependencies, args []string, confi
 	loadOptions := workflow.LoadOptions{Vars: vars, Env: env, BaseEnv: baseEnv, EnvironmentLoaders: environmentLoaders, RunDir: cwd, Diagnostics: reporters.Diagnostic, Providers: providers,
 		Stdin: stdin, Stdout: workflowOutput, Stderr: command.ErrOrStderr(), Interactive: isInteractive,
 		EnsureSecretAuth: true}
+	if target.remote {
+		command.SetContext(workflow.ContextWithPluginLockPolicy(command.Context(), workflow.PluginLockPolicy{Remote: true}))
+	}
 	definition, cleanup, err := target.load(command.Context(), loader, loadOptions)
 	if err != nil {
 		return err

@@ -420,6 +420,9 @@ func Extract(release Release, directory string) (string, error) {
 		if err != nil {
 			return "", err
 		}
+		if name == MarkerName || name == releaseDirectory || strings.HasPrefix(name, releaseDirectory+"/") {
+			return "", fmt.Errorf("plugin archive uses reserved installation metadata path")
+		}
 		if seen[name] {
 			return "", fmt.Errorf("duplicate plugin archive entry %q", name)
 		}

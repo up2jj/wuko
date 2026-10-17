@@ -30,6 +30,9 @@ func IsRemoteLocator(locator string) bool {
 // DecodeRemote fetches and decodes a workflow without preparing its composite actions.
 // The returned cleanup function must be called after preparation and execution finish.
 func (loader *Loader) DecodeRemote(ctx context.Context, locator string, options LoadOptions) (*Definition, func(), error) {
+	if PluginLockPolicyFromContext(ctx).Frozen {
+		return nil, func() {}, fmt.Errorf("--frozen-lockfile is only supported for local workflows; save the workflow locally and run wuko plugin lock FILE")
+	}
 	location := diagnostic.Location{Source: diagnostic.SafeURLString(locator)}
 	fetchStarted := traceStart(options.Diagnostics, diagnostic.PhaseWorkflowFetch, location, "", "", "", "fetching remote workflow")
 	path, description, cleanup, bytesFetched, err := loader.materializeRemoteLocator(ctx, locator, options)
@@ -45,6 +48,7 @@ func (loader *Loader) DecodeRemote(ctx context.Context, locator string, options 
 			cleanup()
 		}
 	}()
+	options.remoteOrigin = true
 	options.sourceRoot = filepath.Dir(path)
 	options.sourceLabel = description
 	definition, err := loader.decode(ctx, path, options)
@@ -105,6 +109,9 @@ func (loader *Loader) materializeRemoteLocator(ctx context.Context, raw string, 
 // package without preparing its composite actions. The returned directory contains the complete
 // package tree and must be released with cleanup after it has been copied or otherwise consumed.
 func (loader *Loader) LoadMarketplacePackage(ctx context.Context, baseURL string, item MarketplacePackage, options LoadOptions) (*Definition, string, func(), error) {
+	if PluginLockPolicyFromContext(ctx).Frozen {
+		return nil, "", func() {}, fmt.Errorf("--frozen-lockfile is only supported for local workflows; save and lock the workflow locally")
+	}
 	if !ValidWorkflowName(item.Name) {
 		return nil, "", func() {}, fmt.Errorf("marketplace package name %q is invalid", item.Name)
 	}
@@ -139,9 +146,10 @@ func (loader *Loader) LoadMarketplacePackage(ctx context.Context, baseURL string
 			cleanup()
 		}
 	}()
+	options.remoteOrigin = true
 	options.sourceRoot = filepath.Dir(workflowPath)
 	options.sourceLabel = packageURL
-	definition, err := loader.Decode(workflowPath, options)
+	definition, err := loader.DecodeContext(ctx, workflowPath, options)
 	if err != nil {
 		return nil, "", func() {}, err
 	}
@@ -160,6 +168,9 @@ func (loader *Loader) LoadMarketplacePackage(ctx context.Context, baseURL string
 // The returned cleanup function removes the temporary materialization directory and must be
 // called after the workflow has finished executing.
 func (loader *Loader) LoadRemote(ctx context.Context, locator string, options LoadOptions) (*Definition, func(), error) {
+	if PluginLockPolicyFromContext(ctx).Frozen {
+		return nil, func() {}, fmt.Errorf("--frozen-lockfile is only supported for local workflows; save the workflow locally and run wuko plugin lock FILE")
+	}
 	location := diagnostic.Location{Source: diagnostic.SafeURLString(locator)}
 	started := traceStart(options.Diagnostics, diagnostic.PhaseLoad, location, "", "", "", "loading remote workflow")
 	definition, cleanup, err := loader.DecodeRemote(ctx, locator, options)

@@ -55,7 +55,7 @@ func pluginScaffoldTemplateNames() []string {
 
 func newPluginCmd(deps dependencies) *cobra.Command {
 	command := &cobra.Command{Use: "plugin", Short: "Install and manage executable plugins"}
-	command.AddCommand(newPluginInstallCmd(deps), newPluginUninstallCmd(deps))
+	command.AddCommand(newPluginInstallCmd(deps), newPluginUninstallCmd(deps), newPluginLockCmd(deps))
 	return command
 }
 
@@ -108,6 +108,9 @@ func installPluginMarketplace(command *cobra.Command, deps dependencies, source,
 		return err
 	}
 	markers, err := pluginpkg.InstallMarketplaceBatch(command.Context(), requests, root, reinstall, deps.httpClient, command.ErrOrStderr())
+	if len(markers) > 0 {
+		err = errors.Join(err, cacheInstallationManager(deps).CacheInstallations(command.Context(), root, markers))
+	}
 	// A non-empty marker list means publication committed, so any error beside it comes from
 	// post-commit cleanup. Reporting the installations first keeps the user from believing a
 	// successful transaction was rolled back.
@@ -116,7 +119,7 @@ func installPluginMarketplace(command *cobra.Command, deps dependencies, source,
 	}
 	if err != nil {
 		if len(markers) > 0 {
-			return fmt.Errorf("cleaning up after marketplace install: %w", err)
+			return fmt.Errorf("finalizing marketplace plugin installation: %w", err)
 		}
 		return fmt.Errorf("installing marketplace plugins: %w", err)
 	}
@@ -174,8 +177,9 @@ func installPluginRelease(command *cobra.Command, deps dependencies, source, exp
 	if err != nil {
 		return err
 	}
+	cacheErr := cacheInstallationManager(deps).CacheInstallations(command.Context(), root, []pluginpkg.InstallationMarker{marker})
 	_, err = fmt.Fprintf(command.OutOrStdout(), "Installed plugin %s %s in %s\n", marker.Namespace, marker.PluginVersion, filepath.Join(root, marker.Namespace))
-	return err
+	return errors.Join(err, cacheErr)
 }
 
 func selectMarketplacePlugins(command *cobra.Command, deps dependencies, plugins []workflow.MarketplacePluginPackage, requested []string) (map[int]struct{}, error) {
@@ -432,4 +436,30 @@ func scaffoldTargetPath(root, path string) string {
 	target := strings.TrimSuffix(strings.TrimPrefix(path, root+"/"), ".tmpl")
 	directory, name := filepath.Split(target)
 	return directory + strings.Replace(name, "dot-", ".", 1)
+}
+
+func newPluginLockCmd(deps dependencies) *cobra.Command {
+	var update, migrate bool
+	command := &cobra.Command{Use: "lock FILE...", Short: "Verify and lock declared workflow plugins", Args: cobra.MinimumNArgs(1), RunE: func(command *cobra.Command, args []string) error {
+		if workflow.PluginLockPolicyFromContext(command.Context()).Frozen {
+			return fmt.Errorf("plugin lock cannot be used with --frozen-lockfile")
+		}
+		paths, err := deps.plugins.LockWorkflows(command.Context(), args, update, migrate)
+		for _, path := range paths {
+			if _, writeErr := fmt.Fprintln(command.OutOrStdout(), "Locked plugins in "+path); writeErr != nil {
+				return errors.Join(err, writeErr)
+			}
+		}
+		return err
+	}}
+	command.Flags().BoolVar(&update, "update", false, "refresh existing pins for selected workflow sources")
+	command.Flags().BoolVar(&migrate, "migrate", false, "move legacy inline plugin SHA pins into wuko.lock")
+	return command
+}
+
+func cacheInstallationManager(deps dependencies) *pluginpkg.Manager {
+	if deps.plugins != nil {
+		return deps.plugins
+	}
+	return pluginpkg.NewManager(pluginpkg.Config{CacheDir: deps.cacheDir})
 }

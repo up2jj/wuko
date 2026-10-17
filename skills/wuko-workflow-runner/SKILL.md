@@ -32,13 +32,14 @@ preparation. Otherwise:
    key-value, retry, polling, and concurrent effects. Do not edit the workflow while preparing to
    run it. If it declares `invokable: false`, do not try another selector: it may run only as
    another workflow's `depends_on` prerequisite.
-3. For each plugin namespace, report either the authoritative declared source, ref, and manifest
-   digest or the ambient discovery mode (project, home, config, or `PATH`). State whether the
-   identity is immutable and digest-verified. List plugin `with` keys without rendering or
+3. For each plugin namespace, report the declared source and ref, plus the manifest digest from the
+   local workflow directory's `wuko.lock` when available. Undeclared plugins are rejected. Remote
+   invocations fetch current manifests and never touch local lockfiles. State whether the identity
+   is locked and digest-verified. List plugin `with` keys without rendering or
    displaying their values, because configuration may contain credentials.
 4. Treat a remote workflow, action, command-based action source, or plugin executable as trusted
-   code. Before the first command that can download or start one, show its locator or discovery
-   mode, pinning status, and executable trust implications, then require explicit confirmation.
+   code. Before the first command that can download or start one, show its declared locator,
+   pinning status, and executable trust implications, then require explicit confirmation.
    This confirmation precedes validation when a declared helper or rendered source can initialize
    or start a plugin. `validate`, `tree`, and dry-run can execute command resolvers while loading.
 5. Gather required non-secret `--var` and `--var-file` inputs and list environment names without

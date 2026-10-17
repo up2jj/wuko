@@ -83,6 +83,10 @@ func githubWorkflowFetchError(locator GitHubWorkflowLocator, response *http.Resp
 // DecodeMaterializedRemote decodes a workflow from a temporary remote repository snapshot.
 // The caller owns and cleans up the snapshot directory.
 func (loader *Loader) DecodeMaterializedRemote(ctx context.Context, filename, logicalSource string, options LoadOptions) (*Definition, error) {
+	if PluginLockPolicyFromContext(ctx).Frozen {
+		return nil, fmt.Errorf("--frozen-lockfile is only supported for local workflows; save and lock the workflow locally")
+	}
+	options.remoteOrigin = true
 	options.sourceRoot = filepath.Dir(filename)
 	options.sourceLabel = logicalSource
 	return loader.decode(ctx, filename, options)
@@ -90,6 +94,10 @@ func (loader *Loader) DecodeMaterializedRemote(ctx context.Context, filename, lo
 
 // LoadMaterializedRemote decodes, selects, and prepares a workflow in a temporary remote snapshot.
 func (loader *Loader) LoadMaterializedRemote(ctx context.Context, filename, logicalSource string, options LoadOptions) (*Definition, error) {
+	if PluginLockPolicyFromContext(ctx).Frozen {
+		return nil, fmt.Errorf("--frozen-lockfile is only supported for local workflows; save and lock the workflow locally")
+	}
+	options.remoteOrigin = true
 	options.sourceRoot = filepath.Dir(filename)
 	options.sourceLabel = logicalSource
 	return loader.Load(ctx, filename, options)
@@ -98,6 +106,9 @@ func (loader *Loader) LoadMaterializedRemote(ctx context.Context, filename, logi
 // DiscoverGitHubWorkflows downloads one repository snapshot and discovers package-root
 // wuko.yaml/wuko.yml manifests below the selected repository or tree URL.
 func (loader *Loader) DiscoverGitHubWorkflows(ctx context.Context, raw string, options LoadOptions) ([]Source, func(), error) {
+	if PluginLockPolicyFromContext(ctx).Frozen {
+		return nil, func() {}, fmt.Errorf("--frozen-lockfile is only supported for local workflows; save and lock the workflow locally")
+	}
 	locator, recognized, err := ParseGitHubWorkflowLocator(raw)
 	if err != nil {
 		return nil, func() {}, err

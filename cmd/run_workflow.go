@@ -132,7 +132,7 @@ type workflowInvocationContextKey struct{}
 
 type workflowInvocationState struct {
 	stack   []workflowInvocationFrame
-	plugins map[string]workflow.PluginSource
+	plugins map[string]workflow.ResolvedPluginSource
 }
 
 type workflowInvocationFrame struct {
@@ -166,23 +166,29 @@ func mergeInvocationPlugins(ctx context.Context, plan *workflow.DependencyPlan) 
 	state, _ := ctx.Value(workflowInvocationContextKey{}).(workflowInvocationState)
 	declarations := maps.Clone(state.plugins)
 	if declarations == nil {
-		declarations = make(map[string]workflow.PluginSource)
-		for namespace, source := range workflow.PluginsFromContext(ctx) {
+		declarations = make(map[string]workflow.ResolvedPluginSource)
+		for namespace, source := range workflow.ResolvedPluginsFromContext(ctx) {
 			canonical, err := source.CanonicalSource()
 			if err != nil {
 				return nil, fmt.Errorf("plugin %q: %w", namespace, err)
 			}
 			source.Source = canonical
+			if source.Identity != "" {
+				source.Source = source.Identity
+			}
 			declarations[namespace] = source
 		}
 	}
 	for _, node := range plan.Order {
-		for namespace, source := range node.Definition.Plugins {
+		for namespace, source := range node.Definition.ResolvedPlugins() {
 			canonical, err := source.CanonicalSource()
 			if err != nil {
 				return nil, fmt.Errorf("plugin %q: %w", namespace, err)
 			}
 			source.Source = canonical
+			if source.Identity != "" {
+				source.Source = source.Identity
+			}
 			if previous, exists := declarations[namespace]; exists && !reflect.DeepEqual(previous, source) {
 				return nil, fmt.Errorf("plugin %q has conflicting declarations in workflow invocation", namespace)
 			}

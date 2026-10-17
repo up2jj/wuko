@@ -47,6 +47,9 @@ type treeWorkflowConfig struct {
 }
 
 func renderWorkflowTree(command *cobra.Command, deps dependencies, args []string, config treeWorkflowConfig) error {
+	initialContext := command.Context()
+	defer command.SetContext(initialContext)
+	command.SetContext(workflow.ContextWithPluginLockPolicy(command.Context(), workflow.PluginLockPolicy{ReadOnly: true}))
 	cwd, home, configDir, err := directories(deps)
 	if err != nil {
 		return err
@@ -98,6 +101,7 @@ func renderWorkflowTree(command *cobra.Command, deps dependencies, args []string
 		}
 		if config.remoteLocator != "" {
 			elevationAllowed = false
+			command.SetContext(workflow.ContextWithPluginLockPolicy(command.Context(), workflow.PluginLockPolicy{Remote: true}))
 			definition, err = loader.LoadMaterializedRemote(command.Context(), path, config.remoteLocator, options)
 		} else {
 			definition, err = loader.Load(command.Context(), path, options)
@@ -107,6 +111,7 @@ func renderWorkflowTree(command *cobra.Command, deps dependencies, args []string
 		}
 	} else if workflow.IsRemoteLocator(args[0]) {
 		elevationAllowed = false
+		command.SetContext(workflow.ContextWithPluginLockPolicy(command.Context(), workflow.PluginLockPolicy{Remote: true}))
 		var cleanup func()
 		definition, cleanup, err = loader.LoadRemote(command.Context(), args[0], options)
 		if err != nil {

@@ -931,7 +931,7 @@ func TestMarketplaceBuildPublicationFailureRestoresPublishedFiles(t *testing.T) 
 	if err := os.WriteFile(filepath.Join(packageDir, "defaults.json"), []byte(`{"target":"production"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	build, err := buildMarketplaceManifest(root, nil, nil)
+	build, err := buildMarketplaceManifest(t.Context(), root, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

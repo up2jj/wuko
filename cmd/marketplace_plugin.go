@@ -330,7 +330,7 @@ func releaseMarketplacePlugin(command *cobra.Command, deps dependencies, source,
 }
 
 func publishMarketplaceForPluginRelease(command *cobra.Command, deps dependencies, cwd string) (bool, error) {
-	build, err := buildMarketplaceManifest(cwd, deps.loader, diagnosticsFor(command, deps, cwd))
+	build, err := buildMarketplaceManifest(marketplaceDecodeContext(command.Context()), cwd, deps.loader, diagnosticsFor(command, deps, cwd))
 	if err != nil {
 		return false, fmt.Errorf("building marketplace for plugin release: %w", err)
 	}

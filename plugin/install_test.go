@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -38,6 +39,14 @@ func TestInstallIsTransactionalAndWritesMarker(t *testing.T) {
 		t.Fatalf("marker protocol = %q", marker.Protocol)
 	}
 	directory := filepath.Join(root, "acme")
+	retained, err := readCachedRelease(filepath.Join(directory, releaseDirectory), "acme", marker.ManifestDigest, marker.Source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(retained.ManifestData, manifest) || !bytes.Equal(retained.ArtifactData, archive) {
+		t.Fatal("installation lost original release bytes")
+	}
+
 	stored, err := os.ReadFile(filepath.Join(directory, MarkerName))
 	if err != nil {
 		t.Fatal(err)

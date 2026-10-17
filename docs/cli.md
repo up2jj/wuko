@@ -77,6 +77,10 @@ wuko marketplace plugin --help       # scaffold and manage marketplace plugins
 ```sh
 wuko plugin install --global --package acme https://github.com/acme/wuko-marketplace
 wuko plugin uninstall --help
+wuko plugin lock build.yaml test.yaml # generate shared local pins without starting plugins
+wuko plugin lock build.yaml --update # intentionally refresh selected pins
+wuko plugin lock legacy.yaml --migrate # move legacy inline SHA pins into wuko.lock
+wuko run --file build.yaml --frozen-lockfile # CI: require existing pins
 ```
 
 See [Executable plugins](plugins.md).

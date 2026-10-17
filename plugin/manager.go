@@ -12,8 +12,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"reflect"
 	"regexp"
 	"slices"
@@ -34,7 +32,7 @@ type Config struct {
 	CWD         func() (string, error)
 	HomeDir     func() (string, error)
 	ConfigDir   func() (string, error)
-	LookPath    func(string) (string, error)
+	CacheDir    func() (string, error)
 	Stderr      io.Writer
 	HostVersion string
 	HTTPClient  *http.Client
@@ -43,7 +41,8 @@ type Config struct {
 type Manager struct {
 	config       Config
 	mu           sync.Mutex
-	declarations map[string]workflow.PluginSource
+	declarations map[string]workflow.ResolvedPluginSource
+	store        *releaseStore
 	plugins      map[string]*runningPlugin
 	failures     map[string]error
 	loading      map[string]*loadState
@@ -156,22 +155,22 @@ func NewManager(config Config) *Manager {
 	if config.ConfigDir == nil {
 		config.ConfigDir = os.UserConfigDir
 	}
-	if config.LookPath == nil {
-		config.LookPath = exec.LookPath
-	}
 	if config.Stderr == nil {
 		config.Stderr = io.Discard
 	}
-	return &Manager{config: config, declarations: make(map[string]workflow.PluginSource), plugins: make(map[string]*runningPlugin), failures: make(map[string]error), loading: make(map[string]*loadState)}
+	return &Manager{config: config, store: &releaseStore{config: config}, declarations: make(map[string]workflow.ResolvedPluginSource), plugins: make(map[string]*runningPlugin), failures: make(map[string]error), loading: make(map[string]*loadState)}
 }
 
 func (m *Manager) ResolveStep(ctx context.Context, name string, raw map[string]any) (step.Runner, error) {
-	if err := m.configureSources(workflow.PluginsFromContext(ctx)); err != nil {
+	if err := m.configureSources(workflow.ResolvedPluginsFromContext(ctx)); err != nil {
 		return nil, err
 	}
 	namespace, err := namespaceForType(name)
 	if err != nil {
 		return nil, fmt.Errorf("unknown step type %q", name)
+	}
+	if err := requirePluginDeclaration(ctx, namespace); err != nil {
+		return nil, err
 	}
 	plugin, err := m.load(ctx, namespace)
 	if err != nil {
@@ -197,12 +196,15 @@ func (m *Manager) ResolveStep(ctx context.Context, name string, raw map[string]a
 // ResolveOutputSchema implements step.OutputSchemaResolver for plugin steps.
 // Schema-less plugins remain open and therefore preserve the v1/v2 contract.
 func (m *Manager) ResolveOutputSchema(ctx context.Context, name string) (step.OutputSchema, bool, error) {
-	if err := m.configureSources(workflow.PluginsFromContext(ctx)); err != nil {
+	if err := m.configureSources(workflow.ResolvedPluginsFromContext(ctx)); err != nil {
 		return step.OutputSchema{}, false, err
 	}
 	namespace, err := namespaceForType(name)
 	if err != nil {
 		return step.OutputSchema{}, false, nil
+	}
+	if err := requirePluginDeclaration(ctx, namespace); err != nil {
+		return step.OutputSchema{}, false, err
 	}
 	plugin, err := m.load(ctx, namespace)
 	if err != nil {
@@ -220,12 +222,15 @@ func (m *Manager) ResolveOutputSchema(ctx context.Context, name string) (step.Ou
 }
 
 func (m *Manager) ResolveExecutor(ctx context.Context, name string, raw map[string]any) (executor.Provider, error) {
-	if err := m.configureSources(workflow.PluginsFromContext(ctx)); err != nil {
+	if err := m.configureSources(workflow.ResolvedPluginsFromContext(ctx)); err != nil {
 		return nil, err
 	}
 	namespace, err := namespaceForType(name)
 	if err != nil {
 		return nil, fmt.Errorf("unknown executor type %q", name)
+	}
+	if err := requirePluginDeclaration(ctx, namespace); err != nil {
+		return nil, err
 	}
 	plugin, err := m.load(ctx, namespace)
 	if err != nil {
@@ -243,7 +248,7 @@ var helperNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 var actionNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // LoadHelpers initializes every explicitly declared plugin and returns its immutable helper set.
-func (m *Manager) LoadHelpers(ctx context.Context, sources map[string]workflow.PluginSource) (helper.Set, error) {
+func (m *Manager) LoadHelpers(ctx context.Context, sources map[string]workflow.ResolvedPluginSource) (helper.Set, error) {
 	if err := m.configureSources(sources); err != nil {
 		return nil, err
 	}
@@ -282,11 +287,14 @@ func (m *Manager) LoadHelpers(ctx context.Context, sources map[string]workflow.P
 // LoadAction returns the cached immutable JSON object advertised by a v3 plugin.
 // Retrieval deliberately does not start the plugin lifecycle.
 func (m *Manager) LoadAction(ctx context.Context, namespace, name string) (json.RawMessage, error) {
-	if err := m.configureSources(workflow.PluginsFromContext(ctx)); err != nil {
+	if err := m.configureSources(workflow.ResolvedPluginsFromContext(ctx)); err != nil {
 		return nil, err
 	}
 	if !validNamespace(namespace) || !actionNamePattern.MatchString(name) {
 		return nil, fmt.Errorf("invalid plugin action %q", namespace+"/"+name)
+	}
+	if err := requirePluginDeclaration(ctx, namespace); err != nil {
+		return nil, err
 	}
 	loaded, err := m.load(ctx, namespace)
 	if err != nil {
@@ -338,7 +346,7 @@ func exposedHelperName(namespace, name string) string {
 	return strings.ReplaceAll(namespace, "-", "_") + "_" + name
 }
 
-func (m *Manager) configureSources(sources map[string]workflow.PluginSource) error {
+func (m *Manager) configureSources(sources map[string]workflow.ResolvedPluginSource) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for namespace, source := range sources {
@@ -348,7 +356,7 @@ func (m *Manager) configureSources(sources map[string]workflow.PluginSource) err
 		}
 		source.Source = canonical
 		if previous, ok := m.declarations[namespace]; ok {
-			if previous.Source != source.Source || previous.SHA256 != source.SHA256 {
+			if previous.SourceIdentity() != source.SourceIdentity() || previous.SHA256 != source.SHA256 {
 				return fmt.Errorf("plugin %q has conflicting workflow declarations: %s (%s) and %s (%s)", namespace, diagnosticPluginSource(previous.Source), shortDigest(previous.SHA256), diagnosticPluginSource(source.Source), shortDigest(source.SHA256))
 			}
 			if !reflect.DeepEqual(previous.With, source.With) {
@@ -472,45 +480,27 @@ func (m *Manager) load(ctx context.Context, namespace string) (*runningPlugin, e
 // launching the process, validating its declarations, and prefetching the actions a
 // v3 plugin advertises - with no manager lock held. Any directory it extracted into
 // is returned even on failure, so the caller can hand it to teardown.
-func (m *Manager) bring(ctx context.Context, namespace string, declaration workflow.PluginSource, declared bool) (*runningPlugin, string, error) {
-	var path string
-	var protocol string
-	var startWith map[string]any
-	var directory string
-	if declared {
-		if !strings.HasPrefix(declaration.Source, "https://") && !strings.HasPrefix(declaration.Source, "github:") {
-			return nil, "", fmt.Errorf("workflow-scoped plugin %q must use an HTTPS or GitHub manifest", namespace)
-		}
-		release, err := FetchRelease(ctx, declaration.Source, declaration.SHA256, m.config.HTTPClient)
-		if err != nil {
-			return nil, "", fmt.Errorf("fetching plugin %q: %w", namespace, err)
-		}
-		if release.Manifest.Namespace != namespace {
-			return nil, "", fmt.Errorf("plugin declaration namespace %q conflicts with manifest namespace %q", namespace, release.Manifest.Namespace)
-		}
-		protocol = release.Manifest.Protocol
-		directory, err = os.MkdirTemp("", "wuko-plugin-"+namespace+"-")
-		if err != nil {
-			return nil, "", err
-		}
-		path, err = Extract(release, directory)
-		if err != nil {
-			_ = os.RemoveAll(directory)
-			return nil, "", err
-		}
-		if startWith, err = cloneWith(declaration.With); err != nil {
-			return nil, directory, err
-		}
-	} else {
-		var err error
-		path, err = m.findLocal(namespace)
-		if err != nil {
-			return nil, "", err
-		}
-		protocol, err = localPluginProtocol(path, namespace)
-		if err != nil {
-			return nil, "", err
-		}
+func (m *Manager) bring(ctx context.Context, namespace string, declaration workflow.ResolvedPluginSource, declared bool) (*runningPlugin, string, error) {
+	if !declared || !validDigest(declaration.SHA256) {
+		return nil, "", fmt.Errorf("plugin %q requires a declared, resolved plugins.%s entry", namespace, namespace)
+	}
+	release, err := m.store.pinned(ctx, namespace, declaration.Source, declaration.SHA256)
+	if err != nil {
+		return nil, "", fmt.Errorf("fetching plugin %q: %w", namespace, err)
+	}
+	protocol := release.Manifest.Protocol
+	directory, err := os.MkdirTemp("", "wuko-plugin-"+namespace+"-")
+	if err != nil {
+		return nil, "", err
+	}
+	path, err := Extract(release, directory)
+	if err != nil {
+		_ = os.RemoveAll(directory)
+		return nil, "", err
+	}
+	startWith, err := cloneWith(declaration.With)
+	if err != nil {
+		return nil, directory, err
 	}
 	c, initialized, protocol, err := launchInitialized(ctx, path, namespace, protocol, m.config.HostVersion, m.config.Stderr)
 	if err != nil {
@@ -654,79 +644,6 @@ func validateOutputSchema(schema outputSchemaDeclaration) error {
 	return nil
 }
 
-func localPluginProtocol(path, namespace string) (string, error) {
-	directory := filepath.Dir(path)
-	if _, err := os.Stat(filepath.Join(directory, MarkerName)); os.IsNotExist(err) {
-		return "", nil
-	} else if err != nil {
-		return "", err
-	}
-	marker, err := ValidateInstallation(directory, namespace)
-	if err != nil {
-		return "", err
-	}
-	return marker.Protocol, nil
-}
-
-func (m *Manager) findLocal(namespace string) (string, error) {
-	name := "wuko-plugin-" + namespace
-	cwd, err := m.config.CWD()
-	if err != nil {
-		return "", err
-	}
-	for directory := cwd; ; directory = filepath.Dir(directory) {
-		candidateDir := filepath.Join(directory, ".wuko", "plugins", namespace)
-		if path, found, err := pluginCandidate(candidateDir, name); found || err != nil {
-			return path, err
-		}
-		parent := filepath.Dir(directory)
-		if parent == directory {
-			break
-		}
-	}
-	home, err := m.config.HomeDir()
-	if err != nil {
-		return "", err
-	}
-	if path, found, err := pluginCandidate(filepath.Join(home, ".wuko", "plugins", namespace), name); found || err != nil {
-		return path, err
-	}
-	config, err := m.config.ConfigDir()
-	if err != nil {
-		return "", err
-	}
-	if path, found, err := pluginCandidate(filepath.Join(config, "wuko", "plugins", namespace), name); found || err != nil {
-		return path, err
-	}
-	path, err := m.config.LookPath(name)
-	if err != nil {
-		return "", fmt.Errorf("plugin %q is not installed: %w", namespace, err)
-	}
-	return path, nil
-}
-
-func pluginCandidate(directory, name string) (string, bool, error) {
-	info, err := os.Stat(directory)
-	if os.IsNotExist(err) {
-		return "", false, nil
-	}
-	if err != nil {
-		return "", true, err
-	}
-	if !info.IsDir() {
-		return "", true, fmt.Errorf("plugin location %s is not a directory", directory)
-	}
-	path := filepath.Join(directory, name)
-	info, err = os.Stat(path)
-	if err != nil {
-		return "", true, fmt.Errorf("invalid plugin installation %s: %w", directory, err)
-	}
-	if !info.Mode().IsRegular() || info.Mode()&0111 == 0 {
-		return "", true, fmt.Errorf("plugin executable %s is not a regular executable", path)
-	}
-	return path, true, nil
-}
-
 func (plugin *runningPlugin) start(ctx context.Context) error {
 	plugin.lifecycleMu.Lock()
 	defer plugin.lifecycleMu.Unlock()
@@ -779,6 +696,7 @@ func (m *Manager) Close(ctx context.Context, reason string) error {
 // several workflows in one process - the picker reopened by a return destination - owes each run
 // its own plugin declarations and lifecycle bracket, exactly as a separate invocation gets.
 func (m *Manager) Reset(ctx context.Context, reason string) error {
+	m.store.reset()
 	return m.teardown(ctx, reason, false)
 }
 
@@ -1235,4 +1153,11 @@ func cloneWith(value map[string]any) (map[string]any, error) {
 		return nil, fmt.Errorf("decoding plugin start parameters: %w", err)
 	}
 	return result, nil
+}
+
+func requirePluginDeclaration(ctx context.Context, namespace string) error {
+	if _, exists := workflow.ResolvedPluginsFromContext(ctx)[namespace]; !exists {
+		return fmt.Errorf("plugin %q must be declared in plugins.%s", namespace, namespace)
+	}
+	return nil
 }

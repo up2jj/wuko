@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -70,7 +71,7 @@ func newMarketplaceBuildCmd(deps dependencies) *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("finding current directory: %w", err)
 			}
-			build, err := buildMarketplaceManifest(cwd, deps.loader, diagnosticsFor(command, deps, cwd))
+			build, err := buildMarketplaceManifest(marketplaceDecodeContext(command.Context()), cwd, deps.loader, diagnosticsFor(command, deps, cwd))
 			if err != nil {
 				return err
 			}
@@ -251,7 +252,17 @@ func syncMarketplacePublicationDirectories(files []marketplacePublicationFile) e
 	return nil
 }
 
-func buildMarketplaceManifest(cwd string, loader *workflow.Loader, reporter diagnostic.Reporter) (result marketplaceBuild, resultErr error) {
+// marketplaceDecodeContext keeps marketplace commands from creating or refreshing plugin pins:
+// packages are published with the wuko.lock their author committed, and building must not
+// rewrite package sources before they are digested and archived.
+func marketplaceDecodeContext(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return workflow.ContextWithPluginLockPolicy(ctx, workflow.PluginLockPolicy{ReadOnly: true})
+}
+
+func buildMarketplaceManifest(ctx context.Context, cwd string, loader *workflow.Loader, reporter diagnostic.Reporter) (result marketplaceBuild, resultErr error) {
 	if loader == nil {
 		loader = workflow.NewLoader(nil)
 	}
@@ -297,7 +308,7 @@ func buildMarketplaceManifest(cwd string, loader *workflow.Loader, reporter diag
 		}
 	}
 	for _, sourcePackage := range sourcePackages {
-		definition, err := loader.Decode(sourcePackage.manifestPath, workflow.LoadOptions{RunDir: cwd, Diagnostics: reporter})
+		definition, err := loader.DecodeContext(ctx, sourcePackage.manifestPath, workflow.LoadOptions{RunDir: cwd, Diagnostics: reporter})
 		if err != nil {
 			return marketplaceBuild{}, err
 		}

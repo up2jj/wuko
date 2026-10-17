@@ -296,6 +296,9 @@ func prepareInstallation(ctx context.Context, release Release, destinationRoot s
 	if err != nil {
 		return fail(fmt.Errorf("hashing plugin executable: %w", err))
 	}
+	if err := writeRelease(filepath.Join(stage, releaseDirectory), release); err != nil {
+		return fail(fmt.Errorf("retaining verified plugin release: %w", err))
+	}
 	marker := InstallationMarker{
 		MarkerVersion:    currentMarkerVersion,
 		ManifestVersion:  release.Manifest.Version,

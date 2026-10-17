@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
-	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -92,16 +91,6 @@ func makeArchive(t *testing.T, name string, mode int64, data []byte) []byte {
 		t.Fatal(err)
 	}
 	return output.Bytes()
-}
-
-func TestPluginCandidateDoesNotSkipInvalidHigherPrecedence(t *testing.T) {
-	directory := t.TempDir()
-	if err := os.WriteFile(filepath.Join(directory, "wuko-plugin-acme"), []byte("x"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if _, found, err := pluginCandidate(directory, "wuko-plugin-acme"); !found || err == nil {
-		t.Fatalf("found=%v err=%v", found, err)
-	}
 }
 
 func TestParseManifestRejectsPaddedPluginVersionAndEmptyArtifacts(t *testing.T) {

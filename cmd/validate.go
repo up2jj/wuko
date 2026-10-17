@@ -77,6 +77,9 @@ type validateWorkflowConfig struct {
 }
 
 func validateWorkflowSources(command *cobra.Command, deps dependencies, args []string, config validateWorkflowConfig) error {
+	initialContext := command.Context()
+	defer command.SetContext(initialContext)
+	command.SetContext(workflow.ContextWithPluginLockPolicy(command.Context(), workflow.PluginLockPolicy{ReadOnly: true}))
 	cwd, home, configDir, err := directories(deps)
 	if err != nil {
 		return err

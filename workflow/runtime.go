@@ -69,6 +69,7 @@ type LoadOptions struct {
 	Providers provider.Set
 	// RejectRemoteArchives prevents remote workflow loading from accepting archive payloads.
 	RejectRemoteArchives bool
+	remoteOrigin         bool
 	sourceRoot           string
 	sourceLabel          string
 }

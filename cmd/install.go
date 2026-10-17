@@ -300,7 +300,12 @@ func installPreparedWorkflow(command *cobra.Command, deps dependencies, config w
 	stagedOptions := workflow.LoadOptions{Vars: invocation.vars, Env: invocation.env, BaseEnv: invocation.baseEnv, EnvironmentLoaders: invocation.environmentLoaders, RunDir: workflowDir, Diagnostics: diagnosticsFor(command, deps, workflowDir), Lifecycle: true, Providers: invocation.providers,
 		Stdin: command.InOrStdin(), Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(), Interactive: interactive(command.InOrStdin()),
 		EnsureSecretAuth: true}
-	definition, err := invocation.loader.Load(command.Context(), stage, stagedOptions)
+	var definition *workflow.Definition
+	if prepared.elevationAllowed {
+		definition, err = invocation.loader.Load(command.Context(), stage, stagedOptions)
+	} else {
+		definition, err = invocation.loader.LoadMaterializedRemote(command.Context(), stage, prepared.source, stagedOptions)
+	}
 	if err != nil {
 		return fmt.Errorf("preparing workflow for installation: %w", err)
 	}
@@ -401,7 +406,7 @@ func installPreparedMarketplacePackage(command *cobra.Command, deps dependencies
 	stagedOptions := workflow.LoadOptions{Vars: invocation.vars, Env: invocation.env, BaseEnv: invocation.baseEnv, EnvironmentLoaders: invocation.environmentLoaders, RunDir: stage, Diagnostics: diagnosticsFor(command, deps, stage), Lifecycle: true, Providers: invocation.providers,
 		Stdin: command.InOrStdin(), Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(), Interactive: interactive(command.InOrStdin()),
 		EnsureSecretAuth: true}
-	definition, err := invocation.loader.Load(command.Context(), stagedPath, stagedOptions)
+	definition, err := invocation.loader.LoadMaterializedRemote(command.Context(), stagedPath, prepared.definition.PluginOriginSource(), stagedOptions)
 	if err != nil {
 		return fmt.Errorf("preparing workflow package for installation: %w", err)
 	}
@@ -638,7 +643,7 @@ func decodeInstallSource(ctx context.Context, loader *workflow.Loader, source st
 	if err != nil {
 		return nil, func() {}, fmt.Errorf("resolving workflow source %s: %w", source, err)
 	}
-	definition, err := loader.Decode(path, options)
+	definition, err := loader.DecodeContext(ctx, path, options)
 	if err != nil {
 		return nil, func() {}, err
 	}

@@ -130,6 +130,7 @@ type dependencies struct {
 	environment       envload.InvocationLoader
 	homeDir           func() (string, error)
 	configDir         func() (string, error)
+	cacheDir          func() (string, error)
 	agentLookPath     func(string) (string, error)
 	executable        func() (string, error)
 	registry          *step.Registry
@@ -193,7 +194,7 @@ func executeWithSignals(signals <-chan os.Signal, gracePeriod time.Duration, exe
 func NewRootCmd() *cobra.Command {
 	registry := step.NewRegistry()
 	executors := executor.NewRegistry()
-	plugins := plugin.NewManager(plugin.Config{CWD: os.Getwd, HomeDir: os.UserHomeDir, ConfigDir: os.UserConfigDir, LookPath: exec.LookPath, Stderr: os.Stderr, HostVersion: version})
+	plugins := plugin.NewManager(plugin.Config{CWD: os.Getwd, HomeDir: os.UserHomeDir, ConfigDir: os.UserConfigDir, Stderr: os.Stderr, HostVersion: version})
 	registry.SetResolver(plugins.ResolveStep)
 	registry.SetOutputSchemaResolver(plugins.ResolveOutputSchema)
 	executors.SetResolver(plugins.ResolveExecutor)
@@ -260,11 +261,11 @@ func newRootCmd(deps dependencies) *cobra.Command {
 		deps.executors = executor.NewRegistry()
 	}
 	if deps.plugins == nil {
-		deps.plugins = plugin.NewManager(plugin.Config{CWD: deps.cwd, HomeDir: deps.homeDir, ConfigDir: deps.configDir, LookPath: deps.agentLookPath, Stderr: deps.stderr, HostVersion: version, HTTPClient: deps.httpClient})
-		deps.registry.SetResolver(deps.plugins.ResolveStep)
-		deps.registry.SetOutputSchemaResolver(deps.plugins.ResolveOutputSchema)
-		deps.executors.SetResolver(deps.plugins.ResolveExecutor)
+		deps.plugins = plugin.NewManager(plugin.Config{CWD: deps.cwd, HomeDir: deps.homeDir, ConfigDir: deps.configDir, CacheDir: deps.cacheDir, Stderr: deps.stderr, HostVersion: version, HTTPClient: deps.httpClient})
 	}
+	deps.registry.SetResolver(deps.plugins.ResolveStep)
+	deps.registry.SetOutputSchemaResolver(deps.plugins.ResolveOutputSchema)
+	deps.executors.SetResolver(deps.plugins.ResolveExecutor)
 	if deps.loader == nil {
 		deps.loader = defaultWorkflowLoader(deps.plugins)
 	}
@@ -320,6 +321,7 @@ func newRootCmd(deps dependencies) *cobra.Command {
 	root.SetIn(deps.stdin)
 	root.SetOut(deps.stdout)
 	root.SetErr(deps.stderr)
+	root.PersistentFlags().Bool("frozen-lockfile", false, "require existing local plugin pins without modifying wuko.lock")
 	root.PersistentFlags().BoolVar(&debug, "debug", false, "trace workflow loading, validation, and execution to stderr (may expose non-secret configuration)")
 	root.PersistentFlags().StringArray("env-loader", nil, "load the invocation environment with auto, none, mise, asdf, or direnv (repeatable)")
 	_ = root.RegisterFlagCompletionFunc("env-loader", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
@@ -334,13 +336,15 @@ func defaultWorkflowLoader(plugins *plugin.Manager) *workflow.Loader {
 	if plugins == nil {
 		return workflow.NewLoader(nil)
 	}
-	return workflow.NewLoader(nil, workflow.WithPluginHelpers(plugins), workflow.WithPluginActions(plugins))
+	return workflow.NewLoader(nil, workflow.WithPluginHelpers(plugins), workflow.WithPluginActions(plugins), workflow.WithPluginResolver(plugins))
 }
 
 func wrapPluginTeardown(command *cobra.Command, manager *plugin.Manager) {
 	if command.RunE != nil {
 		run := command.RunE
 		command.RunE = func(command *cobra.Command, args []string) (runErr error) {
+			frozen, _ := command.Flags().GetBool("frozen-lockfile")
+			command.SetContext(workflow.ContextWithPluginLockPolicy(command.Context(), workflow.PluginLockPolicy{Frozen: frozen}))
 			defer func() {
 				teardownCtx, cancel := context.WithTimeout(context.WithoutCancel(command.Context()), 10*time.Second)
 				defer cancel()

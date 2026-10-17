@@ -23,3 +23,8 @@ wuko marketplace plugin release --version 0.1.0 --description "Describe the plug
 ```
 
 Wuko runs the workflow with the plugin project as its working directory, reads its `bundle` output, and verifies the manifest and every declared archive before updating the catalog.
+
+Consuming workflows must declare this plugin's manifest source. Run `wuko plugin lock FILE` to
+create `wuko.lock` beside the workflow, commit both files, and use `wuko run --file FILE --frozen-lockfile` in CI. Local bundle paths are relative to the workflow;
+after rebuilding, refresh the pin with `wuko plugin lock FILE --update`. Remote workflow runs
+fetch current plugin manifests and reuse verified archives without touching local lockfiles.

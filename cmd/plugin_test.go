@@ -34,7 +34,16 @@ func TestMain(main *testing.M) {
 		runCommandPluginHelper()
 		os.Exit(0)
 	}
-	os.Exit(main.Run())
+	cacheRoot, err := os.MkdirTemp("", "wuko-plugin-test-cache-")
+	if err != nil {
+		panic(err)
+	}
+	if err := os.Setenv("WUKO_PLUGIN_CACHE_DIR", cacheRoot); err != nil {
+		panic(err)
+	}
+	code := main.Run()
+	_ = os.RemoveAll(cacheRoot)
+	os.Exit(code)
 }
 
 func runCommandPluginHelper() {
@@ -50,7 +59,10 @@ func runCommandPluginHelper() {
 		}
 		result := any(map[string]any{})
 		if request.Method == "initialize" {
-			result = map[string]any{"protocol": pluginpkg.Protocol, "namespace": "acme", "steps": []any{}, "executors": []any{}, "helpers": []any{}}
+			result = map[string]any{"protocol": pluginpkg.Protocol, "namespace": "acme", "steps": []any{map[string]any{"type": "acme.uppercase"}}, "executors": []any{}, "helpers": []any{}}
+		}
+		if request.Method == "step.run" {
+			result = map[string]any{"outputs": map[string]any{"value": "HELLO"}}
 		}
 		_ = encoder.Encode(map[string]any{"id": request.ID, "result": result})
 		if request.Method == "shutdown" {

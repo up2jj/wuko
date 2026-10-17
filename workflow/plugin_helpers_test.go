@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -11,7 +12,7 @@ import (
 
 type fakePluginHelpers struct{ loads int }
 
-func (loader *fakePluginHelpers) LoadHelpers(_ context.Context, plugins map[string]PluginSource) (helper.Set, error) {
+func (loader *fakePluginHelpers) LoadHelpers(_ context.Context, plugins map[string]ResolvedPluginSource) (helper.Set, error) {
 	loader.loads++
 	return helper.Set{"acme_slug": func(_ context.Context, args []any) (any, error) {
 		return strings.ToLower(strings.ReplaceAll(args[0].(string), " ", "-")), nil
@@ -26,7 +27,6 @@ name: helpers
 plugins:
   acme:
     source: https://example.test/plugin.json
-    sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 templates:
   slug: '{{ acme_slug .vars.name }}'
 vars:
@@ -43,6 +43,10 @@ steps:
 	}
 	if provider.loads != 1 {
 		t.Fatalf("helper loads = %d, want 1", provider.loads)
+	}
+	first, second := definition.ResolvedPlugins(), definition.ResolvedPlugins()
+	if len(first) != 1 || reflect.ValueOf(first).Pointer() != reflect.ValueOf(second).Pointer() {
+		t.Fatalf("resolved plugins should be computed once at decode: %#v", first)
 	}
 	renderer, err := NewRendererWithHelpers(t.Context(), definition.Templates, nil, definition.Helpers())
 	if err != nil {
@@ -64,7 +68,6 @@ name: demo
 plugins:
   acme:
     source: https://example.test/plugin.json
-    sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 templates:
   slug: '{{ acme_slug .vars.name }}'
 vars:

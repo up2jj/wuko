@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -34,7 +35,7 @@ func newMarketplaceWorkflowAddCmd(deps dependencies) *cobra.Command {
 			if loader == nil {
 				loader = workflow.NewLoader(nil)
 			}
-			name, target, err := addMarketplaceWorkflow(cwd, args[0], loader, diagnosticsFor(command, deps, cwd))
+			name, target, err := addMarketplaceWorkflow(marketplaceDecodeContext(command.Context()), cwd, args[0], loader, diagnosticsFor(command, deps, cwd))
 			if err != nil {
 				return err
 			}
@@ -64,7 +65,7 @@ func newMarketplaceWorkflowRemoveCmd(deps dependencies) *cobra.Command {
 			if loader == nil {
 				loader = workflow.NewLoader(nil)
 			}
-			directory, err := findMarketplaceWorkflow(cwd, name, loader, diagnosticsFor(command, deps, cwd))
+			directory, err := findMarketplaceWorkflow(marketplaceDecodeContext(command.Context()), cwd, name, loader, diagnosticsFor(command, deps, cwd))
 			if err != nil {
 				return err
 			}
@@ -94,7 +95,7 @@ func newMarketplaceWorkflowRemoveCmd(deps dependencies) *cobra.Command {
 	return command
 }
 
-func addMarketplaceWorkflow(cwd, source string, loader *workflow.Loader, reporter diagnostic.Reporter) (string, string, error) {
+func addMarketplaceWorkflow(ctx context.Context, cwd, source string, loader *workflow.Loader, reporter diagnostic.Reporter) (string, string, error) {
 	directory, err := marketplaceWorkflowSourceDirectory(source)
 	if err != nil {
 		return "", "", err
@@ -103,14 +104,14 @@ func addMarketplaceWorkflow(cwd, source string, loader *workflow.Loader, reporte
 	if err != nil {
 		return "", "", err
 	}
-	definition, err := loader.Decode(manifest, workflow.LoadOptions{RunDir: cwd, Diagnostics: reporter})
+	definition, err := loader.DecodeContext(ctx, manifest, workflow.LoadOptions{RunDir: cwd, Diagnostics: reporter})
 	if err != nil {
 		return "", "", fmt.Errorf("validating marketplace workflow source: %w", err)
 	}
 	if !workflow.ValidWorkflowName(definition.Name) {
 		return "", "", fmt.Errorf("workflow name %q cannot be used by a marketplace install", definition.Name)
 	}
-	if previous, findErr := findMarketplaceWorkflow(cwd, definition.Name, loader, reporter); findErr == nil {
+	if previous, findErr := findMarketplaceWorkflow(ctx, cwd, definition.Name, loader, reporter); findErr == nil {
 		return "", "", fmt.Errorf("marketplace workflow %q already exists in %s", definition.Name, previous)
 	} else if !errors.Is(findErr, errMarketplaceWorkflowNotFound) {
 		return "", "", findErr
@@ -142,7 +143,7 @@ func addMarketplaceWorkflow(cwd, source string, loader *workflow.Loader, reporte
 	return definition.Name, target, nil
 }
 
-func findMarketplaceWorkflow(cwd, name string, loader *workflow.Loader, reporter diagnostic.Reporter) (string, error) {
+func findMarketplaceWorkflow(ctx context.Context, cwd, name string, loader *workflow.Loader, reporter diagnostic.Reporter) (string, error) {
 	root := filepath.Join(cwd, ".wuko", "workflows")
 	target := filepath.Join(root, name)
 	if info, err := os.Lstat(target); err == nil {
@@ -154,7 +155,7 @@ func findMarketplaceWorkflow(cwd, name string, loader *workflow.Loader, reporter
 		// that merely shares the directory name is never mistaken for the requested workflow.
 		manifest, err := workflow.WorkflowPackageManifestPath(target)
 		if err == nil {
-			definition, decodeErr := loader.Decode(manifest, workflow.LoadOptions{RunDir: cwd, Diagnostics: reporter})
+			definition, decodeErr := loader.DecodeContext(ctx, manifest, workflow.LoadOptions{RunDir: cwd, Diagnostics: reporter})
 			if decodeErr != nil || definition.Name == name {
 				return target, nil
 			}
@@ -176,7 +177,7 @@ func findMarketplaceWorkflow(cwd, name string, loader *workflow.Loader, reporter
 	}
 	var found string
 	for _, item := range packages {
-		definition, err := loader.Decode(item.manifestPath, workflow.LoadOptions{RunDir: cwd, Diagnostics: reporter})
+		definition, err := loader.DecodeContext(ctx, item.manifestPath, workflow.LoadOptions{RunDir: cwd, Diagnostics: reporter})
 		if err != nil {
 			return "", fmt.Errorf("validating marketplace workflow source %s: %w", item.directory, err)
 		}

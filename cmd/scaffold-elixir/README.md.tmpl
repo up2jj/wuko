@@ -16,3 +16,8 @@ wuko marketplace plugin release --version 0.1.0 --description "Describe the plug
 ```
 
 The executable reserves stdout for protocol frames and sends diagnostics to stderr. For a fully standalone distribution or additional target platforms, replace the workflow's escript packaging step with a tool such as Burrito while retaining its `bundle` output and the same `plugin.json` release contract.
+
+Consuming workflows must declare this plugin's manifest source. Run `wuko plugin lock FILE` to
+create `wuko.lock` beside the workflow, commit both files, and use `wuko run --file FILE --frozen-lockfile` in CI. Local bundle paths are relative to the workflow;
+after rebuilding, refresh the pin with `wuko plugin lock FILE --update`. Remote workflow runs
+fetch current plugin manifests and reuse verified archives without touching local lockfiles.

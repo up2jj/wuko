@@ -212,8 +212,12 @@ func (runner dependencyRecordRunner) Run(_ context.Context, request step.Request
 }
 
 func TestDocumentedDependencyExamplesValidateTreeAndDryRun(t *testing.T) {
-	root, err := filepath.Abs(filepath.Join("..", "examples", "dependencies"))
+	exampleRoot, err := filepath.Abs(filepath.Join("..", "examples", "dependencies"))
 	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	if err := os.CopyFS(root, os.DirFS(exampleRoot)); err != nil {
 		t.Fatal(err)
 	}
 	for _, test := range []struct {

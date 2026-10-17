@@ -64,6 +64,8 @@ type Definition struct {
 	secretSession   *secret.Session
 	helperContext   context.Context
 	helpers         helper.Set
+	resolvedPlugins map[string]ResolvedPluginSource
+	pluginRemote    bool
 	sourceRoot      string
 	sourceLabel     string
 	validationIndex *validation.SourceIndex
@@ -698,10 +700,10 @@ func loadLocal(path string) (*Definition, error) {
 }
 
 func loadLocalWithDiagnostics(path string, reporter diagnostic.Reporter, sourceRoot, sourceLabel string) (*Definition, error) {
-	return loadLocalWithDiagnosticsAndHelpers(context.Background(), path, reporter, sourceRoot, sourceLabel, nil)
+	return loadLocalWithDiagnosticsAndHelpers(context.Background(), path, reporter, sourceRoot, sourceLabel, nil, nil, false)
 }
 
-func loadLocalWithDiagnosticsAndHelpers(ctx context.Context, path string, reporter diagnostic.Reporter, sourceRoot, sourceLabel string, pluginHelpers PluginHelperLoader) (*Definition, error) {
+func loadLocalWithDiagnosticsAndHelpers(ctx context.Context, path string, reporter diagnostic.Reporter, sourceRoot, sourceLabel string, pluginHelpers PluginHelperLoader, resolver PluginSourceResolver, remote bool) (*Definition, error) {
 	displaySource := path
 	if sourceLabel != "" {
 		displaySource = remapSource(path, sourceRoot, sourceLabel)
@@ -714,8 +716,8 @@ func loadLocalWithDiagnosticsAndHelpers(ctx context.Context, path string, report
 	}
 	return decodeWorkflowData(data, workflowDecodeSource{
 		path: path, display: displaySource, sourceRoot: sourceRoot, sourceLabel: sourceLabel,
-		allowedRoot: sourceRoot,
-	}, reporter, loadStarted, ctx, pluginHelpers)
+		allowedRoot: sourceRoot, remote: remote,
+	}, reporter, loadStarted, ctx, pluginHelpers, resolver)
 }
 
 type workflowDecodeSource struct {
@@ -725,9 +727,10 @@ type workflowDecodeSource struct {
 	sourceLabel string
 	allowedRoot string
 	virtual     bool
+	remote      bool
 }
 
-func decodeWorkflowData(data []byte, source workflowDecodeSource, reporter diagnostic.Reporter, loadStarted time.Time, ctx context.Context, pluginHelpers PluginHelperLoader) (*Definition, error) {
+func decodeWorkflowData(data []byte, source workflowDecodeSource, reporter diagnostic.Reporter, loadStarted time.Time, ctx context.Context, pluginHelpers PluginHelperLoader, resolver PluginSourceResolver) (*Definition, error) {
 	path := source.path
 	displaySource := source.display
 	sourceRoot := source.sourceRoot
@@ -764,6 +767,7 @@ func decodeWorkflowData(data []byte, source workflowDecodeSource, reporter diagn
 	definition.Dir = filepath.Dir(abs)
 	definition.sourceRoot = sourceRoot
 	definition.sourceLabel = sourceLabel
+	definition.pluginRemote = source.remote || PluginLockPolicyFromContext(ctx).Remote
 	definition.validationIndex = sourceIndex
 	if err := resolveTemplateFiles(definition.Templates, definition.Dir, nil, source.allowedRoot); err != nil {
 		return nil, fmt.Errorf("loading workflow templates from %s: %w", displaySource, err)
@@ -832,8 +836,18 @@ func decodeWorkflowData(data []byte, source workflowDecodeSource, reporter diagn
 	}
 	// Plugin namespaces are only trustworthy once the schema has accepted them, so declared
 	// helpers are initialized after structural validation and before templates are parsed.
+	if resolver != nil && len(definition.Plugins) > 0 {
+		definition.resolvedPlugins, err = resolver.ResolvePluginSources(ctx, PluginOrigin{Dir: definition.Dir, Root: sourceRoot, Remote: source.remote, Source: sourceLabel}, definition.Plugins)
+		if err != nil {
+			return nil, fmt.Errorf("resolving workflow plugins: %w", err)
+		}
+	} else if len(definition.Plugins) > 0 {
+		// Computed once so per-step plugin contexts do not rebuild the map.
+		definition.resolvedPlugins = definition.unpinnedPlugins()
+	}
+	ctx = definition.PluginContext(ctx)
 	if pluginHelpers != nil && len(definition.Plugins) > 0 {
-		helpers, err := pluginHelpers.LoadHelpers(ctx, definition.Plugins)
+		helpers, err := pluginHelpers.LoadHelpers(ctx, definition.ResolvedPlugins())
 		if err != nil {
 			return nil, fmt.Errorf("loading workflow plugin helpers: %w", err)
 		}

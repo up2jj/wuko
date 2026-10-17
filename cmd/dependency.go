@@ -137,14 +137,17 @@ func executePlan(ctx context.Context, plan *workflow.DependencyPlan, engineFor f
 }
 
 func validatePluginDeclarations(plan *workflow.DependencyPlan) error {
-	declarations := make(map[string]workflow.PluginSource)
+	declarations := make(map[string]workflow.ResolvedPluginSource)
 	for _, node := range plan.Order {
-		for namespace, source := range node.Definition.Plugins {
+		for namespace, source := range node.Definition.ResolvedPlugins() {
 			canonical, err := source.CanonicalSource()
 			if err != nil {
 				return fmt.Errorf("plugin %q: %w", namespace, err)
 			}
 			source.Source = canonical
+			if source.Identity != "" {
+				source.Source = source.Identity
+			}
 			if previous, exists := declarations[namespace]; exists && !reflect.DeepEqual(previous, source) {
 				return fmt.Errorf("plugin %q has conflicting declarations in dependency plan", namespace)
 			}

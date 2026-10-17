@@ -144,12 +144,13 @@ type Loader struct {
 	client              *http.Client
 	githubStoredTokenFn func(context.Context, map[string]string) string
 	pluginHelpers       PluginHelperLoader
+	pluginResolver      PluginSourceResolver
 	pluginActions       PluginActionLoader
 }
 
 // PluginHelperLoader initializes helpers declared by one workflow.
 type PluginHelperLoader interface {
-	LoadHelpers(context.Context, map[string]PluginSource) (helper.Set, error)
+	LoadHelpers(context.Context, map[string]ResolvedPluginSource) (helper.Set, error)
 }
 
 // PluginActionLoader retrieves an immutable action JSON object from an initialized plugin.
@@ -163,6 +164,11 @@ type LoaderOption func(*Loader)
 // WithPluginHelpers enables helpers from explicitly declared plugins.
 func WithPluginHelpers(loader PluginHelperLoader) LoaderOption {
 	return func(workflowLoader *Loader) { workflowLoader.pluginHelpers = loader }
+}
+
+// WithPluginResolver enables lock and cache resolution before helper loading.
+func WithPluginResolver(resolver PluginSourceResolver) LoaderOption {
+	return func(loader *Loader) { loader.pluginResolver = resolver }
 }
 
 // WithPluginActions enables plugin:namespace/action composite-action sources.
@@ -212,7 +218,7 @@ func (loader *Loader) DecodeContext(ctx context.Context, filename string, option
 }
 
 func (loader *Loader) decode(ctx context.Context, filename string, options LoadOptions) (*Definition, error) {
-	definition, err := loadLocalWithDiagnosticsAndHelpers(ctx, filename, options.Diagnostics, options.sourceRoot, options.sourceLabel, loader.pluginHelpers)
+	definition, err := loadLocalWithDiagnosticsAndHelpers(ctx, filename, options.Diagnostics, options.sourceRoot, options.sourceLabel, loader.pluginHelpers, loader.pluginResolver, options.remoteOrigin)
 	if err != nil {
 		return nil, err
 	}
@@ -248,12 +254,12 @@ func (loader *Loader) DecodeStdinContext(ctx context.Context, reader io.Reader, 
 	return decodeWorkflowData(data, workflowDecodeSource{
 		path: filepath.Join(absBaseDir, "-"), display: sourceLabel,
 		sourceRoot: absBaseDir, sourceLabel: sourceLabel, virtual: true,
-	}, options.Diagnostics, started, ctx, loader.pluginHelpers)
+	}, options.Diagnostics, started, ctx, loader.pluginHelpers, loader.pluginResolver)
 }
 
 // Prepare resolves value-dependent workflow environment and composite actions in a decoded definition.
 func (loader *Loader) Prepare(ctx context.Context, definition *Definition, options LoadOptions) (err error) {
-	ctx = ContextWithPlugins(ctx, definition.Plugins)
+	ctx = definition.PluginContext(ctx)
 	if len(definition.helpers) > 0 {
 		definition.setHelpers(ctx, definition.helpers)
 	}
