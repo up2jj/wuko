@@ -132,12 +132,23 @@ func Register(registry *step.Registry) error {
 	if err := registry.RegisterDefinition("process", step.Registration{
 		Builder: func(raw map[string]any) (step.Runner, error) { return newProcess(raw, rpc) },
 		Outputs: step.ClosedOutputs("ready", "label", "detached", "readiness", "worker_id"),
+		References: func(raw map[string]any) (step.References, error) {
+			argv, _ := raw["argv"].(map[string]any)
+			argvExpr := step.ExpressionField(argv, "expr")
+			argvExpr.Label = "argv expr"
+			return step.References{Expressions: []step.ExpressionReference{argvExpr}}, nil
+		},
 	}); err != nil {
 		return err
 	}
 	return registry.RegisterDefinition("process_call", step.Registration{
 		Builder: func(raw map[string]any) (step.Runner, error) { return newCall(raw, rpc) },
 		Outputs: step.ClosedObject(map[string]step.OutputSchema{"result": step.OpenObject(), "worker_id": step.Scalar()}),
+		References: func(raw map[string]any) (step.References, error) {
+			return step.References{Expressions: []step.ExpressionReference{
+				step.ExpressionField(raw, "pool"), step.ExpressionField(raw, "payload_expr"),
+			}}, nil
+		},
 	})
 }
 

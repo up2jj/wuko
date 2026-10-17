@@ -77,9 +77,21 @@ func (*Runner) ExecutorAware() {}
 
 func Register(registry *step.Registry) error {
 	return registry.RegisterDefinition("shell", step.Registration{
-		Builder: New,
-		Outputs: step.ClosedOutputs("stdout", "stderr", "exit_code", "stdout_truncated", "stderr_truncated"),
+		Builder:    New,
+		Outputs:    step.ClosedOutputs("stdout", "stderr", "exit_code", "stdout_truncated", "stderr_truncated"),
+		References: references,
 	})
+}
+
+// references reports the expressions that compute a command line or interaction script.
+func references(raw map[string]any) (step.References, error) {
+	argv, _ := raw["argv"].(map[string]any)
+	interactions, _ := raw["interactions"].(map[string]any)
+	argvExpr := step.ExpressionField(argv, "expr")
+	argvExpr.Label = "argv expr"
+	interactionsExpr := step.ExpressionField(interactions, "expr")
+	interactionsExpr.Label = "interactions expr"
+	return step.References{Expressions: []step.ExpressionReference{argvExpr, interactionsExpr}}, nil
 }
 
 func New(raw map[string]any) (step.Runner, error) {

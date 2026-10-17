@@ -436,6 +436,19 @@ type Registration struct {
 	References func(raw map[string]any) (References, error)
 }
 
+// LookupFrom reports a configuration's "from" field as a lookup, the common shape for steps
+// that read one value out of workflow state.
+func LookupFrom(raw map[string]any) (References, error) {
+	from, _ := raw["from"].(string)
+	return References{Lookups: []LookupReference{{Label: "from", Path: from}}}, nil
+}
+
+// ExpressionField reports a string field as an Expr source labelled with its field name.
+func ExpressionField(raw map[string]any, field string) ExpressionReference {
+	source, _ := raw[field].(string)
+	return ExpressionReference{Label: field, Source: source}
+}
+
 // References lists the workflow state a step configuration reads outside its templates.
 type References struct {
 	// Lookups are dotted paths into the workflow state, such as "steps.fetch.body".

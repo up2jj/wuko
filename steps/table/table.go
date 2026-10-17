@@ -29,7 +29,7 @@ type ColumnConfig struct {
 type Runner struct{ config Config }
 
 func Register(registry *step.Registry) error {
-	return registry.RegisterDefinition("tui_table", step.Registration{Builder: New, Outputs: step.ClosedOutputs()})
+	return registry.RegisterDefinition("tui_table", step.Registration{Builder: New, Outputs: step.ClosedOutputs(), References: step.LookupFrom})
 }
 
 func New(raw map[string]any) (step.Runner, error) {

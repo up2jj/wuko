@@ -1095,8 +1095,6 @@ func (validator *referenceValidator) validateStepConfiguration(stepID, stepType 
 		return err
 	}
 	switch stepType {
-	case "assert", "set":
-		return validator.validateRawExpression("expr", raw, "expr", scope)
 	case "template":
 		// The step binds its parameters below .data, which at render time is copied over the
 		// ordinary roots and helpers. A workflow that already provides one named data would
@@ -1133,18 +1131,6 @@ func (validator *referenceValidator) validateStepConfiguration(stepID, stepType 
 			}
 		}
 		return validator.validateRawExpression("expr", raw, "expr", withEditLocals(scope))
-	case "shell":
-		if err := validator.validateRawExpression("argv expr", nestedMap(raw, "argv"), "expr", scope); err != nil {
-			return err
-		}
-		return validator.validateRawExpression("interactions expr", nestedMap(raw, "interactions"), "expr", scope)
-	case "process":
-		return validator.validateRawExpression("argv expr", nestedMap(raw, "argv"), "expr", scope)
-	case "process_call":
-		if err := validator.validateRawExpression("pool", raw, "pool", scope); err != nil {
-			return err
-		}
-		return validator.validateRawExpression("payload_expr", raw, "payload_expr", scope)
 	case "lua":
 		return validator.validateTypedBindings("argument", nestedMap(raw, "args"), scope)
 	case "tui_choice":
@@ -1161,8 +1147,6 @@ func (validator *referenceValidator) validateStepConfiguration(stepID, stepType 
 				locals.roots[[]string{"label", "value", "description", "disabled", "reason"}[index]] = openReference
 			}
 		}
-	case "extract", "decode", "jsonpath", "table":
-		return validator.validateLookup("from", stringValue(raw, "from"), scope)
 	}
 	return nil
 }

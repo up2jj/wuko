@@ -23,7 +23,11 @@ type Runner struct {
 }
 
 func Register(registry *step.Registry) error {
-	return registry.RegisterDefinition("assert", step.Registration{Builder: New, Outputs: step.ClosedOutputs()})
+	return registry.RegisterDefinition("assert", step.Registration{Builder: New, Outputs: step.ClosedOutputs(), References: references})
+}
+
+func references(raw map[string]any) (step.References, error) {
+	return step.References{Expressions: []step.ExpressionReference{step.ExpressionField(raw, "expr")}}, nil
 }
 
 func New(raw map[string]any) (step.Runner, error) {

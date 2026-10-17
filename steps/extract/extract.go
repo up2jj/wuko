@@ -72,7 +72,7 @@ type Runner struct {
 }
 
 func Register(registry *step.Registry) error {
-	return registry.RegisterDefinition("extract", step.Registration{Builder: New, Outputs: step.OpenObject()})
+	return registry.RegisterDefinition("extract", step.Registration{Builder: New, Outputs: step.OpenObject(), References: step.LookupFrom})
 }
 
 func New(raw map[string]any) (step.Runner, error) {
