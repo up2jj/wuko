@@ -10,19 +10,15 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"os/signal"
 	"os/user"
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
-	"github.com/creack/pty"
 	"github.com/muesli/cancelreader"
 	"github.com/up2jj/wuko/ptyinteract"
-	"golang.org/x/term"
 )
 
 const terminationGracePeriod = 2 * time.Second
@@ -202,226 +198,6 @@ func (LocalExecutor) Run(ctx context.Context, options Options) (Result, error) {
 	return result, fmt.Errorf("starting %s: %w", options.Command, err)
 }
 
-func runTTY(ctx context.Context, options Options, credential *syscall.Credential) (result Result, runErr error) {
-	handoff := options.Interactions == nil || options.Interact
-	var terminal *os.File
-	size := &pty.Winsize{Rows: 24, Cols: 80}
-	if handoff {
-		var ok bool
-		terminal, ok = options.Stdin.(*os.File)
-		if !ok || !term.IsTerminal(int(terminal.Fd())) {
-			return Result{}, fmt.Errorf("tty user handoff requires file-backed terminal stdin")
-		}
-		var err error
-		size, err = pty.GetsizeFull(terminal)
-		if err != nil {
-			return Result{}, fmt.Errorf("reading terminal size: %w", err)
-		}
-	}
-
-	command := exec.Command(options.Command, options.Args...)
-	command.Dir = options.Dir
-	command.Env = environment(options.Env)
-	command.WaitDelay = terminationGracePeriod + time.Second
-	attrs := &syscall.SysProcAttr{Setsid: true, Setctty: true, Credential: credential}
-	ptmx, err := pty.StartWithAttrs(command, size, attrs)
-	if err != nil {
-		if options.User != "" {
-			return Result{}, fmt.Errorf("starting %s as user %q with TTY: %w", options.Command, options.User, err)
-		}
-		return Result{}, fmt.Errorf("starting %s with TTY: %w", options.Command, err)
-	}
-	// Setsid makes the child the leader of a new session and process group.
-	defer TrackGroup(command.Process.Pid)()
-	if options.Started != nil {
-		options.Started()
-	}
-
-	stopResize := startTTYResize(terminal, ptmx)
-	defer stopResize()
-
-	stdout := newCaptureBuffer(options.CaptureLimit)
-	interactionDone := make(chan struct{})
-	var interactionOutput *interactionOutputBuffer
-	if options.Interactions != nil {
-		interactionOutput = newInteractionOutputBuffer(interactionDone, ptyinteract.MaxUnmatchedBytes)
-	}
-	outputDone := make(chan error, 1)
-	sensitiveOutput := newSensitiveOutputWriter(outputWriter(options.StdoutPolicy, options.Stdout, &stdout))
-	go func() {
-		var writer io.Writer = sensitiveOutput
-		if interactionOutput != nil {
-			writer = &interactionOutputWriter{writer: writer, output: interactionOutput, done: interactionDone}
-		}
-		_, copyErr := io.Copy(writer, ptmx)
-		if interactionOutput != nil {
-			interactionOutput.Close()
-		}
-		outputDone <- errors.Join(copyErr, sensitiveOutput.Close())
-	}()
-	wait := make(chan error, 1)
-	go func() { wait <- command.Wait() }()
-	processExited := make(chan struct{})
-	var processExitedOnce sync.Once
-	markProcessExited := func() { processExitedOnce.Do(func() { close(processExited) }) }
-
-	var input cancelreader.CancelReader
-	var inputDone chan error
-	var terminalState *term.State
-	var restoreAppearance func()
-	startHandoff := func() error {
-		var startErr error
-		input, startErr = cancelreader.NewReader(terminal)
-		if startErr != nil {
-			return fmt.Errorf("preparing terminal input: %w", startErr)
-		}
-		terminalState, startErr = term.MakeRaw(int(terminal.Fd()))
-		if startErr != nil {
-			_ = input.Close()
-			input = nil
-			return fmt.Errorf("enabling raw terminal mode: %w", startErr)
-		}
-		restoreAppearance = applyTerminalAppearance(options.Stdout, options.Terminal)
-		inputDone = make(chan error, 1)
-		go func() {
-			_, copyErr := io.Copy(ptmx, input)
-			inputDone <- copyErr
-		}()
-		return nil
-	}
-	stopHandoff := func() error {
-		var stopErr error
-		if input != nil {
-			input.Cancel()
-			inputErr := <-inputDone
-			if !expectedPTYStreamError(inputErr) {
-				stopErr = errors.Join(stopErr, fmt.Errorf("writing terminal input: %w", inputErr))
-			}
-			if closeErr := input.Close(); closeErr != nil {
-				stopErr = errors.Join(stopErr, fmt.Errorf("closing terminal input: %w", closeErr))
-			}
-		}
-		if terminalState != nil {
-			if restoreErr := term.Restore(int(terminal.Fd()), terminalState); restoreErr != nil {
-				stopErr = errors.Join(stopErr, fmt.Errorf("restoring terminal mode: %w", restoreErr))
-			}
-		}
-		if restoreAppearance != nil {
-			restoreAppearance()
-			restoreAppearance = nil
-		}
-		return stopErr
-	}
-	defer func() { runErr = errors.Join(runErr, stopHandoff()) }()
-
-	canceled := false
-	waited := false
-	var interactionErr error
-	if options.Interactions != nil {
-		interactionResult := make(chan error, 1)
-		go func() {
-			defer close(interactionDone)
-			stream := interactionOutput.Stream()
-			stream.Redact = sensitiveOutput.Redact
-			interactionResult <- options.Interactions.Run(ctx, stream, processExited, ptyinteract.NewSink(ptmx))
-		}()
-		select {
-		case interactionErr = <-interactionResult:
-			if interactionErr != nil {
-				err = terminateProcess(command.Process.Pid, wait, options)
-				waited = true
-				markProcessExited()
-			}
-		case err = <-wait:
-			waited = true
-			markProcessExited()
-			interactionErr = <-interactionResult
-		case <-ctx.Done():
-			canceled = true
-			err = terminateProcess(command.Process.Pid, wait, options)
-			waited = true
-			markProcessExited()
-			interactionErr = <-interactionResult
-		}
-	}
-	if interactionErr == nil && handoff && !waited {
-		if startErr := startHandoff(); startErr != nil {
-			interactionErr = startErr
-			err = terminateProcess(command.Process.Pid, wait, options)
-			waited = true
-			markProcessExited()
-		}
-	}
-	if !waited {
-		select {
-		case err = <-wait:
-			markProcessExited()
-		case <-ctx.Done():
-			canceled = true
-			err = terminateProcess(command.Process.Pid, wait, options)
-			markProcessExited()
-		}
-	}
-	stopResize()
-	outputErr := drainPTYOutput(ptmx, outputDone)
-
-	result = Result{Stdout: stdout.String(), ExitCode: 0, StdoutTruncated: stdout.truncated}
-	if !expectedPTYStreamError(outputErr) {
-		runErr = errors.Join(runErr, fmt.Errorf("reading terminal output: %w", outputErr))
-	}
-	if canceled {
-		return result, errors.Join(ctx.Err(), runErr)
-	}
-	if interactionErr != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			result.ExitCode = exitErr.ExitCode()
-		}
-		return result, errors.Join(interactionErr, runErr)
-	}
-	if err == nil {
-		return result, runErr
-	}
-	if ctx.Err() != nil {
-		return result, errors.Join(ctx.Err(), runErr)
-	}
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
-		result.ExitCode = exitErr.ExitCode()
-		return result, errors.Join(&ExitError{Command: options.Command, Code: result.ExitCode, Err: err}, runErr)
-	}
-	return result, errors.Join(fmt.Errorf("waiting for %s: %w", options.Command, err), runErr)
-}
-
-func startTTYResize(terminal, ptmx *os.File) func() {
-	if terminal == nil {
-		return func() {}
-	}
-	resizeSignals := make(chan os.Signal, 1)
-	resizeStop := make(chan struct{})
-	resizeDone := make(chan struct{})
-	var resizeOnce sync.Once
-	signal.Notify(resizeSignals, syscall.SIGWINCH)
-	go func() {
-		defer close(resizeDone)
-		for {
-			select {
-			case <-resizeSignals:
-				_ = pty.InheritSize(terminal, ptmx)
-			case <-resizeStop:
-				return
-			}
-		}
-	}()
-	return func() {
-		resizeOnce.Do(func() {
-			signal.Stop(resizeSignals)
-			close(resizeStop)
-			<-resizeDone
-		})
-	}
-}
-
 type interactionOutputWriter struct {
 	writer io.Writer
 	output *interactionOutputBuffer
@@ -519,19 +295,6 @@ func (buffer *interactionOutputBuffer) run() {
 		case <-buffer.stop:
 			return
 		}
-	}
-}
-
-func drainPTYOutput(ptmx *os.File, outputDone <-chan error) error {
-	timer := time.NewTimer(terminationGracePeriod + time.Second)
-	defer timer.Stop()
-	select {
-	case err := <-outputDone:
-		_ = ptmx.Close()
-		return err
-	case <-timer.C:
-		_ = ptmx.Close()
-		return <-outputDone
 	}
 }
 
