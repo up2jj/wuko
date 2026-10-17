@@ -294,6 +294,20 @@ func TestInputSelectionAndCancellation(t *testing.T) {
 	})
 }
 
+// Inline stdin is finite even under a TTY: without StdinOnce, closing the attach stream would
+// never deliver EOF to the container, and a command such as cat would wait forever.
+func TestContainerConfigClosesInlineStdinUnderTTY(t *testing.T) {
+	input := "hi"
+	runner := &Runner{config: Config{Image: "alpine", Command: "cat", TTY: true, Stdin: &input}}
+	config, _, err := runner.containerConfig(step.Request{}, "client", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !config.StdinOnce {
+		t.Fatal("inline stdin under a TTY did not enable StdinOnce")
+	}
+}
+
 func TestEnsureImageInspectsRequestedPlatform(t *testing.T) {
 	pull := &fakePullResponse{}
 	client := &fakeClient{imageInspectErr: errdefs.ErrNotFound, pullResponse: pull}

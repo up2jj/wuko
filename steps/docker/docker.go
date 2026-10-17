@@ -385,15 +385,17 @@ func (r *Runner) containerConfig(request step.Request, ownerHost string, attachS
 		command = append([]string{r.config.Command}, command...)
 	}
 	config := &container.Config{
-		Image:        r.config.Image,
-		Cmd:          command,
-		WorkingDir:   r.config.WorkingDirectory,
-		User:         r.config.User,
-		Env:          env,
-		Tty:          r.config.TTY,
-		AttachStdin:  attachStdin,
-		OpenStdin:    attachStdin,
-		StdinOnce:    attachStdin && !r.config.TTY,
+		Image:       r.config.Image,
+		Cmd:         command,
+		WorkingDir:  r.config.WorkingDirectory,
+		User:        r.config.User,
+		Env:         env,
+		Tty:         r.config.TTY,
+		AttachStdin: attachStdin,
+		OpenStdin:   attachStdin,
+		// Interactive TTY input stays open for the user; inline stdin is finite and must reach
+		// EOF in the container even under a TTY.
+		StdinOnce:    attachStdin && (!r.config.TTY || r.config.Stdin != nil),
 		AttachStdout: true,
 		AttachStderr: true,
 		Labels: map[string]string{
