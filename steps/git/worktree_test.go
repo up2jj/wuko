@@ -378,3 +378,19 @@ func TestSquashLeavesTheBranchUntouchedWhenThereIsNothingToSquash(t *testing.T) 
 		t.Fatalf("HEAD = %q, want the untouched branch tip %q", got, head)
 	}
 }
+
+// git worktree add accepts options among its arguments, so a base such as --force would be
+// taken as a flag and the branch silently created from HEAD.
+func TestWorktreeEnsureRejectsOptionLikeBase(t *testing.T) {
+	dir := initGitRepository(t)
+	runner, err := NewWorktree(map[string]any{"operation": "ensure", "branch": "feature/option", "base": "--force", "create": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runner.Run(t.Context(), step.Request{RunDir: dir}); err == nil || !strings.Contains(err.Error(), "base") {
+		t.Fatalf("Run() error = %v, want an option-like base rejected", err)
+	}
+	if branches := runGitTest(t, dir, "branch", "--list", "feature/option"); strings.TrimSpace(branches) != "" {
+		t.Fatalf("branch was created from an option-like base: %q", branches)
+	}
+}

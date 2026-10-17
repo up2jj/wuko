@@ -126,6 +126,11 @@ func (runner *worktreeRunner) Run(ctx context.Context, request step.Request) (st
 			return step.Result{}, fmt.Errorf("git_worktree configuration contains an unresolved template")
 		}
 	}
+	// git worktree add takes options among its arguments, so a base starting with "-" would be
+	// read as a flag and the branch silently created from HEAD instead.
+	if strings.HasPrefix(runner.config.Base, "-") {
+		return step.Result{}, fmt.Errorf("git_worktree base %q must be a revision, not an option", runner.config.Base)
+	}
 	switch runner.config.Operation {
 	case worktreeList:
 		return runner.list(ctx, request)
