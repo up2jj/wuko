@@ -128,7 +128,9 @@ type Service struct {
 	ExitOnEnd bool   `json:"exit_on_end"`
 }
 
-// StepHandler groups the optional operations of a plugin step. Run is required.
+// StepHandler groups the optional operations of a plugin step. Run is required. A Run that fails
+// may still return the outputs it produced, such as an exit code; a v4 host keeps them for the
+// workflow's error.outputs.
 type StepHandler[Config any] struct {
 	Validate func(context.Context, ValidateRequest[Config]) error
 	Run      func(context.Context, RunRequest[Config]) (Result, error)

@@ -97,6 +97,8 @@ func (response Response) DecodeResult(target any) error {
 type ResponseError struct {
 	Code    string `json:"code,omitempty"`
 	Message string `json:"message"`
+	// Result is what a failed step returned with its error, as a v4 host receives it.
+	Result json.RawMessage `json:"result,omitempty"`
 }
 
 func (protocolError *ResponseError) Error() string {

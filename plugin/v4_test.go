@@ -608,3 +608,26 @@ func TestPluginExecutorSessionRefinesItsCancelPolicy(t *testing.T) {
 		t.Fatal("the session's own cancel policy did not override the declaration")
 	}
 }
+
+func TestFailedPluginStepKeepsItsOutputs(t *testing.T) {
+	plugin, err := sdk.New("acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sdk.RegisterStep(plugin, "fail", sdk.StepHandler[map[string]any]{Run: func(context.Context, sdk.RunRequest[map[string]any]) (sdk.Result, error) {
+		return sdk.Result{Outputs: map[string]any{"exit_code": 75, "stderr": "rate limit"}}, errors.New("command exited with status 75")
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	runner, err := attachSDK(t, plugin).ResolveStep(t.Context(), "acme.fail", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runner.Run(t.Context(), step.Request{StepID: "fail"})
+	if err == nil || err.Error() != "command exited with status 75" {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.Outputs["exit_code"] != int64(75) || result.Outputs["stderr"] != "rate limit" {
+		t.Fatalf("outputs of the failed step = %#v", result.Outputs)
+	}
+}

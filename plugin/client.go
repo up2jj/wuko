@@ -63,6 +63,9 @@ type outgoingResponseFrame struct {
 type wireError struct {
 	Code    string `json:"code,omitempty"`
 	Message string `json:"message"`
+	// Result (v4) is what a failed step produced before failing, which workflows still read
+	// as error.outputs and conditions such as error.exit_code.
+	Result json.RawMessage `json:"result,omitempty"`
 }
 type pendingCall struct {
 	response chan responseFrame
@@ -496,7 +499,7 @@ func (c *client) send(id, method string, params any) error {
 
 func (c *client) decodeResponse(frame responseFrame, result any) error {
 	if frame.Error != nil {
-		return &remoteError{code: frame.Error.Code, message: frame.Error.Message}
+		return &remoteError{code: frame.Error.Code, message: frame.Error.Message, result: frame.Error.Result}
 	}
 	if result == nil {
 		return nil
@@ -580,6 +583,7 @@ func (c *client) drainAfterCancel(ctx context.Context, id string, state *callSta
 type remoteError struct {
 	code    string
 	message string
+	result  json.RawMessage
 }
 
 func (err *remoteError) Error() string { return err.message }

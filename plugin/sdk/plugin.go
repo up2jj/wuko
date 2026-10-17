@@ -322,6 +322,7 @@ func (plugin *Plugin) dispatch(ctx context.Context, req wireRequest, peer *peer)
 		default:
 			return nil, fmt.Errorf("unsupported protocol %q", params.Protocol)
 		}
+		peer.v4.Store(params.Protocol == Protocol)
 		plugin.mu.RLock()
 		steps := make([]stepDeclaration, 0, len(plugin.steps))
 		for _, name := range sortedKeys(plugin.steps) {

@@ -37,6 +37,8 @@ type outgoingResponse struct {
 type wireError struct {
 	Code    string `json:"code,omitempty"`
 	Message string `json:"message"`
+	// Result (v4) carries what a failed step produced.
+	Result any `json:"result,omitempty"`
 }
 
 type peer struct {
@@ -47,8 +49,11 @@ type peer struct {
 	callbacks map[string]chan wireResponse
 	abandoned map[string]struct{}
 	resizes   map[string]chan TerminalSize
-	next      atomic.Uint64
-	wg        sync.WaitGroup
+	// v4 is set once the host accepted protocol v4, which lets a failed step's result travel
+	// with its error; an older host would reject the field.
+	v4   atomic.Bool
+	next atomic.Uint64
+	wg   sync.WaitGroup
 }
 
 type requestContextKey struct{}
@@ -323,6 +328,9 @@ func (peer *peer) reply(id string, result any, err error) error {
 			response.Error.Code = "timed_out"
 		case errors.Is(err, context.Canceled):
 			response.Error.Code = "canceled"
+		}
+		if failed, ok := result.(Result); ok && peer.v4.Load() && (len(failed.Outputs) != 0 || len(failed.Variables) != 0) {
+			response.Error.Result = failed
 		}
 	}
 	return peer.write(response)

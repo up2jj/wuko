@@ -849,10 +849,23 @@ func (s *pluginStep) Run(ctx context.Context, request step.Request) (_ step.Resu
 			defer func() { err = errors.Join(err, terminal.release()) }()
 		}
 		err = s.plugin.client.callWithOptions(ctx, "step.run", params, &result, options)
-		return runtimeResult(result), err
+		if err != nil {
+			return failedResult(err), err
+		}
+		return runtimeResult(result), nil
 	}
 	err = s.plugin.client.call(ctx, "step.run", params, &result, streamEvents(request.Stdout, request.Stderr, nil))
 	return runtimeResult(result), err
+}
+
+// failedResult recovers the result a v4 plugin attached to a step's failure.
+func failedResult(err error) step.Result {
+	var remote *remoteError
+	var result step.Result
+	if errors.As(err, &remote) && len(remote.result) != 0 && decodeNumber(remote.result, &result) == nil {
+		return runtimeResult(result)
+	}
+	return step.Result{}
 }
 
 // runtimeResult turns the numbers a plugin returned into the ones workflow state carries. The

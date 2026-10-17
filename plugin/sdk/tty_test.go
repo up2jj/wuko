@@ -81,3 +81,47 @@ func TestTTYCommandReceivesResizeNotifications(t *testing.T) {
 		t.Fatalf("run response = %#v", response)
 	}
 }
+
+func TestFailedStepResultIsSentOnlyToV4Hosts(t *testing.T) {
+	for _, protocol := range []string{ProtocolV3, Protocol} {
+		t.Run(protocol, func(t *testing.T) {
+			plugin, err := New("acme")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := RegisterStep(plugin, "fail", StepHandler[map[string]any]{Run: func(context.Context, RunRequest[map[string]any]) (Result, error) {
+				return Result{Outputs: map[string]any{"exit_code": 75}}, fmt.Errorf("failed")
+			}}); err != nil {
+				t.Fatal(err)
+			}
+			pluginInput, hostInput := io.Pipe()
+			hostOutput, pluginOutput := io.Pipe()
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			go func() { _ = plugin.Serve(ctx, pluginInput, pluginOutput) }()
+			frames := bufio.NewScanner(hostOutput)
+			for _, request := range []map[string]any{
+				{"id": "1", "method": "initialize", "params": map[string]any{"protocol": protocol}},
+				{"id": "2", "method": "step.run", "params": map[string]any{"type": "acme.fail", "with": map[string]any{}, "context": map[string]any{}}},
+			} {
+				data, _ := json.Marshal(request)
+				if _, err := hostInput.Write(append(data, '\n')); err != nil {
+					t.Fatal(err)
+				}
+				if !frames.Scan() {
+					t.Fatal("plugin closed its output")
+				}
+			}
+			var response struct {
+				Error map[string]any `json:"error"`
+			}
+			if err := json.Unmarshal(frames.Bytes(), &response); err != nil {
+				t.Fatal(err)
+			}
+			_, carried := response.Error["result"]
+			if carried != (protocol == Protocol) {
+				t.Fatalf("error frame %#v: result carried = %v under %s", response.Error, carried, protocol)
+			}
+		})
+	}
+}
