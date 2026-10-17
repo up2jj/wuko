@@ -300,6 +300,9 @@ func TestPluginExecutorStdin(t *testing.T) {
 
 func TestPluginExecutorStdinThatOutlivesTheCommand(t *testing.T) {
 	_, session := openTestExecutor(t, scriptExecutor(sdk.ExecutorHandler[map[string]any]{Stdin: true}, func(_ context.Context, command sdk.Command) (sdk.CommandResult, error) {
+		if !command.StdinOutlivesProcess {
+			return sdk.CommandResult{}, errors.New("the command was not told its stdin outlives it")
+		}
 		line, err := bufio.NewReader(command.Stdin).ReadString('\n')
 		return sdk.CommandResult{Stdout: line}, err
 	}))
@@ -587,5 +590,21 @@ func TestPluginExecutorOpenStreamsOutputAndSeesWorkflowDir(t *testing.T) {
 	defer session.Close(context.Background())
 	if stdout.String() != "building in /work/flow\n" || stderr.String() != "warning\n" {
 		t.Fatalf("open output = %q, %q", stdout.String(), stderr.String())
+	}
+}
+
+type stoppingSession struct{ localSession }
+
+func (stoppingSession) CancelStopsProcess() bool { return true }
+
+func TestPluginExecutorSessionRefinesItsCancelPolicy(t *testing.T) {
+	_, declared := openTestExecutor(t, sdk.ExecutorHandler[map[string]any]{Open: func(context.Context, sdk.ExecutorRequest[map[string]any]) (sdk.ExecutorSession, error) {
+		return localSession{}, nil
+	}})
+	_, refined := openTestExecutor(t, sdk.ExecutorHandler[map[string]any]{Open: func(context.Context, sdk.ExecutorRequest[map[string]any]) (sdk.ExecutorSession, error) {
+		return stoppingSession{}, nil
+	}})
+	if declared.(process.CancelPolicy).CancelStopsProcess() || !refined.(process.CancelPolicy).CancelStopsProcess() {
+		t.Fatal("the session's own cancel policy did not override the declaration")
 	}
 }

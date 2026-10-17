@@ -476,6 +476,7 @@ func (plugin *Plugin) callExecutor(ctx context.Context, req wireRequest, peer *p
 			Env          map[string]string `json:"env"`
 			Stdin        string            `json:"stdin"`
 			StdinStream  bool              `json:"stdin_stream"`
+			StdinOutlive bool              `json:"stdin_outlives_process"`
 			TTY          *TerminalSize     `json:"tty"`
 			CaptureLimit int64             `json:"capture_limit"`
 			StdoutPolicy int               `json:"stdout_policy"`
@@ -508,7 +509,7 @@ func (plugin *Plugin) callExecutor(ctx context.Context, req wireRequest, peer *p
 			}
 			stdin = bytes.NewReader(data)
 		}
-		command := Command{Command: params.Command, Args: params.Args, Dir: params.Dir, Env: params.Env, Stdin: stdin, TTY: params.TTY, CaptureLimit: params.CaptureLimit, StdoutPolicy: params.StdoutPolicy, StderrPolicy: params.StderrPolicy, Stdout: eventWriter{peer: peer, id: req.ID, event: "stdout"}, Stderr: eventWriter{peer: peer, id: req.ID, event: "stderr"}, Started: func() { _ = peer.event(req.ID, "started", nil) }}
+		command := Command{Command: params.Command, Args: params.Args, Dir: params.Dir, Env: params.Env, Stdin: stdin, TTY: params.TTY, StdinOutlivesProcess: params.StdinOutlive, CaptureLimit: params.CaptureLimit, StdoutPolicy: params.StdoutPolicy, StderrPolicy: params.StderrPolicy, Stdout: eventWriter{peer: peer, id: req.ID, event: "stdout"}, Stderr: eventWriter{peer: peer, id: req.ID, event: "stderr"}, Started: func() { _ = peer.event(req.ID, "started", nil) }}
 		if params.TTY != nil {
 			resize, release := peer.watchResize(req.ID)
 			defer release()
@@ -546,7 +547,11 @@ func (plugin *Plugin) callExecutor(ctx context.Context, req wireRequest, peer *p
 	id := fmt.Sprintf("session-%d", plugin.nextSession)
 	plugin.sessions[id] = session
 	plugin.mu.Unlock()
-	return map[string]any{"session": id}, nil
+	result := map[string]any{"session": id}
+	if policy, ok := session.(CancelPolicy); ok {
+		result["cancel_stops_process"] = policy.CancelStopsProcess()
+	}
+	return result, nil
 }
 
 // requiresV4Locked names the first registration that only protocol v4 can carry, or returns

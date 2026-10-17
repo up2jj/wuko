@@ -44,6 +44,7 @@ func (s *pluginSession) Run(ctx context.Context, o process.Options) (process.Res
 	switch {
 	case o.Stdin != nil && s.declaration.Stdin:
 		params["stdin_stream"] = true
+		params["stdin_outlives_process"] = o.StdinOutlivesProcess
 		input = newHostInput()
 		pumped = make(chan struct{})
 		go func() {

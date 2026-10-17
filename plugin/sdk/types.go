@@ -333,14 +333,17 @@ type Command struct {
 	// TTY is the starting size when the command runs in a terminal. Stdin then carries the
 	// terminal's input, Stdout receives the terminal's single output stream, and Resize
 	// delivers each later size; the host keeps the user's terminal and the capture.
-	TTY          *TerminalSize       `json:"-"`
-	Resize       <-chan TerminalSize `json:"-"`
-	CaptureLimit int64               `json:"capture_limit"`
-	StdoutPolicy int                 `json:"stdout_policy"`
-	StderrPolicy int                 `json:"stderr_policy"`
-	Stdout       io.Writer           `json:"-"`
-	Stderr       io.Writer           `json:"-"`
-	Started      func()              `json:"-"`
+	TTY    *TerminalSize       `json:"-"`
+	Resize <-chan TerminalSize `json:"-"`
+	// StdinOutlivesProcess reports that streamed Stdin stays open past the command's own
+	// lifetime, so its exit must be reported without waiting for Stdin to end.
+	StdinOutlivesProcess bool      `json:"-"`
+	CaptureLimit         int64     `json:"capture_limit"`
+	StdoutPolicy         int       `json:"stdout_policy"`
+	StderrPolicy         int       `json:"stderr_policy"`
+	Stdout               io.Writer `json:"-"`
+	Stderr               io.Writer `json:"-"`
+	Started              func()    `json:"-"`
 }
 
 type CommandResult struct {
@@ -377,6 +380,12 @@ type ExecutorFileSystem interface {
 	ReadFile(context.Context, string, int64) ([]byte, error)
 	WriteFile(context.Context, string, []byte, WriteOptions) error
 	MkdirAll(context.Context, string, fs.FileMode) error
+}
+
+// CancelPolicy may be implemented by an ExecutorSession whose cancellation behavior depends on
+// its configuration; it overrides ExecutorHandler.CancelStopsProcess for that session.
+type CancelPolicy interface {
+	CancelStopsProcess() bool
 }
 
 // ExecutorSession is returned by Open and receives commands until Close.

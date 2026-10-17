@@ -1195,6 +1195,9 @@ func (p *pluginExecutor) Open(ctx context.Context, r executor.Request) (executor
 	}
 	var result struct {
 		Session string `json:"session"`
+		// CancelStopsProcess (v4) lets one session refine its executor's declaration, for an
+		// executor whose answer depends on its configuration.
+		CancelStopsProcess *bool `json:"cancel_stops_process"`
 	}
 	// Opening can take a while, such as building an environment, and its progress belongs on
 	// the workflow's output.
@@ -1205,6 +1208,9 @@ func (p *pluginExecutor) Open(ctx context.Context, r executor.Request) (executor
 		return nil, fmt.Errorf("plugin returned an empty executor session")
 	}
 	session := &pluginSession{plugin: p.plugin, id: result.Session, declaration: p.declaration}
+	if result.CancelStopsProcess != nil {
+		session.declaration.CancelStopsProcess = *result.CancelStopsProcess
+	}
 	if p.declaration.FileSystem {
 		return &fileSystemPluginSession{pluginSession: session}, nil
 	}
