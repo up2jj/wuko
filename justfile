@@ -34,6 +34,10 @@ smoke-devenv:
 vet:
     go vet ./...
 
+# Run staticcheck (configured in staticcheck.conf).
+lint:
+    go run honnef.co/go/tools/cmd/staticcheck@2025.1.1 ./...
+
 # Format all Go sources.
 fmt:
     gofmt -w .

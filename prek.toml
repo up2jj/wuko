@@ -45,6 +45,15 @@ hooks = [
     pass_filenames = false
   },
   {
+    id = "staticcheck",
+    name = "staticcheck",
+    entry = "go run honnef.co/go/tools/cmd/staticcheck@2025.1.1 ./...",
+    language = "system",
+    types = ["go"],
+    pass_filenames = false,
+    stages = ["pre-push"]
+  },
+  {
     id = "go-test",
     name = "go test (race)",
     entry = "go test -race ./...",

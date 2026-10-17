@@ -12,6 +12,7 @@ Use the repository's `justfile` as the command entry point:
 - `just run -- --help` runs the CLI from source with arguments.
 - `just test` runs `go test ./...`.
 - `just vet` runs Go's static checks.
+- `just lint` runs staticcheck (configured in `staticcheck.conf`).
 - `just fmt` formats all Go sources with `gofmt`.
 - `just snapshot` creates local release artifacts in `dist/`.
 - `just hooks` installs pre-commit and pre-push checks; run `prek run --all-files` before broad changes.
@@ -22,7 +23,7 @@ Follow idiomatic Go and let `gofmt` control tabs and layout. Keep packages flat 
 
 ## Testing Guidelines
 
-Tests use the standard `testing` package and are colocated as `*_test.go`. Name tests `TestBehaviorScenario` and prefer table-driven subtests. Use `t.TempDir()`, injected dependencies, and buffers to isolate filesystem and CLI behavior. Add regression tests for behavior changes. There is no coverage threshold, but `go test ./...`, `go vet ./...`, and a clean `gofmt -l .` are required by CI.
+Tests use the standard `testing` package and are colocated as `*_test.go`. Name tests `TestBehaviorScenario` and prefer table-driven subtests. Use `t.TempDir()`, injected dependencies, and buffers to isolate filesystem and CLI behavior. Add regression tests for behavior changes. There is no coverage threshold, but `go test ./...`, `go vet ./...`, staticcheck, and a clean `gofmt -l .` are required by CI.
 
 ## Commit & Pull Request Guidelines
 
