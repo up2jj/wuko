@@ -268,6 +268,27 @@ func TestDashboardActionBlockedByAnotherActionStartsAfterIt(t *testing.T) {
 	}
 }
 
+func TestDashboardKeepsEveryActionQueuedBehindARefresh(t *testing.T) {
+	model := newTwoGroupDashboard(t, 0)
+	model.queueRefresh(0)
+	model.startQueued()
+	if !model.groups[0].running {
+		t.Fatal("refresh did not start")
+	}
+	first := dashboardJob{kind: dashboardActionJob, group: 0, refreshGroups: []string{"first"}}
+	second := dashboardJob{kind: dashboardActionJob, group: 0, refreshGroups: []string{"second"}}
+	model.queueAction(first)
+	model.queueAction(second)
+	model.finishJob(dashboardJobResultMsg{job: dashboardJob{kind: dashboardRefreshJob, group: 0}, data: map[string]any{}, finished: time.Now()})
+	// The first action now owns the action slot; the second must still be waiting for it.
+	if !model.actionRun {
+		t.Fatal("first action did not start after the refresh")
+	}
+	if len(model.queue) != 1 || model.queue[0].kind != dashboardActionJob || model.queue[0].refreshGroups[0] != "second" {
+		t.Fatalf("queue = %#v, want the second action still queued", model.queue)
+	}
+}
+
 func TestDashboardIgnoresSupersededRefreshTicks(t *testing.T) {
 	model := newTwoGroupDashboard(t, time.Hour)
 	done := dashboardJobResultMsg{job: dashboardJob{kind: dashboardRefreshJob, group: 0}, data: map[string]any{}, finished: time.Now()}

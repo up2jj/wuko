@@ -91,7 +91,7 @@ type dashboardGroupState struct {
 	queued         bool
 	paused         bool
 	pendingRefresh bool
-	pendingAction  *dashboardJob
+	pendingActions []dashboardJob
 	actions        []map[string]DashboardState
 	// tickGeneration invalidates scheduled ticks once a newer refresh has completed, so manual
 	// and action-triggered refreshes do not start additional periodic tick chains.
@@ -387,7 +387,7 @@ func (m *dashboardModel) startQueued() []tea.Cmd {
 		} else {
 			if group.running {
 				// Re-queued when the group's refresh finishes.
-				group.pendingAction = &job
+				group.pendingActions = append(group.pendingActions, job)
 				continue
 			}
 			if m.actionRun {
@@ -452,10 +452,10 @@ func (m *dashboardModel) finishJob(message dashboardJobResultMsg) []tea.Cmd {
 		}
 		var commands []tea.Cmd
 		group.tickGeneration++
-		if group.pendingAction != nil {
-			job := *group.pendingAction
-			group.pendingAction = nil
-			m.queue = append([]dashboardJob{job}, m.queue...)
+		if len(group.pendingActions) > 0 {
+			// Every action chosen during the refresh runs, in the order it was chosen.
+			m.queue = append(group.pendingActions, m.queue...)
+			group.pendingActions = nil
 		} else if group.pendingRefresh {
 			group.pendingRefresh = false
 			m.queueRefresh(message.job.group)
@@ -516,7 +516,7 @@ func (m *dashboardModel) queueAction(job dashboardJob) {
 	}
 	m.queue = filtered
 	if group.running {
-		group.pendingAction = &job
+		group.pendingActions = append(group.pendingActions, job)
 		return
 	}
 	m.queue = append([]dashboardJob{job}, m.queue...)
