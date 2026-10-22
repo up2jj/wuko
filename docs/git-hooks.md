@@ -4,6 +4,13 @@ Wuko can bind project workflows to client-side Git hooks. The bindings are versi
 the executable dispatchers and their ownership records stay in local Git metadata. Installing a
 hook is always explicit because both Git hooks and Wuko workflows run as trusted local code.
 
+## Contents
+
+- [Configure and install](#configure-and-install)
+- [Existing hooks and uninstall](#existing-hooks-and-uninstall)
+- [Workflow context](#workflow-context)
+- [Supported hooks](#supported-hooks)
+
 ## Configure and install
 
 Generate a starter configuration and example workflows:

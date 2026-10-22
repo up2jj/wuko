@@ -3,6 +3,16 @@
 Wuko uses context cancellation to stop a running workflow. Cancellation flows from the CLI into
 the engine, through workflow controls, and into every active step runner.
 
+## Contents
+
+- [Signal lifecycle](#signal-lifecycle)
+- [Step termination](#step-termination)
+- [Workflow controls](#workflow-controls)
+- [Expansion limits and cancellation](#expansion-limits-and-cancellation)
+- [Timeouts are cancellation deadlines](#timeouts-are-cancellation-deadlines)
+- [Partial work and idempotency](#partial-work-and-idempotency)
+- [Runner checklist](#runner-checklist)
+
 ## Signal lifecycle
 
 The first `SIGINT` or `SIGTERM` starts graceful shutdown:

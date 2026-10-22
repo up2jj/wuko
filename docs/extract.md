@@ -8,6 +8,18 @@ multiline matching. Extraction requires exactly one match by default; `match: al
 ordered list. A `fields` map can derive several outputs from marker-delimited or regular-expression
 content in the same input.
 
+## Contents
+
+- [Typed line formats](#typed-line-formats)
+- [Capture types](#capture-types)
+- [Raw regular expressions](#raw-regular-expressions)
+- [Multiple matches](#multiple-matches)
+- [Marker fields](#marker-fields)
+- [Publishing workflow variables](#publishing-workflow-variables)
+- [Shell and HTTP output](#shell-and-http-output)
+- [Literal braces and backslashes](#literal-braces-and-backslashes)
+- [Failures and limitations](#failures-and-limitations)
+
 ## Typed line formats
 
 A format describes one complete input line. Literal spaces and tabs in the format match one or

@@ -22,6 +22,19 @@ whose `plugin.json` pins `wuko.plugin/v3` therefore keeps working after it is re
 newer SDK. Declaring a v4 capability requires `"protocol": "wuko.plugin/v4"` in the release
 manifest.
 
+## Contents
+
+- [Declarations](#declarations)
+- [Executor filesystem](#executor-filesystem)
+- [Streamed input](#streamed-input)
+- [TTY runs](#tty-runs)
+- [Borrowing the terminal](#borrowing-the-terminal)
+- [Steps inside their own plugin's executors](#steps-inside-their-own-plugins-executors)
+- [Executor sessions](#executor-sessions)
+- [Failed steps](#failed-steps)
+- [Go SDK](#go-sdk)
+- [Not carried](#not-carried)
+
 ## Declarations
 
 | Declaration | Field | Effect |

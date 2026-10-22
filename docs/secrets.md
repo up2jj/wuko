@@ -28,6 +28,12 @@ steps:
       expr: 'secret("bw://password/Container%20Registry")'
 ```
 
+## Contents
+
+- [References](#references)
+- [Authentication preflight](#authentication-preflight)
+- [Sessions](#sessions)
+
 ## References
 
 1Password references use the native secret-reference URI and are passed to `op read --no-newline`:

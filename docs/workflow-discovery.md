@@ -2,6 +2,18 @@
 
 [Back to the README](../README.md)
 
+## Contents
+
+- [Ways to run a workflow](#ways-to-run-a-workflow)
+- [How discovery works](#how-discovery-works)
+- [Search locations](#search-locations)
+- [Files and names](#files-and-names)
+- [What discovery loads](#what-discovery-loads)
+- [Precedence and shadowing](#precedence-and-shadowing)
+- [Command behavior](#command-behavior)
+- [JSON list format](#json-list-format)
+- [Implementation](#implementation)
+
 ## Ways to run a workflow
 
 | Source | Command |

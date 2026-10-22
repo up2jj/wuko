@@ -6,6 +6,15 @@ Wuko runs shell steps locally by default. An `executor` block temporarily select
 environment for its child shell steps. When the block finishes, later shell steps run locally
 again.
 
+## Contents
+
+- [Block syntax](#block-syntax)
+- [devenv executor](#devenv-executor)
+- [Docker executor](#docker-executor)
+- [Reading and writing files](#reading-and-writing-files)
+- [Sharing files with local steps](#sharing-files-with-local-steps)
+- [Cleanup and persistence](#cleanup-and-persistence)
+
 ## Block syntax
 
 An executor block is an anonymous sequential scope:

@@ -5,6 +5,12 @@
 Wuko is a local automation tool, not a sandbox. Treat every workflow, composite action, and plugin
 you run as trusted code.
 
+## Contents
+
+- [What workflows can do](#what-workflows-can-do)
+- [Remote workflows, actions, and plugins](#remote-workflows-actions-and-plugins)
+- [Secrets](#secrets)
+
 ## What workflows can do
 
 - Lua, shell, agent, Docker, and command-based action sources can access local resources with the

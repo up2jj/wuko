@@ -12,6 +12,22 @@ Wuko has eight controls for scheduling, repeating, recovering, or monitoring ope
 - Use `cancel_on` when a sequential body should stop as soon as one named monitor finishes.
 - Use `observe` for a background loop driven by filesystem, HTTP, shell, or future event sources.
 
+## Contents
+
+- [Observe](#observe)
+- [Try and catch](#try-and-catch)
+- [Cancel on](#cancel-on)
+- [Attempt](#attempt)
+- [Loop](#loop)
+- [Foreach](#foreach)
+- [Batch](#batch)
+- [Matrix](#matrix)
+- [Scheduling and failures](#scheduling-and-failures)
+- [State and nesting](#state-and-nesting)
+- [Composite actions and required files](#composite-actions-and-required-files)
+- [Conditions, inspection, and dry runs](#conditions-inspection-and-dry-runs)
+- [Limitations](#limitations)
+
 ## Observe
 
 `observe` opens and validates its selected source, publishes a ready result, and continues the

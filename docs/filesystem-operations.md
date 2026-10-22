@@ -5,6 +5,28 @@ The `file` step provides strict, shell-independent filesystem operations. Every 
 paths are resolved from the workflow run directory, while absolute paths are used as written. Wuko
 workflows are trusted code, so paths are not confined to the run directory.
 
+## Contents
+
+- [Common rules](#common-rules)
+- [Quick reference](#quick-reference)
+- [Read](#read)
+- [Write](#write)
+- [Copy and move](#copy-and-move)
+- [Remove](#remove)
+- [Make a directory](#make-a-directory)
+- [List](#list)
+- [Stat](#stat)
+- [Chmod](#chmod)
+- [Find](#find)
+- [Link](#link)
+- [Truncate](#truncate)
+- [Tail](#tail)
+- [Disk usage](#disk-usage)
+- [Atomic swap](#atomic-swap)
+- [Permissions](#permissions)
+- [Touch](#touch)
+- [Consuming outputs](#consuming-outputs)
+
 ## Common rules
 
 - Modes are quoted four-digit octal strings from `"0000"` through `"0777"`. Special permission

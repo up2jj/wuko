@@ -31,6 +31,16 @@ Output names must be Wuko identifiers and expressions must be non-empty strings.
 is evaluated atomically against the state available at the return position. An evaluation error or
 non-JSON/YAML-compatible value fails the run and publishes no return outputs.
 
+## Contents
+
+- [Cached result and successful no-op](#cached-result-and-successful-no-op)
+- [Return to the workflow picker](#return-to-the-workflow-picker)
+- [Declared workflow outputs](#declared-workflow-outputs)
+- [Sequential blocks](#sequential-blocks)
+- [Concurrent, batch, foreach, and matrix boundaries](#concurrent-batch-foreach-and-matrix-boundaries)
+- [Composite actions](#composite-actions)
+- [Cleanup and status](#cleanup-and-status)
+
 ## Cached result and successful no-op
 
 Return a cached artifact without running the build or save steps:

@@ -6,6 +6,16 @@ Every command accepts `--help`. Global flags: `--debug` traces loading, validati
 to stderr with diagnostic redaction; `--env-loader auto|none|mise|asdf|direnv` loads the
 invocation environment.
 
+## Contents
+
+- [Find and inspect workflows](#find-and-inspect-workflows)
+- [Run workflows](#run-workflows)
+- [Install and share workflows](#install-and-share-workflows)
+- [Plugins](#plugins)
+- [Git hooks](#git-hooks)
+- [Coding-agent skills](#coding-agent-skills)
+- [Shell completion](#shell-completion)
+
 ## Find and inspect workflows
 
 ```sh

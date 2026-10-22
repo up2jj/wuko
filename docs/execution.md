@@ -5,6 +5,30 @@
 This guide covers the workflow-level features that connect Wuko steps: state, conditions,
 concurrency, scheduling, failure policies, file composition, and remote reuse.
 
+## Contents
+
+- [Choosing a composition mechanism](#choosing-a-composition-mechanism)
+- [Workflow targets](#workflow-targets)
+- [State and execution order](#state-and-execution-order)
+- [Idempotency across runs](#idempotency-across-runs)
+- [Workflow prerequisites](#workflow-prerequisites)
+- [Running child workflows](#running-child-workflows)
+- [Conditions](#conditions)
+- [Scoped environments](#scoped-environments)
+- [Scoped working directories](#scoped-working-directories)
+- [Git worktrees](#git-worktrees)
+- [Concurrency](#concurrency)
+- [Attempts](#attempts)
+- [Scheduled runs](#scheduled-runs)
+- [Run reporters](#run-reporters)
+- [Splitting a workflow across files](#splitting-a-workflow-across-files)
+- [Remote workflows](#remote-workflows)
+- [Workflow installation](#workflow-installation)
+- [Composite actions](#composite-actions)
+- [Environment and templates](#environment-and-templates)
+- [Cleanup and cancellation](#cleanup-and-cancellation)
+- [Inspection and debugging](#inspection-and-debugging)
+
 ## Choosing a composition mechanism
 
 Wuko offers five deliberately different ways to compose automation. Choose based on the boundary

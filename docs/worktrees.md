@@ -17,6 +17,14 @@ worktree path must remain valid for later `working_directory` blocks on the Wuko
 fetch: remote-branch discovery uses only local remote-tracking refs. Like every Wuko workflow,
 this is trusted local code; the Git steps do not introduce a separate approval layer.
 
+## Contents
+
+- [`git_worktree`](#git_worktree)
+- [`git_squash`](#git_squash)
+- [`git_rebase`](#git_rebase)
+- [`git_merge`](#git_merge)
+- [Mapping Worktrunk concepts](#mapping-worktrunk-concepts)
+
 ## `git_worktree`
 
 `git_worktree` has three operations.

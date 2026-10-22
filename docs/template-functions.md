@@ -39,6 +39,24 @@ Executable plugins may add workflow-scoped helpers. A plugin namespace `acme` de
 results and are available only when the workflow explicitly declares the pinned plugin. See
 [Executable plugins](plugins.md#helpers) for the wire contract and lifecycle rules.
 
+## Contents
+
+- [String functions](#string-functions)
+- [Text transformations](#text-transformations)
+- [Defaults and validation](#defaults-and-validation)
+- [Collections](#collections)
+- [Expr-only typed collection operations](#expr-only-typed-collection-operations)
+- [Parsing and serialization](#parsing-and-serialization)
+- [URI functions](#uri-functions)
+- [Conventional Commit functions](#conventional-commit-functions)
+- [Time functions](#time-functions)
+- [Encoding and decoding](#encoding-and-decoding)
+- [Hashing and authentication codes](#hashing-and-authentication-codes)
+- [Numbers and inspection](#numbers-and-inspection)
+- [Secure generators and current time](#secure-generators-and-current-time)
+- [Go-template terminal presentation](#go-template-terminal-presentation)
+- [Availability and safety](#availability-and-safety)
+
 ## String functions
 
 All string functions require string arguments. `split` returns a string list; `join` accepts a

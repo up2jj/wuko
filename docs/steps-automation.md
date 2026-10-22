@@ -5,6 +5,13 @@
 Automation steps run local programs, coding agents, or in-process Lua.
 Wrap a step in an `attempt` control when an operation can hang or fail transiently.
 
+## Contents
+
+- [`process`](#process)
+- [`shell`](#shell)
+- [`agent`](#agent)
+- [`lua`](#lua)
+
 ## `process`
 
 Run one long-lived program as a readiness-gated service. The step succeeds when the program is

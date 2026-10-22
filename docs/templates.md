@@ -4,6 +4,19 @@ Wuko renders strings with Go's standard [`text/template`](https://pkg.go.dev/tex
 package. Templates are strict: referring to a missing map key fails with an error instead of
 silently producing an empty value.
 
+## Contents
+
+- [Template data](#template-data)
+- [Execution provider contexts](#execution-provider-contexts)
+- [Named templates](#named-templates)
+- [File-backed templates](#file-backed-templates)
+- [Remote workflows and actions](#remote-workflows-and-actions)
+- [One-off template rendering](#one-off-template-rendering)
+- [Template trees](#template-trees)
+- [Typed action inputs](#typed-action-inputs)
+- [Execution order](#execution-order)
+- [Safety](#safety)
+
 ## Template data
 
 Every rendered string can access these roots:

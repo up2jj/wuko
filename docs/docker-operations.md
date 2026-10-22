@@ -26,6 +26,18 @@ To run several shell steps in one persistent container and then return to local 
 | `volume_create` | Create a workflow-scoped Docker volume |
 | `build` | Build through Docker Buildx |
 
+## Contents
+
+- [Run containers](#run-containers)
+- [Wait for container health](#wait-for-container-health)
+- [Copy files to and from containers](#copy-files-to-and-from-containers)
+- [Pull and inspect images](#pull-and-inspect-images)
+- [Verify an image digest](#verify-an-image-digest)
+- [Tag and push images](#tag-and-push-images)
+- [Registry authentication](#registry-authentication)
+- [Managed networks and volumes](#managed-networks-and-volumes)
+- [Build with Buildx](#build-with-buildx)
+
 ## Run containers
 
 Run tests with a read-only bind mount:

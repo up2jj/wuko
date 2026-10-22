@@ -6,6 +6,13 @@ Wuko's README media is generated from [Charmbracelet VHS](https://github.com/cha
 tapes. The tapes run deterministic local fixtures, so recording does not need API credentials,
 network access, external agents, or a particular user configuration.
 
+## Contents
+
+- [Prerequisites](#prerequisites)
+- [Regenerate the media](#regenerate-the-media)
+- [Fixtures and recording conventions](#fixtures-and-recording-conventions)
+- [Gallery demos](#gallery-demos)
+
 ## Prerequisites
 
 Install VHS, `ttyd`, and `ffmpeg`. VHS uses `ttyd` and `ffmpeg` when it renders terminal output.

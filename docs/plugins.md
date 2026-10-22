@@ -22,6 +22,18 @@ v4](plugin-protocol-v4.md). The generated concurrent reader handles cancellation
 plugin-to-host callbacks while operations run. The [protocol v1](plugin-protocol.md) reference
 remains available for maintaining existing plugins.
 
+## Contents
+
+- [Declared plugins and local lockfiles](#declared-plugins-and-local-lockfiles)
+- [Remote workflows](#remote-workflows)
+- [Shared verified cache](#shared-verified-cache)
+- [Install and uninstall](#install-and-uninstall)
+- [Create and publish a marketplace plugin](#create-and-publish-a-marketplace-plugin)
+- [Version resolution and conflicts](#version-resolution-and-conflicts)
+- [Helpers](#helpers)
+- [Protocol selection](#protocol-selection)
+- [Lifecycle](#lifecycle)
+
 ## Declared plugins and local lockfiles
 
 Every plugin namespace must be declared by the workflow that uses it. Installed binaries and

@@ -9,6 +9,17 @@ steps inside concurrent groups, require a supplied value unless an optional `tui
 to no selection. The display-only `tui_table` step does not publish a value and prints a static
 table when input is non-interactive.
 
+## Contents
+
+- [`tui_input`](#tui_input)
+- [`tui_password`](#tui_password)
+- [`tui_choice`](#tui_choice)
+- [`tui_path`](#tui_path)
+- [`tui_review`](#tui_review)
+- [`tui_table`](#tui_table)
+- [`dashboard`](#dashboard)
+- [`tui_confirm`](#tui_confirm)
+
 ## `tui_input`
 
 Collect editable text. Use `required`, validation rules, or modifiers when the workflow needs a

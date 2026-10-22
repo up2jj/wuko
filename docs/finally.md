@@ -45,6 +45,15 @@ restriction against `require`. Step IDs are unique across `steps`, attached defe
 Attached defer is supported in sequential workflow/action scopes, conditional and working-directory
 blocks, and executor bodies. It is rejected in concurrent or fan-out bodies and during cleanup.
 
+## Contents
+
+- [Lifecycle](#lifecycle)
+- [State available during cleanup](#state-available-during-cleanup)
+- [Structured errors](#structured-errors)
+- [Composite actions and retries](#composite-actions-and-retries)
+- [Timeouts, controls, and inspection](#timeouts-controls-and-inspection)
+- [Limitations](#limitations)
+
 ## Lifecycle
 
 Wuko loads, resolves, and validates the complete workflow before running it. If that succeeds, the

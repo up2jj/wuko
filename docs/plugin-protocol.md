@@ -10,6 +10,17 @@ back into Wuko should opt into [plugin protocol v2](plugin-protocol-v2.md).
 The distribution manifest and marketplace format are separate from this runtime protocol. See
 [Executable plugins](plugins.md) for packaging, installation, discovery, and publishing.
 
+## Contents
+
+- [The protocol in five rules](#the-protocol-in-five-rules)
+- [Minimal plugin](#minimal-plugin)
+- [Message envelopes](#message-envelopes)
+- [Initialization and declarations](#initialization-and-declarations)
+- [Method reference](#method-reference)
+- [Ordering and lifecycle](#ordering-and-lifecycle)
+- [Limits and failure behavior](#limits-and-failure-behavior)
+- [Versioning](#versioning)
+
 ## The protocol in five rules
 
 1. Each message is one complete JSON object followed by a newline.

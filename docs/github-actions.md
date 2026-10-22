@@ -2,6 +2,16 @@
 
 [Back to the README](../README.md)
 
+## Contents
+
+- [Run a workflow](#run-a-workflow)
+- [Authentication](#authentication)
+- [Workflow outputs](#workflow-outputs)
+- [Execution metadata and failures](#execution-metadata-and-failures)
+- [Inputs and variables](#inputs-and-variables)
+- [Inline definitions](#inline-definitions)
+- [Without the composite action](#without-the-composite-action)
+
 ## Run a workflow
 
 Use the repository's composite action to install a pinned Wuko release and run a workflow with

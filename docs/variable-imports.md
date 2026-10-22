@@ -4,6 +4,16 @@ Wuko can load typed workflow variables from JSON and TOML files. The same Viper-
 used by command-line variable files and the `import_vars` workflow step, so both entry points use
 the same decoding, key normalization, and merge rules.
 
+## Contents
+
+- [File shape and supported values](#file-shape-and-supported-values)
+- [Loading variables before a run](#loading-variables-before-a-run)
+- [Loading variables during a workflow](#loading-variables-during-a-workflow)
+- [Accessing nested values](#accessing-nested-values)
+- [Sequential and concurrent execution](#sequential-and-concurrent-execution)
+- [Remote workflows and actions](#remote-workflows-and-actions)
+- [Adding another format](#adding-another-format)
+
 ## File shape and supported values
 
 A JSON file must contain a top-level object, and a TOML file uses its root table. The document is

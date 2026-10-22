@@ -40,6 +40,12 @@ Run it with `wuko ui greet`, `wuko ui --file ./greet.yaml`, or press `u` on it i
 `wuko` picker. Wuko listens on a random `127.0.0.1` port and opens the default browser. Use
 `--no-open` to print the URL without opening it.
 
+## Contents
+
+- [Fields](#fields)
+- [Dynamic form data](#dynamic-form-data)
+- [Progress and results](#progress-and-results)
+
 ## Fields
 
 Every field binds to an existing top-level variable. Initial values use the normal precedence

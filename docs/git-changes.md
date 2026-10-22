@@ -6,6 +6,15 @@
 whitespace and conflict-marker checks without shell scripts. They work together with ordinary Wuko
 conditions, assertions, fan-out controls, and reporting steps.
 
+## Contents
+
+- [Choose the source](#choose-the-source)
+- [Local feedback and Git hooks](#local-feedback-and-git-hooks)
+- [Selective tests and builds](#selective-tests-and-builds)
+- [Repository policy](#repository-policy)
+- [CI, releases, and maintenance](#ci-releases-and-maintenance)
+- [Boundaries](#boundaries)
+
 ## Choose the source
 
 | Question | Use |

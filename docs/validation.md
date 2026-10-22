@@ -20,6 +20,10 @@ The JSON document never contains source excerpts or wrapped causes. URL credenti
 fragments are removed from presented source names. The GitHub reporter emits one deduplicated
 annotation per issue and uses repository-relative spans when available.
 
+## Contents
+
+- [Package ownership](#package-ownership)
+
 ## Package ownership
 
 - `validation` owns issue codes, common wording, paths, spans, collection, source indexing,

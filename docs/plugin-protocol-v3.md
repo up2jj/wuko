@@ -7,6 +7,15 @@ behavior and adds immutable static composite actions. New Go plugins should use
 `github.com/up2jj/wuko/plugin/sdk`; the SDK owns the JSONL transport and uses only the Go standard
 library.
 
+## Contents
+
+- [Registering an action](#registering-an-action)
+- [Error codes](#error-codes)
+- [Step handler requests](#step-handler-requests)
+- [Adapting native managed-service steps](#adapting-native-managed-service-steps)
+- [Testing Go plugins](#testing-go-plugins)
+- [Wire additions](#wire-additions)
+
 ## Registering an action
 
 ```go

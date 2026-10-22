@@ -5,6 +5,37 @@
 System steps provide portable filesystem, network, cache, temporary-resource, and container
 operations. Relative runtime paths normally resolve from the directory where Wuko was invoked.
 
+## Contents
+
+- [Git operations](#git-operations)
+- [`git_revision`](#git_revision)
+- [`git_merge_base`](#git_merge_base)
+- [`git_log`](#git_log)
+- [`git_diff`](#git_diff)
+- [`git_diff_check`](#git_diff_check)
+- [`git_conventional_commit`](#git_conventional_commit)
+- [`git_commit`](#git_commit)
+- [`git_clean`](#git_clean)
+- [`git_branch`](#git_branch)
+- [`git_remote_branch`](#git_remote_branch)
+- [`git_branch_name`](#git_branch_name)
+- [`git_on_branch`](#git_on_branch)
+- [`github_pr`](#github_pr)
+- [`github_release`](#github_release)
+- [`github_actions`](#github_actions)
+- [`require_tool`](#require_tool)
+- [`tcp_probe`](#tcp_probe)
+- [`multiplexer`](#multiplexer)
+- [`file`](#file)
+- [`scaffold`](#scaffold)
+- [`glob`](#glob)
+- [`watch`](#watch)
+- [`log_wait`](#log_wait)
+- [`temp`](#temp)
+- [`cache`](#cache)
+- [`http`](#http)
+- [`docker`](#docker)
+
 ## Git operations
 
 Git steps run the installed `git` executable in the workflow run directory and work inside executor

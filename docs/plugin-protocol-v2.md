@@ -11,6 +11,15 @@ All v1 framing, lifecycle, step-result, cleanup, stream-event, cancellation, and
 rules still apply unless this document changes them. Executors and top-level plugin helpers are
 otherwise unchanged.
 
+## Contents
+
+- [Selecting v2](#selecting-v2)
+- [Declaring capabilities](#declaring-capabilities)
+- [Extended step context](#extended-step-context)
+- [Managed services](#managed-services)
+- [Plugin-to-host requests](#plugin-to-host-requests)
+- [Complete service sequence](#complete-service-sequence)
+
 ## Selecting v2
 
 A v2 release declares the protocol in `plugin.json`:
