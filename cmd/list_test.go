@@ -118,6 +118,68 @@ func TestListCommandWritesEmptyJSONArray(t *testing.T) {
 	}
 }
 
+func TestListCommandAllIncludesShadowedTargets(t *testing.T) {
+	root := t.TempDir()
+	project := filepath.Join(root, "project")
+	home := filepath.Join(root, "home")
+	paths := []string{
+		filepath.Join(project, ".wuko", "workflows", "deploy.yaml"),
+		filepath.Join(home, ".wuko", "workflows", "deploy.yaml"),
+	}
+	for _, path := range paths {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		data := "version: 1\nname: deploy\ntargets:\n  production:\n    steps: [{return: {outputs: {}}}]\n  staging:\n    steps: [{return: {outputs: {}}}]\n"
+		if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, format := range []string{"text", "json"} {
+		t.Run(format, func(t *testing.T) {
+			var output bytes.Buffer
+			deps := listTestDependencies(project, &output)
+			deps.homeDir = func() (string, error) { return home, nil }
+			command := newRootCmd(deps)
+			command.SetArgs([]string{"list", "--all", "--format", format})
+			if err := command.ExecuteContext(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if format == "text" {
+				if strings.Count(output.String(), "effective\tdeploy\tlocal\t") != 2 || strings.Count(output.String(), "shadowed\tdeploy\tglobal\t") != 2 {
+					t.Fatalf("output = %q", output.String())
+				}
+				for _, path := range paths {
+					if strings.Count(output.String(), path) != 2 {
+						t.Fatalf("output = %q, want both targets for %s", output.String(), path)
+					}
+				}
+				return
+			}
+			var document workflowListDocument
+			if err := json.Unmarshal(output.Bytes(), &document); err != nil {
+				t.Fatal(err)
+			}
+			if document.SchemaVersion != 1 || len(document.Workflows) != 4 {
+				t.Fatalf("document = %#v", document)
+			}
+			for i, entry := range document.Workflows {
+				wantEffective := i%2 == 0
+				if entry.Effective == nil || *entry.Effective != wantEffective || entry.Path != paths[i%2] {
+					t.Fatalf("entry %d = %#v", i, entry)
+				}
+				wantTarget := "production"
+				if i >= 2 {
+					wantTarget = "staging"
+				}
+				if entry.Target != wantTarget {
+					t.Fatalf("entry %d target = %q, want %q", i, entry.Target, wantTarget)
+				}
+			}
+		})
+	}
+}
+
 func TestListCommandRejectsInvalidFormatBeforeDiscovery(t *testing.T) {
 	discovered := false
 	var output bytes.Buffer

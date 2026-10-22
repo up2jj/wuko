@@ -97,6 +97,11 @@ workflows. Between global locations, the home workflow wins over the platform-co
 `Discover` returns only effective sources. `DiscoverAll` returns effective and shadowed sources and
 marks each source with `Effective: true` or `false`.
 
+Use `wuko list --all` to inspect every definition. Each text row starts with `effective` or
+`shadowed`, followed by the usual name, scope, description, and path. This makes it easy to find
+which project or global file takes precedence. `wuko list --all --format json` includes an
+`effective` boolean on every entry, including `false` for shadowed definitions.
+
 Invocation metadata does not affect precedence. An effective workflow with `invokable: false`
 still shadows same-named workflows in lower-precedence locations and remains resolvable as a
 dependency.
@@ -202,10 +207,12 @@ stderr. Entries retain discovery's deterministic name-then-target order:
 }
 ```
 
-Every field is present. Missing strings are empty, workflows without prerequisites use an empty
+Every field shown above is present. Missing strings are empty, workflows without prerequisites use an empty
 `depends_on` object, and an empty discovery result uses `"workflows": []`. The document describes
 effective sources only and deliberately omits internal locator, package-directory, marketplace,
-and precedence fields.
+and precedence fields. With `--all`, the same schema additionally includes `"effective": true`
+or `"effective": false` on each entry and includes shadowed sources. Without `--all`, the JSON
+format remains unchanged.
 
 ## Implementation
 

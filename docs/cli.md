@@ -21,6 +21,7 @@ invocation environment.
 ```sh
 wuko                              # searchable picker (non-interactive: prints workflows)
 wuko list                         # effective workflows: name, scope, description, path
+wuko list --all                   # include shadowed workflows, with effective/shadowed status
 wuko list --format json           # versioned workflow discovery document
 wuko tree check                   # execution tree
 wuko validate                     # validate every discovered workflow
