@@ -335,7 +335,7 @@ func newRootCmd(deps dependencies) *cobra.Command {
 	_ = root.RegisterFlagCompletionFunc("env-loader", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 		return []string{envload.LoaderAuto, envload.LoaderNone, envload.LoaderMise, envload.LoaderASDF, envload.LoaderDirenv}, cobra.ShellCompDirectiveNoFileComp
 	})
-	root.AddCommand(newRunCmd(deps), newUICmd(deps), newListCmd(deps), newTreeCmd(deps), newValidateCmd(deps), newAgentCmd(deps), newGitCmd(deps), newInstallCmd(deps), newUninstallCmd(deps), newMarketplaceCmd(deps), newPluginCmd(deps), newCompletionCmd())
+	root.AddCommand(newRunCmd(deps), newUICmd(deps), newListCmd(deps), newTreeCmd(deps), newValidateCmd(deps), newAgentCmd(deps), newGitCmd(deps), newInstallCmd(deps), newUninstallCmd(deps), newMarketplaceCmd(deps), newPluginCmd(deps), newCompletionCmd(), newScriptSDKCmd(deps))
 	registerWorkflowFileCompletions(root)
 	wrapPluginTeardown(root, deps.plugins)
 	return root

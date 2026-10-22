@@ -1,0 +1,29 @@
+version: 1
+name: bash-sdk
+description: Use Bash SDK functions through the existing Wuko executable
+vars:
+  name: release
+  packages: [api, worker]
+steps:
+  - id: metadata
+    type: shell
+    with:
+      sdk: bash
+      sdk_args:
+        name: "{{ .vars.name }}"
+        packages:
+          expr: vars.packages
+      script: |
+        set -euo pipefail
+        name=$(wuko_get args.name)
+        label=$(wuko_helper upper "$name")
+        packages=$(wuko_get_json args.packages)
+        printf 'Preparing %s\n' "$label"
+        wuko_output label "$label"
+        wuko_output_json packages "$packages"
+        wuko_set_var release_label "$label"
+  - id: show
+    type: shell
+    with:
+      command: printf
+      args: ["%s\n", "{{ .steps.metadata.data.label }}: {{ .vars.release_label }}"]

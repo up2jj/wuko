@@ -678,7 +678,9 @@ grace period, and the step reports the command's own exit status. Run long-lived
 ### Injected script SDK
 
 Set `sdk: node` to inject a bundled `wuko` API into Node.js 22+ scripts without installing an npm
-package. Pass typed values through `sdk_args`, publish custom outputs under `steps.<id>.data`,
+package, or `sdk: bash` to inject shell functions backed by the existing Wuko executable, without
+curl, jq, or additional installation. Bash must already be available. Pass typed values through
+`sdk_args`, publish custom outputs under `steps.<id>.data`,
 and call workflow helpers, secrets, templates, steps, and child workflows. Injection supports
 local shell execution; executor blocks, `user`, and `elevated` are not supported.
 See [Script SDK](script-sdk.md) for examples, API details, and dependency behavior.

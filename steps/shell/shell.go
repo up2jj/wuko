@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"math"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strconv"
@@ -134,8 +135,8 @@ func New(raw map[string]any) (step.Runner, error) {
 	if err := step.DecodeConfig(decodedRaw, &config); err != nil {
 		return nil, err
 	}
-	if config.SDK != "" && config.SDK != "node" {
-		return nil, fmt.Errorf("sdk must be node")
+	if config.SDK != "" && config.SDK != "node" && config.SDK != "bash" {
+		return nil, fmt.Errorf("sdk must be node or bash")
 	}
 	if _, present := raw["sdk_args"]; present && config.SDK == "" {
 		return nil, fmt.Errorf("sdk_args requires sdk")
@@ -339,7 +340,17 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 			return step.Result{}, err
 		}
 		defer bridge.Close()
-		if err := bridge.InjectNode(environment); err != nil {
+		switch r.config.SDK {
+		case "node":
+			err = bridge.InjectNode(environment)
+		case "bash":
+			var executable string
+			executable, err = os.Executable()
+			if err == nil {
+				err = bridge.InjectBash(environment, executable)
+			}
+		}
+		if err != nil {
 			return step.Result{}, err
 		}
 	}
@@ -435,18 +446,78 @@ func (r *Runner) command(request step.Request) (string, []string, error) {
 		if err != nil {
 			return "", nil, err
 		}
-		return argv[0], argv[1:], nil
+		return r.sdkCommand(argv[0], argv[1:])
 	}
 	if r.config.Command != "" {
-		return r.config.Command, r.config.Args, nil
+		return r.sdkCommand(r.config.Command, r.config.Args)
 	}
 	shell := r.config.Shell
 	if shell == "" {
 		shell = "/bin/sh"
+		if r.config.SDK == "bash" {
+			shell = "bash"
+		}
 	}
 	args := []string{"-c", r.config.Script, "wuko"}
 	args = append(args, r.config.Args...)
-	return shell, args, nil
+	return r.sdkCommand(shell, args)
+}
+
+func (r *Runner) sdkCommand(command string, args []string) (string, []string, error) {
+	if r.config.SDK != "bash" {
+		return command, args, nil
+	}
+	if filepath.Base(command) != "bash" {
+		return "", nil, fmt.Errorf("sdk: bash requires running Bash directly (command, shell, or argv)")
+	}
+	// Bash keeps parsing options after -c until the first operand, so the scan
+	// must not stop at -c: `bash -c -i SOURCE` is still interactive.
+	source := false
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" || len(arg) < 2 || (arg[0] != '-' && arg[0] != '+') {
+			if arg != "--" && arg != "-" {
+				source = true // A script file operand.
+			} else if i+1 < len(args) {
+				source = true
+			}
+			break
+		}
+		switch arg {
+		case "--posix":
+			return "", nil, fmt.Errorf("sdk: bash does not support POSIX mode")
+		case "--restricted":
+			return "", nil, fmt.Errorf("sdk: bash requires unrestricted Bash to run the Wuko executable")
+		case "--rcfile", "--init-file":
+			i++
+			continue
+		}
+		if strings.HasPrefix(arg, "--") {
+			continue
+		}
+		for _, option := range arg[1:] {
+			if arg[0] == '-' && (option == 'i' || option == 'p') {
+				return "", nil, fmt.Errorf("sdk: bash requires noninteractive Bash without privileged mode")
+			}
+			if arg[0] == '-' && option == 'r' {
+				return "", nil, fmt.Errorf("sdk: bash requires unrestricted Bash to run the Wuko executable")
+			}
+			if option == 'c' {
+				source = true
+			}
+			if option == 'o' || option == 'O' {
+				i++ // Named options may also appear in groups such as -euo pipefail.
+				if arg[0] == '-' && option == 'o' && i < len(args) && args[i] == "posix" {
+					return "", nil, fmt.Errorf("sdk: bash does not support POSIX mode")
+				}
+			}
+		}
+	}
+	if r.config.TTY && !source {
+		// Without -c or a script operand, Bash reading a terminal is interactive and skips BASH_ENV.
+		return "", nil, fmt.Errorf("sdk: bash with tty requires Bash -c or a script file")
+	}
+	return command, args, nil
 }
 
 func (r *Runner) interactionPlan(request step.Request) (*ptyinteract.Plan, error) {

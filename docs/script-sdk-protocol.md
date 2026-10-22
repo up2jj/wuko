@@ -1,6 +1,6 @@
 # Script SDK bridge protocol v1
 
-This protocol is independent of Node.js and has its own version. A future Python client can use
+This protocol is shared by the Node and Bash adapters and has its own version. A future Python client can use
 the same descriptor, endpoint, and methods without changing shell result semantics or the host.
 Only the language bootstrap and client convenience API are language-specific.
 

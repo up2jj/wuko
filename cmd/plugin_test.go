@@ -30,6 +30,15 @@ import (
 )
 
 func TestMain(main *testing.M) {
+	// Re-execute the real command tree when injected Bash functions call this
+	// test executable, exercising the adapter without building another binary.
+	if len(os.Args) > 1 && os.Args[1] == "__script-sdk" {
+		if err := Execute(); err != nil {
+			fmt.Fprintln(os.Stderr, "wuko:", err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
 	if os.Getenv("WUKO_CMD_PLUGIN_HELPER") == "1" {
 		runCommandPluginHelper()
 		os.Exit(0)
