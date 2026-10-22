@@ -55,15 +55,14 @@ func TestChoiceModelFiltersDescriptions(t *testing.T) {
 	}
 	view := model.View().Content
 	for _, want := range []string{"B", "secondary", "/ filter"} {
-		if !strings.Contains(view, want) {
+		if !strings.Contains(strings.ReplaceAll(ansi.Strip(view), "\n", ""), want) {
 			t.Fatalf("view = %q, want %q", view, want)
 		}
 	}
 	for _, styled := range []string{
-		interactiveStyles.message.Render("Pick"),
-		interactiveStyles.selected.Render("B"),
-		interactiveStyles.description.Render("secondary"),
-		renderHelpText(model.help()),
+		model.styles.message.Render("Pick"),
+		model.styles.selected.Background(model.styles.selection.GetBackground()).Width(model.width).Render("›   B — secondary"),
+		model.styles.renderHelp(model.help()),
 	} {
 		if !strings.Contains(view, styled) {
 			t.Fatalf("view = %q, want styled content %q", view, styled)
@@ -80,7 +79,7 @@ func TestChoiceModelFilterOnTypeFiltersAndSelectsImmediately(t *testing.T) {
 		t.Fatalf("filtering = %v, focused = %v, init nil = %v", model.filtering, model.filter.Focused(), model.Init() == nil)
 	}
 	for _, want := range []string{"Filter:", "type to filter", "enter select", "esc clear"} {
-		if !strings.Contains(model.View().Content, want) {
+		if !strings.Contains(strings.ReplaceAll(ansi.Strip(model.View().Content), "\n", ""), want) {
 			t.Fatalf("view = %q, want %q", model.View().Content, want)
 		}
 	}
@@ -249,7 +248,7 @@ func TestChoiceModelRendersNonSelectableSectionsAndSeparators(t *testing.T) {
 
 	view := model.View().Content
 	for _, want := range []string{"── Common", "── Restricted", "Development", "Production"} {
-		if !strings.Contains(view, want) {
+		if !strings.Contains(strings.ReplaceAll(ansi.Strip(view), "\n", ""), want) {
 			t.Fatalf("view = %q, want %q", view, want)
 		}
 	}
@@ -367,7 +366,7 @@ func TestChoiceModelMarkersConsumeViewportRows(t *testing.T) {
 func TestChoiceRulesFitTerminalWidth(t *testing.T) {
 	for _, width := range []int{1, 8, 24} {
 		for _, label := range []string{"", "Restricted environments"} {
-			rule := renderChoiceRule(label, width, interactiveStyles.label)
+			rule := renderChoiceRule(label, width, newAppearance().styles.label)
 			if got := ansi.StringWidth(rule); got != width {
 				t.Fatalf("width = %d for %q, want %d: %q", got, label, width, rule)
 			}
@@ -409,7 +408,7 @@ func TestChoiceModelUsesDefaultsAndShowsBounds(t *testing.T) {
 	}
 	view := model.View().Content
 	for _, want := range []string{"selected: 2", "min: 1", "max: 3", "ctrl+a select all", "ctrl+x clear"} {
-		if !strings.Contains(view, want) {
+		if !strings.Contains(strings.ReplaceAll(ansi.Strip(view), "\n", ""), want) {
 			t.Fatalf("view = %q, want %q", view, want)
 		}
 	}
@@ -455,7 +454,7 @@ func TestChoiceModelShowsAndBlocksDisabledChoice(t *testing.T) {
 	}
 	view := model.View().Content
 	for _, want := range []string{"Unavailable", "Production", "disabled: maintenance window"} {
-		if !strings.Contains(view, want) {
+		if !strings.Contains(strings.ReplaceAll(ansi.Strip(view), "\n", ""), want) {
 			t.Fatalf("view = %q, want %q", view, want)
 		}
 	}
@@ -697,11 +696,11 @@ func TestSelectionModelViewIncludesDescription(t *testing.T) {
 	if !strings.Contains(model.View().Content, "local") {
 		t.Fatalf("view = %q", model.View().Content)
 	}
-	if !strings.Contains(model.View().Content, path) {
-		t.Fatalf("view = %q, want full path", model.View().Content)
+	if !strings.Contains(ansi.Strip(model.View().Content), ansi.Truncate(path, model.width-2, "…")) {
+		t.Fatalf("view = %q, want truncated path", model.View().Content)
 	}
 	for _, shortcut := range []string{"enter", "run", "a", "actions", "ctrl+c", "cancel"} {
-		if !strings.Contains(model.View().Content, shortcut) {
+		if !strings.Contains(strings.ReplaceAll(ansi.Strip(model.View().Content), "\n", ""), shortcut) {
 			t.Fatalf("view = %q, want shortcut %q", model.View().Content, shortcut)
 		}
 	}
@@ -713,7 +712,7 @@ func TestSelectionModelViewIncludesDescription(t *testing.T) {
 	updated, _ := model.Update(tea.KeyPressMsg{Code: '?'})
 	fullHelp := updated.(selectionModel).View().Content
 	for _, shortcut := range []string{"open UI", "print command", "edit", "pin", "sort"} {
-		if !strings.Contains(fullHelp, shortcut) {
+		if !strings.Contains(strings.ReplaceAll(ansi.Strip(fullHelp), "\n", ""), shortcut) {
 			t.Fatalf("full help = %q, want shortcut %q", fullHelp, shortcut)
 		}
 	}

@@ -25,9 +25,9 @@ func TestSelectionModelUsesSharedPickerStyles(t *testing.T) {
 	model := newSelectionModel("Workflows", []Option{{Label: "build", Description: "local"}})
 	view := model.View().Content
 	for _, styled := range []string{
-		interactiveStyles.message.Render("Workflows"),
-		interactiveStyles.selected.Render("build"),
-		interactiveStyles.description.Render("local"),
+		model.styles.message.Render("Workflows"),
+		model.styles.selected.Background(model.styles.selection.GetBackground()).Width(model.width).Render("› build"),
+		model.styles.description.Background(model.styles.selection.GetBackground()).Width(model.width).Render("  local"),
 	} {
 		if !strings.Contains(view, styled) {
 			t.Fatalf("view = %q, want styled content %q", view, styled)

@@ -8,7 +8,6 @@ import (
 	"unicode"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -16,20 +15,6 @@ const (
 	reviewPlain = "plain"
 	reviewDiff  = "diff"
 )
-
-var reviewDiffStyles = struct {
-	content  lipgloss.Style
-	addition lipgloss.Style
-	removal  lipgloss.Style
-	hunk     lipgloss.Style
-	metadata lipgloss.Style
-}{
-	content:  interactiveStyles.content,
-	addition: lipgloss.NewStyle().Foreground(lipgloss.Color("81")),
-	removal:  lipgloss.NewStyle().Foreground(lipgloss.Color("196")),
-	hunk:     lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("205")),
-	metadata: lipgloss.NewStyle().Foreground(lipgloss.Color("214")),
-}
 
 // ReviewConfig configures a scrollable plain-text or unified-diff review.
 type ReviewConfig struct {
@@ -40,6 +25,7 @@ type ReviewConfig struct {
 }
 
 type reviewModel struct {
+	appearance
 	config     ReviewConfig
 	content    string
 	lines      []string
@@ -54,10 +40,11 @@ type reviewModel struct {
 }
 
 func newReviewModel(config ReviewConfig) reviewModel {
+	appearance := newAppearance()
 	if config.Format == "" {
 		config.Format = reviewPlain
 	}
-	model := reviewModel{
+	model := reviewModel{appearance: appearance,
 		config: config, content: sanitizeReviewContent(config.Content),
 		width: 80, height: 24, approved: config.Default,
 	}
@@ -65,9 +52,13 @@ func newReviewModel(config ReviewConfig) reviewModel {
 	return model
 }
 
-func (m reviewModel) Init() tea.Cmd { return nil }
+func (m reviewModel) Init() tea.Cmd { return tea.RequestBackgroundColor }
 
 func (m reviewModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
+	if m.appearance.update(message) {
+
+		return m, nil
+	}
 	switch message := message.(type) {
 	case tea.WindowSizeMsg:
 		m.width = max(message.Width, 1)
@@ -123,14 +114,16 @@ func (m reviewModel) View() tea.View {
 		return tea.NewView("")
 	}
 	var view strings.Builder
-	view.WriteString(interactiveStyles.message.Render(m.config.Message) + "\n")
-	view.WriteString(interactiveStyles.label.Render("Format: "))
-	view.WriteString(interactiveStyles.value.Render(m.config.Format))
-	view.WriteString(interactiveStyles.status.Render(fmt.Sprintf(" • lines: %d • showing: %d-%d", len(m.lines), m.firstVisible(), m.lastVisible())))
+	view.WriteString(m.styles.heading(m.config.Message, m.width, m.height))
+	var status strings.Builder
+	status.WriteString(m.styles.label.Render("Format: "))
+	status.WriteString(m.styles.value.Render(m.config.Format))
+	status.WriteString(m.styles.status.Render(fmt.Sprintf(" • lines: %d • showing: %d-%d", len(m.lines), m.firstVisible(), m.lastVisible())))
 	if m.config.Format == reviewDiff && m.horizontal > 0 {
-		view.WriteString(interactiveStyles.status.Render(fmt.Sprintf(" • column: %d", m.horizontal+1)))
+		status.WriteString(m.styles.status.Render(fmt.Sprintf(" • column: %d", m.horizontal+1)))
 	}
-	view.WriteByte('\n')
+	status.WriteByte('\n')
+	view.WriteString(fitLines(status.String(), m.width))
 
 	end := min(m.vertical+m.pageSize(), len(m.lines))
 	for index := m.vertical; index < end; index++ {
@@ -145,17 +138,9 @@ func (m reviewModel) View() tea.View {
 		view.WriteByte('\n')
 	}
 
-	reject := interactiveStyles.button.Render("[ Reject ]")
-	approve := interactiveStyles.button.Render("[ Approve ]")
-	if m.approved {
-		approve = interactiveStyles.selected.Render("[ Approve ]")
-	} else {
-		reject = interactiveStyles.selected.Render("[ Reject ]")
-	}
-	view.WriteString(reject + "  " + approve + "\n")
-	view.WriteString(renderHelpText(m.help()))
-	view.WriteByte('\n')
-	return tea.NewView(view.String())
+	view.WriteString(m.decisionView() + "\n")
+	view.WriteString(m.styles.footer(m.help(), m.width, m.height))
+	return screenView(view.String(), m.width)
 }
 
 func (m *reviewModel) layout() {
@@ -176,27 +161,43 @@ func (m *reviewModel) layout() {
 
 func (m reviewModel) styleLine(line string) string {
 	if m.config.Format != reviewDiff {
-		return interactiveStyles.content.Render(line)
+		return m.styles.content.Render(line)
 	}
 	switch {
 	case strings.HasPrefix(line, "@@"):
-		return reviewDiffStyles.hunk.Render(line)
+		return m.styles.selected.Render(line)
 	case strings.HasPrefix(line, "diff "), strings.HasPrefix(line, "index "), strings.HasPrefix(line, "--- "), strings.HasPrefix(line, "+++ "):
-		return reviewDiffStyles.metadata.Render(line)
+		return m.styles.description.Render(line)
 	case strings.HasPrefix(line, "+"):
-		return reviewDiffStyles.addition.Render(line)
+		return m.styles.addition.Render(line)
 	case strings.HasPrefix(line, "-"):
-		return reviewDiffStyles.removal.Render(line)
+		return m.styles.removal.Render(line)
 	default:
-		return reviewDiffStyles.content.Render(line)
+		return m.styles.content.Render(line)
 	}
 }
 
 func (m reviewModel) contentWidth() int { return max(m.width, 1) }
 
+func (m reviewModel) decisionView() string {
+	reject := m.styles.button.Render("[ Reject ]")
+	approve := m.styles.button.Render("[ Approve ]")
+	active := m.styles.selected.Background(m.styles.selection.GetBackground())
+	if m.approved {
+		approve = active.Render("[ Approve ]")
+	} else {
+		reject = active.Render("[ Reject ]")
+	}
+	separator := "  "
+	if ansi.StringWidth(reject)+2+ansi.StringWidth(approve) > m.width {
+		separator = "\n"
+	}
+	return reject + separator + approve
+}
+
 func (m reviewModel) pageSize() int {
-	helpLines := strings.Count(m.help(), "\n")
-	return max(m.height-3-helpLines, 1)
+	helpLines := renderedLines(m.styles.footer(m.help(), m.width, m.height))
+	return max(m.height-renderedLines(m.styles.heading(m.config.Message, m.width, m.height))-1-renderedLines(m.decisionView())-helpLines, 1)
 }
 
 func (m reviewModel) maxVertical() int { return max(len(m.lines)-m.pageSize(), 0) }

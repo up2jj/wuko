@@ -84,6 +84,7 @@ type choiceRow struct {
 }
 
 type choiceModel struct {
+	appearance
 	config ChoicePickerConfig
 	items  []choiceItem
 	// searchText holds the fuzzy-match corpus for items, built once so that filtering a large
@@ -109,6 +110,7 @@ func choiceSearchText(item choiceItem) string {
 }
 
 func newChoiceModel(config ChoicePickerConfig) choiceModel {
+	appearance := newAppearance()
 	items := make([]choiceItem, 0, len(config.Options)+1)
 	if !config.Required && !config.Multiple {
 		items = append(items, choiceItem{index: -1, label: "(none)", description: "select no value", none: true, block: -1})
@@ -142,13 +144,13 @@ func newChoiceModel(config ChoicePickerConfig) choiceModel {
 	filter := textinput.New()
 	filter.Prompt = "/"
 	filter.Placeholder = "filter"
-	styleInteractiveTextInput(&filter)
+	appearance.styles.styleTextInput(&filter)
 	filter.SetWidth(40)
 	searchText := make([]string, len(items))
 	for index, item := range items {
 		searchText[index] = choiceSearchText(item)
 	}
-	model := choiceModel{
+	model := choiceModel{appearance: appearance,
 		config: config, items: items, searchText: searchText, blocks: blocks,
 		selected: make(map[int]bool), filter: filter,
 		width: 80, height: 24,
@@ -184,17 +186,21 @@ func newChoiceModel(config ChoicePickerConfig) choiceModel {
 
 func (m choiceModel) Init() tea.Cmd {
 	if m.config.FilterOnType {
-		return textinput.Blink
+		return tea.Batch(tea.RequestBackgroundColor, textinput.Blink)
 	}
-	return nil
+	return tea.RequestBackgroundColor
 }
 
 func (m choiceModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
+	if m.appearance.update(message) {
+		m.styles.styleTextInput(&m.filter)
+		return m, nil
+	}
 	switch message := message.(type) {
 	case tea.WindowSizeMsg:
 		m.width = max(message.Width, 1)
 		m.height = max(message.Height, 1)
-		m.filter.SetWidth(max(m.width-2, 1))
+		m.filter.SetWidth(max(m.width-9, 1))
 		return m, nil
 	case tea.KeyPressMsg:
 		if isCancelKey(message) {
@@ -436,75 +442,68 @@ func (m choiceModel) View() tea.View {
 		return tea.NewView("")
 	}
 	var view strings.Builder
-	view.WriteString(interactiveStyles.message.Render(m.config.Message))
-	if m.config.Multiple {
-		status := fmt.Sprintf(" • selected: %d", len(m.order))
-		if minimum := m.minimum(); minimum > 0 || m.config.MinSelected != nil {
-			status += fmt.Sprintf(" • min: %d", minimum)
-		}
-		if maximum := m.maximum(); maximum != nil {
-			status += fmt.Sprintf(" • max: %d", *maximum)
-		}
-		view.WriteString(interactiveStyles.status.Render(status))
-	}
-	view.WriteByte('\n')
+	view.WriteString(m.header())
 	if m.filtering || m.filter.Value() != "" {
-		view.WriteString(renderFilter(m.filter) + "\n")
+		view.WriteString(m.styles.renderFilter(m.filter) + "\n")
 	}
 
 	rows := m.displayRows()
 	start, end := m.visibleRange(rows)
 	if len(m.visible) == 0 {
-		view.WriteString(interactiveStyles.disabled.Render("  (no matching choices)") + "\n")
+		view.WriteString(m.styles.disabled.Render("  (no matching choices)") + "\n")
 	}
 	for _, row := range rows[start:end] {
 		if row.kind == choiceRowSection {
-			view.WriteString(renderChoiceRule(row.label, m.width, interactiveStyles.label.Bold(true)))
+			view.WriteString(renderChoiceRule(row.label, m.width, m.styles.label.Bold(true)))
 			view.WriteByte('\n')
 			continue
 		}
 		if row.kind == choiceRowSeparator {
-			view.WriteString(renderChoiceRule("", m.width, interactiveStyles.disabled))
+			view.WriteString(renderChoiceRule("", m.width, m.styles.disabled))
 			view.WriteByte('\n')
 			continue
 		}
+		var line strings.Builder
 		item := row.item
 		cursor := " "
 		if row.visibleIndex == m.cursor {
-			cursor = interactiveStyles.cursor.Render(">")
+			cursor = m.styles.cursor.Render("›")
 		}
 		mark := " "
 		if m.config.Multiple {
 			mark = "[ ]"
 			if m.selected[item.index] {
-				mark = interactiveStyles.selected.Render("[x]")
+				mark = m.styles.selected.Render("[x]")
 			}
 		}
 		label := item.label
 		if item.disabled {
-			label = interactiveStyles.disabled.Render(label)
+			label = m.styles.disabled.Render(label)
 		} else if row.visibleIndex == m.cursor {
-			label = interactiveStyles.selected.Render(label)
+			label = m.styles.selected.Render(label)
 		}
-		fmt.Fprintf(&view, "%s %s %s", cursor, mark, label)
+		fmt.Fprintf(&line, "%s %s %s", cursor, mark, label)
 		if item.description != "" {
-			fmt.Fprintf(&view, " %s %s", interactiveStyles.description.Render("—"), interactiveStyles.description.Render(item.description))
+			fmt.Fprintf(&line, " %s %s", m.styles.description.Render("—"), m.styles.description.Render(item.description))
 		}
 		if item.disabled {
 			separator := "—"
 			if item.description != "" {
 				separator = "•"
 			}
-			fmt.Fprintf(&view, " %s %s", interactiveStyles.disabled.Render(separator), interactiveStyles.disabled.Render("disabled: "+item.reason))
+			fmt.Fprintf(&line, " %s %s", m.styles.disabled.Render(separator), m.styles.disabled.Render("disabled: "+item.reason))
 		}
-		view.WriteByte('\n')
+		text := ansi.Truncate(line.String(), max(m.width, 1), "…")
+		if row.visibleIndex == m.cursor && !item.disabled {
+			text = m.styles.selected.Background(m.styles.selection.GetBackground()).Width(max(m.width, 1)).Render(ansi.Strip(text))
+		}
+		view.WriteString(text + "\n")
 	}
 	if m.err != "" {
-		view.WriteString(interactiveStyles.error.Render(m.err) + "\n")
+		view.WriteString(m.styles.error.Render(ansi.Hardwrap(m.err, max(m.width, 1), true)) + "\n")
 	}
-	view.WriteString(renderHelpText(m.help()))
-	view.WriteByte('\n')
-	return tea.NewView(view.String())
+	view.WriteString(m.styles.footer(m.help(), m.width, m.height))
+	return screenView(view.String(), m.width)
 }
 
 func (m choiceModel) displayRows() []choiceRow {
@@ -592,14 +591,14 @@ func renderChoiceRule(label string, width int, style interface{ Render(...string
 }
 
 func (m choiceModel) pageSize() int {
-	headerLines := 1
+	headerLines := renderedLines(m.header())
 	if m.filtering || m.filter.Value() != "" {
 		headerLines++
 	}
 	if m.err != "" {
-		headerLines++
+		headerLines += renderedLines(ansi.Hardwrap(m.err, max(m.width, 1), true))
 	}
-	helpLines := strings.Count(m.help(), "\n")
+	helpLines := renderedLines(m.styles.footer(m.help(), m.width, m.height))
 	return max(m.height-headerLines-helpLines, 1)
 }
 
@@ -765,4 +764,25 @@ func choose(ctx context.Context, input io.Reader, output io.Writer, model choice
 		return nil, context.Canceled
 	}
 	return finalModel.result, nil
+}
+
+func (m choiceModel) header() string {
+	var view strings.Builder
+	view.WriteString(m.styles.message.Render(m.config.Message))
+	if m.config.Multiple {
+		status := fmt.Sprintf(" • selected: %d", len(m.order))
+		if minimum := m.minimum(); minimum > 0 || m.config.MinSelected != nil {
+			status += fmt.Sprintf(" • min: %d", minimum)
+		}
+		if maximum := m.maximum(); maximum != nil {
+			status += fmt.Sprintf(" • max: %d", *maximum)
+		}
+		view.WriteString(m.styles.status.Render(status))
+	}
+	view.WriteByte('\n')
+	value := ansi.Hardwrap(view.String(), max(m.width, 1), true)
+	if spacious(m.width, m.height) {
+		value += m.styles.border.Render(strings.Repeat("─", m.width)) + "\n"
+	}
+	return value
 }

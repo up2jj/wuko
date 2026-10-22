@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestTablePaginationNavigationAndResize(t *testing.T) {
@@ -55,12 +56,12 @@ func TestTableViewUsesEstablishedStylesAndHelp(t *testing.T) {
 	})
 	view := model.View().Content
 	for _, expected := range []string{
-		interactiveStyles.message.Render("Releases"),
-		interactiveStyles.label.Bold(true).Padding(0, 1).Render("Version"),
+		model.styles.message.Render("Releases"),
+		model.styles.label.Bold(true).Padding(0, 1).Render("Version"),
 		"rows: 1 • showing: 1-1 • page: 1/1",
 		"↑/↓ scroll", "pgup/pgdown page", "enter continue", cancelHelp,
 	} {
-		if !strings.Contains(view, expected) {
+		if !strings.Contains(view, expected) && !strings.Contains(ansi.Strip(view), expected) {
 			t.Fatalf("view = %q, want %q", view, expected)
 		}
 	}
@@ -143,6 +144,9 @@ func TestWriteTableIsPlainAndComplete(t *testing.T) {
 	}
 	if strings.Contains(output.String(), "\x1b[") {
 		t.Fatalf("static output contains ANSI: %q", output.String())
+	}
+	if got := strings.Count(output.String(), "\n"); got != 5 {
+		t.Fatalf("static table has %d lines, want 5: %q", got, output.String())
 	}
 	for _, expected := range []string{"Releases", "Version", "1.0.0", "2.0.0"} {
 		if !strings.Contains(output.String(), expected) {

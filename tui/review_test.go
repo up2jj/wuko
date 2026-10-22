@@ -15,12 +15,12 @@ func TestReviewDiffStylesAndSafeDefault(t *testing.T) {
 	})
 	view := model.View().Content
 	for _, styled := range []string{
-		interactiveStyles.message.Render("Review"),
-		reviewDiffStyles.metadata.Render("--- a/a"),
-		reviewDiffStyles.hunk.Render("@@ -1 +1 @@"),
-		reviewDiffStyles.removal.Render("-old"),
-		reviewDiffStyles.addition.Render("+new"),
-		interactiveStyles.selected.Render("[ Reject ]"),
+		model.styles.message.Render("Review"),
+		model.styles.description.Render("--- a/a"),
+		model.styles.selected.Render("@@ -1 +1 @@"),
+		model.styles.removal.Render("-old"),
+		model.styles.addition.Render("+new"),
+		model.styles.selected.Background(model.styles.selection.GetBackground()).Render("[ Reject ]"),
 	} {
 		if !strings.Contains(view, styled) {
 			t.Fatalf("view = %q, want %q", view, styled)
@@ -67,13 +67,13 @@ func TestReviewScrollPanResizeAndHelp(t *testing.T) {
 	}
 	updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 	model = updated.(reviewModel)
-	styled := reviewDiffStyles.addition.Render(model.lines[0])
+	styled := model.styles.addition.Render(model.lines[0])
 	visible := ansi.Cut(styled, model.horizontal, model.horizontal+model.contentWidth())
 	if !strings.Contains(model.View().Content, visible) {
 		t.Fatalf("view did not preserve addition style after panning: %q", model.View().Content)
 	}
 	for _, shortcut := range []string{"↑/↓ scroll", "shift+←/→ pan", "←/→ decision", "ctrl+c cancel"} {
-		if !strings.Contains(model.View().Content, shortcut) {
+		if !strings.Contains(strings.ReplaceAll(ansi.Strip(model.View().Content), "\n", ""), shortcut) {
 			t.Fatalf("view = %q, want %q", model.View().Content, shortcut)
 		}
 	}

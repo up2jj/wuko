@@ -9,6 +9,7 @@ import (
 // actionPalette is the shared contextual action view used by selection pickers and dashboards.
 // Its caller owns selection and execution; the palette owns only navigation and presentation.
 type actionPalette struct {
+	styles      interactiveStyleSet
 	Title       string
 	Description string
 	Path        string
@@ -41,12 +42,12 @@ func (palette actionPalette) move(key string) (int, bool) {
 
 func (palette actionPalette) view() string {
 	var view strings.Builder
-	view.WriteString(interactiveStyles.message.Render("Actions — "+palette.Title) + "\n")
+	view.WriteString(palette.styles.heading("Actions — "+palette.Title, palette.Width, palette.Height))
 	if palette.Description != "" {
-		view.WriteString(interactiveStyles.description.Render(palette.Description) + "\n")
+		view.WriteString(palette.styles.description.Render(palette.Description) + "\n")
 	}
 	if palette.Path != "" {
-		view.WriteString(interactiveStyles.description.Render(palette.Path) + "\n")
+		view.WriteString(palette.styles.description.Render(palette.Path) + "\n")
 	}
 	view.WriteByte('\n')
 	start, end := palette.visibleRange()
@@ -54,39 +55,43 @@ func (palette actionPalette) view() string {
 		action := palette.Actions[index]
 		prefix := "  "
 		if index == palette.Cursor {
-			prefix = interactiveStyles.cursor.Render("> ")
+			prefix = palette.styles.cursor.Render("› ")
 		}
 		label := action.Label
 		description := action.Description
 		if action.Disabled {
-			label = interactiveStyles.disabled.Render(label)
+			label = palette.styles.disabled.Render(label)
 			if description != "" {
 				description += " • "
 			}
 			description += "disabled: " + action.DisabledReason
-			description = interactiveStyles.disabled.Render(description)
+			description = palette.styles.disabled.Render(description)
 		} else if index == palette.Cursor {
-			label = interactiveStyles.selected.Render(label)
+			label = palette.styles.selected.Render(label)
 			if description != "" {
-				description = interactiveStyles.description.Render(description)
+				description = palette.styles.description.Render(description)
 			}
 		} else {
-			label = interactiveStyles.content.Render(label)
+			label = palette.styles.content.Render(label)
 			if description != "" {
-				description = interactiveStyles.description.Render(description)
+				description = palette.styles.description.Render(description)
 			}
 		}
 		line := prefix + label
 		if description != "" {
-			line += " " + interactiveStyles.description.Render("—") + " " + description
+			line += " " + palette.styles.description.Render("—") + " " + description
 		}
-		view.WriteString(ansi.Truncate(line, max(palette.Width, 1), "…") + "\n")
+		line = ansi.Truncate(line, max(palette.Width, 1), "…")
+		if index == palette.Cursor && !action.Disabled {
+			line = palette.styles.selected.Background(palette.styles.selection.GetBackground()).Width(max(palette.Width, 1)).Render(ansi.Strip(line))
+		}
+		view.WriteString(line + "\n")
 	}
 	if palette.Error != "" {
-		view.WriteString(interactiveStyles.error.Render(palette.Error) + "\n")
+		view.WriteString(palette.styles.error.Render(palette.Error) + "\n")
 	}
-	view.WriteString(renderHelpText(wrapHelp(actionPaletteHelp, palette.Width)))
-	return view.String()
+	view.WriteString(palette.styles.footer(wrapHelp(actionPaletteHelp, palette.Width), palette.Width, palette.Height))
+	return fitLines(view.String(), palette.Width)
 }
 
 func (palette actionPalette) visibleRange() (int, int) {
@@ -101,7 +106,7 @@ func (palette actionPalette) visibleRange() (int, int) {
 }
 
 func (palette actionPalette) pageSize() int {
-	headerLines := 2
+	headerLines := renderedLines(palette.styles.heading("Actions — "+palette.Title, palette.Width, palette.Height)) + 1
 	if palette.Description != "" {
 		headerLines++
 	}
@@ -111,7 +116,7 @@ func (palette actionPalette) pageSize() int {
 	if palette.Error != "" {
 		headerLines++
 	}
-	helpLines := strings.Count(wrapHelp(actionPaletteHelp, palette.Width), "\n")
+	helpLines := renderedLines(palette.styles.footer(wrapHelp(actionPaletteHelp, palette.Width), palette.Width, palette.Height))
 	return max(palette.Height-headerLines-helpLines, 1)
 }
 

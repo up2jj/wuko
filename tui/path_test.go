@@ -8,20 +8,21 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestPathPickerShowsContextualShortcuts(t *testing.T) {
 	root := pathPickerTree(t)
 	single := mustPathModel(t, PathPickerConfig{Message: "Select", Root: root, Kind: "file", Required: true})
 	for _, shortcut := range []string{"↑/↓ move", "→ open", "← back", "enter select", "/ filter", "ctrl+h hidden", "ctrl+c cancel"} {
-		if !strings.Contains(single.View().Content, shortcut) {
+		if !strings.Contains(strings.ReplaceAll(ansi.Strip(single.View().Content), "\n", ""), shortcut) {
 			t.Fatalf("single view = %q, want %q", single.View().Content, shortcut)
 		}
 	}
 
 	multiple := mustPathModel(t, PathPickerConfig{Message: "Select", Root: root, Kind: "file", Multiple: true, Required: true})
 	for _, shortcut := range []string{"space toggle", "enter confirm", "ctrl+c cancel"} {
-		if !strings.Contains(multiple.View().Content, shortcut) {
+		if !strings.Contains(strings.ReplaceAll(ansi.Strip(multiple.View().Content), "\n", ""), shortcut) {
 			t.Fatalf("multiple view = %q, want %q", multiple.View().Content, shortcut)
 		}
 	}
@@ -29,7 +30,7 @@ func TestPathPickerShowsContextualShortcuts(t *testing.T) {
 	updated, _ := single.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
 	filtering := updated.(pathPickerModel)
 	for _, shortcut := range []string{"type filter", "enter apply", "esc clear", "ctrl+c cancel"} {
-		if !strings.Contains(filtering.View().Content, shortcut) {
+		if !strings.Contains(strings.ReplaceAll(ansi.Strip(filtering.View().Content), "\n", ""), shortcut) {
 			t.Fatalf("filter view = %q, want %q", filtering.View().Content, shortcut)
 		}
 	}
@@ -41,9 +42,9 @@ func TestPathPickerStylesSelectedEntriesAndEntryKinds(t *testing.T) {
 	view := model.View().Content
 
 	for _, styled := range []string{
-		interactiveStyles.message.Render("Select"),
-		interactiveStyles.selected.Render("a.go"),
-		pathStyles.directory.Render("nested/"),
+		model.styles.message.Render("Select"),
+		model.styles.selected.Background(model.styles.selection.GetBackground()).Width(model.width).Render("›   a.go — file"),
+		model.styles.cursor.Render("nested/"),
 	} {
 		if !strings.Contains(view, styled) {
 			t.Fatalf("view = %q, want styled content %q", view, styled)
@@ -59,7 +60,7 @@ func TestPathPickerWrapsButRetainsNarrowHelp(t *testing.T) {
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 12, Height: 30})
 	view := updated.(pathPickerModel).View().Content
 	for _, shortcut := range []string{"← back", "enter select", "ctrl+c cancel"} {
-		if !strings.Contains(view, shortcut) {
+		if !strings.Contains(strings.ReplaceAll(ansi.Strip(view), "\n", ""), shortcut) {
 			t.Fatalf("view = %q, want %q", view, shortcut)
 		}
 	}

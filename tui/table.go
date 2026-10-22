@@ -32,6 +32,7 @@ type TableConfig struct {
 }
 
 type tableModel struct {
+	appearance
 	config    TableConfig
 	rows      []bubblestable.Row
 	preferred []int
@@ -45,22 +46,17 @@ type tableModel struct {
 }
 
 func newTableModel(config TableConfig) tableModel {
+	appearance := newAppearance()
 	rows := make([]bubblestable.Row, len(config.Rows))
 	for index, row := range config.Rows {
 		rows[index] = bubblestable.Row(row)
 	}
-	model := tableModel{
+	model := tableModel{appearance: appearance,
 		config: config, rows: rows, preferred: preferredTableWidths(config),
 		width: defaultTableWidth, height: defaultTableHeight,
 	}
-	styles := bubblestable.DefaultStyles()
-	styles.Header = interactiveStyles.label.Bold(true).Padding(0, 1)
-	styles.Cell = interactiveStyles.content.Padding(0, 1)
-	styles.Selected = interactiveStyles.selected
-	model.table = bubblestable.New(
-		bubblestable.WithFocused(true),
-		bubblestable.WithStyles(styles),
-	)
+	model.table = bubblestable.New(bubblestable.WithFocused(true))
+	model.styleTable()
 	model.layout()
 	return model
 }
@@ -83,9 +79,13 @@ func preferredTableWidths(config TableConfig) []int {
 	return widths
 }
 
-func (m tableModel) Init() tea.Cmd { return nil }
+func (m tableModel) Init() tea.Cmd { return tea.RequestBackgroundColor }
 
 func (m tableModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
+	if m.appearance.update(message) {
+		m.styleTable()
+		return m, nil
+	}
 	switch message := message.(type) {
 	case tea.WindowSizeMsg:
 		m.width = max(message.Width, 1)
@@ -125,20 +125,19 @@ func (m tableModel) View() tea.View {
 		return tea.NewView("")
 	}
 	var view strings.Builder
-	view.WriteString(interactiveStyles.message.Render(m.config.Message))
-	view.WriteByte('\n')
-	view.WriteString(interactiveStyles.status.Render(m.status()))
+	view.WriteString(m.styles.heading(m.config.Message, m.width, m.height))
+	view.WriteString(fitLines(m.styles.status.Render(m.status()), m.width))
 	view.WriteByte('\n')
 	view.WriteString(m.table.View())
 	view.WriteByte('\n')
-	view.WriteString(renderHelpText(m.help()))
-	view.WriteByte('\n')
-	return tea.NewView(view.String())
+	view.WriteString(m.styles.footer(m.help(), m.width, m.height))
+	return screenView(view.String(), m.width)
 }
 
 func (m *tableModel) layout() {
-	helpLines := strings.Count(m.help(), "\n")
-	m.pageSize = max(m.height-3-helpLines, 1)
+	helpLines := renderedLines(m.styles.footer(m.help(), m.width, m.height))
+	headerLines := renderedLines(m.styles.heading(m.config.Message, m.width, m.height)) + 2
+	m.pageSize = max(m.height-headerLines-helpLines, 1)
 	m.cursor = min(m.cursor, max(len(m.rows)-1, 0))
 	columns := make([]bubblestable.Column, len(m.config.Columns))
 	widths := fitTableWidths(m.preferred, m.width)
@@ -264,9 +263,21 @@ func WriteTable(output io.Writer, config TableConfig, width int) error {
 	}
 	model := newTableModel(config)
 	model.width = width
-	model.height = len(model.rows) + 4 + strings.Count(model.help(), "\n")
+	model.height = len(model.rows) + 2 + renderedLines(model.styles.heading(config.Message, model.width, model.height)) + renderedLines(model.styles.footer(model.help(), model.width, model.height))
 	model.layout()
-	view := interactiveStyles.message.Render(config.Message) + "\n" + model.table.View() + "\n"
+	// Static output keeps its original one-row trailing space, independently of
+	// the borders and footer reserved by the interactive screen.
+	model.table.SetHeight(len(model.rows) + 2)
+	view := model.styles.message.Render(config.Message) + "\n" + model.table.View() + "\n"
 	_, err := io.WriteString(output, ansi.Strip(view))
 	return err
+}
+
+func (m *tableModel) styleTable() {
+	styles := bubblestable.DefaultStyles()
+	styles.Header = m.styles.label.Bold(true).Padding(0, 1)
+	// Cells inherit the row style so their foreground resets do not interrupt
+	// the focused row's background between columns.
+	styles.Selected = m.styles.selected.Background(m.styles.selection.GetBackground())
+	m.table.SetStyles(styles)
 }

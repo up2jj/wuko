@@ -84,20 +84,21 @@ func (item multiListOption) FilterValue() string {
 }
 
 type selectionDelegate struct {
-	base list.DefaultDelegate
+	styles interactiveStyleSet
+	base   list.DefaultDelegate
 }
 
-func newSelectionDelegate() selectionDelegate {
+func newSelectionDelegate(styles interactiveStyleSet) selectionDelegate {
 	base := list.NewDefaultDelegate()
 	base.SetHeight(3)
-	base.Styles.NormalTitle = interactiveStyles.content
-	base.Styles.NormalDesc = interactiveStyles.description
-	base.Styles.SelectedTitle = interactiveStyles.selected
-	base.Styles.SelectedDesc = interactiveStyles.description
-	base.Styles.DimmedTitle = interactiveStyles.disabled
-	base.Styles.DimmedDesc = interactiveStyles.disabled
-	base.Styles.FilterMatch = interactiveStyles.selected.Underline(true)
-	return selectionDelegate{base: base}
+	base.Styles.NormalTitle = styles.content
+	base.Styles.NormalDesc = styles.description
+	base.Styles.SelectedTitle = styles.selected
+	base.Styles.SelectedDesc = styles.description
+	base.Styles.DimmedTitle = styles.disabled
+	base.Styles.DimmedDesc = styles.disabled
+	base.Styles.FilterMatch = styles.selected.Underline(true)
+	return selectionDelegate{base: base, styles: styles}
 }
 
 func (delegate selectionDelegate) Height() int  { return delegate.base.Height() }
@@ -127,31 +128,45 @@ func (delegate selectionDelegate) Render(writer io.Writer, model list.Model, ind
 	prefix := "  "
 	selected := index == model.Index() && model.FilterState() != list.Filtering
 	if selected && !option.Disabled {
-		prefix = interactiveStyles.cursor.Render("> ")
+		prefix = "› "
 	}
 	textWidth := max(model.Width()-ansi.StringWidth(prefix), 1)
 	title = ansi.Truncate(title, textWidth, "…")
 	description := ansi.Truncate(option.Description, textWidth, "…")
 	if option.Path != "" {
-		description += "\n" + option.Path
+		description += "\n" + ansi.Truncate(option.Path, textWidth, "…")
 	}
 
 	emptyFilter := model.FilterState() == list.Filtering && model.FilterValue() == ""
+	titleStyle, descriptionStyle := styles.NormalTitle, styles.NormalDesc
 	if option.Disabled || emptyFilter {
-		title = styles.DimmedTitle.Render(title)
-		description = styles.DimmedDesc.Render(description)
+		titleStyle, descriptionStyle = styles.DimmedTitle, styles.DimmedDesc
 	} else if selected && model.FilterState() != list.Filtering {
-		title = styles.SelectedTitle.Render(title)
-		description = styles.SelectedDesc.Render(description)
-	} else {
-		title = styles.NormalTitle.Render(title)
-		description = styles.NormalDesc.Render(description)
+		background := delegate.styles.selection.GetBackground()
+		titleStyle = styles.SelectedTitle.Background(background)
+		descriptionStyle = styles.SelectedDesc.Background(background)
 	}
 	descriptionPrefix := strings.Repeat(" ", ansi.StringWidth(prefix))
-	fmt.Fprintf(writer, "%s%s\n%s%s", prefix, title, descriptionPrefix, description) //nolint:errcheck
+	lines := []string{prefix + title}
+	for _, line := range strings.Split(description, "\n") {
+		lines = append(lines, descriptionPrefix+line)
+	}
+	// Rows always occupy the delegate's declared height, even without a path.
+	for len(lines) < delegate.Height() {
+		lines = append(lines, "")
+	}
+	for index, line := range lines {
+		style := descriptionStyle
+		if index == 0 {
+			style = titleStyle
+		}
+		lines[index] = style.Width(model.Width()).Render(line)
+	}
+	fmt.Fprint(writer, strings.Join(lines, "\n")) //nolint:errcheck
 }
 
 type selectionModel struct {
+	appearance
 	list         list.Model
 	selected     Option
 	intent       SelectionIntent
@@ -171,14 +186,16 @@ func newSelectionModel(title string, options []Option) selectionModel {
 }
 
 func newSelectionModelWithConfig(config SelectionPickerConfig) selectionModel {
+	appearance := newAppearance()
 	options := config.Options
 	items := make([]list.Item, len(options))
 	for i, option := range options {
 		items[i] = listOption{Option: option}
 	}
-	delegate := newSelectionDelegate()
+	delegate := newSelectionDelegate(appearance.styles)
 	workflowList := list.New(items, delegate, 80, 20)
-	styleSelectionList(&workflowList)
+	workflowList.SetShowHelp(false)
+	appearance.styles.styleSelectionList(&workflowList)
 	workflowList.Title = config.Title
 	if config.Notice != "" {
 		workflowList.NewStatusMessage(config.Notice)
@@ -207,7 +224,8 @@ func newSelectionModelWithConfig(config SelectionPickerConfig) selectionModel {
 		}
 		return append(bindings, openEditor, togglePin, toggleSort, cancel)
 	}
-	return selectionModel{list: workflowList, width: 80, height: 20}
+	layoutSelectionList(&workflowList, appearance.styles, 80, 20)
+	return selectionModel{appearance: appearance, list: workflowList, width: 80, height: 20}
 }
 
 func selectDefaultListOption(workflowList *list.Model) {
@@ -220,14 +238,20 @@ func selectDefaultListOption(workflowList *list.Model) {
 	}
 }
 
-func (m selectionModel) Init() tea.Cmd { return nil }
+func (m selectionModel) Init() tea.Cmd { return tea.RequestBackgroundColor }
 
 func (m selectionModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
+	if m.appearance.update(message) {
+		layoutSelectionList(&m.list, m.styles, m.width, m.height)
+		return m, nil
+	}
+
 	if size, ok := message.(tea.WindowSizeMsg); ok {
 		m.width = max(size.Width, 1)
 		m.height = max(size.Height, 1)
 		var command tea.Cmd
 		m.list, command = m.list.Update(message)
+		layoutSelectionList(&m.list, m.styles, m.width, m.height)
 		return m, command
 	}
 	if m.actionMode {
@@ -289,6 +313,7 @@ func (m selectionModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	var command tea.Cmd
 	m.list, command = m.list.Update(message)
+	layoutSelectionList(&m.list, m.styles, m.width, m.height)
 	return m, command
 }
 
@@ -297,9 +322,9 @@ func (m selectionModel) View() tea.View {
 		return tea.NewView("")
 	}
 	if m.actionMode {
-		return tea.NewView(m.actionMenuView())
+		return screenView(m.actionMenuView(), m.width)
 	}
-	return tea.NewView(m.list.View())
+	return screenView(m.list.View()+"\n"+selectionListFooter(m.list, m.styles, m.width, m.height), m.width)
 }
 
 func firstEnabledAction(actions []SelectionAction) int {
@@ -355,31 +380,35 @@ func (m selectionModel) actionMenuView() string {
 
 func (m selectionModel) actionPalette() actionPalette {
 	return actionPalette{
-		Title: m.actionOption.Label, Description: m.actionOption.Description, Path: m.actionOption.Path,
+		styles: m.styles, Title: m.actionOption.Label, Description: m.actionOption.Description, Path: m.actionOption.Path,
 		Actions: m.actionOption.Actions, Cursor: m.actionCursor, Error: m.actionError,
 		Width: m.width, Height: m.height,
 	}
 }
 
 type multiSelectionModel struct {
-	list      list.Model
-	options   []Option
-	selected  map[int]bool
-	title     string
-	done      bool
-	cancelled bool
+	appearance
+	width, height int
+	list          list.Model
+	options       []Option
+	selected      map[int]bool
+	title         string
+	done          bool
+	cancelled     bool
 }
 
 func newMultiSelectionModel(title string, options []Option) multiSelectionModel {
+	appearance := newAppearance()
 	items := make([]list.Item, len(options))
 	selected := make(map[int]bool, len(options))
 	for index, option := range options {
 		selected[index] = option.Default
 		items[index] = multiListOption{Option: option, index: index, selected: option.Default}
 	}
-	delegate := newSelectionDelegate()
+	delegate := newSelectionDelegate(appearance.styles)
 	workflowList := list.New(items, delegate, 80, 20)
-	styleSelectionList(&workflowList)
+	workflowList.SetShowHelp(false)
+	appearance.styles.styleSelectionList(&workflowList)
 	workflowList.Title = multiSelectionTitle(title, selected)
 	toggle := key.NewBinding(key.WithKeys(" ", "space"), key.WithHelp("space", "toggle"))
 	selectAll := key.NewBinding(key.WithKeys("ctrl+a"), key.WithHelp("ctrl+a", "select visible"))
@@ -392,7 +421,8 @@ func newMultiSelectionModel(title string, options []Option) multiSelectionModel 
 	workflowList.AdditionalFullHelpKeys = func() []key.Binding {
 		return []key.Binding{toggle, selectAll, clear, confirm, cancel}
 	}
-	return multiSelectionModel{list: workflowList, options: options, selected: selected, title: title}
+	layoutSelectionList(&workflowList, appearance.styles, 80, 20)
+	return multiSelectionModel{appearance: appearance, list: workflowList, options: options, selected: selected, title: title, width: 80, height: 20}
 }
 
 func multiSelectionTitle(title string, selected map[int]bool) string {
@@ -434,9 +464,20 @@ func (m multiSelectionModel) selectedIndexes() []int {
 	return result
 }
 
-func (m multiSelectionModel) Init() tea.Cmd { return nil }
+func (m multiSelectionModel) Init() tea.Cmd { return tea.RequestBackgroundColor }
 
 func (m multiSelectionModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
+	if m.appearance.update(message) {
+		layoutSelectionList(&m.list, m.styles, m.width, m.height)
+		return m, nil
+	}
+
+	if size, ok := message.(tea.WindowSizeMsg); ok {
+		m.width, m.height = max(size.Width, 1), max(size.Height, 1)
+		layoutSelectionList(&m.list, m.styles, m.width, m.height)
+		return m, nil
+	}
+
 	if keyMessage, ok := message.(tea.KeyPressMsg); ok {
 		if keyMessage.String() == "ctrl+c" {
 			m.cancelled = true
@@ -467,6 +508,7 @@ func (m multiSelectionModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	var command tea.Cmd
 	m.list, command = m.list.Update(message)
+	layoutSelectionList(&m.list, m.styles, m.width, m.height)
 	return m, command
 }
 
@@ -474,7 +516,7 @@ func (m multiSelectionModel) View() tea.View {
 	if m.done || m.cancelled {
 		return tea.NewView("")
 	}
-	return tea.NewView(m.list.View())
+	return screenView(m.list.View()+"\n"+selectionListFooter(m.list, m.styles, m.width, m.height), m.width)
 }
 
 // SelectMany runs the same searchable list UI as the bare wuko picker and returns selected indexes.
@@ -516,4 +558,28 @@ func SelectWithIntentConfig(ctx context.Context, input io.Reader, output io.Writ
 func Select(ctx context.Context, input io.Reader, output io.Writer, title string, options []Option) (Option, error) {
 	selection, err := SelectWithIntent(ctx, input, output, title, options)
 	return selection.Option, err
+}
+
+func selectionListFooter(model list.Model, styles interactiveStyleSet, width, height int) string {
+	bindings := model.ShortHelp()
+	if model.Help.ShowAll {
+		bindings = nil
+		for _, group := range model.FullHelp() {
+			bindings = append(bindings, group...)
+		}
+	}
+	var tokens []string
+	for _, binding := range bindings {
+		if binding.Enabled() {
+			help := binding.Help()
+			tokens = append(tokens, help.Key+" "+help.Desc)
+		}
+	}
+	return styles.footer(wrapHelp(tokens, width), width, height)
+}
+
+func layoutSelectionList(model *list.Model, styles interactiveStyleSet, width, height int) {
+	model.SetSize(width, height)
+	styles.styleSelectionList(model)
+	model.SetSize(width, max(height-renderedLines(selectionListFooter(*model, styles, width, height)), 1))
 }

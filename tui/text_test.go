@@ -22,9 +22,9 @@ func TestTextModelStartsWithEditableValue(t *testing.T) {
 		t.Fatalf("view = %q, want prepopulated value", view)
 	}
 	for _, styled := range []string{
-		interactiveStyles.message.Render("Enter the release name"),
+		model.styles.message.Render("Enter the release name"),
 		model.input.Styles().Focused.Prompt.Render("> "),
-		renderHelpText("enter confirm • ctrl+c cancel"),
+		model.styles.renderHelp("enter confirm • ctrl+c cancel"),
 	} {
 		if !strings.Contains(view, styled) {
 			t.Fatalf("view = %q, want styled content %q", view, styled)
@@ -70,7 +70,7 @@ func TestTextModelShowsValidationErrorAndStaysOpen(t *testing.T) {
 	if !strings.Contains(model.View().Content, errTooShort.Error()) {
 		t.Fatalf("view = %q, want validation error", model.View().Content)
 	}
-	if !strings.Contains(model.View().Content, interactiveStyles.error.Render(errTooShort.Error())) {
+	if !strings.Contains(model.View().Content, model.styles.error.Render(errTooShort.Error())) {
 		t.Fatalf("view = %q, want styled validation error", model.View().Content)
 	}
 }

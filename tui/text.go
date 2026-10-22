@@ -7,36 +7,45 @@ import (
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 type textModel struct {
+	appearance
 	input     textinput.Model
 	message   string
 	required  bool
 	width     int
+	height    int
 	done      bool
 	cancelled bool
 	err       string
 }
 
 func newTextModel(message, value string, required bool, echoMode textinput.EchoMode, validate textinput.ValidateFunc) textModel {
+	appearance := newAppearance()
 	input := textinput.New()
-	styleInteractiveTextInput(&input)
+	appearance.styles.styleTextInput(&input)
 	input.Prompt = "> "
-	input.SetWidth(78)
+	input.SetWidth(74)
 	input.EchoMode = echoMode
 	input.Validate = validate
 	input.SetValue(value)
 	input.Focus()
-	return textModel{input: input, message: message, required: required, width: 80}
+	return textModel{appearance: appearance, input: input, message: message, required: required, width: 80, height: 24}
 }
 
-func (m textModel) Init() tea.Cmd { return textinput.Blink }
+func (m textModel) Init() tea.Cmd { return tea.Batch(tea.RequestBackgroundColor, textinput.Blink) }
 
 func (m textModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
+	if m.appearance.update(message) {
+		m.styles.styleTextInput(&m.input)
+		return m, nil
+	}
 	if size, ok := message.(tea.WindowSizeMsg); ok {
 		m.width = max(size.Width, 1)
-		m.input.SetWidth(max(m.width-2, 1))
+		m.height = max(size.Height, 1)
+		m.input.SetWidth(max(m.width-m.inputFrameWidth()-2, 1))
 		return m, nil
 	}
 	if key, ok := message.(tea.KeyPressMsg); ok {
@@ -77,17 +86,19 @@ func (m textModel) View() tea.View {
 		return tea.NewView("")
 	}
 	var view strings.Builder
-	view.WriteString(interactiveStyles.message.Render(m.message))
-	view.WriteByte('\n')
-	view.WriteString(m.input.View())
+	view.WriteString(m.styles.heading(m.message, m.width, m.height))
+	input := m.input.View()
+	if spacious(m.width, m.height) {
+		input = m.styles.inputBorder(m.width).Render(input)
+	}
+	view.WriteString(input)
 	view.WriteByte('\n')
 	if m.err != "" {
-		view.WriteString(interactiveStyles.error.Render(m.err))
+		view.WriteString(m.styles.error.Render(ansi.Hardwrap(m.err, max(m.width, 1), true)))
 		view.WriteByte('\n')
 	}
-	view.WriteString(renderHelpText(m.help()))
-	view.WriteByte('\n')
-	return tea.NewView(view.String())
+	view.WriteString(m.styles.footer(m.help(), m.width, m.height))
+	return screenView(view.String(), m.width)
 }
 
 func (m textModel) help() string {
@@ -126,4 +137,11 @@ func runText(ctx context.Context, input io.Reader, output io.Writer, message, va
 		return "", context.Canceled
 	}
 	return model.input.Value(), nil
+}
+
+func (m textModel) inputFrameWidth() int {
+	if spacious(m.width, m.height) {
+		return 4
+	}
+	return 0
 }

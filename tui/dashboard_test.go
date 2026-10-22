@@ -9,6 +9,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestDashboardStaticGroupRendersDuringInitialization(t *testing.T) {
@@ -214,7 +215,7 @@ func TestDashboardUsesWorkflowActionPalette(t *testing.T) {
 	if got, want := dashboard.View().Content, workflowPicker.View().Content; got != want {
 		t.Fatalf("dashboard action palette differs from workflow picker\n--- dashboard ---\n%s\n--- workflow ---\n%s", got, want)
 	}
-	if !strings.Contains(dashboard.View().Content, "Actions — One") || !strings.Contains(dashboard.View().Content, "> ") {
+	if !strings.Contains(dashboard.View().Content, "Actions — One") || !strings.Contains(dashboard.View().Content, "› ") {
 		t.Fatalf("dashboard action palette = %q", dashboard.View().Content)
 	}
 	if strings.Contains(dashboard.View().Content, "Build —") {
@@ -443,7 +444,7 @@ func TestDashboardHelpUsesCompactKeyLegendAndExpands(t *testing.T) {
 	model := dashboardModel{width: 200, height: 20}
 	shortHelp := model.dashboardHelpText()
 	for _, want := range []string{"↑/k up", "↓/j down", "tab focus", "enter/a actions", "r refresh", "q close", cancelHelp, "? more"} {
-		if !strings.Contains(shortHelp, want) {
+		if !strings.Contains(strings.ReplaceAll(ansi.Strip(shortHelp), "\n", ""), want) {
 			t.Fatalf("short help = %q, want %q", shortHelp, want)
 		}
 	}
@@ -455,7 +456,7 @@ func TestDashboardHelpUsesCompactKeyLegendAndExpands(t *testing.T) {
 	model = updated.(dashboardModel)
 	fullHelp := model.dashboardHelpText()
 	for _, want := range []string{"pgup/pgdown page", "home/end bounds", "tab/shift+tab focus", "q close", "? less"} {
-		if !strings.Contains(fullHelp, want) {
+		if !strings.Contains(strings.ReplaceAll(ansi.Strip(fullHelp), "\n", ""), want) {
 			t.Fatalf("full help = %q, want %q", fullHelp, want)
 		}
 	}

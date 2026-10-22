@@ -18,6 +18,7 @@ type TextViewerConfig struct {
 }
 
 type textViewerModel struct {
+	appearance
 	config    TextViewerConfig
 	content   string
 	lines     []string
@@ -29,18 +30,23 @@ type textViewerModel struct {
 }
 
 func newTextViewerModel(config TextViewerConfig) textViewerModel {
+	appearance := newAppearance()
 	content := sanitizeReviewContent(config.Content)
 	if strings.TrimSpace(content) == "" {
 		content = "(no output)"
 	}
-	model := textViewerModel{config: config, content: content, width: 80, height: 24}
+	model := textViewerModel{appearance: appearance, config: config, content: content, width: 80, height: 24}
 	model.layout()
 	return model
 }
 
-func (m textViewerModel) Init() tea.Cmd { return nil }
+func (m textViewerModel) Init() tea.Cmd { return tea.RequestBackgroundColor }
 
 func (m textViewerModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
+	if m.appearance.update(message) {
+
+		return m, nil
+	}
 	switch message := message.(type) {
 	case tea.WindowSizeMsg:
 		m.width = max(message.Width, 1)
@@ -77,28 +83,27 @@ func (m textViewerModel) View() tea.View {
 		return tea.NewView("")
 	}
 	var view strings.Builder
-	view.WriteString(interactiveStyles.message.Render(m.config.Title))
+	view.WriteString(m.styles.heading(m.config.Title, m.width, m.height))
 	status := "complete"
-	style := interactiveStyles.status
+	style := m.styles.status
 	if m.config.Failed {
 		status = "failed"
-		style = interactiveStyles.error
+		style = m.styles.error
 	}
-	view.WriteString(style.Render(" • " + status))
-	view.WriteString(interactiveStyles.status.Render(fmt.Sprintf(" • lines: %d • showing: %d-%d", len(m.lines), m.firstVisible(), m.lastVisible())))
+	view.WriteString(style.Render(status))
+	view.WriteString(m.styles.status.Render(fmt.Sprintf(" • lines: %d • showing: %d-%d", len(m.lines), m.firstVisible(), m.lastVisible())))
 	view.WriteByte('\n')
 
 	end := min(m.vertical+m.pageSize(), len(m.lines))
 	for index := m.vertical; index < end; index++ {
-		view.WriteString(interactiveStyles.content.Render(m.lines[index]))
+		view.WriteString(m.styles.content.Render(m.lines[index]))
 		view.WriteByte('\n')
 	}
 	for index := end - m.vertical; index < m.pageSize(); index++ {
 		view.WriteByte('\n')
 	}
-	view.WriteString(renderHelpText(m.help()))
-	view.WriteByte('\n')
-	result := tea.NewView(view.String())
+	view.WriteString(m.styles.footer(m.help(), m.width, m.height))
+	result := screenView(view.String(), m.width)
 	result.AltScreen = true
 	return result
 }
@@ -116,8 +121,8 @@ func (m *textViewerModel) layout() {
 }
 
 func (m textViewerModel) pageSize() int {
-	helpLines := strings.Count(m.help(), "\n")
-	return max(m.height-1-helpLines, 1)
+	helpLines := renderedLines(m.styles.footer(m.help(), m.width, m.height))
+	return max(m.height-renderedLines(m.styles.heading(m.config.Title, m.width, m.height))-1-helpLines, 1)
 }
 
 func (m textViewerModel) maxVertical() int { return max(len(m.lines)-m.pageSize(), 0) }

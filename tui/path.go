@@ -11,18 +11,10 @@ import (
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/bmatcuk/doublestar/v4"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/sahilm/fuzzy"
 )
-
-var pathStyles = struct {
-	directory lipgloss.Style
-	file      lipgloss.Style
-}{
-	directory: interactiveStyles.cursor,
-	file:      interactiveStyles.content,
-}
 
 // PathPickerConfig configures an interactive filesystem path browser.
 type PathPickerConfig struct {
@@ -48,6 +40,7 @@ type pathEntry struct {
 }
 
 type pathPickerModel struct {
+	appearance
 	config    PathPickerConfig
 	current   string
 	entries   []pathEntry
@@ -66,6 +59,7 @@ type pathPickerModel struct {
 }
 
 func newPathPickerModel(config PathPickerConfig) (pathPickerModel, error) {
+	appearance := newAppearance()
 	root, err := filepath.EvalSymlinks(config.Root)
 	if err != nil {
 		return pathPickerModel{}, fmt.Errorf("resolving path root %s: %w", config.Root, err)
@@ -81,9 +75,9 @@ func newPathPickerModel(config PathPickerConfig) (pathPickerModel, error) {
 	filter := textinput.New()
 	filter.Prompt = "/"
 	filter.Placeholder = "filter"
-	styleInteractiveTextInput(&filter)
+	appearance.styles.styleTextInput(&filter)
 	filter.SetWidth(40)
-	model := pathPickerModel{
+	model := pathPickerModel{appearance: appearance,
 		config: config, current: config.Root, selected: make(map[string]bool), filter: filter,
 		width: 80, height: 24,
 	}
@@ -93,14 +87,18 @@ func newPathPickerModel(config PathPickerConfig) (pathPickerModel, error) {
 	return model, nil
 }
 
-func (m pathPickerModel) Init() tea.Cmd { return nil }
+func (m pathPickerModel) Init() tea.Cmd { return tea.RequestBackgroundColor }
 
 func (m pathPickerModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
+	if m.appearance.update(message) {
+		m.styles.styleTextInput(&m.filter)
+		return m, nil
+	}
 	switch message := message.(type) {
 	case tea.WindowSizeMsg:
 		m.width = max(message.Width, 1)
 		m.height = max(message.Height, 1)
-		m.filter.SetWidth(max(m.width-2, 1))
+		m.filter.SetWidth(max(m.width-9, 1))
 		return m, nil
 	case tea.KeyPressMsg:
 		if isCancelKey(message) {
@@ -361,39 +359,27 @@ func (m pathPickerModel) View() tea.View {
 		return tea.NewView("")
 	}
 	var view strings.Builder
-	view.WriteString(interactiveStyles.message.Render(m.config.Message) + "\n")
-	relative, err := relativePath(m.config.Root, m.current)
-	if err != nil {
-		relative = "."
-	}
-	view.WriteString(interactiveStyles.label.Render("Path: "))
-	view.WriteString(interactiveStyles.value.Render(relative))
-	if m.config.Multiple {
-		view.WriteString(interactiveStyles.status.Render(fmt.Sprintf(" • selected: %d", len(m.order))))
-	}
-	if m.config.ShowHidden {
-		view.WriteString(interactiveStyles.status.Render(" • hidden: shown"))
-	}
-	view.WriteByte('\n')
+	view.WriteString(m.header())
 	if m.filtering || m.filter.Value() != "" {
-		view.WriteString(renderFilter(m.filter) + "\n")
+		view.WriteString(m.styles.renderFilter(m.filter) + "\n")
 	}
 
 	start, end := m.visibleRange()
 	if len(m.visible) == 0 {
-		view.WriteString(interactiveStyles.disabled.Render("  (no matching entries)") + "\n")
+		view.WriteString(m.styles.disabled.Render("  (no matching entries)") + "\n")
 	}
 	for index := start; index < end; index++ {
+		var line strings.Builder
 		entry := m.visible[index]
 		cursor := " "
 		if index == m.cursor {
-			cursor = interactiveStyles.cursor.Render(">")
+			cursor = m.styles.cursor.Render("›")
 		}
 		mark := " "
 		if m.config.Multiple {
 			mark = "[ ]"
 			if m.selected[entry.relative] {
-				mark = interactiveStyles.selected.Render("[x]")
+				mark = m.styles.selected.Render("[x]")
 			}
 		}
 		suffix := ""
@@ -403,29 +389,32 @@ func (m pathPickerModel) View() tea.View {
 		name := entry.name + suffix
 		switch {
 		case !entry.selectable && !entry.directory:
-			name = interactiveStyles.disabled.Render(name)
+			name = m.styles.disabled.Render(name)
 		case index == m.cursor:
-			name = interactiveStyles.selected.Render(name)
+			name = m.styles.selected.Render(name)
 		case entry.directory:
-			name = pathStyles.directory.Render(name)
+			name = m.styles.cursor.Render(name)
 		default:
-			name = pathStyles.file.Render(name)
+			name = m.styles.content.Render(name)
 		}
-		fmt.Fprintf(&view, "%s %s %s", cursor, mark, name)
+		fmt.Fprintf(&line, "%s %s %s", cursor, mark, name)
 		if entry.description != "" {
-			fmt.Fprintf(&view, " %s %s", interactiveStyles.description.Render("—"), interactiveStyles.description.Render(entry.description))
+			fmt.Fprintf(&line, " %s %s", m.styles.description.Render("—"), m.styles.description.Render(entry.description))
 		}
-		view.WriteByte('\n')
+		text := ansi.Truncate(line.String(), max(m.width, 1), "…")
+		if index == m.cursor {
+			text = m.styles.selected.Background(m.styles.selection.GetBackground()).Width(max(m.width, 1)).Render(ansi.Strip(text))
+		}
+		view.WriteString(text + "\n")
 	}
 	if m.err != "" {
-		view.WriteString(interactiveStyles.error.Render(m.err) + "\n")
+		view.WriteString(m.styles.error.Render(ansi.Hardwrap(m.err, max(m.width, 1), true)) + "\n")
 	}
-	view.WriteString(renderHelpText(m.help()))
-	view.WriteByte('\n')
+	view.WriteString(m.styles.footer(m.help(), m.width, m.height))
 	if !strings.HasSuffix(view.String(), "\n") {
 		view.WriteByte('\n')
 	}
-	return tea.NewView(view.String())
+	return screenView(view.String(), m.width)
 }
 
 func (m pathPickerModel) visibleRange() (int, int) {
@@ -440,14 +429,14 @@ func (m pathPickerModel) visibleRange() (int, int) {
 }
 
 func (m pathPickerModel) pageSize() int {
-	helpLines := strings.Count(m.help(), "\n")
-	headerLines := 2
+	headerLines := renderedLines(m.header())
 	if m.filtering || m.filter.Value() != "" {
 		headerLines++
 	}
 	if m.err != "" {
-		headerLines++
+		headerLines += renderedLines(ansi.Hardwrap(m.err, max(m.width, 1), true))
 	}
+	helpLines := renderedLines(m.styles.footer(m.help(), m.width, m.height))
 	return max(m.height-headerLines-helpLines, 1)
 }
 
@@ -515,4 +504,27 @@ func PickPaths(ctx context.Context, input io.Reader, output io.Writer, config Pa
 		return nil, context.Canceled
 	}
 	return finalModel.result, nil
+}
+
+func (m pathPickerModel) header() string {
+	var view strings.Builder
+	view.WriteString(m.styles.message.Render(m.config.Message) + "\n")
+	relative, err := relativePath(m.config.Root, m.current)
+	if err != nil {
+		relative = "."
+	}
+	view.WriteString(m.styles.label.Render("Path: "))
+	view.WriteString(m.styles.value.Render(relative))
+	if m.config.Multiple {
+		view.WriteString(m.styles.status.Render(fmt.Sprintf(" • selected: %d", len(m.order))))
+	}
+	if m.config.ShowHidden {
+		view.WriteString(m.styles.status.Render(" • hidden: shown"))
+	}
+	view.WriteByte('\n')
+	value := ansi.Hardwrap(view.String(), max(m.width, 1), true)
+	if spacious(m.width, m.height) {
+		value += m.styles.border.Render(strings.Repeat("─", m.width)) + "\n"
+	}
+	return value
 }

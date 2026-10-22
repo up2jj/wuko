@@ -26,7 +26,7 @@ func TestTextAreaModelStartsWithEditableMultilineValue(t *testing.T) {
 		"First line",
 		"Second line",
 		model.input.Styles().Focused.Prompt.Render("> "),
-		renderHelpText("enter newline • ctrl+s confirm • ctrl+c cancel"),
+		model.styles.renderHelp("enter newline • ctrl+s confirm • ctrl+c cancel"),
 	} {
 		if !strings.Contains(view, content) {
 			t.Fatalf("view = %q, want content %q", view, content)
@@ -64,7 +64,7 @@ func TestTextAreaModelShowsValidationErrorAndStaysOpen(t *testing.T) {
 	if command != nil || model.done {
 		t.Fatalf("done = %v, command nil = %v", model.done, command == nil)
 	}
-	if !strings.Contains(model.View().Content, interactiveStyles.error.Render(errTooShort.Error())) {
+	if !strings.Contains(model.View().Content, model.styles.error.Render(errTooShort.Error())) {
 		t.Fatalf("view = %q, want styled validation error", model.View().Content)
 	}
 }

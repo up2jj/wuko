@@ -16,16 +16,20 @@ Set PlaybackSpeed 0.6
 Set LoopOffset 45%
 
 Hide
-Type `export PS1='$ '`
+Type `export WUKO_REPO="$PWD" HOME="$(mktemp -d)"`
 Enter
-Type "cd docs/demos/fixtures"
+Type `export XDG_CONFIG_HOME="$HOME/.config" PATH="$HOME/bin:$PATH" PS1='$ '`
+Enter
+Type `mkdir -p "$HOME/bin" "$HOME/demo" && ln -s "$WUKO_REPO/wuko" "$HOME/bin/wuko"`
+Enter
+Type `cp -R docs/demos/fixtures/.wuko "$HOME/demo/" && cd "$HOME/demo"`
 Enter
 Type "clear"
 Enter
 Show
 Sleep 1s
 
-Type "../../../wuko run --file .wuko/workflows/release-demo.yaml --reporter plain"
+Type "wuko run --file .wuko/workflows/release-demo.yaml --reporter plain"
 Enter
 Wait+Screen@10s /Enter the release name/
 Sleep 1.2s

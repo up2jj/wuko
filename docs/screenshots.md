@@ -11,6 +11,7 @@ network access, external agents, or a particular user configuration.
 - [Prerequisites](#prerequisites)
 - [Regenerate the media](#regenerate-the-media)
 - [Fixtures and recording conventions](#fixtures-and-recording-conventions)
+- [Terminal appearance](#terminal-appearance)
 - [Gallery demos](#gallery-demos)
 
 ## Prerequisites
@@ -47,6 +48,18 @@ rate, letter spacing, cursor behavior, typing speed, and playback speed. Install
 if you want matching local renders. Interactive tapes use `Wait` for visible prompts before sending
 keys. The picker tape sets temporary `HOME` and `XDG_CONFIG_HOME` directories so persisted picker
 state never affects a recording.
+
+## Terminal appearance
+
+Interactive screens adapt their colors to light and dark terminal backgrounds. Terminals that
+do not report their background use the dark palette. Set `NO_COLOR=1` to disable colors while
+keeping selection markers, keyboard hints, and borders readable.
+
+Screens use compact spacing below 60 columns or 12 rows. Titles, paths, content, and keyboard
+hints are measured in terminal cells so wide Unicode characters do not break the layout.
+
+When recording the colored demos, leave `NO_COLOR` unset. The tapes use a fixed dark theme;
+also inspect a light terminal when changing the shared styles.
 
 ## Gallery demos
 

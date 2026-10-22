@@ -154,6 +154,7 @@ type dashboardLayout struct {
 }
 
 type dashboardModel struct {
+	appearance
 	ctx       context.Context
 	cancel    context.CancelFunc
 	config    DashboardConfig
@@ -180,7 +181,8 @@ type dashboardModel struct {
 }
 
 func newDashboardModel(ctx context.Context, cancel context.CancelFunc, config DashboardConfig, tracker *sync.WaitGroup) dashboardModel {
-	model := dashboardModel{ctx: ctx, cancel: cancel, config: config, width: 100, height: 30, tracker: tracker}
+	appearance := newAppearance()
+	model := dashboardModel{appearance: appearance, ctx: ctx, cancel: cancel, config: config, width: 100, height: 30, tracker: tracker}
 	model.groups = make([]dashboardGroupState, len(config.Groups))
 	for groupIndex, group := range config.Groups {
 		state := dashboardGroupState{DashboardState: DashboardState{Status: "static", Data: map[string]any{}}, actions: make([]map[string]DashboardState, len(group.Widgets))}
@@ -212,9 +214,13 @@ func newDashboardModel(ctx context.Context, cancel context.CancelFunc, config Da
 	return model
 }
 
-func (m dashboardModel) Init() tea.Cmd { return m.initial }
+func (m dashboardModel) Init() tea.Cmd { return tea.Batch(tea.RequestBackgroundColor, m.initial) }
 
 func (m dashboardModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
+	if m.appearance.update(message) {
+
+		return m, nil
+	}
 	var commands []tea.Cmd
 	switch message := message.(type) {
 	case tea.WindowSizeMsg:
@@ -351,7 +357,7 @@ func (m dashboardModel) View() tea.View {
 		return tea.NewView("")
 	}
 	if m.menu {
-		view := tea.NewView(m.actionPalette().view())
+		view := screenView(m.actionPalette().view(), m.width)
 		view.AltScreen = true
 		return view
 	}
@@ -363,7 +369,7 @@ func (m dashboardModel) View() tea.View {
 		visible += "\n"
 		end++
 	}
-	view := tea.NewView(visible + "\n" + m.dashboardHelpText() + "\n")
+	view := screenView(visible+"\n"+m.dashboardHelpText(), m.width)
 	view.AltScreen = true
 	return view
 }
@@ -558,8 +564,8 @@ func (m *dashboardModel) renderGroup(groupIndex int, data map[string]any) error 
 
 func (m dashboardModel) renderPage() string {
 	var page strings.Builder
-	page.WriteString(m.wrapDashboardText(interactiveStyles.message.Render(m.config.Title)))
-	page.WriteString("\n\n")
+	page.WriteString(m.styles.heading(m.config.Title, m.width, m.height))
+	page.WriteByte('\n')
 	for groupIndex := range m.config.Groups {
 		page.WriteString(m.dashboardGroupHeader(groupIndex))
 		page.WriteByte('\n')
@@ -587,18 +593,18 @@ func (m dashboardModel) renderWidgetGrid(groupIndex int) string {
 		for index := start; index < min(start+layout.columns, len(group.Widgets)); index++ {
 			widget := group.Widgets[index]
 			geometry := layout.widgets[index]
-			style := dashboardPanelStyle(geometry.panelWidth, geometry.panelHeight, m.isFocused(groupIndex, index))
+			style := m.styles.dashboardPanelStyle(geometry.panelWidth, geometry.panelHeight, m.isFocused(groupIndex, index))
 			content := ""
 			if index < len(m.groups[groupIndex].content) {
 				content = m.groups[groupIndex].content[index]
 			}
 			var body strings.Builder
-			body.WriteString(fitDashboardLine(interactiveStyles.value.Render(widget.Title), geometry.Width))
+			body.WriteString(fitDashboardLine(m.styles.value.Render(widget.Title), geometry.Width))
 			body.WriteByte('\n')
 			body.WriteString(fitDashboardContent(content, geometry.Width, geometry.Height))
 			if len(widget.Actions) > 0 {
 				body.WriteByte('\n')
-				body.WriteString(fitDashboardLine(interactiveStyles.status.Render(latestActionLine(widget, m.groups[groupIndex].actions[index])), geometry.Width))
+				body.WriteString(fitDashboardLine(m.styles.status.Render(latestActionLine(widget, m.groups[groupIndex].actions[index])), geometry.Width))
 			}
 			if len(panels) > 0 {
 				panels = append(panels, strings.Repeat(" ", dashboardPanelGap))
@@ -610,10 +616,10 @@ func (m dashboardModel) renderWidgetGrid(groupIndex int) string {
 	return strings.Join(rows, "\n")
 }
 
-func dashboardPanelStyle(width, height int, focused bool) lipgloss.Style {
-	color := lipgloss.Color("240")
+func (s interactiveStyleSet) dashboardPanelStyle(width, height int, focused bool) lipgloss.Style {
+	color := s.border.GetForeground()
 	if focused {
-		color = lipgloss.Color("205")
+		color = s.accent
 	}
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
@@ -653,7 +659,7 @@ func fitDashboardContent(value string, width, height int) string {
 
 func (m dashboardModel) calculateLayout() dashboardLayout {
 	layout := dashboardLayout{groups: make([]dashboardGroupLayout, len(m.config.Groups))}
-	panelFrameWidth, panelFrameHeight := dashboardPanelStyle(1, 1, false).GetFrameSize()
+	panelFrameWidth, panelFrameHeight := m.styles.dashboardPanelStyle(1, 1, false).GetFrameSize()
 	availableWidth := max(m.width, panelFrameWidth+1)
 
 	for groupIndex, group := range m.config.Groups {
@@ -728,7 +734,7 @@ func distributeDashboardSpace(total, count int) []int {
 }
 
 func (m dashboardModel) minimumPageHeight(layout dashboardLayout) int {
-	height := lipgloss.Height(m.wrapDashboardText(interactiveStyles.message.Render(m.config.Title))) + 1
+	height := renderedLines(m.styles.heading(m.config.Title, m.width, m.height)) + 1
 	for groupIndex := range m.config.Groups {
 		height += lipgloss.Height(m.dashboardGroupHeader(groupIndex))
 		if m.groupShowsWidgets(groupIndex) {
@@ -758,20 +764,20 @@ func (m dashboardModel) dashboardGroupHeader(groupIndex int) string {
 	if !state.UpdatedAt.IsZero() {
 		status += " • " + state.UpdatedAt.Local().Format("15:04:05")
 	}
-	header := interactiveStyles.label.Bold(true).Render(group.Title) + interactiveStyles.status.Render(" • "+status)
+	header := m.styles.label.Bold(true).Render(group.Title) + m.styles.status.Render(" • "+status)
 	return m.wrapDashboardText(header)
 }
 
 func (m dashboardModel) dashboardGroupMessage(groupIndex int) string {
 	state := m.groups[groupIndex]
 	if state.Status == "failed" {
-		return m.wrapDashboardText(interactiveStyles.error.Render("refresh failed: " + state.Error))
+		return m.wrapDashboardText(m.styles.error.Render("refresh failed: " + state.Error))
 	}
-	return m.wrapDashboardText(interactiveStyles.description.Render("Loading…"))
+	return m.wrapDashboardText(m.styles.description.Render("Loading…"))
 }
 
 func (m dashboardModel) dashboardConfirmationText() string {
-	return m.wrapDashboardText(interactiveStyles.error.Bold(true).Render(m.confirmText + " [y/N]"))
+	return m.wrapDashboardText(m.styles.error.Bold(true).Render(m.confirmText + " [y/N]"))
 }
 
 func (m dashboardModel) wrapDashboardText(value string) string {
@@ -852,7 +858,7 @@ func (m dashboardModel) actionPalette() actionPalette {
 	for index, action := range widget.Actions {
 		actions[index] = SelectionAction{Label: action.Label}
 	}
-	return actionPalette{Title: widget.Title, Actions: actions, Cursor: m.menuIndex, Width: m.width, Height: m.height}
+	return actionPalette{styles: m.styles, Title: widget.Title, Actions: actions, Cursor: m.menuIndex, Width: m.width, Height: m.height}
 }
 
 func (m dashboardModel) focusedWidget() dashboardWidgetRef {
@@ -890,7 +896,7 @@ func (m dashboardModel) dashboardHelpText() string {
 	if m.confirm != dashboardNoConfirmation {
 		help = []string{"y confirm", "n/esc/enter cancel", cancelHelp}
 	}
-	return renderHelpText(wrapHelp(help, m.width))
+	return strings.TrimSuffix(m.styles.footer(wrapHelp(help, m.width), m.width, m.height), "\n")
 }
 
 func (m dashboardModel) pageSize() int {

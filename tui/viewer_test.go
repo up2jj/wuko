@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestTextViewerWrapsSanitizesAndReportsStatus(t *testing.T) {
@@ -20,7 +21,7 @@ func TestTextViewerWrapsSanitizesAndReportsStatus(t *testing.T) {
 	}
 	view := rendered.Content
 	for _, want := range []string{"Validate", "failed", "enter/esc back"} {
-		if !strings.Contains(view, want) {
+		if !strings.Contains(strings.ReplaceAll(ansi.Strip(view), "\n", ""), want) {
 			t.Fatalf("view = %q, want %q", view, want)
 		}
 	}

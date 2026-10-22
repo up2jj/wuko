@@ -4,10 +4,10 @@ import (
 	"context"
 	"io"
 	"strings"
-	"unicode/utf8"
 
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 const (
@@ -17,6 +17,7 @@ const (
 )
 
 type textAreaModel struct {
+	appearance
 	input     textarea.Model
 	message   string
 	required  bool
@@ -29,11 +30,12 @@ type textAreaModel struct {
 }
 
 func newTextAreaModel(message, value string, required bool, validate func(string) error) textAreaModel {
+	appearance := newAppearance()
 	input := textarea.New()
-	styleInteractiveTextArea(&input)
+	appearance.styles.styleTextArea(&input)
 	input.Prompt = "> "
 	input.ShowLineNumbers = false
-	model := textAreaModel{
+	model := textAreaModel{appearance: appearance,
 		input:    input,
 		message:  message,
 		required: required,
@@ -49,28 +51,24 @@ func newTextAreaModel(message, value string, required bool, validate func(string
 
 // layout sizes the text area so the whole prompt fits inside the terminal.
 func (m *textAreaModel) layout() {
-	m.input.SetWidth(m.width)
+	m.input.SetWidth(max(m.width-m.inputFrameWidth(), 1))
 	m.input.SetHeight(min(max(m.height-m.chromeLines(), 1), textAreaHeight))
 }
 
 // chromeLines counts the rows the view spends around the text area: the
 // message, a possible validation error, and the help line or lines.
 func (m textAreaModel) chromeLines() int {
-	return countLines(m.message, m.width) + 1 + strings.Count(m.help(), "\n")
+	errorLines := renderedLines(ansi.Hardwrap(m.err, max(m.width, 1), true))
+	return renderedLines(m.styles.heading(m.message, m.width, m.height)) + errorLines + renderedLines(m.styles.footer(m.help(), m.width, m.height)) + m.inputFrameHeight()
 }
 
-func countLines(text string, width int) int {
-	width = max(width, 1)
-	lines := 0
-	for _, line := range strings.Split(text, "\n") {
-		lines += max((utf8.RuneCountInString(line)+width-1)/width, 1)
-	}
-	return lines
-}
-
-func (m textAreaModel) Init() tea.Cmd { return textarea.Blink }
+func (m textAreaModel) Init() tea.Cmd { return tea.Batch(tea.RequestBackgroundColor, textarea.Blink) }
 
 func (m textAreaModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
+	if m.appearance.update(message) {
+		m.styles.styleTextArea(&m.input)
+		return m, nil
+	}
 	if size, ok := message.(tea.WindowSizeMsg); ok {
 		m.width = max(size.Width, 1)
 		m.height = max(size.Height, 1)
@@ -90,17 +88,20 @@ func (m textAreaModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			if m.validate != nil {
 				if err := m.validate(value); err != nil {
 					m.err = err.Error()
+					m.layout()
 					return m, nil
 				}
 			}
 			if m.required && strings.TrimSpace(value) == "" {
 				m.err = "a value is required"
+				m.layout()
 				return m, nil
 			}
 			m.done = true
 			return m, tea.Quit
 		}
 	}
+	previousError := m.err
 	var command tea.Cmd
 	m.input, command = m.input.Update(message)
 	// Any key press clears the message, so it survives until the user reacts:
@@ -115,6 +116,9 @@ func (m textAreaModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = m.input.Err.Error()
 		m.input.Err = nil
 	}
+	if m.err != previousError {
+		m.layout()
+	}
 	return m, command
 }
 
@@ -123,17 +127,19 @@ func (m textAreaModel) View() tea.View {
 		return tea.NewView("")
 	}
 	var view strings.Builder
-	view.WriteString(interactiveStyles.message.Render(m.message))
-	view.WriteByte('\n')
-	view.WriteString(m.input.View())
+	view.WriteString(m.styles.heading(m.message, m.width, m.height))
+	input := m.input.View()
+	if spacious(m.width, m.height) {
+		input = m.styles.inputBorder(m.width).Render(input)
+	}
+	view.WriteString(input)
 	view.WriteByte('\n')
 	if m.err != "" {
-		view.WriteString(interactiveStyles.error.Render(m.err))
+		view.WriteString(m.styles.error.Render(ansi.Hardwrap(m.err, max(m.width, 1), true)))
 		view.WriteByte('\n')
 	}
-	view.WriteString(renderHelpText(m.help()))
-	view.WriteByte('\n')
-	return tea.NewView(view.String())
+	view.WriteString(m.styles.footer(m.help(), m.width, m.height))
+	return screenView(view.String(), m.width)
 }
 
 func (m textAreaModel) help() string {
@@ -153,4 +159,18 @@ func TextAreaWithValidation(ctx context.Context, input io.Reader, output io.Writ
 		return "", context.Canceled
 	}
 	return model.input.Value(), nil
+}
+
+func (m textAreaModel) inputFrameWidth() int {
+	if spacious(m.width, m.height) {
+		return 4
+	}
+	return 0
+}
+
+func (m textAreaModel) inputFrameHeight() int {
+	if spacious(m.width, m.height) {
+		return 2
+	}
+	return 0
 }
