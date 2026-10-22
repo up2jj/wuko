@@ -675,6 +675,14 @@ background (for example `my-server &`) is sent the termination signal, then `SIG
 grace period, and the step reports the command's own exit status. Run long-lived services with the
 `process` step instead.
 
+### Injected script SDK
+
+Set `sdk: node` to inject a bundled `wuko` API into Node.js 22+ scripts without installing an npm
+package. Pass typed values through `sdk_args`, publish custom outputs under `steps.<id>.data`,
+and call workflow helpers, secrets, templates, steps, and child workflows. Injection supports
+local shell execution; executor blocks, `user`, and `elevated` are not supported.
+See [Script SDK](script-sdk.md) for examples, API details, and dependency behavior.
+
 ### Elevated shell and process commands
 
 Set `elevated: true` on a `shell` or `process` step to run its command as root through `sudo`:

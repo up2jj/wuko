@@ -187,7 +187,7 @@ finally:
 | [Data](docs/steps-data.md) | `set`, `template`, `transform`, `decode`, `jsonpath`, `edit`, `markdown_edit`, [`extract`](docs/extract.md), `semver`, `time`, `assert`, `import_vars`, `key_value`, `changed` |
 | [Git and GitHub](docs/steps-system.md#git_revision) | `git_diff`, `git_log`, `git_commit`, `git_conventional_commit`, [worktrees](docs/worktrees.md), squash, rebase, merge, branch checks, `github_pr`, `github_release`, `github_actions` |
 | [Files and system](docs/steps-system.md) | `file`, `glob`, `scaffold`, `watch`, `log_wait`, `temp`, `cache`, `require_tool`, `tcp_probe`, `multiplexer` |
-| [Network, processes, and automation](docs/steps-automation.md) | `http`, [`docker`](docs/docker-operations.md), `shell` (including scripted PTY sessions), `process`, `process_call`, `lua`, `agent` |
+| [Network, processes, and automation](docs/steps-automation.md) | `http`, [`docker`](docs/docker-operations.md), `shell` (including scripted PTY sessions and the [Node SDK](docs/script-sdk.md)), `process`, `process_call`, `lua`, `agent` |
 | [Controls](docs/workflow-control.md) | `if`, `attempt`, `concurrent`, `foreach`, `batch`, `matrix`, `loop`, `try`/`catch`, `cancel_on`, `observe`, `return`, `defer`, `finally`, `cron`, [`executor`](docs/executors.md) |
 | [Composition](docs/execution.md#choosing-a-composition-mechanism) | `depends_on`, `run_workflow`, `targets`, `require`, `uses` composite actions, `once` |
 

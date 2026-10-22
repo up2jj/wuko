@@ -2,6 +2,7 @@ package shell
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"math"
@@ -15,6 +16,7 @@ import (
 	wukoexpr "github.com/up2jj/wuko/expression"
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/ptyinteract"
+	"github.com/up2jj/wuko/scriptsdk"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
 	"gopkg.in/yaml.v3"
@@ -41,6 +43,8 @@ type Config struct {
 	Stderr           string               `yaml:"stderr,omitempty"`
 	CaptureLimit     string               `yaml:"capture_limit,omitempty"`
 	AllowedExitCodes []int                `yaml:"allowed_exit_codes,omitempty"`
+	SDK              string               `yaml:"sdk,omitempty"`
+	SDKArgs          map[string]any       `yaml:"sdk_args,omitempty"`
 }
 
 type ArgvExpression struct {
@@ -71,14 +75,31 @@ type Runner struct {
 	interactionExpr *vm.Program
 	interactions    *ptyinteract.Plan
 	hasInteractions bool
+	sdkArgPrograms  map[string]*vm.Program
 }
 
 func (*Runner) ExecutorAware() {}
 
+type sdkRunner struct{ *Runner }
+
+func (*sdkRunner) InlineWorkflowAware() {}
+
+func shellOutputs(sdk bool) step.OutputSchema {
+	schema := step.ClosedOutputs("stdout", "stderr", "exit_code", "stdout_truncated", "stderr_truncated")
+	if sdk {
+		schema.Fields["data"] = step.OpenObject()
+	}
+	return schema
+}
+
 func Register(registry *step.Registry) error {
 	return registry.RegisterDefinition("shell", step.Registration{
-		Builder:    New,
-		Outputs:    step.ClosedOutputs("stdout", "stderr", "exit_code", "stdout_truncated", "stderr_truncated"),
+		Builder: New,
+		Outputs: shellOutputs(true),
+		ConfigOutputs: func(raw map[string]any) step.OutputSchema {
+			sdk, _ := raw["sdk"].(string)
+			return shellOutputs(sdk != "")
+		},
 		References: references,
 	})
 }
@@ -91,7 +112,17 @@ func references(raw map[string]any) (step.References, error) {
 	argvExpr.Label = "argv expr"
 	interactionsExpr := step.ExpressionField(interactions, "expr")
 	interactionsExpr.Label = "interactions expr"
-	return step.References{Expressions: []step.ExpressionReference{argvExpr, interactionsExpr}}, nil
+	references := step.References{Expressions: []step.ExpressionReference{argvExpr, interactionsExpr}}
+	args, _ := raw["sdk_args"].(map[string]any)
+	for name, value := range args {
+		binding, ok := value.(map[string]any)
+		if ok && len(binding) == 1 {
+			reference := step.ExpressionField(binding, "expr")
+			reference.Label = "sdk_args." + name + ".expr"
+			references.Expressions = append(references.Expressions, reference)
+		}
+	}
+	return references, nil
 }
 
 func New(raw map[string]any) (step.Runner, error) {
@@ -102,6 +133,35 @@ func New(raw map[string]any) (step.Runner, error) {
 	var config Config
 	if err := step.DecodeConfig(decodedRaw, &config); err != nil {
 		return nil, err
+	}
+	if config.SDK != "" && config.SDK != "node" {
+		return nil, fmt.Errorf("sdk must be node")
+	}
+	if _, present := raw["sdk_args"]; present && config.SDK == "" {
+		return nil, fmt.Errorf("sdk_args requires sdk")
+	}
+	if config.SDK != "" && (config.User != "" || config.Elevated) {
+		return nil, fmt.Errorf("sdk cannot be combined with user or elevated")
+	}
+	sdkArgPrograms := make(map[string]*vm.Program)
+	for name, value := range config.SDKArgs {
+		binding, ok := value.(map[string]any)
+		if !ok || len(binding) != 1 {
+			continue
+		}
+		source, exists := binding["expr"]
+		if !exists {
+			continue
+		}
+		text, ok := source.(string)
+		if !ok || strings.TrimSpace(text) == "" {
+			return nil, fmt.Errorf("sdk_args.%s.expr must be a non-empty string", name)
+		}
+		program, err := wukoexpr.Compile(text, expr.Env(step.ExpressionEnvironmentShape(nil)), expr.AllowUndefinedVariables())
+		if err != nil {
+			return nil, fmt.Errorf("compiling sdk_args.%s.expr: %w", name, err)
+		}
+		sdkArgPrograms[name] = program
 	}
 	_, hasArgv := raw["argv"]
 	if hasArgv {
@@ -195,14 +255,22 @@ func New(raw map[string]any) (step.Runner, error) {
 			return nil, err
 		}
 	}
-	return &Runner{
+	runner := &Runner{
 		config: config, exitCodes: exitCodes,
 		stdoutPolicy: stdoutPolicy, stderrPolicy: stderrPolicy, captureLimit: captureLimit,
 		argvProgram: argvProgram, interactionExpr: interactionExpr, interactions: interactions, hasInteractions: hasInteractions,
-	}, nil
+		sdkArgPrograms: sdkArgPrograms,
+	}
+	if config.SDK != "" {
+		return &sdkRunner{runner}, nil
+	}
+	return runner, nil
 }
 
 func (r *Runner) Validate(_ context.Context, request step.Request) error {
+	if r.config.SDK != "" && request.InsideExecutor {
+		return fmt.Errorf("sdk injection is not supported inside executor blocks")
+	}
 	if !r.config.Elevated {
 		return nil
 	}
@@ -250,6 +318,31 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 	maps.Copy(environment, inherited)
 	maps.Copy(environment, r.config.Env)
 	environment = step.ApplyAttemptEnvironment(environment, request)
+	var bridge *scriptsdk.Bridge
+	if r.config.SDK != "" {
+		if request.InsideExecutor {
+			// Validation is deferred inside some blocks, so enforce the local-only bridge here too.
+			return step.Result{}, fmt.Errorf("sdk injection is not supported inside executor blocks")
+		}
+		sdkArgs := maps.Clone(r.config.SDKArgs)
+		for name, program := range r.sdkArgPrograms {
+			value, err := expr.Run(program, request.ExpressionEnvironment(nil))
+			if err != nil {
+				return step.Result{}, fmt.Errorf("evaluating sdk_args.%s.expr: %w", name, err)
+			}
+			sdkArgs[name] = value
+		}
+		bridgeRequest := request
+		bridgeRequest.Env = environment
+		bridge, err = scriptsdk.Open(ctx, bridgeRequest, sdkArgs)
+		if err != nil {
+			return step.Result{}, err
+		}
+		defer bridge.Close()
+		if err := bridge.InjectNode(environment); err != nil {
+			return step.Result{}, err
+		}
+	}
 	executor := request.Executor
 	if r.config.Elevated {
 		executor = request.ElevatedExecutor
@@ -279,17 +372,28 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 		"stdout": result.Stdout, "stderr": result.Stderr, "exit_code": result.ExitCode,
 		"stdout_truncated": result.StdoutTruncated, "stderr_truncated": result.StderrTruncated,
 	}
+	var variables map[string]any
+	if bridge != nil {
+		closeErr := bridge.Close()
+		if closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("closing script SDK: %w", closeErr))
+		}
+		staged := bridge.Result()
+		outputs["data"] = staged.Outputs
+		variables = staged.Variables
+	}
+	stepResult := step.Result{Outputs: outputs, Variables: variables}
 	if err != nil {
 		exitErr, isExitError := soleProcessExitError(err)
 		if isExitError && exitErr.Code == result.ExitCode && r.exitCodes.Allows(result.ExitCode) {
-			return step.Result{Outputs: outputs}, nil
+			return stepResult, nil
 		}
-		return step.Result{Outputs: outputs}, err
+		return stepResult, err
 	}
 	if !r.exitCodes.Allows(result.ExitCode) {
-		return step.Result{Outputs: outputs}, &process.ExitError{Command: command, Code: result.ExitCode}
+		return stepResult, &process.ExitError{Command: command, Code: result.ExitCode}
 	}
-	return step.Result{Outputs: outputs}, nil
+	return stepResult, nil
 }
 
 func soleProcessExitError(err error) (*process.ExitError, bool) {

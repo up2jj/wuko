@@ -1,0 +1,22 @@
+version: 1
+name: node-sdk
+description: Use the bundled Node SDK without installing an npm package
+vars:
+  name: release
+  packages: [api, worker]
+steps:
+  - id: metadata
+    type: shell
+    with:
+      sdk: node
+      command: node
+      args: ["{{ .workflow.dir }}/scripts/metadata.mjs"]
+      sdk_args:
+        name: "{{ .vars.name }}"
+        packages:
+          expr: vars.packages
+  - id: show
+    type: shell
+    with:
+      command: printf
+      args: ["%s\n", "{{ .steps.metadata.data.label }}: {{ .vars.release_label }}"]

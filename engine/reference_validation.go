@@ -227,6 +227,10 @@ var (
 )
 
 func (scope *referenceScope) addWrittenVariables(stepType, stepID string, raw map[string]any) {
+	if stepType == "shell" && stringValue(raw, "sdk") != "" {
+		scope.roots["vars"] = openReference
+		return
+	}
 	if _, dynamic := dynamicVarWriters[stepType]; dynamic {
 		scope.roots["vars"] = openReference
 		return
