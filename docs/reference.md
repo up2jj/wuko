@@ -145,7 +145,7 @@ Use controls to run independent work or repeat a block over runtime data.
 | `try` / `catch` | Recover from a failed or timed-out sequential block | [Workflow controls](workflow-control.md#try-and-catch) |
 | `cancel_on` | Race a sequential body against one or more named monitors and record the winner | [Workflow controls](workflow-control.md#cancel-on) |
 | `observe` | Run a background loop driven by filesystem, HTTP, or shell events | [Workflow controls](workflow-control.md#observe) |
-| `executor` | Run a block's shell steps inside Docker or another command environment | [Executor scopes](executors.md) |
+| `executor` | Run a block's steps through Docker, devenv, or SSH | [Executor scopes](executors.md) |
 | `attempt` | Bound, repeat, or poll a body of steps | [Execution and composition](execution.md#attempts) |
 | `return` | Finish successfully early and publish explicit outputs | [Early successful return](return.md) |
 | `defer` | Attach cleanup to a successful step | [Finally cleanup](finally.md) |

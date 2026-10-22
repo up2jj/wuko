@@ -7,6 +7,24 @@ on:
       - master
 
 jobs:
+  ssh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
+          cache: true
+      - name: install isolated SSH test prerequisites
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y openssh-server
+          sudo mkdir -p /run/sshd
+      - name: test SSH executor with real loopback sshd
+        env:
+          WUKO_SSH_INTEGRATION: "1"
+        run: go test -race -count=1 -timeout=120s ./steps/ssh
+
   test:
     runs-on: ubuntu-latest
     steps:

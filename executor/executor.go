@@ -56,6 +56,12 @@ type Validator interface {
 	Validate(context.Context, Request) error
 }
 
+// StepValidator restricts child steps without opening an executor connection.
+// It also applies to children of controls and cleanup scopes inside the block.
+type StepValidator interface {
+	ValidateStep(stepType string, raw map[string]any) error
+}
+
 // Builder strictly decodes and validates one executor configuration.
 type Builder func(map[string]any) (Provider, error)
 

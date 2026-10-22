@@ -303,6 +303,12 @@ func (e *Engine) validateStepsRaw(ctx context.Context, definition *workflow.Defi
 			return fmt.Errorf("step %q: %w", workflowStep.ID, err)
 		}
 		if options.insideExecutor {
+			if validator := options.executorStepValidator; validator != nil {
+				if err := validator.ValidateStep(workflowStep.Type, workflowStep.With); err != nil {
+					traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusFailed, started, "validating executor step restrictions", err)
+					return fmt.Errorf("step %q: %w", workflowStep.ID, err)
+				}
+			}
 			if _, ok := runner.(step.ExecutorAware); !ok {
 				err := fmt.Errorf("step type %q is not supported inside executor blocks", workflowStep.Type)
 				traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusFailed, started, "validating executor support", err)

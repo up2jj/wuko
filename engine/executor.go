@@ -42,6 +42,7 @@ func (e *Engine) validateExecutorBlock(ctx context.Context, definition *workflow
 	childOptions.insideExecutor = true
 	filesystem, ok := provider.(fileSystemProvider)
 	childOptions.executorFileSystem = ok && filesystem.SupportsFileSystem()
+	childOptions.executorStepValidator, _ = provider.(executor.StepValidator)
 	if err := e.validateSteps(ctx, definition, block.Steps, childOptions, state); err != nil {
 		return fail(fmt.Errorf("steps: %w", err))
 	}
@@ -83,6 +84,9 @@ func (e *Engine) executeExecutorBlock(ctx context.Context, definition *workflow.
 	childOptions := options
 	childOptions.Executor = session
 	childOptions.insideExecutor = true
+	childOptions.executorStepValidator, _ = provider.(executor.StepValidator)
+	filesystem, ok := provider.(fileSystemProvider)
+	childOptions.executorFileSystem = ok && filesystem.SupportsFileSystem()
 	serviceScope := newBackgroundSupervisor(ctx)
 	// Every job is joined before this returns; releasing the scope's context detaches it from
 	// the run's, which a block repeated by a loop would otherwise accumulate until the run ends.

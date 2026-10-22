@@ -10,6 +10,7 @@ again.
 
 - [Block syntax](#block-syntax)
 - [devenv executor](#devenv-executor)
+- [SSH executor](#ssh-executor)
 - [Docker executor](#docker-executor)
 - [Reading and writing files](#reading-and-writing-files)
 - [Sharing files with local steps](#sharing-files-with-local-steps)
@@ -36,7 +37,7 @@ An executor block is an anonymous sequential scope:
 
 | Field | Required | Meaning |
 | --- | --- | --- |
-| `executor.type` | Yes | Registered executor provider. Version 1 provides `docker` and `devenv`. |
+| `executor.type` | Yes | Registered executor provider: built-ins are `docker`, `devenv`, and `ssh`. |
 | `executor.with` | Provider-specific | Configuration used to open the session. Unknown fields are rejected. |
 | `steps` | Yes | Non-empty list executed through the opened session. |
 | `finally` | No | Cleanup list executed through the same session before it closes. |
@@ -97,12 +98,15 @@ nested in version 1, that currently means returning to the local executor. A roo
 `finally` list is therefore local; use the block's own `finally` when cleanup must run inside its
 container.
 
-Version 1 executor scopes support shell and lifecycle-managed
+Docker and devenv executor scopes support shell and lifecycle-managed
 [`process`](steps-automation.md#process) steps, the file steps listed under
 [Reading and writing files](#reading-and-writing-files), working-directory and conditional blocks, early
 return, and sequential batch, foreach, or matrix controls. Other leaf steps, actions, waits, concurrent
 groups, parallel fan-out, and nested executor blocks are rejected instead of running unexpectedly
 on the host.
+
+SSH scopes support shell and file/edit steps with those same sequential controls; managed
+processes and interactive terminals are excluded. See [SSH executor](#ssh-executor).
 
 For `batch`, `foreach`, or `matrix` inside an executor block, explicitly set `max_concurrency: 1`. Every
 iteration then uses the one persistent session sequentially. Transparent conditional and
@@ -117,6 +121,82 @@ container and `exec`s the service, and stopping runs a second exec that signals 
 escalates to `SIGKILL` after `shutdown.timeout`. A session whose `init.command` is not a shell
 cannot do this, and there a `process` step configuring `restart` is rejected unless it also sets
 `shutdown.command`, because each restart would otherwise leave the previous instance alive.
+
+## SSH executor
+
+The SSH executor keeps Wuko on your machine and runs a block of shell commands and file/edit
+operations on a Linux server. It uses system OpenSSH and an existing remote directory; the server
+does not need Wuko installed. See [the example](../examples/ssh-executor.yaml).
+
+```yaml
+- executor:
+    type: ssh
+    with:
+      host: production
+      directory: /srv/app
+      forward_env: [RELEASE_VERSION]
+      env: {DEPLOY_MODE: rolling}
+  steps:
+    - id: deploy
+      type: shell
+      with: {command: ./deploy.sh}
+  finally:
+    - id: cleanup
+      type: shell
+      with: {command: ./cleanup.sh}
+```
+
+| Setting | Meaning |
+| --- | --- |
+| `host` | Required hostname, SSH config alias, or `user@host`. |
+| `directory` | Required absolute path to an existing directory on the server. |
+| `user`, `port` | Optional connection overrides; otherwise OpenSSH config applies. |
+| `identity_file`, `config_file` | Optional local key/config paths, relative to the block's opening local directory unless absolute. Use an absolute path rather than `~`. |
+| `connect_timeout` | Positive opening timeout, default `10s`. Command timeouts use the usual workflow controls. |
+| `forward_env` | Names to forward from each step's final workflow environment. Default empty; missing names are omitted. |
+| `env` | Explicit remote environment values, overriding forwarded names. Default empty. |
+
+String values support normal templates. Unknown settings are rejected. OpenSSH handles aliases,
+keys, agent authentication, jump hosts, and host-key checking using its configuration. Wuko sets
+`BatchMode=yes`, so keys must be usable without login prompts and host trust must already be
+configured. Password prompts, terminal allocation, scripted PTY interactions, step-level `user`
+switching, and managed `process` steps are rejected. The remote host needs Linux with `/proc`,
+a POSIX shell, GNU coreutils, `setsid`, and `/bin/kill`.
+
+The remote environment is preserved: local `PATH`, `HOME`, credentials, and other values are
+not sent unless listed in `forward_env` or explicitly set under executor `env`. A shell step's
+`with.env` value is forwarded only if its name is in `forward_env`. These overrides affect the
+command, not Wuko's SSH helper scripts. Values travel over the SSH connection's input into a
+private per-command file, so they do not appear in local or remote process listings. OpenSSH's own
+`SendEnv`/`SetEnv` configuration continues to apply independently.
+
+Paths underneath the local run directory at block entry map to the same relative path underneath
+`directory`. For example, local `/home/me/project/build/info.json` maps to remote
+`/srv/app/build/info.json`. Absolute paths outside that local root name remote absolute paths.
+Working-directory scopes inside the block check the remote filesystem and require no matching
+local directory. Relative paths in commands themselves are interpreted by the remote command;
+Wuko translates working directories and file/edit paths, not arbitrary command arguments.
+Symlink metadata is reported without following links, so a working-directory scope must name
+a directory rather than a symlink.
+
+SSH supports `file` read, write, mkdir, and stat, plus `edit`, with the same restrictions as other
+remote filesystems. Writes use a temporary file beside the destination and atomic installation;
+`overwrite: false` refuses an existing target without a check/write race. Permissions and symlink
+metadata describe the remote target. No files are copied automatically. Use explicit local
+`rsync`, `scp`, or Git commands to prepare the server workspace and retrieve artifacts.
+
+One private SSH control connection belongs to each block. Each command gets a fresh shell:
+files persist, but `cd` and `export` in one command do not change later commands. Output, exit codes
+(including `255`), capture limits, sequential controls, and block cleanup use the usual workflow
+state and lifecycle. Validation and dry runs do not connect.
+
+On cancellation, Wuko stops its remote process group with TERM, then KILL once the command exits
+or after a two-second grace period.
+It also stops leftover descendants after a command exits. Processes that deliberately detach into
+a different session are outside that process group. Block `finally` runs remotely before Wuko
+closes the connection and removes temporary resources. Root workflow cleanup runs locally.
+If the connection is lost, Wuko never reconnects to replay a command. It reports when remote
+termination cannot be confirmed; cleanup and temporary-file removal may then be incomplete.
 
 ## devenv executor
 

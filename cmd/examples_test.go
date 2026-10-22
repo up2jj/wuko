@@ -11,7 +11,9 @@ import (
 
 	"github.com/up2jj/wuko/engine"
 	envload "github.com/up2jj/wuko/environment"
+	"github.com/up2jj/wuko/executor"
 	"github.com/up2jj/wuko/step"
+	sshstep "github.com/up2jj/wuko/steps/ssh"
 	"github.com/up2jj/wuko/workflow"
 )
 
@@ -26,6 +28,10 @@ func TestExamplesValidate(t *testing.T) {
 	}
 	registry := step.NewRegistry()
 	if err := registerBuiltinSteps(registry); err != nil {
+		t.Fatal(err)
+	}
+	executors := executor.NewRegistry()
+	if err := sshstep.RegisterExecutor(executors); err != nil {
 		t.Fatal(err)
 	}
 
@@ -49,7 +55,7 @@ func TestExamplesValidate(t *testing.T) {
 				if err != nil {
 					t.Fatalf("target %q: %v", target, err)
 				}
-				if err := engine.New(registry).Validate(t.Context(), definition, engine.Options{RunDir: runDir}); err != nil {
+				if err := engine.New(registry, engine.WithExecutors(executors)).Validate(t.Context(), definition, engine.Options{RunDir: runDir}); err != nil {
 					t.Fatalf("target %q: %v", target, err)
 				}
 			}

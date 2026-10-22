@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/up2jj/wuko/diagnostic"
+	"github.com/up2jj/wuko/executor"
 	"github.com/up2jj/wuko/workflow"
 )
 
@@ -62,7 +63,7 @@ func (e *Engine) executeWorkingDirectoryBlock(ctx context.Context, definition *w
 		})
 		return fmt.Errorf("workflow %q working_directory block: rendering path: %w", definition.Name, err)
 	}
-	dir, err := resolveWorkingDirectory(options.RunDir, rendered)
+	dir, err := scopedWorkingDirectory(ctx, options, rendered)
 	if err != nil {
 		trace(options, diagnostic.Event{
 			Phase: diagnostic.PhaseRender, Status: diagnostic.StatusFailed, Time: time.Now(), Duration: time.Since(started),
@@ -81,6 +82,31 @@ func (e *Engine) executeWorkingDirectoryBlock(ctx context.Context, definition *w
 		return fmt.Errorf("workflow %q working_directory block: validating scoped steps: %w", definition.Name, err)
 	}
 	return e.executeSequence(ctx, definition, block.Steps, childOptions, state, stats, firstIndex, total)
+}
+
+// scopedWorkingDirectory checks the directory where scoped commands will run: on the executor's
+// own filesystem when it exposes a non-host one, and on the host otherwise, so executors without
+// a filesystem keep the host check they had before.
+func scopedWorkingDirectory(ctx context.Context, options Options, value string) (string, error) {
+	if !options.insideExecutor || !options.executorFileSystem {
+		return resolveWorkingDirectory(options.RunDir, value)
+	}
+	filesystem, err := executor.FileSystemFor(options.Executor)
+	if err != nil || executor.IsLocal(filesystem) {
+		return resolveWorkingDirectory(options.RunDir, value)
+	}
+	if strings.TrimSpace(value) == "" {
+		return "", fmt.Errorf("resolved path must not be empty")
+	}
+	dir := cleanWorkingDirectory(options.RunDir, value)
+	info, err := filesystem.Stat(ctx, dir)
+	if err != nil {
+		return "", fmt.Errorf("inspecting directory %s: %w", dir, err)
+	}
+	if !info.Mode.IsDir() {
+		return "", fmt.Errorf("working_directory %s is not a directory", dir)
+	}
+	return dir, nil
 }
 
 func resolveWorkingDirectory(base, value string) (string, error) {

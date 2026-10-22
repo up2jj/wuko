@@ -108,6 +108,7 @@ type Options struct {
 	deferContextValidation bool
 	insideExecutor         bool
 	executorFileSystem     bool
+	executorStepValidator  executor.StepValidator
 	services               step.ServiceLauncher
 	// cleanups scopes managed-resource cleanup to a background control iteration, whose
 	// resources must be released when the iteration ends rather than accumulating for

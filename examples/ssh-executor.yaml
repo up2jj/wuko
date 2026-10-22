@@ -1,0 +1,34 @@
+# Configure the production SSH alias and provision /srv/app before running.
+# wuko run --file examples/ssh-executor.yaml --var host=production --var directory=/srv/app
+version: 1
+name: ssh-executor
+description: Inspect a remote workspace while Wuko runs locally
+vars:
+  host: production
+  directory: /srv/app
+steps:
+  - id: local_before
+    type: shell
+    with: {command: hostname}
+  - executor:
+      type: ssh
+      with:
+        host: "{{ .vars.host }}"
+        directory: "{{ .vars.directory }}"
+    steps:
+      - id: remote_host
+        type: shell
+        with: {command: hostname}
+      - id: remote_workspace
+        type: shell
+        with: {command: pwd}
+      - id: remote_metadata
+        type: file
+        with: {operation: stat, path: .}
+    finally:
+      - id: remote_cleanup
+        type: shell
+        with: {script: "printf 'Remote inspection finished\n'"}
+  - id: local_after
+    type: shell
+    with: {command: hostname}

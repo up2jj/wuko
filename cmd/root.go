@@ -67,6 +67,7 @@ import (
 	semverstep "github.com/up2jj/wuko/steps/semver"
 	setstep "github.com/up2jj/wuko/steps/set"
 	"github.com/up2jj/wuko/steps/shell"
+	sshstep "github.com/up2jj/wuko/steps/ssh"
 	tablestep "github.com/up2jj/wuko/steps/table"
 	tcpprobestep "github.com/up2jj/wuko/steps/tcp_probe"
 	tempstep "github.com/up2jj/wuko/steps/temp"
@@ -209,6 +210,9 @@ func NewRootCmd() *cobra.Command {
 		panic(err)
 	}
 	if err := devenvstep.RegisterExecutor(executors); err != nil {
+		panic(err)
+	}
+	if err := sshstep.RegisterExecutor(executors); err != nil {
 		panic(err)
 	}
 	environments := envload.NewDefaultResolver()

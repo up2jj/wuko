@@ -37,6 +37,8 @@
   source locations and suggestions. Use `--dry-run` and `wuko tree` to see what will happen.
 - **Shareable.** Compose workflows, reuse actions from GitHub, install from marketplaces, extend
   with plugins, and run the same YAML locally, in Git hooks, or in GitHub Actions.
+- **Remote execution.** Keep Wuko local and run a block's commands and file operations on a Linux
+  server with the built-in [SSH executor](docs/executors.md#ssh-executor).
 
 Wuko is not a GitHub Actions runtime. It is for local and interactive development automation; a CI
 job can invoke Wuko, but the two workflow formats are separate.

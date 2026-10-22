@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -279,6 +281,26 @@ func TestExecutorScopeRestoresParentAndSharesOutputs(t *testing.T) {
 	}
 	if scoped.closed != 1 || state.Steps["build"].(map[string]any)["stdout"] != "container-build-output" {
 		t.Fatalf("closed = %d, state = %#v", scoped.closed, state.Steps)
+	}
+}
+
+func TestExecutorScopeWorkingDirectoryWithoutFileSystemUsesHost(t *testing.T) {
+	scoped := &recordingExecutor{}
+	runDir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(runDir, "nested"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	definition := testDefinition(t, "scoped-directory", workflow.Step{
+		Executor: &workflow.ExecutorScope{Type: "recording", With: map[string]any{}},
+		Steps: []workflow.Step{{WorkingDirectory: "nested", Steps: []workflow.Step{
+			{ID: "build", Type: "shell", With: map[string]any{"command": "build"}},
+		}}},
+	})
+	if _, err := executorTestEngine(t, scoped).Run(t.Context(), definition, Options{RunDir: runDir, Stdout: io.Discard, Stderr: io.Discard}); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(scoped.commands, ","); got != "build " {
+		t.Fatalf("scoped commands = %q", got)
 	}
 }
 
