@@ -26,6 +26,9 @@ func newRunCmd(deps dependencies) *cobra.Command {
 		Short: "Run a named or remotely located workflow",
 		Args:  cobra.MaximumNArgs(2),
 		RunE: func(command *cobra.Command, args []string) error {
+			if handled, err := runWithResourceLimits(command, deps, args, config); handled {
+				return err
+			}
 			if config.pick {
 				// The picker is an interactive loop that can run several workflows or none, so it
 				// cannot honor the single-report stdout contract of --report-json -.
@@ -46,11 +49,15 @@ func newRunCmd(deps dependencies) *cobra.Command {
 	command.Flags().StringVar(&config.reportJSON, "report-json", "", "write the final execution report as JSON to a path, or - for stdout")
 	command.Flags().StringVar(&config.workflowFile, "file", "", "run a workflow from a file path, or - for stdin")
 	command.Flags().BoolVar(&config.pick, "pick", false, "select a workflow from a GitHub repository or tree")
+	command.Flags().StringVar(&config.cpus, "cpus", "", "limit aggregate local workflow CPU use in cores (for example 1.5)")
+	command.Flags().StringVar(&config.memory, "memory", "", "limit aggregate local workflow memory (for example 512MiB)")
 	command.ValidArgsFunction = workflowCompletion(deps, true)
 	return command
 }
 
 type runWorkflowConfig struct {
+	cpus            string
+	memory          string
 	variables       []string
 	variableFiles   []string
 	environment     []string

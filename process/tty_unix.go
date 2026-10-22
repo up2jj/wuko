@@ -111,6 +111,9 @@ func runTTY(ctx context.Context, options Options, credential *syscall.Credential
 	}
 	// Setsid makes the child the leader of a new session and process group.
 	defer TrackGroup(command.Process.Pid)()
+	if options.StartedPID != nil {
+		options.StartedPID(command.Process.Pid)
+	}
 	if options.Started != nil {
 		options.Started()
 	}

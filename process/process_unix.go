@@ -64,6 +64,9 @@ type Options struct {
 	StderrPolicy OutputPolicy
 	// Started is called exactly once after the command has been started successfully.
 	Started func()
+	// StartedPID reports the local child PID after start, before waiting for it. It is
+	// intended for host-side supervision; remote executors need not call it.
+	StartedPID func(int)
 	// TerminationSignal is sent on cancellation before SIGKILL escalation. Zero means SIGTERM.
 	TerminationSignal syscall.Signal
 	// TerminationParentOnly signals only the direct child instead of its process group.
@@ -168,6 +171,9 @@ func (LocalExecutor) Run(ctx context.Context, options Options) (Result, error) {
 	stdoutPipe.started()
 	stderrPipe.started()
 	defer TrackGroup(command.Process.Pid)()
+	if options.StartedPID != nil {
+		options.StartedPID(command.Process.Pid)
+	}
 	if options.Started != nil {
 		options.Started()
 	}

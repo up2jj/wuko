@@ -81,6 +81,7 @@ wuko                                    # pick from every discovered workflow
 wuko run check                          # run by name
 wuko run check --var package=./cmd/...  # override a variable
 wuko run check --dry-run                # validate and preview without running
+wuko run check --cpus 1.5 --memory 512MiB # shared local CPU and memory budget
 ```
 
 Next: the [Getting started guide](docs/getting-started.md) walks from here to prompts, retries,

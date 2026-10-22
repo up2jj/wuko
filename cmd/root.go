@@ -23,6 +23,7 @@ import (
 	"github.com/up2jj/wuko/engine"
 	envload "github.com/up2jj/wuko/environment"
 	"github.com/up2jj/wuko/executor"
+	"github.com/up2jj/wuko/localresource"
 	"github.com/up2jj/wuko/observe"
 	"github.com/up2jj/wuko/plugin"
 	"github.com/up2jj/wuko/process"
@@ -133,6 +134,7 @@ type dependencies struct {
 	cacheDir          func() (string, error)
 	agentLookPath     func(string) (string, error)
 	executable        func() (string, error)
+	resourceRunner    func(context.Context, localresource.Limits, process.Options) (process.Result, error)
 	registry          *step.Registry
 	executors         *executor.Registry
 	elevatedExecutor  process.Executor

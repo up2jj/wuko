@@ -1,0 +1,10 @@
+version: 1
+name: resource-memory
+steps:
+  - id: exceed_memory
+    type: shell
+    with:
+      command: python3
+      args:
+        - -c
+        - "import time; print('allocating test memory', flush=True); data = bytearray(512 * 1024 * 1024); time.sleep(10)"

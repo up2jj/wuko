@@ -91,8 +91,26 @@ jobs:
       - name: test native TCP probe
         if: runner.os == 'macOS'
         run: go test -race ./steps/tcp_probe
+      - name: test local resource supervision
+        run: go test -race ./localresource
+      - name: start Linux user manager for resource-limit smoke tests
+        if: runner.os == 'Linux'
+        run: |
+          sudo loginctl enable-linger "$(id -un)"
+          sudo systemctl start "user@$(id -u).service"
+          echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >> "$GITHUB_ENV"
       - name: build action test binary
         run: go build -o "$RUNNER_TEMP/wuko-action-test" .
+      - name: run workflow with shared local resource limits
+        run: |
+          "$RUNNER_TEMP/wuko-action-test" --env-loader none run --file .github/fixtures/ci-smoke.yaml --once --cpus 0.5 --memory 256MiB --reporter plain
+          command -v python3
+          if "$RUNNER_TEMP/wuko-action-test" --env-loader none run --file .github/fixtures/resource-memory.yaml --once --memory 128MiB --reporter plain > "$RUNNER_TEMP/resource-memory.log" 2>&1; then
+            echo "memory-limited workflow unexpectedly succeeded" >&2
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/resource-memory.log"
+          grep -q 'allocating test memory' "$RUNNER_TEMP/resource-memory.log"
       - name: run file workflow through action
         id: file
         uses: ./

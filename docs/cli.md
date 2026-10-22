@@ -43,6 +43,7 @@ wuko run check --var-file vars.json      # JSON or TOML variables
 wuko run check --env API_URL=http://localhost:8080
 wuko run check --dry-run                 # validate and print steps without running them
 wuko run check --once                    # ignore a declared cron schedule
+wuko run check --cpus 1.5 --memory 512MiB # shared budget for the local invocation
 wuko run check --report-json report.json # versioned execution report
 wuko run check --once --report-json -    # report JSON on stdout; terminal output on stderr
 wuko run check --reporter plain --reporter github
@@ -60,6 +61,45 @@ wuko run --pick https://github.com/acme/automation/tree/main/workflows
 
 See [Run reporters](execution.md#run-reporters), [Validation diagnostics](validation.md), and
 [Browser forms](forms.md).
+
+### Local CPU and memory limits
+
+`--cpus` and `--memory` supervise the entire `wuko run` invocation without Docker. Either flag
+can be used alone. CPU counts are relative to one core (`0.5` is half a core, `2` is two cores),
+from `0.01` through `1000000`. Memory accepts a positive integer followed by `B`, `KiB`, `MiB`,
+`GiB`, or `TiB`. Omitting a flag leaves that resource unlimited. `--dry-run` validates the values
+without launching a supervisor or requiring its platform facilities.
+
+The runner, local shell commands, managed processes, plugins, prerequisites, and child workflows
+share the budget. Concurrent branches do not receive separate allowances. A scheduled invocation
+or `--pick` session keeps the same budget for its lifetime. The small supervising process stays
+outside the budget. These are invocation flags; they do not add a YAML `resources` field or apply
+to `wuko ui` and install hooks.
+
+| Platform | Enforcement | Requirements |
+| --- | --- | --- |
+| Linux | A cgroup v2 scope enforces CPU quota and aggregate memory, with swap disabled. An OOM event kills the whole scope. | systemd 254+, `systemd-run`, `systemctl`, and a running user manager with the requested controllers delegated. |
+| macOS | A supervisor samples the descendant process tree every 50ms, throttles aggregate CPU with stop/continue signals, and kills the observed tree when summed resident memory exceeds the budget. | Permission to enumerate, measure, and signal the workflow's processes. |
+
+Linux checks the actual cgroup settings before loading or executing the workflow. Missing
+controllers, unavailable user sessions, and unsupported systemd options fail the run; Wuko never
+falls back to unlimited execution. Linux uses systemd's [CPU and memory controls](https://www.freedesktop.org/software/systemd/man/latest/systemd.resource-control.html)
+and [scope OOM policy](https://www.freedesktop.org/software/systemd/man/latest/systemd.scope.html#OOMPolicy=).
+
+macOS limits are approximate and print a notice on stderr. CPU and memory can overshoot between
+samples. Processes that start and finish between samples may be missed, and children that detach
+before discovery may escape tracking. Shared resident pages can be counted more than once;
+swapped or compressed pages are not a hard allocation limit. Previously observed descendants
+remain tracked after reparenting, and process start times protect against PID reuse. CPU
+accounting converts XNU's [Mach time counters](https://github.com/apple-oss-distributions/xnu/blob/main/osfmk/kern/bsd_kern.c)
+using the kernel timebase on both Intel and Apple Silicon.
+
+Memory termination may prevent `finally` cleanup and final JSON reports from being produced on
+either platform. Ordinary cancellation resumes CPU-throttled processes before graceful shutdown.
+Force-killing the supervisor can bypass cleanup, especially on macOS where suspended descendants
+may need to be killed manually. These controls assume trusted workflows: privileged processes
+and work submitted to external daemons, remote executors, or Docker containers can escape the
+local budget. Use the Docker executor's own resource settings for container workloads.
 
 ## Install and share workflows
 
