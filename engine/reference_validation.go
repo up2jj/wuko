@@ -232,6 +232,14 @@ func (scope *referenceScope) addWrittenVariables(stepType, stepID string, raw ma
 		return
 	}
 	if _, writes := varWriters[stepType]; writes {
+		if stepType == "set" {
+			if variables, ok := raw["variables"].(map[string]any); ok {
+				for name := range variables {
+					scope.addVariable(name)
+				}
+				return
+			}
+		}
 		variable := stringValue(raw, "variable")
 		if stepType == "time" && variable == "" {
 			variable = stepID

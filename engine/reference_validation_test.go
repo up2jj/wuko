@@ -534,6 +534,24 @@ func TestReferenceValidationSeesVariablesWrittenBySteps(t *testing.T) {
 		}
 	})
 
+	t.Run("set declares multiple variables", func(t *testing.T) {
+		definition := testDefinition(t, "set",
+			workflow.Step{ID: "assign", Type: "set", With: map[string]any{
+				"variables": map[string]any{
+					"greeting": "hi",
+					"artifact": map[string]any{"expr": `vars.base`},
+				},
+			}},
+			workflow.Step{ID: "use", Type: "capture", With: map[string]any{
+				"value": `{{ .vars.greeting }}:{{ .vars.artifact }}`,
+			}},
+		)
+		definition.Vars = map[string]any{"base": "artifact"}
+		if err := New(registry).Validate(t.Context(), definition, Options{}); err != nil {
+			t.Fatal(err)
+		}
+	})
+
 	t.Run("extract declares its targets", func(t *testing.T) {
 		definition := testDefinition(t, "extract",
 			workflow.Step{ID: "parse", Type: "extract", With: map[string]any{

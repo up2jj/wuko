@@ -198,6 +198,9 @@ func stepDependencyReferences(steps []Step) []dependencyOutputReference {
 			if expression, ok := workflowStep.With["expr"].(string); ok {
 				references = append(references, expressionDependencyReferences(expression)...)
 			}
+			if variables, ok := workflowStep.With["variables"].(map[string]any); ok {
+				references = append(references, typedBindingDependencyReferences(variables)...)
+			}
 		case "tui_choice":
 			for _, name := range []string{"label_expr", "value_expr", "description_expr", "disabled_expr", "reason_expr", "default_expr"} {
 				if expression, ok := workflowStep.With[name].(string); ok {

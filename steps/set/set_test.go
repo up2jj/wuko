@@ -24,6 +24,46 @@ func TestLiteralValue(t *testing.T) {
 	}
 }
 
+func TestMultipleVariables(t *testing.T) {
+	runner, err := New(map[string]any{
+		"variables": map[string]any{
+			"application": "wuko",
+			"artifact":    map[string]any{"expr": "vars.application + \"-\" + vars.version"},
+			"version":     map[string]any{"value": 3},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{"application": "old", "version": "7"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{"application": "wuko", "artifact": "old-7", "version": 3}
+	if !reflect.DeepEqual(result.Variables, want) {
+		t.Fatalf("variables = %#v, want %#v", result.Variables, want)
+	}
+	if !reflect.DeepEqual(result.Outputs["value"], want) {
+		t.Fatalf("value = %#v, want %#v", result.Outputs["value"], want)
+	}
+}
+
+func TestMultipleVariablesFailureIsAtomic(t *testing.T) {
+	runner, err := New(map[string]any{
+		"variables": map[string]any{
+			"good": "value",
+			"bad":  map[string]any{"expr": "vars.missing.name"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{}})
+	if err == nil || len(result.Outputs) != 0 || len(result.Variables) != 0 {
+		t.Fatalf("result = %#v, error = %v", result, err)
+	}
+}
+
 func TestExpressionUsesAllRoots(t *testing.T) {
 	runner, err := New(map[string]any{
 		"variable": "artifact",
@@ -155,6 +195,10 @@ func TestRejectsInvalidConfigurationAndValue(t *testing.T) {
 	tests := []map[string]any{
 		{"value": true},
 		{"variable": "x"},
+		{"variable": "x", "variables": map[string]any{"y": true}, "value": true},
+		{"variables": map[string]any{}},
+		{"variables": map[string]any{"": true}},
+		{"variables": map[string]any{"x": map[string]any{"expr": ""}}},
 		{"variable": "x", "value": true, "expr": "true"},
 		{"variable": "x", "expr": ""},
 		{"variable": "x", "expr": "vars."},

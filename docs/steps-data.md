@@ -19,8 +19,8 @@ them through `.vars` and `.steps`; expressions use `vars` and `steps` without th
 
 ## `set`
 
-Assign a typed literal or evaluate an Expr expression. Exactly one of `value` or `expr` is
-required.
+Assign one variable with a typed literal or Expr expression. Exactly one of `value` or `expr` is
+required for the single-variable form.
 
 ```yaml
 - id: defaults
@@ -42,6 +42,26 @@ required.
 ```
 
 The result is available as `.steps.<id>.value` and as the configured variable.
+
+To assign several variables in one step, use `variables`. Each entry is a literal by default, or
+use an `{expr: ...}` binding to keep the expression result typed:
+
+```yaml
+vars:
+  target: production
+steps:
+- id: release_metadata
+  type: set
+  with:
+    variables:
+      application: wuko
+      version: 3
+      artifact: {expr: 'vars.target + "-" + workflow.name'}
+```
+
+All expressions see the workflow state from before the step starts, and the assignments are
+committed together. The step output `value` is the map of assigned variables. Use `{literal: ...}`
+when a literal object has the shape of an expression binding.
 
 ## `template`
 
