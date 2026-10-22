@@ -18,12 +18,15 @@ import (
 
 func newValidateCmd(deps dependencies) *cobra.Command {
 	var variables, variableFiles, environment []string
-	var format, reporterName string
+	var format, reporterName, workflowFile string
 	command := &cobra.Command{
 		Use:   "validate [NAME] [TARGET]",
 		Short: "Validate one or all effective workflows",
 		Args:  cobra.MaximumNArgs(2),
 		RunE: func(command *cobra.Command, args []string) error {
+			if workflowFile != "" && len(args) > 1 {
+				return fmt.Errorf("workflow selector and --file cannot be used together")
+			}
 			if format != "text" && format != "json" {
 				return fmt.Errorf("format must be text or json")
 			}
@@ -32,7 +35,7 @@ func newValidateCmd(deps dependencies) *cobra.Command {
 			}
 			err := validateWorkflowSources(command, deps, args, validateWorkflowConfig{
 				variables: variables, variableFiles: variableFiles, environment: environment,
-				format: format,
+				format: format, workflowFile: workflowFile,
 			})
 			issues := validation.Issues(err)
 			if reporterName == "github" && len(issues) != 0 {
@@ -64,6 +67,7 @@ func newValidateCmd(deps dependencies) *cobra.Command {
 	command.Flags().StringArrayVar(&environment, "env", nil, "override an environment variable (KEY=value; repeatable)")
 	command.Flags().StringVar(&format, "format", "text", "validation output format: text or json")
 	command.Flags().StringVar(&reporterName, "reporter", "plain", "validation reporter: plain or github")
+	command.Flags().StringVar(&workflowFile, "file", "", "validate a workflow from a file path, or - for stdin")
 	command.ValidArgsFunction = workflowCompletion(deps, false)
 	return command
 }
@@ -74,6 +78,7 @@ type validateWorkflowConfig struct {
 	environment   []string
 	sources       []workflow.Source
 	format        string
+	workflowFile  string
 }
 
 func validateWorkflowSources(command *cobra.Command, deps dependencies, args []string, config validateWorkflowConfig) error {
@@ -118,10 +123,12 @@ func validateWorkflowSources(command *cobra.Command, deps dependencies, args []s
 		}
 	}
 	sources := config.sources
-	all := len(config.sources) == 0 && len(args) == 0
+	all := len(config.sources) == 0 && len(args) == 0 && config.workflowFile == ""
 	discoveryStarted := time.Now()
 	diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusStarted, Time: discoveryStarted, Message: "discovering workflows"})
-	if len(sources) == 0 && len(args) > 0 {
+	if config.workflowFile != "" {
+		sources = []workflow.Source{{Path: config.workflowFile}}
+	} else if len(sources) == 0 && len(args) > 0 {
 		source, findErr := workflow.Find(cwd, home, configDir, args[0])
 		if findErr != nil {
 			diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusFailed, Duration: time.Since(discoveryStarted), Error: findErr})
@@ -153,8 +160,18 @@ func validateWorkflowSources(command *cobra.Command, deps dependencies, args []s
 		if len(args) == 2 {
 			loadOptions.Target = args[1]
 		}
+		if config.workflowFile != "" && len(args) == 1 {
+			loadOptions.Target = args[0]
+		}
+		fromStdin := config.workflowFile == "-"
+		if fromStdin {
+			loadOptions.Stdin = nil
+			loadOptions.Interactive = false
+		}
 		var definition *workflow.Definition
-		if source.Locator != "" {
+		if config.workflowFile != "" {
+			definition, err = loadInspectionFile(command.Context(), loader, config.workflowFile, cwd, command.InOrStdin(), loadOptions)
+		} else if source.Locator != "" {
 			definition, err = loader.LoadMaterializedRemote(command.Context(), source.Path, source.Locator, loadOptions)
 		} else {
 			definition, err = loader.Load(command.Context(), source.Path, loadOptions)
@@ -179,9 +196,9 @@ func validateWorkflowSources(command *cobra.Command, deps dependencies, args []s
 			}
 			return engine.Options{
 				Vars: vars, Env: env, BaseEnv: baseEnv, EnvironmentLoaders: environmentLoaders, Dependencies: dependencies, RunDir: cwd, Providers: providers,
-				Stdin: command.InOrStdin(), Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(),
+				Stdin: loadOptions.Stdin, Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(),
 				LocalValueDir: localValueDir, GlobalValueDir: filepath.Join(configDir, "wuko", "values"),
-				ElevationAllowed: source.Locator == "" && installedWorkflowMayElevate(definition.Path),
+				ElevationAllowed: !fromStdin && source.Locator == "" && installedWorkflowMayElevate(definition.Path),
 				Diagnostics:      reporter,
 			}
 		}
@@ -192,6 +209,9 @@ func validateWorkflowSources(command *cobra.Command, deps dependencies, args []s
 			return err
 		}
 		label := source.Name
+		if config.workflowFile != "" {
+			label = definition.Name
+		}
 		if loadOptions.Target != "" {
 			label += " (" + loadOptions.Target + ")"
 		}

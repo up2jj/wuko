@@ -32,7 +32,7 @@ func newTreeCmd(deps dependencies) *cobra.Command {
 	command.Flags().StringArrayVar(&variables, "var", nil, "set a workflow variable (key=value; repeatable)")
 	command.Flags().StringArrayVar(&variableFiles, "var-file", nil, "import workflow variables from a JSON or TOML file (repeatable)")
 	command.Flags().StringArrayVar(&environment, "env", nil, "override an environment variable (KEY=value; repeatable)")
-	command.Flags().StringVar(&workflowFile, "file", "", "display a workflow from a file path")
+	command.Flags().StringVar(&workflowFile, "file", "", "display a workflow from a file path, or - for stdin")
 	command.ValidArgsFunction = workflowCompletion(deps, false)
 	return command
 }
@@ -92,25 +92,33 @@ func renderWorkflowTree(command *cobra.Command, deps dependencies, args []string
 	} else if config.workflowFile == "" && len(args) == 2 {
 		options.Target = args[1]
 	}
+	fromStdin := config.workflowFile == "-" && config.remoteLocator == ""
+	if fromStdin {
+		options.Stdin = nil
+		options.Interactive = false
+	}
 	var definition *workflow.Definition
 	elevationAllowed := true
+	remote := config.remoteLocator != ""
 	if config.workflowFile != "" {
-		path, err := filepath.Abs(config.workflowFile)
-		if err != nil {
-			return fmt.Errorf("resolving workflow file %s: %w", config.workflowFile, err)
-		}
 		if config.remoteLocator != "" {
 			elevationAllowed = false
 			command.SetContext(workflow.ContextWithPluginLockPolicy(command.Context(), workflow.PluginLockPolicy{Remote: true}))
+			path := config.workflowFile
+			if !filepath.IsAbs(path) {
+				path = filepath.Join(cwd, path)
+			}
 			definition, err = loader.LoadMaterializedRemote(command.Context(), path, config.remoteLocator, options)
 		} else {
-			definition, err = loader.Load(command.Context(), path, options)
+			elevationAllowed = !fromStdin
+			definition, err = loadInspectionFile(command.Context(), loader, config.workflowFile, cwd, command.InOrStdin(), options)
 		}
 		if err != nil {
 			return err
 		}
 	} else if workflow.IsRemoteLocator(args[0]) {
 		elevationAllowed = false
+		remote = true
 		command.SetContext(workflow.ContextWithPluginLockPolicy(command.Context(), workflow.PluginLockPolicy{Remote: true}))
 		var cleanup func()
 		definition, cleanup, err = loader.LoadRemote(command.Context(), args[0], options)
@@ -142,11 +150,11 @@ func renderWorkflowTree(command *cobra.Command, deps dependencies, args []string
 	if deps.registry != nil && deps.registry.Len() > 0 {
 		if err := preflightDependencyPlan(command.Context(), plan, func() *engine.Engine { return workflowEngine(deps) }, func(definition *workflow.Definition, dependencies map[string]map[string]any) engine.Options {
 			localValueDir := ""
-			if elevationAllowed {
+			if !remote {
 				localValueDir = filepath.Join(definition.Dir, ".wuko", "values")
 			}
 			return engine.Options{Vars: vars, Env: env, BaseEnv: baseEnv, EnvironmentLoaders: environmentLoaders, Dependencies: dependencies, RunDir: cwd, Providers: providers,
-				Stdin: command.InOrStdin(), Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(), Diagnostics: reporter,
+				Stdin: options.Stdin, Stdout: command.OutOrStdout(), Stderr: command.ErrOrStderr(), Diagnostics: reporter,
 				ElevationAllowed: elevationAllowed && installedWorkflowMayElevate(definition.Path),
 				LocalValueDir:    localValueDir, GlobalValueDir: filepath.Join(configDir, "wuko", "values")}
 		}); err != nil {

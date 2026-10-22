@@ -35,7 +35,7 @@ targets:
 	if err := os.WriteFile(broken, []byte("version: ["), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"run", "tree", "ui"} {
+	for _, name := range []string{"run", "tree", "ui", "validate"} {
 		t.Run(name, func(t *testing.T) {
 			output := executeCompletion(t, root, []string{name, "--file", "draft.yaml", ""})
 			want := "production\tDeploy\nstaging\tStage release\n:4\n"
@@ -107,6 +107,7 @@ func TestWorkflowFlagCompletionFiltersFileExtensions(t *testing.T) {
 		{"run", "--file", []string{"yaml", "yml"}},
 		{"tree", "--file", []string{"yaml", "yml"}},
 		{"ui", "--file", []string{"yaml", "yml"}},
+		{"validate", "--file", []string{"yaml", "yml"}},
 		{"run", "--var-file", []string{"json", "toml"}},
 		{"validate", "--var-file", []string{"json", "toml"}},
 		{"install", "--var-file", []string{"json", "toml"}},

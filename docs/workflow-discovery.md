@@ -135,6 +135,10 @@ affects display order, not which definition wins.
   dependency-only workflows.
 - `wuko validate NAME` and `wuko tree NAME` use effective discovery; without a name, `validate`
   validates every effective workflow. Both inspection commands accept dependency-only workflows.
+  `wuko validate --file PATH [TARGET]` and `wuko tree --file PATH [TARGET]` bypass root discovery
+  and inspect an explicit file. `--file -` consumes stdin once, uses the current directory for
+  relative resources, and disables interactive input. Diagnostics use the logical source `stdin`;
+  use `--file ./-` for a literal filename. Named prerequisites still use effective discovery.
 - Bare `wuko` calls `DiscoverAll`. In an interactive terminal it shows effective and shadowed
   directly invokable sources in the picker, including one row per target and each workflow's direct
   prerequisites. Enter runs the exact selected source and `a` opens a contextual action palette.

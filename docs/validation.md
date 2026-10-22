@@ -14,7 +14,17 @@ request one versioned document:
 ```sh
 wuko validate --format json
 wuko validate --reporter github
+wuko validate --file ./draft.yaml --format json
+./generate-workflow | wuko validate --file - --format json
 ```
+
+`--file PATH [TARGET]` validates a specific workflow without discovering unrelated workflows
+(named prerequisites still use discovery). For workflows with targets, select one with the
+positional `TARGET`, just as for `run`. Dependency-only workflows can also be inspected.
+`--file -` reads stdin once, resolves relative includes, templates, and actions from the current
+directory, and disables interactive input. Diagnostics identify the source as `stdin`.
+Use `--file ./-` to inspect a literal file named `-`. `wuko tree` accepts the same file and stdin
+forms. These commands perform loading and preflight validation without executing workflow steps.
 
 The JSON document never contains source excerpts or wrapped causes. URL credentials, queries, and
 fragments are removed from presented source names. The GitHub reporter emits one deduplicated

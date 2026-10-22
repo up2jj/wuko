@@ -27,7 +27,14 @@ wuko tree check                   # execution tree
 wuko validate                     # validate every discovered workflow
 wuko validate check --format json # versioned machine-readable diagnostics
 wuko validate check --reporter github
+wuko validate --file ./draft.yaml # validate a file outside discovery
+./generate-workflow | wuko validate --file - --format json
+./generate-workflow | wuko tree --file -
 ```
+
+`validate --file PATH [TARGET]` and `tree --file PATH [TARGET]` inspect the selected file without
+executing steps. Use `--file -` to read from stdin; relative resources resolve from the current
+directory, and the inspection is non-interactive. Use `--file ./-` for a file named `-`.
 
 Misspelled workflow names suggest a close discovered match, for example `wuko run depoly`
 suggests `deploy`. Unknown-name errors also point to `wuko list`; Wuko never runs the suggestion
