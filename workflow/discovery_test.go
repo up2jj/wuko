@@ -3,8 +3,42 @@ package workflow
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func TestSelectSourceSuggestsWorkflowNames(t *testing.T) {
+	t.Parallel()
+	sources := []Source{{Name: "deploy", Path: "deploy.yaml"}, {Name: "check", Path: "check.yaml"}, {Name: "deploy", Target: "staging"}}
+	for _, test := range []struct {
+		name string
+		want string
+	}{
+		{name: "depoly", want: `did you mean "deploy"?`},
+		{name: "chek", want: `did you mean "check"?`},
+		{name: "unrelated-workflow", want: "run 'wuko list'"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := SelectSource(sources, test.name)
+			if err == nil || !strings.Contains(err.Error(), test.want) || !strings.Contains(err.Error(), "wuko list") {
+				t.Fatalf("SelectSource() error = %v, want %q and list hint", err, test.want)
+			}
+			if test.name == "unrelated-workflow" && strings.Contains(err.Error(), "did you mean") {
+				t.Fatalf("unexpected weak suggestion: %v", err)
+			}
+		})
+	}
+	selected, err := SelectSource(sources, "deploy")
+	if err != nil || selected.Path != "deploy.yaml" {
+		t.Fatalf("exact selection = %#v, %v", selected, err)
+	}
+	if _, err := SelectSource(sources, "../deploy"); err == nil || strings.Contains(err.Error(), "did you mean") {
+		t.Fatalf("invalid selector error = %v", err)
+	}
+	if _, err := SelectSource(nil, "deploy"); err == nil || strings.Contains(err.Error(), "did you mean") || !strings.Contains(err.Error(), "wuko list") {
+		t.Fatalf("empty source error = %v", err)
+	}
+}
 
 func TestDiscoverPrecedence(t *testing.T) {
 	t.Parallel()

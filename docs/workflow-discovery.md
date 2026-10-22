@@ -69,6 +69,11 @@ summary; aliases that differ from their workflow name use `alias=workflow`. The 
 `depends_on` prerequisite. A workflow may optionally declare named `targets`; each target is
 listed as a separate selectable source while retaining the same filename-stem workflow name.
 
+If a named workflow cannot be found, Wuko suggests a close discovered name when available:
+`wuko run depoly` reports `did you mean "deploy"?`. Suggestions are advisory and never run a
+different workflow automatically. The error also points to `wuko list`; unrelated names receive
+that hint without a weak guess. This applies to named run, UI, tree, and validation commands.
+
 Within each directory, workflow names are sorted before loading. Declaring both `name.yaml` and
 `name.yml` in the same directory is an error. Selectors reject absolute paths and traversal
 components.

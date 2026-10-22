@@ -380,7 +380,14 @@ func SelectSource(sources []Source, name string) (Source, error) {
 			return source, nil
 		}
 	}
-	return Source{}, fmt.Errorf("workflow %q not found", name)
+	names := make([]string, 0, len(sources))
+	for _, source := range sources {
+		names = append(names, source.Name)
+	}
+	if suggestion := validation.Suggest(name, names); suggestion != "" {
+		return Source{}, fmt.Errorf("workflow %q not found; did you mean %q? Run 'wuko list' to see available workflows", name, suggestion)
+	}
+	return Source{}, fmt.Errorf("workflow %q not found; run 'wuko list' to see available workflows", name)
 }
 
 type discoveryLocation struct {

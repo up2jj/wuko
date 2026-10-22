@@ -29,6 +29,10 @@ wuko validate check --format json # versioned machine-readable diagnostics
 wuko validate check --reporter github
 ```
 
+Misspelled workflow names suggest a close discovered match, for example `wuko run depoly`
+suggests `deploy`. Unknown-name errors also point to `wuko list`; Wuko never runs the suggestion
+automatically.
+
 In the picker, Enter runs the selected workflow and `a` opens its action palette: open a browser
 form, validate, show the tree, dry-run, print a reproducible command, edit, pin, change sorting, or
 manage marketplace installs. See [Workflow discovery](workflow-discovery.md) for search order,
