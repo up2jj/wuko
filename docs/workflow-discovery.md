@@ -162,7 +162,11 @@ affects display order, not which definition wins.
   are emitted separately.
 - Shell completion returns effective workflow names and, after a targeted workflow name, its target
   names. Run and UI completion omit dependency-only workflows; validation and tree completion
-  retain them.
+  retain them. With `--file PATH`, completion reads target names and descriptions from that
+  file's YAML metadata without resolving actions, starting plugins, or discovering other files.
+  It offers no further positional values after a target, and never consumes stdin for
+  `--file -`. Remote target completion is not offered. File flags filter to `.yaml`/`.yml`,
+  and variable-file flags filter to `.json`/`.toml`.
 - `wuko install SOURCE` saves a standalone local, HTTPS, or `github:` workflow under the current
   directory’s `.wuko/workflows/`; `--global` selects `~/.wuko/workflows/`. The YAML `name` is used
   as the installed filename. An HTTPS repository URL with a root `manifest.json` is treated as a
