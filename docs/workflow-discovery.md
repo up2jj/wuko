@@ -147,9 +147,11 @@ affects display order, not which definition wins.
   marketplace package when available. Form actions are disabled when the selected target has no
   form. Validation, tree, and dry-run results use the exact selected path and target—including a
   shadowed source—and open in a scrollable viewer before returning to the same selection and
-  filter. The existing `u`, `e`, `p`, `s`, `m`, `r`, and Shift+Enter shortcuts remain available in
-  expanded help. Editing always triggers rediscovery; a successful reinstall does the same. A
-  refresh failure leaves the last valid picker snapshot available and displays a warning.
+  filter. Plugins used by an inspection are stopped before returning to the picker. The existing
+  `u`, `e`, `p`, `s`, `m`, `r`, and Shift+Enter shortcuts respect the selected workflow's available
+  actions; remote workflows cannot be edited. Editing always triggers rediscovery; a successful
+  reinstall does the same. A refresh failure leaves the last valid picker snapshot available and
+  displays a warning.
   A root workflow can use `return: {to: picker, outputs: {}}` to finish normally, run cleanup, and
   rediscover workflows before reopening the same filter and selection. Prerequisite returns do not
   navigate. A failure before that return exits normally with an error; cleanup or reporting errors
@@ -159,8 +161,9 @@ affects display order, not which definition wins.
   the next selection declares and starts its own.
   Shift+Enter prints `wuko run NAME [TARGET]` for an effective source or `wuko run --file PATH
   [TARGET]` for a shadowed source so the printed command remains unambiguous. Picker state and the
-  selected sort preference are global; successful runs are remembered, and entries for workflows
-  no longer discovered as directly invokable are pruned.
+  selected sort preference are global; successful terminal and form runs are remembered. History
+  for other projects is preserved. Entries are pruned when their local files no longer exist or
+  discovery finds that none of their targets are directly invokable.
 - Bare `wuko` in a non-interactive context prints directly invokable discovered sources as
   tab-separated rows, appending the target name and dependency summary when present. Target rows
   are emitted separately.

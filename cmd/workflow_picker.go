@@ -3,13 +3,16 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/up2jj/wuko/keyvalue"
 	"github.com/up2jj/wuko/tui"
@@ -92,9 +95,10 @@ func saveWorkflowPickerState(ctx context.Context, configDir string, state workfl
 }
 
 func (state *workflowPickerState) reconcile(sources []workflow.Source) bool {
-	available := make(map[string]struct{}, len(sources))
+	available := make(map[string]bool, len(sources))
 	for _, source := range sources {
-		available[workflowPickerSourcePath(source)] = struct{}{}
+		path := workflowPickerSourcePath(source)
+		available[path] = available[path] || source.Invokable
 	}
 	pinned, pinnedChanged := filterWorkflowPaths(state.Pinned, available)
 	recent, recentChanged := filterWorkflowPaths(state.Recent, available)
@@ -291,17 +295,36 @@ func normalizeWorkflowPaths(paths []string) []string {
 	return result
 }
 
-func filterWorkflowPaths(paths []string, available map[string]struct{}) ([]string, bool) {
+func filterWorkflowPaths(paths []string, available map[string]bool) ([]string, bool) {
 	normalized := normalizeWorkflowPaths(paths)
 	filtered := make([]string, 0, len(normalized))
 	for _, path := range normalized {
-		// GitHub locators belong to the `run --pick` picker, which shares this state; local
-		// discovery cannot see them, so their absence is not evidence they are stale.
-		if _, exists := available[path]; exists || strings.HasPrefix(path, "github:") {
+		if invokable, discovered := available[path]; discovered {
+			if invokable {
+				filtered = append(filtered, path)
+			}
+			continue
+		}
+		// History is global, but discovery only covers the current project's workflow
+		// roots. Preserve remote locators and local files outside that discovery scope.
+		if strings.HasPrefix(path, "github:") {
+			filtered = append(filtered, path)
+			continue
+		}
+		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
 			filtered = append(filtered, path)
 		}
 	}
 	return filtered, !slices.Equal(paths, filtered)
+}
+
+func resetWorkflowPickerPlugins(ctx context.Context, deps dependencies, runErr error) error {
+	if deps.plugins == nil {
+		return nil
+	}
+	resetCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	return deps.plugins.Reset(resetCtx, pluginStopReason(runErr))
 }
 
 func workflowPickerPath(path string) string {

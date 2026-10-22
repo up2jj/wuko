@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/up2jj/wuko/tui"
@@ -86,16 +85,11 @@ func runGitHubWorkflowPicker(command *cobra.Command, deps dependencies, args []s
 		if runErr != nil {
 			notice = "workflow failed: " + runErr.Error()
 		}
-		if deps.plugins != nil {
-			resetCtx, cancel := context.WithTimeout(context.WithoutCancel(command.Context()), 10*time.Second)
-			resetErr := deps.plugins.Reset(resetCtx, pluginStopReason(runErr))
-			cancel()
-			if resetErr != nil {
-				if notice != "" {
-					notice += "; "
-				}
-				notice += "plugin teardown failed: " + resetErr.Error()
+		if resetErr := resetWorkflowPickerPlugins(command.Context(), deps, runErr); resetErr != nil {
+			if notice != "" {
+				notice += "; "
 			}
+			notice += "plugin teardown failed: " + resetErr.Error()
 		}
 		return true
 	}
@@ -138,6 +132,12 @@ func runGitHubWorkflowPicker(command *cobra.Command, deps dependencies, args []s
 				variables: config.variables, variableFiles: config.variableFiles, environment: config.environment, reporters: config.reporters,
 				workflowFile: source.Path, remoteLocator: source.Locator, targetName: source.Target, returnObserver: observer,
 			})
+			if err == nil {
+				state.markRecent(workflowPickerSourcePath(source))
+				if saveErr := saveWorkflowPickerState(command.Context(), configDir, state); saveErr != nil {
+					fmt.Fprintf(command.ErrOrStderr(), "Warning: cannot save workflow picker state: %v\n", saveErr)
+				}
+			}
 			if resumeAfterReturn(observer, err) {
 				continue
 			}
@@ -147,6 +147,8 @@ func runGitHubWorkflowPicker(command *cobra.Command, deps dependencies, args []s
 			if err := deps.viewText(command.Context(), command.InOrStdin(), command.OutOrStdout(), tui.TextViewerConfig{Title: title, Content: content, Failed: failed}); err != nil && !errors.Is(err, context.Canceled) {
 				return err
 			}
+		case tui.SelectionEditor:
+			notice = "remote workflows cannot be edited in place"
 		case tui.SelectionTogglePin:
 			state.togglePinned(workflowPickerSourcePath(source))
 			if err := saveWorkflowPickerState(command.Context(), configDir, state); err != nil {

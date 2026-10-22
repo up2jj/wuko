@@ -35,6 +35,20 @@ func TestSelectionModelUsesSharedPickerStyles(t *testing.T) {
 	}
 }
 
+func TestSelectionModelIgnoresUnavailableEditorShortcut(t *testing.T) {
+	for _, actions := range [][]SelectionAction{
+		{{Label: "Run", Intent: SelectionPrimary}},
+		{{Label: "Edit", Intent: SelectionEditor, Disabled: true, DisabledReason: "read only"}},
+	} {
+		model := newSelectionModelWithConfig(SelectionPickerConfig{Title: "Workflows", InitialFilter: "build", Options: []Option{{Label: "build", Actions: actions}}})
+		updated, command := model.Update(tea.KeyPressMsg{Code: 'e'})
+		model = updated.(selectionModel)
+		if command != nil || model.done || model.cancelled || model.list.FilterValue() != "build" {
+			t.Fatalf("unavailable editor shortcut changed picker: done=%t, cancelled=%t, filter=%q", model.done, model.cancelled, model.list.FilterValue())
+		}
+	}
+}
+
 func TestMultiSelectionModelBulkActionsRespectFilterAndPickerStyle(t *testing.T) {
 	model := newMultiSelectionModel("Marketplace", []Option{{Label: "A", Description: "visible"}, {Label: "B", Description: "hidden"}, {Label: "C", Description: "visible"}})
 	model.list.SetFilterText("visible")

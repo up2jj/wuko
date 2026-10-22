@@ -93,6 +93,106 @@ func TestWorkflowPickerSortsPinnedAndRecentSources(t *testing.T) {
 	}
 }
 
+func TestWorkflowPickerPreservesOtherProjectHistory(t *testing.T) {
+	for _, invokable := range []bool{false, true} {
+		t.Run(fmt.Sprintf("invokable=%t", invokable), func(t *testing.T) {
+			other := writePickerWorkflow(t, t.TempDir(), "version: 1\nname: other\nsteps:\n  - return: {outputs: {}}\n")
+			root, configDir := t.TempDir(), t.TempDir()
+			dependency := writePickerWorkflow(t, root, "version: 1\nname: dependency\ninvokable: false\nsteps:\n  - return: {outputs: {}}\n")
+			if invokable {
+				writeWorkflowData(t, filepath.Join(filepath.Dir(dependency), "run.yaml"), "version: 1\nname: run\nsteps:\n  - return: {outputs: {}}\n")
+			}
+			missing := filepath.Join(root, "missing.yaml")
+			paths := []string{other, dependency, missing}
+			if err := saveWorkflowPickerState(t.Context(), configDir, workflowPickerState{Pinned: paths, Recent: paths, Sort: "recent"}); err != nil {
+				t.Fatal(err)
+			}
+			deps := pickerDependencies(root, step.NewRegistry(), func(context.Context, io.Reader, io.Writer, tui.SelectionPickerConfig) (tui.Selection, error) {
+				return tui.Selection{}, context.Canceled
+			})
+			deps.configDir = func() (string, error) { return configDir, nil }
+			command := newRootCmd(deps)
+			command.SetArgs(nil)
+			if err := command.ExecuteContext(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			state, err := loadWorkflowPickerState(t.Context(), configDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := []string{workflowPickerPath(other)}
+			if !slices.Equal(state.Pinned, want) || !slices.Equal(state.Recent, want) || state.Sort != "recent" {
+				t.Fatalf("picker state = %#v, want other project's history and recent sort", state)
+			}
+		})
+	}
+}
+
+func TestWorkflowPickerInspectionsIsolatePlugins(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		intent tui.SelectionIntent
+		failed bool
+	}{
+		{name: "validate", intent: tui.SelectionValidate},
+		{name: "tree", intent: tui.SelectionTree},
+		{name: "dry run", intent: tui.SelectionDryRun},
+		{name: "failed dry run", intent: tui.SelectionDryRun, failed: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root, cache := t.TempDir(), t.TempDir()
+			dir := filepath.Join(root, ".wuko", "workflows")
+			commandPluginBundle(t, filepath.Join(dir, "bundle"))
+			for _, name := range []string{"a", "b"} {
+				body := strings.Replace(string(pluginWorkflow("./bundle")), "    source: ./bundle", "    source: ./bundle\n    with: {mode: "+name+"}", 1)
+				if name == "a" && test.failed {
+					body = strings.Replace(body, "type: acme.uppercase", "type: missing_step", 1)
+				}
+				path := filepath.Join(dir, name+".yaml")
+				writeWorkflowData(t, path, body)
+				if err := executePluginCommand(t, pluginCommandDeps(t, root, cache, nil), "plugin", "lock", path); err != nil {
+					t.Fatal(err)
+				}
+			}
+			deps := pluginCommandDeps(t, root, cache, nil)
+			deps.isInteractive = func(io.Reader) bool { return true }
+			selections, views := 0, 0
+			deps.selectWorkflow = func(_ context.Context, _ io.Reader, _ io.Writer, config tui.SelectionPickerConfig) (tui.Selection, error) {
+				selections++
+				switch selections {
+				case 1:
+					return tui.Selection{Option: config.Options[0], Intent: test.intent, Filter: "a"}, nil
+				case 2:
+					if config.InitialFilter != "a" || !config.Options[0].Default {
+						t.Fatalf("restored picker config = %#v", config)
+					}
+					return tui.Selection{Option: config.Options[1], Intent: tui.SelectionValidate}, nil
+				case 3:
+					return tui.Selection{Option: config.Options[1], Intent: tui.SelectionPrimary}, nil
+				default:
+					t.Fatal("unexpected picker selection")
+					return tui.Selection{}, context.Canceled
+				}
+			}
+			deps.viewText = func(_ context.Context, _ io.Reader, _ io.Writer, config tui.TextViewerConfig) error {
+				views++
+				if config.Failed != (views == 1 && test.failed) {
+					t.Fatalf("inspection %d failed=%t: %s", views, config.Failed, config.Content)
+				}
+				return nil
+			}
+			command := newRootCmd(deps)
+			command.SetArgs(nil)
+			if err := command.ExecuteContext(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if selections != 3 || views != 2 {
+				t.Fatalf("selections=%d, views=%d, want 3 and 2", selections, views)
+			}
+		})
+	}
+}
+
 func TestWorkflowPickerStateCapsRecentHistory(t *testing.T) {
 	state := workflowPickerState{}
 	paths := make([]string, workflowPickerRecentMax+5)
@@ -509,7 +609,7 @@ func TestWorkflowPickerScheduledFailureKeepsSchedule(t *testing.T) {
 
 func TestWorkflowPickerReturnDestinationReopensAfterFormRun(t *testing.T) {
 	root := t.TempDir()
-	writePickerWorkflow(t, root, `version: 1
+	path := writePickerWorkflow(t, root, `version: 1
 name: form-return
 vars: {confirmed: false}
 form:
@@ -542,6 +642,13 @@ steps:
 	}
 	if selections != 2 {
 		t.Fatalf("selections = %d, want 2", selections)
+	}
+	state, err := loadWorkflowPickerState(t.Context(), filepath.Join(root, "config"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(state.Recent, []string{workflowPickerPath(path)}) {
+		t.Fatalf("recent = %#v, want successful form run", state.Recent)
 	}
 }
 

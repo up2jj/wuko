@@ -222,7 +222,10 @@ func newSelectionModelWithConfig(config SelectionPickerConfig) selectionModel {
 		if slices.ContainsFunc(options, func(option Option) bool { return option.URL != "" }) {
 			bindings = append(bindings, openMarketplace, reinstall)
 		}
-		return append(bindings, openEditor, togglePin, toggleSort, cancel)
+		if slices.ContainsFunc(options, func(option Option) bool { return selectionActionEnabled(option, SelectionEditor) }) {
+			bindings = append(bindings, openEditor)
+		}
+		return append(bindings, togglePin, toggleSort, cancel)
 	}
 	layoutSelectionList(&workflowList, appearance.styles, 80, 20)
 	return selectionModel{appearance: appearance, list: workflowList, width: 80, height: 20}
@@ -284,23 +287,28 @@ func (m selectionModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 					if key.String() == "r" && item.Option.URL == "" {
 						return m, nil
 					}
+					intent := SelectionPrimary
+					if key.String() == "shift+enter" {
+						intent = SelectionAlternate
+					} else if key.String() == "u" {
+						intent = SelectionUI
+					} else if key.String() == "m" {
+						intent = SelectionMarketplace
+					} else if key.String() == "r" {
+						intent = SelectionReinstall
+					} else if key.String() == "e" {
+						intent = SelectionEditor
+					} else if key.String() == "p" {
+						intent = SelectionTogglePin
+					} else if key.String() == "s" {
+						intent = SelectionToggleSort
+					}
+					if !selectionActionEnabled(item.Option, intent) {
+						return m, nil
+					}
 					m.selected = item.Option
 					m.filter = m.list.FilterValue()
-					if key.String() == "shift+enter" {
-						m.intent = SelectionAlternate
-					} else if key.String() == "u" {
-						m.intent = SelectionUI
-					} else if key.String() == "m" {
-						m.intent = SelectionMarketplace
-					} else if key.String() == "r" {
-						m.intent = SelectionReinstall
-					} else if key.String() == "e" {
-						m.intent = SelectionEditor
-					} else if key.String() == "p" {
-						m.intent = SelectionTogglePin
-					} else if key.String() == "s" {
-						m.intent = SelectionToggleSort
-					}
+					m.intent = intent
 					m.done = true
 					return m, tea.Quit
 				}
@@ -315,6 +323,12 @@ func (m selectionModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	m.list, command = m.list.Update(message)
 	layoutSelectionList(&m.list, m.styles, m.width, m.height)
 	return m, command
+}
+
+func selectionActionEnabled(option Option, intent SelectionIntent) bool {
+	return len(option.Actions) == 0 || slices.ContainsFunc(option.Actions, func(action SelectionAction) bool {
+		return action.Intent == intent && !action.Disabled
+	})
 }
 
 func (m selectionModel) View() tea.View {

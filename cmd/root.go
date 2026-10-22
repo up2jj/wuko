@@ -394,10 +394,11 @@ func runWorkflowPicker(command *cobra.Command, deps dependencies) error {
 	}
 	reporter := diagnosticsFor(command, deps, cwd)
 	diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseInvocation, Status: diagnostic.StatusStarted, Message: "workflow picker", Attributes: []diagnostic.Attribute{diagnostic.Attr("run_dir", cwd)}})
-	sources, discovered, err := discoverWorkflowPickerSources(cwd, home, config, reporter)
+	allSources, discovered, err := discoverWorkflowPickerSources(cwd, home, config, reporter)
 	if err != nil {
 		return err
 	}
+	sources := slices.DeleteFunc(slices.Clone(allSources), func(source workflow.Source) bool { return !source.Invokable })
 	if !deps.isInteractive(command.InOrStdin()) {
 		for _, source := range sources {
 			if err := writeWorkflowSource(command.OutOrStdout(), source); err != nil {
@@ -410,7 +411,7 @@ func runWorkflowPicker(command *cobra.Command, deps dependencies) error {
 	if stateErr != nil {
 		fmt.Fprintf(command.ErrOrStderr(), "Warning: cannot load workflow picker state: %v\n", stateErr)
 	}
-	if stateErr == nil && pickerState.reconcile(sources) {
+	if stateErr == nil && pickerState.reconcile(allSources) {
 		if err := saveWorkflowPickerState(command.Context(), config, pickerState); err != nil {
 			fmt.Fprintf(command.ErrOrStderr(), "Warning: cannot save workflow picker state: %v\n", err)
 		}
@@ -441,9 +442,9 @@ func runWorkflowPicker(command *cobra.Command, deps dependencies) error {
 			addNotice("refresh failed: " + refreshErr.Error())
 			return false
 		}
-		sources = refreshed
+		sources = slices.DeleteFunc(slices.Clone(refreshed), func(source workflow.Source) bool { return !source.Invokable })
 		discovered = refreshedCount
-		if pickerState.reconcile(sources) {
+		if pickerState.reconcile(refreshed) {
 			if saveErr := saveWorkflowPickerState(command.Context(), config, pickerState); saveErr != nil {
 				addNotice("cannot save picker state: " + saveErr.Error())
 			}
@@ -478,13 +479,8 @@ func runWorkflowPicker(command *cobra.Command, deps dependencies) error {
 		}
 		// The finished run keeps its plugin declarations and lifecycles to itself: the next
 		// selection declares its own sources, and a stateful plugin starts fresh for it.
-		if deps.plugins != nil {
-			resetCtx, cancel := context.WithTimeout(context.WithoutCancel(command.Context()), 10*time.Second)
-			resetErr := deps.plugins.Reset(resetCtx, pluginStopReason(runErr))
-			cancel()
-			if resetErr != nil {
-				addNotice("plugin teardown failed: " + resetErr.Error())
-			}
+		if resetErr := resetWorkflowPickerPlugins(command.Context(), deps, runErr); resetErr != nil {
+			addNotice("plugin teardown failed: " + resetErr.Error())
 		}
 		return !refresh(), nil
 	}
@@ -530,6 +526,12 @@ func runWorkflowPicker(command *cobra.Command, deps dependencies) error {
 			}
 			returnObserver := &returnDestinationObserver{}
 			runErr := runWorkflowUI(command, deps, nil, uiWorkflowConfig{workflowFile: source.Path, remoteLocator: source.Locator, targetName: source.Target, returnObserver: returnObserver})
+			if runErr == nil {
+				pickerState.markRecent(workflowPickerSourcePath(source))
+				if err := saveWorkflowPickerState(command.Context(), config, pickerState); err != nil {
+					fmt.Fprintf(command.ErrOrStderr(), "Warning: cannot save workflow picker state: %v\n", err)
+				}
+			}
 			resume, err := resumeAfterReturn(source, returnObserver, runErr)
 			if !resume {
 				return err
@@ -623,7 +625,6 @@ func discoverWorkflowPickerSources(cwd, home, config string, reporter diagnostic
 	}
 	discovered := len(sources)
 	diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusSucceeded, Duration: time.Since(discoveryStarted), Attributes: []diagnostic.Attribute{diagnostic.Attr("workflows", fmt.Sprint(discovered))}})
-	sources = slices.DeleteFunc(sources, func(source workflow.Source) bool { return !source.Invokable })
 	return sources, discovered, nil
 }
 
@@ -651,6 +652,9 @@ func runWorkflowPickerInspection(command *cobra.Command, deps dependencies, sour
 	default:
 		title = "Inspect — " + label
 		err = fmt.Errorf("unsupported workflow inspection")
+	}
+	if resetErr := resetWorkflowPickerPlugins(command.Context(), deps, err); resetErr != nil {
+		err = errors.Join(err, fmt.Errorf("plugin teardown failed: %w", resetErr))
 	}
 	if err != nil {
 		if output.Len() > 0 && !strings.HasSuffix(output.String(), "\n") {
