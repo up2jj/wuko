@@ -48,9 +48,10 @@ Discovery checks locations in this order:
 3. `~/.wuko/workflows/`.
 4. The platform user config directory under `wuko/workflows/`.
 
-The current directory and all of its parents are `local` locations. The home and platform config
-locations are `global` locations. Missing directories are skipped, and duplicate paths created by
-the directory inputs are visited only once.
+The current directory and its parents are `local` locations, except that `~/.wuko/workflows/`
+always remains `global`, including when the current directory is home or a project inside home.
+The platform config location is also `global`. Missing directories are skipped, and duplicate
+paths created by the directory inputs are visited only once.
 
 ## Files and names
 

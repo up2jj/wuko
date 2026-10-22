@@ -120,8 +120,8 @@ func TestListCommandWritesEmptyJSONArray(t *testing.T) {
 
 func TestListCommandAllIncludesShadowedTargets(t *testing.T) {
 	root := t.TempDir()
-	project := filepath.Join(root, "project")
 	home := filepath.Join(root, "home")
+	project := filepath.Join(home, "project")
 	paths := []string{
 		filepath.Join(project, ".wuko", "workflows", "deploy.yaml"),
 		filepath.Join(home, ".wuko", "workflows", "deploy.yaml"),
@@ -167,6 +167,13 @@ func TestListCommandAllIncludesShadowedTargets(t *testing.T) {
 				wantEffective := i%2 == 0
 				if entry.Effective == nil || *entry.Effective != wantEffective || entry.Path != paths[i%2] {
 					t.Fatalf("entry %d = %#v", i, entry)
+				}
+				wantScope := "global"
+				if wantEffective {
+					wantScope = "local"
+				}
+				if entry.Scope != wantScope {
+					t.Fatalf("entry %d scope = %q, want %q", i, entry.Scope, wantScope)
 				}
 				wantTarget := "production"
 				if i >= 2 {

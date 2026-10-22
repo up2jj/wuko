@@ -409,8 +409,10 @@ func discoveryLocations(cwd, homeDir, configDir string) []discoveryLocation {
 		}
 	}
 	localCount := len(dirs)
+	homeWorkflows := ""
 	if homeDir != "" {
-		dirs = append(dirs, filepath.Join(homeDir, ".wuko", "workflows"))
+		homeWorkflows = filepath.Join(homeDir, ".wuko", "workflows")
+		dirs = append(dirs, homeWorkflows)
 	}
 	if configDir != "" {
 		dirs = append(dirs, filepath.Join(configDir, "wuko", "workflows"))
@@ -425,7 +427,8 @@ func discoveryLocations(cwd, homeDir, configDir string) []discoveryLocation {
 		}
 		seen[clean] = struct{}{}
 		scope := "local"
-		if i >= localCount {
+		// The home root stays global when the ancestor walk reaches it first.
+		if i >= localCount || clean == homeWorkflows {
 			scope = "global"
 		}
 		locations = append(locations, discoveryLocation{dir: clean, scope: scope})

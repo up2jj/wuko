@@ -105,6 +105,72 @@ func TestDiscoverAllIncludesScopesAndEffectivePrecedence(t *testing.T) {
 	}
 }
 
+func TestDiscoverHomeWorkflowsKeepGlobalScope(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	project := filepath.Join(home, "project")
+	nested := filepath.Join(project, "nested")
+	config := filepath.Join(root, "config")
+	homeOnly := filepath.Join(home, ".wuko", "workflows", "home-only.yaml")
+	homeShared := filepath.Join(home, ".wuko", "workflows", "shared.yaml")
+	projectShared := filepath.Join(project, ".wuko", "workflows", "shared.yaml")
+	configOnly := filepath.Join(config, "wuko", "workflows", "config-only.yaml")
+	for _, dir := range []string{nested, filepath.Dir(homeOnly), filepath.Dir(projectShared), filepath.Dir(configOnly)} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, path := range []string{homeOnly, homeShared, projectShared, configOnly} {
+		writeWorkflow(t, path, "Scope regression")
+	}
+	for _, location := range []struct {
+		name      string
+		cwd       string
+		withLocal bool
+	}{
+		{name: "home", cwd: home},
+		{name: "project inside home", cwd: project, withLocal: true},
+		{name: "nested project directory", cwd: nested, withLocal: true},
+	} {
+		for _, discovery := range []struct {
+			name string
+			run  func(string, string, string) ([]Source, error)
+			all  bool
+		}{
+			{name: "effective", run: Discover},
+			{name: "all", run: DiscoverAll, all: true},
+			{name: "validation", run: DiscoverForValidation},
+		} {
+			t.Run(location.name+"/"+discovery.name, func(t *testing.T) {
+				t.Parallel()
+				sources, err := discovery.run(location.cwd, home, config)
+				if err != nil {
+					t.Fatal(err)
+				}
+				wantScopes := map[string]string{homeOnly: "global", configOnly: "global"}
+				if location.withLocal {
+					wantScopes[projectShared] = "local"
+				}
+				if !location.withLocal || discovery.all {
+					wantScopes[homeShared] = "global"
+				}
+				for _, source := range sources {
+					wantScope, found := wantScopes[source.Path]
+					wantEffective := source.Path != homeShared || !location.withLocal
+					if !found || source.Scope != wantScope || source.Effective != wantEffective {
+						t.Fatalf("source = %#v, want scope %q, effective %t, present %t", source, wantScope, wantEffective, found)
+					}
+					delete(wantScopes, source.Path)
+				}
+				if len(wantScopes) != 0 {
+					t.Fatalf("missing sources: %v", wantScopes)
+				}
+			})
+		}
+	}
+}
+
 func TestDiscoverIncludesWorkflowDependencies(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
