@@ -354,9 +354,9 @@ func openWorkflowEditor(getenv func(string) string) func(context.Context, io.Rea
 				spec = "vi"
 			}
 		}
-		parts := strings.Fields(spec)
-		if len(parts) == 0 {
-			return fmt.Errorf("editor command is empty")
+		parts, err := splitEditorCommand(spec)
+		if err != nil {
+			return fmt.Errorf("parsing editor command: %w", err)
 		}
 		args := append(slices.Clone(parts[1:]), path)
 		command := exec.CommandContext(ctx, parts[0], args...)

@@ -48,6 +48,10 @@ form, validate, show the tree, dry-run, print a reproducible command, edit, pin,
 manage marketplace installs. See [Workflow discovery](workflow-discovery.md) for search order,
 shadowing, and picker behavior.
 
+The editor action uses `$VISUAL`, then `$EDITOR`, with single or double quotes for paths or
+arguments containing spaces. For example: `VISUAL='"/path/to/My Editor" --wait'`. It launches
+the editor directly; environment variables and shell commands inside the value are not expanded.
+
 ## Run workflows
 
 ```sh
