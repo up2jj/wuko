@@ -73,7 +73,7 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 	if value, exists := request.Vars[r.config.Variable]; exists {
 		text, ok := value.(string)
 		if !ok {
-			return step.Result{}, fmt.Errorf("pre-supplied variable %q must be a string", r.config.Variable)
+			return step.Result{}, fmt.Errorf("pre-supplied variable %q must be a string; --var parses JSON, so quote text values, e.g. --var 'key=\"123\"'", r.config.Variable)
 		}
 		if err := r.validate(text); err != nil {
 			return step.Result{}, fmt.Errorf("pre-supplied variable %q: %w", r.config.Variable, err)

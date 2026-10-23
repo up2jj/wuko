@@ -10,6 +10,10 @@ to no selection. The display-only `tui_table` step does not publish a value and 
 table when input is non-interactive. `tui_form` publishes each field directly as a step output
 and never assigns workflow variables; its unattended inputs use explicit field `value` bindings.
 
+Text and password inputs require strings. Since `--var` parses JSON, pass numeric-looking text
+with JSON quotes, for example `--var 'code="123"'`. Shell quoting alone (`--var 'code=123'`)
+does not force a string. Prefer environment-backed secrets for password values.
+
 ## Contents
 
 - [`tui_form`](#tui_form)

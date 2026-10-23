@@ -72,6 +72,10 @@ wuko ui check                            # run through the local browser form
 Canceled runs, including graceful Ctrl+C cancellation, exit with status 130. Other failures
 exit with status 1.
 
+`--var` parses valid JSON values, so `--var code=123` is a number and `--var enabled=true` is
+a boolean. To keep numeric-looking or boolean-looking text as a string, preserve JSON quotes:
+`--var 'code="123"'` or `--var 'label="true"'`. Replace `code` or `label` with your variable name.
+
 Workflows can also come from a file, standard input, a URL, or a GitHub repository:
 
 ```sh
