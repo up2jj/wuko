@@ -1,0 +1,28 @@
+version: 1
+name: date
+description: Pick a maintenance window on a calendar or with day shortcuts
+
+steps:
+  - id: start
+    type: tui_date
+    with:
+      variable: start
+      message: Maintenance starts
+      value: "+1d"
+      min: "+1d"
+      max: "+60d"
+
+  - id: end
+    type: tui_date
+    with:
+      variable: end
+      message: Maintenance ends
+      value: "{{ .vars.start }}"
+      min: "{{ .vars.start }}"
+      max: "+60d"
+
+  - id: schedule
+    type: shell
+    with:
+      command: printf
+      args: ['Maintenance window: %s to %s\n', '{{ .vars.start }}', '{{ .vars.end }}']

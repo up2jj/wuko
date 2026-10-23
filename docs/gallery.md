@@ -11,6 +11,7 @@ workflow in [`docs/demos`](demos). Expand a demo to see its complete YAML, copy 
 - [Guided release](#guided-release)
 - [Validated prompts](#validated-prompts)
 - [Validated form](#validated-form)
+- [Pick a date](#pick-a-date)
 - [Pick files](#pick-files)
 - [Browse data as a table](#browse-data-as-a-table)
 - [Live dashboard](#live-dashboard)
@@ -228,6 +229,50 @@ steps:
 </details>
 
 Learn more: [`tui_form`](steps-interactive.md#tui_form).
+
+## Pick a date
+
+`tui_date` picks a day on a calendar or from typed input. Shortcuts such as `+14d` count from today, and bounds can depend on an earlier answer: the end date cannot fall before the chosen start.
+
+![Pick a date](assets/gallery/date.gif)
+
+<details>
+<summary>Workflow: <code>docs/demos/gallery/.wuko/workflows/date.yaml</code></summary>
+
+```yaml
+version: 1
+name: date
+description: Pick a maintenance window on a calendar or with day shortcuts
+
+steps:
+  - id: start
+    type: tui_date
+    with:
+      variable: start
+      message: Maintenance starts
+      value: "+1d"
+      min: "+1d"
+      max: "+60d"
+
+  - id: end
+    type: tui_date
+    with:
+      variable: end
+      message: Maintenance ends
+      value: "{{ .vars.start }}"
+      min: "{{ .vars.start }}"
+      max: "+60d"
+
+  - id: schedule
+    type: shell
+    with:
+      command: printf
+      args: ['Maintenance window: %s to %s\n', '{{ .vars.start }}', '{{ .vars.end }}']
+```
+
+</details>
+
+Learn more: [`tui_date`](steps-interactive.md#tui_date).
 
 ## Pick files
 
