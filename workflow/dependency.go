@@ -172,7 +172,11 @@ func stepDependencyReferences(steps []Step) []dependencyOutputReference {
 		for _, argument := range workflowStep.Uses.Args {
 			references = append(references, templateDependencyReferences(argument)...)
 		}
-		references = append(references, templateValueDependencyReferences(workflowStep.With)...)
+		configuration := workflowStep.With
+		if workflowStep.Type == "tui_form" {
+			configuration = formTemplateConfiguration(configuration)
+		}
+		references = append(references, templateValueDependencyReferences(configuration)...)
 		if workflowStep.Return != nil {
 			for _, output := range workflowStep.Return.Outputs {
 				references = append(references, expressionDependencyReferences(output)...)
@@ -200,6 +204,28 @@ func stepDependencyReferences(steps []Step) []dependencyOutputReference {
 			}
 			if variables, ok := workflowStep.With["variables"].(map[string]any); ok {
 				references = append(references, typedBindingDependencyReferences(variables)...)
+			}
+		case "tui_form":
+			fields, _ := workflowStep.With["fields"].([]any)
+			for _, item := range fields {
+				field, _ := item.(map[string]any)
+				if from, _ := field["from"].(string); from != "" {
+					parts := strings.Split(from, ".")
+					if len(parts) >= 3 && parts[0] == "dependencies" {
+						references = append(references, dependencyOutputReference{alias: parts[1], output: parts[2]})
+					}
+				}
+				if validation, ok := field["validation"].(map[string]any); ok {
+					source, _ := validation["expr"].(string)
+					references = append(references, expressionDependencyReferences(source)...)
+				}
+				for _, key := range []string{"value", "default"} {
+					if binding, ok := field[key].(map[string]any); ok {
+						if source, ok := binding["expr"].(string); ok {
+							references = append(references, expressionDependencyReferences(source)...)
+						}
+					}
+				}
 			}
 		case "tui_choice":
 			for _, name := range []string{"label_expr", "value_expr", "description_expr", "disabled_expr", "reason_expr", "default_expr"} {
@@ -230,6 +256,32 @@ func stepDependencyReferences(steps []Step) []dependencyOutputReference {
 		}
 	}
 	return references
+}
+
+// formTemplateConfiguration excludes literal Lua source from template dependency scanning.
+func formTemplateConfiguration(raw map[string]any) map[string]any {
+	fields, ok := raw["fields"].([]any)
+	if !ok {
+		return raw
+	}
+	result := maps.Clone(raw)
+	items := make([]any, len(fields))
+	for i, item := range fields {
+		field, ok := item.(map[string]any)
+		if !ok {
+			items[i] = item
+			continue
+		}
+		clone := maps.Clone(field)
+		if validation, ok := field["validation"].(map[string]any); ok {
+			rules := maps.Clone(validation)
+			delete(rules, "lua")
+			clone["validation"] = rules
+		}
+		items[i] = clone
+	}
+	result["fields"] = items
+	return result
 }
 
 func typedBindingDependencyReferences(bindings map[string]any) []dependencyOutputReference {

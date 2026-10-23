@@ -48,9 +48,11 @@ func redact(value any, redactValues bool) any {
 	case map[string]any:
 		result := make(map[string]any, len(typed))
 		interactionSensitive, _ := typed["sensitive"].(bool)
+		passwordField := typed["type"] == "password"
 		for key, item := range typed {
 			sensitive := redactValues || sensitiveKey(key) || strings.EqualFold(key, "env") || strings.EqualFold(key, "environment") ||
-				(interactionSensitive && strings.EqualFold(key, "send"))
+				(interactionSensitive && strings.EqualFold(key, "send")) ||
+				(passwordField && (key == "value" || key == "default"))
 			if sensitive && !isContainer(item) {
 				result[key] = Redacted
 				continue

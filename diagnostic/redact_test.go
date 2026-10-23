@@ -40,3 +40,19 @@ func TestRedactedJSONTruncatesAtUTF8Boundary(t *testing.T) {
 		t.Fatalf("RedactedJSON() length = %d, value suffix = %q", len(got), got[max(0, len(got)-20):])
 	}
 }
+
+func TestRedactedJSONMasksPasswordFieldInputs(t *testing.T) {
+	value := map[string]any{"fields": []any{
+		map[string]any{"id": "credential", "type": "password", "value": "private-value", "default": map[string]any{"expr": "private-expression"}},
+		map[string]any{"id": "name", "type": "text", "value": "visible"},
+	}}
+	got := RedactedJSON(value)
+	for _, secret := range []string{"private-value", "private-expression"} {
+		if strings.Contains(got, secret) {
+			t.Fatalf("exposed %q in %s", secret, got)
+		}
+	}
+	if !strings.Contains(got, "visible") {
+		t.Fatalf("redacted ordinary field: %s", got)
+	}
+}

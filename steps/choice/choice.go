@@ -126,6 +126,25 @@ func New(raw map[string]any) (step.Runner, error) {
 	return &Runner{config: config, programs: programs, staticRows: staticRows}, nil
 }
 
+// ResolveOptions resolves and validates the runner's choices without opening a prompt.
+// Composite interfaces use the same immutable choices as the standalone step.
+func (r *Runner) ResolveOptions(request step.Request) ([]tui.Option, error) {
+	resolved, err := r.resolveChoices(request)
+	if err != nil {
+		return nil, err
+	}
+	if len(resolved.markers) != 0 {
+		return nil, fmt.Errorf("choice sections and separators are not supported in a form field")
+	}
+	if err := ensureUnique(resolved.options); err != nil {
+		return nil, err
+	}
+	if err := r.validateOptions(resolved.options); err != nil {
+		return nil, err
+	}
+	return tuiOptions(resolved.options), nil
+}
+
 func compileExpressions(raw map[string]any, config Config) (expressionPrograms, error) {
 	type declaration struct {
 		name       string

@@ -7,6 +7,7 @@ import (
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/steps/choice"
 	"github.com/up2jj/wuko/steps/confirm"
+	formstep "github.com/up2jj/wuko/steps/form"
 	inputstep "github.com/up2jj/wuko/steps/input"
 	passwordstep "github.com/up2jj/wuko/steps/password"
 	pathstep "github.com/up2jj/wuko/steps/path"
@@ -16,7 +17,7 @@ import (
 func TestInteractiveStepRegistrationsUseTUIPrefix(t *testing.T) {
 	registry := step.NewRegistry()
 	for _, register := range []func(*step.Registry) error{
-		inputstep.Register, passwordstep.Register, choice.Register, pathstep.Register, review.Register, confirm.Register,
+		formstep.Register, inputstep.Register, passwordstep.Register, choice.Register, pathstep.Register, review.Register, confirm.Register,
 	} {
 		if err := register(registry); err != nil {
 			t.Fatal(err)
@@ -27,6 +28,7 @@ func TestInteractiveStepRegistrationsUseTUIPrefix(t *testing.T) {
 		name string
 		raw  map[string]any
 	}{
+		{name: "tui_form", raw: map[string]any{"title": "Settings", "fields": []any{map[string]any{"id": "name", "type": "text", "label": "Name"}}}},
 		{name: "tui_input", raw: map[string]any{"variable": "value", "message": "Value"}},
 		{name: "tui_password", raw: map[string]any{"variable": "value", "message": "Value"}},
 		{name: "tui_choice", raw: map[string]any{
@@ -45,7 +47,7 @@ func TestInteractiveStepRegistrationsUseTUIPrefix(t *testing.T) {
 		})
 	}
 
-	for _, legacyName := range []string{"input", "password", "choice", "path", "review", "confirm"} {
+	for _, legacyName := range []string{"form", "input", "password", "choice", "path", "review", "confirm"} {
 		t.Run("rejects_"+legacyName, func(t *testing.T) {
 			_, err := registry.Build(legacyName, nil)
 			if err == nil || !strings.Contains(err.Error(), "unknown step type") {

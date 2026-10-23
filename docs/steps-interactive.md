@@ -2,15 +2,17 @@
 
 [Back to the step reference](reference.md#steps)
 
-Interactive input steps write their result to `.steps.<id>` and to the variable named by
+Standalone input steps such as `tui_input` and `tui_choice` write their result to `.steps.<id>` and to the variable named by
 `with.variable`. Single-value steps expose `value`; multiple choice and path selections expose
 `values`. A value supplied with `--var` skips the prompt. Non-interactive runs, and interactive
 steps inside concurrent groups, require a supplied value unless an optional `tui_choice` resolves
 to no selection. The display-only `tui_table` step does not publish a value and prints a static
-table when input is non-interactive.
+table when input is non-interactive. `tui_form` publishes each field directly as a step output
+and never assigns workflow variables; its unattended inputs use explicit field `value` bindings.
 
 ## Contents
 
+- [`tui_form`](#tui_form)
 - [`tui_input`](#tui_input)
 - [`tui_password`](#tui_password)
 - [`tui_choice`](#tui_choice)
@@ -19,6 +21,197 @@ table when input is non-interactive.
 - [`tui_table`](#tui_table)
 - [`dashboard`](#dashboard)
 - [`tui_confirm`](#tui_confirm)
+
+## `tui_form`
+
+Collect several typed values in one editable, scrollable form. Every field has a unique literal
+`id` (letters, digits, and underscores, starting with a letter or underscore), a `type`, and a
+`label`. The form requires `title` and a nonempty `fields` list; form and field `description`
+are optional. Fields publish direct outputs such as `.steps.deployment.release_name`; the step
+never writes workflow variables or implicitly reads variables whose names match field IDs.
+
+```yaml
+- id: deployment
+  type: tui_form
+  with:
+    title: Deployment settings
+    description: Review the release before continuing
+    fields:
+      - id: release_name
+        type: text
+        label: Release name
+        default: next-release
+        required: true
+        validation: {min_length: 3, pattern: '^[a-z][a-z0-9-]+$'}
+      - id: notes
+        type: textarea
+        label: Release notes
+      - id: credential
+        type: password
+        label: API token
+      - id: notify
+        type: checkbox
+        label: Notify the team
+        default: true
+      - id: environment
+        type: select
+        label: Environment
+        required: true
+        default: staging
+        choices:
+          - {label: Staging, value: staging}
+          - {label: Production, value: production}
+      - id: regions
+        type: multiselect
+        label: Regions
+        default: [west]
+        min_selected: 1
+        choices:
+          - {label: West, value: west}
+          - {label: East, value: east}
+      - id: replicas
+        type: number
+        label: Replicas
+        default: 2
+        validation: {min: 1, max: 20, integer: true}
+      - id: manifest
+        type: path
+        label: Deployment manifest
+        root: .
+        kind: file
+        patterns: ["**/*.yaml"]
+```
+
+Use Tab and Shift+Tab to move, Enter to advance or activate Submit, and Ctrl+S to submit from
+any field. Enter inserts a newline in textarea and opens Browse for a path. Space toggles
+checkboxes; arrow keys navigate choices. Ctrl+X clears a select, multiselect, or path. The path browser
+uses the existing path shortcuts; Escape returns without changing the selection. Ctrl+C cancels
+the entire form. Validation runs on leaving a field and on submission, focuses the first invalid
+field, and retains edits. Values become outputs together only after successful submission.
+
+| Type | Output | Rules |
+| --- | --- | --- |
+| `text`, `textarea`, `password` | String | `validation.min_length`, `max_length`, `pattern`, `message` |
+| `checkbox` | Boolean | `required: true` requires it to be checked |
+| `select` | Selected scalar value, or null | Exactly one of `choices` or `from` |
+| `multiselect` | List of scalar values in selection order | `min_selected`, `max_selected`; required adds a minimum of one |
+| `number` | Integer or floating-point number, or null | `validation.min`, `max`, `integer`, `message`; finite numbers only |
+| `path` | Root-relative string, or list with `multiple: true` | Same `root`, `kind`, `patterns`, `show_hidden`, and containment rules as `tui_path` |
+
+`required` defaults to false. Unfilled optional text and single path fields produce `""`, checkbox
+produces false, multiple selections produce `[]`, and number/select produce null. Text length
+counts Unicode characters. Numeric input accepts decimal or exponent notation and preserves exact
+whole numbers within the workflow's integer range. Password fields mask both focused and blurred
+values, redact their configured inputs in diagnostics, and omit values from validation errors.
+Outputs are ordinary workflow data, so later steps should handle password outputs accordingly.
+
+Set `value` to supply an editable initial value explicitly. Use a literal of the field's type or
+an `{expr: ...}` binding for typed workflow data:
+
+```yaml
+fields:
+  - id: name
+    type: text
+    label: Name
+    value: {expr: vars.person}
+  - id: notify
+    type: checkbox
+    label: Notify
+    value: {expr: vars.notify}
+```
+
+`default` supplies an interactive initial value only when `value` is absent. It also supports
+literals, templates, and `{expr: ...}` bindings. Templates yield strings; use expressions for
+booleans, lists, numbers, or null. Interactive forms remain editable when every `value` is supplied.
+Unattended runs, including steps in concurrent groups, require an explicit `value` for **every**
+field, even optional ones. Defaults and matching workflow variables do not satisfy this requirement.
+To support `--var`, bind that variable explicitly with `value: {expr: vars.person}`.
+
+Choices may be static `{label, value, description, disabled, reason}` records or come from a
+workflow lookup such as `from: steps.fetch_regions.value`. Dynamic records support `label_field`,
+`value_field`, `description_field`, `disabled_field`, and `reason_field`; scalar items provide their
+own label and value. Dynamic mappings default to `label` and `value`. Choices and initial values
+are resolved once before display. Disabled choices require a reason and cannot be submitted.
+Choice values remain typed scalars. Use field `default` for initial selections; choice-level
+defaults, sections, separators, and reactive choice dependencies are unsupported.
+
+Custom validation is available on every widget through `validation.expr` or `validation.lua`.
+Choose one per field; it runs after built-in rules receive and normalize the value. Both must
+return a boolean. A false result displays `validation.message`, or "value does not satisfy
+validation" when no message is configured. Invalid results, execution failures, and cancellation
+never publish outputs. Runtime error details omit entered values, including password values.
+
+Expr validators receive the typed field `value`, a `fields` object keyed by every form field ID,
+and the normal workflow roots and helpers. `fields` contains the current edited draft, including
+fields declared later in the YAML:
+
+```yaml
+- id: replicas
+  type: number
+  label: Replicas
+  validation:
+    integer: true
+    expr: 'value != nil && fields.minimum_replicas != nil && value >= fields.minimum_replicas'
+    message: Use at least the minimum entered in the form
+```
+
+Lua validators are function expressions receiving `(value, context)`. The context contains copies
+of `vars`, `inputs`, `steps`, `env`, `dependencies`, `workflow`, `run`, provider values, and active
+workflow bindings. `context.fields` adds the current edited values of every form field. Workflow
+roots such as `context.vars` still reflect state before the form. Lua source is literal and is
+never processed as a Go template.
+
+```yaml
+- id: ticket
+  type: text
+  label: Operations ticket
+  validation:
+    lua: |
+      function(value)
+        return string.match(value, "^OPS%-%d+$") ~= nil
+      end
+    message: Use a ticket such as OPS-42
+```
+
+For example, compare a confirmation with the current password using either
+`expr: 'value == fields.password'` or this Lua predicate:
+
+```yaml
+validation:
+  lua: |
+    function(value, context)
+      return value == context.fields.password
+    end
+  message: Passwords must match
+```
+
+Draft values retain their types: numbers are parsed, checkboxes are booleans, and multiple
+selections are lists. An empty or temporarily unparseable number appears as null (`nil` in Lua),
+so guard optional numeric references before comparing them. Other fields retain their current
+values even when a content rule fails. Invalid inputs still fail their own validation and cannot
+be submitted. Each validator receives an independent copy of the draft.
+
+On leaving a field, its validator reads a fresh draft and any already-visible errors are
+refreshed. Submission and final output validation check every field against one complete draft,
+so field order and circular comparisons do not require staged submission. Draft values remain
+private to the form until the whole submission succeeds.
+
+For reuse, save functions in a Lua module beside the workflow or in its `lua/` directory, then use
+`validation: {lua: 'require("form_rules").ticket', message: 'Use a ticket such as OPS-42'}`.
+Module lookup follows the same rules as the [`lua` step](steps-automation.md#lua), including
+packaged-action directory ownership. Each check gets a fresh Lua state with the standard
+base/table/string/math/package libraries and a one-second execution limit. It has no `wuko`
+mutation API. Validators may run on blur, submission, and final output validation, so keep them
+free of side effects. Expr validators can also call registered workflow helper functions.
+
+A complete runnable example is [`examples/tui-form.yaml`](../examples/tui-form.yaml). For both
+custom validation modes and a reusable Lua module, see
+[`examples/tui-form-validation.yaml`](../examples/tui-form-validation.yaml).
+Watch the [terminal recording](assets/tui-form.gif) to see submission and validation.
+
+![Terminal form](assets/tui-form.png)
+
+![Form validation retains editable values](assets/tui-form-validation.png)
 
 ## `tui_input`
 

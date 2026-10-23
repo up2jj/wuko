@@ -1,0 +1,77 @@
+version: 1
+name: deployment-form
+description: Collect deployment settings in one terminal form
+
+steps:
+  - id: deployment
+    type: tui_form
+    with:
+      title: Deployment settings
+      description: Review the release before continuing
+      fields:
+        - id: release_name
+          type: text
+          label: Release name
+          default: next-release
+          required: true
+          validation:
+            min_length: 3
+            pattern: '^[a-z][a-z0-9-]+$'
+            message: Use at least three lowercase letters, numbers, or hyphens
+        - id: notes
+          type: textarea
+          label: Release notes
+          default: Improved deployment reliability
+        - id: credential
+          type: password
+          label: API token (optional)
+        - id: notify
+          type: checkbox
+          label: Notify the team
+          default: true
+        - id: environment
+          type: select
+          label: Environment
+          default: staging
+          required: true
+          choices:
+            - {label: Staging, value: staging}
+            - {label: Production, value: production, disabled: true, reason: Approval required}
+        - id: regions
+          type: multiselect
+          label: Regions
+          default: [west]
+          min_selected: 1
+          choices:
+            - {label: West, value: west}
+            - {label: East, value: east}
+        - id: replicas
+          type: number
+          label: Replicas
+          default: 2
+          validation: {min: 1, max: 20, integer: true}
+        - id: manifest
+          type: path
+          label: Deployment manifest (optional)
+          root: .
+          kind: file
+          patterns: ["**/*.yaml"]
+
+  - id: summary
+    type: shell
+    with:
+      command: printf
+      args:
+        - 'Release %s: %s, replicas=%s\n'
+        - '{{ .steps.deployment.release_name }}'
+        - '{{ .steps.deployment.environment }}'
+        - '{{ .steps.deployment.replicas }}'
+
+  - return:
+      outputs:
+        release_name: steps.deployment.release_name
+        environment: steps.deployment.environment
+        regions: steps.deployment.regions
+        replicas: steps.deployment.replicas
+        notify: steps.deployment.notify
+        manifest: steps.deployment.manifest

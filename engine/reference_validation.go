@@ -1098,9 +1098,13 @@ func (validator *referenceValidator) validateStepConfiguration(stepID, stepType 
 	// Dashboard owns nested workflow fragments and live templates. Static fields are checked here;
 	// callback workflows are checked by the runner against the captured parent state.
 	if stepType == "dashboard" {
-		return validator.validateDashboardTemplateValue("with", raw, scope, nil)
+		return validator.validateDeferredStepTemplateValue("with", raw, scope, stepType, nil)
 	}
-	if err := validator.validateTemplateValue("with", raw, scope, rawSourceStep(stepType)); err != nil {
+	if stepType == "tui_form" {
+		if err := validator.validateDeferredStepTemplateValue("with", raw, scope, stepType, nil); err != nil {
+			return err
+		}
+	} else if err := validator.validateTemplateValue("with", raw, scope, rawSourceStep(stepType)); err != nil {
 		return err
 	}
 	if err := validator.validateDeclaredReferences(stepType, raw, scope); err != nil {
@@ -1190,8 +1194,8 @@ func (validator *referenceValidator) validateDeclaredReferences(stepType string,
 	return nil
 }
 
-func (validator *referenceValidator) validateDashboardTemplateValue(label string, value any, scope *referenceScope, path []string) error {
-	if deferredStepTemplateSubtree("dashboard", path) {
+func (validator *referenceValidator) validateDeferredStepTemplateValue(label string, value any, scope *referenceScope, stepType string, path []string) error {
+	if deferredStepTemplateSubtree(stepType, path) {
 		last := path[len(path)-1]
 		if last != "template" && last != "confirm" {
 			return nil
@@ -1208,7 +1212,7 @@ func (validator *referenceValidator) validateDashboardTemplateValue(label string
 		return validator.validateTemplate(label, typed, scope)
 	case []any:
 		for index, item := range typed {
-			if err := validator.validateDashboardTemplateValue(fmt.Sprintf("%s item %d", label, index), item, scope, append(path, fmt.Sprint(index))); err != nil {
+			if err := validator.validateDeferredStepTemplateValue(fmt.Sprintf("%s item %d", label, index), item, scope, stepType, append(path, fmt.Sprint(index))); err != nil {
 				return err
 			}
 		}
@@ -1217,7 +1221,7 @@ func (validator *referenceValidator) validateDashboardTemplateValue(label string
 			return nil
 		}
 		for _, key := range slices.Sorted(maps.Keys(typed)) {
-			if err := validator.validateDashboardTemplateValue(label+" field "+key, typed[key], scope, append(path, key)); err != nil {
+			if err := validator.validateDeferredStepTemplateValue(label+" field "+key, typed[key], scope, stepType, append(path, key)); err != nil {
 				return err
 			}
 		}

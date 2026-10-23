@@ -18,6 +18,7 @@ Prompt for input or show rich terminal views. See also [browser forms](forms.md)
 
 | Step | Use it to | Examples |
 | --- | --- | --- |
+| `tui_form` | Collect multiple typed fields as named step outputs | [Interactive steps](steps-interactive.md#tui_form) |
 | `tui_input` | Collect editable text or typed JSON/lists | [Interactive steps](steps-interactive.md#tui_input) |
 | `tui_password` | Collect masked text | [Interactive steps](steps-interactive.md#tui_password) |
 | `tui_choice` | Select bounded static/dynamic values with defaults or select-all | [Interactive steps](steps-interactive.md#tui_choice) |

@@ -115,8 +115,8 @@ func rawSourceStep(stepType string) bool {
 }
 
 func validateStepTemplates(renderer *workflow.Renderer, value any, stepType string) error {
-	if stepType != "dashboard" {
-		// Only dashboard defers nested subtrees; skip path tracking on the hot path.
+	if stepType != "dashboard" && stepType != "tui_form" {
+		// Only composite screens defer nested subtrees; skip path tracking on the hot path.
 		return validateTemplates(renderer, value, rawSourceStep(stepType))
 	}
 	return walkStepTemplates(value, stepType, nil, func(text string) error {
@@ -125,7 +125,7 @@ func validateStepTemplates(renderer *workflow.Renderer, value any, stepType stri
 }
 
 func renderStepValue(renderer *workflow.Renderer, value any, data map[string]any, stepType string) (any, error) {
-	if stepType != "dashboard" {
+	if stepType != "dashboard" && stepType != "tui_form" {
 		return renderValue(renderer, value, data, rawSourceStep(stepType))
 	}
 	return transformStepTemplates(value, stepType, nil, func(text string) (string, error) {
@@ -138,6 +138,9 @@ func renderStepValue(renderer *workflow.Renderer, value any, data map[string]any
 // templates and confirmations receive live dashboard roots.
 func deferredStepTemplateSubtree(stepType string, path []string) bool {
 	if len(path) == 1 && path[0] == "source" && rawSourceStep(stepType) {
+		return true
+	}
+	if stepType == "tui_form" && len(path) == 4 && path[0] == "fields" && path[2] == "validation" && path[3] == "lua" {
 		return true
 	}
 	if stepType != "dashboard" || len(path) == 0 {

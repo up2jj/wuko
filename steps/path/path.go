@@ -69,6 +69,35 @@ func New(raw map[string]any) (step.Runner, error) {
 	return &Runner{config: config}, nil
 }
 
+// PreparePicker resolves the runner's root once. The returned validator accepts
+// supplied or edited values and preserves the standalone path rules.
+func (r *Runner) PreparePicker(runDir string) (tui.PathPickerConfig, func(any) (any, error), error) {
+	root, err := resolveRoot(runDir, r.config.Root)
+	if err != nil {
+		return tui.PathPickerConfig{}, nil, err
+	}
+	config := tui.PathPickerConfig{
+		Message: r.config.Message, Root: root, Kind: r.config.Kind,
+		Multiple: r.config.Multiple, Required: r.required(),
+		Patterns: r.config.Patterns, ShowHidden: r.config.ShowHidden,
+	}
+	validate := func(value any) (any, error) {
+		paths, err := r.supplied(value, root)
+		if err != nil {
+			return nil, err
+		}
+		if !r.config.Multiple {
+			return paths[0], nil
+		}
+		values := make([]any, len(paths))
+		for i, path := range paths {
+			values[i] = path
+		}
+		return values, nil
+	}
+	return config, validate, nil
+}
+
 func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, error) {
 	root, err := resolveRoot(request.RunDir, r.config.Root)
 	if err != nil {

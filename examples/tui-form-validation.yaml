@@ -1,0 +1,56 @@
+version: 1
+name: custom-form-validation
+description: Validate terminal fields with expressions and reusable Lua functions
+
+vars:
+  minimum_replicas: 2
+
+steps:
+  - id: settings
+    type: tui_form
+    with:
+      title: Custom validation
+      fields:
+        - id: name
+          type: text
+          label: Release name
+          value: autumn-release
+          validation:
+            expr: 'len(value) >= 3 && value startsWith fields.prefix'
+            message: Start with the prefix entered below and use at least three characters
+        - id: prefix
+          type: text
+          label: Required release prefix
+          value: autumn-
+          required: true
+        - id: ticket
+          type: text
+          label: Operations ticket
+          value: OPS-42
+          validation:
+            lua: 'require("form_rules").ticket'
+            message: Use a ticket such as OPS-42
+        - id: minimum_replicas
+          type: number
+          label: Minimum replicas
+          value: {expr: vars.minimum_replicas}
+          required: true
+          validation: {min: 1, integer: true}
+        - id: replicas
+          type: number
+          label: Replicas
+          value: 3
+          validation:
+            integer: true
+            lua: |
+              function(value, context)
+                return context.fields.minimum_replicas ~= nil
+                  and value >= context.fields.minimum_replicas
+              end
+            message: Use at least the minimum entered in the form
+
+  - return:
+      outputs:
+        name: steps.settings.name
+        ticket: steps.settings.ticket
+        replicas: steps.settings.replicas

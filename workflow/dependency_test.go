@@ -416,3 +416,59 @@ func TestTemplateDependencyReferencesHandlesArgumentLessInvocation(t *testing.T)
 		t.Fatalf("references = %#v", references)
 	}
 }
+
+func TestFormDependencyReferencesValidateNestedFields(t *testing.T) {
+	for _, key := range []string{"from", "value", "default"} {
+		t.Run(key, func(t *testing.T) {
+			field := map[string]any{"id": "selection", "type": "select", "label": "Selection"}
+			if key == "from" {
+				field[key] = "dependencies.build.missing"
+			} else {
+				field[key] = map[string]any{"expr": "dependencies.build.missing"}
+			}
+			root := dependencyDefinition("root", "/root.yaml")
+			root.DependsOn = map[string]string{"build": "build"}
+			root.Steps = []Step{{ID: "settings", Type: "tui_form", With: map[string]any{"title": "Settings", "fields": []any{field}}}}
+			build := dependencyDefinition("build", "/build.yaml")
+			_, err := ResolveDependencyPlan(t.Context(), root, func(context.Context, string) (*Definition, error) { return build, nil })
+			if err == nil || !strings.Contains(err.Error(), `does not declare output "missing"`) {
+				t.Fatalf("error = %v", err)
+			}
+		})
+	}
+}
+
+func TestFormDependencyReferencesToleratesMissingConfiguration(t *testing.T) {
+	for _, with := range []map[string]any{nil, {"title": "Settings"}, {"fields": "invalid"}} {
+		root := dependencyDefinition("root", "/root.yaml")
+		root.Steps = []Step{{ID: "settings", Type: "tui_form", With: with}}
+		if _, err := ResolveDependencyPlan(t.Context(), root, nil); err != nil {
+			t.Fatalf("with=%#v: %v", with, err)
+		}
+	}
+}
+
+func TestFormCustomValidationDependencyReferences(t *testing.T) {
+	for _, test := range []struct {
+		kind, source string
+		wantError    bool
+	}{
+		{"expr", "value == dependencies.build.missing", true},
+		{"lua", `function(value) return value ~= "{{ .dependencies.missing.output }}" end`, false},
+	} {
+		root := dependencyDefinition("root", "/root.yaml")
+		root.DependsOn = map[string]string{"build": "build"}
+		root.Steps = []Step{{ID: "settings", Type: "tui_form", With: map[string]any{"title": "Settings", "fields": []any{
+			map[string]any{"id": "name", "type": "text", "label": "Name", "validation": map[string]any{test.kind: test.source}},
+		}}}}
+		build := dependencyDefinition("build", "/build.yaml")
+		_, err := ResolveDependencyPlan(t.Context(), root, func(context.Context, string) (*Definition, error) { return build, nil })
+		if test.wantError {
+			if err == nil || !strings.Contains(err.Error(), `does not declare output "missing"`) {
+				t.Fatalf("error=%v", err)
+			}
+		} else if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
