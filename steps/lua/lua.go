@@ -24,6 +24,9 @@ import (
 	glua "github.com/yuin/gopher-lua"
 )
 
+// maxHTTPResponseSize matches the http step's response limit.
+const maxHTTPResponseSize = 10 << 20
+
 type Config struct {
 	File   string               `yaml:"file,omitempty"`
 	Source string               `yaml:"source,omitempty"`
@@ -569,6 +572,10 @@ func (r *runtime) httpRequest(state *glua.LState) int {
 	}
 	body := tableString(options, "body", "")
 	timeoutSeconds := tableNumber(options, "timeout", 30)
+	if !(timeoutSeconds > 0) {
+		state.RaiseError("http.request timeout must be a positive number of seconds")
+		return 0
+	}
 	request, err := http.NewRequestWithContext(state.Context(), method, url, strings.NewReader(body))
 	if err != nil {
 		state.RaiseError("creating HTTP request: %v", err)
@@ -583,9 +590,13 @@ func (r *runtime) httpRequest(state *glua.LState) int {
 		return 0
 	}
 	defer response.Body.Close()
-	data, err := io.ReadAll(response.Body)
+	data, err := io.ReadAll(io.LimitReader(response.Body, maxHTTPResponseSize+1))
 	if err != nil {
 		state.RaiseError("reading HTTP response: %v", err)
+		return 0
+	}
+	if len(data) > maxHTTPResponseSize {
+		state.RaiseError("HTTP response body exceeds %d bytes", maxHTTPResponseSize)
 		return 0
 	}
 	result := state.NewTable()

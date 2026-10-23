@@ -921,3 +921,38 @@ func TestLuaExecRunValidatesOutputConfiguration(t *testing.T) {
 		})
 	}
 }
+
+func TestLuaHTTPRequestRejectsUnsafeOptionsAndOversizedBodies(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		body   io.Reader
+		want   string
+	}{
+		{name: "zero timeout", source: `wuko.http.request({url = "https://example.test", timeout = 0})`, body: strings.NewReader(""), want: "timeout must be a positive"},
+		{name: "negative timeout", source: `wuko.http.request({url = "https://example.test", timeout = -1})`, body: strings.NewReader(""), want: "timeout must be a positive"},
+		{name: "oversized body", source: `wuko.http.request({url = "https://example.test"})`, body: io.LimitReader(zeroReader{}, maxHTTPResponseSize+1), want: "exceeds"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runner, err := New(map[string]any{"source": tt.source})
+			if err != nil {
+				t.Fatal(err)
+			}
+			runner.(*Runner).doHTTP = func(*http.Request, time.Duration) (*http.Response, error) {
+				return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(tt.body)}, nil
+			}
+			_, err = runner.Run(t.Context(), step.Request{StepID: "http", WorkflowName: "test", RunDir: t.TempDir(), Env: map[string]string{}, Stdout: io.Discard, Stderr: io.Discard})
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+type zeroReader struct{}
+
+func (zeroReader) Read(data []byte) (int, error) {
+	clear(data)
+	return len(data), nil
+}
