@@ -22,7 +22,10 @@ func newTreeCmd(deps dependencies) *cobra.Command {
 	command := &cobra.Command{
 		Use:   "tree [NAME|URL|GITHUB] [TARGET]",
 		Short: "Display a workflow as a tree",
-		Args:  cobra.MaximumNArgs(2),
+		Example: `  wuko tree check
+  wuko tree deploy staging
+  wuko tree --file ./deploy.yaml staging`,
+		Args: cobra.MaximumNArgs(2),
 		RunE: func(command *cobra.Command, args []string) error {
 			return renderWorkflowTree(command, deps, args, treeWorkflowConfig{
 				variables: variables, variableFiles: variableFiles, environment: environment, workflowFile: workflowFile,

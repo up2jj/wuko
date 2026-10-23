@@ -37,7 +37,11 @@ func newUICmd(deps dependencies) *cobra.Command {
 	command := &cobra.Command{
 		Use:   "ui [NAME|URL|GITHUB] [TARGET]",
 		Short: "Run a workflow through its local browser form",
-		Args:  cobra.MaximumNArgs(2),
+		Example: `  wuko ui check
+  wuko ui deploy staging
+  wuko ui --file ./deploy.yaml staging
+  wuko ui check --no-open`,
+		Args: cobra.MaximumNArgs(2),
 		RunE: func(command *cobra.Command, args []string) error {
 			return runWorkflowUI(command, deps, args, config)
 		},

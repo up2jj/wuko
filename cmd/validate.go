@@ -22,7 +22,12 @@ func newValidateCmd(deps dependencies) *cobra.Command {
 	command := &cobra.Command{
 		Use:   "validate [NAME] [TARGET]",
 		Short: "Validate one or all effective workflows",
-		Args:  cobra.MaximumNArgs(2),
+		Example: `  wuko validate
+  wuko validate check
+  wuko validate deploy staging
+  wuko validate --file ./deploy.yaml staging
+  wuko validate check --format json`,
+		Args: cobra.MaximumNArgs(2),
 		RunE: func(command *cobra.Command, args []string) error {
 			if workflowFile != "" && len(args) > 1 {
 				return fmt.Errorf("workflow selector and --file cannot be used together")

@@ -24,7 +24,13 @@ func newRunCmd(deps dependencies) *cobra.Command {
 	command := &cobra.Command{
 		Use:   "run [NAME|URL|GITHUB] [TARGET]",
 		Short: "Run a named or remotely located workflow",
-		Args:  cobra.MaximumNArgs(2),
+		Example: `  wuko run check
+  wuko run deploy staging
+  wuko run --file ./deploy.yaml staging
+  ./generate-workflow | wuko run --file -
+  wuko run check --dry-run
+  wuko run check --var 'code="123"'`,
+		Args: cobra.MaximumNArgs(2),
 		RunE: func(command *cobra.Command, args []string) error {
 			if handled, err := runWithResourceLimits(command, deps, args, config); handled {
 				return err
