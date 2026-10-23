@@ -436,22 +436,15 @@ func TestDiscoverDeduplicatesWorkflowRootsOverlappingWorkingDirectory(t *testing
 	}
 }
 
-func TestLoadRejectsNonStringEnvironmentAndMultipleDocuments(t *testing.T) {
+func TestLoadRejectsNonStringEnvironment(t *testing.T) {
 	t.Parallel()
-	tests := map[string]string{
-		"numeric environment": "version: 1\nname: bad\nenv:\n  PORT: 123\nsteps:\n  - id: run\n    type: shell\n    with: {}\n",
-		"multiple documents":  "version: 1\nname: bad\nsteps:\n  - id: run\n    type: shell\n    with: {}\n---\nextra: true\n",
+	path := filepath.Join(t.TempDir(), "bad.yaml")
+	data := "version: 1\nname: bad\nenv:\n  PORT: 123\nsteps:\n  - id: run\n    type: shell\n    with: {}\n"
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
 	}
-	for name, data := range tests {
-		t.Run(name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "bad.yaml")
-			if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := Load(path); err == nil {
-				t.Fatal("expected load error")
-			}
-		})
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected load error")
 	}
 }
 

@@ -21,8 +21,9 @@ func TestPluginSourceIncludesStartParameters(t *testing.T) {
 
 func TestPluginSourceRejectsInlineDigest(t *testing.T) {
 	var source PluginSource
-	if err := yaml.Unmarshal([]byte("source: https://example.com/plugin.json\nsha256: "+strings.Repeat("a", 64)+"\n"), &source); err == nil {
-		t.Fatal("expected migration error")
+	err := yaml.Unmarshal([]byte("source: https://example.com/plugin.json\nsha256: "+strings.Repeat("a", 64)+"\n"), &source)
+	if err == nil || !strings.Contains(err.Error(), "--migrate") {
+		t.Fatalf("error = %v, want a pointer to wuko plugin lock --migrate", err)
 	}
 }
 

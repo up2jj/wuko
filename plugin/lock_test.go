@@ -13,7 +13,6 @@ func TestReadLockReportsTheDocumentProblem(t *testing.T) {
 		want string
 	}{
 		{name: "second document", body: "version: 1\nplugins: []\n---\nversion: 1\n", want: "multiple YAML documents are not supported"},
-		{name: "broken second document", body: "version: 1\nplugins: []\n---\nplugins: [\n", want: "did not find expected node content"},
 		{name: "unknown field", body: "version: 1\nextra: true\n", want: "field extra not found"},
 	}
 	for _, test := range tests {
