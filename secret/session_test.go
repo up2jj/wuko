@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/up2jj/wuko/validation"
 )
@@ -415,5 +416,30 @@ func TestResolveOnNilSessionReportsUnavailableResolver(t *testing.T) {
 	}
 	if got := session.Redact("value"); got != "value" {
 		t.Fatalf("Redact = %q", got)
+	}
+}
+
+func TestRedactReplacesLongerSecretsBeforeTheirPrefixes(t *testing.T) {
+	values := map[string]string{"op://vault/short/value": "abcdef12", "op://vault/long/value": "abcdef12XYZ789"}
+	runner := &fakeRunner{run: func(command Command) (string, error) { return values[command.Args[len(command.Args)-1]], nil }}
+	session := NewSession(t.Context(), Options{Runner: runner, BaseEnv: map[string]string{}})
+	for _, reference := range []string{"op://vault/short/value", "op://vault/long/value"} {
+		if _, err := session.Resolve(reference); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := session.Redact("token=abcdef12XYZ789"); got != "token=<redacted>" {
+		t.Fatalf("Redact = %q, leaked part of the longer secret", got)
+	}
+}
+
+func TestExecRunnerReturnsWhenBackgroundChildHoldsOutput(t *testing.T) {
+	started := time.Now()
+	output, err := execRunner{}.Run(t.Context(), Command{Name: "/bin/sh", Args: []string{"-c", "sleep 30 & echo ready"}, Capture: true})
+	if elapsed := time.Since(started); elapsed > 10*time.Second {
+		t.Fatalf("runner returned after %s", elapsed)
+	}
+	if err != nil || output != "ready\n" {
+		t.Fatalf("output = %q, err = %v", output, err)
 	}
 }

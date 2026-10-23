@@ -2,6 +2,7 @@ package secret
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -14,6 +15,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/up2jj/wuko/validation"
 )
@@ -23,6 +25,8 @@ import (
 // number would rewrite unrelated output and make failures unreadable. Values below this length are
 // kept out of the redaction set.
 const minRedactableLength = 6
+
+const commandWaitDelay = 2 * time.Second
 
 // Runner executes provider commands. It is exported to make provider behavior testable without
 // installing password-manager CLIs.
@@ -458,21 +462,24 @@ func (session *Session) Redact(value string) string {
 	session.mu.Lock()
 	values := append([]string(nil), session.resolved...)
 	session.mu.Unlock()
+	// Replace longest patterns first: a secret that prefixes a longer one would otherwise be
+	// replaced inside it and leave the longer secret's remainder in the text.
+	patterns := make([]string, 0, len(values)*4)
 	for _, secret := range values {
 		if secret == "" {
 			continue
 		}
-		value = strings.ReplaceAll(value, secret, "<redacted>")
-		if encoded, err := json.Marshal(secret); err == nil && len(encoded) >= 2 {
-			value = strings.ReplaceAll(value, string(encoded[1:len(encoded)-1]), "<redacted>")
+		patterns = append(patterns, secret)
+		if encoded, err := json.Marshal(secret); err == nil && len(encoded) > 2 {
+			patterns = append(patterns, string(encoded[1:len(encoded)-1]))
 		}
 		// A secret placed in a URL reaches errors percent-encoded: net/http reports the full
 		// request URL, so a token with +, / or = would otherwise pass through unmatched.
-		for _, escaped := range []string{url.QueryEscape(secret), url.PathEscape(secret)} {
-			if escaped != secret {
-				value = strings.ReplaceAll(value, escaped, "<redacted>")
-			}
-		}
+		patterns = append(patterns, url.QueryEscape(secret), url.PathEscape(secret))
+	}
+	slices.SortFunc(patterns, func(a, b string) int { return cmp.Or(len(b)-len(a), strings.Compare(a, b)) })
+	for _, pattern := range slices.Compact(patterns) {
+		value = strings.ReplaceAll(value, pattern, "<redacted>")
 	}
 	return value
 }
@@ -545,6 +552,9 @@ func (execRunner) Run(ctx context.Context, command Command) (string, error) {
 	}
 	cmd := exec.CommandContext(ctx, command.Name, command.Args...)
 	cmd.Env = environmentList(command.Env)
+	// A fallback script may leave a background child holding the output pipe; without a delay
+	// Wait would block until that child exits even though the command itself has finished.
+	cmd.WaitDelay = commandWaitDelay
 	cmd.Stdin = command.Stdin
 	cmd.Stderr = command.Stderr
 	var stdout bytes.Buffer
@@ -553,7 +563,7 @@ func (execRunner) Run(ctx context.Context, command Command) (string, error) {
 	} else {
 		cmd.Stdout = command.Stdout
 	}
-	if err := cmd.Run(); err != nil {
+	if err := cmd.Run(); err != nil && !errors.Is(err, exec.ErrWaitDelay) {
 		return "", fmt.Errorf("running %s: %w", command.Name, err)
 	}
 	return stdout.String(), nil
