@@ -164,3 +164,46 @@ func testGitOutput(dir string, args ...string) string {
 	}
 	return string(output)
 }
+
+func TestWorktreeStopsItsServicesBeforeRemovingTheWorktree(t *testing.T) {
+	root, _ := initWorktreeRepository(t)
+	stopped := make(chan struct{})
+	var stoppedBeforeNextStep bool
+	registry := newTestRegistry(t, map[string]step.Builder{
+		"serve": func(map[string]any) (step.Runner, error) {
+			return runnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
+				return step.Result{}, request.Services.StartService(request.StepID, "process", step.ServiceOptions{}, func(ctx context.Context) error {
+					<-ctx.Done()
+					close(stopped)
+					return nil
+				})
+			}), nil
+		},
+		"check": func(map[string]any) (step.Runner, error) {
+			return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+				select {
+				case <-stopped:
+					stoppedBeforeNextStep = true
+				default:
+				}
+				return step.Result{}, nil
+			}), nil
+		},
+	})
+	definition := &workflow.Definition{
+		Version: 1, Name: "worktree-service", Dir: root,
+		Steps: []workflow.Step{
+			{ID: "isolated", Worktree: &workflow.WorktreeGroup{
+				Revision: "HEAD", Path: "auto",
+				Steps: []workflow.Step{{ID: "server", Type: "serve", With: map[string]any{}}},
+			}},
+			{ID: "after", Type: "check", With: map[string]any{}},
+		},
+	}
+	if _, err := New(registry).Run(t.Context(), definition, Options{RunDir: root}); err != nil {
+		t.Fatal(err)
+	}
+	if !stoppedBeforeNextStep {
+		t.Fatal("a service started in the worktree block outlived the block")
+	}
+}

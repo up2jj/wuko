@@ -57,6 +57,9 @@ func TestObserveControlRejectsInvalidDeclarations(t *testing.T) {
 			{ID: "observe", Observe: &ObserveGroup{Source: validSource, Steps: validBody}},
 			{ID: "other", Type: "shell", With: map[string]any{"command": "true"}},
 		}}}, "main sequential"},
+		{"worktree", Step{ID: "isolated", Worktree: &WorktreeGroup{Revision: "HEAD", Path: "auto", Steps: []Step{
+			{ID: "observe", Observe: &ObserveGroup{Source: validSource, Steps: validBody}},
+		}}}, "inside worktree blocks"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

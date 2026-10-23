@@ -156,7 +156,21 @@ func (e *Engine) executeWorktreeBlock(ctx context.Context, definition *workflow.
 		outcome.err = fmt.Errorf("workflow %q worktree %q: validating scoped steps: %w", definition.Name, block.ID, err)
 		return outcome
 	}
-	mainErr := e.executeSequence(ctx, definition, block.Worktree.Steps, childOptions, state, &bodyStats, 1, bodyTotal)
+	// Services started in the block run in the worktree, so they are joined here, before
+	// the cleanup below removes it, rather than by the run-wide supervisor.
+	serviceScope := newBackgroundSupervisor(ctx)
+	defer serviceScope.cancel(errBackgroundStopped)
+	childOptions.services = serviceScope
+	mainErr := e.executeSequence(serviceScope.context(), definition, block.Worktree.Steps, childOptions, state, &bodyStats, 1, bodyTotal)
+	serviceScope.seal()
+	if mainErr != nil || state.didReturn {
+		serviceScope.stop(errBackgroundStopped)
+	}
+	serviceErr := serviceScope.wait()
+	if serviceScope.endedScope() && cancellationOnly(mainErr) {
+		mainErr = nil
+	}
+	mainErr = joinBackgroundError(mainErr, serviceErr)
 	returning := state.returning
 	state.returning = false
 	cleanupErrors := e.executeCleanupScope(context.WithoutCancel(ctx), definition, childOptions.defers, nil, childOptions, state, &bodyStats, mainErr, bodyStats.Steps, bodyMainTotal+1, bodyTotal)

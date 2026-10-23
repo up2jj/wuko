@@ -188,7 +188,7 @@ it is never mutated from a background goroutine.
 
 Version 1 permits the control only in the main sequential workflow flow, including transparent
 `env` and `working_directory` scopes. It is rejected in actions, lifecycle hooks, cleanup,
-executors, concurrent or fan-out bodies, and nested observers. Use workflow `finally` for shutdown
+executors, worktree blocks, concurrent or fan-out bodies, and nested observers. Use workflow `finally` for shutdown
 work; it runs after the observer body and its child processes have stopped.
 
 ## Try and catch

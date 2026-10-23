@@ -610,6 +610,10 @@ func validateWorktreeEntry(workflowStep Step, scope stepScope, allowActions bool
 	if workflowStep.Type != "" || !workflowStep.Uses.Empty() || workflowStep.Require != nil || workflowStep.WorkingDirectory != "" || workflowStep.Steps != nil || workflowStep.Executor != nil || workflowStep.Finally != nil || workflowStep.Defer != nil || workflowStep.IsConditionalBlock() || workflowStep.Concurrent != nil || workflowStep.Batch != nil || workflowStep.Foreach != nil || workflowStep.Matrix != nil || workflowStep.Observe != nil || workflowStep.Return != nil || workflowStep.SHA256 != "" || workflowStep.If != "" || workflowStep.Attempt != nil || workflowStep.With != nil {
 		return fmt.Errorf("worktree block cannot be combined with other step fields")
 	}
+	// The worktree is removed when the block ends, so nothing in it may outlive the block.
+	if containsObserve(workflowStep.Worktree.Steps) {
+		return fmt.Errorf("observe is not supported inside worktree blocks")
+	}
 	return validateSteps(workflowStep.Worktree.Steps, allowActions, scope, seen)
 }
 
