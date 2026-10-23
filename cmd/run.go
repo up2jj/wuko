@@ -221,10 +221,10 @@ func runWorkflow(command *cobra.Command, deps dependencies, args []string, confi
 	}()
 	diagnostic.Emit(reporters.Diagnostic, diagnostic.Event{Phase: diagnostic.PhaseInvocation, Status: diagnostic.StatusStarted, Message: "run workflow", Attributes: []diagnostic.Attribute{diagnostic.Attr("run_dir", cwd), diagnostic.Attr("variable_files", fmt.Sprint(len(config.variableFiles))), diagnostic.Attr("variables", fmt.Sprint(len(config.variables))), diagnostic.Attr("environment", fmt.Sprint(len(config.environment)))}})
 	if config.workflowFile != "" && len(args) > 1 {
-		return fmt.Errorf("workflow selector and --file cannot be used together")
+		return fmt.Errorf("with --file, pass at most one positional TARGET; usage: wuko run --file PATH [TARGET]")
 	}
 	if config.workflowFile == "" && len(args) == 0 {
-		return fmt.Errorf("workflow name or --file is required")
+		return fmt.Errorf("workflow name or --file is required; use wuko list to find workflows")
 	}
 	vars, err := parseVars(command.Context(), cwd, config.variableFiles, config.variables)
 	if err != nil {

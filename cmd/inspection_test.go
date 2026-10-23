@@ -149,7 +149,7 @@ func TestInspectionCommandsReportInputAndTargetErrors(t *testing.T) {
 			name, input, want string
 			args              []string
 		}{
-			{name: "selector conflict", input: "unread", args: []string{"--file", "-", "deploy", "staging"}, want: "workflow selector and --file cannot be used together"},
+			{name: "selector conflict", input: "unread", args: []string{"--file", "-", "deploy", "staging"}, want: "with --file, pass at most one positional TARGET; usage: wuko " + name + " --file PATH [TARGET]"},
 			{name: "malformed stdin", input: "version: [", args: []string{"--file", "-"}, want: "yaml: line"},
 			{name: "missing file", args: []string{"--file", "missing.yaml"}, want: "missing.yaml"},
 			{name: "stdin read error", args: []string{"--file", "-"}, want: "reading workflow from stdin"},

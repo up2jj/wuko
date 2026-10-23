@@ -60,10 +60,10 @@ func renderWorkflowTree(command *cobra.Command, deps dependencies, args []string
 	reporter := diagnosticsFor(command, deps, cwd)
 	diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseInvocation, Status: diagnostic.StatusStarted, Message: "render workflow tree", Attributes: []diagnostic.Attribute{diagnostic.Attr("run_dir", cwd)}})
 	if config.workflowFile != "" && len(args) > 1 {
-		return fmt.Errorf("workflow selector and --file cannot be used together")
+		return fmt.Errorf("with --file, pass at most one positional TARGET; usage: wuko tree --file PATH [TARGET]")
 	}
 	if config.workflowFile == "" && len(args) == 0 {
-		return fmt.Errorf("workflow name or --file is required")
+		return fmt.Errorf("workflow name or --file is required; use wuko list to find workflows")
 	}
 	vars, err := parseVars(command.Context(), cwd, config.variableFiles, config.variables)
 	if err != nil {

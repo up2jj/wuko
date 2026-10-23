@@ -30,7 +30,7 @@ func newValidateCmd(deps dependencies) *cobra.Command {
 		Args: cobra.MaximumNArgs(2),
 		RunE: func(command *cobra.Command, args []string) error {
 			if workflowFile != "" && len(args) > 1 {
-				return fmt.Errorf("workflow selector and --file cannot be used together")
+				return fmt.Errorf("with --file, pass at most one positional TARGET; usage: wuko validate --file PATH [TARGET]")
 			}
 			if format != "text" && format != "json" {
 				return fmt.Errorf("format must be text or json")
