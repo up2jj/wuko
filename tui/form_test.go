@@ -151,6 +151,94 @@ func TestFormDisabledOptionsCannotBeSelected(t *testing.T) {
 	}
 }
 
+func TestFormChoiceNavigationSkipsDisabledOptions(t *testing.T) {
+	for _, kind := range []string{"select", "multiselect"} {
+		t.Run(kind, func(t *testing.T) {
+			var value any = "west"
+			if kind == "multiselect" {
+				value = []any{"west"}
+			}
+			m := newFormModel(FormConfig{Fields: []FormField{{ID: "region", Type: kind, Value: value, Options: []Option{
+				{Label: "Blocked first", Value: "first", Disabled: true, DisabledReason: "Unavailable"},
+				{Label: "West", Value: "west"},
+				{Label: "Blocked middle", Value: "middle", Disabled: true, DisabledReason: "Unavailable"},
+				{Label: "East", Value: "east"},
+				{Label: "Blocked last", Value: "last", Disabled: true, DisabledReason: "Unavailable"},
+			}}}})
+			if m.widgets[0].cursor != 1 {
+				t.Fatalf("initial cursor = %d, want 1", m.widgets[0].cursor)
+			}
+			for _, move := range []struct {
+				key  rune
+				want int
+			}{{tea.KeyDown, 3}, {tea.KeyDown, 3}, {tea.KeyHome, 1}, {tea.KeyUp, 1}, {tea.KeyEnd, 3}, {tea.KeyUp, 1}} {
+				m = formKey(m, move.key)
+				if m.widgets[0].cursor != move.want {
+					t.Fatalf("after key %d: cursor = %d, want %d", move.key, m.widgets[0].cursor, move.want)
+				}
+			}
+			if !reflect.DeepEqual(m.fieldValue(0), value) {
+				t.Fatalf("navigation changed value to %#v", m.fieldValue(0))
+			}
+			if kind == "multiselect" {
+				m = formKey(m, tea.KeySpace) // Remove West before choosing East.
+			}
+			m = formKey(m, tea.KeyDown)
+			if kind == "multiselect" {
+				m = formKey(m, tea.KeySpace)
+				value = []any{"east"}
+			} else {
+				value = "east"
+			}
+			m = formKey(m, 's', tea.ModCtrl)
+			if !m.done || !reflect.DeepEqual(m.result["region"], value) {
+				t.Fatalf("done = %v, result = %#v, want %#v", m.done, m.result, value)
+			}
+		})
+	}
+}
+
+func TestFormChoiceNavigationWithoutEnabledOptions(t *testing.T) {
+	for _, kind := range []string{"select", "multiselect"} {
+		for _, empty := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/empty=%t", kind, empty), func(t *testing.T) {
+				options := []Option{{Label: "Blocked", Value: "blocked", Disabled: true, DisabledReason: "Unavailable"}}
+				if empty {
+					options = nil
+				}
+				m := newFormModel(FormConfig{Fields: []FormField{{ID: "region", Type: kind, Options: options}}})
+				for _, key := range []rune{tea.KeyDown, tea.KeyUp, tea.KeyHome, tea.KeyEnd, tea.KeySpace} {
+					m = formKey(m, key)
+					if m.widgets[0].cursor != -1 || m.fieldValue(0) != nil {
+						t.Fatalf("after key %d: cursor = %d, value = %#v", key, m.widgets[0].cursor, m.fieldValue(0))
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestFormSelectKeepsInvalidInitialValueUntilEdited(t *testing.T) {
+	m := newFormModel(FormConfig{Fields: []FormField{{ID: "region", Type: "select", Value: "blocked", Options: []Option{
+		{Label: "Blocked", Value: "blocked", Disabled: true, DisabledReason: "Unavailable"},
+		{Label: "West", Value: "west"},
+	}, Validate: func(value any, _ map[string]any) (any, error) {
+		if value == "blocked" {
+			return nil, errors.New("unavailable choice")
+		}
+		return value, nil
+	}}}})
+	m = formKey(m, 's', tea.ModCtrl)
+	if m.done || m.widgets[0].err == "" || m.widgets[0].cursor != -1 {
+		t.Fatalf("invalid initial value was lost: done = %v, cursor = %d, error = %q", m.done, m.widgets[0].cursor, m.widgets[0].err)
+	}
+	m = formKey(m, tea.KeyDown)
+	m = formKey(m, 's', tea.ModCtrl)
+	if !m.done || m.result["region"] != "west" {
+		t.Fatalf("result = %#v", m.result)
+	}
+}
+
 func TestFormPathBrowserReturnsToParent(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "a.yaml"), []byte("a"), 0o600); err != nil {

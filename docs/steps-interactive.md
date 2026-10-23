@@ -88,7 +88,8 @@ never writes workflow variables or implicitly reads variables whose names match 
 
 Use Tab and Shift+Tab to move, Enter to advance or activate Submit, and Ctrl+S to submit from
 any field. Enter inserts a newline in textarea and opens Browse for a path. Space toggles
-checkboxes; arrow keys navigate choices. Ctrl+X clears a select, multiselect, or path. The path browser
+checkboxes; arrow keys navigate enabled choices, skipping disabled options. Home and End move to
+the first and last enabled choices. Ctrl+X clears a select, multiselect, or path. The path browser
 uses the existing path shortcuts; Escape returns without changing the selection. Ctrl+C cancels
 the entire form. Validation runs on leaving a field and on submission, focuses the first invalid
 field, and retains edits. Values become outputs together only after successful submission.

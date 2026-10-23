@@ -88,12 +88,14 @@ func newFormModel(config FormConfig) formModel {
 		case "select":
 			widget.cursor = -1
 			for i, option := range field.Options {
-				if FormValuesEqual(option.Value, field.Value) {
+				if !option.Disabled && FormValuesEqual(option.Value, field.Value) {
 					widget.cursor = i
 					break
 				}
 			}
 		case "multiselect":
+			widget.cursor = -1
+			widget.moveChoice(0, 1)
 			values := reflect.ValueOf(field.Value)
 			if values.IsValid() && (values.Kind() == reflect.Slice || values.Kind() == reflect.Array) {
 				for i := 0; i < values.Len(); i++ {
@@ -211,13 +213,17 @@ func (m formModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		case "select", "multiselect":
 			switch key.String() {
 			case "up":
-				widget.cursor = max(widget.cursor-1, 0)
+				if widget.cursor < 0 {
+					widget.moveChoice(0, 1)
+				} else {
+					widget.moveChoice(widget.cursor-1, -1)
+				}
 			case "down":
-				widget.cursor = min(widget.cursor+1, len(widget.field.Options)-1)
+				widget.moveChoice(widget.cursor+1, 1)
 			case "home":
-				widget.cursor = 0
+				widget.moveChoice(0, 1)
 			case "end":
-				widget.cursor = len(widget.field.Options) - 1
+				widget.moveChoice(len(widget.field.Options)-1, -1)
 			case "ctrl+x":
 				if widget.field.Type == "select" {
 					widget.cursor = -1
@@ -266,6 +272,17 @@ func (m formModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		widget.area, command = widget.area.Update(message)
 	}
 	return m, command
+}
+
+// moveChoice keeps the cursor on an enabled option, retaining its position
+// when there are no more choices in the requested direction.
+func (widget *formWidget) moveChoice(start, direction int) {
+	for index := start; index >= 0 && index < len(widget.field.Options); index += direction {
+		if !widget.field.Options[index].Disabled {
+			widget.cursor = index
+			return
+		}
+	}
 }
 
 func (m *formModel) fieldValue(index int) any {
