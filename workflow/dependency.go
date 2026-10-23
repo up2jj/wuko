@@ -363,15 +363,17 @@ func templateDependencyReferences(value string) []dependencyOutputReference {
 	if !strings.Contains(value, "{{") {
 		return nil
 	}
-	tmpl, err := newTemplate("dependency-reference", nil).Parse(value)
-	if err != nil {
+	// Only the field references matter here, so function names are not resolved: a template
+	// piping a dependency output through any helper must still be found.
+	tree := parse.New("dependency-reference")
+	tree.Mode = parse.SkipFuncCheck
+	trees := make(map[string]*parse.Tree)
+	if _, err := tree.Parse(value, "", "", trees); err != nil {
 		return nil
 	}
 	var references []dependencyOutputReference
-	for _, item := range tmpl.Templates() {
-		if item.Tree != nil {
-			collectTemplateDependencyReferences(item.Tree.Root, &references)
-		}
+	for _, name := range slices.Sorted(maps.Keys(trees)) {
+		collectTemplateDependencyReferences(trees[name].Root, &references)
 	}
 	return references
 }

@@ -417,6 +417,20 @@ func TestTemplateDependencyReferencesHandlesArgumentLessInvocation(t *testing.T)
 	}
 }
 
+func TestTemplateDependencyReferencesFindsReferencesPipedThroughFunctions(t *testing.T) {
+	t.Parallel()
+	for _, value := range []string{
+		`{{ .dependencies.build.version | trim }}`,
+		`{{ upper (index .dependencies.build.version 0) }}`,
+		`{{ if eq .dependencies.build.version "1" }}x{{ end }}`,
+	} {
+		references := templateDependencyReferences(value)
+		if len(references) != 1 || references[0].alias != "build" || references[0].output != "version" {
+			t.Errorf("templateDependencyReferences(%q) = %#v", value, references)
+		}
+	}
+}
+
 func TestFormDependencyReferencesValidateNestedFields(t *testing.T) {
 	for _, key := range []string{"from", "value", "default"} {
 		t.Run(key, func(t *testing.T) {
