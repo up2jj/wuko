@@ -144,10 +144,14 @@ type Observer struct {
 	// patterns is config.Patterns pre-split into components, the form both matching and watch
 	// registration consume. Splitting once keeps the two in step and keeps the per-event path
 	// out of the allocator.
-	patterns  [][]string
-	ignore    [][]string
-	selected  map[string]bool
-	source    Source
+	patterns [][]string
+	ignore   [][]string
+	selected map[string]bool
+	source   Source
+	// queued holds create events synthesized for entries found inside a newly created
+	// directory: they usually exist before the directory is watched, so the source never
+	// reports them.
+	queued    []fsnotify.Event
 	closeOnce sync.Once
 	closeErr  error
 }
@@ -177,7 +181,7 @@ func Open(ctx context.Context, runDir string, config Config, factory Factory) (*
 	}
 	patterns := patternComponents(config.Patterns)
 	ignore := patternComponents(config.Ignore)
-	if err := addTree(ctx, source, patterns, ignore, root, root, false); err != nil {
+	if err := addTree(ctx, source, patterns, ignore, root, root, false, nil); err != nil {
 		_ = source.Close()
 		return nil, fmt.Errorf("registering watch root %s: %w", root, err)
 	}
@@ -192,6 +196,14 @@ func (observer *Observer) Root() string { return observer.root }
 
 func (observer *Observer) Next(ctx context.Context) (Change, error) {
 	for {
+		if len(observer.queued) > 0 {
+			event := observer.queued[0]
+			observer.queued = observer.queued[1:]
+			if change, ok := observer.change(event); ok {
+				return change, nil
+			}
+			continue
+		}
 		select {
 		case <-ctx.Done():
 			return Change{}, ctx.Err()
@@ -200,27 +212,45 @@ func (observer *Observer) Next(ctx context.Context) (Change, error) {
 				return Change{}, fmt.Errorf("filesystem watch event channel closed unexpectedly")
 			}
 			if event.Has(fsnotify.Create) {
-				if err := addCreatedTree(ctx, observer.source, observer.patterns, observer.ignore, observer.root, event.Name); err != nil {
+				queue := func(name string) {
+					observer.queued = append(observer.queued, fsnotify.Event{Name: name, Op: fsnotify.Create})
+				}
+				if err := addCreatedTree(ctx, observer.source, observer.patterns, observer.ignore, observer.root, event.Name, queue); err != nil {
 					return Change{}, fmt.Errorf("registering created directory %s: %w", event.Name, err)
 				}
 			}
-			relative, matches := matchingPath(observer.root, observer.patterns, observer.ignore, event.Name)
-			if !matches {
-				continue
-			}
-			operations := matchingOperations(event, observer.selected)
-			if len(operations) > 0 {
-				return Change{Path: relative, Operations: operations}, nil
+			if change, ok := observer.change(event); ok {
+				return change, nil
 			}
 		case watchErr, ok := <-observer.source.ErrorChannel():
 			if !ok {
 				return Change{}, fmt.Errorf("filesystem watch error channel closed unexpectedly")
+			}
+			if errors.Is(watchErr, fsnotify.ErrEventOverflow) {
+				// The kernel dropped events, possibly including creates of directories that
+				// now go unwatched. Re-register the tree rather than ending the watch.
+				if err := addTree(ctx, observer.source, observer.patterns, observer.ignore, observer.root, observer.root, true, nil); err != nil {
+					return Change{}, fmt.Errorf("re-registering watch root after event overflow: %w", err)
+				}
+				continue
 			}
 			if watchErr != nil {
 				return Change{}, fmt.Errorf("watching filesystem: %w", watchErr)
 			}
 		}
 	}
+}
+
+func (observer *Observer) change(event fsnotify.Event) (Change, bool) {
+	relative, matches := matchingPath(observer.root, observer.patterns, observer.ignore, event.Name)
+	if !matches {
+		return Change{}, false
+	}
+	operations := matchingOperations(event, observer.selected)
+	if len(operations) == 0 {
+		return Change{}, false
+	}
+	return Change{Path: relative, Operations: operations}, true
 }
 
 func (observer *Observer) Close() error {
@@ -406,7 +436,9 @@ func matchComponents(pattern, name []string) bool {
 	return err == nil && matched && matchComponents(pattern[1:], name[1:])
 }
 
-func addTree(ctx context.Context, source Source, patterns, ignore [][]string, root, start string, allowMissing bool) error {
+// addTree watches every reachable directory under start. found, when set, receives each entry
+// below start, so a caller can report entries that predate the watch.
+func addTree(ctx context.Context, source Source, patterns, ignore [][]string, root, start string, allowMissing bool, found func(string)) error {
 	err := filepath.WalkDir(start, func(current string, entry fs.DirEntry, walkErr error) error {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -416,6 +448,9 @@ func addTree(ctx context.Context, source Source, patterns, ignore [][]string, ro
 				return fs.SkipDir
 			}
 			return walkErr
+		}
+		if found != nil && current != start {
+			found(current)
 		}
 		if entry.Type()&os.ModeSymlink != 0 || !entry.IsDir() {
 			return nil
@@ -437,7 +472,7 @@ func addTree(ctx context.Context, source Source, patterns, ignore [][]string, ro
 	return err
 }
 
-func addCreatedTree(ctx context.Context, source Source, patterns, ignore [][]string, root, created string) error {
+func addCreatedTree(ctx context.Context, source Source, patterns, ignore [][]string, root, created string, found func(string)) error {
 	// Checked before the Lstat: a build writing into a pruned directory creates faster than
 	// it is worth stat-ing, and nothing under one can be registered anyway.
 	if !descendable(patterns, ignore, root, created) {
@@ -453,7 +488,7 @@ func addCreatedTree(ctx context.Context, source Source, patterns, ignore [][]str
 	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return nil
 	}
-	return addTree(ctx, source, patterns, ignore, root, created, true)
+	return addTree(ctx, source, patterns, ignore, root, created, true, found)
 }
 
 func resolveRoot(runDir, root string) (string, error) {

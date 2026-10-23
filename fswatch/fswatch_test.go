@@ -215,3 +215,51 @@ func TestNormalizeValidatesIgnorePatterns(t *testing.T) {
 		t.Fatalf("valid ignore patterns rejected: %v", err)
 	}
 }
+
+func TestNextReportsFilesThatPredateACreatedDirectoryWatch(t *testing.T) {
+	root := t.TempDir()
+	source := newRecordingSource()
+	observer, err := Open(t.Context(), root, Config{Root: root, Patterns: []string{"**/*.go"}, Events: EventNames()}, func() (Source, error) { return source, nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer observer.Close()
+	// The subtree is complete before the create event arrives, as with git checkout or unzip.
+	if err := os.MkdirAll(filepath.Join(root, "gen", "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "gen", "sub", "x.go"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	go func() { source.events <- fsnotify.Event{Name: filepath.Join(root, "gen"), Op: fsnotify.Create} }()
+
+	change, err := observer.Next(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if change.Path != "gen/sub/x.go" || !slices.Equal(change.Operations, []string{EventCreate}) {
+		t.Fatalf("change = %#v", change)
+	}
+}
+
+func TestNextSurvivesEventOverflow(t *testing.T) {
+	root := t.TempDir()
+	source := newRecordingSource()
+	observer, err := Open(t.Context(), root, Config{Root: root, Patterns: []string{"*.txt"}, Events: EventNames()}, func() (Source, error) { return source, nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer observer.Close()
+	go func() {
+		source.errors <- fsnotify.ErrEventOverflow
+		source.events <- fsnotify.Event{Name: filepath.Join(root, "a.txt"), Op: fsnotify.Write}
+	}()
+
+	change, err := observer.Next(t.Context())
+	if err != nil {
+		t.Fatalf("overflow ended the watch: %v", err)
+	}
+	if change.Path != "a.txt" {
+		t.Fatalf("change = %#v", change)
+	}
+}
