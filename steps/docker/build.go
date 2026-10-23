@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -24,10 +25,24 @@ func defaultCommandRunner(ctx context.Context, name string, args []string, stdou
 	if err != nil {
 		return err
 	}
-	command := exec.CommandContext(ctx, executable, args...)
-	command.Stdout = stdout
-	command.Stderr = stderr
-	return command.Run()
+	// process.Run signals the whole process group and bounds the wait for inherited pipes, so
+	// cancellation also stops helpers such as docker-buildx instead of waiting for the build.
+	_, err = process.Run(ctx, process.Options{
+		Command: executable, Args: args, Env: hostEnvironment(),
+		Stdout: stdout, Stderr: stderr,
+		StdoutPolicy: process.OutputInherit, StderrPolicy: process.OutputInherit,
+	})
+	return err
+}
+
+func hostEnvironment() map[string]string {
+	values := make(map[string]string)
+	for _, entry := range os.Environ() {
+		if key, value, ok := strings.Cut(entry, "="); ok && key != "" {
+			values[key] = value
+		}
+	}
+	return values
 }
 
 func (r *Runner) runBuild(ctx context.Context, request step.Request) (step.Result, error) {
