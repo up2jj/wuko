@@ -202,6 +202,7 @@ targets from that file, for example after `wuko run --file ./deploy.yaml `, with
 workflow or starting plugins. Stdin (`--file -`) and remote workflows do not offer target
 completion. `--file` filters filenames to YAML; `--var-file` filters to JSON and TOML.
 `validate --format` and `validate --reporter` suggest their supported values.
+`--var` and `--env` do not suggest filenames; enter a `key=value` override directly.
 `wuko ui` suggests only invokable workflows and targets with an effective browser form,
 including forms inherited from the workflow declaration.
 `wuko uninstall` and `wuko plugin uninstall` suggest names from their local installation

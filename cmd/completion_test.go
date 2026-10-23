@@ -118,6 +118,22 @@ func TestWorkflowFlagCompletionFiltersFileExtensions(t *testing.T) {
 	}
 }
 
+func TestWorkflowOverrideCompletionDisablesFilenames(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{"run", "tree", "validate", "ui", "install", "uninstall"} {
+		for _, flag := range []string{"--var", "--env"} {
+			for _, value := range []string{"", "CO", "CODE=", "CODE=123"} {
+				t.Run(name+"/"+flag+"/"+value, func(t *testing.T) {
+					t.Parallel()
+					if got := executeCompletion(t, t.TempDir(), []string{name, flag, value}); got != ":4\n" {
+						t.Fatalf("completion = %q, want no candidates and no filename completion", got)
+					}
+				})
+			}
+		}
+	}
+}
+
 func TestValidateFlagCompletionSuggestsSupportedValues(t *testing.T) {
 	t.Parallel()
 	for _, test := range []struct {

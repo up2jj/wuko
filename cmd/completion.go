@@ -34,15 +34,22 @@ func newCompletionCmd() *cobra.Command {
 	}
 }
 
-func registerWorkflowFileCompletions(command *cobra.Command) {
+func registerWorkflowFlagCompletions(command *cobra.Command) {
 	if command.Flags().Lookup("file") != nil {
 		_ = command.MarkFlagFilename("file", "yaml", "yml")
 	}
 	if command.Flags().Lookup("var-file") != nil {
 		_ = command.MarkFlagFilename("var-file", "json", "toml")
 	}
+	for _, name := range []string{"var", "env"} {
+		if command.Flags().Lookup(name) != nil {
+			_ = command.RegisterFlagCompletionFunc(name, func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
+				return nil, cobra.ShellCompDirectiveNoFileComp
+			})
+		}
+	}
 	for _, child := range command.Commands() {
-		registerWorkflowFileCompletions(child)
+		registerWorkflowFlagCompletions(child)
 	}
 }
 

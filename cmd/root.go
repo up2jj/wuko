@@ -337,7 +337,7 @@ func newRootCmd(deps dependencies) *cobra.Command {
 		return []string{envload.LoaderAuto, envload.LoaderNone, envload.LoaderMise, envload.LoaderASDF, envload.LoaderDirenv}, cobra.ShellCompDirectiveNoFileComp
 	})
 	root.AddCommand(newRunCmd(deps), newUICmd(deps), newListCmd(deps), newTreeCmd(deps), newValidateCmd(deps), newAgentCmd(deps), newGitCmd(deps), newInstallCmd(deps), newUninstallCmd(deps), newMarketplaceCmd(deps), newPluginCmd(deps), newCompletionCmd(), newScriptSDKCmd(deps))
-	registerWorkflowFileCompletions(root)
+	registerWorkflowFlagCompletions(root)
 	wrapPluginTeardown(root, deps.plugins)
 	return root
 }
