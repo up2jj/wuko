@@ -65,6 +65,9 @@ wuko run check --reporter plain --reporter github
 wuko ui check                            # run through the local browser form
 ```
 
+Canceled runs, including graceful Ctrl+C cancellation, exit with status 130. Other failures
+exit with status 1.
+
 Workflows can also come from a file, standard input, a URL, or a GitHub repository:
 
 ```sh

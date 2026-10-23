@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -24,9 +25,16 @@ func main() {
 		if !cmd.WriteError(os.Stderr, err) {
 			fmt.Fprintln(os.Stderr, "wuko:", err)
 		}
-		if errors.Is(err, cmd.ErrForcedShutdown) {
-			os.Exit(130)
-		}
-		os.Exit(1)
+		os.Exit(exitCode(err))
 	}
+}
+
+func exitCode(err error) int {
+	if err == nil {
+		return 0
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, cmd.ErrForcedShutdown) {
+		return 130
+	}
+	return 1
 }
