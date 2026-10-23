@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -23,7 +24,7 @@ func TestTempCreatesAndCleansManagedResources(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.kind, func(t *testing.T) {
-			runner := newRunner(t, map[string]any{"kind": test.kind, "pattern": "wuko-temp-test-*"})
+			runner := steptest.BuildAs[*Runner](t, New, map[string]any{"kind": test.kind, "pattern": "wuko-temp-test-*"})
 			result, err := runner.Run(t.Context(), step.Request{})
 			if err != nil {
 				t.Fatal(err)
@@ -90,7 +91,7 @@ func TestTempCreatesAndCleansManagedResources(t *testing.T) {
 func TestTempUsesDefaultPattern(t *testing.T) {
 	for _, kind := range []string{kindFile, kindFIFO} {
 		t.Run(kind, func(t *testing.T) {
-			runner := newRunner(t, map[string]any{"kind": kind})
+			runner := steptest.BuildAs[*Runner](t, New, map[string]any{"kind": kind})
 			result, err := runner.Run(t.Context(), step.Request{})
 			if err != nil {
 				t.Fatal(err)
@@ -127,7 +128,7 @@ func TestTempRejectsInvalidConfiguration(t *testing.T) {
 }
 
 func TestTempValidatesRenderedConfiguration(t *testing.T) {
-	runner := newRunner(t, map[string]any{"kind": "{{ .vars.kind }}", "pattern": "{{ .vars.pattern }}"})
+	runner := steptest.BuildAs[*Runner](t, New, map[string]any{"kind": "{{ .vars.kind }}", "pattern": "{{ .vars.pattern }}"})
 	if _, err := runner.Run(t.Context(), step.Request{}); err == nil || !strings.Contains(err.Error(), "kind must be") {
 		t.Fatalf("unresolved configuration error = %v", err)
 	}
@@ -136,7 +137,7 @@ func TestTempValidatesRenderedConfiguration(t *testing.T) {
 func TestTempHonorsCancellation(t *testing.T) {
 	for _, kind := range []string{kindDirectory, kindFIFO} {
 		t.Run(kind, func(t *testing.T) {
-			runner := newRunner(t, map[string]any{"kind": kind})
+			runner := steptest.BuildAs[*Runner](t, New, map[string]any{"kind": kind})
 			ctx, cancel := context.WithCancel(t.Context())
 			cancel()
 			if _, err := runner.Run(ctx, step.Request{}); !errors.Is(err, context.Canceled) {
@@ -147,7 +148,7 @@ func TestTempHonorsCancellation(t *testing.T) {
 }
 
 func TestTempFileCleanupRefusesReplacementDirectory(t *testing.T) {
-	runner := newRunner(t, map[string]any{"kind": kindFile})
+	runner := steptest.BuildAs[*Runner](t, New, map[string]any{"kind": kindFile})
 	result, err := runner.Run(t.Context(), step.Request{})
 	if err != nil {
 		t.Fatal(err)
@@ -195,7 +196,7 @@ func TestTempFIFOCleanupRefusesReplacement(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			runner := newRunner(t, map[string]any{"kind": kindFIFO})
+			runner := steptest.BuildAs[*Runner](t, New, map[string]any{"kind": kindFIFO})
 			result, err := runner.Run(t.Context(), step.Request{})
 			if err != nil {
 				t.Fatal(err)
@@ -219,7 +220,7 @@ func TestTempFIFOCleanupRefusesReplacement(t *testing.T) {
 }
 
 func TestTempFIFOCleanupRemovesEmptyDirectoryWhenPipeIsMissing(t *testing.T) {
-	runner := newRunner(t, map[string]any{"kind": kindFIFO})
+	runner := steptest.BuildAs[*Runner](t, New, map[string]any{"kind": kindFIFO})
 	result, err := runner.Run(t.Context(), step.Request{})
 	if err != nil {
 		t.Fatal(err)
@@ -252,7 +253,7 @@ func TestCreateFIFORollsBackPartialCreation(t *testing.T) {
 }
 
 func TestTempCleanupRejectsMalformedResult(t *testing.T) {
-	runner := newRunner(t, map[string]any{"kind": kindFile})
+	runner := steptest.BuildAs[*Runner](t, New, map[string]any{"kind": kindFile})
 	for _, result := range []step.Result{
 		{},
 		{Outputs: map[string]any{"path": "/tmp/example"}},
@@ -263,15 +264,6 @@ func TestTempCleanupRejectsMalformedResult(t *testing.T) {
 			t.Fatalf("Cleanup(%#v) succeeded", result)
 		}
 	}
-}
-
-func newRunner(t *testing.T, raw map[string]any) *Runner {
-	t.Helper()
-	runner, err := New(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return runner.(*Runner)
 }
 
 var _ step.Cleaner = (*Runner)(nil)

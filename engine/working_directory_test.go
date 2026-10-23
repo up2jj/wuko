@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
 )
@@ -43,7 +44,7 @@ func (runner scopedValidationRunner) Run(_ context.Context, request step.Request
 
 func workingDirectoryRegistry(t *testing.T) *step.Registry {
 	t.Helper()
-	registry := newTestRegistry(t, nil)
+	registry := steptest.Registry(t, nil)
 	if err := registry.Register("capture_dir", func(raw map[string]any) (step.Runner, error) {
 		variable, _ := raw["variable"].(string)
 		return directoryCaptureRunner{variable: variable}, nil
@@ -96,7 +97,7 @@ func TestWorkingDirectoryValidatorReceivesScopedRunDirectory(t *testing.T) {
 	if err := os.Mkdir(project, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	registry := newTestRegistry(t, nil)
+	registry := steptest.Registry(t, nil)
 	if err := registry.Register("validate_dir", func(map[string]any) (step.Runner, error) {
 		return scopedValidationRunner{expected: project}, nil
 	}); err != nil {
@@ -122,9 +123,9 @@ func TestWorkingDirectoryDefersValidationUntilRuntimeDirectoryIsKnown(t *testing
 	if err := os.Mkdir(project, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	registry := newTestRegistry(t, nil)
+	registry := steptest.Registry(t, nil)
 	if err := registry.Register("select_dir", func(map[string]any) (step.Runner, error) {
-		return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+		return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) {
 			return step.Result{Outputs: map[string]any{"dir": project}}, nil
 		}), nil
 	}); err != nil {
@@ -258,7 +259,7 @@ func TestWorkingDirectoryComposesWithForeachAndCompositeActions(t *testing.T) {
 
 func TestWorkingDirectoryDryRunDisplaysNestedPlan(t *testing.T) {
 	t.Parallel()
-	definition := testDefinition(t, "dry", workflow.Step{
+	definition := steptest.Definition(t, "dry", workflow.Step{
 		WorkingDirectory: "{{ .vars.dir }}", Steps: []workflow.Step{{ID: "run", Type: "capture_dir", With: map[string]any{}}},
 	})
 	definition.Vars = map[string]any{"dir": "/unused"}

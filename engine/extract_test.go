@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/engine"
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 	extractstep "github.com/up2jj/wuko/steps/extract"
 	"github.com/up2jj/wuko/workflow"
@@ -21,7 +22,7 @@ func (r extractFixtureRunner) Run(context.Context, step.Request) (step.Result, e
 
 func TestExtractRendersConfigurationAndCommitsTypedResults(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, map[string]step.Builder{
+	registry := steptest.Registry(t, map[string]step.Builder{
 		"extract_fixture": func(raw map[string]any) (step.Runner, error) {
 			return extractFixtureRunner{outputs: raw}, nil
 		},
@@ -29,7 +30,7 @@ func TestExtractRendersConfigurationAndCommitsTypedResults(t *testing.T) {
 	if err := extractstep.Register(registry); err != nil {
 		t.Fatal(err)
 	}
-	definition := testDefinition(t, "extract",
+	definition := steptest.Definition(t, "extract",
 		workflow.Step{ID: "build", Type: "extract_fixture", With: map[string]any{"stdout": "Release 1.4.2 build 42"}},
 		workflow.Step{ID: "release", Type: "extract", With: map[string]any{
 			"from": "{{ .vars.source }}", "format": "{{ .vars.format }}",
@@ -59,11 +60,11 @@ func TestExtractRendersConfigurationAndCommitsTypedResults(t *testing.T) {
 
 func TestExtractStaticConfigurationFailsValidation(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, nil)
+	registry := steptest.Registry(t, nil)
 	if err := extractstep.Register(registry); err != nil {
 		t.Fatal(err)
 	}
-	definition := testDefinition(t, "invalid-extract", workflow.Step{ID: "extract", Type: "extract", With: map[string]any{
+	definition := steptest.Definition(t, "invalid-extract", workflow.Step{ID: "extract", Type: "extract", With: map[string]any{
 		"text": "value", "pattern": "[",
 	}})
 	if _, err := engine.New(registry).Run(t.Context(), definition, engine.Options{
@@ -75,7 +76,7 @@ func TestExtractStaticConfigurationFailsValidation(t *testing.T) {
 
 func TestExtractFieldsReadProducerStdoutAndCommitMarkerOutputs(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, map[string]step.Builder{
+	registry := steptest.Registry(t, map[string]step.Builder{
 		"extract_fixture": func(raw map[string]any) (step.Runner, error) {
 			return extractFixtureRunner{outputs: raw}, nil
 		},
@@ -88,7 +89,7 @@ func TestExtractFieldsReadProducerStdoutAndCommitMarkerOutputs(t *testing.T) {
 		"binary=dist/action.test\n" +
 		`WUKO_OUTPUT_V1 {"event":"end","key":"action_test_binary"}` + "\n" +
 		"warning: first\nwarning: second\n"
-	definition := testDefinition(t, "extract-fields",
+	definition := steptest.Definition(t, "extract-fields",
 		workflow.Step{ID: "build", Type: "extract_fixture", With: map[string]any{"stdout": stdout}},
 		workflow.Step{ID: "build_outputs", Type: "extract", With: map[string]any{
 			"from": "steps.build.stdout",

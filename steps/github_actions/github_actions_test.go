@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	enginepkg "github.com/up2jj/wuko/engine"
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
@@ -23,12 +24,6 @@ type recordedCall struct {
 type recordingExecutor struct {
 	calls []process.Options
 	steps []recordedCall
-}
-
-type runnerFunc func(context.Context, step.Request) (step.Result, error)
-
-func (run runnerFunc) Run(ctx context.Context, request step.Request) (step.Result, error) {
-	return run(ctx, request)
 }
 
 type executorFunc func(context.Context, process.Options) (process.Result, error)
@@ -101,7 +96,7 @@ func TestNewAcceptsSupportedSelectorsAndTemplates(t *testing.T) {
 func TestEngineRendersJobAndStepSelectorsFromRuntimeContext(t *testing.T) {
 	registry := step.NewRegistry()
 	if err := registry.Register("producer", func(map[string]any) (step.Runner, error) {
-		return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+		return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) {
 			return step.Result{Outputs: map[string]any{"suffix": "from-step"}}, nil
 		}), nil
 	}); err != nil {
@@ -117,7 +112,7 @@ func TestEngineRendersJobAndStepSelectorsFromRuntimeContext(t *testing.T) {
 		if !templated(config.Job) && !templated(config.Step) {
 			rendered = append(rendered, config)
 		}
-		return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+		return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) {
 			return step.Result{Outputs: map[string]any{"log": "ok"}}, nil
 		}), nil
 	}); err != nil {
@@ -169,7 +164,7 @@ func TestRunDiscoversLatestWorkflowRunAndWatchesIt(t *testing.T) {
 		{result: process.Result{Stdout: "watch progress\n"}},
 		{result: process.Result{Stdout: `{"databaseId":42,"workflowName":"ci","workflowDatabaseId":7,"number":18,"status":"completed","conclusion":"success","event":"push","headSha":"abc","headBranch":"master","url":"https://github.com/acme/wuko/actions/runs/42","attempt":1}`}},
 	}}
-	runnerValue := newRunner(t, map[string]any{"operation": "watch", "workflow": "ci"})
+	runnerValue := steptest.Build(t, New, map[string]any{"operation": "watch", "workflow": "ci"})
 	result, err := runnerValue.Run(t.Context(), step.Request{Executor: executor, RunDir: "/workspace", Env: map[string]string{"GITHUB_REPOSITORY": "acme/wuko"}})
 	if err != nil {
 		t.Fatal(err)
@@ -210,7 +205,7 @@ func TestRunListsThenWatchesExactCommit(t *testing.T) {
 		{},
 		{result: process.Result{Stdout: `{"databaseId":42,"status":"completed","conclusion":"success"}`}},
 	}}
-	runnerValue := newRunner(t, map[string]any{"operation": "watch", "workflow": "ci.yml", "head_sha": headSHA})
+	runnerValue := steptest.Build(t, New, map[string]any{"operation": "watch", "workflow": "ci.yml", "head_sha": headSHA})
 	result, err := runnerValue.Run(t.Context(), step.Request{Executor: executor})
 	if err != nil {
 		t.Fatal(err)
@@ -230,7 +225,7 @@ func TestRunResolvesPullRequestBeforeWatching(t *testing.T) {
 		{},
 		{result: process.Result{Stdout: `{"databaseId":99,"status":"completed","conclusion":"failure","headSha":"` + headSHA + `"}`}},
 	}}
-	runnerValue := newRunner(t, map[string]any{"operation": "watch", "workflow": "ci.yml", "pull_request": "12"})
+	runnerValue := steptest.Build(t, New, map[string]any{"operation": "watch", "workflow": "ci.yml", "pull_request": "12"})
 	result, err := runnerValue.Run(t.Context(), step.Request{Executor: executor})
 	if err != nil {
 		t.Fatal(err)
@@ -246,7 +241,7 @@ func TestRunFailsWhenLatestDiscoveredRunAlreadyCompleted(t *testing.T) {
 	executor := &recordingExecutor{steps: []recordedCall{
 		{result: process.Result{Stdout: `[{"databaseId":41,"status":"completed","conclusion":"success"}]`}},
 	}}
-	runnerValue := newRunner(t, map[string]any{"operation": "watch", "workflow": "ci"})
+	runnerValue := steptest.Build(t, New, map[string]any{"operation": "watch", "workflow": "ci"})
 	result, err := runnerValue.Run(t.Context(), step.Request{Executor: executor})
 	if err == nil || !strings.Contains(err.Error(), "run 41") || !strings.Contains(err.Error(), "has already completed") || result.Outputs != nil {
 		t.Fatalf("result = %#v, error = %v", result, err)
@@ -263,7 +258,7 @@ func TestRunWatchesCompletedRunSelectedByCommit(t *testing.T) {
 		{},
 		{result: process.Result{Stdout: `{"databaseId":42,"status":"completed","conclusion":"success"}`}},
 	}}
-	runnerValue := newRunner(t, map[string]any{"operation": "watch", "workflow": "ci", "head_sha": headSHA})
+	runnerValue := steptest.Build(t, New, map[string]any{"operation": "watch", "workflow": "ci", "head_sha": headSHA})
 	result, err := runnerValue.Run(t.Context(), step.Request{Executor: executor})
 	if err != nil {
 		t.Fatal(err)
@@ -275,7 +270,7 @@ func TestRunWatchesCompletedRunSelectedByCommit(t *testing.T) {
 
 func TestRunFailsWhenDiscoveryFindsNoRun(t *testing.T) {
 	executor := &recordingExecutor{steps: []recordedCall{{result: process.Result{Stdout: "[]\n"}}}}
-	runnerValue := newRunner(t, map[string]any{"operation": "watch", "workflow": "ci"})
+	runnerValue := steptest.Build(t, New, map[string]any{"operation": "watch", "workflow": "ci"})
 	result, err := runnerValue.Run(t.Context(), step.Request{Executor: executor})
 	if err == nil || !strings.Contains(err.Error(), `no GitHub Actions run found for workflow "ci"`) || result.Outputs != nil {
 		t.Fatalf("result = %#v, error = %v", result, err)
@@ -288,7 +283,7 @@ func TestRunWatchesKnownRunWithIntervalAndStreamsProgress(t *testing.T) {
 		{result: process.Result{Stdout: "progress\n", Stderr: "warning\n"}},
 		{result: process.Result{Stdout: `{"databaseId":77,"status":"completed","conclusion":"failure","workflowName":"CI"}`}},
 	}}
-	runnerValue := newRunner(t, map[string]any{"operation": "watch", "run_id": "77", "interval": 5})
+	runnerValue := steptest.Build(t, New, map[string]any{"operation": "watch", "run_id": "77", "interval": 5})
 	result, err := runnerValue.Run(t.Context(), step.Request{Executor: executor, Stdout: &stdout, Stderr: &stderr})
 	if err != nil {
 		t.Fatal(err)
@@ -313,7 +308,7 @@ func TestRunFailsWhenWatchCommandFails(t *testing.T) {
 	executor := &recordingExecutor{steps: []recordedCall{{
 		result: process.Result{Stderr: "authentication required\n"}, err: errors.New("exit status 1"),
 	}}}
-	runnerValue := newRunner(t, map[string]any{"operation": "watch", "run_id": "77"})
+	runnerValue := steptest.Build(t, New, map[string]any{"operation": "watch", "run_id": "77"})
 	result, err := runnerValue.Run(t.Context(), step.Request{Executor: executor})
 	if err == nil || !strings.Contains(err.Error(), "watching GitHub Actions run") || !strings.Contains(err.Error(), "authentication required") || result.Outputs != nil {
 		t.Fatalf("result = %#v, error = %v", result, err)
@@ -327,7 +322,7 @@ func TestRunReturnsCompleteJobLog(t *testing.T) {
 	view := `{"databaseId":77,"status":"completed","conclusion":"success","jobs":[{"databaseId":101,"name":"action (ubuntu-latest)","status":"completed","conclusion":"success"}]}`
 	rawLog := "\ufeff2026-09-05T18:18:46.6404147Z job log\n"
 	executor := &recordingExecutor{steps: []recordedCall{{}, {result: process.Result{Stdout: view}}, {result: process.Result{Stdout: rawLog}}}}
-	runnerValue := newRunner(t, map[string]any{
+	runnerValue := steptest.Build(t, New, map[string]any{
 		"operation": "watch", "repository": "up2jj/wuko", "run_id": "77", "job": "action (ubuntu-latest)",
 	})
 	result, err := runnerValue.Run(t.Context(), step.Request{Executor: executor, Env: map[string]string{"GH_TOKEN": "token"}})
@@ -360,7 +355,7 @@ func TestRunReportsTruncatedJobLog(t *testing.T) {
 		{}, {result: process.Result{Stdout: view}},
 		{result: process.Result{Stdout: rawLog, StdoutTruncated: true}},
 	}}
-	runnerValue := newRunner(t, map[string]any{"operation": "watch", "run_id": "77", "job": "test"})
+	runnerValue := steptest.Build(t, New, map[string]any{"operation": "watch", "run_id": "77", "job": "test"})
 	result, err := runnerValue.Run(t.Context(), step.Request{Executor: executor})
 	if err != nil {
 		t.Fatal(err)
@@ -376,7 +371,7 @@ func TestRunReportsTruncationWhenStepScopingFails(t *testing.T) {
 		{}, {result: process.Result{Stdout: view}},
 		{result: process.Result{Stdout: "2026-09-05T18:18:40.000Z earlier\n", StdoutTruncated: true}},
 	}}
-	runnerValue := newRunner(t, map[string]any{"operation": "watch", "run_id": "77", "job": "test", "step": "build"})
+	runnerValue := steptest.Build(t, New, map[string]any{"operation": "watch", "run_id": "77", "job": "test", "step": "build"})
 	result, err := runnerValue.Run(t.Context(), step.Request{Executor: executor})
 	if err == nil || !strings.Contains(err.Error(), "job log was truncated") || !strings.Contains(err.Error(), "no lines") || result.Outputs != nil {
 		t.Fatalf("result = %#v, error = %v", result, err)
@@ -390,7 +385,7 @@ func TestRunFailsWhenJobLogIsUnavailable(t *testing.T) {
 		{result: process.Result{Stdout: view}},
 		{result: process.Result{Stderr: "log has expired\n"}, err: errors.New("exit status 1")},
 	}}
-	runnerValue := newRunner(t, map[string]any{"operation": "watch", "run_id": "77", "job": "test"})
+	runnerValue := steptest.Build(t, New, map[string]any{"operation": "watch", "run_id": "77", "job": "test"})
 	result, err := runnerValue.Run(t.Context(), step.Request{Executor: executor})
 	if err == nil || !strings.Contains(err.Error(), "downloading GitHub Actions job log") || !strings.Contains(err.Error(), "log has expired") || result.Outputs != nil {
 		t.Fatalf("result = %#v, error = %v", result, err)
@@ -410,7 +405,7 @@ func TestRunReturnsTimestampScopedStepLog(t *testing.T) {
 		"continued output\n" +
 		"2026-09-05T18:18:59.9999999Z shared completion bucket\n"
 	executor := &recordingExecutor{steps: []recordedCall{{}, {result: process.Result{Stdout: view}}, {result: process.Result{Stdout: rawLog}}}}
-	runnerValue := newRunner(t, map[string]any{
+	runnerValue := steptest.Build(t, New, map[string]any{
 		"operation": "watch", "run_id": "77", "job": "action (ubuntu-latest)", "step": "build action test binary",
 	})
 	result, err := runnerValue.Run(t.Context(), step.Request{Executor: executor})
@@ -478,7 +473,7 @@ func TestScopeStepLogRejectsUnusableBoundaries(t *testing.T) {
 }
 
 func TestRunRejectsUnresolvedTemplate(t *testing.T) {
-	runnerValue := newRunner(t, map[string]any{"operation": "watch", "workflow": "ci", "job": "{{ .vars.job }}"})
+	runnerValue := steptest.Build(t, New, map[string]any{"operation": "watch", "workflow": "ci", "job": "{{ .vars.job }}"})
 	result, err := runnerValue.Run(t.Context(), step.Request{})
 	if err == nil || !strings.Contains(err.Error(), "unresolved template") || result.Outputs != nil {
 		t.Fatalf("result = %#v, error = %v", result, err)
@@ -491,7 +486,7 @@ func TestRunPreservesCancellation(t *testing.T) {
 		cancel()
 		return process.Result{}, context.Canceled
 	})
-	runnerValue := newRunner(t, map[string]any{"operation": "watch", "run_id": "77"})
+	runnerValue := steptest.Build(t, New, map[string]any{"operation": "watch", "run_id": "77"})
 	result, err := runnerValue.Run(ctx, step.Request{Executor: executor})
 	if !errors.Is(err, context.Canceled) || result.Outputs != nil {
 		t.Fatalf("result = %#v, error = %v", result, err)
@@ -499,15 +494,6 @@ func TestRunPreservesCancellation(t *testing.T) {
 }
 
 func watchConfig() map[string]any { return map[string]any{"operation": "watch"} }
-
-func newRunner(t *testing.T, raw map[string]any) step.Runner {
-	t.Helper()
-	runner, err := New(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return runner
-}
 
 func assertArgs(t *testing.T, call process.Options, want ...string) {
 	t.Helper()

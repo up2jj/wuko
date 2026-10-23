@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	toml "github.com/pelletier/go-toml/v2"
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -20,7 +21,7 @@ func editFile(t *testing.T, name, body string, config map[string]any) string {
 		t.Fatal(err)
 	}
 	config["from"] = map[string]any{"file": name}
-	if _, err := newRunner(t, config).Run(t.Context(), step.Request{RunDir: directory}); err != nil {
+	if _, err := steptest.Build(t, New, config).Run(t.Context(), step.Request{RunDir: directory}); err != nil {
 		t.Fatalf("edit failed: %v", err)
 	}
 	data, err := os.ReadFile(path)

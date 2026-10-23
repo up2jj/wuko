@@ -14,13 +14,14 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
 )
 
 func concurrentDefinition(t *testing.T, group *workflow.ConcurrentGroup) *workflow.Definition {
 	t.Helper()
-	return testDefinition(t, "concurrent", workflow.Step{Concurrent: group})
+	return steptest.Definition(t, "concurrent", workflow.Step{Concurrent: group})
 }
 
 func TestRunConcurrentGroupBoundsExecutionAndCommitsInDeclarationOrder(t *testing.T) {
@@ -29,8 +30,8 @@ func TestRunConcurrentGroupBoundsExecutionAndCommitsInDeclarationOrder(t *testin
 	release := make(chan struct{}, 3)
 	var active atomic.Int32
 	var maximum atomic.Int32
-	registry := newTestRegistry(t, map[string]step.Builder{"gate": func(map[string]any) (step.Runner, error) {
-		return runnerFunc(func(ctx context.Context, request step.Request) (step.Result, error) {
+	registry := steptest.Registry(t, map[string]step.Builder{"gate": func(map[string]any) (step.Runner, error) {
+		return steptest.RunnerFunc(func(ctx context.Context, request step.Request) (step.Result, error) {
 			current := active.Add(1)
 			defer active.Add(-1)
 			for {
@@ -98,8 +99,8 @@ func TestRunConcurrentGroupRespectsRetriesPerChild(t *testing.T) {
 	t.Parallel()
 	var mu sync.Mutex
 	attempts := make(map[string]int)
-	registry := newTestRegistry(t, map[string]step.Builder{"retry_child": func(map[string]any) (step.Runner, error) {
-		return runnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
+	registry := steptest.Registry(t, map[string]step.Builder{"retry_child": func(map[string]any) (step.Runner, error) {
+		return steptest.RunnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
 			mu.Lock()
 			attempts[request.StepID]++
 			mu.Unlock()
@@ -138,8 +139,8 @@ func TestRunConcurrentGroupFailFastControlsQueuedSteps(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var laterRuns atomic.Int32
-			registry := newTestRegistry(t, map[string]step.Builder{"fail_or_count": func(map[string]any) (step.Runner, error) {
-				return runnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
+			registry := steptest.Registry(t, map[string]step.Builder{"fail_or_count": func(map[string]any) (step.Runner, error) {
+				return steptest.RunnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
 					if request.StepID == "first" {
 						return step.Result{}, errors.New("broken")
 					}
@@ -161,8 +162,8 @@ func TestRunConcurrentGroupFailFastControlsQueuedSteps(t *testing.T) {
 
 func TestRunConcurrentGroupAggregatesErrorsInDeclarationOrder(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, map[string]step.Builder{"always_fail": func(map[string]any) (step.Runner, error) {
-		return runnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
+	registry := steptest.Registry(t, map[string]step.Builder{"always_fail": func(map[string]any) (step.Runner, error) {
+		return steptest.RunnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
 			return step.Result{}, fmt.Errorf("%s failed", request.StepID)
 		}), nil
 	}})
@@ -181,8 +182,8 @@ func TestRunConcurrentGroupAggregatesErrorsInDeclarationOrder(t *testing.T) {
 
 func TestRunConcurrentGroupTimeoutCancelsChildren(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		registry := newTestRegistry(t, map[string]step.Builder{"block": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(ctx context.Context, _ step.Request) (step.Result, error) {
+		registry := steptest.Registry(t, map[string]step.Builder{"block": func(map[string]any) (step.Runner, error) {
+			return steptest.RunnerFunc(func(ctx context.Context, _ step.Request) (step.Result, error) {
 				<-ctx.Done()
 				return step.Result{}, ctx.Err()
 			}), nil
@@ -200,8 +201,8 @@ func TestRunConcurrentGroupCancellationDoesNotAdmitQueuedChildren(t *testing.T) 
 	t.Parallel()
 	started := make(chan struct{}, 1)
 	var runs atomic.Int32
-	registry := newTestRegistry(t, map[string]step.Builder{"block": func(map[string]any) (step.Runner, error) {
-		return runnerFunc(func(ctx context.Context, _ step.Request) (step.Result, error) {
+	registry := steptest.Registry(t, map[string]step.Builder{"block": func(map[string]any) (step.Runner, error) {
+		return steptest.RunnerFunc(func(ctx context.Context, _ step.Request) (step.Result, error) {
 			runs.Add(1)
 			started <- struct{}{}
 			<-ctx.Done()
@@ -238,9 +239,9 @@ func TestRunConcurrentGroupCancellationDoesNotAdmitQueuedChildren(t *testing.T) 
 
 func TestRunConcurrentGroupUsesSnapshotAndRejectsVariableConflicts(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, map[string]step.Builder{"write": func(raw map[string]any) (step.Runner, error) {
+	registry := steptest.Registry(t, map[string]step.Builder{"write": func(raw map[string]any) (step.Runner, error) {
 		value := maps.Clone(raw)
-		return runnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
+		return steptest.RunnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
 			variable, _ := value["variable"].(string)
 			return step.Result{Outputs: map[string]any{"id": request.StepID}, Variables: map[string]any{variable: request.StepID}}, nil
 		}), nil
@@ -276,8 +277,8 @@ func TestRunConcurrentGroupNeedsPropagatesAncestorState(t *testing.T) {
 	t.Parallel()
 	var mu sync.Mutex
 	observed := make(map[string]step.Request)
-	registry := newTestRegistry(t, map[string]step.Builder{"dag": func(map[string]any) (step.Runner, error) {
-		return runnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
+	registry := steptest.Registry(t, map[string]step.Builder{"dag": func(map[string]any) (step.Runner, error) {
+		return steptest.RunnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
 			mu.Lock()
 			observed[request.StepID] = request
 			mu.Unlock()
@@ -316,8 +317,8 @@ func TestRunConcurrentGroupNeedsPropagatesAncestorState(t *testing.T) {
 func TestRunConcurrentGroupNeedsMergesReadsInDeclarationOrderBeforeJoinConflict(t *testing.T) {
 	t.Parallel()
 	observed := make(chan any, 1)
-	registry := newTestRegistry(t, map[string]step.Builder{"merge": func(map[string]any) (step.Runner, error) {
-		return runnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
+	registry := steptest.Registry(t, map[string]step.Builder{"merge": func(map[string]any) (step.Runner, error) {
+		return steptest.RunnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
 			if request.StepID == "consumer" {
 				observed <- request.Vars["shared"]
 				return step.Result{}, nil
@@ -344,8 +345,8 @@ func TestRunConcurrentGroupNeedsMergesReadsInDeclarationOrderBeforeJoinConflict(
 func TestRunConcurrentGroupNeedsMergesAncestorsInDependencyOrder(t *testing.T) {
 	t.Parallel()
 	observed := make(chan any, 1)
-	registry := newTestRegistry(t, map[string]step.Builder{"merge": func(map[string]any) (step.Runner, error) {
-		return runnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
+	registry := steptest.Registry(t, map[string]step.Builder{"merge": func(map[string]any) (step.Runner, error) {
+		return steptest.RunnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
 			if request.StepID == "consumer" {
 				observed <- request.Vars["shared"]
 				return step.Result{}, nil
@@ -374,8 +375,8 @@ func TestRunConcurrentGroupNeedsMergesAncestorsInDependencyOrder(t *testing.T) {
 func TestRunConcurrentGroupNeedsSkipsDescendantsAndContinuesIndependentWork(t *testing.T) {
 	t.Parallel()
 	var runs sync.Map
-	registry := newTestRegistry(t, map[string]step.Builder{"dependency": func(map[string]any) (step.Runner, error) {
-		return runnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
+	registry := steptest.Registry(t, map[string]step.Builder{"dependency": func(map[string]any) (step.Runner, error) {
+		return steptest.RunnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
 			runs.Store(request.StepID, true)
 			if request.StepID == "failed" {
 				return step.Result{}, errors.New("broken prerequisite")
@@ -415,8 +416,8 @@ func TestRunConcurrentGroupNeedsSkipsDescendantsAndContinuesIndependentWork(t *t
 func TestRunConcurrentGroupNeedsSkipsDescendantsBeforeFailFastStopsAdmission(t *testing.T) {
 	t.Parallel()
 	var independentRuns atomic.Int32
-	registry := newTestRegistry(t, map[string]step.Builder{"fail_fast_dependency": func(map[string]any) (step.Runner, error) {
-		return runnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
+	registry := steptest.Registry(t, map[string]step.Builder{"fail_fast_dependency": func(map[string]any) (step.Runner, error) {
+		return steptest.RunnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
 			if request.StepID == "failed" {
 				return step.Result{}, errors.New("broken prerequisite")
 			}
@@ -449,8 +450,8 @@ func TestRunConcurrentGroupNeedsSkipsDescendantsBeforeFailFastStopsAdmission(t *
 func TestRunConcurrentGroupConditionSkippedNeedAllowsDependent(t *testing.T) {
 	t.Parallel()
 	var dependentRuns atomic.Int32
-	registry := newTestRegistry(t, map[string]step.Builder{"conditional_need": func(map[string]any) (step.Runner, error) {
-		return runnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
+	registry := steptest.Registry(t, map[string]step.Builder{"conditional_need": func(map[string]any) (step.Runner, error) {
+		return steptest.RunnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
 			if request.StepID == "dependent" {
 				dependentRuns.Add(1)
 				if _, exists := request.Steps["optional"]; exists {
@@ -474,8 +475,8 @@ func TestRunConcurrentGroupConditionSkippedNeedAllowsDependent(t *testing.T) {
 
 func TestRunConcurrentGroupSerializesProgressAndOutput(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, map[string]step.Builder{"write_output": func(map[string]any) (step.Runner, error) {
-		return runnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
+	registry := steptest.Registry(t, map[string]step.Builder{"write_output": func(map[string]any) (step.Runner, error) {
+		return steptest.RunnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
 			if request.Interactive || request.Stdin != nil {
 				return step.Result{}, errors.New("concurrent child received interactive stdin")
 			}
@@ -506,8 +507,8 @@ func TestRunConcurrentGroupSerializesProgressAndOutput(t *testing.T) {
 
 func TestConcurrentGroupDryRunShowsChildrenAndPolicies(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, map[string]step.Builder{"noop": func(map[string]any) (step.Runner, error) {
-		return runnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
+	registry := steptest.Registry(t, map[string]step.Builder{"noop": func(map[string]any) (step.Runner, error) {
+		return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
 	}})
 	timeout := workflow.Duration(5 * time.Minute)
 	steps := []workflow.Step{
@@ -548,8 +549,8 @@ func TestSlowProgressCallbackDoesNotBlockBranchOutput(t *testing.T) {
 	release := make(chan struct{})
 	wrote := make(chan struct{})
 
-	registry := newTestRegistry(t, map[string]step.Builder{"branch": func(map[string]any) (step.Runner, error) {
-		return runnerFunc(func(ctx context.Context, request step.Request) (step.Result, error) {
+	registry := steptest.Registry(t, map[string]step.Builder{"branch": func(map[string]any) (step.Runner, error) {
+		return steptest.RunnerFunc(func(ctx context.Context, request step.Request) (step.Result, error) {
 			switch request.StepID {
 			case "writer":
 				// Park inside the runner, past every report call this branch makes,
@@ -646,8 +647,8 @@ func (b *lockedBuffer) String() string {
 
 func TestRunConcurrentGroupKeepsBranchesThatSucceededAtTheDeadline(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		registry := newTestRegistry(t, map[string]step.Builder{"finish_at_deadline": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(ctx context.Context, _ step.Request) (step.Result, error) {
+		registry := steptest.Registry(t, map[string]step.Builder{"finish_at_deadline": func(map[string]any) (step.Runner, error) {
+			return steptest.RunnerFunc(func(ctx context.Context, _ step.Request) (step.Result, error) {
 				<-ctx.Done()
 				return step.Result{Outputs: map[string]any{"ok": true}}, nil
 			}), nil

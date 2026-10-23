@@ -7,13 +7,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
 )
 
 func TestAttachedDeferUnwindsGroupsBeforeFinally(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, nil)
+	registry := steptest.Registry(t, nil)
 	var events []string
 	register := func(kind string, run func(step.Request) error) {
 		t.Helper()
@@ -34,7 +35,7 @@ func TestAttachedDeferUnwindsGroupsBeforeFinally(t *testing.T) {
 		}
 		return nil
 	})
-	definition := testDefinition(t, "defer-order",
+	definition := steptest.Definition(t, "defer-order",
 		workflow.Step{ID: "first", Type: "create", Defer: []workflow.Step{{ID: "first_a", Type: "cleanup"}, {ID: "first_b", Type: "cleanup"}}},
 		workflow.Step{ID: "second", Type: "create", Defer: []workflow.Step{{ID: "second_a", Type: "cleanup"}}},
 	)
@@ -56,7 +57,7 @@ func TestAttachedDeferUnwindsGroupsBeforeFinally(t *testing.T) {
 
 func TestAttachedDeferRegistersOnlyAfterSuccessAndContinuesErrors(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, nil)
+	registry := steptest.Registry(t, nil)
 	mainFailure := errors.New("create failed")
 	cleanupFailure := errors.New("cleanup failed")
 	var events []string
@@ -80,7 +81,7 @@ func TestAttachedDeferRegistersOnlyAfterSuccessAndContinuesErrors(t *testing.T) 
 		}
 		return step.Result{}, nil
 	})
-	definition := testDefinition(t, "defer-failure",
+	definition := steptest.Definition(t, "defer-failure",
 		workflow.Step{ID: "created", Type: "ok", Defer: []workflow.Step{{ID: "cleanup_fail", Type: "fail_cleanup"}, {ID: "cleanup_after", Type: "ok"}}},
 		workflow.Step{ID: "failed", Type: "fail_main", Defer: []workflow.Step{{ID: "never", Type: "ok"}}},
 	)
@@ -100,7 +101,7 @@ func TestAttachedDeferRegistersOnlyAfterSuccessAndContinuesErrors(t *testing.T) 
 
 func TestAttachedDeferCapturesWorkingDirectory(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, nil)
+	registry := steptest.Registry(t, nil)
 	dir := t.TempDir()
 	var cleanupDir string
 	registerFinallyTestRunner(t, registry, "ok", func(context.Context, step.Request) (step.Result, error) {
@@ -110,7 +111,7 @@ func TestAttachedDeferCapturesWorkingDirectory(t *testing.T) {
 		cleanupDir = request.RunDir
 		return step.Result{}, nil
 	})
-	definition := testDefinition(t, "defer-dir", workflow.Step{WorkingDirectory: dir, Steps: []workflow.Step{{
+	definition := steptest.Definition(t, "defer-dir", workflow.Step{WorkingDirectory: dir, Steps: []workflow.Step{{
 		ID: "create", Type: "ok", Defer: []workflow.Step{{ID: "cleanup", Type: "observe_dir"}},
 	}}})
 	if _, err := New(registry).Run(t.Context(), definition, Options{RunDir: t.TempDir()}); err != nil {
@@ -123,7 +124,7 @@ func TestAttachedDeferCapturesWorkingDirectory(t *testing.T) {
 
 func TestCompositeActionDeferRunsPerAttempt(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, nil)
+	registry := steptest.Registry(t, nil)
 	mainRuns, cleanupRuns := 0, 0
 	registerFinallyTestRunner(t, registry, "action_main", func(context.Context, step.Request) (step.Result, error) {
 		mainRuns++
@@ -140,7 +141,7 @@ func TestCompositeActionDeferRunsPerAttempt(t *testing.T) {
 		ID: "work", Type: "action_main", Defer: []workflow.Step{{ID: "cleanup", Type: "action_cleanup"}},
 	})
 	action.Outputs = map[string]workflow.ActionOutput{"result": {Value: "steps.cleanup.value"}}
-	definition := testDefinition(t, "caller", attemptStep("call", immediateRetry(2), workflow.Step{
+	definition := steptest.Definition(t, "caller", attemptStep("call", immediateRetry(2), workflow.Step{
 		Uses: workflow.ActionSource{URL: "https://example.test/action"}, Action: action,
 		With: map[string]any{},
 	}))
@@ -155,11 +156,11 @@ func TestCompositeActionDeferRunsPerAttempt(t *testing.T) {
 
 func TestAttachedDeferProgressCountsUnregisteredCleanup(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, nil)
+	registry := steptest.Registry(t, nil)
 	registerFinallyTestRunner(t, registry, "ok", func(context.Context, step.Request) (step.Result, error) {
 		return step.Result{}, nil
 	})
-	definition := testDefinition(t, "defer-progress",
+	definition := steptest.Definition(t, "defer-progress",
 		workflow.Step{ID: "skipped", Type: "ok", If: "false", Defer: []workflow.Step{{ID: "skipped_cleanup", Type: "ok"}}},
 		workflow.Step{ID: "active", Type: "ok", Defer: []workflow.Step{{ID: "active_cleanup", Type: "ok"}}},
 	)

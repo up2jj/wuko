@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/diagnostic"
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 	changedstep "github.com/up2jj/wuko/steps/changed"
 	"github.com/up2jj/wuko/workflow"
@@ -149,7 +150,7 @@ func TestChangedValidationAndDryRunDoNotCreateSnapshot(t *testing.T) {
 
 func changedRegistry(t *testing.T) (*step.Registry, *int) {
 	t.Helper()
-	registry := newTestRegistry(t, nil)
+	registry := steptest.Registry(t, nil)
 	if err := changedstep.Register(registry); err != nil {
 		t.Fatal(err)
 	}

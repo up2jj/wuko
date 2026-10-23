@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/up2jj/wuko/diagnostic"
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/workflow"
 )
 
@@ -33,11 +34,11 @@ func TestTraceStepIncludesWrappedErrorAttributes(t *testing.T) {
 
 func TestReturnDiagnosticIncludesDestination(t *testing.T) {
 	t.Parallel()
-	definition := testDefinition(t, "picker-return", workflow.Step{
+	definition := steptest.Definition(t, "picker-return", workflow.Step{
 		Return: &workflow.ReturnControl{To: workflow.ReturnDestinationPicker, Outputs: map[string]string{}},
 	})
 	var returned diagnostic.Event
-	_, err := New(newTestRegistry(t, nil)).Run(t.Context(), definition, Options{Diagnostics: func(event diagnostic.Event) {
+	_, err := New(steptest.Registry(t, nil)).Run(t.Context(), definition, Options{Diagnostics: func(event diagnostic.Event) {
 		if event.Phase == diagnostic.PhaseControl && event.Status == diagnostic.StatusSucceeded {
 			returned = event
 		}

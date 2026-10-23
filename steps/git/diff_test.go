@@ -13,6 +13,7 @@ import (
 	"github.com/expr-lang/expr"
 	wukoexpr "github.com/up2jj/wuko/expression"
 	"github.com/up2jj/wuko/internal/gittest"
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/provider"
 	"github.com/up2jj/wuko/step"
@@ -615,18 +616,10 @@ func gitHookProviders(updates []any) provider.Set {
 
 func mustDiff(t *testing.T) step.Runner {
 	t.Helper()
-	runner, err := NewDiff(map[string]any{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return runner
+	return steptest.Build(t, NewDiff, map[string]any{})
 }
 
 func mustDiffCheck(t *testing.T) step.Runner {
 	t.Helper()
-	runner, err := NewDiffCheck(map[string]any{"source": "staged"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return runner
+	return steptest.Build(t, NewDiffCheck, map[string]any{"source": "staged"})
 }

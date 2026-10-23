@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/up2jj/wuko/executor"
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/step"
 )
@@ -68,7 +69,7 @@ func TestMarkdownEditUsesExecutorTargetFileSystem(t *testing.T) {
 		files: map[string][]byte{target: []byte("# Before\n")},
 		modes: map[string]fs.FileMode{target: 0o640},
 	}
-	runner := newRunner(t, map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"from": map[string]any{"file": "README.md"},
 		"edits": []any{map[string]any{
 			"operation": "set", "select": map[string]any{"kind": "heading", "text": "Before"},
@@ -91,7 +92,7 @@ func TestMarkdownEditUsesExecutorTargetFileSystem(t *testing.T) {
 
 func TestMarkdownEditRefusesExecutorWithoutFileSystem(t *testing.T) {
 	t.Parallel()
-	runner := newRunner(t, map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"from":  map[string]any{"file": "README.md"},
 		"edits": []any{map[string]any{"operation": "delete", "select": map[string]any{"kind": "heading"}}},
 	})
@@ -103,7 +104,7 @@ func TestMarkdownEditRefusesExecutorWithoutFileSystem(t *testing.T) {
 
 func TestMarkdownVariableSourceDoesNotNeedExecutorFileSystem(t *testing.T) {
 	t.Parallel()
-	runner := newRunner(t, map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"from": map[string]any{"var": "document"},
 		"edits": []any{map[string]any{
 			"operation": "set", "select": map[string]any{"kind": "heading", "text": "Before"},

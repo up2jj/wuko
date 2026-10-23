@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/validation"
 	"github.com/up2jj/wuko/workflow"
@@ -18,7 +19,7 @@ func TestValidateCollectsIndependentTopLevelStepFailures(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	definition := testDefinition(t, "multiple",
+	definition := steptest.Definition(t, "multiple",
 		workflow.Step{ID: "first", Type: "broken", With: map[string]any{"value": "one"}},
 		workflow.Step{ID: "second", Type: "broken", With: map[string]any{"value": "two"}},
 	)
@@ -39,7 +40,7 @@ func TestValidateGatesStepPreparationAfterStructuralFailure(t *testing.T) {
 	if err := registry.Register("capture", func(map[string]any) (step.Runner, error) { builds++; return nil, nil }); err != nil {
 		t.Fatal(err)
 	}
-	definition := testDefinition(t, "invalid", workflow.Step{ID: "bad", Type: "capture", Uses: workflow.ActionSource{URL: "https://example.test/action"}})
+	definition := steptest.Definition(t, "invalid", workflow.Step{ID: "bad", Type: "capture", Uses: workflow.ActionSource{URL: "https://example.test/action"}})
 	if err := New(registry).Validate(t.Context(), definition, Options{}); err == nil {
 		t.Fatal("expected structural failure")
 	}

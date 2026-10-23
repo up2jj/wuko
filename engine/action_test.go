@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 	luastep "github.com/up2jj/wuko/steps/lua"
 	"github.com/up2jj/wuko/workflow"
@@ -58,7 +59,7 @@ steps:
 		t.Fatal(err)
 	}
 	var runs int
-	registry := newTestRegistry(t, map[string]step.Builder{"capture": func(raw map[string]any) (step.Runner, error) {
+	registry := steptest.Registry(t, map[string]step.Builder{"capture": func(raw map[string]any) (step.Runner, error) {
 		return countingRunner{value: raw["value"], runs: &runs}, nil
 	}})
 	state, err := New(registry).Run(t.Context(), definition, Options{RunDir: dir, Stdout: io.Discard, Stderr: io.Discard})
@@ -108,7 +109,7 @@ steps:
 	if err != nil {
 		t.Fatal(err)
 	}
-	registry := newTestRegistry(t, nil)
+	registry := steptest.Registry(t, nil)
 	if err := luastep.Register(registry); err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +138,7 @@ func TestCompositeActionRetryKeepsInnerOperationIDsStable(t *testing.T) {
 	t.Parallel()
 	var failures int
 	var recordKeys []string
-	registry := newTestRegistry(t, map[string]step.Builder{"action_retry": func(raw map[string]any) (step.Runner, error) {
+	registry := steptest.Registry(t, map[string]step.Builder{"action_retry": func(raw map[string]any) (step.Runner, error) {
 		return actionRetryRunner{kind: raw["kind"].(string), failures: &failures, recordKeys: &recordKeys}, nil
 	}})
 	action := testAction(t, "retry-action",
@@ -145,7 +146,7 @@ func TestCompositeActionRetryKeepsInnerOperationIDsStable(t *testing.T) {
 		workflow.Step{ID: "finish", Type: "action_retry", With: map[string]any{"kind": "fail"}},
 	)
 	action.Outputs = map[string]workflow.ActionOutput{"result": {Value: "steps.finish.value"}}
-	definition := testDefinition(t, "caller", attemptStep("remote", immediateRetry(2), workflow.Step{
+	definition := steptest.Definition(t, "caller", attemptStep("remote", immediateRetry(2), workflow.Step{
 		Uses: workflow.ActionSource{URL: "https://example.test/action"}, Action: action,
 		With: map[string]any{},
 	}))
@@ -184,7 +185,7 @@ func TestCompositeActionRunsSequentiallyWithTypedInputsAndDeclaredOutputs(t *tes
 	t.Parallel()
 	var order []string
 	var innerRequest step.Request
-	registry := newTestRegistry(t, map[string]step.Builder{"action_capture": func(raw map[string]any) (step.Runner, error) {
+	registry := steptest.Registry(t, map[string]step.Builder{"action_capture": func(raw map[string]any) (step.Runner, error) {
 		return actionCaptureRunner{value: raw["value"], order: &order, request: &innerRequest}, nil
 	}})
 	action := testAction(t, "composite",
@@ -200,7 +201,7 @@ func TestCompositeActionRunsSequentiallyWithTypedInputsAndDeclaredOutputs(t *tes
 		"os":     {Value: "run.os"},
 		"arch":   {Value: "run.arch"},
 	}
-	definition := testDefinition(t, "caller",
+	definition := steptest.Definition(t, "caller",
 		workflow.Step{ID: "prepare", Type: "action_capture", With: map[string]any{"value": []any{"b", "a"}}},
 		workflow.Step{ID: "remote", Uses: workflow.ActionSource{URL: "https://example.test/action@v1"}, Action: action, With: map[string]any{"items": map[string]any{"expr": "list(steps.prepare.value[1], steps.prepare.value[0])"}}},
 		workflow.Step{ID: "consume", Type: "action_capture", With: map[string]any{"value": "{{ .steps.remote.result }}"}},
@@ -231,7 +232,7 @@ func TestCompositeActionRunsSequentiallyWithTypedInputsAndDeclaredOutputs(t *tes
 func TestCompositeActionKeepsCallerAndActionTemplatesIsolated(t *testing.T) {
 	t.Parallel()
 	var order []string
-	registry := newTestRegistry(t, map[string]step.Builder{"action_capture": func(raw map[string]any) (step.Runner, error) {
+	registry := steptest.Registry(t, map[string]step.Builder{"action_capture": func(raw map[string]any) (step.Runner, error) {
 		return actionCaptureRunner{value: raw["value"], order: &order}, nil
 	}})
 	action := testAction(t, "composite", workflow.Step{
@@ -242,7 +243,7 @@ func TestCompositeActionKeepsCallerAndActionTemplatesIsolated(t *testing.T) {
 	}
 	action.Inputs = map[string]workflow.ActionInput{"target": {Type: "string", Required: true}}
 	action.Outputs = map[string]workflow.ActionOutput{"result": {Value: "steps.render.value"}}
-	definition := testDefinition(t, "caller", workflow.Step{
+	definition := steptest.Definition(t, "caller", workflow.Step{
 		ID: "remote", Uses: workflow.ActionSource{URL: "https://example.test/action"}, Action: action,
 		With: map[string]any{"target": `{{ template "value" . }}`},
 	})
@@ -261,9 +262,9 @@ func TestCompositeActionKeepsCallerAndActionTemplatesIsolated(t *testing.T) {
 
 func TestCompositeActionRejectsInputContractViolations(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, nil)
+	registry := steptest.Registry(t, nil)
 	action := &workflow.Action{Version: 1, Name: "action", Inputs: map[string]workflow.ActionInput{"name": {Type: "string", Required: true}}, Steps: []workflow.Step{{ID: "run", Type: "capture", With: map[string]any{}}}}
-	definition := testDefinition(t, "caller", workflow.Step{ID: "remote", Uses: workflow.ActionSource{URL: "https://example.test"}, Action: action, With: map[string]any{"unknown": true}})
+	definition := steptest.Definition(t, "caller", workflow.Step{ID: "remote", Uses: workflow.ActionSource{URL: "https://example.test"}, Action: action, With: map[string]any{"unknown": true}})
 	err := New(registry).Validate(t.Context(), definition, Options{Stdout: io.Discard, Stderr: io.Discard})
 	if err == nil || !strings.Contains(err.Error(), "unknown input") {
 		t.Fatalf("error = %v", err)
@@ -272,9 +273,9 @@ func TestCompositeActionRejectsInputContractViolations(t *testing.T) {
 
 func TestCompositeActionValidateRejectsStaticInputTypeMismatch(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, nil)
+	registry := steptest.Registry(t, nil)
 	action := &workflow.Action{Version: 1, Name: "action", Inputs: map[string]workflow.ActionInput{"name": {Type: "string", Required: true}}, Steps: []workflow.Step{{ID: "run", Type: "capture", With: map[string]any{}}}}
-	definition := testDefinition(t, "caller", workflow.Step{ID: "remote", Uses: workflow.ActionSource{URL: "https://example.test"}, Action: action, With: map[string]any{"name": true}})
+	definition := steptest.Definition(t, "caller", workflow.Step{ID: "remote", Uses: workflow.ActionSource{URL: "https://example.test"}, Action: action, With: map[string]any{"name": true}})
 	err := New(registry).Validate(t.Context(), definition, Options{Stdout: io.Discard, Stderr: io.Discard})
 	if err == nil || !strings.Contains(err.Error(), "does not match type string") {
 		t.Fatalf("error = %v", err)
@@ -283,9 +284,9 @@ func TestCompositeActionValidateRejectsStaticInputTypeMismatch(t *testing.T) {
 
 func TestCompositeActionDryRunPrintsNestedPlan(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, map[string]step.Builder{"capture": func(map[string]any) (step.Runner, error) { return countingRunner{}, nil }})
+	registry := steptest.Registry(t, map[string]step.Builder{"capture": func(map[string]any) (step.Runner, error) { return countingRunner{}, nil }})
 	action := testAction(t, "action", workflow.Step{ID: "inside", Type: "capture"})
-	definition := testDefinition(t, "caller", workflow.Step{ID: "remote", Uses: workflow.ActionSource{URL: "https://example.test/action"}, Action: action, With: map[string]any{}})
+	definition := steptest.Definition(t, "caller", workflow.Step{ID: "remote", Uses: workflow.ActionSource{URL: "https://example.test/action"}, Action: action, With: map[string]any{}})
 	var output bytes.Buffer
 	if _, err := New(registry).Run(t.Context(), definition, Options{DryRun: true, Stdout: &output, Stderr: io.Discard}); err != nil {
 		t.Fatal(err)
@@ -297,7 +298,7 @@ func TestCompositeActionDryRunPrintsNestedPlan(t *testing.T) {
 
 func TestPackagedActionResolvesRelativeLuaModulesFromActionRoot(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, nil)
+	registry := steptest.Registry(t, nil)
 	if err := luastep.Register(registry); err != nil {
 		t.Fatal(err)
 	}
@@ -310,7 +311,7 @@ func TestPackagedActionResolvesRelativeLuaModulesFromActionRoot(t *testing.T) {
 			"lua/deploy.lua":     {Data: []byte(`return {value = "from-package"}`), Mode: 0o644},
 		},
 	}
-	definition := testDefinition(t, "caller", workflow.Step{ID: "remote", Uses: workflow.ActionSource{URL: "https://example.test/package"}, Action: action, With: map[string]any{}})
+	definition := steptest.Definition(t, "caller", workflow.Step{ID: "remote", Uses: workflow.ActionSource{URL: "https://example.test/package"}, Action: action, With: map[string]any{}})
 	if err := os.WriteFile(filepath.Join(definition.Dir, "deploy.lua"), []byte(`return {value = "from-caller"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}

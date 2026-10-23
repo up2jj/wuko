@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
 )
@@ -42,7 +43,7 @@ func TestOperationsLeaveTheirSourceUntouched(t *testing.T) {
 					continue
 				}
 				want := workflow.Clone(source)
-				runner := buildRunner(t, map[string]any{"from": "vars.source", "operations": []any{operationFixture(name)}})
+				runner := steptest.BuildAs[*Runner](t, New, map[string]any{"from": "vars.source", "operations": []any{operationFixture(name)}})
 				_, _ = runner.Run(t.Context(), step.Request{Vars: map[string]any{"source": source}})
 				if !reflect.DeepEqual(source, want) {
 					t.Fatalf("%s changed its source:\n got %#v\nwant %#v", name, source, want)

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 	setstep "github.com/up2jj/wuko/steps/set"
 	templatestep "github.com/up2jj/wuko/steps/template"
@@ -19,7 +20,7 @@ func TestTemplateStepRendersRawSourceAfterResolvingData(t *testing.T) {
 	if err := templatestep.Register(registry); err != nil {
 		t.Fatal(err)
 	}
-	definition := testDefinition(t, "render",
+	definition := steptest.Definition(t, "render",
 		workflow.Step{ID: "manifest", Type: "template", With: map[string]any{
 			"source": `{{ .data.name }}:{{ .data.replicas }}`,
 			"data": map[string]any{
@@ -47,7 +48,7 @@ func TestTemplateStepSelectsPackagedFileWithRenderedPath(t *testing.T) {
 	if err := templatestep.Register(registry); err != nil {
 		t.Fatal(err)
 	}
-	definition := testDefinition(t, "render-file", workflow.Step{
+	definition := steptest.Definition(t, "render-file", workflow.Step{
 		ID: "message", Type: "template", With: map[string]any{
 			"file": "templates/{{ .vars.kind }}.tmpl",
 			"data": map[string]any{"name": "{{ .vars.application }}"},
@@ -78,7 +79,7 @@ func TestTemplateStepAcceptsTemplatedExpressionBinding(t *testing.T) {
 	if err := templatestep.Register(registry); err != nil {
 		t.Fatal(err)
 	}
-	definition := testDefinition(t, "templated-expr", workflow.Step{
+	definition := steptest.Definition(t, "templated-expr", workflow.Step{
 		ID: "render", Type: "template", With: map[string]any{
 			"source": `{{ .data.name }}`,
 			"data":   map[string]any{"name": map[string]any{"expr": "{{ .vars.expression }}"}},
@@ -136,7 +137,7 @@ func TestTemplateStepOutputContractFollowsMode(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			definition := testDefinition(t, "contract",
+			definition := steptest.Definition(t, "contract",
 				workflow.Step{ID: "render", Type: "template", With: test.with},
 				workflow.Step{ID: "use", Type: "set", With: map[string]any{"variable": "target", "value": test.reference}},
 			)
@@ -181,7 +182,7 @@ func TestTemplateStepReferenceValidation(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			definition := testDefinition(t, test.name, workflow.Step{
+			definition := steptest.Definition(t, test.name, workflow.Step{
 				ID: "render", Type: "template", With: map[string]any{"source": test.source, "data": test.data},
 			})
 			definition.Vars = map[string]any{"application": "billing"}

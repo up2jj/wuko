@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -164,7 +165,7 @@ func TestStreamingStopsEvaluatingOnceTheResultIsKnown(t *testing.T) {
 	for name, operations := range tests {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			runner := buildRunner(t, map[string]any{"from": "vars.source", "operations": operations})
+			runner := steptest.BuildAs[*Runner](t, New, map[string]any{"from": "vars.source", "operations": operations})
 			if _, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{"source": source}}); err != nil {
 				t.Fatalf("Run() evaluated the failing item past the result: %v", err)
 			}
@@ -174,7 +175,7 @@ func TestStreamingStopsEvaluatingOnceTheResultIsKnown(t *testing.T) {
 
 func TestStreamingReportsTheFailingOperationAndItem(t *testing.T) {
 	t.Parallel()
-	runner := buildRunner(t, map[string]any{"from": "vars.source", "operations": []any{
+	runner := steptest.BuildAs[*Runner](t, New, map[string]any{"from": "vars.source", "operations": []any{
 		map[string]any{"filter": "true"},
 		map[string]any{"map": "item + 1"},
 		map[string]any{"take": 10},
@@ -187,7 +188,7 @@ func TestStreamingReportsTheFailingOperationAndItem(t *testing.T) {
 
 func TestStreamingKeepsStageLocalIndexes(t *testing.T) {
 	t.Parallel()
-	runner := buildRunner(t, map[string]any{"from": "vars.source", "operations": []any{
+	runner := steptest.BuildAs[*Runner](t, New, map[string]any{"from": "vars.source", "operations": []any{
 		map[string]any{"filter": "item % 2 == 0"},
 		map[string]any{"map": "index"},
 	}})
@@ -208,7 +209,7 @@ func TestStreamingStopsWhenCanceled(t *testing.T) {
 		source[index] = index
 	}
 	evaluated := 0
-	runner := buildRunner(t, map[string]any{"from": "vars.source", "operations": []any{
+	runner := steptest.BuildAs[*Runner](t, New, map[string]any{"from": "vars.source", "operations": []any{
 		map[string]any{"filter": "tick()"},
 	}})
 	request := step.Request{Vars: map[string]any{"source": source}}

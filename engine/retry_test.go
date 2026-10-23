@@ -10,6 +10,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
 )
@@ -30,12 +31,12 @@ func (runner retryTestRunner) Run(_ context.Context, request step.Request) (step
 func TestRunRetriesAndCommitsOnlySuccessfulAttempt(t *testing.T) {
 	t.Parallel()
 	var requests []step.Request
-	registry := newTestRegistry(t, map[string]step.Builder{"retry": func(map[string]any) (step.Runner, error) {
+	registry := steptest.Registry(t, map[string]step.Builder{"retry": func(map[string]any) (step.Runner, error) {
 		return retryTestRunner{failures: 2, requests: &requests}, nil
 	}})
 	policy := immediateRetry(3)
 	policy.OperationID = "{{ .vars.operation }}"
-	definition := testDefinition(t, "retry", attemptStep("publish", policy, workflow.Step{Type: "retry"}))
+	definition := steptest.Definition(t, "retry", attemptStep("publish", policy, workflow.Step{Type: "retry"}))
 	definition.Vars = map[string]any{"operation": "release-42"}
 	var diagnostics strings.Builder
 	state, err := New(registry).Run(t.Context(), definition, Options{RunDir: t.TempDir(), Stdout: io.Discard, Stderr: &diagnostics})
@@ -90,12 +91,12 @@ func TestRetryWhenUsesStructuredFailureAndNormalRoots(t *testing.T) {
 		},
 		err: errors.New("temporary failure"),
 	}
-	registry := newTestRegistry(t, map[string]step.Builder{
+	registry := steptest.Registry(t, map[string]step.Builder{
 		"conditional": func(map[string]any) (step.Runner, error) { return runner, nil },
 	})
 	policy := immediateRetry(2)
 	policy.When = `vars.retry && error.exit_code == 75 && error.stderr contains "rate limit" && error.status == "failed" && error.message contains "temporary failure" && error.step == "run" && error.type == "attempt" && error.outputs.status == 503 && error.outputs.message == "output message" && error.outputs.errors == "output errors" && error.outputs.outputs == "output outputs" && len(error.errors) == 1`
-	definition := testDefinition(t, "conditional", attemptStep("run", policy, workflow.Step{Type: "conditional", With: map[string]any{}}))
+	definition := steptest.Definition(t, "conditional", attemptStep("run", policy, workflow.Step{Type: "conditional", With: map[string]any{}}))
 	definition.Vars = map[string]any{"retry": true}
 
 	state, err := New(registry).Run(t.Context(), definition, Options{})
@@ -113,12 +114,12 @@ func TestRetryWhenUsesStructuredFailureAndNormalRoots(t *testing.T) {
 func TestRetryWhenFalseReturnsOriginalFailure(t *testing.T) {
 	t.Parallel()
 	runner := &conditionalRetryRunner{err: errors.New("permanent failure")}
-	registry := newTestRegistry(t, map[string]step.Builder{
+	registry := steptest.Registry(t, map[string]step.Builder{
 		"conditional": func(map[string]any) (step.Runner, error) { return runner, nil },
 	})
 	policy := immediateRetry(3)
 	policy.When = "false"
-	definition := testDefinition(t, "conditional", attemptStep("run", policy, workflow.Step{Type: "conditional", With: map[string]any{}}))
+	definition := steptest.Definition(t, "conditional", attemptStep("run", policy, workflow.Step{Type: "conditional", With: map[string]any{}}))
 
 	_, err := New(registry).Run(t.Context(), definition, Options{})
 	if err == nil || !strings.Contains(err.Error(), "permanent failure") || strings.Contains(err.Error(), "evaluating attempt when") {
@@ -132,12 +133,12 @@ func TestRetryWhenFalseReturnsOriginalFailure(t *testing.T) {
 func TestRetryWhenEvaluationFailureIsTerminal(t *testing.T) {
 	t.Parallel()
 	runner := &conditionalRetryRunner{outputs: map[string]any{"values": []any{1}}, err: errors.New("attempt failure")}
-	registry := newTestRegistry(t, map[string]step.Builder{
+	registry := steptest.Registry(t, map[string]step.Builder{
 		"conditional": func(map[string]any) (step.Runner, error) { return runner, nil },
 	})
 	policy := immediateRetry(3)
 	policy.When = `error.outputs.values[2] == 1`
-	definition := testDefinition(t, "conditional", attemptStep("run", policy, workflow.Step{Type: "conditional", With: map[string]any{}}))
+	definition := steptest.Definition(t, "conditional", attemptStep("run", policy, workflow.Step{Type: "conditional", With: map[string]any{}}))
 
 	_, err := New(registry).Run(t.Context(), definition, Options{})
 	if err == nil || !strings.Contains(err.Error(), "evaluating attempt when after") {
@@ -159,9 +160,9 @@ func TestRetryWhenValidationRejectsInvalidOrNonBooleanExpression(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			registry := newTestRegistry(t, map[string]step.Builder{
+			registry := steptest.Registry(t, map[string]step.Builder{
 				"conditional": func(map[string]any) (step.Runner, error) {
-					return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+					return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) {
 						t.Fatal("runner executed after retry condition validation failure")
 						return step.Result{}, nil
 					}), nil
@@ -169,7 +170,7 @@ func TestRetryWhenValidationRejectsInvalidOrNonBooleanExpression(t *testing.T) {
 			})
 			policy := immediateRetry(2)
 			policy.When = test.when
-			definition := testDefinition(t, "invalid", attemptStep("run", policy, workflow.Step{Type: "conditional", With: map[string]any{}}))
+			definition := steptest.Definition(t, "invalid", attemptStep("run", policy, workflow.Step{Type: "conditional", With: map[string]any{}}))
 
 			_, err := New(registry).Run(t.Context(), definition, Options{})
 			if err == nil || !strings.Contains(err.Error(), "attempt when") {
@@ -182,9 +183,9 @@ func TestRetryWhenValidationRejectsInvalidOrNonBooleanExpression(t *testing.T) {
 func TestRetryWhenShadowsOuterCatchError(t *testing.T) {
 	t.Parallel()
 	inner := &conditionalRetryRunner{err: errors.New("inner failure")}
-	registry := newTestRegistry(t, map[string]step.Builder{
+	registry := steptest.Registry(t, map[string]step.Builder{
 		"outer_fail": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) {
 				return step.Result{}, errors.New("outer failure")
 			}), nil
 		},
@@ -192,7 +193,7 @@ func TestRetryWhenShadowsOuterCatchError(t *testing.T) {
 	})
 	policy := immediateRetry(2)
 	policy.When = `error.message contains "inner failure" && error.step == "recover"`
-	definition := testDefinition(t, "shadow", tryCatchStep(
+	definition := steptest.Definition(t, "shadow", tryCatchStep(
 		[]workflow.Step{{ID: "deploy", Type: "outer_fail", With: map[string]any{}}},
 		[]workflow.Step{attemptStep("recover", policy, workflow.Step{Type: "inner_flaky", With: map[string]any{}})},
 	))
@@ -219,13 +220,13 @@ func (runner *timeoutThenSuccessRunner) Run(ctx context.Context, _ step.Request)
 
 func TestRunRetriesAttemptTimeout(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		registry := newTestRegistry(t, nil)
+		registry := steptest.Registry(t, nil)
 		runner := &timeoutThenSuccessRunner{}
 		if err := registry.Register("timeout", func(map[string]any) (step.Runner, error) { return runner, nil }); err != nil {
 			t.Fatal(err)
 		}
 		timeout := workflow.Duration(time.Second)
-		definition := testDefinition(t, "timeout", attemptStep("run", attemptTimeout(immediateRetry(2), &timeout), workflow.Step{Type: "timeout", With: map[string]any{}}))
+		definition := steptest.Definition(t, "timeout", attemptStep("run", attemptTimeout(immediateRetry(2), &timeout), workflow.Step{Type: "timeout", With: map[string]any{}}))
 
 		state, err := New(registry).Run(t.Context(), definition, Options{})
 		if err != nil {
@@ -252,12 +253,12 @@ func (runner *canceledThenSuccessRunner) Run(_ context.Context, _ step.Request) 
 
 func TestRunRetriesRunnerCancellationWhileWorkflowActive(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, nil)
+	registry := steptest.Registry(t, nil)
 	runner := &canceledThenSuccessRunner{}
 	if err := registry.Register("local_cancel", func(map[string]any) (step.Runner, error) { return runner, nil }); err != nil {
 		t.Fatal(err)
 	}
-	definition := testDefinition(t, "local-cancel", attemptStep("run", immediateRetry(2), workflow.Step{Type: "local_cancel", With: map[string]any{}}))
+	definition := steptest.Definition(t, "local-cancel", attemptStep("run", immediateRetry(2), workflow.Step{Type: "local_cancel", With: map[string]any{}}))
 
 	state, err := New(registry).Run(t.Context(), definition, Options{})
 	if err != nil {
@@ -278,14 +279,14 @@ func (runner *contextRunner) Run(ctx context.Context, _ step.Request) (step.Resu
 
 func TestRunStopsAtMaxElapsedTime(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		registry := newTestRegistry(t, nil)
+		registry := steptest.Registry(t, nil)
 		runner := &contextRunner{}
 		if err := registry.Register("blocking", func(map[string]any) (step.Runner, error) { return runner, nil }); err != nil {
 			t.Fatal(err)
 		}
 		policy := immediateRetry(3)
 		policy.MaxElapsedTime = workflow.LiteralDuration(workflow.Duration(2 * time.Second))
-		definition := testDefinition(t, "budget", attemptStep("wait", policy, workflow.Step{Type: "blocking", With: map[string]any{}}))
+		definition := steptest.Definition(t, "budget", attemptStep("wait", policy, workflow.Step{Type: "blocking", With: map[string]any{}}))
 		_, err := New(registry).Run(t.Context(), definition, Options{})
 		if err == nil || !strings.Contains(err.Error(), "max_elapsed_time 2s exceeded") {
 			t.Fatalf("error = %v", err)
@@ -298,14 +299,14 @@ func TestRunStopsAtMaxElapsedTime(t *testing.T) {
 
 func TestRunDoesNotRetryParentCancellation(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, nil)
+	registry := steptest.Registry(t, nil)
 	var requests []step.Request
 	if err := registry.Register("retry", func(map[string]any) (step.Runner, error) {
 		return retryTestRunner{failures: 3, requests: &requests}, nil
 	}); err != nil {
 		t.Fatal(err)
 	}
-	definition := testDefinition(t, "cancel", attemptStep("run", immediateRetry(3), workflow.Step{Type: "retry", With: map[string]any{}}))
+	definition := steptest.Definition(t, "cancel", attemptStep("run", immediateRetry(3), workflow.Step{Type: "retry", With: map[string]any{}}))
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	_, err := New(registry).Run(ctx, definition, Options{})
@@ -371,12 +372,12 @@ func TestRetryWhenOverridesHTTPFailureEligibility(t *testing.T) {
 				outputs: map[string]any{"status": test.status},
 				err:     retryHTTPError{method: test.method, status: test.status},
 			}
-			registry := newTestRegistry(t, map[string]step.Builder{
+			registry := steptest.Registry(t, map[string]step.Builder{
 				"http": func(map[string]any) (step.Runner, error) { return runner, nil },
 			})
 			policy := immediateRetry(2)
 			policy.When = test.when
-			definition := testDefinition(t, "http", attemptStep("request", policy, workflow.Step{Type: "http", With: map[string]any{}}))
+			definition := steptest.Definition(t, "http", attemptStep("request", policy, workflow.Step{Type: "http", With: map[string]any{}}))
 
 			state, err := New(registry).Run(t.Context(), definition, Options{})
 			if test.wantSuccess {
@@ -417,12 +418,12 @@ func TestRetryConditionOutputsPrefersReportedOutputs(t *testing.T) {
 func TestRetryWhenReportsTransportFailureAsZeroStatus(t *testing.T) {
 	t.Parallel()
 	runner := &conditionalRetryRunner{err: retryTransportError{retryHTTPError{method: "GET"}}}
-	registry := newTestRegistry(t, map[string]step.Builder{
+	registry := steptest.Registry(t, map[string]step.Builder{
 		"http": func(map[string]any) (step.Runner, error) { return runner, nil },
 	})
 	policy := immediateRetry(2)
 	policy.When = "error.outputs.status >= 500 || error.outputs.status == 0"
-	definition := testDefinition(t, "http", attemptStep("request", policy, workflow.Step{Type: "http", With: map[string]any{}}))
+	definition := steptest.Definition(t, "http", attemptStep("request", policy, workflow.Step{Type: "http", With: map[string]any{}}))
 
 	state, err := New(registry).Run(t.Context(), definition, Options{})
 	if err != nil {
@@ -449,15 +450,15 @@ func TestRetryAfterExtendsBackoffWithinMaxDelay(t *testing.T) {
 func TestRunKeepsAttemptPassThatSucceededAtItsDeadline(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var runs atomic.Int32
-		registry := newTestRegistry(t, map[string]step.Builder{"finish_at_deadline": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(ctx context.Context, _ step.Request) (step.Result, error) {
+		registry := steptest.Registry(t, map[string]step.Builder{"finish_at_deadline": func(map[string]any) (step.Runner, error) {
+			return steptest.RunnerFunc(func(ctx context.Context, _ step.Request) (step.Result, error) {
 				runs.Add(1)
 				<-ctx.Done()
 				return step.Result{Outputs: map[string]any{"ok": true}}, nil
 			}), nil
 		}})
 		timeout := workflow.Duration(time.Second)
-		definition := testDefinition(t, "deadline", attemptStep("run", attemptTimeout(immediateRetry(2), &timeout), workflow.Step{Type: "finish_at_deadline", With: map[string]any{}}))
+		definition := steptest.Definition(t, "deadline", attemptStep("run", attemptTimeout(immediateRetry(2), &timeout), workflow.Step{Type: "finish_at_deadline", With: map[string]any{}}))
 
 		state, err := New(registry).Run(t.Context(), definition, Options{})
 		if err != nil {

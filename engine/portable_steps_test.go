@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/engine"
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/steps/confirm"
 	filestep "github.com/up2jj/wuko/steps/file"
@@ -75,7 +76,7 @@ func TestHTTPRetriesAndCommitsSuccessfulResponse(t *testing.T) {
 	}))
 	defer server.Close()
 
-	definition := testDefinition(t, "retry", workflow.Step{
+	definition := steptest.Definition(t, "retry", workflow.Step{
 		ID: "fetch",
 		Attempt: &workflow.AttemptControl{
 			MaxAttempts:       workflow.LiteralCount(2),
@@ -86,7 +87,7 @@ func TestHTTPRetriesAndCommitsSuccessfulResponse(t *testing.T) {
 		},
 	})
 
-	registry := newTestRegistry(t, nil)
+	registry := steptest.Registry(t, nil)
 	if err := httpstep.Register(registry); err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +126,7 @@ func TestHTTPRetryRevalidatesPreviousResponse(t *testing.T) {
 	}))
 	defer server.Close()
 
-	definition := testDefinition(t, "revalidate", workflow.Step{
+	definition := steptest.Definition(t, "revalidate", workflow.Step{
 		ID: "revalidate",
 		Attempt: &workflow.AttemptControl{
 			MaxAttempts:       workflow.LiteralCount(2),
@@ -136,7 +137,7 @@ func TestHTTPRetryRevalidatesPreviousResponse(t *testing.T) {
 		},
 	})
 
-	registry := newTestRegistry(t, nil)
+	registry := steptest.Registry(t, nil)
 	if err := httpstep.Register(registry); err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +158,7 @@ func TestHTTPRetryRevalidatesPreviousResponse(t *testing.T) {
 
 func portableRegistry(t *testing.T) *step.Registry {
 	t.Helper()
-	registry := newTestRegistry(t, nil)
+	registry := steptest.Registry(t, nil)
 	for _, register := range []func(*step.Registry) error{
 		confirm.Register, httpstep.Register, setstep.Register, filestep.Register,
 	} {

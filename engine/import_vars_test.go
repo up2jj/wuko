@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/engine"
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 	importvarsstep "github.com/up2jj/wuko/steps/import_vars"
 	setstep "github.com/up2jj/wuko/steps/set"
@@ -26,7 +27,7 @@ func TestImportedVariablesAreVisibleToLaterSteps(t *testing.T) {
 			{ID: "artifact", Type: "set", With: map[string]any{"variable": "artifact", "expr": `vars.target + "-archive"`}},
 		},
 	}
-	registry := newTestRegistry(t, nil)
+	registry := steptest.Registry(t, nil)
 	for _, register := range []func(*step.Registry) error{importvarsstep.Register, setstep.Register} {
 		if err := register(registry); err != nil {
 			t.Fatal(err)

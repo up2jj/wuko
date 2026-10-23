@@ -6,13 +6,14 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/engine"
+	"github.com/up2jj/wuko/internal/steptest"
 	jsonpathstep "github.com/up2jj/wuko/steps/jsonpath"
 	"github.com/up2jj/wuko/workflow"
 )
 
 func TestJSONPathTemplatesAndCommitsTypedResults(t *testing.T) {
 	t.Parallel()
-	definition := testDefinition(t, "selection", workflow.Step{ID: "active", Type: "jsonpath", With: map[string]any{
+	definition := steptest.Definition(t, "selection", workflow.Step{ID: "active", Type: "jsonpath", With: map[string]any{
 		"from": "{{ .vars.source }}", "query": "$.{{ .vars.collection }}[?@.active == true].id",
 		"result": "{{ .vars.mode }}", "variable": "active_ids",
 	}})
@@ -23,7 +24,7 @@ func TestJSONPathTemplatesAndCommitsTypedResults(t *testing.T) {
 			map[string]any{"id": "two", "active": false},
 		}},
 	}
-	registry := newTestRegistry(t, nil)
+	registry := steptest.Registry(t, nil)
 	if err := jsonpathstep.Register(registry); err != nil {
 		t.Fatal(err)
 	}

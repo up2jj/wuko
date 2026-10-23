@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/tui"
 )
@@ -23,15 +24,6 @@ func configFor(fields ...map[string]any) map[string]any {
 
 func fieldFor(kind string, value any) map[string]any {
 	return map[string]any{"id": "answer", "type": kind, "label": "Answer", "value": value}
-}
-
-func buildForm(t *testing.T, raw map[string]any) *Runner {
-	t.Helper()
-	runner, err := New(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return runner.(*Runner)
 }
 
 func TestFormRejectsInvalidConfiguration(t *testing.T) {
@@ -83,7 +75,7 @@ func TestFormTypedOutputsDoNotWriteVariables(t *testing.T) {
 		{"id": "manifest", "type": "path", "label": "Manifest", "value": "app.yaml", "patterns": []any{"*.yaml"}},
 		{"id": "files", "type": "path", "label": "Files", "multiple": true, "value": []any{"app.yaml"}},
 	}
-	runner := buildForm(t, configFor(fields...))
+	runner := steptest.BuildAs[*Runner](t, New, configFor(fields...))
 	request := step.Request{RunDir: root, Vars: map[string]any{"name": "untouched"}}
 	result, err := runner.Run(t.Context(), request)
 	if err != nil {
@@ -106,7 +98,7 @@ func TestFormUnattendedRequiresEveryExplicitValue(t *testing.T) {
 		map[string]any{"id": "name", "type": "text", "label": "Name", "default": "Ada"},
 		map[string]any{"id": "notify", "type": "checkbox", "label": "Notify"},
 	)
-	runner := buildForm(t, raw)
+	runner := steptest.BuildAs[*Runner](t, New, raw)
 	_, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{"name": "supplied", "notify": true}})
 	if err == nil || !strings.Contains(err.Error(), "name, notify") {
 		t.Fatalf("error=%v", err)
@@ -119,7 +111,7 @@ func TestFormInteractiveValuesAndDefaultsRemainEditable(t *testing.T) {
 		map[string]any{"id": "notes", "type": "textarea", "label": "Notes", "default": "initial"},
 		map[string]any{"id": "notify", "type": "checkbox", "label": "Notify"},
 	)
-	runner := buildForm(t, raw)
+	runner := steptest.BuildAs[*Runner](t, New, raw)
 	calls := 0
 	runner.read = func(_ context.Context, _ step.Request, config tui.FormConfig) (map[string]any, error) {
 		calls++
@@ -143,7 +135,7 @@ func TestFormNilExpressionDefaultsUseZeroValue(t *testing.T) {
 		map[string]any{"id": "notify", "type": "checkbox", "label": "Notify", "default": map[string]any{"expr": "vars.missing"}},
 		map[string]any{"id": "tags", "type": "multiselect", "label": "Tags", "choices": []any{map[string]any{"label": "A", "value": "a"}}, "default": map[string]any{"expr": "vars.missing"}},
 	)
-	runner := buildForm(t, raw)
+	runner := steptest.BuildAs[*Runner](t, New, raw)
 	runner.read = func(_ context.Context, _ step.Request, config tui.FormConfig) (map[string]any, error) {
 		if config.Fields[0].Value != "" || config.Fields[1].Value != false || !reflect.DeepEqual(config.Fields[2].Value, []any{}) {
 			t.Fatalf("prefill=%#v", config.Fields)
@@ -162,7 +154,7 @@ func TestFormOptionalValues(t *testing.T) {
 		{"id": "selection", "type": "select", "label": "Selection", "value": nil, "choices": []any{map[string]any{"label": "One", "value": 1}}},
 		{"id": "multi", "type": "multiselect", "label": "Multi", "value": []any{}, "choices": []any{map[string]any{"label": "One", "value": 1}}},
 	}
-	result, err := buildForm(t, configFor(fields...)).Run(t.Context(), step.Request{})
+	result, err := steptest.BuildAs[*Runner](t, New, configFor(fields...)).Run(t.Context(), step.Request{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +191,7 @@ func TestFormRejectsInvalidValuesAtomically(t *testing.T) {
 			for key, value := range test.extra {
 				field[key] = value
 			}
-			runner := buildForm(t, configFor(field, map[string]any{"id": "valid", "type": "text", "label": "Valid", "value": "ok"}))
+			runner := steptest.BuildAs[*Runner](t, New, configFor(field, map[string]any{"id": "valid", "type": "text", "label": "Valid", "value": "ok"}))
 			result, err := runner.Run(t.Context(), step.Request{RunDir: t.TempDir()})
 			if err == nil || !strings.Contains(err.Error(), "answer") || len(result.Outputs) != 0 || len(result.Variables) != 0 {
 				t.Fatalf("result=%#v error=%v", result, err)
@@ -211,7 +203,7 @@ func TestFormRejectsInvalidValuesAtomically(t *testing.T) {
 func TestFormDynamicChoicesAreFrozenAndRevalidated(t *testing.T) {
 	raw := configFor(map[string]any{"id": "region", "type": "select", "label": "Region", "from": "steps.fetch.value", "label_field": "name", "value_field": "id", "default": 2})
 	request := step.Request{Interactive: true, Steps: map[string]any{"fetch": map[string]any{"value": []any{map[string]any{"name": "West", "id": 2}}}}}
-	runner := buildForm(t, raw)
+	runner := steptest.BuildAs[*Runner](t, New, raw)
 	runner.read = func(_ context.Context, _ step.Request, config tui.FormConfig) (map[string]any, error) {
 		if len(config.Fields[0].Options) != 1 || config.Fields[0].Options[0].Label != "West" {
 			t.Fatalf("options=%#v", config.Fields[0].Options)
@@ -232,7 +224,7 @@ func TestFormDynamicChoicesAreFrozenAndRevalidated(t *testing.T) {
 }
 
 func TestFormCancellationPublishesNothing(t *testing.T) {
-	runner := buildForm(t, configFor(fieldFor("text", "initial")))
+	runner := steptest.BuildAs[*Runner](t, New, configFor(fieldFor("text", "initial")))
 	runner.read = func(context.Context, step.Request, tui.FormConfig) (map[string]any, error) {
 		return map[string]any{"answer": "partial"}, context.Canceled
 	}
@@ -256,7 +248,7 @@ func TestFormPathRejectsSymlinkOutsideRoot(t *testing.T) {
 	if err := os.Symlink(outside, filepath.Join(root, "link.yaml")); err != nil {
 		t.Fatal(err)
 	}
-	result, err := buildForm(t, configFor(fieldFor("path", "link.yaml"))).Run(t.Context(), step.Request{RunDir: root})
+	result, err := steptest.BuildAs[*Runner](t, New, configFor(fieldFor("path", "link.yaml"))).Run(t.Context(), step.Request{RunDir: root})
 	if err == nil || !strings.Contains(err.Error(), "outside root") || len(result.Outputs) > 0 {
 		t.Fatalf("result=%#v error=%v", result, err)
 	}

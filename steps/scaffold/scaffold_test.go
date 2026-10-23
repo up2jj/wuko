@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
 )
@@ -70,7 +71,7 @@ func TestRunRendersTemplateTree(t *testing.T) {
 	renderer := newRenderer(t, map[string]workflow.TemplateDefinition{
 		"header": {Inline: "// generated for {{ .vars.name }}\n"},
 	}, map[string]any{"vars": map[string]any{"kind": "cmd", "name": "billing"}})
-	runner := newRunner(t, map[string]any{"from": "templates/service", "into": "services/billing"})
+	runner := steptest.BuildAs[*Runner](t, New, map[string]any{"from": "templates/service", "into": "services/billing"})
 	runDir := t.TempDir()
 	result, err := runner.Run(t.Context(), step.Request{WorkflowDir: workflowDir, RunDir: runDir, TemplateRenderer: renderer})
 	if err != nil {
@@ -122,7 +123,7 @@ func TestRunConflictPolicies(t *testing.T) {
 			mustMkdir(t, destination, 0o755)
 			mustWrite(t, filepath.Join(destination, "existing.txt"), "old", 0o600)
 
-			runner := newRunner(t, map[string]any{"from": "source", "into": "target", "on_conflict": policy})
+			runner := steptest.BuildAs[*Runner](t, New, map[string]any{"from": "source", "into": "target", "on_conflict": policy})
 			result, err := runner.Run(t.Context(), step.Request{
 				WorkflowDir: workflowDir, RunDir: runDir, TemplateRenderer: newRenderer(t, nil, map[string]any{}),
 			})
@@ -211,7 +212,7 @@ func TestRunRejectsUnsafeTrees(t *testing.T) {
 			source := filepath.Join(workflowDir, "source")
 			mustMkdir(t, source, 0o755)
 			test.prepare(t, source, workflowDir)
-			runner := newRunner(t, map[string]any{"from": "source", "into": "target"})
+			runner := steptest.BuildAs[*Runner](t, New, map[string]any{"from": "source", "into": "target"})
 			_, err := runner.Run(t.Context(), step.Request{
 				WorkflowDir: workflowDir, RunDir: t.TempDir(),
 				TemplateRenderer: newRenderer(t, nil, map[string]any{"vars": test.vars}),
@@ -233,7 +234,7 @@ func TestRunRejectsSymlinkedDestinationDirectory(t *testing.T) {
 	if err := os.Symlink(outside, filepath.Join(runDir, "target")); err != nil {
 		t.Skipf("creating symlink: %v", err)
 	}
-	runner := newRunner(t, map[string]any{"from": "source", "into": "target", "on_conflict": "overwrite"})
+	runner := steptest.BuildAs[*Runner](t, New, map[string]any{"from": "source", "into": "target", "on_conflict": "overwrite"})
 	_, err := runner.Run(t.Context(), step.Request{
 		WorkflowDir: workflowDir, RunDir: runDir, TemplateRenderer: newRenderer(t, nil, map[string]any{}),
 	})
@@ -255,7 +256,7 @@ func TestRunOverwriteReplacesLeafSymlink(t *testing.T) {
 	if err := os.Symlink(outside, filepath.Join(destination, "file")); err != nil {
 		t.Skipf("creating symlink: %v", err)
 	}
-	runner := newRunner(t, map[string]any{"from": "source", "into": "target", "on_conflict": "overwrite"})
+	runner := steptest.BuildAs[*Runner](t, New, map[string]any{"from": "source", "into": "target", "on_conflict": "overwrite"})
 	result, err := runner.Run(t.Context(), step.Request{
 		WorkflowDir: workflowDir, RunDir: runDir, TemplateRenderer: newRenderer(t, nil, map[string]any{}),
 	})
@@ -283,7 +284,7 @@ func TestValidateChecksLiteralTreeTemplates(t *testing.T) {
 	source := filepath.Join(workflowDir, "source")
 	mustMkdir(t, source, 0o755)
 	mustWrite(t, filepath.Join(source, "file"), `{{ template "missing" . }}`, 0o644)
-	runner := newRunner(t, map[string]any{"from": "source", "into": "target"})
+	runner := steptest.BuildAs[*Runner](t, New, map[string]any{"from": "source", "into": "target"})
 	err := runner.Validate(t.Context(), step.Request{
 		WorkflowDir: workflowDir, TemplateRenderer: newRenderer(t, nil, map[string]any{}),
 	})
@@ -297,7 +298,7 @@ func TestRunRejectsBorrowedWorkflowDirectory(t *testing.T) {
 	source := filepath.Join(workflowDir, "source")
 	mustMkdir(t, source, 0o755)
 	mustWrite(t, filepath.Join(source, "leak.txt"), "caller secret", 0o644)
-	runner := newRunner(t, map[string]any{"from": "source", "into": "target"})
+	runner := steptest.BuildAs[*Runner](t, New, map[string]any{"from": "source", "into": "target"})
 	runDir := t.TempDir()
 	request := step.Request{
 		WorkflowDir: workflowDir, WorkflowDirBorrowed: true, RunDir: runDir,
@@ -318,7 +319,7 @@ func TestRunRejectsBorrowedWorkflowDirectory(t *testing.T) {
 func TestRunHonorsCanceledContext(t *testing.T) {
 	workflowDir := t.TempDir()
 	mustMkdir(t, filepath.Join(workflowDir, "source"), 0o755)
-	runner := newRunner(t, map[string]any{"from": "source", "into": "target"})
+	runner := steptest.BuildAs[*Runner](t, New, map[string]any{"from": "source", "into": "target"})
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	_, err := runner.Run(ctx, step.Request{
@@ -327,15 +328,6 @@ func TestRunHonorsCanceledContext(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Run() error = %v", err)
 	}
-}
-
-func newRunner(t *testing.T, raw map[string]any) *Runner {
-	t.Helper()
-	runner, err := New(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return runner.(*Runner)
 }
 
 func newRenderer(t *testing.T, definitions map[string]workflow.TemplateDefinition, data map[string]any) boundRenderer {

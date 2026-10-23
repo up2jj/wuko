@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/provider"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/steps/decode"
@@ -19,8 +20,8 @@ import (
 
 func referenceTestRegistry(t *testing.T, runs *int) *step.Registry {
 	t.Helper()
-	return newTestRegistry(t, map[string]step.Builder{"capture": func(raw map[string]any) (step.Runner, error) {
-		return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+	return steptest.Registry(t, map[string]step.Builder{"capture": func(raw map[string]any) (step.Runner, error) {
+		return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) {
 			if runs != nil {
 				*runs++
 			}
@@ -58,7 +59,7 @@ func TestReferenceValidationUsesProviderSchemas(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			definition := testDefinition(t, tt.name, workflow.Step{
+			definition := steptest.Definition(t, tt.name, workflow.Step{
 				ID: "use", Type: "capture", If: tt.condition, With: map[string]any{"value": tt.value},
 			})
 			err := New(registry).Validate(t.Context(), definition, Options{Providers: tt.providers})
@@ -80,7 +81,7 @@ func TestReferenceValidationUsesRegisteredStepOutputSchemas(t *testing.T) {
 	registry := step.NewRegistry()
 	if err := registry.RegisterDefinition("http_test", step.Registration{
 		Builder: func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) {
 				return step.Result{Outputs: map[string]any{"status": 200}}, nil
 			}), nil
 		},
@@ -89,11 +90,11 @@ func TestReferenceValidationUsesRegisteredStepOutputSchemas(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := registry.Register("capture", func(map[string]any) (step.Runner, error) {
-		return runnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
+		return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
 	}); err != nil {
 		t.Fatal(err)
 	}
-	definition := testDefinition(t, "outputs",
+	definition := steptest.Definition(t, "outputs",
 		workflow.Step{ID: "fetch", Type: "http_test", With: map[string]any{}},
 		workflow.Step{ID: "use", Type: "capture", With: map[string]any{"value": `{{ .steps.fetch.sttaus }}`}},
 	)
@@ -119,7 +120,7 @@ func TestTransformReferenceValidationAndOutputContract(t *testing.T) {
 	}}
 
 	t.Run("callback locals and variable writer", func(t *testing.T) {
-		definition := testDefinition(t, "transform-valid",
+		definition := steptest.Definition(t, "transform-valid",
 			workflow.Step{ID: "selected", Type: "transform", With: map[string]any{
 				"from": "vars.values",
 				"operations": []any{
@@ -155,7 +156,7 @@ func TestTransformReferenceValidationAndOutputContract(t *testing.T) {
 			if test.consumer != "" {
 				steps = append(steps, workflow.Step{ID: "use", Type: "capture", With: map[string]any{"value": test.consumer}})
 			}
-			err := New(registry).Validate(t.Context(), testDefinition(t, test.name, steps...), options)
+			err := New(registry).Validate(t.Context(), steptest.Definition(t, test.name, steps...), options)
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("Validate error = %v, want %q", err, test.want)
 			}
@@ -168,7 +169,7 @@ func TestReferenceValidationDerivesCompositeActionOutputSchema(t *testing.T) {
 	registry := referenceTestRegistry(t, nil)
 	action := testAction(t, "typed")
 	action.Outputs = map[string]workflow.ActionOutput{"status": {Value: "true"}}
-	definition := testDefinition(t, "action-outputs",
+	definition := steptest.Definition(t, "action-outputs",
 		workflow.Step{ID: "build", Uses: workflow.ActionSource{URL: "https://example.test/action"}, Action: action},
 		workflow.Step{ID: "use", Type: "capture", With: map[string]any{"value": `{{ .steps.build.sttaus }}`}},
 	)
@@ -190,7 +191,7 @@ func TestProviderNamesCannotCollideWithRuntimeRoots(t *testing.T) {
 		{name: "active control", root: "custom_context", engine: New(referenceTestRegistry(t, nil), WithBackgroundControl(providerCollisionControl{}))},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			definition := testDefinition(t, "collision", workflow.Step{ID: "use", Type: "capture"})
+			definition := steptest.Definition(t, "collision", workflow.Step{ID: "use", Type: "capture"})
 			providers := provider.Set{
 				Schemas: map[string]provider.Schema{test.root: provider.OpenObject()},
 				Values:  map[string]map[string]any{test.root: {}},
@@ -242,7 +243,7 @@ func TestReferenceValidationFailsBeforeAnyStepRuns(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var runs int
-			definition := testDefinition(t, test.name, test.steps...)
+			definition := steptest.Definition(t, test.name, test.steps...)
 			state, err := New(referenceTestRegistry(t, &runs)).Run(t.Context(), definition, Options{})
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("error = %v, want %q", err, test.want)
@@ -286,7 +287,7 @@ func TestReferenceValidationChecksConstantKeysAndAllowsDynamicKeys(t *testing.T)
 		{name: "unknown expression root", ifExpr: `varz.unknown == nil`, want: `data root "varz" is not available here`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			definition := testDefinition(t, test.name, workflow.Step{
+			definition := steptest.Definition(t, test.name, workflow.Step{
 				ID: "use", Type: "capture", If: workflow.Condition(test.ifExpr), With: map[string]any{"value": test.value},
 			})
 			definition.Vars = map[string]any{"known": "x", "key": "runtime_key"}
@@ -304,14 +305,14 @@ func TestReferenceValidationChecksConstantKeysAndAllowsDynamicKeys(t *testing.T)
 	}
 
 	t.Run("invocation variable", func(t *testing.T) {
-		definition := testDefinition(t, "invocation", workflow.Step{ID: "use", Type: "capture", With: map[string]any{"value": `{{ .vars.provided }}`}})
+		definition := steptest.Definition(t, "invocation", workflow.Step{ID: "use", Type: "capture", With: map[string]any{"value": `{{ .vars.provided }}`}})
 		if err := New(registry).Validate(t.Context(), definition, Options{Vars: map[string]any{"provided": "value"}}); err != nil {
 			t.Fatal(err)
 		}
 	})
 
 	t.Run("dependency contract", func(t *testing.T) {
-		definition := testDefinition(t, "dependency", workflow.Step{ID: "use", Type: "capture", With: map[string]any{"value": `{{ .dependencies.build.artifact.path }}`}})
+		definition := steptest.Definition(t, "dependency", workflow.Step{ID: "use", Type: "capture", With: map[string]any{"value": `{{ .dependencies.build.artifact.path }}`}})
 		dependencies := map[string]map[string]any{"build": {"artifact": nil}}
 		if err := New(registry).Validate(t.Context(), definition, Options{Dependencies: dependencies}); err != nil {
 			t.Fatal(err)
@@ -417,7 +418,7 @@ func TestReferenceValidationTracksStepVisibility(t *testing.T) {
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			definition := testDefinition(t, test.name, test.steps...)
+			definition := steptest.Definition(t, test.name, test.steps...)
 			err := New(registry).Validate(t.Context(), definition, Options{})
 			if test.want == "" {
 				if err != nil {
@@ -437,7 +438,7 @@ func TestReferenceValidationTracksCleanupLifecycleAndActions(t *testing.T) {
 	registry := referenceTestRegistry(t, nil)
 
 	t.Run("defer sees completed sequence", func(t *testing.T) {
-		definition := testDefinition(t, "defer",
+		definition := steptest.Definition(t, "defer",
 			workflow.Step{ID: "first", Type: "capture", With: map[string]any{"value": "first"}, Defer: []workflow.Step{{ID: "cleanup", Type: "capture", With: map[string]any{"value": `{{ .steps.later.value }}`}}}},
 			workflow.Step{ID: "later", Type: "capture", With: map[string]any{"value": "later"}},
 		)
@@ -447,7 +448,7 @@ func TestReferenceValidationTracksCleanupLifecycleAndActions(t *testing.T) {
 	})
 
 	t.Run("finally sees main steps", func(t *testing.T) {
-		definition := testDefinition(t, "finally", workflow.Step{ID: "main", Type: "capture", With: map[string]any{"value": "main"}})
+		definition := steptest.Definition(t, "finally", workflow.Step{ID: "main", Type: "capture", With: map[string]any{"value": "main"}})
 		definition.Finally = []workflow.Step{{ID: "cleanup", Type: "capture", With: map[string]any{"value": `{{ .steps.main.value }}:{{ .finally.status }}`}}}
 		if err := New(registry).Validate(t.Context(), definition, Options{}); err != nil {
 			t.Fatal(err)
@@ -455,7 +456,7 @@ func TestReferenceValidationTracksCleanupLifecycleAndActions(t *testing.T) {
 	})
 
 	t.Run("lifecycle is isolated", func(t *testing.T) {
-		definition := testDefinition(t, "lifecycle", workflow.Step{ID: "main", Type: "capture", With: map[string]any{"value": "main"}})
+		definition := steptest.Definition(t, "lifecycle", workflow.Step{ID: "main", Type: "capture", With: map[string]any{"value": "main"}})
 		definition.Install = []workflow.Step{{ID: "install", Type: "capture", With: map[string]any{"value": `{{ .steps.main.value }}`}}}
 		err := New(registry).Validate(t.Context(), definition, Options{})
 		if err == nil || !strings.Contains(err.Error(), `step "main" is not available here`) {
@@ -466,7 +467,7 @@ func TestReferenceValidationTracksCleanupLifecycleAndActions(t *testing.T) {
 	t.Run("action inputs are closed", func(t *testing.T) {
 		action := testAction(t, "inner", workflow.Step{ID: "inner", Type: "capture", With: map[string]any{"value": `{{ .inputs.typo }}`}})
 		action.Inputs = map[string]workflow.ActionInput{"name": {Type: "string"}}
-		definition := testDefinition(t, "caller", workflow.Step{ID: "call", Uses: workflow.ActionSource{URL: "https://example.test/action"}, Action: action, With: map[string]any{"name": "ok"}})
+		definition := steptest.Definition(t, "caller", workflow.Step{ID: "call", Uses: workflow.ActionSource{URL: "https://example.test/action"}, Action: action, With: map[string]any{"name": "ok"}})
 		err := New(registry).Validate(t.Context(), definition, Options{})
 		if err == nil || !strings.Contains(err.Error(), `input "typo" is not declared`) {
 			t.Fatalf("error = %v", err)
@@ -479,7 +480,7 @@ func TestReferenceValidationChecksNamedTemplatesGloballyAndAtUsePoint(t *testing
 	registry := referenceTestRegistry(t, nil)
 
 	t.Run("unused template", func(t *testing.T) {
-		definition := testDefinition(t, "named", workflow.Step{ID: "only", Type: "capture", With: map[string]any{"value": "only"}})
+		definition := steptest.Definition(t, "named", workflow.Step{ID: "only", Type: "capture", With: map[string]any{"value": "only"}})
 		definition.Templates = map[string]workflow.TemplateDefinition{"unused": {Inline: `{{ .steps.missing.value }}`}}
 		err := New(registry).Validate(t.Context(), definition, Options{})
 		if err == nil || !strings.Contains(err.Error(), `template "unused": step "missing" is not available here`) {
@@ -488,7 +489,7 @@ func TestReferenceValidationChecksNamedTemplatesGloballyAndAtUsePoint(t *testing
 	})
 
 	t.Run("invocation scope", func(t *testing.T) {
-		definition := testDefinition(t, "named",
+		definition := steptest.Definition(t, "named",
 			workflow.Step{ID: "early", Type: "capture", With: map[string]any{"value": `{{ template "show" . }}`}},
 			workflow.Step{ID: "later", Type: "capture", With: map[string]any{"value": "later"}},
 		)
@@ -503,7 +504,7 @@ func TestReferenceValidationChecksNamedTemplatesGloballyAndAtUsePoint(t *testing
 func TestReferenceValidationLeavesSkippedEarlierStepHandlingAtRuntime(t *testing.T) {
 	t.Parallel()
 	var runs int
-	definition := testDefinition(t, "skipped",
+	definition := steptest.Definition(t, "skipped",
 		workflow.Step{ID: "optional", Type: "capture", If: "false", With: map[string]any{"value": "optional"}},
 		workflow.Step{ID: "consumer", Type: "capture", With: map[string]any{"value": `{{ .steps.optional.value }}`}},
 	)
@@ -524,7 +525,7 @@ func TestReferenceValidationSeesVariablesWrittenBySteps(t *testing.T) {
 	t.Parallel()
 	registry := step.NewRegistry()
 	if err := registry.Register("capture", func(raw map[string]any) (step.Runner, error) {
-		return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+		return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) {
 			return step.Result{Outputs: map[string]any{"value": raw["value"]}}, nil
 		}), nil
 	}); err != nil {
@@ -538,7 +539,7 @@ func TestReferenceValidationSeesVariablesWrittenBySteps(t *testing.T) {
 	assign := workflow.Step{ID: "assign", Type: "set", With: map[string]any{"variable": "greeting", "expr": `"hi"`}}
 
 	t.Run("set declares its variable", func(t *testing.T) {
-		definition := testDefinition(t, "set", assign,
+		definition := steptest.Definition(t, "set", assign,
 			workflow.Step{ID: "use", Type: "capture", With: map[string]any{"value": `{{ .vars.greeting }}`}},
 		)
 		if err := New(registry).Validate(t.Context(), definition, Options{}); err != nil {
@@ -547,7 +548,7 @@ func TestReferenceValidationSeesVariablesWrittenBySteps(t *testing.T) {
 	})
 
 	t.Run("set declares multiple variables", func(t *testing.T) {
-		definition := testDefinition(t, "set",
+		definition := steptest.Definition(t, "set",
 			workflow.Step{ID: "assign", Type: "set", With: map[string]any{
 				"variables": map[string]any{
 					"greeting": "hi",
@@ -565,7 +566,7 @@ func TestReferenceValidationSeesVariablesWrittenBySteps(t *testing.T) {
 	})
 
 	t.Run("extract declares its targets", func(t *testing.T) {
-		definition := testDefinition(t, "extract",
+		definition := steptest.Definition(t, "extract",
 			workflow.Step{ID: "parse", Type: "extract", With: map[string]any{
 				"text": "v1", "pattern": `(?P<version>v\d+)`, "variables": map[string]any{"version": "release"},
 			}},
@@ -577,7 +578,7 @@ func TestReferenceValidationSeesVariablesWrittenBySteps(t *testing.T) {
 	})
 
 	t.Run("lua stops variable validation", func(t *testing.T) {
-		definition := testDefinition(t, "lua",
+		definition := steptest.Definition(t, "lua",
 			workflow.Step{ID: "script", Type: "lua", With: map[string]any{"source": "return {}"}},
 			workflow.Step{ID: "use", Type: "capture", With: map[string]any{"value": `{{ .vars.decided_at_runtime }}`}},
 		)
@@ -587,7 +588,7 @@ func TestReferenceValidationSeesVariablesWrittenBySteps(t *testing.T) {
 	})
 
 	t.Run("concurrent and try bodies commit their writes", func(t *testing.T) {
-		definition := testDefinition(t, "nested",
+		definition := steptest.Definition(t, "nested",
 			workflow.Step{ID: "guarded",
 				Try:   &workflow.TryBlock{Steps: []workflow.Step{{ID: "risky", Type: "set", With: map[string]any{"variable": "from_try", "expr": `"t"`}}}},
 				Catch: &workflow.CatchBlock{Steps: []workflow.Step{{ID: "recover", Type: "capture", With: map[string]any{"value": "recovered"}}}},
@@ -604,7 +605,7 @@ func TestReferenceValidationSeesVariablesWrittenBySteps(t *testing.T) {
 	})
 
 	t.Run("iteration writes stay in the fanout", func(t *testing.T) {
-		definition := testDefinition(t, "fanout",
+		definition := steptest.Definition(t, "fanout",
 			workflow.Step{ID: "fan", Foreach: &workflow.ForeachGroup{Items: `["a"]`, MaxConcurrency: 1, Steps: []workflow.Step{
 				{ID: "each", Type: "set", With: map[string]any{"variable": "seen", "expr": "foreach.item"}},
 			}}},
@@ -617,7 +618,7 @@ func TestReferenceValidationSeesVariablesWrittenBySteps(t *testing.T) {
 	})
 
 	t.Run("other variables stay declared", func(t *testing.T) {
-		definition := testDefinition(t, "typo", assign,
+		definition := steptest.Definition(t, "typo", assign,
 			workflow.Step{ID: "use", Type: "capture", With: map[string]any{"value": `{{ .vars.greetign }}`}},
 		)
 		err := New(registry).Validate(t.Context(), definition, Options{})
@@ -633,7 +634,7 @@ func TestReferenceValidationDefersTemplatedLookupsToRuntime(t *testing.T) {
 	if err := decode.Register(registry); err != nil {
 		t.Fatal(err)
 	}
-	definition := testDefinition(t, "lookup", workflow.Step{
+	definition := steptest.Definition(t, "lookup", workflow.Step{
 		ID: "read", Type: "decode", With: map[string]any{"format": "json", "from": "steps.{{ .vars.producer }}.stdout"},
 	})
 	definition.Vars = map[string]any{"producer": "build"}
@@ -645,7 +646,7 @@ func TestReferenceValidationDefersTemplatedLookupsToRuntime(t *testing.T) {
 func TestReferenceValidationEndsTheFinallyBindingWithTheDeferredSteps(t *testing.T) {
 	t.Parallel()
 	registry := referenceTestRegistry(t, nil)
-	definition := testDefinition(t, "defer-scope", workflow.Step{
+	definition := steptest.Definition(t, "defer-scope", workflow.Step{
 		ID: "main", Type: "capture", With: map[string]any{"value": "main"},
 		Defer: []workflow.Step{{ID: "cleanup", Type: "capture", With: map[string]any{"value": `{{ .finally.status }}`}}},
 	})
@@ -669,13 +670,13 @@ func TestReferenceValidationAcceptsIndexedMarkdownEditMatches(t *testing.T) {
 	registry := referenceTestRegistry(t, nil)
 	if err := registry.RegisterDefinition("markdown_edit_test", step.Registration{
 		Builder: func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
+			return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
 		},
 		Outputs: registered,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	definition := testDefinition(t, "markdown-matches",
+	definition := steptest.Definition(t, "markdown-matches",
 		workflow.Step{ID: "edit", Type: "markdown_edit_test", With: map[string]any{}},
 		workflow.Step{ID: "use", Type: "capture", With: map[string]any{"value": `{{ (index .steps.edit.matches 0).path }}`, "expr": map[string]any{"expr": "steps.edit.matches[0].line"}}},
 	)

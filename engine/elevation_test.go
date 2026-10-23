@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/steps/shell"
@@ -35,7 +36,7 @@ func elevationTestEngine(t *testing.T, executor process.Executor) *Engine {
 func TestEngineRunsElevatedShellOnlyForAllowedLocalProvenance(t *testing.T) {
 	t.Parallel()
 	executor := &elevatedRecordingExecutor{}
-	workflowDefinition := testDefinition(t, "local", workflow.Step{ID: "root", Type: "shell", With: map[string]any{"command": "id", "elevated": true}})
+	workflowDefinition := steptest.Definition(t, "local", workflow.Step{ID: "root", Type: "shell", With: map[string]any{"command": "id", "elevated": true}})
 	engine := elevationTestEngine(t, executor)
 	options := Options{RunDir: t.TempDir(), ElevationAllowed: true, Stdout: io.Discard, Stderr: io.Discard}
 	if _, err := engine.Run(t.Context(), workflowDefinition, options); err != nil {
@@ -59,13 +60,13 @@ func TestEngineRestrictsElevationAcrossActionProvenance(t *testing.T) {
 	engine := elevationTestEngine(t, executor)
 	options := Options{RunDir: t.TempDir(), ElevationAllowed: true, Stdout: io.Discard, Stderr: io.Discard}
 
-	remote := testDefinition(t, "caller", workflow.Step{ID: "action", Uses: workflow.ActionSource{URL: "https://example.test/action"}, Action: action})
+	remote := steptest.Definition(t, "caller", workflow.Step{ID: "action", Uses: workflow.ActionSource{URL: "https://example.test/action"}, Action: action})
 	err := engine.Validate(t.Context(), remote, options)
 	if err == nil || !strings.Contains(err.Error(), "trusted local") {
 		t.Fatalf("remote action validation error = %v", err)
 	}
 
-	local := testDefinition(t, "caller", workflow.Step{ID: "action", Uses: workflow.ActionSource{Path: "./action"}, Action: action})
+	local := steptest.Definition(t, "caller", workflow.Step{ID: "action", Uses: workflow.ActionSource{Path: "./action"}, Action: action})
 	if err := engine.Validate(t.Context(), local, options); err != nil {
 		t.Fatalf("local action validation error = %v", err)
 	}

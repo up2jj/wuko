@@ -5,6 +5,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -13,7 +14,7 @@ import (
 // added at run time but not here would be rejected by validation as unknown.
 func TestValidationRootsCoverRuntimeTemplateData(t *testing.T) {
 	t.Parallel()
-	definition := testDefinition(t, "roots")
+	definition := steptest.Definition(t, "roots")
 	data := templateData(definition, t.TempDir(), &State{})
 	for _, name := range slices.Sorted(maps.Keys(data)) {
 		if _, ok := baseTemplateRoots[name]; !ok {

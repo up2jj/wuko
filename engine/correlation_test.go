@@ -7,6 +7,7 @@ import (
 
 	"github.com/up2jj/wuko/correlation"
 	"github.com/up2jj/wuko/diagnostic"
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
 )
@@ -15,8 +16,8 @@ func TestRunCorrelationPropagatesThroughRetriesAndStats(t *testing.T) {
 	t.Parallel()
 	invocationID := correlation.InvocationID("invocation")
 	var attempts int
-	registry := newTestRegistry(t, map[string]step.Builder{"flaky": func(map[string]any) (step.Runner, error) {
-		return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+	registry := steptest.Registry(t, map[string]step.Builder{"flaky": func(map[string]any) (step.Runner, error) {
+		return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) {
 			attempts++
 			if attempts == 1 {
 				return step.Result{}, errors.New("temporary")
@@ -24,7 +25,7 @@ func TestRunCorrelationPropagatesThroughRetriesAndStats(t *testing.T) {
 			return step.Result{}, nil
 		}), nil
 	}})
-	definition := testDefinition(t, "correlated", attemptStep("run", immediateRetry(2), workflow.Step{Type: "flaky", With: map[string]any{}}))
+	definition := steptest.Definition(t, "correlated", attemptStep("run", immediateRetry(2), workflow.Step{Type: "flaky", With: map[string]any{}}))
 	var events []ProgressEvent
 	state, err := New(registry).Run(t.Context(), definition, Options{InvocationID: invocationID, Progress: func(event ProgressEvent) {
 		events = append(events, event)
@@ -59,11 +60,11 @@ func TestRunCorrelationPropagatesThroughRetriesAndStats(t *testing.T) {
 
 func TestCompositeRunCorrelationIncludesCallingStep(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, map[string]step.Builder{"ok": func(map[string]any) (step.Runner, error) {
-		return runnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
+	registry := steptest.Registry(t, map[string]step.Builder{"ok": func(map[string]any) (step.Runner, error) {
+		return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
 	}})
 	action := testAction(t, "child", workflow.Step{ID: "inside", Type: "ok", With: map[string]any{}})
-	definition := testDefinition(t, "parent", workflow.Step{
+	definition := steptest.Definition(t, "parent", workflow.Step{
 		ID: "call", Uses: workflow.ActionSource{URL: "https://example.test/action"}, Action: action, With: map[string]any{},
 	})
 	var events []ProgressEvent
@@ -97,13 +98,13 @@ func TestCompositeRunCorrelationIncludesCallingStep(t *testing.T) {
 func TestLoopOccurrencesReceiveDistinctStepRunIDs(t *testing.T) {
 	t.Parallel()
 	var polls int
-	registry := newTestRegistry(t, map[string]step.Builder{"poll": func(map[string]any) (step.Runner, error) {
-		return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+	registry := steptest.Registry(t, map[string]step.Builder{"poll": func(map[string]any) (step.Runner, error) {
+		return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) {
 			polls++
 			return step.Result{Outputs: map[string]any{"done": polls == 2}}, nil
 		}), nil
 	}})
-	definition := testDefinition(t, "loop", workflow.Step{ID: "wait", Loop: &workflow.LoopGroup{
+	definition := steptest.Definition(t, "loop", workflow.Step{ID: "wait", Loop: &workflow.LoopGroup{
 		Until: "steps.poll.done", MaxIterations: 2,
 		Steps: []workflow.Step{{ID: "poll", Type: "poll", With: map[string]any{}}},
 	}})
@@ -122,10 +123,10 @@ func TestLoopOccurrencesReceiveDistinctStepRunIDs(t *testing.T) {
 
 func TestMatrixAndSkippedOccurrencesReceiveStepRunIDs(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, map[string]step.Builder{"ok": func(map[string]any) (step.Runner, error) {
-		return runnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
+	registry := steptest.Registry(t, map[string]step.Builder{"ok": func(map[string]any) (step.Runner, error) {
+		return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
 	}})
-	definition := testDefinition(t, "occurrences",
+	definition := steptest.Definition(t, "occurrences",
 		workflow.Step{ID: "skip", Type: "ok", If: "false", With: map[string]any{}},
 		workflow.Step{ID: "matrix", Matrix: &workflow.MatrixGroup{
 			Axes: workflow.MatrixAxes{{Name: "value", Values: []any{1, 2}}}, MaxConcurrency: 2,
@@ -155,9 +156,9 @@ func TestMatrixAndSkippedOccurrencesReceiveStepRunIDs(t *testing.T) {
 
 func TestRunCorrelationExistsForDryRunAndValidationFailure(t *testing.T) {
 	t.Parallel()
-	dryDefinition := testDefinition(t, "dry", workflow.Step{ID: "run", Type: "missing", With: map[string]any{}})
+	dryDefinition := steptest.Definition(t, "dry", workflow.Step{ID: "run", Type: "missing", With: map[string]any{}})
 	var failed diagnostic.Event
-	_, err := New(newTestRegistry(t, nil)).Run(t.Context(), dryDefinition, Options{InvocationID: "invocation", Diagnostics: func(event diagnostic.Event) {
+	_, err := New(steptest.Registry(t, nil)).Run(t.Context(), dryDefinition, Options{InvocationID: "invocation", Diagnostics: func(event diagnostic.Event) {
 		if event.Status == diagnostic.StatusFailed {
 			failed = event
 		}
@@ -166,10 +167,10 @@ func TestRunCorrelationExistsForDryRunAndValidationFailure(t *testing.T) {
 		t.Fatalf("validation error = %v, diagnostic = %#v", err, failed)
 	}
 
-	dryRegistry := newTestRegistry(t, map[string]step.Builder{"ok": func(map[string]any) (step.Runner, error) {
-		return runnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
+	dryRegistry := steptest.Registry(t, map[string]step.Builder{"ok": func(map[string]any) (step.Runner, error) {
+		return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
 	}})
-	dryDefinition = testDefinition(t, "dry", workflow.Step{ID: "run", Type: "ok", With: map[string]any{}})
+	dryDefinition = steptest.Definition(t, "dry", workflow.Step{ID: "run", Type: "ok", With: map[string]any{}})
 	state, err := New(dryRegistry).Run(t.Context(), dryDefinition, Options{InvocationID: "invocation", DryRun: true})
 	if err != nil {
 		t.Fatal(err)

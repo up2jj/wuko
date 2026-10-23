@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 	runworkflow "github.com/up2jj/wuko/steps/runworkflow"
 	"github.com/up2jj/wuko/steps/set"
@@ -66,7 +67,7 @@ func TestScriptSDKCallsEngineWithIsolatedState(t *testing.T) {
 	node := scriptSDKNode(t)
 	registry := scriptSDKRegistry(t)
 	if err := registry.Register("inspect", func(raw map[string]any) (step.Runner, error) {
-		return runnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
+		return steptest.RunnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
 			if request.Interactive || request.Stdin != nil {
 				t.Error("child invocation is interactive")
 			}
@@ -75,7 +76,7 @@ func TestScriptSDKCallsEngineWithIsolatedState(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	definition := testDefinition(t, "script-host",
+	definition := steptest.Definition(t, "script-host",
 		nodeSDKStep(node, "script", `
 const value = await wuko.step('inspect', {value: {count: 3}});
 await wuko.output('child', value);
@@ -121,7 +122,7 @@ func TestScriptSDKInvokesNamedWorkflow(t *testing.T) {
 	t.Parallel()
 	node := scriptSDKNode(t)
 	host := &sdkChildWorkflowHost{}
-	definition := testDefinition(t, "caller", nodeSDKStep(node, "script", `
+	definition := steptest.Definition(t, "caller", nodeSDKStep(node, "script", `
 await wuko.output('child', await wuko.runWorkflow('build', {target: 'release', vars: {revision: 'abc', count: 2}}));
 `))
 	var stderr bytes.Buffer
@@ -148,7 +149,7 @@ if (wuko.attempt.number === 1) {
   await wuko.setVar('published', true);
 }
 `)
-	definition := testDefinition(t, "retry-sdk", attemptStep("publish", immediateRetry(2), body))
+	definition := steptest.Definition(t, "retry-sdk", attemptStep("publish", immediateRetry(2), body))
 	state, err := New(scriptSDKRegistry(t)).Run(t.Context(), definition, Options{RunDir: t.TempDir(), Stdout: io.Discard, Stderr: io.Discard})
 	if err != nil {
 		t.Fatal(err)
@@ -188,7 +189,7 @@ func TestScriptSDKReferenceValidation(t *testing.T) {
 			if test.arg != "" {
 				script.With["sdk_args"] = map[string]any{"items": map[string]any{"expr": test.arg}}
 			}
-			definition := testDefinition(t, "references", script, workflow.Step{ID: "use", Type: "set", With: map[string]any{"variable": "result", "value": test.reference}})
+			definition := steptest.Definition(t, "references", script, workflow.Step{ID: "use", Type: "set", With: map[string]any{"variable": "result", "value": test.reference}})
 			definition.Vars = map[string]any{"items": []any{1, 2}}
 			err := New(scriptSDKRegistry(t)).Validate(t.Context(), definition, Options{})
 			if test.want == "" && err != nil {

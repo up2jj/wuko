@@ -5,15 +5,16 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
 )
 
 func TestWorkflowDependencyOutputsReachTemplatesExpressionsAndDeclaredOutputs(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, map[string]step.Builder{
+	registry := steptest.Registry(t, map[string]step.Builder{
 		"dependency_capture": func(raw map[string]any) (step.Runner, error) {
-			return runnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
 				return step.Result{Outputs: map[string]any{
 					"rendered": raw["value"],
 					"request":  request.Dependencies["build"]["artifact"],
@@ -21,7 +22,7 @@ func TestWorkflowDependencyOutputsReachTemplatesExpressionsAndDeclaredOutputs(t 
 			}), nil
 		},
 	})
-	definition := testDefinition(t, "release", workflow.Step{
+	definition := steptest.Definition(t, "release", workflow.Step{
 		ID: "consume", Type: "dependency_capture", If: `dependencies.build.publishable`,
 		With: map[string]any{"value": "{{ .dependencies.build.artifact }}"},
 	})
@@ -42,9 +43,9 @@ func TestWorkflowDependencyOutputsReachTemplatesExpressionsAndDeclaredOutputs(t 
 
 func TestWorkflowOutputContractRejectsEarlyReturnTypeMismatch(t *testing.T) {
 	t.Parallel()
-	definition := testDefinition(t, "typed", workflow.Step{Return: &workflow.ReturnControl{Outputs: map[string]string{"count": `"three"`}}})
+	definition := steptest.Definition(t, "typed", workflow.Step{Return: &workflow.ReturnControl{Outputs: map[string]string{"count": `"three"`}}})
 	definition.Outputs = map[string]workflow.WorkflowOutput{"count": {Type: "number", Value: "3"}}
-	_, err := New(newTestRegistry(t, nil)).Run(t.Context(), definition, Options{})
+	_, err := New(steptest.Registry(t, nil)).Run(t.Context(), definition, Options{})
 	if err == nil || !strings.Contains(err.Error(), `output "count" value does not match type number`) {
 		t.Fatalf("error = %v", err)
 	}
@@ -52,9 +53,9 @@ func TestWorkflowOutputContractRejectsEarlyReturnTypeMismatch(t *testing.T) {
 
 func TestWorkflowDeclaredOutputsProduceDryRunPlaceholders(t *testing.T) {
 	t.Parallel()
-	definition := testDefinition(t, "dry", workflow.Step{Return: &workflow.ReturnControl{Outputs: map[string]string{"ready": "true"}}})
+	definition := steptest.Definition(t, "dry", workflow.Step{Return: &workflow.ReturnControl{Outputs: map[string]string{"ready": "true"}}})
 	definition.Outputs = map[string]workflow.WorkflowOutput{"ready": {Type: "boolean", Value: "true"}}
-	state, err := New(newTestRegistry(t, nil)).Run(t.Context(), definition, Options{DryRun: true})
+	state, err := New(steptest.Registry(t, nil)).Run(t.Context(), definition, Options{DryRun: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,14 +66,14 @@ func TestWorkflowDeclaredOutputsProduceDryRunPlaceholders(t *testing.T) {
 
 func TestRunStepsDoesNotEvaluateWorkflowOutputs(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, map[string]step.Builder{
+	registry := steptest.Registry(t, map[string]step.Builder{
 		"capture": func(raw map[string]any) (step.Runner, error) {
-			return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) {
 				return step.Result{Outputs: map[string]any{"value": raw["value"]}}, nil
 			}), nil
 		},
 	})
-	definition := testDefinition(t, "lifecycle", workflow.Step{ID: "main", Type: "capture", With: map[string]any{"value": "main"}})
+	definition := steptest.Definition(t, "lifecycle", workflow.Step{ID: "main", Type: "capture", With: map[string]any{"value": "main"}})
 	definition.Outputs = map[string]workflow.WorkflowOutput{
 		"result": {Type: "string", Value: "steps.main.value"},
 	}

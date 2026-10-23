@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -43,7 +44,7 @@ func TestPreSuppliedSingleAndMultiplePaths(t *testing.T) {
 	mustWrite(t, filepath.Join(root, "main.go"))
 	mustWrite(t, filepath.Join(root, "notes.txt"))
 
-	single := newRunner(t, map[string]any{
+	single := steptest.BuildAs[*Runner](t, New, map[string]any{
 		"variable": "source", "message": "Select", "patterns": []any{"**/*.go"},
 	})
 	result, err := single.Run(t.Context(), step.Request{RunDir: root, Vars: map[string]any{"source": "main.go"}})
@@ -58,7 +59,7 @@ func TestPreSuppliedSingleAndMultiplePaths(t *testing.T) {
 		t.Fatalf("result = %#v", result)
 	}
 
-	multiple := newRunner(t, map[string]any{
+	multiple := steptest.BuildAs[*Runner](t, New, map[string]any{
 		"variable": "sources", "message": "Select", "multiple": true,
 	})
 	result, err = multiple.Run(t.Context(), step.Request{
@@ -81,7 +82,7 @@ func TestRootAndKindValidation(t *testing.T) {
 	}
 	mustWrite(t, filepath.Join(root, "file.txt"))
 
-	directory := newRunner(t, map[string]any{
+	directory := steptest.BuildAs[*Runner](t, New, map[string]any{
 		"variable": "target", "message": "Select", "root": "workspace", "kind": "directory",
 	})
 	result, err := directory.Run(t.Context(), step.Request{RunDir: runDir, Vars: map[string]any{"target": "."}})
@@ -100,7 +101,7 @@ func TestRootAndKindValidation(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "not a directory") {
 		t.Fatalf("error = %v", err)
 	}
-	file := newRunner(t, map[string]any{"variable": "target", "message": "Select", "root": root})
+	file := steptest.BuildAs[*Runner](t, New, map[string]any{"variable": "target", "message": "Select", "root": root})
 	_, err = file.Run(t.Context(), step.Request{Vars: map[string]any{"target": "."}})
 	if err == nil || !strings.Contains(err.Error(), "not a regular file") {
 		t.Fatalf("error = %v", err)
@@ -109,14 +110,14 @@ func TestRootAndKindValidation(t *testing.T) {
 
 func TestOptionalAndNonInteractiveValues(t *testing.T) {
 	root := t.TempDir()
-	optionalSingle := newRunner(t, map[string]any{
+	optionalSingle := steptest.BuildAs[*Runner](t, New, map[string]any{
 		"variable": "source", "message": "Select", "required": false,
 	})
 	result, err := optionalSingle.Run(t.Context(), step.Request{RunDir: root, Vars: map[string]any{"source": ""}})
 	if err != nil || result.Outputs["value"] != "" {
 		t.Fatalf("result = %#v, error = %v", result, err)
 	}
-	optionalMultiple := newRunner(t, map[string]any{
+	optionalMultiple := steptest.BuildAs[*Runner](t, New, map[string]any{
 		"variable": "sources", "message": "Select", "multiple": true, "required": false,
 	})
 	result, err = optionalMultiple.Run(t.Context(), step.Request{RunDir: root, Vars: map[string]any{"sources": []any{}}})
@@ -124,7 +125,7 @@ func TestOptionalAndNonInteractiveValues(t *testing.T) {
 		t.Fatalf("result = %#v, error = %v", result, err)
 	}
 
-	required := newRunner(t, map[string]any{"variable": "source", "message": "Select"})
+	required := steptest.BuildAs[*Runner](t, New, map[string]any{"variable": "source", "message": "Select"})
 	_, err = required.Run(t.Context(), step.Request{RunDir: root, Vars: map[string]any{}, Interactive: false})
 	if err == nil || !strings.Contains(err.Error(), "supply it with --var") {
 		t.Fatalf("error = %v", err)
@@ -138,7 +139,7 @@ func TestOptionalAndNonInteractiveValues(t *testing.T) {
 func TestPreSuppliedPathFailures(t *testing.T) {
 	root := t.TempDir()
 	mustWrite(t, filepath.Join(root, "notes.txt"))
-	runner := newRunner(t, map[string]any{
+	runner := steptest.BuildAs[*Runner](t, New, map[string]any{
 		"variable": "source", "message": "Select", "patterns": []any{"**/*.go"},
 	})
 	for _, value := range []string{"notes.txt", "missing.go", "../outside.go", filepath.Join(root, "notes.txt"), `C:\\notes.txt`} {
@@ -164,7 +165,7 @@ func TestSymlinkBoundary(t *testing.T) {
 	if err := os.Symlink(outside, filepath.Join(root, "outside-link.txt")); err != nil {
 		t.Fatal(err)
 	}
-	runner := newRunner(t, map[string]any{"variable": "source", "message": "Select"})
+	runner := steptest.BuildAs[*Runner](t, New, map[string]any{"variable": "source", "message": "Select"})
 	if _, err := runner.Run(t.Context(), step.Request{RunDir: root, Vars: map[string]any{"source": "inside-link.txt"}}); err != nil {
 		t.Fatalf("internal symlink: %v", err)
 	}
@@ -172,15 +173,6 @@ func TestSymlinkBoundary(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "outside root") {
 		t.Fatalf("error = %v", err)
 	}
-}
-
-func newRunner(t *testing.T, raw map[string]any) *Runner {
-	t.Helper()
-	runner, err := New(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return runner.(*Runner)
 }
 
 func mustWrite(t *testing.T, path string) {

@@ -5,18 +5,19 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/engine"
+	"github.com/up2jj/wuko/internal/steptest"
 	semverstep "github.com/up2jj/wuko/steps/semver"
 	"github.com/up2jj/wuko/workflow"
 )
 
 func TestSemVerTemplatesAndCommitsTypedResults(t *testing.T) {
 	t.Parallel()
-	definition := testDefinition(t, "release", workflow.Step{ID: "supported", Type: "semver", With: map[string]any{
+	definition := steptest.Definition(t, "release", workflow.Step{ID: "supported", Type: "semver", With: map[string]any{
 		"operation": "{{ .vars.operation }}", "version": "{{ .vars.version }}",
 		"constraint": "{{ .vars.constraint }}", "variable": "is_supported",
 	}})
 	definition.Vars = map[string]any{"version": "v1.4.2", "operation": "constrain", "constraint": "^1.4"}
-	registry := newTestRegistry(t, nil)
+	registry := steptest.Registry(t, nil)
 	if err := semverstep.Register(registry); err != nil {
 		t.Fatal(err)
 	}

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/engine"
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 	decodestep "github.com/up2jj/wuko/steps/decode"
 	jsonpathstep "github.com/up2jj/wuko/steps/jsonpath"
@@ -17,13 +18,13 @@ import (
 
 func TestDecodeShellOutputFeedsJSONPath(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, nil)
+	registry := steptest.Registry(t, nil)
 	for _, register := range []func(*step.Registry) error{shell.Register, decodestep.Register, jsonpathstep.Register} {
 		if err := register(registry); err != nil {
 			t.Fatal(err)
 		}
 	}
-	definition := testDefinition(t, "decode",
+	definition := steptest.Definition(t, "decode",
 		workflow.Step{ID: "deployments", Type: "shell", With: map[string]any{
 			"script": `printf '%s' '{"items":[{"metadata":{"name":"api"}},{"metadata":{"name":"worker"}}]}'`,
 		}},
@@ -61,7 +62,7 @@ func TestDecodePathUsesWorkingDirectoryScope(t *testing.T) {
 			ID: "data", Type: "decode", With: map[string]any{"format": "yaml", "path": "data.yaml"},
 		}}}},
 	}
-	registry := newTestRegistry(t, nil)
+	registry := steptest.Registry(t, nil)
 	if err := decodestep.Register(registry); err != nil {
 		t.Fatal(err)
 	}

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -26,7 +27,7 @@ func runStructuralCases(t *testing.T, file string, tests []structuralCase) {
 				t.Fatal(err)
 			}
 			test.config["from"] = map[string]any{"file": file}
-			runner := newRunner(t, test.config)
+			runner := steptest.Build(t, New, test.config)
 			if _, err := runner.Run(t.Context(), step.Request{RunDir: directory}); err != nil {
 				t.Fatal(err)
 			}
@@ -620,7 +621,7 @@ func TestStructuralEditsSettleAfterOneApplication(t *testing.T) {
 				t.Fatal(err)
 			}
 			test.config["from"] = map[string]any{"file": test.file}
-			runner := newRunner(t, test.config)
+			runner := steptest.Build(t, New, test.config)
 			for pass := range 2 {
 				if _, err := runner.Run(t.Context(), step.Request{RunDir: directory}); err != nil {
 					t.Fatalf("pass %d: %v", pass+1, err)
@@ -677,7 +678,7 @@ func TestStructuralEditsRefuseUnsupportedTargets(t *testing.T) {
 				t.Fatal(err)
 			}
 			test.config["from"] = map[string]any{"file": test.file}
-			runner := newRunner(t, test.config)
+			runner := steptest.Build(t, New, test.config)
 			_, err := runner.Run(t.Context(), step.Request{RunDir: directory})
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("error = %v, want it to mention %q", err, test.want)

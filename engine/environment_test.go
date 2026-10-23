@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
 )
@@ -32,7 +33,7 @@ func (runner environmentCaptureRunner) Run(_ context.Context, request step.Reque
 
 func environmentRegistry(t *testing.T) *step.Registry {
 	t.Helper()
-	registry := newTestRegistry(t, map[string]step.Builder{
+	registry := steptest.Registry(t, map[string]step.Builder{
 		"capture_env": func(raw map[string]any) (step.Runner, error) {
 			name, _ := raw["name"].(string)
 			expected, _ := raw["expected"].(string)
@@ -42,7 +43,7 @@ func environmentRegistry(t *testing.T) *step.Registry {
 			return countingRunner{value: raw["value"]}, nil
 		},
 		"fail": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) {
 				return step.Result{}, fmt.Errorf("failed")
 			}), nil
 		},
@@ -69,7 +70,7 @@ func TestEnvironmentBlockRestoresEnvironmentBeforeFinallyAfterFailure(t *testing
 	registry := environmentRegistry(t)
 	var finallyMode string
 	if err := registry.Register("capture_finally_env", func(map[string]any) (step.Runner, error) {
-		return runnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
+		return steptest.RunnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
 			finallyMode = request.Env["MODE"]
 			return step.Result{}, nil
 		}), nil
@@ -244,7 +245,7 @@ func TestEnvironmentBlockReportsRenderedVariable(t *testing.T) {
 
 func TestEnvironmentBlockDryRunListsNamesWithoutValues(t *testing.T) {
 	t.Parallel()
-	definition := testDefinition(t, "dry", workflow.Step{
+	definition := steptest.Definition(t, "dry", workflow.Step{
 		Env: workflow.ScopedEnvironmentValues(workflow.Environment{"TOKEN": "secret", "GOOS": "linux"}), Steps: []workflow.Step{envCapture("run", "GOOS")},
 	})
 	var output strings.Builder

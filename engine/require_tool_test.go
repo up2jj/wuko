@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/engine"
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/step"
 	assertstep "github.com/up2jj/wuko/steps/assert"
@@ -22,12 +23,12 @@ func (executor *requireToolExecutor) Run(_ context.Context, options process.Opti
 
 func TestRequireToolRendersConfigurationAndCommitsOutputs(t *testing.T) {
 	t.Parallel()
-	definition := testDefinition(t, "tools", workflow.Step{ID: "go", Type: "require_tool", With: map[string]any{
+	definition := steptest.Definition(t, "tools", workflow.Step{ID: "go", Type: "require_tool", With: map[string]any{
 		"tool": "{{ .vars.tool }}", "version_args": []any{"{{ .vars.version_arg }}"},
 		"constraint": "{{ .vars.constraint }}",
 	}})
 	definition.Vars = map[string]any{"tool": "go", "version_arg": "version", "constraint": ">= 1.26.0"}
-	registry := newTestRegistry(t, nil)
+	registry := steptest.Registry(t, nil)
 	if err := requiretoolstep.Register(registry); err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +59,7 @@ func (unavailableRequireToolExecutor) Run(_ context.Context, _ process.Options) 
 
 func TestOptionalRequireToolCommitsOutputsForLaterConditions(t *testing.T) {
 	t.Parallel()
-	definition := testDefinition(t, "optional-tools",
+	definition := steptest.Definition(t, "optional-tools",
 		workflow.Step{ID: "lsof", Type: "require_tool", With: map[string]any{
 			"tool": "lsof", "constraint": ">= 4.0.0", "required": false,
 		}},
@@ -67,7 +68,7 @@ func TestOptionalRequireToolCommitsOutputsForLaterConditions(t *testing.T) {
 			"message": "optional tool outputs were not committed",
 		}},
 	)
-	registry := newTestRegistry(t, nil)
+	registry := steptest.Registry(t, nil)
 	for _, register := range []func(*step.Registry) error{requiretoolstep.Register, assertstep.Register} {
 		if err := register(registry); err != nil {
 			t.Fatal(err)
@@ -87,10 +88,10 @@ func TestOptionalRequireToolCommitsOutputsForLaterConditions(t *testing.T) {
 
 func TestRequireToolValidationAndDryRunDoNotExecuteProbe(t *testing.T) {
 	t.Parallel()
-	definition := testDefinition(t, "tools", workflow.Step{ID: "go", Type: "require_tool", With: map[string]any{
+	definition := steptest.Definition(t, "tools", workflow.Step{ID: "go", Type: "require_tool", With: map[string]any{
 		"tool": "go", "constraint": ">= 1.25.0",
 	}})
-	registry := newTestRegistry(t, nil)
+	registry := steptest.Registry(t, nil)
 	if err := requiretoolstep.Register(registry); err != nil {
 		t.Fatal(err)
 	}

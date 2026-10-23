@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/steps/shell"
 	"github.com/up2jj/wuko/workflow"
@@ -128,7 +129,7 @@ func TestEnvironmentOperationsReachChildProcessesAndRestore(t *testing.T) {
 	if err := shell.Register(registry); err != nil {
 		t.Fatal(err)
 	}
-	definition := testDefinition(t, "process-env",
+	definition := steptest.Definition(t, "process-env",
 		workflow.Step{ID: "prepare", Type: "literal", With: map[string]any{"value": "TOKEN"}},
 		workflow.Step{Env: scopedEnvironment(t, `
 - unset: {expr: '[steps.prepare.value]'}
@@ -159,7 +160,7 @@ func TestEnvironmentOperationsRestoreAcrossExitPaths(t *testing.T) {
 			snapshots := map[string]map[string]string{}
 			if err := registry.Register("snapshot", func(raw map[string]any) (step.Runner, error) {
 				name, _ := raw["name"].(string)
-				return runnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
+				return steptest.RunnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
 					snapshots[name] = maps.Clone(request.Env)
 					if name == "exit" {
 						switch exit {
@@ -187,7 +188,7 @@ func TestEnvironmentOperationsRestoreAcrossExitPaths(t *testing.T) {
 			if exit == "return" {
 				children = append(children, workflow.Step{Return: &workflow.ReturnControl{Outputs: map[string]string{}}})
 			}
-			definition := testDefinition(t, "exits", workflow.Step{Env: scopedEnvironment(t, `[{unset: [TOKEN]}]`), Steps: children})
+			definition := steptest.Definition(t, "exits", workflow.Step{Env: scopedEnvironment(t, `[{unset: [TOKEN]}]`), Steps: children})
 			definition.Finally = []workflow.Step{snapshot("finally")}
 			state, err := New(registry).Run(ctx, definition, Options{BaseEnv: map[string]string{"TOKEN": "original"}, Stdout: io.Discard, Stderr: io.Discard})
 			if (err != nil) != (exit == "failure" || exit == "cancel") {
@@ -211,7 +212,7 @@ func TestEnvironmentOperationsIsolateBranchesAndActions(t *testing.T) {
 	t.Parallel()
 	registry := environmentRegistry(t)
 	if err := registry.Register("snapshot", func(map[string]any) (step.Runner, error) {
-		return runnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
+		return steptest.RunnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
 			_, exists := request.Env["TOKEN"]
 			return step.Result{Outputs: map[string]any{"present": exists}}, nil
 		}), nil
@@ -221,7 +222,7 @@ func TestEnvironmentOperationsIsolateBranchesAndActions(t *testing.T) {
 	action := &workflow.Action{Version: 1, Name: "snapshot-action", Steps: []workflow.Step{{ID: "capture", Type: "snapshot"}}, Outputs: map[string]workflow.ActionOutput{
 		"present": {Value: "steps.capture.present"},
 	}}
-	definition := testDefinition(t, "branches", workflow.Step{Concurrent: &workflow.ConcurrentGroup{MaxConcurrency: 2, Steps: []workflow.Step{
+	definition := steptest.Definition(t, "branches", workflow.Step{Concurrent: &workflow.ConcurrentGroup{MaxConcurrency: 2, Steps: []workflow.Step{
 		{Env: scopedEnvironment(t, `{TOKEN: null}`), Steps: []workflow.Step{
 			{ID: "removed", Type: "snapshot"},
 			{ID: "action", Uses: workflow.ActionSource{Path: "./action"}, Action: action},
@@ -250,7 +251,7 @@ func TestEnvironmentOperationsValidateSyntaxAndReferences(t *testing.T) {
 		{`[{unset: ['{{ invalid_function }}']}]`, "template"},
 	} {
 		t.Run(test.body, func(t *testing.T) {
-			definition := testDefinition(t, "invalid", workflow.Step{Env: scopedEnvironment(t, test.body), Steps: []workflow.Step{envCapture("child", "A")}})
+			definition := steptest.Definition(t, "invalid", workflow.Step{Env: scopedEnvironment(t, test.body), Steps: []workflow.Step{envCapture("child", "A")}})
 			err := New(environmentRegistry(t)).Validate(t.Context(), definition, Options{})
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("error = %v, want %q", err, test.want)
@@ -261,7 +262,7 @@ func TestEnvironmentOperationsValidateSyntaxAndReferences(t *testing.T) {
 
 func TestEnvironmentOperationsDryRunHidesValuesAndSelectors(t *testing.T) {
 	t.Parallel()
-	definition := testDefinition(t, "dry", workflow.Step{Env: scopedEnvironment(t, `
+	definition := steptest.Definition(t, "dry", workflow.Step{Env: scopedEnvironment(t, `
 - set: {TOKEN: private-value, REMOVE: null}
 - unset: ["AWS_*", "{{ .vars.private_selector }}"]
 - unset: {expr: vars.private_list}

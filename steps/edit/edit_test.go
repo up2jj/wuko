@@ -10,12 +10,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 )
 
 func TestVariableSourceReturnsEditedClone(t *testing.T) {
 	t.Parallel()
-	runner := newRunner(t, map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"operation": "set",
 		"from":      map[string]any{"var": "deployment"},
 		"path":      "$.spec.replicas",
@@ -40,7 +41,7 @@ func TestVariableSourceReturnsEditedClone(t *testing.T) {
 
 func TestAllExpressionsUseOriginalSnapshot(t *testing.T) {
 	t.Parallel()
-	runner := newRunner(t, map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"operation": "set",
 		"from":      map[string]any{"expr": "vars.document"},
 		"path":      "$[*]",
@@ -79,7 +80,7 @@ func TestMissingPolicy(t *testing.T) {
 			if test.missing != "" {
 				raw["missing"] = test.missing
 			}
-			runner := newRunner(t, raw)
+			runner := steptest.Build(t, New, raw)
 			result, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{"document": map[string]any{"present": true}}})
 			if (err != nil) != test.wantErr {
 				t.Fatalf("error = %v, wantErr %t", err, test.wantErr)
@@ -127,7 +128,7 @@ func TestFileEditsPreserveUnrelatedBytes(t *testing.T) {
 			if err := os.WriteFile(path, []byte(test.input), 0o640); err != nil {
 				t.Fatal(err)
 			}
-			runner := newRunner(t, map[string]any{
+			runner := steptest.Build(t, New, map[string]any{
 				"operation": "set", "from": map[string]any{"file": test.file},
 				"path": test.path, "value": test.value,
 			})
@@ -168,7 +169,7 @@ func TestFileMissingIgnoreDoesNotRewrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner := newRunner(t, map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"operation": "set", "from": map[string]any{"file": "package.json"},
 		"path": "$.missing", "expr": "current + 1", "missing": "ignore",
 	})
@@ -197,7 +198,7 @@ func TestAllFileEditIsAtomicWhenReplacementFails(t *testing.T) {
 	if err := os.WriteFile(path, input, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	runner := newRunner(t, map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"operation": "set", "from": map[string]any{"file": "values.json"},
 		"path": "$[*]", "expr": "index == 0 ? current + 1 : current.missing", "result": "all",
 	})
@@ -221,7 +222,7 @@ func TestAllFileEditDoesNotReencodeUnchangedMatches(t *testing.T) {
 	if err := os.WriteFile(path, input, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	runner := newRunner(t, map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"operation": "set", "from": map[string]any{"file": "values.toml"},
 		"path": "$.*", "expr": `path == "$['second']" ? current + 1 : current`, "result": "all",
 	})
@@ -259,15 +260,6 @@ func TestNewRejectsInvalidConfiguration(t *testing.T) {
 	}
 }
 
-func newRunner(t *testing.T, raw map[string]any) step.Runner {
-	t.Helper()
-	runner, err := New(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return runner
-}
-
 func bytesEqual(left, right []byte) bool { return string(left) == string(right) }
 
 func TestFileSourceRejectsSymlink(t *testing.T) {
@@ -281,7 +273,7 @@ func TestFileSourceRejectsSymlink(t *testing.T) {
 	if err := os.Symlink("real.json", filepath.Join(directory, "link.json")); err != nil {
 		t.Fatal(err)
 	}
-	runner := newRunner(t, map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"operation": "set", "from": map[string]any{"file": "link.json"},
 		"path": "$.a", "value": 2,
 	})
@@ -317,7 +309,7 @@ func TestJSONNumbersCompareByValue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner := newRunner(t, map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"operation": "set", "from": map[string]any{"file": "values.json"},
 		"path": "$.replicas", "value": 2,
 	})
@@ -348,7 +340,7 @@ func TestExpressionsSeeJSONNumbersAsNumbers(t *testing.T) {
 	if err := os.WriteFile(path, []byte("{\"replicas\": 2, \"ratio\": 1.5}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	runner := newRunner(t, map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"operation": "set", "from": map[string]any{"file": "values.json"},
 		"path": "$.*", "expr": "current * 2", "result": "all",
 	})
@@ -367,7 +359,7 @@ func TestExpressionsSeeJSONNumbersAsNumbers(t *testing.T) {
 
 func TestUnresolvedReplacementExpressionIsReported(t *testing.T) {
 	t.Parallel()
-	runner := newRunner(t, map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"operation": "set", "from": map[string]any{"var": "document"},
 		"path": "$.a", "expr": "{{ inputs.replicas }}",
 	})
@@ -384,7 +376,7 @@ func TestTOMLKeyWithEscapedQuote(t *testing.T) {
 	if err := os.WriteFile(path, []byte("\"a\\\"=b\" = 1\nother = 2\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	runner := newRunner(t, map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"operation": "set", "from": map[string]any{"file": "config.toml"},
 		"path": "$.other", "value": 3,
 	})
@@ -447,7 +439,7 @@ func TestYAMLScalarSpans(t *testing.T) {
 			if err := os.WriteFile(path, []byte(test.input), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			runner := newRunner(t, map[string]any{
+			runner := steptest.Build(t, New, map[string]any{
 				"operation": "set", "from": map[string]any{"file": "config.yaml"},
 				"path": test.path, "value": test.value,
 			})
@@ -467,7 +459,7 @@ func TestYAMLScalarSpans(t *testing.T) {
 
 func TestDuplicateSelectionCollapsesBeforeResultCheck(t *testing.T) {
 	t.Parallel()
-	runner := newRunner(t, map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"operation": "set", "from": map[string]any{"var": "document"},
 		"path": "$['a','a']", "value": 2,
 	})
@@ -494,7 +486,7 @@ func TestOverlappingSelectionIsRejected(t *testing.T) {
 		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			runner := newRunner(t, map[string]any{
+			runner := steptest.Build(t, New, map[string]any{
 				"operation": "set", "from": map[string]any{"var": "document"},
 				"path": test.path, "value": 0, "result": "all",
 			})
@@ -534,7 +526,7 @@ func TestSameValueMatchesRoundTrip(t *testing.T) {
 // alias each other or the caller's variable.
 func TestOutputsDoNotAliasEachOther(t *testing.T) {
 	t.Parallel()
-	runner := newRunner(t, map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"operation": "set", "from": map[string]any{"var": "document"},
 		"path": "$.*", "value": map[string]any{"tag": "new"}, "result": "all",
 	})
@@ -634,7 +626,7 @@ func TestStructuralEditKeepsCRLFLineEndings(t *testing.T) {
 			if err := os.WriteFile(path, []byte(test.input), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			runner := newRunner(t, map[string]any{
+			runner := steptest.Build(t, New, map[string]any{
 				"operation": "set", "from": map[string]any{"file": test.file},
 				"path": "$.services.worker", "value": 2, "missing": "create",
 			})

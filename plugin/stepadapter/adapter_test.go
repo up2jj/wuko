@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/plugin/sdk"
 	"github.com/up2jj/wuko/plugin/sdk/sdktest"
 	"github.com/up2jj/wuko/step"
@@ -389,7 +390,7 @@ func TestRegisterServiceValidatesRegistrationAndRunner(t *testing.T) {
 		t.Fatalf("nil builder error = %v", err)
 	}
 	notService := func(map[string]any) (step.Runner, error) {
-		return runnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
+		return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
 	}
 	if err := RegisterService(plugin, "ordinary", ServiceRegistration{Builder: notService}); err != nil {
 		t.Fatal(err)
@@ -399,12 +400,6 @@ func TestRegisterServiceValidatesRegistrationAndRunner(t *testing.T) {
 	if response.Error == nil || !strings.Contains(response.Error.Message, "does not implement") {
 		t.Fatalf("response error = %+v", response.Error)
 	}
-}
-
-type runnerFunc func(context.Context, step.Request) (step.Result, error)
-
-func (run runnerFunc) Run(ctx context.Context, request step.Request) (step.Result, error) {
-	return run(ctx, request)
 }
 
 func TestCleanupRequiresCleanerWhenDeclared(t *testing.T) {

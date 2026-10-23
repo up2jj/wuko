@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/executor"
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/step"
 	gitstep "github.com/up2jj/wuko/steps/git"
@@ -42,7 +43,7 @@ func (executor *recordingExecutor) Run(_ context.Context, options process.Option
 func TestExecutorScopeReceivesEnvironmentBlock(t *testing.T) {
 	t.Parallel()
 	scoped := &recordingExecutor{}
-	definition := testDefinition(t, "env-executor", workflow.Step{
+	definition := steptest.Definition(t, "env-executor", workflow.Step{
 		Env: workflow.ScopedEnvironmentValues(workflow.Environment{"MODE": "scoped"}), Steps: []workflow.Step{{
 			Executor: &workflow.ExecutorScope{Type: "recording", With: map[string]any{}},
 			Steps:    []workflow.Step{{ID: "run", Type: "shell", With: map[string]any{"command": "printenv", "args": []any{"MODE"}}}},
@@ -74,7 +75,7 @@ func TestExecutorScopesPreserveEnvironmentRemovals(t *testing.T) {
 				executor.Steps = []workflow.Step{run}
 				outer.Steps = []workflow.Step{executor}
 			}
-			definition := testDefinition(t, "removal-executor", outer)
+			definition := steptest.Definition(t, "removal-executor", outer)
 			if _, err := executorTestEngine(t, scoped).Run(t.Context(), definition, Options{
 				BaseEnv: map[string]string{"TOKEN": "original", "KEEP": "yes"}, Stdout: io.Discard, Stderr: io.Discard,
 			}); err != nil {
@@ -93,7 +94,7 @@ func TestExecutorScopesPreserveEnvironmentRemovals(t *testing.T) {
 func TestExecutorScopePreservesRunMetadata(t *testing.T) {
 	t.Parallel()
 	scoped := &recordingExecutor{}
-	definition := testDefinition(t, "loader-executor", workflow.Step{
+	definition := steptest.Definition(t, "loader-executor", workflow.Step{
 		Executor: &workflow.ExecutorScope{Type: "recording", With: map[string]any{}},
 		Steps: []workflow.Step{{ID: "run", Type: "shell", If: workflow.Condition(fmt.Sprintf(
 			`"direnv" in run.environment_loaders && run.os == %q && run.arch == %q`, runtime.GOOS, runtime.GOARCH,
@@ -152,7 +153,7 @@ func executorTestEngine(t *testing.T, session *recordingExecutor) *Engine {
 func TestExecutorScopeSupportsRequireTool(t *testing.T) {
 	t.Parallel()
 	scoped := &recordingExecutor{}
-	definition := testDefinition(t, "tools", workflow.Step{
+	definition := steptest.Definition(t, "tools", workflow.Step{
 		Executor: &workflow.ExecutorScope{Type: "recording", With: map[string]any{}},
 		Steps: []workflow.Step{{ID: "tool", Type: "require_tool", With: map[string]any{
 			"tool": "go", "version_args": []any{"version"},
@@ -177,7 +178,7 @@ func TestExecutorScopeCommitsAllowedShellExitForLaterCondition(t *testing.T) {
 	for _, allowed := range []any{[]any{0, 7}, "any"} {
 		t.Run(fmt.Sprintf("%v", allowed), func(t *testing.T) {
 			scoped := &recordingExecutor{fail: "probe"}
-			definition := testDefinition(t, "probe", workflow.Step{
+			definition := steptest.Definition(t, "probe", workflow.Step{
 				Executor: &workflow.ExecutorScope{Type: "recording", With: map[string]any{}},
 				Steps: []workflow.Step{
 					{ID: "probe", Type: "shell", With: map[string]any{
@@ -205,7 +206,7 @@ func TestExecutorScopeCommitsAllowedShellExitForLaterCondition(t *testing.T) {
 func TestExecutorScopeDoesNotRetryAllowedShellExit(t *testing.T) {
 	t.Parallel()
 	scoped := &recordingExecutor{fail: "probe"}
-	definition := testDefinition(t, "probe-retry", workflow.Step{
+	definition := steptest.Definition(t, "probe-retry", workflow.Step{
 		Executor: &workflow.ExecutorScope{Type: "recording", With: map[string]any{}},
 		Steps: []workflow.Step{attemptStep("probe", immediateRetry(3), workflow.Step{
 			Type: "shell", With: map[string]any{"command": "probe", "allowed_exit_codes": "any"},
@@ -228,7 +229,7 @@ func TestExecutorScopeDoesNotRetryAllowedShellExit(t *testing.T) {
 func TestExecutorScopeSupportsGitAssertions(t *testing.T) {
 	t.Parallel()
 	scoped := &recordingExecutor{}
-	definition := testDefinition(t, "git", workflow.Step{
+	definition := steptest.Definition(t, "git", workflow.Step{
 		Executor: &workflow.ExecutorScope{Type: "recording", With: map[string]any{}},
 		Steps: []workflow.Step{{ID: "branch", Type: "git_branch", With: map[string]any{
 			"operation": "assert", "branch": "main", "exists": true,
@@ -247,7 +248,7 @@ func TestExecutorScopeSupportsGitAssertions(t *testing.T) {
 func TestExecutorScopeSupportsGitCommit(t *testing.T) {
 	t.Parallel()
 	scoped := &recordingExecutor{}
-	definition := testDefinition(t, "git-commit", workflow.Step{
+	definition := steptest.Definition(t, "git-commit", workflow.Step{
 		Executor: &workflow.ExecutorScope{Type: "recording", With: map[string]any{}},
 		Steps: []workflow.Step{{ID: "commit", Type: "git_commit", With: map[string]any{
 			"message": "automated commit", "on_empty": "commit", "verify": false,
@@ -272,7 +273,7 @@ func TestExecutorScopeRestoresParentAndSharesOutputs(t *testing.T) {
 	t.Parallel()
 	scoped := &recordingExecutor{}
 	local := &recordingExecutor{}
-	definition := testDefinition(t, "mixed",
+	definition := steptest.Definition(t, "mixed",
 		workflow.Step{Executor: &workflow.ExecutorScope{Type: "recording", With: map[string]any{}},
 			Steps:   []workflow.Step{{ID: "build", Type: "shell", With: map[string]any{"command": "container-build"}}},
 			Finally: []workflow.Step{{ID: "clean", Type: "shell", With: map[string]any{"command": "container-clean"}}}},
@@ -300,7 +301,7 @@ func TestExecutorScopeWorkingDirectoryWithoutFileSystemUsesHost(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(runDir, "nested"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	definition := testDefinition(t, "scoped-directory", workflow.Step{
+	definition := steptest.Definition(t, "scoped-directory", workflow.Step{
 		Executor: &workflow.ExecutorScope{Type: "recording", With: map[string]any{}},
 		Steps: []workflow.Step{{WorkingDirectory: "nested", Steps: []workflow.Step{
 			{ID: "build", Type: "shell", With: map[string]any{"command": "build"}},
@@ -317,7 +318,7 @@ func TestExecutorScopeWorkingDirectoryWithoutFileSystemUsesHost(t *testing.T) {
 func TestExecutorScopeRunsFinallyAfterFailure(t *testing.T) {
 	t.Parallel()
 	scoped := &recordingExecutor{fail: "fail"}
-	definition := testDefinition(t, "cleanup",
+	definition := steptest.Definition(t, "cleanup",
 		workflow.Step{Executor: &workflow.ExecutorScope{Type: "recording", With: map[string]any{}},
 			Steps:   []workflow.Step{{ID: "work", Type: "shell", With: map[string]any{"command": "fail"}}},
 			Finally: []workflow.Step{{ID: "clean", Type: "shell", With: map[string]any{"command": "clean"}}}},
@@ -337,7 +338,7 @@ func TestExecutorScopeRunsFinallyAfterFailure(t *testing.T) {
 func TestExecutorScopeRunsDeferBeforeFinallyAndClose(t *testing.T) {
 	t.Parallel()
 	scoped := &recordingExecutor{}
-	definition := testDefinition(t, "defer-cleanup",
+	definition := steptest.Definition(t, "defer-cleanup",
 		workflow.Step{
 			Executor: &workflow.ExecutorScope{Type: "recording", With: map[string]any{}},
 			Steps: []workflow.Step{{
@@ -357,7 +358,7 @@ func TestExecutorScopeRunsDeferBeforeFinallyAndClose(t *testing.T) {
 
 func TestExecutorScopeRejectsNonAwareRunner(t *testing.T) {
 	t.Parallel()
-	steps := newTestRegistry(t, map[string]step.Builder{"host_only": func(map[string]any) (step.Runner, error) {
+	steps := steptest.Registry(t, map[string]step.Builder{"host_only": func(map[string]any) (step.Runner, error) {
 		return countingRunner{}, nil
 	}})
 	executors := executor.NewRegistry()
@@ -366,7 +367,7 @@ func TestExecutorScopeRejectsNonAwareRunner(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	definition := testDefinition(t, "invalid", workflow.Step{
+	definition := steptest.Definition(t, "invalid", workflow.Step{
 		Executor: &workflow.ExecutorScope{Type: "recording", With: map[string]any{}},
 		Steps:    []workflow.Step{{ID: "host", Type: "host_only", With: map[string]any{}}},
 	})
@@ -386,10 +387,10 @@ func (executorFileSystemRunner) ExecutorFileSystem() {}
 
 func TestExecutorScopeValidatesFileSystemCapability(t *testing.T) {
 	t.Parallel()
-	steps := newTestRegistry(t, map[string]step.Builder{"filesystem": func(map[string]any) (step.Runner, error) {
+	steps := steptest.Registry(t, map[string]step.Builder{"filesystem": func(map[string]any) (step.Runner, error) {
 		return executorFileSystemRunner{}, nil
 	}})
-	definition := testDefinition(t, "filesystem", workflow.Step{
+	definition := steptest.Definition(t, "filesystem", workflow.Step{
 		Executor: &workflow.ExecutorScope{Type: "recording", With: map[string]any{}},
 		Steps:    []workflow.Step{{ID: "read", Type: "filesystem", With: map[string]any{}}},
 	})
@@ -424,7 +425,7 @@ func TestExecutorScopeValidatesFileSystemCapability(t *testing.T) {
 // because its polling executor was engine-native, so polling inside an executor is new.
 func TestExecutorScopeAllowsAttempt(t *testing.T) {
 	t.Parallel()
-	definition := testDefinition(t, "attempt-in-executor", workflow.Step{
+	definition := steptest.Definition(t, "attempt-in-executor", workflow.Step{
 		Executor: &workflow.ExecutorScope{Type: "recording", With: map[string]any{}},
 		Steps: []workflow.Step{{
 			ID: "pause",

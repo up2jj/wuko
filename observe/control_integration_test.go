@@ -17,6 +17,7 @@ import (
 	"github.com/fsnotify/fsnotify"
 	"github.com/up2jj/wuko/engine"
 	"github.com/up2jj/wuko/fswatch"
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/observe"
 	"github.com/up2jj/wuko/step"
 	tempstep "github.com/up2jj/wuko/steps/temp"
@@ -26,18 +27,18 @@ import (
 func TestObserveLaunchesInBackgroundAndExplicitReturnStopsIt(t *testing.T) {
 	source := newFilesystemTestSource()
 	foregroundRan := false
-	registry := newTestRegistry(t, map[string]step.Builder{
+	registry := steptest.Registry(t, map[string]step.Builder{
 		"body": func(map[string]any) (step.Runner, error) {
-			return observeRunnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
+			return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
 		},
 		"foreground": func(map[string]any) (step.Runner, error) {
-			return observeRunnerFunc(func(context.Context, step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) {
 				foregroundRan = true
 				return step.Result{}, nil
 			}), nil
 		},
 	})
-	definition := testDefinition(t, "background", observeControl("dev", t.TempDir(), []workflow.Step{{ID: "body", Type: "body", With: map[string]any{}}}))
+	definition := steptest.Definition(t, "background", observeControl("dev", t.TempDir(), []workflow.Step{{ID: "body", Type: "body", With: map[string]any{}}}))
 	definition.Steps = append(definition.Steps,
 		workflow.Step{ID: "foreground", Type: "foreground", With: map[string]any{}},
 		workflow.Step{Return: &workflow.ReturnControl{Outputs: map[string]string{}}},
@@ -63,9 +64,9 @@ func TestObserveRerunsWithDeterministicBinding(t *testing.T) {
 	source := newFilesystemTestSource()
 	bindings := make(chan map[string]any, 4)
 	releaseInitial := make(chan struct{})
-	registry := newTestRegistry(t, map[string]step.Builder{
+	registry := steptest.Registry(t, map[string]step.Builder{
 		"body": func(map[string]any) (step.Runner, error) {
-			return observeRunnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
 				binding := workflow.Clone(request.Bindings["observe"]).(map[string]any)
 				bindings <- binding
 				if binding["initial"] == true {
@@ -79,7 +80,7 @@ func TestObserveRerunsWithDeterministicBinding(t *testing.T) {
 	})
 	control := observeControl("dev", root, []workflow.Step{{ID: "body", Type: "body", With: map[string]any{}}})
 	control.Observe.Debounce = workflow.Duration(time.Millisecond)
-	definition := testDefinition(t, "rerun", control)
+	definition := steptest.Definition(t, "rerun", control)
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	triggers := make(chan string, 4)
@@ -123,19 +124,19 @@ func TestObserveFailureCancelsForeground(t *testing.T) {
 	root := t.TempDir()
 	source := newFilesystemTestSource()
 	foregroundStarted := make(chan struct{})
-	registry := newTestRegistry(t, map[string]step.Builder{
+	registry := steptest.Registry(t, map[string]step.Builder{
 		"body": func(map[string]any) (step.Runner, error) {
-			return observeRunnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
+			return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
 		},
 		"block": func(map[string]any) (step.Runner, error) {
-			return observeRunnerFunc(func(ctx context.Context, _ step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(ctx context.Context, _ step.Request) (step.Result, error) {
 				close(foregroundStarted)
 				<-ctx.Done()
 				return step.Result{}, ctx.Err()
 			}), nil
 		},
 	})
-	definition := testDefinition(t, "failure", observeControl("dev", root, []workflow.Step{{ID: "body", Type: "body", With: map[string]any{}}}))
+	definition := steptest.Definition(t, "failure", observeControl("dev", root, []workflow.Step{{ID: "body", Type: "body", With: map[string]any{}}}))
 	definition.Steps = append(definition.Steps, workflow.Step{ID: "foreground", Type: "block", With: map[string]any{}})
 	done := make(chan error, 1)
 	go func() {
@@ -161,9 +162,9 @@ func TestObserveHTTPSourceFeedsGenericBinding(t *testing.T) {
 		}, nil
 	})}
 	bindings := make(chan map[string]any, 3)
-	registry := newTestRegistry(t, map[string]step.Builder{
+	registry := steptest.Registry(t, map[string]step.Builder{
 		"body": func(map[string]any) (step.Runner, error) {
-			return observeRunnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
 				bindings <- workflow.Clone(request.Bindings["observe"]).(map[string]any)
 				return step.Result{}, nil
 			}), nil
@@ -181,7 +182,7 @@ func TestObserveHTTPSourceFeedsGenericBinding(t *testing.T) {
 	done := make(chan error, 1)
 	sources := observe.NewRegistry(observe.HTTPBuilder{Client: client})
 	go func() {
-		_, err := engine.New(registry, engine.WithBackgroundControl(observe.NewControl(sources))).Run(ctx, testDefinition(t, "http-observe", control), engine.Options{RunDir: t.TempDir()})
+		_, err := engine.New(registry, engine.WithBackgroundControl(observe.NewControl(sources))).Run(ctx, steptest.Definition(t, "http-observe", control), engine.Options{RunDir: t.TempDir()})
 		done <- err
 	}()
 	initial := receiveObserveTest(t, bindings)
@@ -211,9 +212,9 @@ func TestObserveChangePolicies(t *testing.T) {
 			var runs atomic.Int32
 			var active atomic.Int32
 			var overlapped atomic.Bool
-			registry := newTestRegistry(t, map[string]step.Builder{
+			registry := steptest.Registry(t, map[string]step.Builder{
 				"body": func(map[string]any) (step.Runner, error) {
-					return observeRunnerFunc(func(ctx context.Context, _ step.Request) (step.Result, error) {
+					return steptest.RunnerFunc(func(ctx context.Context, _ step.Request) (step.Result, error) {
 						run := int(runs.Add(1))
 						if active.Add(1) != 1 {
 							overlapped.Store(true)
@@ -234,7 +235,7 @@ func TestObserveChangePolicies(t *testing.T) {
 			control := observeControl("dev", root, []workflow.Step{{ID: "body", Type: "body", With: map[string]any{}}})
 			control.Observe.Debounce = workflow.Duration(time.Millisecond)
 			control.Observe.OnChange = policy
-			definition := testDefinition(t, "policy", control)
+			definition := steptest.Definition(t, "policy", control)
 			ctx, cancel := context.WithCancel(t.Context())
 			done := make(chan error, 1)
 			go func() {
@@ -304,22 +305,6 @@ func receiveObserveTest[T any](t *testing.T, channel <-chan T) T {
 	}
 }
 
-func testDefinition(t *testing.T, name string, steps ...workflow.Step) *workflow.Definition {
-	t.Helper()
-	return &workflow.Definition{Version: 1, Name: name, Dir: t.TempDir(), Steps: steps}
-}
-
-func newTestRegistry(t *testing.T, builders map[string]step.Builder) *step.Registry {
-	t.Helper()
-	registry := step.NewRegistry()
-	for name, builder := range builders {
-		if err := registry.Register(name, builder); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return registry
-}
-
 func observeControl(id, root string, body []workflow.Step) workflow.Step {
 	return workflow.Step{ID: id, Observe: &workflow.ObserveGroup{
 		Source: workflow.ObserveSource{Type: "filesystem", With: map[string]any{"root": root, "paths": []any{"**/*.go"}}},
@@ -330,12 +315,6 @@ func observeControl(id, root string, body []workflow.Step) workflow.Step {
 func withFilesystemTestSource(source fswatch.Source) engine.Option {
 	registry := observe.NewRegistry(observe.FilesystemBuilder{Factory: func() (fswatch.Source, error) { return source, nil }})
 	return engine.WithBackgroundControl(observe.NewControl(registry))
-}
-
-type observeRunnerFunc func(context.Context, step.Request) (step.Result, error)
-
-func (runner observeRunnerFunc) Run(ctx context.Context, request step.Request) (step.Result, error) {
-	return runner(ctx, request)
 }
 
 type filesystemTestSource struct {
@@ -373,10 +352,10 @@ func TestObserveReleasesManagedResourcesEachIteration(t *testing.T) {
 	root := t.TempDir()
 	source := newFilesystemTestSource()
 	paths := make(chan string, 4)
-	registry := newTestRegistry(t, map[string]step.Builder{
+	registry := steptest.Registry(t, map[string]step.Builder{
 		"record": func(raw map[string]any) (step.Runner, error) {
 			path, _ := raw["path"].(string)
-			return observeRunnerFunc(func(context.Context, step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) {
 				paths <- path
 				return step.Result{}, nil
 			}), nil
@@ -395,7 +374,7 @@ func TestObserveReleasesManagedResourcesEachIteration(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() {
-		_, err := engine.New(registry, withFilesystemTestSource(source)).Run(ctx, testDefinition(t, "managed", control), engine.Options{
+		_, err := engine.New(registry, withFilesystemTestSource(source)).Run(ctx, steptest.Definition(t, "managed", control), engine.Options{
 			RunDir: root,
 			Progress: func(event engine.ProgressEvent) {
 				switch event.Kind {
@@ -438,16 +417,16 @@ func TestObserveReportsIterationInterruptedByShutdown(t *testing.T) {
 	root := t.TempDir()
 	source := newFilesystemTestSource()
 	running := make(chan struct{})
-	registry := newTestRegistry(t, map[string]step.Builder{
+	registry := steptest.Registry(t, map[string]step.Builder{
 		"block": func(map[string]any) (step.Runner, error) {
-			return observeRunnerFunc(func(ctx context.Context, _ step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(ctx context.Context, _ step.Request) (step.Result, error) {
 				close(running)
 				<-ctx.Done()
 				return step.Result{}, ctx.Err()
 			}), nil
 		},
 	})
-	definition := testDefinition(t, "shutdown", observeControl("dev", root, []workflow.Step{{ID: "body", Type: "block", With: map[string]any{}}}))
+	definition := steptest.Definition(t, "shutdown", observeControl("dev", root, []workflow.Step{{ID: "body", Type: "block", With: map[string]any{}}}))
 	finished := make(chan engine.ProgressEvent, 4)
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
@@ -478,17 +457,17 @@ func TestObserveNamedTemplateReferencesBinding(t *testing.T) {
 	root := t.TempDir()
 	source := newFilesystemTestSource()
 	rendered := make(chan string, 2)
-	registry := newTestRegistry(t, map[string]step.Builder{
+	registry := steptest.Registry(t, map[string]step.Builder{
 		"record": func(raw map[string]any) (step.Runner, error) {
 			value, _ := raw["value"].(string)
-			return observeRunnerFunc(func(context.Context, step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) {
 				rendered <- value
 				return step.Result{}, nil
 			}), nil
 		},
 	})
 	body := []workflow.Step{{ID: "body", Type: "record", With: map[string]any{"value": `{{ template "changes" . }}`}}}
-	definition := testDefinition(t, "templates", observeControl("dev", root, body))
+	definition := steptest.Definition(t, "templates", observeControl("dev", root, body))
 	definition.Templates = map[string]workflow.TemplateDefinition{"changes": {Inline: "{{ len .observe.filesystem.paths }} changed"}}
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
@@ -515,9 +494,9 @@ func TestObserveNamedTemplateReferencesBinding(t *testing.T) {
 
 func TestObserveShellSourceUsesWorkflowEnvironment(t *testing.T) {
 	bindings := make(chan map[string]any, 3)
-	registry := newTestRegistry(t, map[string]step.Builder{
+	registry := steptest.Registry(t, map[string]step.Builder{
 		"body": func(map[string]any) (step.Runner, error) {
-			return observeRunnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
 				bindings <- workflow.Clone(request.Bindings["observe"]).(map[string]any)
 				return step.Result{}, nil
 			}), nil
@@ -531,7 +510,7 @@ func TestObserveShellSourceUsesWorkflowEnvironment(t *testing.T) {
 		Debounce: workflow.Duration(time.Millisecond),
 		Steps:    []workflow.Step{{ID: "body", Type: "body", With: map[string]any{}}},
 	}}
-	definition := testDefinition(t, "shell-observe", control)
+	definition := steptest.Definition(t, "shell-observe", control)
 	definition.Env = workflow.Environment{"GREETING": "hello"}
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
@@ -562,9 +541,9 @@ func TestObserveContinuesAfterToleratedSourceFailure(t *testing.T) {
 	source := newFilesystemTestSource()
 	runs := make(chan int, 4)
 	var started atomic.Int32
-	registry := newTestRegistry(t, map[string]step.Builder{
+	registry := steptest.Registry(t, map[string]step.Builder{
 		"body": func(map[string]any) (step.Runner, error) {
-			return observeRunnerFunc(func(context.Context, step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) {
 				runs <- int(started.Add(1))
 				return step.Result{}, nil
 			}), nil
@@ -577,7 +556,7 @@ func TestObserveContinuesAfterToleratedSourceFailure(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() {
-		_, err := engine.New(registry, withFilesystemTestSource(source)).Run(ctx, testDefinition(t, "tolerant", control), engine.Options{
+		_, err := engine.New(registry, withFilesystemTestSource(source)).Run(ctx, steptest.Definition(t, "tolerant", control), engine.Options{
 			RunDir: root,
 			Progress: func(event engine.ProgressEvent) {
 				if event.Kind == engine.BackgroundSourceFailed {

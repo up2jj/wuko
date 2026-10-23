@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -135,7 +136,7 @@ func operationFixture(name string) any {
 }
 
 func TestListPipelineAndVariable(t *testing.T) {
-	runner := buildRunner(t, map[string]any{
+	runner := steptest.BuildAs[*Runner](t, New, map[string]any{
 		"from": "vars.apps",
 		"operations": []any{
 			map[string]any{"filter": "item.live_tag != item.release_tag"},
@@ -168,7 +169,7 @@ func TestListPipelineAndVariable(t *testing.T) {
 }
 
 func TestObjectPipelineUsesSortedKeys(t *testing.T) {
-	runner := buildRunner(t, map[string]any{
+	runner := steptest.BuildAs[*Runner](t, New, map[string]any{
 		"from": "vars.services",
 		"operations": []any{
 			map[string]any{"filter_map_to_list": map[string]any{"when": "value.enabled", "value": `{name: key, index: index}`}},
@@ -190,7 +191,7 @@ func TestObjectPipelineUsesSortedKeys(t *testing.T) {
 
 func TestNumericAndTupleOperations(t *testing.T) {
 	t.Run("integer mean", func(t *testing.T) {
-		runner := buildRunner(t, map[string]any{"from": "vars.values", "operations": []any{"mean"}})
+		runner := steptest.BuildAs[*Runner](t, New, map[string]any{"from": "vars.values", "operations": []any{"mean"}})
 		result, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{"values": []any{1, 2, 5}}})
 		if err != nil {
 			t.Fatal(err)
@@ -201,7 +202,7 @@ func TestNumericAndTupleOperations(t *testing.T) {
 	})
 
 	t.Run("zip with", func(t *testing.T) {
-		runner := buildRunner(t, map[string]any{
+		runner := steptest.BuildAs[*Runner](t, New, map[string]any{
 			"from": "vars.apps",
 			"operations": []any{map[string]any{"zip_with": map[string]any{
 				"with": []any{map[string]any{"expr": "vars.tags"}},
@@ -223,7 +224,7 @@ func TestNumericAndTupleOperations(t *testing.T) {
 }
 
 func TestStructuralEqualityAndTypedChaining(t *testing.T) {
-	runner := buildRunner(t, map[string]any{
+	runner := steptest.BuildAs[*Runner](t, New, map[string]any{
 		"from": "vars.apps",
 		"operations": []any{
 			map[string]any{"unique_by": `{region: item.region, platform: item.platform}`},
@@ -292,7 +293,7 @@ func TestAggregationSemantics(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			runner := buildRunner(t, map[string]any{"from": "vars.values", "operations": []any{test.operation}})
+			runner := steptest.BuildAs[*Runner](t, New, map[string]any{"from": "vars.values", "operations": []any{test.operation}})
 			result, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{"values": test.values}})
 			if err != nil {
 				t.Fatal(err)
@@ -303,14 +304,14 @@ func TestAggregationSemantics(t *testing.T) {
 		})
 	}
 
-	runner := buildRunner(t, map[string]any{"from": "vars.values", "operations": []any{"sum"}})
+	runner := steptest.BuildAs[*Runner](t, New, map[string]any{"from": "vars.values", "operations": []any{"sum"}})
 	if _, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{"values": []any{1, 2.5}}}); err == nil || !contains(err.Error(), "mixes integer and floating-point") {
 		t.Fatalf("mixed numeric error = %v", err)
 	}
 }
 
 func TestStructuralEqualityTreatsEquivalentNumbersEqually(t *testing.T) {
-	runner := buildRunner(t, map[string]any{"from": "vars.values", "operations": []any{"unique"}})
+	runner := steptest.BuildAs[*Runner](t, New, map[string]any{"from": "vars.values", "operations": []any{"unique"}})
 	result, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{"values": []any{
 		map[string]any{"nested": []any{1}},
 		map[string]any{"nested": []any{1.0}},
@@ -324,7 +325,7 @@ func TestStructuralEqualityTreatsEquivalentNumbersEqually(t *testing.T) {
 }
 
 func TestStableSortAndStageReindexing(t *testing.T) {
-	runner := buildRunner(t, map[string]any{
+	runner := steptest.BuildAs[*Runner](t, New, map[string]any{
 		"from": "vars.values",
 		"operations": []any{
 			map[string]any{"filter": "item.keep"},
@@ -350,7 +351,7 @@ func TestStableSortAndStageReindexing(t *testing.T) {
 }
 
 func TestReduceRightUsesOriginalIndexes(t *testing.T) {
-	runner := buildRunner(t, map[string]any{
+	runner := steptest.BuildAs[*Runner](t, New, map[string]any{
 		"from": "vars.values",
 		"operations": []any{map[string]any{"reduce_right": map[string]any{
 			"initial": "",
@@ -367,7 +368,7 @@ func TestReduceRightUsesOriginalIndexes(t *testing.T) {
 }
 
 func TestObjectCombinationCollisionAndRoundTrip(t *testing.T) {
-	runner := buildRunner(t, map[string]any{
+	runner := steptest.BuildAs[*Runner](t, New, map[string]any{
 		"from": "vars.base",
 		"operations": []any{
 			map[string]any{"assign": map[string]any{"with": []any{map[string]any{"expr": "vars.overlay"}}}},
@@ -390,7 +391,7 @@ func TestObjectCombinationCollisionAndRoundTrip(t *testing.T) {
 }
 
 func TestMultiObjectExtractionOrder(t *testing.T) {
-	runner := buildRunner(t, map[string]any{
+	runner := steptest.BuildAs[*Runner](t, New, map[string]any{
 		"from": "vars.first",
 		"operations": []any{map[string]any{"keys": map[string]any{"with": []any{
 			map[string]any{"expr": "vars.second"},
@@ -410,7 +411,7 @@ func TestMultiObjectExtractionOrder(t *testing.T) {
 
 func TestTupleOperations(t *testing.T) {
 	t.Run("unzip validation", func(t *testing.T) {
-		runner := buildRunner(t, map[string]any{"from": "vars.rows", "operations": []any{"unzip"}})
+		runner := steptest.BuildAs[*Runner](t, New, map[string]any{"from": "vars.rows", "operations": []any{"unzip"}})
 		_, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{"rows": []any{[]any{1, 2}, []any{3}}}})
 		if err == nil || !contains(err.Error(), "tuple width") {
 			t.Fatalf("error = %v", err)
@@ -418,7 +419,7 @@ func TestTupleOperations(t *testing.T) {
 	})
 
 	t.Run("cartesian order", func(t *testing.T) {
-		runner := buildRunner(t, map[string]any{
+		runner := steptest.BuildAs[*Runner](t, New, map[string]any{
 			"from": "vars.left",
 			"operations": []any{map[string]any{"cross_join": map[string]any{"with": []any{
 				map[string]any{"expr": "vars.right"},
@@ -436,7 +437,7 @@ func TestTupleOperations(t *testing.T) {
 }
 
 func TestNamedTerminalRecordsAndOnlyValueOutput(t *testing.T) {
-	runner := buildRunner(t, map[string]any{
+	runner := steptest.BuildAs[*Runner](t, New, map[string]any{
 		"from":       "vars.values",
 		"operations": []any{map[string]any{"find_index": "item == 2"}},
 	})
@@ -451,7 +452,7 @@ func TestNamedTerminalRecordsAndOnlyValueOutput(t *testing.T) {
 }
 
 func TestSourceExpressionAndRuntimeKindValidation(t *testing.T) {
-	runner := buildRunner(t, map[string]any{
+	runner := steptest.BuildAs[*Runner](t, New, map[string]any{
 		"from":       map[string]any{"expr": "vars.values"},
 		"operations": []any{map[string]any{"map": "item * 2"}},
 	})
@@ -463,14 +464,14 @@ func TestSourceExpressionAndRuntimeKindValidation(t *testing.T) {
 		t.Fatalf("value = %#v, want %#v", result.Outputs["value"], want)
 	}
 
-	wrongKind := buildRunner(t, map[string]any{"from": "vars.value", "operations": []any{"unique"}})
+	wrongKind := steptest.BuildAs[*Runner](t, New, map[string]any{"from": "vars.value", "operations": []any{"unique"}})
 	if _, err := wrongKind.Run(t.Context(), step.Request{Vars: map[string]any{"value": "scalar"}}); err == nil || !contains(err.Error(), "cannot consume scalar") {
 		t.Fatalf("error = %v", err)
 	}
 }
 
 func TestResultNormalizesNestedTypedCollections(t *testing.T) {
-	runner := buildRunner(t, map[string]any{"from": "vars.values", "operations": []any{"clone"}})
+	runner := steptest.BuildAs[*Runner](t, New, map[string]any{"from": "vars.values", "operations": []any{"clone"}})
 	result, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{
 		"values": []map[string][]int{{"ports": {80, 443}}},
 	}})
@@ -502,7 +503,7 @@ func TestConfigurationAndCancellationErrors(t *testing.T) {
 		})
 	}
 
-	runner := buildRunner(t, map[string]any{"from": "vars.values", "operations": []any{"unique"}})
+	runner := steptest.BuildAs[*Runner](t, New, map[string]any{"from": "vars.values", "operations": []any{"unique"}})
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	if _, err := runner.Run(ctx, step.Request{Vars: map[string]any{"values": []any{1}}}); err != context.Canceled {
@@ -546,7 +547,7 @@ func TestFilteringOperationsGuardTheirValueExpressions(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			runner := buildRunner(t, map[string]any{"from": "vars.values", "operations": []any{test.operation}})
+			runner := steptest.BuildAs[*Runner](t, New, map[string]any{"from": "vars.values", "operations": []any{test.operation}})
 			result, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{"values": test.source}})
 			if err != nil {
 				t.Fatal(err)
@@ -576,7 +577,7 @@ func TestCrossJoinStopsOnCancellation(t *testing.T) {
 // The expression environment is shared across a run, so one operation's callback
 // locals must not still be bound while the next operation's callbacks evaluate.
 func TestCallbackLocalsDoNotLeakBetweenOperations(t *testing.T) {
-	runner := buildRunner(t, map[string]any{"from": "vars.values", "operations": []any{
+	runner := steptest.BuildAs[*Runner](t, New, map[string]any{"from": "vars.values", "operations": []any{
 		map[string]any{"group_by": "item.region"},
 		map[string]any{"map_values": "item"},
 	}})
@@ -587,15 +588,6 @@ func TestCallbackLocalsDoNotLeakBetweenOperations(t *testing.T) {
 	if !reflect.DeepEqual(result.Outputs["value"], map[string]any{"eu": nil}) {
 		t.Fatalf("value = %#v, want the list local to be unbound", result.Outputs["value"])
 	}
-}
-
-func buildRunner(t *testing.T, raw map[string]any) *Runner {
-	t.Helper()
-	runner, err := New(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return runner.(*Runner)
 }
 
 func contains(value, substring string) bool {

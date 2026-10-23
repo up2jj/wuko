@@ -7,13 +7,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 )
 
 func TestPrepareNextReleasePreservesExistingBody(t *testing.T) {
 	t.Parallel()
 	input := "### Next release (2026-09-09)\n\n- Add keyboard navigation to the command palette.\n- Preserve filters when returning to the dashboard.\n\n### 2026-08-19\n\n- Improve retry diagnostics for failed uploads.\n"
-	runner := newRunner(t, map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"from": map[string]any{"var": "document"},
 		"edits": []any{
 			map[string]any{
@@ -42,7 +43,7 @@ func TestPrepareNextReleasePreservesExistingBody(t *testing.T) {
 func TestDuplicateHeadingRequiresDisambiguation(t *testing.T) {
 	t.Parallel()
 	input := "## Fixed\n\nfirst\n\n## Fixed\n\nsecond\n"
-	runner := newRunner(t, map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"from": map[string]any{"var": "document"},
 		"edits": []any{map[string]any{
 			"operation": "set", "select": map[string]any{"kind": "heading", "text": "Fixed"},
@@ -54,7 +55,7 @@ func TestDuplicateHeadingRequiresDisambiguation(t *testing.T) {
 		t.Fatalf("error = %v", err)
 	}
 
-	runner = newRunner(t, map[string]any{
+	runner = steptest.Build(t, New, map[string]any{
 		"from": map[string]any{"var": "document"},
 		"edits": []any{map[string]any{
 			"operation": "set", "select": map[string]any{"kind": "heading", "text": "Fixed", "occurrence": 2},
@@ -73,7 +74,7 @@ func TestDuplicateHeadingRequiresDisambiguation(t *testing.T) {
 func TestStructuralHeadingAnchors(t *testing.T) {
 	t.Parallel()
 	input := "# Version 2.0\n## Fixed\n# Version 1.9\n## Fixed\n"
-	runner := newRunner(t, map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"from": map[string]any{"var": "document"},
 		"edits": []any{map[string]any{
 			"operation": "set",
@@ -97,7 +98,7 @@ func TestStructuralHeadingAnchors(t *testing.T) {
 func TestHeadingAttributesAndSetextLevel(t *testing.T) {
 	t.Parallel()
 	t.Run("attribute", func(t *testing.T) {
-		runner := newRunner(t, map[string]any{
+		runner := steptest.Build(t, New, map[string]any{
 			"from": map[string]any{"var": "document"},
 			"edits": []any{map[string]any{
 				"operation": "set", "select": map[string]any{"kind": "heading", "id": "install", "attributes": map[string]any{"owner": "docs"}},
@@ -113,7 +114,7 @@ func TestHeadingAttributesAndSetextLevel(t *testing.T) {
 		}
 	})
 	t.Run("setext level", func(t *testing.T) {
-		runner := newRunner(t, map[string]any{
+		runner := steptest.Build(t, New, map[string]any{
 			"from": map[string]any{"var": "document"},
 			"edits": []any{map[string]any{
 				"operation": "set", "select": map[string]any{"kind": "heading", "text": "Release"},
@@ -163,7 +164,7 @@ func TestTaskCodeLinkAndTableFields(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			runner := newRunner(t, map[string]any{
+			runner := steptest.Build(t, New, map[string]any{
 				"from": map[string]any{"var": "document"}, "edits": []any{test.edit},
 			})
 			result, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{"document": test.input}})
@@ -180,7 +181,7 @@ func TestTaskCodeLinkAndTableFields(t *testing.T) {
 func TestAppendAndDeleteTableRows(t *testing.T) {
 	t.Parallel()
 	input := "| Service | Status |\n| --- | --- |\n| API | beta |\n| Legacy API | retired |\n"
-	runner := newRunner(t, map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"from": map[string]any{"var": "document"},
 		"edits": []any{
 			map[string]any{
@@ -207,7 +208,7 @@ func TestAppendAndDeleteTableRows(t *testing.T) {
 
 func TestAppendTableRowAfterNonTerminatedDocument(t *testing.T) {
 	t.Parallel()
-	runner := newRunner(t, map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"from": map[string]any{"var": "document"},
 		"edits": []any{map[string]any{
 			"operation": "append", "select": map[string]any{"kind": "table", "headers": []any{"Name", "State"}},
@@ -232,7 +233,7 @@ func TestReplaceAndInsertTableRows(t *testing.T) {
 		"ancestor": map[string]any{"kind": "table", "headers": []any{"Service", "Status"}},
 		"contains": map[string]any{"kind": "table_cell", "column": "Service", "text": "API"},
 	}
-	runner := newRunner(t, map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"from": map[string]any{"var": "document"},
 		"edits": []any{
 			map[string]any{"operation": "replace", "select": rowSelector, "value": []any{"API", "stable"}},
@@ -251,7 +252,7 @@ func TestReplaceAndInsertTableRows(t *testing.T) {
 
 func TestDeleteListItemDoesNotConsumeSibling(t *testing.T) {
 	t.Parallel()
-	runner := newRunner(t, map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"from": map[string]any{"var": "document"},
 		"edits": []any{map[string]any{
 			"operation": "delete", "select": map[string]any{"kind": "list_item", "text": "first"},
@@ -268,7 +269,7 @@ func TestDeleteListItemDoesNotConsumeSibling(t *testing.T) {
 
 func TestCodeFenceCollisionAndBlockquotePrefix(t *testing.T) {
 	t.Parallel()
-	runner := newRunner(t, map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"from": map[string]any{"var": "document"},
 		"edits": []any{map[string]any{
 			"operation": "set",
@@ -289,7 +290,7 @@ func TestCodeFenceCollisionAndBlockquotePrefix(t *testing.T) {
 func TestHeadingAttributeRemovalAndLinkTitleAddition(t *testing.T) {
 	t.Parallel()
 	t.Run("remove attribute", func(t *testing.T) {
-		runner := newRunner(t, map[string]any{
+		runner := steptest.Build(t, New, map[string]any{
 			"from": map[string]any{"var": "document"},
 			"edits": []any{map[string]any{
 				"operation": "set", "select": map[string]any{"kind": "heading", "id": "install"},
@@ -305,7 +306,7 @@ func TestHeadingAttributeRemovalAndLinkTitleAddition(t *testing.T) {
 		}
 	})
 	t.Run("add title", func(t *testing.T) {
-		runner := newRunner(t, map[string]any{
+		runner := steptest.Build(t, New, map[string]any{
 			"from": map[string]any{"var": "document"},
 			"edits": []any{map[string]any{
 				"operation": "set", "select": map[string]any{"kind": "link", "text": "guide"},
@@ -324,7 +325,7 @@ func TestHeadingAttributeRemovalAndLinkTitleAddition(t *testing.T) {
 
 func TestCRLFAndNoOpArePreserved(t *testing.T) {
 	t.Parallel()
-	runner := newRunner(t, map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"from": map[string]any{"var": "document"},
 		"edits": []any{map[string]any{
 			"operation": "set", "select": map[string]any{"kind": "heading", "text": "Same"},
@@ -342,7 +343,7 @@ func TestCRLFAndNoOpArePreserved(t *testing.T) {
 
 func TestCodeContentPreservesCRLF(t *testing.T) {
 	t.Parallel()
-	runner := newRunner(t, map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"from": map[string]any{"var": "document"},
 		"edits": []any{map[string]any{
 			"operation": "set", "select": map[string]any{"kind": "code_block", "language": "go"},
@@ -360,7 +361,7 @@ func TestCodeContentPreservesCRLF(t *testing.T) {
 
 func TestTableHeaderRowCannotBeDeleted(t *testing.T) {
 	t.Parallel()
-	runner := newRunner(t, map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"from": map[string]any{"var": "document"},
 		"edits": []any{map[string]any{
 			"operation": "delete",
@@ -384,7 +385,7 @@ func TestPrependAndAppendEditNodeContent(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			runner := newRunner(t, map[string]any{
+			runner := steptest.Build(t, New, map[string]any{
 				"from": map[string]any{"var": "document"},
 				"edits": []any{map[string]any{
 					"operation": test.operation, "select": map[string]any{"kind": test.kind, "text": test.text}, "value": test.value,
@@ -409,7 +410,7 @@ func TestConflictingEditsDoNotWriteFile(t *testing.T) {
 	if err := os.WriteFile(path, input, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	runner := newRunner(t, map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"from": map[string]any{"file": "README.md"},
 		"edits": []any{
 			map[string]any{"operation": "replace", "select": map[string]any{"kind": "heading", "text": "Title"}, "value": "# First"},
@@ -431,7 +432,7 @@ func TestConflictingEditsDoNotWriteFile(t *testing.T) {
 
 func TestExpressionSourceAndReplacement(t *testing.T) {
 	t.Parallel()
-	runner := newRunner(t, map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"from": map[string]any{"expr": "vars.document"},
 		"edits": []any{map[string]any{
 			"operation": "set", "select": map[string]any{"kind": "heading", "level": 2},
@@ -454,7 +455,7 @@ func TestFileSourceWritesAtomicallyAndPreservesMode(t *testing.T) {
 	if err := os.WriteFile(path, []byte("# Old\n"), 0o640); err != nil {
 		t.Fatal(err)
 	}
-	runner := newRunner(t, map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"from": map[string]any{"file": "README.md"},
 		"edits": []any{map[string]any{
 			"operation": "set", "select": map[string]any{"kind": "heading", "text": "Old"},
@@ -487,7 +488,7 @@ func TestFileSourceRejectsSymlink(t *testing.T) {
 	if err := os.Symlink("real.md", filepath.Join(directory, "link.md")); err != nil {
 		t.Fatal(err)
 	}
-	runner := newRunner(t, map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"from":  map[string]any{"file": "link.md"},
 		"edits": []any{map[string]any{"operation": "delete", "select": map[string]any{"kind": "heading"}}},
 	})
@@ -508,7 +509,7 @@ func TestNoOpFileEditDoesNotRewrite(t *testing.T) {
 	if err := os.Chtimes(path, stamp, stamp); err != nil {
 		t.Fatal(err)
 	}
-	runner := newRunner(t, map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"from": map[string]any{"file": "README.md"},
 		"edits": []any{map[string]any{
 			"operation": "set", "select": map[string]any{"kind": "heading", "text": "Same"},
@@ -563,18 +564,9 @@ func TestNewRejectsInvalidConfiguration(t *testing.T) {
 	}
 }
 
-func newRunner(t *testing.T, raw map[string]any) step.Runner {
-	t.Helper()
-	runner, err := New(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return runner
-}
-
 func TestDeleteAndInsertAtSameOffsetStayOrdered(t *testing.T) {
 	t.Parallel()
-	runner := newRunner(t, map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"from": map[string]any{"var": "document"},
 		"edits": []any{
 			map[string]any{
@@ -617,7 +609,7 @@ func TestTableRowKeepsSurroundingIndentation(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			runner := newRunner(t, map[string]any{
+			runner := steptest.Build(t, New, map[string]any{
 				"from": map[string]any{"var": "document"},
 				"edits": []any{map[string]any{
 					"operation": "append", "select": map[string]any{"kind": "table"},
@@ -648,7 +640,7 @@ func TestTableCellEscapesBackslashes(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			runner := newRunner(t, map[string]any{
+			runner := steptest.Build(t, New, map[string]any{
 				"from": map[string]any{"var": "document"},
 				"edits": []any{map[string]any{
 					"operation": "set", "select": map[string]any{"kind": "table_cell", "text": "beta"},
@@ -716,7 +708,7 @@ func TestMultiLineSetextHeadingCoversUnderline(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			runner := newRunner(t, map[string]any{
+			runner := steptest.Build(t, New, map[string]any{
 				"from": map[string]any{"var": "document"}, "edits": []any{test.edit},
 			})
 			result, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{"document": input}})

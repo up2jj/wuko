@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
 )
@@ -31,7 +32,7 @@ func registerFinallyTestRunner(t *testing.T, registry *step.Registry, name strin
 
 func TestFinallyRunsAfterSuccessWithCommittedState(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, nil)
+	registry := steptest.Registry(t, nil)
 	registerFinallyTestRunner(t, registry, "main", func(context.Context, step.Request) (step.Result, error) {
 		return step.Result{
 			Outputs:   map[string]any{"value": "main-output"},
@@ -56,7 +57,7 @@ func TestFinallyRunsAfterSuccessWithCommittedState(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	definition := testDefinition(t, "success", workflow.Step{ID: "prepare", Type: "main"})
+	definition := steptest.Definition(t, "success", workflow.Step{ID: "prepare", Type: "main"})
 	definition.Finally = []workflow.Step{{
 		ID: "cleanup", Type: "cleanup",
 		If: `finally.status == "succeeded" && len(finally.errors) == 0`, With: map[string]any{"status": "{{ .finally.status }}"},
@@ -78,7 +79,7 @@ func TestFinallyRunsAfterSuccessWithCommittedState(t *testing.T) {
 
 func TestFinallyContinuesAndAccumulatesStructuredErrors(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, nil)
+	registry := steptest.Registry(t, nil)
 	mainFailure := errors.New("main broke")
 	cleanupFailure := errors.New("cleanup broke")
 	registerFinallyTestRunner(t, registry, "main_fail", func(context.Context, step.Request) (step.Result, error) {
@@ -111,7 +112,7 @@ func TestFinallyContinuesAndAccumulatesStructuredErrors(t *testing.T) {
 		return step.Result{}, nil
 	})
 
-	definition := testDefinition(t, "failure", workflow.Step{ID: "main", Type: "main_fail"})
+	definition := steptest.Definition(t, "failure", workflow.Step{ID: "main", Type: "main_fail"})
 	definition.Finally = []workflow.Step{
 		{ID: "cleanup_one", Type: "cleanup_fail", If: `any(finally.errors, {.step_id == "main" && .status == "failed"})`, With: map[string]any{}},
 		{ID: "cleanup_two", Type: "cleanup_after", If: `len(finally.errors) == 2`, With: map[string]any{}},
@@ -127,7 +128,7 @@ func TestFinallyContinuesAndAccumulatesStructuredErrors(t *testing.T) {
 
 func TestFinallyUsesFreshContextAfterCancellation(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, nil)
+	registry := steptest.Registry(t, nil)
 	cleanupFailure := errors.New("cleanup after cancellation failed")
 	registerFinallyTestRunner(t, registry, "main", func(context.Context, step.Request) (step.Result, error) {
 		t.Fatal("main step should not start with a canceled context")
@@ -146,7 +147,7 @@ func TestFinallyUsesFreshContextAfterCancellation(t *testing.T) {
 		}
 		return step.Result{}, cleanupFailure
 	})
-	definition := testDefinition(t, "canceled", workflow.Step{ID: "main", Type: "main"})
+	definition := steptest.Definition(t, "canceled", workflow.Step{ID: "main", Type: "main"})
 	definition.Finally = []workflow.Step{{ID: "cleanup", Type: "cleanup"}}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
@@ -166,7 +167,7 @@ func TestFinallyUsesFreshContextAfterCancellation(t *testing.T) {
 
 func TestCompositeActionFinallyRunsPerAttemptAndFeedsOutputs(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, nil)
+	registry := steptest.Registry(t, nil)
 	mainRuns, cleanupRuns := 0, 0
 	registerFinallyTestRunner(t, registry, "action_main", func(context.Context, step.Request) (step.Result, error) {
 		mainRuns++
@@ -182,7 +183,7 @@ func TestCompositeActionFinallyRunsPerAttemptAndFeedsOutputs(t *testing.T) {
 	action := testAction(t, "action", workflow.Step{ID: "work", Type: "action_main"})
 	action.Outputs = map[string]workflow.ActionOutput{"result": {Value: "steps.cleanup.value"}}
 	action.Finally = []workflow.Step{{ID: "cleanup", Type: "action_cleanup"}}
-	definition := testDefinition(
+	definition := steptest.Definition(
 		t, "caller",
 		attemptStep("call", immediateRetry(2), workflow.Step{
 			Uses: workflow.ActionSource{URL: "https://example.test/action"}, Action: action,
@@ -200,13 +201,13 @@ func TestCompositeActionFinallyRunsPerAttemptAndFeedsOutputs(t *testing.T) {
 
 func TestFinallyRejectsControlBeforeContextValidation(t *testing.T) {
 	t.Parallel()
-	definition := testDefinition(t, "control-cleanup", workflow.Step{ID: "main", Type: "main"})
+	definition := steptest.Definition(t, "control-cleanup", workflow.Step{ID: "main", Type: "main"})
 	definition.Vars = map[string]any{"items": []any{"resource"}}
 	definition.Finally = []workflow.Step{{ID: "cleanup", Foreach: &workflow.ForeachGroup{
 		Items: "vars.items", MaxConcurrency: 1, FailFast: true,
 		Steps: []workflow.Step{{ID: "remove", Type: "cleanup"}},
 	}}}
-	err := New(newTestRegistry(t, nil)).Validate(t.Context(), definition, Options{})
+	err := New(steptest.Registry(t, nil)).Validate(t.Context(), definition, Options{})
 	if err == nil || !strings.Contains(err.Error(), "nested foreach controls are not supported") {
 		t.Fatalf("Validate() error = %v", err)
 	}
@@ -214,13 +215,13 @@ func TestFinallyRejectsControlBeforeContextValidation(t *testing.T) {
 
 func TestFinallyDryRunShowsWorkflowAndActionSections(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, nil)
+	registry := steptest.Registry(t, nil)
 	registerFinallyTestRunner(t, registry, "noop", func(context.Context, step.Request) (step.Result, error) {
 		return step.Result{}, nil
 	})
 	action := testAction(t, "action", workflow.Step{ID: "inside", Type: "noop"})
 	action.Finally = []workflow.Step{{ID: "inside_cleanup", Type: "noop"}}
-	definition := testDefinition(t, "dry", workflow.Step{ID: "call", Uses: workflow.ActionSource{URL: "https://example.test/action"}, Action: action})
+	definition := steptest.Definition(t, "dry", workflow.Step{ID: "call", Uses: workflow.ActionSource{URL: "https://example.test/action"}, Action: action})
 	definition.Finally = []workflow.Step{{ID: "cleanup", Type: "noop"}}
 	var output bytes.Buffer
 	if _, err := New(registry).Run(t.Context(), definition, Options{DryRun: true, Stdout: &output, Stderr: io.Discard}); err != nil {
@@ -235,11 +236,11 @@ func TestFinallyDryRunShowsWorkflowAndActionSections(t *testing.T) {
 
 func TestDeferDryRunShowsAttachedSection(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, nil)
+	registry := steptest.Registry(t, nil)
 	registerFinallyTestRunner(t, registry, "noop", func(context.Context, step.Request) (step.Result, error) {
 		return step.Result{}, nil
 	})
-	definition := testDefinition(t, "dry-defer", workflow.Step{
+	definition := steptest.Definition(t, "dry-defer", workflow.Step{
 		ID: "create", Type: "noop", Defer: []workflow.Step{{ID: "remove", Type: "noop"}},
 	})
 	var output bytes.Buffer

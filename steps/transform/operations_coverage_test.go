@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -128,7 +129,7 @@ func TestOperationsProduceExpectedValues(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			runner := buildRunner(t, map[string]any{"from": "vars.values", "operations": []any{test.operation}})
+			runner := steptest.BuildAs[*Runner](t, New, map[string]any{"from": "vars.values", "operations": []any{test.operation}})
 			result, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{"values": test.source}})
 			if test.wantErr != "" {
 				if err == nil || !contains(err.Error(), test.wantErr) {
@@ -162,7 +163,7 @@ func TestOperationsRejectWrongInputKind(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			runner := buildRunner(t, map[string]any{"from": "vars.values", "operations": []any{test.operation}})
+			runner := steptest.BuildAs[*Runner](t, New, map[string]any{"from": "vars.values", "operations": []any{test.operation}})
 			if _, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{"values": test.source}}); err == nil || !contains(err.Error(), "cannot consume") {
 				t.Fatalf("error = %v, want cannot consume", err)
 			}

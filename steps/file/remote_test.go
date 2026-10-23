@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/up2jj/wuko/executor"
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/step"
 )
@@ -71,10 +72,7 @@ func (commandOnlySession) Run(context.Context, process.Options) (process.Result,
 
 func remoteRunner(t *testing.T, config map[string]any) step.Runner {
 	t.Helper()
-	runner, err := New(config)
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, config)
 	if _, ok := runner.(step.ExecutorAware); !ok {
 		t.Fatalf("file %v is not usable inside executor blocks", config["operation"])
 	}

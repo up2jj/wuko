@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -82,7 +83,7 @@ func TestLogWaitMatchesExistingContentAndNamedCaptures(t *testing.T) {
 	if err := os.WriteFile(path, []byte("starting\nready id=42\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	runner := newRunner(t, map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"path": path, "pattern": `ready id=(?P<id>\d+)`,
 	})
 
@@ -185,7 +186,7 @@ func TestLogWaitFailsWhenMaxBytesIsExceeded(t *testing.T) {
 	if err := os.WriteFile(path, []byte("long content"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	runner := newRunner(t, map[string]any{"path": path, "pattern": "ready", "max_bytes": "4B"})
+	runner := steptest.Build(t, New, map[string]any{"path": path, "pattern": "ready", "max_bytes": "4B"})
 	_, err := runner.Run(t.Context(), request(root))
 	if err == nil || !strings.Contains(err.Error(), "exceeded max_bytes") {
 		t.Fatalf("Run() error = %v", err)
@@ -214,15 +215,6 @@ func TestLogWaitStopsOnCancellation(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("Run() did not stop after cancellation")
 	}
-}
-
-func newRunner(t *testing.T, raw map[string]any) step.Runner {
-	t.Helper()
-	runner, err := New(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return runner
 }
 
 func newRunnerWithReadyWatcher(t *testing.T, raw map[string]any) (*Runner, <-chan struct{}) {

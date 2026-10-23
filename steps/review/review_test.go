@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -57,9 +58,5 @@ func TestNonInteractiveAndInvalidSuppliedValues(t *testing.T) {
 
 func newRunner(t *testing.T) *Runner {
 	t.Helper()
-	runner, err := New(map[string]any{"variable": "approved", "message": "Review", "content": "change", "format": "diff"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return runner.(*Runner)
+	return steptest.BuildAs[*Runner](t, New, map[string]any{"variable": "approved", "message": "Review", "content": "change", "format": "diff"})
 }

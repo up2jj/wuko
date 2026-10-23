@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
 )
@@ -12,9 +13,9 @@ import (
 func TestLoopRepeatsUntilExpressionMatches(t *testing.T) {
 	t.Parallel()
 	var polls int
-	registry := newTestRegistry(t, map[string]step.Builder{
+	registry := steptest.Registry(t, map[string]step.Builder{
 		"poll": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) {
 				polls++
 				return step.Result{Outputs: map[string]any{
 					"status":   map[bool]string{false: "in_progress", true: "completed"}[polls >= 2],
@@ -23,7 +24,7 @@ func TestLoopRepeatsUntilExpressionMatches(t *testing.T) {
 			}), nil
 		},
 	})
-	definition := testDefinition(t, "loop", workflow.Step{
+	definition := steptest.Definition(t, "loop", workflow.Step{
 		ID: "wait",
 		Loop: &workflow.LoopGroup{
 			Until:         "steps.poll.terminal",
@@ -50,14 +51,14 @@ func TestLoopRepeatsUntilExpressionMatches(t *testing.T) {
 
 func TestLoopFailsAtMaximumIterations(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, map[string]step.Builder{
+	registry := steptest.Registry(t, map[string]step.Builder{
 		"poll": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) {
 				return step.Result{Outputs: map[string]any{"terminal": false}}, nil
 			}), nil
 		},
 	})
-	definition := testDefinition(t, "loop", workflow.Step{
+	definition := steptest.Definition(t, "loop", workflow.Step{
 		ID: "wait",
 		Loop: &workflow.LoopGroup{
 			Until:         "steps.poll.terminal",
@@ -74,9 +75,9 @@ func TestLoopFailsAtMaximumIterations(t *testing.T) {
 func TestLoopFinishedEventCountsOnlySucceededIterations(t *testing.T) {
 	t.Parallel()
 	runs := 0
-	registry := newTestRegistry(t, map[string]step.Builder{
+	registry := steptest.Registry(t, map[string]step.Builder{
 		"poll": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) {
 				runs++
 				if runs == 3 {
 					return step.Result{}, errors.New("probe failed")
@@ -85,7 +86,7 @@ func TestLoopFinishedEventCountsOnlySucceededIterations(t *testing.T) {
 			}), nil
 		},
 	})
-	definition := testDefinition(t, "loop", workflow.Step{
+	definition := steptest.Definition(t, "loop", workflow.Step{
 		ID: "wait",
 		Loop: &workflow.LoopGroup{
 			Until:         "steps.poll.terminal",

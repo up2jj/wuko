@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -55,7 +56,7 @@ func TestJSONStructuralEditsPreserveUnrelatedBytes(t *testing.T) {
 				t.Fatal(err)
 			}
 			test.config["from"] = map[string]any{"file": "document.json"}
-			runner := newRunner(t, test.config)
+			runner := steptest.Build(t, New, test.config)
 			if _, err := runner.Run(t.Context(), step.Request{RunDir: directory}); err != nil {
 				t.Fatal(err)
 			}
@@ -120,7 +121,7 @@ func TestYAMLStructuralEditsPreserveUnrelatedBytes(t *testing.T) {
 				t.Fatal(err)
 			}
 			test.config["from"] = map[string]any{"file": "document.yaml"}
-			runner := newRunner(t, test.config)
+			runner := steptest.Build(t, New, test.config)
 			if _, err := runner.Run(t.Context(), step.Request{RunDir: directory}); err != nil {
 				t.Fatal(err)
 			}
@@ -185,7 +186,7 @@ func TestTOMLStructuralEditsPreserveUnrelatedBytes(t *testing.T) {
 				t.Fatal(err)
 			}
 			test.config["from"] = map[string]any{"file": "document.toml"}
-			runner := newRunner(t, test.config)
+			runner := steptest.Build(t, New, test.config)
 			if _, err := runner.Run(t.Context(), step.Request{RunDir: directory}); err != nil {
 				t.Fatal(err)
 			}
@@ -216,7 +217,7 @@ func TestFileDeleteAllArrayElementsIsStable(t *testing.T) {
 			if err := os.WriteFile(path, []byte(test.input), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			runner := newRunner(t, map[string]any{
+			runner := steptest.Build(t, New, map[string]any{
 				"operation": "delete", "from": map[string]any{"file": test.file},
 				"path": "$.items[*]", "result": "all",
 			})
@@ -236,7 +237,7 @@ func TestFileDeleteAllArrayElementsIsStable(t *testing.T) {
 
 func TestSetCreatesMissingMapPath(t *testing.T) {
 	t.Parallel()
-	runner := newRunner(t, map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"operation": "set", "from": map[string]any{"var": "document"},
 		"path": "$.dependencies.tools.wuko", "value": "v1", "missing": "create",
 	})
@@ -257,7 +258,7 @@ func TestSetCreatesMissingMapPath(t *testing.T) {
 
 func TestSetCreateExpressionSeesNullCurrent(t *testing.T) {
 	t.Parallel()
-	runner := newRunner(t, map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"operation": "set", "from": map[string]any{"var": "document"},
 		"path": "$.created", "expr": "current == nil ? path : 'wrong'", "missing": "create",
 	})
@@ -301,7 +302,7 @@ func TestArrayOperationsUseOriginalLocations(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			test.raw["from"] = map[string]any{"var": "document"}
-			runner := newRunner(t, test.raw)
+			runner := steptest.Build(t, New, test.raw)
 			result, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{
 				"document": map[string]any{"items": []any{"a", "b", "c"}},
 			}})
@@ -321,7 +322,7 @@ func TestArrayOperationsUseOriginalLocations(t *testing.T) {
 
 func TestMergeRecursesThroughMapsAndReplacesLeaves(t *testing.T) {
 	t.Parallel()
-	runner := newRunner(t, map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"operation": "merge", "from": map[string]any{"var": "document"}, "path": "$.service",
 		"value": map[string]any{"image": "v2", "limits": map[string]any{"cpu": 2}, "ports": []any{443}},
 	})
@@ -339,7 +340,7 @@ func TestMergeRecursesThroughMapsAndReplacesLeaves(t *testing.T) {
 
 func TestRenameMovesObjectMemberWithoutOverwriting(t *testing.T) {
 	t.Parallel()
-	runner := newRunner(t, map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"operation": "rename", "from": map[string]any{"var": "document"}, "path": "$.old", "name": "new",
 	})
 	result, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{"document": map[string]any{"old": 1}}})
@@ -350,7 +351,7 @@ func TestRenameMovesObjectMemberWithoutOverwriting(t *testing.T) {
 		t.Fatalf("value = %#v", result.Outputs["value"])
 	}
 
-	conflict := newRunner(t, map[string]any{
+	conflict := steptest.Build(t, New, map[string]any{
 		"operation": "rename", "from": map[string]any{"var": "document"}, "path": "$.old", "name": "new",
 	})
 	_, err = conflict.Run(t.Context(), step.Request{Vars: map[string]any{"document": map[string]any{"old": 1, "new": 2}}})
@@ -394,7 +395,7 @@ func TestCreateRejectsQueriesAndMissingArrayIndexes(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			runner := newRunner(t, map[string]any{
+			runner := steptest.Build(t, New, map[string]any{
 				"operation": "set", "from": map[string]any{"var": "document"},
 				"path": test.path, "value": 1, "missing": "create",
 			})
@@ -484,7 +485,7 @@ func TestStructuralEditsSurviveAwkwardLayouts(t *testing.T) {
 				t.Fatal(err)
 			}
 			test.config["from"] = map[string]any{"file": test.file}
-			runner := newRunner(t, test.config)
+			runner := steptest.Build(t, New, test.config)
 			if _, err := runner.Run(t.Context(), step.Request{RunDir: directory}); err != nil {
 				t.Fatal(err)
 			}
@@ -512,7 +513,7 @@ func TestMergeWritesAddedKeysInSortedOrder(t *testing.T) {
 			if err := os.WriteFile(path, []byte(test.input), 0o640); err != nil {
 				t.Fatal(err)
 			}
-			runner := newRunner(t, map[string]any{
+			runner := steptest.Build(t, New, map[string]any{
 				"operation": "merge", "from": map[string]any{"file": test.file}, "path": "$.api",
 				"value": map[string]any{"x": 1, "w": 2, "q": 3},
 			})
@@ -552,7 +553,7 @@ func TestTOMLInlineTableEditsAreRefused(t *testing.T) {
 				t.Fatal(err)
 			}
 			test.config["from"] = map[string]any{"file": "document.toml"}
-			runner := newRunner(t, test.config)
+			runner := steptest.Build(t, New, test.config)
 			if _, err := runner.Run(t.Context(), step.Request{RunDir: directory}); err == nil ||
 				!strings.Contains(err.Error(), "inline table") {
 				t.Fatalf("error = %v, want an inline table error", err)

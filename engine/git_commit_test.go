@@ -10,6 +10,7 @@ import (
 
 	"github.com/up2jj/wuko/engine"
 	"github.com/up2jj/wuko/internal/gittest"
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/step"
 	assertstep "github.com/up2jj/wuko/steps/assert"
@@ -23,7 +24,7 @@ func TestGitCommitRendersConfigurationAndCommitsOutputs(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "change.txt"), []byte("content\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	definition := testDefinition(t, "commit",
+	definition := steptest.Definition(t, "commit",
 		workflow.Step{ID: "commit", Type: "git_commit", With: map[string]any{
 			"message": "{{ .vars.message }}", "body": "{{ .vars.body }}", "paths": []any{"{{ .vars.path }}"},
 			"author":   map[string]any{"name": "{{ .vars.author }}", "email": "{{ .vars.email }}"},
@@ -37,7 +38,7 @@ func TestGitCommitRendersConfigurationAndCommitsOutputs(t *testing.T) {
 		"message": "feat: rendered commit", "body": "Rendered body.", "path": "change.txt",
 		"author": "Workflow Bot", "email": "workflow@example.test", "task": "WUKO-42",
 	}
-	registry := newTestRegistry(t, nil)
+	registry := steptest.Registry(t, nil)
 	for _, register := range []func(*step.Registry) error{gitstep.Register, assertstep.Register} {
 		if err := register(registry); err != nil {
 			t.Fatal(err)
@@ -73,12 +74,12 @@ func (executor *countingGitExecutor) Run(context.Context, process.Options) (proc
 
 func TestGitCommitValidationAndDryRunDoNotExecuteGit(t *testing.T) {
 	t.Parallel()
-	definition := testDefinition(t, "commit", workflow.Step{ID: "commit", Type: "git_commit", With: map[string]any{
+	definition := steptest.Definition(t, "commit", workflow.Step{ID: "commit", Type: "git_commit", With: map[string]any{
 		"message": "{{ .vars.message }}", "paths": []any{"{{ .vars.path }}"},
 		"author": map[string]any{"name": "{{ .vars.name }}", "email": "{{ .vars.email }}"},
 	}})
 	definition.Vars = map[string]any{"message": "feat: dry run", "path": ".", "name": "Bot", "email": "bot@example.test"}
-	registry := newTestRegistry(t, nil)
+	registry := steptest.Registry(t, nil)
 	if err := gitstep.Register(registry); err != nil {
 		t.Fatal(err)
 	}

@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	storepkg "github.com/up2jj/wuko/keyvalue"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
@@ -20,7 +21,7 @@ func onceTestRegistry(t *testing.T, runs *atomic.Int64, started chan<- struct{},
 	t.Helper()
 	registry := step.NewRegistry()
 	if err := registry.Register("once_test", func(raw map[string]any) (step.Runner, error) {
-		return runnerFunc(func(ctx context.Context, _ step.Request) (step.Result, error) {
+		return steptest.RunnerFunc(func(ctx context.Context, _ step.Request) (step.Result, error) {
 			runs.Add(1)
 			if started != nil {
 				started <- struct{}{}
@@ -121,7 +122,7 @@ func TestOnceRecordsNumbersUsableInConditions(t *testing.T) {
 	t.Parallel()
 	registry := step.NewRegistry()
 	if err := registry.Register("counter", func(map[string]any) (step.Runner, error) {
-		return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+		return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) {
 			return step.Result{Variables: map[string]any{"count": 7}}, nil
 		}), nil
 	}); err != nil {
@@ -129,7 +130,7 @@ func TestOnceRecordsNumbersUsableInConditions(t *testing.T) {
 	}
 	// A gate that writes nothing, so the committed count stays the recorded one.
 	if err := registry.Register("gate", func(map[string]any) (step.Runner, error) {
-		return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+		return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) {
 			return step.Result{}, nil
 		}), nil
 	}); err != nil {
@@ -288,7 +289,7 @@ func TestOnceWaiterTakesOverAfterOwnerFailure(t *testing.T) {
 	release := make(chan struct{})
 	registry := step.NewRegistry()
 	if err := registry.Register("once_test", func(raw map[string]any) (step.Runner, error) {
-		return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+		return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) {
 			run := runs.Add(1)
 			started <- struct{}{}
 			<-release
@@ -355,7 +356,7 @@ func TestOnceRefusesNestedWaitThatWouldDeadlock(t *testing.T) {
 	// Both branches take their outer claim before either reaches its inner one, so
 	// the opposite-order pair is closed rather than racing to completion.
 	if err := registry.Register("barrier", func(map[string]any) (step.Runner, error) {
-		return runnerFunc(func(ctx context.Context, _ step.Request) (step.Result, error) {
+		return steptest.RunnerFunc(func(ctx context.Context, _ step.Request) (step.Result, error) {
 			barrier <- struct{}{}
 			for len(barrier) < 2 {
 				select {
@@ -370,7 +371,7 @@ func TestOnceRefusesNestedWaitThatWouldDeadlock(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := registry.Register("work", func(map[string]any) (step.Runner, error) {
-		return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+		return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) {
 			return step.Result{}, nil
 		}), nil
 	}); err != nil {
@@ -431,7 +432,7 @@ func TestOnceNestedWaitWithoutCycleStillWaits(t *testing.T) {
 	holding := make(chan struct{})
 	registry := step.NewRegistry()
 	if err := registry.Register("slow", func(map[string]any) (step.Runner, error) {
-		return runnerFunc(func(ctx context.Context, _ step.Request) (step.Result, error) {
+		return steptest.RunnerFunc(func(ctx context.Context, _ step.Request) (step.Result, error) {
 			close(holding)
 			select {
 			case <-time.After(300 * time.Millisecond):
@@ -443,7 +444,7 @@ func TestOnceNestedWaitWithoutCycleStillWaits(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := registry.Register("work", func(map[string]any) (step.Runner, error) {
-		return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+		return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) {
 			return step.Result{}, nil
 		}), nil
 	}); err != nil {

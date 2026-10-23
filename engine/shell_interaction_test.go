@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/diagnostic"
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/ptyinteract"
 	"github.com/up2jj/wuko/step"
@@ -23,7 +24,7 @@ func TestShellInteractionSendRendersRuntimeStateAndRedactsSensitiveValue(t *test
 	if err := shell.Register(registry); err != nil {
 		t.Fatal(err)
 	}
-	definition := testDefinition(t, "interaction",
+	definition := steptest.Definition(t, "interaction",
 		workflow.Step{ID: "seed", Type: "seed"},
 		workflow.Step{ID: "console", Type: "shell", With: map[string]any{
 			"command": "console", "tty": true,

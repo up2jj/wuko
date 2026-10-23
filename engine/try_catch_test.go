@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
 )
@@ -17,20 +18,20 @@ import (
 func TestTryCatchSuccessSkipsCatchAndPublishesNamedOutcome(t *testing.T) {
 	t.Parallel()
 	var catchRuns int
-	registry := newTestRegistry(t, map[string]step.Builder{
+	registry := steptest.Registry(t, map[string]step.Builder{
 		"write": func(raw map[string]any) (step.Runner, error) {
-			return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) {
 				return step.Result{Outputs: map[string]any{"value": raw["value"]}, Variables: map[string]any{"artifact": raw["value"]}}, nil
 			}), nil
 		},
 		"catch": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) {
 				catchRuns++
 				return step.Result{}, nil
 			}), nil
 		},
 	})
-	definition := testDefinition(t, "success",
+	definition := steptest.Definition(t, "success",
 		tryCatchStep([]workflow.Step{{ID: "deploy", Type: "write", With: map[string]any{"value": "dist/app"}}}, []workflow.Step{{ID: "rollback", Type: "catch", With: map[string]any{}}}),
 		workflow.Step{ID: "consume", Type: "write", With: map[string]any{"value": "{{ .steps.deployment.try.steps.deploy.outputs.value }}"}},
 	)
@@ -60,19 +61,19 @@ func TestTryCatchSuccessSkipsCatchAndPublishesNamedOutcome(t *testing.T) {
 
 func TestTryCatchRecoversAndExposesStructuredError(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, map[string]step.Builder{
+	registry := steptest.Registry(t, map[string]step.Builder{
 		"fail": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) {
 				return step.Result{}, errors.New("release rejected")
 			}), nil
 		},
 		"capture": func(raw map[string]any) (step.Runner, error) {
-			return runnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
 				return step.Result{Outputs: map[string]any{"value": raw["value"], "error": request.Bindings["error"]}, Variables: map[string]any{"recovery": raw["value"]}}, nil
 			}), nil
 		},
 	})
-	definition := testDefinition(t, "recovery",
+	definition := steptest.Definition(t, "recovery",
 		tryCatchStep(
 			[]workflow.Step{{ID: "deploy", Type: "fail", With: map[string]any{}}},
 			[]workflow.Step{
@@ -110,9 +111,9 @@ func TestTryCatchCatchIsBestEffortButPublishesNothingOnFailure(t *testing.T) {
 	var ran []string
 	var publishedStep bool
 	var publishedVariable bool
-	registry := newTestRegistry(t, map[string]step.Builder{
+	registry := steptest.Registry(t, map[string]step.Builder{
 		"fail": func(raw map[string]any) (step.Runner, error) {
-			return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) {
 				mu.Lock()
 				ran = append(ran, raw["name"].(string))
 				mu.Unlock()
@@ -120,7 +121,7 @@ func TestTryCatchCatchIsBestEffortButPublishesNothingOnFailure(t *testing.T) {
 			}), nil
 		},
 		"record": func(raw map[string]any) (step.Runner, error) {
-			return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) {
 				mu.Lock()
 				ran = append(ran, raw["name"].(string))
 				mu.Unlock()
@@ -128,14 +129,14 @@ func TestTryCatchCatchIsBestEffortButPublishesNothingOnFailure(t *testing.T) {
 			}), nil
 		},
 		"inspect": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
 				_, publishedStep = request.Steps["deployment"]
 				_, publishedVariable = request.Vars["leaked"]
 				return step.Result{}, nil
 			}), nil
 		},
 	})
-	definition := testDefinition(t, "failed-recovery", tryCatchStep(
+	definition := steptest.Definition(t, "failed-recovery", tryCatchStep(
 		[]workflow.Step{{ID: "deploy", Type: "fail", With: map[string]any{"name": "deploy"}}},
 		[]workflow.Step{{ID: "rollback", Type: "fail", With: map[string]any{"name": "rollback"}}, {ID: "report", Type: "record", With: map[string]any{"name": "report"}}},
 	))
@@ -154,21 +155,21 @@ func TestTryCatchCatchIsBestEffortButPublishesNothingOnFailure(t *testing.T) {
 
 func TestTryCatchRecoversChildTimeout(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, map[string]step.Builder{
+	registry := steptest.Registry(t, map[string]step.Builder{
 		"block": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(ctx context.Context, _ step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(ctx context.Context, _ step.Request) (step.Result, error) {
 				<-ctx.Done()
 				return step.Result{}, ctx.Err()
 			}), nil
 		},
 		"capture": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
 				return step.Result{Outputs: map[string]any{"status": request.Bindings["error"].(map[string]any)["status"]}}, nil
 			}), nil
 		},
 	})
 	timeout := workflow.Duration(10 * time.Millisecond)
-	definition := testDefinition(t, "timeout", tryCatchStep(
+	definition := steptest.Definition(t, "timeout", tryCatchStep(
 		[]workflow.Step{attemptStep("deploy", attemptTimeout(workflow.AttemptControl{}, &timeout), workflow.Step{Type: "block", With: map[string]any{}})},
 		[]workflow.Step{{ID: "rollback", Type: "capture", With: map[string]any{}}},
 	))
@@ -190,27 +191,27 @@ func TestTryCatchRunsLocalDeferAfterRecoveryBeforePublishing(t *testing.T) {
 	t.Parallel()
 	var cleanupSawError bool
 	var cleanupFinally map[string]any
-	registry := newTestRegistry(t, map[string]step.Builder{
+	registry := steptest.Registry(t, map[string]step.Builder{
 		"prepare": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
+			return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
 		},
 		"fail": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) {
 				return step.Result{}, errors.New("deploy failed")
 			}), nil
 		},
 		"recover": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
+			return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
 		},
 		"cleanup": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
 				_, cleanupSawError = request.Bindings["error"]
 				cleanupFinally = request.Bindings["finally"].(map[string]any)
 				return step.Result{Outputs: map[string]any{"done": true}, Variables: map[string]any{"cleaned": true}}, nil
 			}), nil
 		},
 	})
-	definition := testDefinition(t, "cleanup", tryCatchStep(
+	definition := steptest.Definition(t, "cleanup", tryCatchStep(
 		[]workflow.Step{
 			{ID: "prepare", Type: "prepare", With: map[string]any{}, Defer: []workflow.Step{{ID: "release", Type: "cleanup", With: map[string]any{}}}},
 			{ID: "deploy", Type: "fail", With: map[string]any{}},
@@ -236,22 +237,22 @@ func TestTryCatchCancellationBypassesCatchAndRunsLocalDefer(t *testing.T) {
 	started := make(chan struct{})
 	cleaned := make(chan struct{})
 	var catchRuns int
-	registry := newTestRegistry(t, map[string]step.Builder{
+	registry := steptest.Registry(t, map[string]step.Builder{
 		"prepare": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
+			return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
 		},
 		"block": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(ctx context.Context, _ step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(ctx context.Context, _ step.Request) (step.Result, error) {
 				close(started)
 				<-ctx.Done()
 				return step.Result{}, ctx.Err()
 			}), nil
 		},
 		"catch": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(context.Context, step.Request) (step.Result, error) { catchRuns++; return step.Result{}, nil }), nil
+			return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) { catchRuns++; return step.Result{}, nil }), nil
 		},
 		"cleanup": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(ctx context.Context, _ step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(ctx context.Context, _ step.Request) (step.Result, error) {
 				if ctx.Err() != nil {
 					t.Fatalf("cleanup context remained canceled: %v", ctx.Err())
 				}
@@ -270,7 +271,7 @@ func TestTryCatchCancellationBypassesCatchAndRunsLocalDefer(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		_, err := New(registry).Run(ctx, testDefinition(t, "canceled", control), Options{})
+		_, err := New(registry).Run(ctx, steptest.Definition(t, "canceled", control), Options{})
 		done <- err
 	}()
 	<-started
@@ -291,10 +292,10 @@ func TestTryCatchCancellationBypassesCatchAndRunsLocalDefer(t *testing.T) {
 
 func TestTryCatchDryRunShowsBothPhases(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, map[string]step.Builder{
+	registry := steptest.Registry(t, map[string]step.Builder{
 		"run": func(map[string]any) (step.Runner, error) { return countingRunner{}, nil },
 	})
-	definition := testDefinition(t, "dry-run", tryCatchStep(
+	definition := steptest.Definition(t, "dry-run", tryCatchStep(
 		[]workflow.Step{{ID: "deploy", Type: "run", With: map[string]any{}}},
 		[]workflow.Step{{ID: "rollback", Type: "run", With: map[string]any{}}},
 	))
@@ -317,20 +318,20 @@ func tryCatchStep(primary, rescue []workflow.Step) workflow.Step {
 func TestTryCatchSkippedCatchDoesNotRecover(t *testing.T) {
 	t.Parallel()
 	var catchRuns int
-	registry := newTestRegistry(t, map[string]step.Builder{
+	registry := steptest.Registry(t, map[string]step.Builder{
 		"fail": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) {
 				return step.Result{}, errors.New("release rejected")
 			}), nil
 		},
 		"catch": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) {
 				catchRuns++
 				return step.Result{}, nil
 			}), nil
 		},
 	})
-	definition := testDefinition(t, "unmatched-recovery", tryCatchStep(
+	definition := steptest.Definition(t, "unmatched-recovery", tryCatchStep(
 		[]workflow.Step{{ID: "deploy", Type: "fail", With: map[string]any{}}},
 		[]workflow.Step{{ID: "rollback", Type: "catch", If: `error.status == "timed_out"`, With: map[string]any{}}},
 	))
@@ -345,19 +346,19 @@ func TestTryCatchSkippedCatchDoesNotRecover(t *testing.T) {
 
 func TestTryCatchExecutedCatchStepIsNotReportedSkipped(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, map[string]step.Builder{
+	registry := steptest.Registry(t, map[string]step.Builder{
 		"fail": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) {
 				return step.Result{}, errors.New("release rejected")
 			}), nil
 		},
 		"catch": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) {
 				return step.Result{}, nil
 			}), nil
 		},
 	})
-	definition := testDefinition(t, "recovery-progress", tryCatchStep(
+	definition := steptest.Definition(t, "recovery-progress", tryCatchStep(
 		[]workflow.Step{{ID: "deploy", Type: "fail", With: map[string]any{}}},
 		[]workflow.Step{{ID: "rollback", Type: "catch", With: map[string]any{}}},
 	))
@@ -376,9 +377,9 @@ func TestTryCatchExecutedCatchStepIsNotReportedSkipped(t *testing.T) {
 
 func TestTryCatchValidateRejectsInvalidCondition(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, map[string]step.Builder{
+	registry := steptest.Registry(t, map[string]step.Builder{
 		"noop": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
+			return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
 		},
 	})
 	control := tryCatchStep(
@@ -386,7 +387,7 @@ func TestTryCatchValidateRejectsInvalidCondition(t *testing.T) {
 		[]workflow.Step{{ID: "rollback", Type: "noop", With: map[string]any{}}},
 	)
 	control.If = "vars.enabled ==="
-	definition := testDefinition(t, "invalid-condition", control)
+	definition := steptest.Definition(t, "invalid-condition", control)
 	err := New(registry).Validate(t.Context(), definition, Options{})
 	if err == nil || !strings.Contains(err.Error(), `step "deployment": if:`) {
 		t.Fatalf("Validate() error = %v", err)

@@ -8,6 +8,7 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -18,7 +19,7 @@ func TestRunRejectsSpecialSourceFile(t *testing.T) {
 	if err := syscall.Mkfifo(filepath.Join(source, "pipe"), 0o600); err != nil {
 		t.Skipf("creating FIFO: %v", err)
 	}
-	runner := newRunner(t, map[string]any{"from": "source", "into": "target"})
+	runner := steptest.BuildAs[*Runner](t, New, map[string]any{"from": "source", "into": "target"})
 	_, err := runner.Run(t.Context(), step.Request{
 		WorkflowDir: workflowDir, RunDir: t.TempDir(), TemplateRenderer: newRenderer(t, nil, map[string]any{}),
 	})

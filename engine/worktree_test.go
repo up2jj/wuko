@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/internal/gittest"
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
 )
@@ -18,9 +19,9 @@ func TestWorktreeRunsMultipleCommitsPublishesAndCleansUp(t *testing.T) {
 	t.Parallel()
 	root, base := initWorktreeRepository(t)
 	var observedDir string
-	registry := newTestRegistry(t, map[string]step.Builder{
+	registry := steptest.Registry(t, map[string]step.Builder{
 		"commit_changes": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(ctx context.Context, request step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(ctx context.Context, request step.Request) (step.Result, error) {
 				observedDir = request.RunDir
 				for index := range 2 {
 					name := filepath.Join(request.RunDir, fmt.Sprintf("change-%d.txt", index))
@@ -80,9 +81,9 @@ func TestWorktreeRunsMultipleCommitsPublishesAndCleansUp(t *testing.T) {
 func TestWorktreePublishingFailsWithoutNewCommit(t *testing.T) {
 	t.Parallel()
 	root, _ := initWorktreeRepository(t)
-	registry := newTestRegistry(t, map[string]step.Builder{
+	registry := steptest.Registry(t, map[string]step.Builder{
 		"noop": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
+			return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
 		},
 	})
 	definition := &workflow.Definition{
@@ -104,9 +105,9 @@ func TestNestedWorktreeDefersRunOnceBeforeRemoval(t *testing.T) {
 	t.Parallel()
 	root, _ := initWorktreeRepository(t)
 	var cleanupRuns int
-	registry := newTestRegistry(t, map[string]step.Builder{
+	registry := steptest.Registry(t, map[string]step.Builder{
 		"record": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
 				if request.StepID == "cleanup" {
 					cleanupRuns++
 				}
@@ -154,9 +155,9 @@ func TestWorktreeStopsItsServicesBeforeRemovingTheWorktree(t *testing.T) {
 	root, _ := initWorktreeRepository(t)
 	stopped := make(chan struct{})
 	var stoppedBeforeNextStep bool
-	registry := newTestRegistry(t, map[string]step.Builder{
+	registry := steptest.Registry(t, map[string]step.Builder{
 		"serve": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
 				return step.Result{}, request.Services.StartService(request.StepID, "process", step.ServiceOptions{}, func(ctx context.Context) error {
 					<-ctx.Done()
 					close(stopped)
@@ -165,7 +166,7 @@ func TestWorktreeStopsItsServicesBeforeRemovingTheWorktree(t *testing.T) {
 			}), nil
 		},
 		"check": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) {
 				select {
 				case <-stopped:
 					stoppedBeforeNextStep = true

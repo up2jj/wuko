@@ -4,13 +4,14 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/engine"
+	"github.com/up2jj/wuko/internal/steptest"
 	gitstep "github.com/up2jj/wuko/steps/git"
 	"github.com/up2jj/wuko/workflow"
 )
 
 func TestConventionalCommitRendersConfigurationAndDeclaresVariable(t *testing.T) {
 	t.Parallel()
-	definition := testDefinition(t, "commit", workflow.Step{
+	definition := steptest.Definition(t, "commit", workflow.Step{
 		ID: "create", Type: "git_conventional_commit", With: map[string]any{
 			"operation": "create", "type": "{{ .vars.type }}", "scope": "workflow",
 			"subject": "{{ .vars.subject }}", "task": "{{ .vars.task }}", "variable": "commit_message",
@@ -22,7 +23,7 @@ func TestConventionalCommitRendersConfigurationAndDeclaresVariable(t *testing.T)
 		},
 	})
 	definition.Vars = map[string]any{"type": "feat", "subject": "add commit support", "task": "WUKO-142"}
-	registry := newTestRegistry(t, nil)
+	registry := steptest.Registry(t, nil)
 	if err := gitstep.Register(registry); err != nil {
 		t.Fatal(err)
 	}

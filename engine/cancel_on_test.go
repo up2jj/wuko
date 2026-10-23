@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
 )
@@ -20,21 +21,21 @@ func TestCancelOnMonitorWinsAndRecordsPartialBodyState(t *testing.T) {
 	// unstarted body step is documented to record as skipped, and the monitor could win
 	// in the gap between the two. The monitor waits for deploy itself to be running.
 	deploying := make(chan struct{})
-	registry := newTestRegistry(t, map[string]step.Builder{
+	registry := steptest.Registry(t, map[string]step.Builder{
 		"prepare": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) {
 				return step.Result{Outputs: map[string]any{}, Variables: map[string]any{"artifact": "dist/app.tar"}}, nil
 			}), nil
 		},
 		"block": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(ctx context.Context, _ step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(ctx context.Context, _ step.Request) (step.Result, error) {
 				close(deploying)
 				<-ctx.Done()
 				return step.Result{}, ctx.Err()
 			}), nil
 		},
 		"monitor": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) {
 				<-deploying
 				return step.Result{Outputs: map[string]any{"matched": true}}, nil
 			}), nil
@@ -106,15 +107,15 @@ func TestCancelOnMonitorWinsAndRecordsPartialBodyState(t *testing.T) {
 func TestCancelOnBodyWinsAndCanceledMonitorHasNullError(t *testing.T) {
 	t.Parallel()
 	monitorStarted := make(chan struct{})
-	registry := newTestRegistry(t, map[string]step.Builder{
+	registry := steptest.Registry(t, map[string]step.Builder{
 		"body": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) {
 				<-monitorStarted
 				return step.Result{Outputs: map[string]any{"stdout": "deployed\n"}}, nil
 			}), nil
 		},
 		"monitor": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(ctx context.Context, _ step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(ctx context.Context, _ step.Request) (step.Result, error) {
 				close(monitorStarted)
 				<-ctx.Done()
 				return step.Result{}, ctx.Err()
@@ -143,14 +144,14 @@ func TestCancelOnBodyWinsAndCanceledMonitorHasNullError(t *testing.T) {
 
 func TestCancelOnMonitorWinsAfterSkippedBody(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, map[string]step.Builder{
+	registry := steptest.Registry(t, map[string]step.Builder{
 		"done": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) {
 				return step.Result{Outputs: map[string]any{"ready": true}}, nil
 			}), nil
 		},
 		"never": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) {
 				return step.Result{}, errors.New("skipped body step ran")
 			}), nil
 		},
@@ -175,15 +176,15 @@ func TestCancelOnMonitorWinsAfterSkippedBody(t *testing.T) {
 
 func TestCancelOnSkippedBodyEndsTheRace(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, map[string]step.Builder{
+	registry := steptest.Registry(t, map[string]step.Builder{
 		"block": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(ctx context.Context, _ step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(ctx context.Context, _ step.Request) (step.Result, error) {
 				<-ctx.Done()
 				return step.Result{}, ctx.Err()
 			}), nil
 		},
 		"never": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) {
 				return step.Result{}, errors.New("skipped body step ran")
 			}), nil
 		},
@@ -226,9 +227,9 @@ func TestCancelOnSkippedBodyEndsTheRace(t *testing.T) {
 
 func TestCancelOnSkippedByConditionCommitsNothing(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, map[string]step.Builder{
+	registry := steptest.Registry(t, map[string]step.Builder{
 		"never": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) {
 				return step.Result{}, errors.New("skipped cancel_on ran")
 			}), nil
 		},
@@ -261,14 +262,14 @@ func TestCancelOnSkippedByConditionCommitsNothing(t *testing.T) {
 
 func TestCancelOnMultipleMonitorsAndAnonymousMonitorChildren(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, map[string]step.Builder{
+	registry := steptest.Registry(t, map[string]step.Builder{
 		"done": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
 				return step.Result{Outputs: map[string]any{"id": request.StepID}}, nil
 			}), nil
 		},
 		"block": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(ctx context.Context, _ step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(ctx context.Context, _ step.Request) (step.Result, error) {
 				<-ctx.Done()
 				return step.Result{}, ctx.Err()
 			}), nil
@@ -334,12 +335,12 @@ func TestCancelOnWinnerStatuses(t *testing.T) {
 
 func TestCancelOnCapturesMonitorFailure(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, map[string]step.Builder{
+	registry := steptest.Registry(t, map[string]step.Builder{
 		"fail": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, errors.New("offline") }), nil
+			return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, errors.New("offline") }), nil
 		},
 		"block": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(ctx context.Context, _ step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(ctx context.Context, _ step.Request) (step.Result, error) {
 				<-ctx.Done()
 				return step.Result{}, ctx.Err()
 			}), nil
@@ -361,14 +362,14 @@ func TestCancelOnCapturesMonitorFailure(t *testing.T) {
 
 func TestCancelOnCollectsRecordedOutcome(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, map[string]step.Builder{
+	registry := steptest.Registry(t, map[string]step.Builder{
 		"done": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) {
 				return step.Result{Outputs: map[string]any{"value": 7}}, nil
 			}), nil
 		},
 		"block": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(ctx context.Context, _ step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(ctx context.Context, _ step.Request) (step.Result, error) {
 				<-ctx.Done()
 				return step.Result{}, ctx.Err()
 			}), nil
@@ -388,15 +389,15 @@ func TestCancelOnCollectsRecordedOutcome(t *testing.T) {
 func TestCancelOnCollectionFailureFailsParent(t *testing.T) {
 	t.Parallel()
 	var runs int
-	registry := newTestRegistry(t, map[string]step.Builder{
+	registry := steptest.Registry(t, map[string]step.Builder{
 		"done": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) {
 				runs++
 				return step.Result{Outputs: map[string]any{}}, nil
 			}), nil
 		},
 		"block": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(ctx context.Context, _ step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(ctx context.Context, _ step.Request) (step.Result, error) {
 				<-ctx.Done()
 				return step.Result{}, ctx.Err()
 			}), nil
@@ -421,16 +422,16 @@ func TestCancelOnCollectionFailureFailsParent(t *testing.T) {
 
 func cancelOnDefinition(t *testing.T, monitors, body []workflow.Step, collect string) *workflow.Definition {
 	t.Helper()
-	return testDefinition(t, "cancel-on", workflow.Step{
+	return steptest.Definition(t, "cancel-on", workflow.Step{
 		ID: "deployment_watch", CancelOn: &workflow.CancelOnGroup{Monitors: monitors, Steps: body, Collect: collect},
 	})
 }
 
 func TestCancelOnValidateRejectsInvalidCondition(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, map[string]step.Builder{
+	registry := steptest.Registry(t, map[string]step.Builder{
 		"noop": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
+			return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
 		},
 	})
 	definition := cancelOnDefinition(t,
@@ -492,15 +493,15 @@ func TestCancelOnRecordsPanickingParticipantAsFailedOutcome(t *testing.T) {
 	t.Parallel()
 	monitorStarted := make(chan struct{})
 	monitorCanceled := make(chan struct{})
-	registry := newTestRegistry(t, map[string]step.Builder{
+	registry := steptest.Registry(t, map[string]step.Builder{
 		"body": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) {
 				<-monitorStarted
 				panic("body step exploded")
 			}), nil
 		},
 		"monitor": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(ctx context.Context, _ step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(ctx context.Context, _ step.Request) (step.Result, error) {
 				close(monitorStarted)
 				<-ctx.Done()
 				close(monitorCanceled)

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/executor"
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 	processstep "github.com/up2jj/wuko/steps/process"
 	"github.com/up2jj/wuko/steps/shell"
@@ -19,7 +20,7 @@ import (
 
 func TestSSHRestrictionsApplyInsideControlsAndCleanup(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, nil)
+	registry := steptest.Registry(t, nil)
 	if err := shell.Register(registry); err != nil {
 		t.Fatal(err)
 	}
@@ -47,14 +48,14 @@ func TestSSHRestrictionsApplyInsideControlsAndCleanup(t *testing.T) {
 			case "defer":
 				block.Steps = []workflow.Step{{ID: "ok", Type: "shell", With: map[string]any{"command": "true"}, Defer: []workflow.Step{bad}}}
 			}
-			definition := testDefinition(t, "ssh-invalid", block)
+			definition := steptest.Definition(t, "ssh-invalid", block)
 			err := New(registry, WithExecutors(executors)).Validate(t.Context(), definition, Options{RunDir: t.TempDir()})
 			if err == nil || !strings.Contains(err.Error(), "SSH executor does not support tty") {
 				t.Fatalf("Validate() = %v", err)
 			}
 		})
 	}
-	definition := testDefinition(t, "ssh-process", workflow.Step{
+	definition := steptest.Definition(t, "ssh-process", workflow.Step{
 		Executor: &workflow.ExecutorScope{Type: "ssh", With: map[string]any{"host": "never-connect.invalid", "directory": "/remote"}},
 		Steps:    []workflow.Step{{ID: "server", Type: "process", With: map[string]any{"command": "sleep", "args": []string{"10"}}}},
 	})
@@ -98,7 +99,7 @@ func TestExecutorWorkingDirectoryUsesTargetAndRestoresLocalExecution(t *testing.
 	root := t.TempDir()
 	remoteOnly := filepath.Join(root, "exists-only-on-target")
 	session := &directoryExecutor{directory: remoteOnly}
-	registry := newTestRegistry(t, map[string]step.Builder{"capture_dir": func(map[string]any) (step.Runner, error) { return directoryCaptureRunner{}, nil }})
+	registry := steptest.Registry(t, map[string]step.Builder{"capture_dir": func(map[string]any) (step.Runner, error) { return directoryCaptureRunner{}, nil }})
 	if err := shell.Register(registry); err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +107,7 @@ func TestExecutorWorkingDirectoryUsesTargetAndRestoresLocalExecution(t *testing.
 	if err := executors.Register("target", func(map[string]any) (executor.Provider, error) { return directoryProvider{session}, nil }); err != nil {
 		t.Fatal(err)
 	}
-	definition := testDefinition(t, "remote-directory",
+	definition := steptest.Definition(t, "remote-directory",
 		workflow.Step{Executor: &workflow.ExecutorScope{Type: "target"}, Steps: []workflow.Step{{WorkingDirectory: "exists-only-on-target", Steps: []workflow.Step{{ID: "remote", Type: "shell", With: map[string]any{"command": "pwd"}}}}}},
 		workflow.Step{ID: "local", Type: "capture_dir"},
 	)

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	storepkg "github.com/up2jj/wuko/keyvalue"
 	"github.com/up2jj/wuko/step"
 )
@@ -29,7 +30,7 @@ func TestChangedTracksFilesDirectoriesGlobsAndValues(t *testing.T) {
 	writeTestFile(t, runDir, "src/main.go", "package main\n")
 	writeTestFile(t, runDir, "assets/logo.txt", "logo\n")
 	writeTestFile(t, runDir, "assets/.ignored", "hidden\n")
-	runner := newTestRunner(t, map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"files":  []any{"go.mod", "src/**/*.go", "assets", "src/**/*.go"},
 		"values": map[string]any{"target": "linux", "options": map[string]any{"race": true, "count": 2}},
 	})
@@ -72,7 +73,7 @@ func TestChangedTracksFilesDirectoriesGlobsAndValues(t *testing.T) {
 	if runChanged(t, runner, request) {
 		t.Fatal("implicitly selected hidden file affected the fingerprint")
 	}
-	changedValues := newTestRunner(t, map[string]any{
+	changedValues := steptest.Build(t, New, map[string]any{
 		"files": []any{"assets", "src/**/*.go", "go.mod"},
 		"values": map[string]any{
 			"options": map[string]any{"count": 2, "race": true}, "target": "darwin",
@@ -86,7 +87,7 @@ func TestChangedTracksFilesDirectoriesGlobsAndValues(t *testing.T) {
 func TestChangedTracksMissingPathsAndExcludesOwnStore(t *testing.T) {
 	runDir := t.TempDir()
 	localDir := filepath.Join(runDir, ".wuko", "values")
-	runner := newTestRunner(t, map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"files": []any{"missing.txt", ".wuko/values/**"},
 	})
 	request := testRequest(runDir, localDir)
@@ -117,7 +118,7 @@ func TestChangedDoesNotFollowSymlinksInLiteralPrefixes(t *testing.T) {
 	if err := os.Symlink(outside, filepath.Join(runDir, "linked")); err != nil {
 		t.Skipf("creating directory symlink: %v", err)
 	}
-	runner := newTestRunner(t, map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"files": []any{"linked/secret.txt", "linked/**/*.txt"},
 	})
 	request := testRequest(runDir, filepath.Join(runDir, ".wuko", "values"))
@@ -133,7 +134,7 @@ func TestChangedDoesNotFollowSymlinksInLiteralPrefixes(t *testing.T) {
 func TestChangedSnapshotIdentityAndExplicitKey(t *testing.T) {
 	runDir := t.TempDir()
 	localDir := filepath.Join(runDir, ".wuko", "values")
-	runner := newTestRunner(t, map[string]any{"values": map[string]any{"value": true}})
+	runner := steptest.Build(t, New, map[string]any{"values": map[string]any{"value": true}})
 	first := testRequest(runDir, localDir)
 	if !runChanged(t, runner, first) || runChanged(t, runner, first) {
 		t.Fatal("default identity did not stabilize")
@@ -143,7 +144,7 @@ func TestChangedSnapshotIdentityAndExplicitKey(t *testing.T) {
 	if !runChanged(t, runner, second) {
 		t.Fatal("workflow source did not namespace the snapshot")
 	}
-	explicit := newTestRunner(t, map[string]any{"key": "iteration-linux", "values": map[string]any{"value": true}})
+	explicit := steptest.Build(t, New, map[string]any{"key": "iteration-linux", "values": map[string]any{"value": true}})
 	if !runChanged(t, explicit, first) || runChanged(t, explicit, first) {
 		t.Fatal("explicit key did not create a stable snapshot")
 	}
@@ -152,19 +153,19 @@ func TestChangedSnapshotIdentityAndExplicitKey(t *testing.T) {
 func TestChangedPreservesValueTypesAndIgnoresMapOrder(t *testing.T) {
 	runDir := t.TempDir()
 	request := testRequest(runDir, filepath.Join(runDir, ".wuko", "values"))
-	first := newTestRunner(t, map[string]any{"values": map[string]any{
+	first := steptest.Build(t, New, map[string]any{"values": map[string]any{
 		"enabled": true, "count": 2, "items": []any{"a", map[string]any{"left": 1, "right": false}},
 	}})
 	if !runChanged(t, first, request) {
 		t.Fatal("first typed value snapshot was unchanged")
 	}
-	reordered := newTestRunner(t, map[string]any{"values": map[string]any{
+	reordered := steptest.Build(t, New, map[string]any{"values": map[string]any{
 		"items": []any{"a", map[string]any{"right": false, "left": 1}}, "count": 2, "enabled": true,
 	}})
 	if runChanged(t, reordered, request) {
 		t.Fatal("map insertion order affected the fingerprint")
 	}
-	typeChanged := newTestRunner(t, map[string]any{"values": map[string]any{
+	typeChanged := steptest.Build(t, New, map[string]any{"values": map[string]any{
 		"enabled": true, "count": "2", "items": []any{"a", map[string]any{"left": 1, "right": false}},
 	}})
 	if !runChanged(t, typeChanged, request) {
@@ -198,18 +199,18 @@ func TestChangedRejectsInvalidConfiguration(t *testing.T) {
 }
 
 func TestChangedValidationRuntimeErrorsAndCancellation(t *testing.T) {
-	runner := newTestRunner(t, map[string]any{"values": map[string]any{"value": true}})
+	runner := steptest.Build(t, New, map[string]any{"values": map[string]any{"value": true}})
 	if err := runner.(step.Validator).Validate(t.Context(), step.Request{}); err == nil || !strings.Contains(err.Error(), "local workflow storage") {
 		t.Fatalf("validation error = %v", err)
 	}
 
-	unresolved := newTestRunner(t, map[string]any{"key": "{{ .vars.key }}", "values": map[string]any{"value": true}})
+	unresolved := steptest.Build(t, New, map[string]any{"key": "{{ .vars.key }}", "values": map[string]any{"value": true}})
 	_, err := unresolved.Run(t.Context(), testRequest(t.TempDir(), t.TempDir()))
 	if err == nil || !strings.Contains(err.Error(), "unresolved template") {
 		t.Fatalf("unresolved key error = %v", err)
 	}
 
-	missingRoot := newTestRunner(t, map[string]any{"root": "missing", "files": []any{"**"}})
+	missingRoot := steptest.Build(t, New, map[string]any{"root": "missing", "files": []any{"**"}})
 	_, err = missingRoot.Run(t.Context(), testRequest(t.TempDir(), t.TempDir()))
 	if err == nil || !strings.Contains(err.Error(), "inspecting changed root") {
 		t.Fatalf("missing root error = %v", err)
@@ -221,15 +222,6 @@ func TestChangedValidationRuntimeErrorsAndCancellation(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancellation error = %v", err)
 	}
-}
-
-func newTestRunner(t *testing.T, raw map[string]any) step.Runner {
-	t.Helper()
-	runner, err := New(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return runner
 }
 
 func runChanged(t *testing.T, runner step.Runner, request step.Request) bool {

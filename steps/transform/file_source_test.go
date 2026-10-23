@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/steps/decode"
@@ -73,7 +74,7 @@ func TestFileSourceMatchesDecodeThenTransform(t *testing.T) {
 	}
 	request := step.Request{Steps: map[string]any{"data": decoded.Outputs}}
 	for _, operations := range pipelines {
-		runner := buildRunner(t, map[string]any{"from": "steps.data.value", "operations": operations})
+		runner := steptest.BuildAs[*Runner](t, New, map[string]any{"from": "steps.data.value", "operations": operations})
 		want, err := runner.Run(t.Context(), request)
 		if err != nil {
 			t.Fatal(err)

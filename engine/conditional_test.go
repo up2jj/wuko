@@ -7,13 +7,14 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/diagnostic"
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
 )
 
 func conditionalTestRegistry(t *testing.T, runs *int) *step.Registry {
 	t.Helper()
-	return newTestRegistry(t, map[string]step.Builder{"capture": func(raw map[string]any) (step.Runner, error) {
+	return steptest.Registry(t, map[string]step.Builder{"capture": func(raw map[string]any) (step.Runner, error) {
 		return countingRunner{value: raw["value"], runs: runs}, nil
 	}})
 }
@@ -22,7 +23,7 @@ func TestConditionalBlockRunsSequentiallyAfterOneConditionEvaluation(t *testing.
 	t.Parallel()
 	var runs int
 	registry := conditionalTestRegistry(t, &runs)
-	definition := testDefinition(
+	definition := steptest.Definition(
 		t, "conditional",
 		workflow.Step{If: `vars.result == nil`, Steps: []workflow.Step{
 			{ID: "first", Type: "capture", With: map[string]any{"value": "produced"}},
@@ -45,7 +46,7 @@ func TestConditionalBlockFalseRecordsLeafAndControlSkips(t *testing.T) {
 	t.Parallel()
 	var runs int
 	registry := conditionalTestRegistry(t, &runs)
-	definition := testDefinition(
+	definition := steptest.Definition(
 		t, "skipped",
 		workflow.Step{If: "false", Steps: []workflow.Step{
 			{ID: "ordinary", Type: "capture", With: map[string]any{"value": "unused"}},
@@ -97,7 +98,7 @@ func TestConditionalBlockStopsAfterChildFailure(t *testing.T) {
 	if err := registry.Register("fail", func(map[string]any) (step.Runner, error) { return alwaysFailRunner{}, nil }); err != nil {
 		t.Fatal(err)
 	}
-	definition := testDefinition(
+	definition := steptest.Definition(
 		t, "failure",
 		workflow.Step{If: "true", Steps: []workflow.Step{
 			{ID: "before", Type: "capture", With: map[string]any{"value": "before"}},
@@ -117,7 +118,7 @@ func TestConditionalBlockInsideForeachCollectsTransparentOutputs(t *testing.T) {
 	t.Parallel()
 	var runs int
 	registry := conditionalTestRegistry(t, &runs)
-	definition := testDefinition(t, "foreach-conditional", workflow.Step{ID: "loop", Foreach: &workflow.ForeachGroup{
+	definition := steptest.Definition(t, "foreach-conditional", workflow.Step{ID: "loop", Foreach: &workflow.ForeachGroup{
 		Items: "vars.items", Collect: "steps.inside", MaxConcurrency: 1, FailFast: true,
 		Steps: []workflow.Step{{If: "true", Steps: []workflow.Step{
 			{ID: "inside", Type: "capture", With: map[string]any{"value": "{{ .foreach.item }}"}},
@@ -142,7 +143,7 @@ func TestConditionalBlocksRunInCompositeActionsAndFinally(t *testing.T) {
 		{ID: "inside", Type: "capture", With: map[string]any{"value": "action"}},
 	}})
 	action.Outputs = map[string]workflow.ActionOutput{"value": {Value: "steps.inside.value"}}
-	definition := testDefinition(t, "caller", workflow.Step{ID: "call", Uses: workflow.ActionSource{URL: "https://example.test/action"}, Action: action})
+	definition := steptest.Definition(t, "caller", workflow.Step{ID: "call", Uses: workflow.ActionSource{URL: "https://example.test/action"}, Action: action})
 	definition.Finally = []workflow.Step{{If: `finally.status == "succeeded"`, Steps: []workflow.Step{
 		{ID: "cleanup", Type: "capture", With: map[string]any{"value": "cleanup"}},
 	}}}
@@ -159,7 +160,7 @@ func TestConditionalBlockDryRunDisplaysNestedPlan(t *testing.T) {
 	t.Parallel()
 	var runs int
 	registry := conditionalTestRegistry(t, &runs)
-	definition := testDefinition(
+	definition := steptest.Definition(
 		t, "dry",
 		workflow.Step{If: "vars.enabled", Steps: []workflow.Step{
 			{ID: "first", Type: "capture", With: map[string]any{"value": "first"}},
@@ -182,7 +183,7 @@ func TestConditionalBlockValidationDiagnosticUsesWrapperLocation(t *testing.T) {
 	var runs int
 	registry := conditionalTestRegistry(t, &runs)
 	wrapperLocation := diagnostic.Location{Source: "workflow.yaml", Line: 7, Column: 3}
-	definition := testDefinition(
+	definition := steptest.Definition(
 		t, "invalid",
 		workflow.Step{If: "vars.", Location: wrapperLocation, Steps: []workflow.Step{
 			{ID: "run", Type: "capture", With: map[string]any{"value": "unused"}},

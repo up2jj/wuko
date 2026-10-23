@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/validation"
 	"github.com/up2jj/wuko/workflow"
@@ -35,14 +36,14 @@ steps:
 	registry := step.NewRegistry()
 	if err := registry.RegisterDefinition("producer", step.Registration{
 		Builder: func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
+			return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
 		},
 		Outputs: step.ClosedOutputs("status"),
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := registry.Register("capture", func(map[string]any) (step.Runner, error) {
-		return runnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
+		return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
 	}); err != nil {
 		t.Fatal(err)
 	}

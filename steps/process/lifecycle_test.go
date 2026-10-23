@@ -10,19 +10,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	processpkg "github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
 )
-
-func mustRunner(t *testing.T, raw map[string]any) *Runner {
-	t.Helper()
-	runner, err := New(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return runner.(*Runner)
-}
 
 // nonStoppingExecutor stands in for an executor whose cancellation cannot reach the process it
 // started, as a Docker exec cannot.
@@ -35,7 +27,7 @@ func (nonStoppingExecutor) Run(ctx context.Context, options processpkg.Options) 
 func (nonStoppingExecutor) CancelStopsProcess() bool { return false }
 
 func TestProcessFailedStartupIsReportedByTheStepAndNotTheScope(t *testing.T) {
-	runner := mustRunner(t, map[string]any{
+	runner := steptest.BuildAs[*Runner](t, New, map[string]any{
 		"script":      "while :; do sleep 1; done",
 		"readiness":   map[string]any{"log": map[string]any{"pattern": "never matches", "timeout": "100ms"}},
 		"exit_on_end": true, "exit_on_failure": true,
@@ -60,7 +52,7 @@ func TestProcessFailedStartupIsReportedByTheStepAndNotTheScope(t *testing.T) {
 }
 
 func TestProcessAbandonedAfterReadinessStopsTheService(t *testing.T) {
-	runner := mustRunner(t, map[string]any{
+	runner := steptest.BuildAs[*Runner](t, New, map[string]any{
 		"command": "sh", "args": []any{"-c", "while :; do sleep 1; done"},
 		"shutdown": map[string]any{"timeout": "100ms"},
 	})
@@ -94,7 +86,7 @@ func TestProcessAbandonedAfterReadinessStopsTheService(t *testing.T) {
 func TestProcessLivenessFailureRunsShutdownCommandBeforeEachRestart(t *testing.T) {
 	directory := t.TempDir()
 	stops := filepath.Join(directory, "stops")
-	runner := mustRunner(t, map[string]any{
+	runner := steptest.BuildAs[*Runner](t, New, map[string]any{
 		"script":   "trap 'exit 0' TERM INT; while :; do sleep 1; done",
 		"liveness": map[string]any{"exec": map[string]any{"command": "false", "period": "10ms", "timeout": "1s", "failure_threshold": 1}},
 		"restart":  map[string]any{"policy": "on_failure", "backoff": "1ms", "max_restarts": 1},
@@ -119,7 +111,7 @@ func TestProcessLivenessFailureRunsShutdownCommandBeforeEachRestart(t *testing.T
 }
 
 func TestProcessRestartRequiresShutdownCommandWhenCancellationCannotStop(t *testing.T) {
-	runner := mustRunner(t, map[string]any{
+	runner := steptest.BuildAs[*Runner](t, New, map[string]any{
 		"command": "sh", "args": []any{"-c", "while :; do sleep 1; done"},
 		"restart": map[string]any{"policy": "always"},
 	})
@@ -210,7 +202,7 @@ func TestProcessAppliesAllowedExitCodes(t *testing.T) {
 			if test.allowed != nil {
 				raw["allowed_exit_codes"] = test.allowed
 			}
-			if err := mustRunner(t, raw).exitError(test.exit); (err != nil) != test.wantErr {
+			if err := steptest.BuildAs[*Runner](t, New, raw).exitError(test.exit); (err != nil) != test.wantErr {
 				t.Fatalf("exitError() = %v, wantErr %t", err, test.wantErr)
 			}
 		})
@@ -218,7 +210,7 @@ func TestProcessAppliesAllowedExitCodes(t *testing.T) {
 }
 
 func TestProcessAnyExitCodeSuppressesOnFailureRestart(t *testing.T) {
-	runner := mustRunner(t, map[string]any{
+	runner := steptest.BuildAs[*Runner](t, New, map[string]any{
 		"script": "exit 7", "allowed_exit_codes": "any",
 		"restart": map[string]any{"policy": "on_failure", "max_restarts": 3},
 	})
@@ -264,7 +256,7 @@ func TestProbeTimeoutWidensForElevatedProcesses(t *testing.T) {
 func TestProcessReplacementExitingBeforeReadinessDoesNotWaitForShutdownTimeout(t *testing.T) {
 	directory := t.TempDir()
 	marker := filepath.Join(directory, "launched")
-	runner := mustRunner(t, map[string]any{
+	runner := steptest.BuildAs[*Runner](t, New, map[string]any{
 		"script":    `if [ -e "$1" ]; then exit 1; fi; : > "$1"; echo ready; sleep 0.05; exit 1`,
 		"args":      []any{marker},
 		"readiness": map[string]any{"log": map[string]any{"pattern": "ready", "timeout": "2s"}},

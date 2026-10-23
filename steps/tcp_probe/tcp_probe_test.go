@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -46,7 +47,7 @@ func TestNewValidatesConfiguration(t *testing.T) {
 }
 
 func TestRunReturnsOrderedMatrixSummaryAndOwners(t *testing.T) {
-	runner := testRunner(t, map[string]any{
+	runner := steptest.BuildAs[*Runner](t, New, map[string]any{
 		"hosts": []any{"one", "two"}, "ports": []any{4000, 4001}, "owners": true,
 	})
 	runner.dial = func(_ context.Context, _, address string) (net.Conn, error) {
@@ -106,7 +107,7 @@ func TestRunReturnsOrderedMatrixSummaryAndOwners(t *testing.T) {
 }
 
 func TestExpectationFailureCarriesObservation(t *testing.T) {
-	runner := testRunner(t, map[string]any{
+	runner := steptest.BuildAs[*Runner](t, New, map[string]any{
 		"hosts": []any{"127.0.0.1"}, "ports": []any{4000, 4001}, "expect": stateFree,
 	})
 	runner.dial = func(_ context.Context, _, address string) (net.Conn, error) {
@@ -134,7 +135,7 @@ func TestRunHonorsConcurrencyLimit(t *testing.T) {
 	for index := range ports {
 		ports[index] = index + 1
 	}
-	runner := testRunner(t, map[string]any{"hosts": []any{"127.0.0.1"}, "ports": ports})
+	runner := steptest.BuildAs[*Runner](t, New, map[string]any{"hosts": []any{"127.0.0.1"}, "ports": ports})
 	started := make(chan struct{}, len(ports))
 	release := make(chan struct{})
 	var mu sync.Mutex
@@ -188,7 +189,7 @@ func TestRealLoopbackListener(t *testing.T) {
 	}
 	defer listener.Close()
 	port := listener.Addr().(*net.TCPAddr).Port
-	runner := testRunner(t, map[string]any{"hosts": []any{"127.0.0.1"}, "ports": []any{port}})
+	runner := steptest.BuildAs[*Runner](t, New, map[string]any{"hosts": []any{"127.0.0.1"}, "ports": []any{port}})
 	result, err := runner.Run(t.Context(), step.Request{})
 	if err != nil {
 		t.Fatal(err)
@@ -202,7 +203,7 @@ func TestRealLoopbackListener(t *testing.T) {
 // A port is the field most likely to come from a variable, so it has to survive validation
 // while it is still a template and be parsed once the engine has resolved it.
 func TestPortsAcceptTemplates(t *testing.T) {
-	runner := testRunner(t, map[string]any{
+	runner := steptest.BuildAs[*Runner](t, New, map[string]any{
 		"hosts": []any{"{{ .vars.host }}"}, "ports": []any{"{{ .vars.port }}", 4001},
 	})
 	if _, err := runner.validate(true); err == nil {
@@ -227,7 +228,7 @@ func TestPortsAcceptTemplates(t *testing.T) {
 // A template that is still a template when the step runs never becomes a port, and failing
 // there is better than dialing whatever the text happens to parse as.
 func TestPortsRejectUnresolvedTemplatesAtRun(t *testing.T) {
-	runner := testRunner(t, map[string]any{
+	runner := steptest.BuildAs[*Runner](t, New, map[string]any{
 		"hosts": []any{"localhost"}, "ports": []any{"{{ .vars.port }}", "{{ .vars.other }}"},
 	})
 	if _, err := runner.validate(true); err == nil {
@@ -238,7 +239,7 @@ func TestPortsRejectUnresolvedTemplatesAtRun(t *testing.T) {
 // Every endpoint handed to the lookup answered a TCP handshake moments earlier, so an empty
 // owner list is a blind spot rather than an unowned port and must not read as complete.
 func TestRunReportsUnexplainedListenersAsIncomplete(t *testing.T) {
-	runner := testRunner(t, map[string]any{
+	runner := steptest.BuildAs[*Runner](t, New, map[string]any{
 		"hosts": []any{"127.0.0.1"}, "ports": []any{4000}, "owners": true,
 	})
 	runner.dial = func(_ context.Context, _, _ string) (net.Conn, error) {
@@ -263,15 +264,6 @@ func TestRunReportsUnexplainedListenersAsIncomplete(t *testing.T) {
 	if !strings.Contains(detail, "127.0.0.1:4000") || !strings.Contains(detail, "not readable") {
 		t.Fatalf("detail = %q", detail)
 	}
-}
-
-func testRunner(t *testing.T, raw map[string]any) *Runner {
-	t.Helper()
-	built, err := New(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return built.(*Runner)
 }
 
 type stubConn struct {

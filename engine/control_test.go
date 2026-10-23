@@ -9,19 +9,20 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
 )
 
 func TestRunForeachAggregatesOrderedIsolatedResults(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, map[string]step.Builder{"capture": func(raw map[string]any) (step.Runner, error) {
+	registry := steptest.Registry(t, map[string]step.Builder{"capture": func(raw map[string]any) (step.Runner, error) {
 		value := raw["value"]
-		return runnerFunc(func(_ context.Context, _ step.Request) (step.Result, error) {
+		return steptest.RunnerFunc(func(_ context.Context, _ step.Request) (step.Result, error) {
 			return step.Result{Outputs: map[string]any{"value": value}, Variables: map[string]any{"temporary": value}}, nil
 		}), nil
 	}})
-	definition := testDefinition(t, "foreach", workflow.Step{ID: "deploy", Foreach: &workflow.ForeachGroup{
+	definition := steptest.Definition(t, "foreach", workflow.Step{ID: "deploy", Foreach: &workflow.ForeachGroup{
 		Items: "vars.targets", Collect: `{"item": foreach.item, "value": steps.second.value, "local": vars.temporary, "input": inputs.seed, "env": env.COLLECT, "dir": run.dir}`, MaxConcurrency: 1, FailFast: true,
 		Steps: []workflow.Step{
 			{ID: "first", Type: "capture", With: map[string]any{"value": "{{ .foreach.index }}:{{ .foreach.item }}"}},
@@ -58,13 +59,13 @@ func TestRunForeachAggregatesOrderedIsolatedResults(t *testing.T) {
 
 func TestRunBatchUsesDynamicSizeAndCollectsOrderedBindings(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, map[string]step.Builder{"capture_batch": func(raw map[string]any) (step.Runner, error) {
+	registry := steptest.Registry(t, map[string]step.Builder{"capture_batch": func(raw map[string]any) (step.Runner, error) {
 		value := raw["value"]
-		return runnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
+		return steptest.RunnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
 			return step.Result{Outputs: map[string]any{"value": value, "binding": request.Bindings["batch"]}}, nil
 		}), nil
 	}})
-	definition := testDefinition(t, "batch", workflow.Step{ID: "groups", Batch: &workflow.BatchGroup{
+	definition := steptest.Definition(t, "batch", workflow.Step{ID: "groups", Batch: &workflow.BatchGroup{
 		Items: "vars.targets", Size: workflow.BatchSize{Expression: "vars.batch_size"},
 		Collect: `{"index": batch.index, "items": batch.items, "value": steps.run.value}`, MaxConcurrency: 2, FailFast: true,
 		Steps: []workflow.Step{{
@@ -96,8 +97,8 @@ func TestRunBatchUsesDynamicSizeAndCollectsOrderedBindings(t *testing.T) {
 
 func TestRunBatchValidatesDynamicSizeResult(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, map[string]step.Builder{"noop": func(map[string]any) (step.Runner, error) {
-		return runnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
+	registry := steptest.Registry(t, map[string]step.Builder{"noop": func(map[string]any) (step.Runner, error) {
+		return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
 	}})
 	tests := []struct {
 		name string
@@ -112,7 +113,7 @@ func TestRunBatchValidatesDynamicSizeResult(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			definition := testDefinition(t, test.name, workflow.Step{ID: "groups", Batch: &workflow.BatchGroup{
+			definition := steptest.Definition(t, test.name, workflow.Step{ID: "groups", Batch: &workflow.BatchGroup{
 				Items: "vars.items", Size: workflow.BatchSize{Expression: "vars.size"}, MaxConcurrency: 1, FailFast: true,
 				Steps: []workflow.Step{{ID: "run", Type: "noop", With: map[string]any{}}},
 			}})
@@ -124,7 +125,7 @@ func TestRunBatchValidatesDynamicSizeResult(t *testing.T) {
 		})
 	}
 
-	valid := testDefinition(t, "integral-float", workflow.Step{ID: "groups", Batch: &workflow.BatchGroup{
+	valid := steptest.Definition(t, "integral-float", workflow.Step{ID: "groups", Batch: &workflow.BatchGroup{
 		Items: "vars.items", Size: workflow.BatchSize{Expression: "vars.size"}, MaxConcurrency: 1, FailFast: true,
 		Steps: []workflow.Step{{ID: "run", Type: "noop", With: map[string]any{}}},
 	}})
@@ -137,10 +138,10 @@ func TestRunBatchValidatesDynamicSizeResult(t *testing.T) {
 
 func TestValidateBatchRejectsInvalidSizeExpression(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, map[string]step.Builder{"noop": func(map[string]any) (step.Runner, error) {
-		return runnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
+	registry := steptest.Registry(t, map[string]step.Builder{"noop": func(map[string]any) (step.Runner, error) {
+		return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
 	}})
-	definition := testDefinition(t, "invalid-size", workflow.Step{ID: "groups", Batch: &workflow.BatchGroup{
+	definition := steptest.Definition(t, "invalid-size", workflow.Step{ID: "groups", Batch: &workflow.BatchGroup{
 		Items: "[]", Size: workflow.BatchSize{Expression: "vars."}, MaxConcurrency: 1, FailFast: true,
 		Steps: []workflow.Step{{ID: "run", Type: "noop", With: map[string]any{}}},
 	}})
@@ -151,12 +152,12 @@ func TestValidateBatchRejectsInvalidSizeExpression(t *testing.T) {
 
 func TestRunMatrixUsesDeterministicBindings(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, map[string]step.Builder{"binding": func(map[string]any) (step.Runner, error) {
-		return runnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
+	registry := steptest.Registry(t, map[string]step.Builder{"binding": func(map[string]any) (step.Runner, error) {
+		return steptest.RunnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
 			return step.Result{Outputs: map[string]any{"matrix": request.Bindings["matrix"]}}, nil
 		}), nil
 	}})
-	definition := testDefinition(t, "matrix", workflow.Step{ID: "checks", Matrix: &workflow.MatrixGroup{
+	definition := steptest.Definition(t, "matrix", workflow.Step{ID: "checks", Matrix: &workflow.MatrixGroup{
 		Axes: workflow.MatrixAxes{
 			{Name: "os", Values: []any{"linux", "darwin"}},
 			{Name: "version", Expression: "vars.versions"},
@@ -185,15 +186,15 @@ func TestRunMatrixUsesDeterministicBindings(t *testing.T) {
 
 func TestRunControlFailureDoesNotCommitAggregate(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, map[string]step.Builder{"fail": func(map[string]any) (step.Runner, error) {
-		return runnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
+	registry := steptest.Registry(t, map[string]step.Builder{"fail": func(map[string]any) (step.Runner, error) {
+		return steptest.RunnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
 			if request.Bindings["foreach"].(map[string]any)["item"] == "bad" {
 				return step.Result{}, errors.New("broken")
 			}
 			return step.Result{Outputs: map[string]any{"ok": true}}, nil
 		}), nil
 	}})
-	definition := testDefinition(t, "failure", workflow.Step{ID: "loop", Foreach: &workflow.ForeachGroup{
+	definition := steptest.Definition(t, "failure", workflow.Step{ID: "loop", Foreach: &workflow.ForeachGroup{
 		Items: "vars.items", MaxConcurrency: 1, FailFast: false,
 		Steps: []workflow.Step{{ID: "run", Type: "fail", With: map[string]any{}}},
 	}})
@@ -221,13 +222,13 @@ func TestRunControlFailureDoesNotCommitAggregate(t *testing.T) {
 func TestRunControlRejectsExpansionAboveWorkflowLimit(t *testing.T) {
 	t.Parallel()
 	runs := 0
-	registry := newTestRegistry(t, map[string]step.Builder{"count": func(map[string]any) (step.Runner, error) {
-		return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+	registry := steptest.Registry(t, map[string]step.Builder{"count": func(map[string]any) (step.Runner, error) {
+		return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) {
 			runs++
 			return step.Result{}, nil
 		}), nil
 	}})
-	definition := testDefinition(t, "bounded", workflow.Step{ID: "loop", Foreach: &workflow.ForeachGroup{
+	definition := steptest.Definition(t, "bounded", workflow.Step{ID: "loop", Foreach: &workflow.ForeachGroup{
 		Items: "vars.items", MaxConcurrency: 1, MaxIterations: 2, FailFast: true,
 		Steps: []workflow.Step{{ID: "run", Type: "count", With: map[string]any{}}},
 	}})
@@ -243,15 +244,15 @@ func TestRunControlRejectsExpansionAboveWorkflowLimit(t *testing.T) {
 
 func TestForeachPassesBindingToCompositeActionInput(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, map[string]step.Builder{"echo": func(raw map[string]any) (step.Runner, error) {
-		return runnerFunc(func(_ context.Context, _ step.Request) (step.Result, error) {
+	registry := steptest.Registry(t, map[string]step.Builder{"echo": func(raw map[string]any) (step.Runner, error) {
+		return steptest.RunnerFunc(func(_ context.Context, _ step.Request) (step.Result, error) {
 			return step.Result{Outputs: map[string]any{"value": raw["value"]}}, nil
 		}), nil
 	}})
 	action := testAction(t, "echo-action", workflow.Step{ID: "echo", Type: "echo", With: map[string]any{"value": "{{ .inputs.target }}"}})
 	action.Inputs = map[string]workflow.ActionInput{"target": {Type: "string", Required: true}}
 	action.Outputs = map[string]workflow.ActionOutput{"result": {Value: "steps.echo.value"}}
-	definition := testDefinition(t, "caller", workflow.Step{ID: "calls", Foreach: &workflow.ForeachGroup{
+	definition := steptest.Definition(t, "caller", workflow.Step{ID: "calls", Foreach: &workflow.ForeachGroup{
 		Items: "vars.targets", Collect: "steps.remote", MaxConcurrency: 1, FailFast: true,
 		Steps: []workflow.Step{{
 			ID: "remote", Uses: workflow.ActionSource{URL: "https://example.test/action"}, Action: action,
@@ -271,15 +272,15 @@ func TestForeachPassesBindingToCompositeActionInput(t *testing.T) {
 
 func TestBatchPassesBindingToCompositeActionInput(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, map[string]step.Builder{"echo": func(raw map[string]any) (step.Runner, error) {
-		return runnerFunc(func(_ context.Context, _ step.Request) (step.Result, error) {
+	registry := steptest.Registry(t, map[string]step.Builder{"echo": func(raw map[string]any) (step.Runner, error) {
+		return steptest.RunnerFunc(func(_ context.Context, _ step.Request) (step.Result, error) {
 			return step.Result{Outputs: map[string]any{"value": raw["value"]}}, nil
 		}), nil
 	}})
 	action := testAction(t, "batch-action", workflow.Step{ID: "echo", Type: "echo", With: map[string]any{"value": "{{ .inputs.targets | toJSONCompact }}"}})
 	action.Inputs = map[string]workflow.ActionInput{"targets": {Type: "array", Required: true}}
 	action.Outputs = map[string]workflow.ActionOutput{"result": {Value: "steps.echo.value"}}
-	definition := testDefinition(t, "caller", workflow.Step{ID: "calls", Batch: &workflow.BatchGroup{
+	definition := steptest.Definition(t, "caller", workflow.Step{ID: "calls", Batch: &workflow.BatchGroup{
 		Items: "vars.targets", Size: workflow.BatchSize{Literal: 2}, Collect: "steps.remote", MaxConcurrency: 1, FailFast: true,
 		Steps: []workflow.Step{{
 			ID: "remote", Uses: workflow.ActionSource{URL: "https://example.test/action"}, Action: action,
@@ -301,16 +302,16 @@ func TestControlInteractivePolicyAndNestedConcurrent(t *testing.T) {
 	t.Parallel()
 	seen := make(map[string]bool)
 	var mu sync.Mutex
-	registry := newTestRegistry(t, map[string]step.Builder{"observe": func(raw map[string]any) (step.Runner, error) {
+	registry := steptest.Registry(t, map[string]step.Builder{"observe": func(raw map[string]any) (step.Runner, error) {
 		label := raw["label"].(string)
-		return runnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
+		return steptest.RunnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
 			mu.Lock()
 			seen[label] = request.Interactive
 			mu.Unlock()
 			return step.Result{Outputs: map[string]any{"label": label}}, nil
 		}), nil
 	}})
-	definition := testDefinition(t, "policies",
+	definition := steptest.Definition(t, "policies",
 		workflow.Step{ID: "serial", Foreach: &workflow.ForeachGroup{
 			Items: "vars.items", MaxConcurrency: 1, FailFast: true,
 			Steps: []workflow.Step{{ID: "prompt", Type: "observe", With: map[string]any{"label": "serial"}}},
@@ -342,12 +343,12 @@ func TestControlInteractivePolicyAndNestedConcurrent(t *testing.T) {
 
 func TestRunControlWithoutCollectExposesCountOnly(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, map[string]step.Builder{"value": func(map[string]any) (step.Runner, error) {
-		return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+	registry := steptest.Registry(t, map[string]step.Builder{"value": func(map[string]any) (step.Runner, error) {
+		return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) {
 			return step.Result{Outputs: map[string]any{"hidden": true}}, nil
 		}), nil
 	}})
-	definition := testDefinition(t, "count-only", workflow.Step{ID: "loop", Foreach: &workflow.ForeachGroup{
+	definition := steptest.Definition(t, "count-only", workflow.Step{ID: "loop", Foreach: &workflow.ForeachGroup{
 		Items: "[1, 2]", MaxConcurrency: 1, FailFast: true,
 		Steps: []workflow.Step{{ID: "run", Type: "value", With: map[string]any{}}},
 	}})
@@ -363,10 +364,10 @@ func TestRunControlWithoutCollectExposesCountOnly(t *testing.T) {
 
 func TestRunControlCollectsEmptyResults(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, map[string]step.Builder{"noop": func(map[string]any) (step.Runner, error) {
-		return runnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
+	registry := steptest.Registry(t, map[string]step.Builder{"noop": func(map[string]any) (step.Runner, error) {
+		return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
 	}})
-	definition := testDefinition(t, "empty", workflow.Step{ID: "loop", Foreach: &workflow.ForeachGroup{
+	definition := steptest.Definition(t, "empty", workflow.Step{ID: "loop", Foreach: &workflow.ForeachGroup{
 		Items: "[]", Collect: "foreach.item", MaxConcurrency: 1, FailFast: true,
 		Steps: []workflow.Step{{ID: "run", Type: "noop", With: map[string]any{}}},
 	}})
@@ -382,10 +383,10 @@ func TestRunControlCollectsEmptyResults(t *testing.T) {
 
 func TestRunControlCollectPreservesNestedTypedValues(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, map[string]step.Builder{"noop": func(map[string]any) (step.Runner, error) {
-		return runnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
+	registry := steptest.Registry(t, map[string]step.Builder{"noop": func(map[string]any) (step.Runner, error) {
+		return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
 	}})
-	definition := testDefinition(t, "typed", workflow.Step{ID: "loop", Foreach: &workflow.ForeachGroup{
+	definition := steptest.Definition(t, "typed", workflow.Step{ID: "loop", Foreach: &workflow.ForeachGroup{
 		Items: "[true]", Collect: `[foreach.item, nil, {"nested": [1, "two"]}]`, MaxConcurrency: 1, FailFast: true,
 		Steps: []workflow.Step{{ID: "run", Type: "noop", With: map[string]any{}}},
 	}})
@@ -402,10 +403,10 @@ func TestRunControlCollectPreservesNestedTypedValues(t *testing.T) {
 
 func TestValidateControlRejectsInvalidCollectExpression(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, map[string]step.Builder{"noop": func(map[string]any) (step.Runner, error) {
-		return runnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
+	registry := steptest.Registry(t, map[string]step.Builder{"noop": func(map[string]any) (step.Runner, error) {
+		return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
 	}})
-	definition := testDefinition(t, "invalid", workflow.Step{ID: "loop", Foreach: &workflow.ForeachGroup{
+	definition := steptest.Definition(t, "invalid", workflow.Step{ID: "loop", Foreach: &workflow.ForeachGroup{
 		Items: "[1]", Collect: "steps.", MaxConcurrency: 1, FailFast: true,
 		Steps: []workflow.Step{{ID: "run", Type: "noop", With: map[string]any{}}},
 	}})
@@ -416,14 +417,14 @@ func TestValidateControlRejectsInvalidCollectExpression(t *testing.T) {
 
 func TestRunControlCollectFailureIsAtomic(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, map[string]step.Builder{
+	registry := steptest.Registry(t, map[string]step.Builder{
 		"value": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) {
 				return step.Result{Outputs: map[string]any{"ok": true}}, nil
 			}), nil
 		},
 		"unsupported": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) {
 				return step.Result{Outputs: map[string]any{"value": make(chan struct{})}}, nil
 			}), nil
 		},
@@ -439,7 +440,7 @@ func TestRunControlCollectFailureIsAtomic(t *testing.T) {
 		{name: "unsupported value", stepType: "unsupported", expression: "steps.run.value", want: "YAML/JSON-compatible"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			definition := testDefinition(t, test.name, workflow.Step{ID: "loop", Foreach: &workflow.ForeachGroup{
+			definition := steptest.Definition(t, test.name, workflow.Step{ID: "loop", Foreach: &workflow.ForeachGroup{
 				Items: "[1]", Collect: test.expression, MaxConcurrency: 1, FailFast: true,
 				Steps: []workflow.Step{{ID: "run", Type: test.stepType, With: map[string]any{}}},
 			}})

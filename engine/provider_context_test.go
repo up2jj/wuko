@@ -7,6 +7,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/provider"
 	"github.com/up2jj/wuko/step"
 	luastep "github.com/up2jj/wuko/steps/lua"
@@ -45,7 +46,7 @@ func testProviderSet(t *testing.T) provider.Set {
 
 func TestRegisteredProviderReachesEveryEvaluationSurface(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, map[string]step.Builder{"capture": func(raw map[string]any) (step.Runner, error) {
+	registry := steptest.Registry(t, map[string]step.Builder{"capture": func(raw map[string]any) (step.Runner, error) {
 		return countingRunner{value: raw["value"]}, nil
 	}})
 	for _, register := range []func(*step.Registry) error{setstep.Register, luastep.Register} {
@@ -60,7 +61,7 @@ func TestRegisteredProviderReachesEveryEvaluationSurface(t *testing.T) {
 	action.Outputs = map[string]workflow.ActionOutput{
 		"value": {Value: `steps.inner.value + ":" + acme.region`},
 	}
-	definition := testDefinition(t, "provider-context",
+	definition := steptest.Definition(t, "provider-context",
 		workflow.Step{ID: "template", Type: "capture", With: map[string]any{"value": `{{ template "provider" . }}`}},
 		workflow.Step{ID: "expression", Type: "set", With: map[string]any{"variable": "count", "expr": `acme.count + 1`}},
 		workflow.Step{ID: "condition", Type: "capture", If: `acme.enabled`, With: map[string]any{"value": `{{ .env.PROVIDER_REGION }}`}},
@@ -104,9 +105,9 @@ func TestProviderValuesAreIsolatedAcrossConcurrentAndNestedExecution(t *testing.
 	t.Parallel()
 	var mutex sync.Mutex
 	seen := make([]string, 0, 3)
-	registry := newTestRegistry(t, map[string]step.Builder{
+	registry := steptest.Registry(t, map[string]step.Builder{
 		"mutate_provider": func(map[string]any) (step.Runner, error) {
-			return runnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
+			return steptest.RunnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
 				root := request.Providers.Values["acme"]
 				mutex.Lock()
 				seen = append(seen, root["region"].(string))
@@ -118,7 +119,7 @@ func TestProviderValuesAreIsolatedAcrossConcurrentAndNestedExecution(t *testing.
 		},
 	})
 	action := testAction(t, "nested", workflow.Step{ID: "inner", Type: "mutate_provider"})
-	definition := testDefinition(t, "isolation",
+	definition := steptest.Definition(t, "isolation",
 		workflow.Step{Concurrent: &workflow.ConcurrentGroup{MaxConcurrency: 2, Steps: []workflow.Step{
 			{ID: "left", Type: "mutate_provider"},
 			{ID: "right", Type: "mutate_provider"},

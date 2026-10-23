@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -120,7 +121,7 @@ func TestFormatCellRejectsUnsupportedStructuredValue(t *testing.T) {
 
 func newRunner(t testing.TB) *Runner {
 	t.Helper()
-	runner, err := New(map[string]any{
+	return steptest.BuildAs[*Runner](t, New, map[string]any{
 		"message": "Release table", "from": "vars.rows",
 		"columns": []any{
 			map[string]any{"header": "Name", "field": "name", "width": 20},
@@ -128,10 +129,6 @@ func newRunner(t testing.TB) *Runner {
 			map[string]any{"header": "Details", "field": "details"},
 		},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return runner.(*Runner)
 }
 
 func BenchmarkNormalizeTable1000Rows(b *testing.B)  { benchmarkNormalizeTable(b, 1_000) }

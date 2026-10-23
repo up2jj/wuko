@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/helper"
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
 )
@@ -58,7 +59,7 @@ steps:
 	}
 	var runs int
 	var captured any
-	registry := newTestRegistry(t, map[string]step.Builder{"capture": func(raw map[string]any) (step.Runner, error) {
+	registry := steptest.Registry(t, map[string]step.Builder{"capture": func(raw map[string]any) (step.Runner, error) {
 		captured = raw["value"]
 		return countingRunner{value: raw["value"], runs: &runs}, nil
 	}})

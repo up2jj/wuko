@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/helper"
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/tui"
 )
@@ -43,7 +44,7 @@ func TestFormCustomValidatorsReceiveNormalizedValues(t *testing.T) {
 			for key, value := range test.extra {
 				field[key] = value
 			}
-			result, err := buildForm(t, configFor(field)).Run(t.Context(), step.Request{RunDir: t.TempDir(), Vars: map[string]any{"expected": "Ada"}})
+			result, err := steptest.BuildAs[*Runner](t, New, configFor(field)).Run(t.Context(), step.Request{RunDir: t.TempDir(), Vars: map[string]any{"expected": "Ada"}})
 			if test.valid {
 				if err != nil {
 					t.Fatal(err)
@@ -78,7 +79,7 @@ func TestFormRejectsInvalidCustomValidation(t *testing.T) {
 func TestFormCustomValidationDoesNotBypassBuiltInRules(t *testing.T) {
 	field := fieldFor("text", "short")
 	field["validation"] = map[string]any{"min_length": 10, "expr": "true"}
-	if _, err := buildForm(t, configFor(field)).Run(t.Context(), step.Request{}); err == nil {
+	if _, err := steptest.BuildAs[*Runner](t, New, configFor(field)).Run(t.Context(), step.Request{}); err == nil {
 		t.Fatal("custom rule bypassed min_length")
 	}
 }
@@ -91,7 +92,7 @@ func TestFormCustomValidationErrorsDoNotExposePasswords(t *testing.T) {
 	} {
 		field := fieldFor("password", "private-input")
 		field["validation"] = rules
-		result, err := buildForm(t, configFor(field)).Run(t.Context(), step.Request{})
+		result, err := steptest.BuildAs[*Runner](t, New, configFor(field)).Run(t.Context(), step.Request{})
 		if err == nil || strings.Contains(err.Error(), "private-input") || len(result.Outputs) > 0 {
 			t.Fatalf("result=%#v error=%v", result, err)
 		}
@@ -101,7 +102,7 @@ func TestFormCustomValidationErrorsDoNotExposePasswords(t *testing.T) {
 func TestFormInteractiveCustomValidationCanBeCorrected(t *testing.T) {
 	field := fieldFor("text", "short")
 	field["validation"] = map[string]any{"expr": "len(value) >= 8", "message": "Use eight characters"}
-	runner := buildForm(t, configFor(field))
+	runner := steptest.BuildAs[*Runner](t, New, configFor(field))
 	runner.read = func(_ context.Context, _ step.Request, config tui.FormConfig) (map[string]any, error) {
 		validator := config.Fields[0].Validate
 		if _, err := validator("short", map[string]any{"answer": "short"}); err == nil || err.Error() != "Use eight characters" {
@@ -129,7 +130,7 @@ func TestFormExpressionValidatorUsesCancelableHelpers(t *testing.T) {
 		cancel()
 		return nil, callContext.Err()
 	}}}
-	result, err := buildForm(t, configFor(field)).Run(ctx, request)
+	result, err := steptest.BuildAs[*Runner](t, New, configFor(field)).Run(ctx, request)
 	if !errors.Is(err, context.Canceled) || len(result.Outputs) > 0 {
 		t.Fatalf("result=%#v error=%v", result, err)
 	}

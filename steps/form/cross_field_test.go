@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/helper"
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/tui"
 )
@@ -36,7 +37,7 @@ func TestFormValidatorsSeeAllTypedFieldsRegardlessOfOrder(t *testing.T) {
 						fields[i], fields[j] = fields[j], fields[i]
 					}
 				}
-				result, err := buildForm(t, configFor(fields...)).Run(t.Context(), step.Request{})
+				result, err := steptest.BuildAs[*Runner](t, New, configFor(fields...)).Run(t.Context(), step.Request{})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -55,7 +56,7 @@ func TestFormCrossFieldRejectionPublishesNothing(t *testing.T) {
 			if kind == "lua" {
 				rules = map[string]any{"lua": "function(value, context) return value == context.fields.password end", "message": "Passwords must match"}
 			}
-			runner := buildForm(t, configFor(
+			runner := steptest.BuildAs[*Runner](t, New, configFor(
 				map[string]any{"id": "confirmation", "type": "password", "label": "Confirm", "value": "different", "validation": rules},
 				map[string]any{"id": "password", "type": "password", "label": "Password", "value": "private-input"},
 			))
@@ -74,7 +75,7 @@ func TestFormCrossFieldValidationUsesSubmittedEdits(t *testing.T) {
 			if kind == "lua" {
 				rules = map[string]any{"lua": "function(value, context) return value == context.fields.password end", "message": "Passwords must match"}
 			}
-			runner := buildForm(t, configFor(
+			runner := steptest.BuildAs[*Runner](t, New, configFor(
 				map[string]any{"id": "password", "type": "password", "label": "Password", "default": "old"},
 				map[string]any{"id": "confirmation", "type": "password", "label": "Confirm", "default": "old", "validation": rules},
 			))
@@ -103,7 +104,7 @@ func TestFormCrossFieldValidationUsesSubmittedEdits(t *testing.T) {
 }
 
 func TestFormDraftNormalizesNumbersWithoutRequiringValidBounds(t *testing.T) {
-	runner := buildForm(t, configFor(
+	runner := steptest.BuildAs[*Runner](t, New, configFor(
 		map[string]any{"id": "limit", "type": "number", "label": "Limit", "default": 10, "validation": map[string]any{"min": 5}},
 		map[string]any{"id": "amount", "type": "number", "label": "Amount", "default": 20, "validation": map[string]any{"expr": "fields.limit == nil || value > fields.limit"}},
 	))
@@ -147,7 +148,7 @@ func TestFormValidatorsCannotMutateSharedDraft(t *testing.T) {
 		fields["other"] = false
 		return true, nil
 	}}}
-	runner := buildForm(t, configFor(field, map[string]any{"id": "other", "type": "checkbox", "label": "Other", "value": true, "validation": map[string]any{"expr": "fields.other"}}))
+	runner := steptest.BuildAs[*Runner](t, New, configFor(field, map[string]any{"id": "other", "type": "checkbox", "label": "Other", "value": true, "validation": map[string]any{"expr": "fields.other"}}))
 	result, err := runner.Run(t.Context(), request)
 	if err != nil || result.Outputs["other"] != true {
 		t.Fatalf("result=%#v error=%v", result, err)
@@ -159,7 +160,7 @@ func TestFormCrossFieldValidationErrorsDoNotExposeSiblingPassword(t *testing.T) 
 		{"expr": "int(fields.password) > 0"},
 		{"lua": "function(value, context) error(context.fields.password) end"},
 	} {
-		runner := buildForm(t, configFor(
+		runner := steptest.BuildAs[*Runner](t, New, configFor(
 			map[string]any{"id": "answer", "type": "text", "label": "Answer", "value": "Ada", "validation": rules},
 			map[string]any{"id": "password", "type": "password", "label": "Password", "value": "private-sibling-value"},
 		))

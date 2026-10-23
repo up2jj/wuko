@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 	keyvaluestep "github.com/up2jj/wuko/steps/key_value"
 	"github.com/up2jj/wuko/workflow"
@@ -13,13 +14,13 @@ import (
 
 func TestKeyValueOutputIsAvailableToSubsequentSteps(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, map[string]step.Builder{"capture": func(raw map[string]any) (step.Runner, error) {
+	registry := steptest.Registry(t, map[string]step.Builder{"capture": func(raw map[string]any) (step.Runner, error) {
 		return countingRunner{value: raw["value"]}, nil
 	}})
 	if err := keyvaluestep.Register(registry); err != nil {
 		t.Fatal(err)
 	}
-	definition := testDefinition(t, "values",
+	definition := steptest.Definition(t, "values",
 		workflow.Step{ID: "save", Type: "key_value", With: map[string]any{"operation": "set", "scope": "local", "store": "prefs", "key": "theme", "value": "dark"}},
 		workflow.Step{ID: "load", Type: "key_value", With: map[string]any{"operation": "get", "scope": "local", "store": "prefs", "key": "theme"}},
 		workflow.Step{ID: "consume", Type: "capture", If: "steps.load.found", With: map[string]any{"value": "{{ .steps.load.value }}"}},
@@ -37,13 +38,13 @@ func TestKeyValueOutputIsAvailableToSubsequentSteps(t *testing.T) {
 
 func TestKeyValueTemplatesAndNumericConditions(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, map[string]step.Builder{"capture": func(raw map[string]any) (step.Runner, error) {
+	registry := steptest.Registry(t, map[string]step.Builder{"capture": func(raw map[string]any) (step.Runner, error) {
 		return countingRunner{value: raw["value"]}, nil
 	}})
 	if err := keyvaluestep.Register(registry); err != nil {
 		t.Fatal(err)
 	}
-	definition := testDefinition(t, "templated-values",
+	definition := steptest.Definition(t, "templated-values",
 		workflow.Step{ID: "save", Type: "key_value", With: map[string]any{
 			"operation": "{{ .vars.set_operation }}", "scope": "{{ .vars.scope }}",
 			"store": "prefs-{{ .vars.suffix }}", "key": "count", "value": 3,
@@ -68,7 +69,7 @@ func TestKeyValueTemplatesAndNumericConditions(t *testing.T) {
 
 func TestRemoteActionIsDeniedTheCallerLocalStore(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, nil)
+	registry := steptest.Registry(t, nil)
 	if err := keyvaluestep.Register(registry); err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +80,7 @@ func TestRemoteActionIsDeniedTheCallerLocalStore(t *testing.T) {
 				"operation": "set", "scope": scope, "store": "shared", "key": "from_remote", "value": true,
 			}},
 		)
-		definition := testDefinition(t, "caller", workflow.Step{
+		definition := steptest.Definition(t, "caller", workflow.Step{
 			ID: "call", Uses: source, Action: action,
 		})
 		_, err := New(registry).Run(t.Context(), definition, Options{
@@ -111,7 +112,7 @@ func TestRemoteActionIsDeniedTheCallerLocalStore(t *testing.T) {
 
 func TestCompositeActionInheritsCallerValueRoots(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, nil)
+	registry := steptest.Registry(t, nil)
 	if err := keyvaluestep.Register(registry); err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +121,7 @@ func TestCompositeActionInheritsCallerValueRoots(t *testing.T) {
 		workflow.Step{ID: "load", Type: "key_value", With: map[string]any{"operation": "get", "scope": "local", "store": "shared", "key": "from_action"}},
 	)
 	action.Outputs = map[string]workflow.ActionOutput{"value": {Value: "steps.load.value"}}
-	definition := testDefinition(t, "caller", workflow.Step{ID: "call", Uses: workflow.ActionSource{Path: "./actions/store/action.yaml"}, Action: action})
+	definition := steptest.Definition(t, "caller", workflow.Step{ID: "call", Uses: workflow.ActionSource{Path: "./actions/store/action.yaml"}, Action: action})
 	localRoot := t.TempDir()
 	state, err := New(registry).Run(t.Context(), definition, Options{
 		LocalValueDir: localRoot, GlobalValueDir: t.TempDir(), Stdout: io.Discard, Stderr: io.Discard,
@@ -146,13 +147,13 @@ func TestCompositeActionInheritsCallerValueRoots(t *testing.T) {
 
 func TestKeyValueExprPersistsTypesAcrossRuns(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, nil)
+	registry := steptest.Registry(t, nil)
 	if err := keyvaluestep.Register(registry); err != nil {
 		t.Fatal(err)
 	}
 	localRoot := t.TempDir()
 	counter := func() *workflow.Definition {
-		return testDefinition(t, "counter",
+		return steptest.Definition(t, "counter",
 			workflow.Step{ID: "load", Type: "key_value", With: map[string]any{
 				"operation": "get", "scope": "local", "store": "counter", "key": "runs",
 			}},
@@ -177,11 +178,11 @@ func TestKeyValueExprPersistsTypesAcrossRuns(t *testing.T) {
 
 func TestKeyValueUpdateSurvivesConcurrentIncrements(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, nil)
+	registry := steptest.Registry(t, nil)
 	if err := keyvaluestep.Register(registry); err != nil {
 		t.Fatal(err)
 	}
-	definition := testDefinition(t, "concurrent-counter",
+	definition := steptest.Definition(t, "concurrent-counter",
 		workflow.Step{ID: "bump", Foreach: &workflow.ForeachGroup{
 			Items: "[1, 2, 3, 4, 5, 6, 7, 8]", MaxConcurrency: 8,
 			Steps: []workflow.Step{{ID: "increment", Type: "key_value", With: map[string]any{
@@ -206,13 +207,13 @@ func TestKeyValueUpdateSurvivesConcurrentIncrements(t *testing.T) {
 
 func TestKeyValueVariableIsAvailableToLaterExpressions(t *testing.T) {
 	t.Parallel()
-	registry := newTestRegistry(t, map[string]step.Builder{"capture": func(raw map[string]any) (step.Runner, error) {
+	registry := steptest.Registry(t, map[string]step.Builder{"capture": func(raw map[string]any) (step.Runner, error) {
 		return countingRunner{value: raw["value"]}, nil
 	}})
 	if err := keyvaluestep.Register(registry); err != nil {
 		t.Fatal(err)
 	}
-	definition := testDefinition(t, "variables",
+	definition := steptest.Definition(t, "variables",
 		workflow.Step{ID: "save", Type: "key_value", With: map[string]any{
 			"operation": "set", "scope": "local", "store": "build", "key": "attempts", "expr": "3",
 		}},
