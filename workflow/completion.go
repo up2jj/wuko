@@ -14,9 +14,19 @@ import (
 // It never prepares workflows or initializes their plugins and helpers. Directory
 // and file I/O errors still fail discovery rather than presenting incomplete results.
 func DiscoverForCompletion(cwd, homeDir, configDir string) ([]Source, error) {
+	return discoverForCompletion(discoveryLocations(cwd, homeDir, configDir))
+}
+
+// DiscoverDirectoryForCompletion reads metadata from one storage directory without
+// searching ancestors or other scopes. It shares completion's tolerant YAML policy.
+func DiscoverDirectoryForCompletion(directory, scope string) ([]Source, error) {
+	return discoverForCompletion([]discoveryLocation{{dir: directory, scope: scope}})
+}
+
+func discoverForCompletion(locations []discoveryLocation) ([]Source, error) {
 	var sources []Source
 	seen := make(map[string]bool)
-	for _, location := range discoveryLocations(cwd, homeDir, configDir) {
+	for _, location := range locations {
 		files, err := discoverWorkflowFiles(location.dir)
 		if errors.Is(err, os.ErrNotExist) {
 			continue

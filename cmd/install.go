@@ -57,6 +57,7 @@ func newUninstallCmd(deps dependencies) *cobra.Command {
 	}
 	addWorkflowLifecycleFlags(command, &config)
 	command.Flags().BoolVarP(&config.yes, "yes", "y", false, "skip uninstall confirmation")
+	command.ValidArgsFunction = uninstallWorkflowCompletion(deps)
 	return command
 }
 

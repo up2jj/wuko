@@ -200,3 +200,6 @@ completion. `--file` filters filenames to YAML; `--var-file` filters to JSON and
 `validate --format` and `validate --reporter` suggest their supported values.
 `wuko ui` suggests only invokable workflows and targets with an effective browser form,
 including forms inherited from the workflow declaration.
+`wuko uninstall` and `wuko plugin uninstall` suggest names from their local installation
+directory, or the home-global directory with `--global`. Completion does not run uninstall
+hooks or launch plugins.
