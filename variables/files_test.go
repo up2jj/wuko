@@ -3,9 +3,10 @@ package variables
 import (
 	"context"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 
 	"github.com/up2jj/wuko/internal/testfs"
 )
@@ -30,11 +31,11 @@ new = "value"
 	if values["name"] != "toml" {
 		t.Fatalf("name = %#v", values["name"])
 	}
-	if !reflect.DeepEqual(values["nested"], map[string]any{"new": "value"}) {
-		t.Fatalf("nested = %#v", values["nested"])
+	if diff := cmp.Diff(map[string]any{"new": "value"}, values["nested"]); diff != "" {
+		t.Fatalf("nested mismatch (-want +got):\n%s", diff)
 	}
-	if !reflect.DeepEqual(values["items"], []any{"one", "two"}) {
-		t.Fatalf("items = %#v", values["items"])
+	if diff := cmp.Diff([]any{"one", "two"}, values["items"]); diff != "" {
+		t.Fatalf("items mismatch (-want +got):\n%s", diff)
 	}
 	if _, exists := values["Name"]; exists {
 		t.Fatalf("uppercase key was preserved: %#v", values)
@@ -62,8 +63,8 @@ func TestLoadFilesPreservesNullAndEmptyObjects(t *testing.T) {
 			"emptyobject": map[string]any{},
 		},
 	}
-	if !reflect.DeepEqual(values, want) {
-		t.Fatalf("values = %#v, want %#v", values, want)
+	if diff := cmp.Diff(want, values); diff != "" {
+		t.Fatalf("values mismatch (-want +got):\n%s", diff)
 	}
 }
 

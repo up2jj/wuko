@@ -9,13 +9,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"reflect"
 	"strconv"
 	"strings"
 	"sync"
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/google/go-cmp/cmp"
 
 	"github.com/up2jj/wuko/internal/testfs"
 )
@@ -34,8 +35,8 @@ func TestStoreOperationsAndPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(stored, map[string]any{"enabled": true, "items": []any{"a", json.Number("2")}}) {
-		t.Fatalf("stored = %#v", stored)
+	if diff := cmp.Diff(map[string]any{"enabled": true, "items": []any{"a", json.Number("2")}}, stored); diff != "" {
+		t.Fatalf("stored mismatch (-want +got):\n%s", diff)
 	}
 	if _, err := store.Set(t.Context(), "nothing", nil); err != nil {
 		t.Fatal(err)

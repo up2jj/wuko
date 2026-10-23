@@ -6,9 +6,10 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 
 	"github.com/spf13/cobra"
 	"github.com/up2jj/wuko/localresource"
@@ -32,8 +33,8 @@ func TestResourceWorkerArgumentsPreserveValuesAndInheritedFlags(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{"run", "--debug=true", "--env=TOKEN=a=b", "--env-loader=none", "--reporter=plain", "--reporter=github", "--var=a=x,y", "--var=b=$HOME", "--", "-workflow", "target"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("worker arguments = %#v, want %#v", got, want)
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Fatalf("worker arguments mismatch (-want +got):\n%s", diff)
 	}
 }
 

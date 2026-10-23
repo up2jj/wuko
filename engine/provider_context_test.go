@@ -3,9 +3,10 @@ package engine
 import (
 	"context"
 	"io"
-	"reflect"
 	"sync"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 
 	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/provider"
@@ -96,8 +97,8 @@ func TestRegisteredProviderReachesEveryEvaluationSurface(t *testing.T) {
 	if got := state.Steps["action"].(map[string]any)["value"]; got != "eu-central:eu-central" {
 		t.Fatalf("nested action value = %#v", got)
 	}
-	if !reflect.DeepEqual(state.Providers.Values, providers.Values) {
-		t.Fatalf("state provider snapshot = %#v", state.Providers.Values)
+	if diff := cmp.Diff(providers.Values, state.Providers.Values); diff != "" {
+		t.Fatalf("state provider snapshot mismatch (-want +got):\n%s", diff)
 	}
 }
 

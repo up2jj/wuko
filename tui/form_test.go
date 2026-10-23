@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
+
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/up2jj/wuko/internal/testfs"
@@ -57,8 +59,11 @@ func TestFormNavigatesAndSubmitsAllFields(t *testing.T) {
 	}
 	m = formKey(m, tea.KeyEnter)
 	want := map[string]any{"name": "Ada", "notify": true, "region": "west", "features": []any{2, 1}}
-	if !m.done || !reflect.DeepEqual(m.result, want) {
-		t.Fatalf("done=%v values=%#v", m.done, m.result)
+	if !m.done {
+		t.Fatal("form is not done")
+	}
+	if diff := cmp.Diff(want, m.result); diff != "" {
+		t.Fatalf("values mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -135,8 +140,11 @@ func TestFormDoesNotDropInvalidInitialMultiselectValues(t *testing.T) {
 	}
 	m = formKey(m, 'x', tea.ModCtrl)
 	m = formKey(m, 's', tea.ModCtrl)
-	if !m.done || !reflect.DeepEqual(m.result["features"], []any{}) {
-		t.Fatalf("result=%#v", m.result)
+	if !m.done {
+		t.Fatal("form is not done")
+	}
+	if diff := cmp.Diff([]any{}, m.result["features"]); diff != "" {
+		t.Fatalf("features mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -177,8 +185,8 @@ func TestFormChoiceNavigationSkipsDisabledOptions(t *testing.T) {
 					t.Fatalf("after key %d: cursor = %d, want %d", move.key, m.widgets[0].cursor, move.want)
 				}
 			}
-			if !reflect.DeepEqual(m.fieldValue(0), value) {
-				t.Fatalf("navigation changed value to %#v", m.fieldValue(0))
+			if diff := cmp.Diff(value, m.fieldValue(0)); diff != "" {
+				t.Fatalf("navigation changed the value (-want +got):\n%s", diff)
 			}
 			if kind == "multiselect" {
 				m = formKey(m, tea.KeySpace) // Remove West before choosing East.
@@ -191,8 +199,11 @@ func TestFormChoiceNavigationSkipsDisabledOptions(t *testing.T) {
 				value = "east"
 			}
 			m = formKey(m, 's', tea.ModCtrl)
-			if !m.done || !reflect.DeepEqual(m.result["region"], value) {
-				t.Fatalf("done = %v, result = %#v, want %#v", m.done, m.result, value)
+			if !m.done {
+				t.Fatal("form is not done")
+			}
+			if diff := cmp.Diff(value, m.result["region"]); diff != "" {
+				t.Fatalf("region mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}
@@ -385,7 +396,10 @@ func TestFormSubmissionUsesOneIsolatedDraftSnapshot(t *testing.T) {
 	m.widgets[1].input.SetValue("latest")
 	m = formKey(m, 's', tea.ModCtrl)
 	want := map[string]any{"first": "edited", "second": "latest"}
-	if !m.done || len(snapshots) != 2 || !reflect.DeepEqual(snapshots[0], want) || !reflect.DeepEqual(snapshots[1], want) || !reflect.DeepEqual(m.result, want) {
-		t.Fatalf("result=%#v snapshots=%#v", m.result, snapshots)
+	if !m.done || len(snapshots) != 2 {
+		t.Fatalf("done = %v, snapshots = %d, want done with 2", m.done, len(snapshots))
+	}
+	if diff := cmp.Diff([]map[string]any{want, want, want}, []map[string]any{snapshots[0], snapshots[1], m.result}); diff != "" {
+		t.Fatalf("snapshots and result mismatch (-want +got):\n%s", diff)
 	}
 }

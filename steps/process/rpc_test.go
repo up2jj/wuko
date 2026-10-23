@@ -9,11 +9,12 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/google/go-cmp/cmp"
 
 	"github.com/up2jj/wuko/internal/polltest"
 	"github.com/up2jj/wuko/internal/testfs"
@@ -64,8 +65,8 @@ func TestProcessCallUsesSingleWorker(t *testing.T) {
 		"payload": map[string]any{"component": "Hello", "props": map[string]any{"name": "Wuko"}},
 		"worker":  "single",
 	}
-	if got := result.Outputs["result"]; !reflect.DeepEqual(got, want) {
-		t.Fatalf("result = %#v, want %#v", got, want)
+	if diff := cmp.Diff(want, result.Outputs["result"]); diff != "" {
+		t.Fatalf("result mismatch (-want +got):\n%s", diff)
 	}
 	if result.Outputs["worker_id"] != worker {
 		t.Fatalf("worker_id = %v, want %q", result.Outputs["worker_id"], worker)
@@ -88,8 +89,8 @@ func TestProcessCallSelectsPoolWorkersFairly(t *testing.T) {
 		selected = append(selected, result.Outputs["worker_id"].(string))
 	}
 	want := []string{workers[0].(string), workers[1].(string), workers[0].(string), workers[1].(string)}
-	if !reflect.DeepEqual(selected, want) {
-		t.Fatalf("selected workers = %#v, want %#v", selected, want)
+	if diff := cmp.Diff(want, selected); diff != "" {
+		t.Fatalf("selected workers mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -161,8 +162,8 @@ func TestProcessCallRotatesEachPoolIndependently(t *testing.T) {
 		}
 	}
 	want := []string{workers[0].(string), workers[1].(string)}
-	if !reflect.DeepEqual(selected, want) {
-		t.Fatalf("selected workers = %#v, want %#v", selected, want)
+	if diff := cmp.Diff(want, selected); diff != "" {
+		t.Fatalf("selected workers mismatch (-want +got):\n%s", diff)
 	}
 }
 

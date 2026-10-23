@@ -7,10 +7,11 @@ import (
 	"math"
 	"math/rand"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/go-cmp/cmp"
 
 	toml "github.com/pelletier/go-toml/v2"
 	"github.com/up2jj/wuko/expression"
@@ -49,8 +50,8 @@ func TestStructuredFormatsDecodeJSONCompatibleValues(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			result := runFrom(t, test.format, test.input, nil)
-			if !reflect.DeepEqual(result.Outputs["value"], test.want) {
-				t.Fatalf("value = %#v, want %#v", result.Outputs["value"], test.want)
+			if diff := cmp.Diff(test.want, result.Outputs["value"]); diff != "" {
+				t.Fatalf("value mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}
@@ -62,8 +63,8 @@ func TestDecodedNumbersAreUsableInExpressions(t *testing.T) {
 	result := runFrom(t, "json", `{"score": 1.50, "count": 2, "big": 9007199254740993, "huge": 18446744073709551615}`, nil)
 	value := result.Outputs["value"].(map[string]any)
 	want := map[string]any{"score": 1.5, "count": int64(2), "big": int64(9007199254740993), "huge": uint64(18446744073709551615)}
-	if !reflect.DeepEqual(value, want) {
-		t.Fatalf("value = %#v, want %#v", value, want)
+	if diff := cmp.Diff(want, value); diff != "" {
+		t.Fatalf("value mismatch (-want +got):\n%s", diff)
 	}
 	for _, source := range []string{"value.score > 1", "value.count * 2 == 4"} {
 		matched, err := expression.Eval(source, map[string]any{"value": value})
@@ -87,8 +88,8 @@ func TestStructuredFormatsAcceptTopLevelScalarsAndNull(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.format+"_"+test.input, func(t *testing.T) {
 			result := runFrom(t, test.format, test.input, nil)
-			if !reflect.DeepEqual(result.Outputs["value"], test.want) {
-				t.Fatalf("value = %#v, want %#v", result.Outputs["value"], test.want)
+			if diff := cmp.Diff(test.want, result.Outputs["value"]); diff != "" {
+				t.Fatalf("value mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}
@@ -116,8 +117,8 @@ func TestLinesOptionsAndEndings(t *testing.T) {
 			result := runFrom(t, "lines", test.input, map[string]any{
 				"trim": test.trim, "omit_empty": test.omitEmpty,
 			})
-			if !reflect.DeepEqual(result.Outputs["value"], test.want) {
-				t.Fatalf("value = %#v, want %#v", result.Outputs["value"], test.want)
+			if diff := cmp.Diff(test.want, result.Outputs["value"]); diff != "" {
+				t.Fatalf("value mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}
@@ -174,8 +175,8 @@ func TestFromMustResolveToString(t *testing.T) {
 
 func TestInputLimitAllowsExactSizeAndRejectsLargerInput(t *testing.T) {
 	result := runFrom(t, "lines", "four", map[string]any{"max_bytes": "4B"})
-	if !reflect.DeepEqual(result.Outputs["value"], []any{"four"}) {
-		t.Fatalf("result = %#v", result)
+	if diff := cmp.Diff([]any{"four"}, result.Outputs["value"]); diff != "" {
+		t.Fatalf("result mismatch (-want +got):\n%s", diff)
 	}
 	runner, err := New(map[string]any{"format": "lines", "from": "vars.data", "max_bytes": "4B"})
 	if err != nil {
@@ -374,8 +375,8 @@ func TestNormalizeMatchesJSONRoundTrip(t *testing.T) {
 				}
 				return
 			}
-			if !reflect.DeepEqual(got, want) {
-				t.Fatalf("value = %#v, want %#v", got, want)
+			if diff := cmp.Diff(want, got); diff != "" {
+				t.Fatalf("value mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}

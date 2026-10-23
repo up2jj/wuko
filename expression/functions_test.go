@@ -3,10 +3,12 @@ package expression
 import (
 	"bytes"
 	"encoding/json"
-	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"text/template"
+
+	"github.com/google/go-cmp/cmp"
 )
 
 func TestEmptyUsesGoTemplateTruthRules(t *testing.T) {
@@ -48,15 +50,15 @@ func TestCollectionHelpersAreStrictAndDeterministic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(keys, []string{"a", "b"}) {
-		t.Fatalf("keys = %#v", keys)
+	if diff := cmp.Diff([]string{"a", "b"}, keys); diff != "" {
+		t.Fatalf("keys mismatch (-want +got):\n%s", diff)
 	}
 	values := []string{"b", "a"}
 	sorted, err := sortAlpha(values)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(sorted, []string{"a", "b"}) || !reflect.DeepEqual(values, []string{"b", "a"}) {
+	if !slices.Equal(sorted, []string{"a", "b"}) || !slices.Equal(values, []string{"b", "a"}) {
 		t.Fatalf("sorted = %#v, input = %#v", sorted, values)
 	}
 	if _, err := dict("key"); err == nil {
@@ -118,8 +120,8 @@ func TestExprTypedCollectionHelpers(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Fatalf("value = %#v, want %#v", got, tt.want)
+			if diff := cmp.Diff(tt.want, got); diff != "" {
+				t.Fatalf("value mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}
@@ -132,10 +134,10 @@ func TestExprTypedCollectionHelpersAcceptTypedListsWithoutMutation(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := [][]any{{1, 2}, {3}}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("value = %#v, want %#v", got, want)
+	if diff := cmp.Diff([][]any{{1, 2}, {3}}, got); diff != "" {
+		t.Fatalf("value mismatch (-want +got):\n%s", diff)
 	}
-	if !reflect.DeepEqual(items, []int{1, 2, 3}) {
+	if !slices.Equal(items, []int{1, 2, 3}) {
 		t.Fatalf("input mutated: %#v", items)
 	}
 	array := [3]string{"api", "worker", "web"}
@@ -143,8 +145,8 @@ func TestExprTypedCollectionHelpersAcceptTypedListsWithoutMutation(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := [][]any{{"api", "worker", "web"}}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("value = %#v, want %#v", got, want)
+	if diff := cmp.Diff([][]any{{"api", "worker", "web"}}, got); diff != "" {
+		t.Fatalf("value mismatch (-want +got):\n%s", diff)
 	}
 
 	indexed, err := Eval(`indexBy(items, "id")`, map[string]any{
@@ -157,8 +159,8 @@ func TestExprTypedCollectionHelpersAcceptTypedListsWithoutMutation(t *testing.T)
 		"api":    map[string]string{"id": "api"},
 		"worker": map[string]string{"id": "worker"},
 	}
-	if !reflect.DeepEqual(indexed, want) {
-		t.Fatalf("value = %#v, want %#v", indexed, want)
+	if diff := cmp.Diff(want, indexed); diff != "" {
+		t.Fatalf("value mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -349,8 +351,8 @@ func TestExprIntegerArgumentsAcceptDecodedNumbers(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Fatalf("got %#v, want %#v", got, tt.want)
+			if diff := cmp.Diff(tt.want, got); diff != "" {
+				t.Fatalf("mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}

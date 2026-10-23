@@ -3,6 +3,8 @@ package workflow
 import (
 	"reflect"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 )
 
 // TestCloneSharesNoMutableStateWithSource covers the invariant the engine's branch
@@ -87,8 +89,8 @@ func TestClonePreservesTypeAndEdgeCases(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			cloned := Clone(source)
-			if !reflect.DeepEqual(source, cloned) {
-				t.Fatalf("Clone(%#v) = %#v", source, cloned)
+			if diff := cmp.Diff(source, cloned); diff != "" {
+				t.Fatalf("Clone mismatch (-source +clone):\n%s", diff)
 			}
 			if source != nil && reflect.TypeOf(source) != reflect.TypeOf(cloned) {
 				t.Errorf("Clone changed type %T -> %T", source, cloned)

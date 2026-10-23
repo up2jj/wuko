@@ -3,9 +3,10 @@ package runworkflow
 import (
 	"context"
 	"errors"
-	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 
 	"github.com/up2jj/wuko/step"
 )
@@ -59,16 +60,19 @@ func TestRunWorkflowReturnsDirectOutputsAndResolvesVars(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantOutputs := map[string]any{"artifact": "dist/app.tar.gz", "count": 3}
-	if !reflect.DeepEqual(result.Outputs, wantOutputs) {
-		t.Fatalf("outputs = %#v, want %#v", result.Outputs, wantOutputs)
+	if diff := cmp.Diff(wantOutputs, result.Outputs); diff != "" {
+		t.Fatalf("outputs mismatch (-want +got):\n%s", diff)
 	}
 	wantVars := map[string]any{
 		"revision": "abc123",
 		"nested":   []any{3},
 		"literal":  map[string]any{"expr": "keep"},
 	}
-	if len(host.run) != 1 || host.run[0].Workflow != "build-artifacts" || host.run[0].Target != "linux" || !reflect.DeepEqual(host.run[0].Vars, wantVars) {
-		t.Fatalf("calls = %#v, want vars %#v", host.run, wantVars)
+	if len(host.run) != 1 || host.run[0].Workflow != "build-artifacts" || host.run[0].Target != "linux" {
+		t.Fatalf("calls = %#v", host.run)
+	}
+	if diff := cmp.Diff(wantVars, host.run[0].Vars); diff != "" {
+		t.Fatalf("vars mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -101,11 +105,11 @@ func TestRunWorkflowValidationResolvesOnlyStaticReference(t *testing.T) {
 	if len(host.validated) != 1 || host.validated[0].Workflow != "build" {
 		t.Fatalf("validation calls = %#v", host.validated)
 	}
-	if !reflect.DeepEqual(host.validated[0].Vars, wantVars) {
-		t.Fatalf("validated vars = %#v, want %#v", host.validated[0].Vars, wantVars)
+	if diff := cmp.Diff(wantVars, host.validated[0].Vars); diff != "" {
+		t.Fatalf("validated vars mismatch (-want +got):\n%s", diff)
 	}
-	if !reflect.DeepEqual(host.validated[0].DeferredVars, wantDeferred) {
-		t.Fatalf("deferred vars = %#v, want %#v", host.validated[0].DeferredVars, wantDeferred)
+	if diff := cmp.Diff(wantDeferred, host.validated[0].DeferredVars); diff != "" {
+		t.Fatalf("deferred vars mismatch (-want +got):\n%s", diff)
 	}
 }
 

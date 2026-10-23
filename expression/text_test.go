@@ -1,9 +1,10 @@
 package expression
 
 import (
-	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 
 	"golang.org/x/text/unicode/norm"
 )
@@ -248,8 +249,8 @@ func TestTextHelpersPreserveExprBuiltins(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(reversed, []any{3, 2, 1}) {
-		t.Fatalf("reverse value = %#v", reversed)
+	if diff := cmp.Diff([]any{3, 2, 1}, reversed); diff != "" {
+		t.Fatalf("reverse value mismatch (-want +got):\n%s", diff)
 	}
 }
 

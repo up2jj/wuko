@@ -4,10 +4,11 @@ import (
 	"context"
 	"errors"
 	"io"
-	"reflect"
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 
 	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
@@ -87,8 +88,8 @@ func TestRunBatchUsesDynamicSizeAndCollectsOrderedBindings(t *testing.T) {
 		map[string]any{"index": 0, "items": []any{"api", "worker"}, "value": `["api","worker"]`},
 		map[string]any{"index": 1, "items": []any{"web"}, "value": `["web"]`},
 	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("results = %#v, want %#v", got, want)
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Fatalf("results mismatch (-want +got):\n%s", diff)
 	}
 	if len(state.Stats.Steps[0].Iterations) != 2 || state.Stats.Steps[0].Type != "batch" {
 		t.Fatalf("stats = %#v", state.Stats)
@@ -179,8 +180,8 @@ func TestRunMatrixUsesDeterministicBindings(t *testing.T) {
 		{"os": "linux", "version": "1"}, {"os": "linux", "version": "2"},
 		{"os": "darwin", "version": "1"}, {"os": "darwin", "version": "2"},
 	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("matrix = %#v, want %#v", got, want)
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Fatalf("matrix mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -357,8 +358,8 @@ func TestRunControlWithoutCollectExposesCountOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := state.Steps["loop"].(map[string]any)
-	if !reflect.DeepEqual(got, map[string]any{"count": 2}) {
-		t.Fatalf("outputs = %#v", got)
+	if diff := cmp.Diff(map[string]any{"count": 2}, got); diff != "" {
+		t.Fatalf("outputs mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -396,8 +397,8 @@ func TestRunControlCollectPreservesNestedTypedValues(t *testing.T) {
 	}
 	got := state.Steps["loop"].(map[string]any)["results"].([]any)[0]
 	want := []any{true, nil, map[string]any{"nested": []any{1, "two"}}}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("result = %#v, want %#v", got, want)
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Fatalf("result mismatch (-want +got):\n%s", diff)
 	}
 }
 

@@ -7,11 +7,12 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"reflect"
 	goruntime "runtime"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/go-cmp/cmp"
 
 	"github.com/up2jj/wuko/helper"
 	"github.com/up2jj/wuko/step"
@@ -79,8 +80,11 @@ func TestLuaControlBindings(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]any{"batch_index": float64(1), "batch_items": []any{"api", "worker"}, "item": "api", "os": "linux"}
-	if got := result.Outputs["binding"].(map[string]any); got["batch_index"] != want["batch_index"] || !reflect.DeepEqual(got["batch_items"], want["batch_items"]) || got["item"] != want["item"] || got["os"] != want["os"] {
-		t.Fatalf("binding = %#v", got)
+	got := result.Outputs["binding"].(map[string]any)
+	for _, name := range []string{"batch_index", "batch_items", "item", "os"} {
+		if diff := cmp.Diff(want[name], got[name]); diff != "" {
+			t.Errorf("binding %s mismatch (-want +got):\n%s", name, diff)
+		}
 	}
 }
 
@@ -111,8 +115,8 @@ func TestLuaArgumentExpressionsUseRuntimeRootsAndPreserveTypes(t *testing.T) {
 	}
 	args := result.Outputs["args"].(map[string]any)
 	wantInventory := []any{map[string]any{"name": "api", "replicas": float64(2)}}
-	if !reflect.DeepEqual(args["inventory"], wantInventory) {
-		t.Fatalf("inventory = %#v, want %#v", args["inventory"], wantInventory)
+	if diff := cmp.Diff(wantInventory, args["inventory"]); diff != "" {
+		t.Fatalf("inventory mismatch (-want +got):\n%s", diff)
 	}
 	wantSummary := "deploy:app:batch:item:linux:succeeded:release:/workflow:/run:" + goruntime.GOOS + ":" + goruntime.GOARCH
 	if args["summary"] != wantSummary {
@@ -152,8 +156,8 @@ wuko.output("roots", {
 		"workflow_name": "release", "workflow_dir": "/workflow", "run_dir": "/run", "environment_loaders": []any{"mise", "direnv"},
 		"os": goruntime.GOOS, "arch": goruntime.GOARCH,
 	}
-	if got := result.Outputs["roots"]; !reflect.DeepEqual(got, want) {
-		t.Fatalf("roots = %#v, want %#v", got, want)
+	if diff := cmp.Diff(want, result.Outputs["roots"]); diff != "" {
+		t.Fatalf("roots mismatch (-want +got):\n%s", diff)
 	}
 	if got := steps["decode"].(map[string]any)["value"].([]any)[0].(map[string]any)["name"]; got != "api" {
 		t.Fatalf("Lua mutation changed request steps to %q", got)
@@ -479,8 +483,8 @@ wuko.output("mailto", mailto)
 		result.Outputs["host"] != "api.example.com" || result.Outputs["mailto"] != "mailto:ops@example.com?subject=Deployment+ready" {
 		t.Fatalf("outputs = %#v", result.Outputs)
 	}
-	if tags := result.Outputs["tags"].([]any); !reflect.DeepEqual(tags, []any{"v1", "v2"}) {
-		t.Fatalf("tags = %#v", tags)
+	if diff := cmp.Diff([]any{"v1", "v2"}, result.Outputs["tags"].([]any)); diff != "" {
+		t.Fatalf("tags mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -662,8 +666,8 @@ wuko.output("normalize_unicode_default", h.normalize_unicode("é"))
 		"normalize_unicode":         "é",
 		"normalize_unicode_default": "é",
 	}
-	if !reflect.DeepEqual(result.Outputs, want) {
-		t.Fatalf("outputs = %#v, want %#v", result.Outputs, want)
+	if diff := cmp.Diff(want, result.Outputs); diff != "" {
+		t.Fatalf("outputs mismatch (-want +got):\n%s", diff)
 	}
 }
 

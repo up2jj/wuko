@@ -4,9 +4,10 @@ import (
 	"bytes"
 	"context"
 	"io"
-	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/tui"
@@ -65,8 +66,8 @@ func TestDynamicObjectSelectionPreservesClonedItem(t *testing.T) {
 		t.Fatalf("outputs = %#v", result.Outputs)
 	}
 	item := result.Outputs["item"].(map[string]any)
-	if !reflect.DeepEqual(item, source) {
-		t.Fatalf("item = %#v, want %#v", item, source)
+	if diff := cmp.Diff(source, item); diff != "" {
+		t.Fatalf("item mismatch (-want +got):\n%s", diff)
 	}
 	item["commands"].(map[string]any)["shell"] = "/bin/sh"
 	if source["commands"].(map[string]any)["shell"] != "/bin/bash" {
@@ -530,19 +531,19 @@ func TestStaticChoiceMarkersAreDisplayOnly(t *testing.T) {
 		{Kind: tui.ChoiceMarkerSeparator, Before: 2},
 		{Kind: tui.ChoiceMarkerSection, Before: 2, Label: "Restricted"},
 	}
-	if !reflect.DeepEqual(choices.markers, wantMarkers) {
-		t.Fatalf("markers = %#v, want %#v", choices.markers, wantMarkers)
+	if diff := cmp.Diff(wantMarkers, choices.markers); diff != "" {
+		t.Fatalf("markers mismatch (-want +got):\n%s", diff)
 	}
 
 	result, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{"items": []any{"prod", "dev"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if values := result.Outputs["values"].([]any); !reflect.DeepEqual(values, []any{"prod", "dev"}) {
-		t.Fatalf("values = %#v", values)
+	if diff := cmp.Diff([]any{"prod", "dev"}, result.Outputs["values"].([]any)); diff != "" {
+		t.Fatalf("values mismatch (-want +got):\n%s", diff)
 	}
-	if labels := result.Outputs["labels"].([]any); !reflect.DeepEqual(labels, []any{"Production", "Development"}) {
-		t.Fatalf("labels = %#v", labels)
+	if diff := cmp.Diff([]any{"Production", "Development"}, result.Outputs["labels"].([]any)); diff != "" {
+		t.Fatalf("labels mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -579,8 +580,8 @@ func TestDynamicChoiceMarkersBypassMappingsAndExpressions(t *testing.T) {
 		t.Fatal(err)
 	}
 	item := result.Outputs["item"].(map[string]any)
-	if !reflect.DeepEqual(item, source[4]) {
-		t.Fatalf("item = %#v, want %#v", item, source[4])
+	if diff := cmp.Diff(source[4], item); diff != "" {
+		t.Fatalf("item mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -650,8 +651,8 @@ func TestDynamicChoiceExpressionsUseOrderedEnvironment(t *testing.T) {
 		t.Fatalf("description = %q, want %q", option.Description, wantDescription)
 	}
 	item := option.item.(map[string]any)
-	if !reflect.DeepEqual(item, source) {
-		t.Fatalf("item = %#v, want %#v", item, source)
+	if diff := cmp.Diff(source, item); diff != "" {
+		t.Fatalf("item mismatch (-want +got):\n%s", diff)
 	}
 	item["name"] = "changed"
 	if source["name"] != "dev" {

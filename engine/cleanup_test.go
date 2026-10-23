@@ -7,11 +7,13 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/google/go-cmp/cmp"
 
 	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
@@ -122,7 +124,7 @@ func TestManagedTempValidationAndDryRunCreateNothing(t *testing.T) {
 	if _, err := engine.Run(t.Context(), definition, Options{DryRun: true, Stdout: io.Discard, Stderr: io.Discard}); err != nil {
 		t.Fatal(err)
 	}
-	if after := matches(); !reflect.DeepEqual(after, before) {
+	if after := matches(); !slices.Equal(after, before) {
 		t.Fatalf("temporary paths changed: before=%#v after=%#v", before, after)
 	}
 }
@@ -215,8 +217,8 @@ func TestManagedCleanupRunsInReverseAndJoinsErrors(t *testing.T) {
 	if !strings.Contains(err.Error(), "cleanup third") || !strings.Contains(err.Error(), "cleanup first") {
 		t.Fatalf("cleanup error = %v", err)
 	}
-	if want := []string{"third", "second", "first"}; !reflect.DeepEqual(cleaned, want) {
-		t.Fatalf("cleanup order = %#v, want %#v", cleaned, want)
+	if diff := cmp.Diff([]string{"third", "second", "first"}, cleaned); diff != "" {
+		t.Fatalf("cleanup order mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -267,8 +269,8 @@ func TestManagedCleanupReleasesDiscardedPassesAndPromotesTheWinner(t *testing.T)
 	if duringRun != 2 {
 		t.Fatalf("cleaned during run = %d, want 2", duringRun)
 	}
-	if want := []int{1, 2, 3}; !reflect.DeepEqual(runner.cleaned, want) {
-		t.Fatalf("cleaned polls = %#v, want %#v", runner.cleaned, want)
+	if diff := cmp.Diff([]int{1, 2, 3}, runner.cleaned); diff != "" {
+		t.Fatalf("cleaned polls mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -325,8 +327,8 @@ func TestManagedCleanupReleasesSucceededStepsOfAFailedPass(t *testing.T) {
 	if duringRun != 1 {
 		t.Fatalf("cleaned during run = %d, want 1", duringRun)
 	}
-	if want := []int{1, 2}; !reflect.DeepEqual(runner.cleaned, want) {
-		t.Fatalf("cleaned = %#v, want %#v", runner.cleaned, want)
+	if diff := cmp.Diff([]int{1, 2}, runner.cleaned); diff != "" {
+		t.Fatalf("cleaned mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -344,7 +346,7 @@ func TestManagedCleanupRegistersOnlySuccessfulRetry(t *testing.T) {
 	if _, err := New(registry).Run(t.Context(), definition, Options{}); err != nil {
 		t.Fatal(err)
 	}
-	if runner.attempts != 2 || !reflect.DeepEqual(runner.cleaned, []int{2}) {
+	if runner.attempts != 2 || !slices.Equal(runner.cleaned, []int{2}) {
 		t.Fatalf("attempts=%d cleaned=%#v", runner.attempts, runner.cleaned)
 	}
 }

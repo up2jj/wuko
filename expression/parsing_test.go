@@ -2,9 +2,10 @@ package expression
 
 import (
 	"math"
-	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 )
 
 func TestParseJSONReturnsRuntimeValues(t *testing.T) {
@@ -28,8 +29,8 @@ func TestParseJSONReturnsRuntimeValues(t *testing.T) {
 		"maximum": uint64(math.MaxUint64), "ratio": 1.5, "exponent": 1000.0,
 		"items": []any{"api", nil},
 	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("ParseJSON() = %#v, want %#v", got, want)
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Fatalf("ParseJSON() mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -50,8 +51,8 @@ func TestParseJSONAcceptsScalarsAndWhitespace(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Fatalf("ParseJSON() = %#v, want %#v", got, tt.want)
+			if diff := cmp.Diff(tt.want, got); diff != "" {
+				t.Fatalf("ParseJSON() mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}
@@ -101,8 +102,8 @@ items:
 		"name": "wuko", "enabled": true, "retries": int64(3),
 		"maximum": uint64(math.MaxUint64), "ratio": 1.5, "items": []any{"api", nil},
 	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("ParseYAML() = %#v, want %#v", got, want)
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Fatalf("ParseYAML() mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -123,8 +124,8 @@ func TestParseYAMLAcceptsSingleScalarsAndDocuments(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Fatalf("ParseYAML() = %#v, want %#v", got, tt.want)
+			if diff := cmp.Diff(tt.want, got); diff != "" {
+				t.Fatalf("ParseYAML() mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}
@@ -205,8 +206,8 @@ func TestParseHelpersRoundTripSerializedValues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(fromJSON, value) {
-		t.Fatalf("JSON round trip = %#v, want %#v", fromJSON, value)
+	if diff := cmp.Diff(value, fromJSON); diff != "" {
+		t.Fatalf("JSON round trip mismatch (-want +got):\n%s", diff)
 	}
 
 	yamlValue, err := ToYAML(value)
@@ -217,7 +218,7 @@ func TestParseHelpersRoundTripSerializedValues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(fromYAML, value) {
-		t.Fatalf("YAML round trip = %#v, want %#v", fromYAML, value)
+	if diff := cmp.Diff(value, fromYAML); diff != "" {
+		t.Fatalf("YAML round trip mismatch (-want +got):\n%s", diff)
 	}
 }

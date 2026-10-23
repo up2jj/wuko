@@ -2,9 +2,10 @@ package form
 
 import (
 	"context"
-	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 
 	"github.com/up2jj/wuko/helper"
 	"github.com/up2jj/wuko/internal/steptest"
@@ -96,8 +97,8 @@ func TestFormCrossFieldValidationUsesSubmittedEdits(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !reflect.DeepEqual(result.Outputs, map[string]any{"password": "new", "confirmation": "new"}) {
-				t.Fatalf("outputs=%#v", result.Outputs)
+			if diff := cmp.Diff(map[string]any{"password": "new", "confirmation": "new"}, result.Outputs); diff != "" {
+				t.Fatalf("outputs mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}

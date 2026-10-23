@@ -4,10 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/go-cmp/cmp"
 
 	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
@@ -133,8 +134,8 @@ func TestCancelOnBodyWinsAndCanceledMonitorHasNullError(t *testing.T) {
 		t.Fatalf("outcome = %#v", output)
 	}
 	deploy := output["steps"].(map[string]any)["deploy"].(map[string]any)
-	if !reflect.DeepEqual(deploy["outputs"], map[string]any{"stdout": "deployed\n"}) {
-		t.Fatalf("deploy = %#v", deploy)
+	if diff := cmp.Diff(map[string]any{"stdout": "deployed\n"}, deploy["outputs"]); diff != "" {
+		t.Fatalf("deploy mismatch (-want +got):\n%s", diff)
 	}
 	monitor := output["monitors"].(map[string]any)["deployment_finished"].(map[string]any)
 	if monitor["status"] != "canceled" || monitor["error"] != nil || monitor["outputs"] != nil {

@@ -3,9 +3,10 @@ package keyvalue
 import (
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 )
 
 func TestOpenScopedSeparatesLocalAndGlobalValues(t *testing.T) {
@@ -76,8 +77,8 @@ func TestOpenScopedReopenSeesPersistedValues(t *testing.T) {
 				t.Fatal(err)
 			}
 			want := []Entry{{Key: "count", Value: mustNormalizeScoped(t, 3)}}
-			if !reflect.DeepEqual(entries, want) {
-				t.Fatalf("entries = %#v, want %#v", entries, want)
+			if diff := cmp.Diff(want, entries); diff != "" {
+				t.Fatalf("entries mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}

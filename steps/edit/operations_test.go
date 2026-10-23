@@ -3,9 +3,10 @@ package edit
 import (
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 
 	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/internal/testfs"
@@ -241,11 +242,11 @@ func TestSetCreatesMissingMapPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]any{"name": "demo", "dependencies": map[string]any{"tools": map[string]any{"wuko": "v1"}}}
-	if !reflect.DeepEqual(result.Outputs["value"], want) {
-		t.Fatalf("value = %#v, want %#v", result.Outputs["value"], want)
+	if diff := cmp.Diff(want, result.Outputs["value"]); diff != "" {
+		t.Fatalf("value mismatch (-want +got):\n%s", diff)
 	}
-	if !reflect.DeepEqual(result.Outputs["paths"], []any{"$['dependencies']['tools']['wuko']"}) {
-		t.Fatalf("paths = %#v", result.Outputs["paths"])
+	if diff := cmp.Diff([]any{"$['dependencies']['tools']['wuko']"}, result.Outputs["paths"]); diff != "" {
+		t.Fatalf("paths mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -303,8 +304,8 @@ func TestArrayOperationsUseOriginalLocations(t *testing.T) {
 				t.Fatal(err)
 			}
 			got := result.Outputs["value"].(map[string]any)["items"]
-			if !reflect.DeepEqual(got, test.want) {
-				t.Fatalf("items = %#v, want %#v", got, test.want)
+			if diff := cmp.Diff(test.want, got); diff != "" {
+				t.Fatalf("items mismatch (-want +got):\n%s", diff)
 			}
 			if test.raw["operation"] == "delete" && len(result.Outputs["replacements"].([]any)) != 0 {
 				t.Fatalf("delete replacements = %#v", result.Outputs["replacements"])
@@ -326,8 +327,8 @@ func TestMergeRecursesThroughMapsAndReplacesLeaves(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]any{"image": "v2", "limits": map[string]any{"memory": "1Gi", "cpu": 2}, "ports": []any{443}}
-	if got := result.Outputs["value"].(map[string]any)["service"]; !reflect.DeepEqual(got, want) {
-		t.Fatalf("service = %#v, want %#v", got, want)
+	if diff := cmp.Diff(want, result.Outputs["value"].(map[string]any)["service"]); diff != "" {
+		t.Fatalf("service mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -340,8 +341,8 @@ func TestRenameMovesObjectMemberWithoutOverwriting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(result.Outputs["value"], map[string]any{"new": 1}) {
-		t.Fatalf("value = %#v", result.Outputs["value"])
+	if diff := cmp.Diff(map[string]any{"new": 1}, result.Outputs["value"]); diff != "" {
+		t.Fatalf("value mismatch (-want +got):\n%s", diff)
 	}
 
 	conflict := steptest.Build(t, New, map[string]any{

@@ -1,9 +1,10 @@
 package expression
 
 import (
-	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 )
 
 func TestParseURIReturnsDecodedComponents(t *testing.T) {
@@ -20,8 +21,8 @@ func TestParseURIReturnsDecodedComponents(t *testing.T) {
 			"empty": []any{""},
 		},
 	}
-	if !reflect.DeepEqual(parts, want) {
-		t.Fatalf("parts = %#v, want %#v", parts, want)
+	if diff := cmp.Diff(want, parts); diff != "" {
+		t.Fatalf("parts mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -79,8 +80,8 @@ func TestParseURISupportsRelativeAndOpaqueReferences(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Fatalf("parts = %#v, want %#v", got, tt.want)
+			if diff := cmp.Diff(tt.want, got); diff != "" {
+				t.Fatalf("parts mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}

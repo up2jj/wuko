@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
+
 	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
@@ -30,8 +32,8 @@ func TestVariableSourceReturnsEditedClone(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]any{"spec": map[string]any{"replicas": 3}}
-	if !reflect.DeepEqual(result.Outputs["value"], want) {
-		t.Fatalf("value = %#v, want %#v", result.Outputs["value"], want)
+	if diff := cmp.Diff(want, result.Outputs["value"]); diff != "" {
+		t.Fatalf("value mismatch (-want +got):\n%s", diff)
 	}
 	if got := source["spec"].(map[string]any)["replicas"]; got != 2 {
 		t.Fatalf("source variable was mutated: replicas = %#v", got)
@@ -59,8 +61,8 @@ func TestAllExpressionsUseOriginalSnapshot(t *testing.T) {
 	if result.Outputs["count"] != 2 || result.Outputs["changed_count"] != 2 {
 		t.Fatalf("outputs = %#v", result.Outputs)
 	}
-	if got := result.Outputs["replacements"]; !reflect.DeepEqual(got, []any{3, 13}) {
-		t.Fatalf("replacements = %#v", got)
+	if diff := cmp.Diff([]any{3, 13}, result.Outputs["replacements"]); diff != "" {
+		t.Fatalf("replacements mismatch (-want +got):\n%s", diff)
 	}
 }
 

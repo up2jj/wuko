@@ -2,8 +2,9 @@ package engine_test
 
 import (
 	"io"
-	"reflect"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 
 	"github.com/up2jj/wuko/engine"
 	"github.com/up2jj/wuko/internal/steptest"
@@ -35,10 +36,10 @@ func TestJSONPathTemplatesAndCommitsTypedResults(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []any{"one"}
-	if !reflect.DeepEqual(state.Vars["active_ids"], want) {
-		t.Fatalf("variables = %#v", state.Vars)
+	if diff := cmp.Diff(want, state.Vars["active_ids"]); diff != "" {
+		t.Fatalf("variables mismatch (-want +got):\n%s", diff)
 	}
-	if !reflect.DeepEqual(state.Steps["active"].(map[string]any)["value"], want) {
-		t.Fatalf("outputs = %#v", state.Steps["active"])
+	if diff := cmp.Diff(want, state.Steps["active"].(map[string]any)["value"]); diff != "" {
+		t.Fatalf("outputs mismatch (-want +got):\n%s", diff)
 	}
 }

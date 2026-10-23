@@ -2,9 +2,10 @@ package set
 
 import (
 	"math"
-	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 
 	"github.com/up2jj/wuko/step"
 )
@@ -40,11 +41,11 @@ func TestMultipleVariables(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]any{"application": "wuko", "artifact": "old-7", "version": 3}
-	if !reflect.DeepEqual(result.Variables, want) {
-		t.Fatalf("variables = %#v, want %#v", result.Variables, want)
+	if diff := cmp.Diff(want, result.Variables); diff != "" {
+		t.Fatalf("variables mismatch (-want +got):\n%s", diff)
 	}
-	if !reflect.DeepEqual(result.Outputs["value"], want) {
-		t.Fatalf("value = %#v, want %#v", result.Outputs["value"], want)
+	if diff := cmp.Diff(want, result.Outputs["value"]); diff != "" {
+		t.Fatalf("value mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -173,8 +174,8 @@ func TestExpressionStoresTypedCollectionResults(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got := result.Variables["result"]; !reflect.DeepEqual(got, tt.want) {
-				t.Fatalf("value = %#v, want %#v", got, tt.want)
+			if diff := cmp.Diff(tt.want, result.Variables["result"]); diff != "" {
+				t.Fatalf("value mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}

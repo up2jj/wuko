@@ -2,9 +2,10 @@ package provider
 
 import (
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 
 	"github.com/up2jj/wuko/internal/testfs"
 )
@@ -76,8 +77,8 @@ func TestGitHubPushContextAndNativeNumbers(t *testing.T) {
 		t.Fatal("GitHub provider is inactive")
 	}
 	wantRepository := map[string]any{"owner": "up2jj", "name": "wuko", "full_name": "up2jj/wuko"}
-	if !reflect.DeepEqual(value["repository"], wantRepository) {
-		t.Fatalf("repository = %#v", value["repository"])
+	if diff := cmp.Diff(wantRepository, value["repository"]); diff != "" {
+		t.Fatalf("repository mismatch (-want +got):\n%s", diff)
 	}
 	if value["actor"] != "up2jj" || value["sha"] != "merge-sha" || value["ref"] != "refs/heads/main" {
 		t.Fatalf("metadata = %#v", value)

@@ -3,9 +3,10 @@ package importvars
 import (
 	"context"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 
 	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
@@ -24,11 +25,11 @@ func TestRunImportsWorkflowRelativeFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]any{"name": "override", "nested": map[string]any{"new": true}}
-	if !reflect.DeepEqual(result.Variables, want) {
-		t.Fatalf("variables = %#v", result.Variables)
+	if diff := cmp.Diff(want, result.Variables); diff != "" {
+		t.Fatalf("variables mismatch (-want +got):\n%s", diff)
 	}
-	if result.Outputs["count"] != 2 || !reflect.DeepEqual(result.Outputs["variables"], want) {
-		t.Fatalf("outputs = %#v", result.Outputs)
+	if diff := cmp.Diff(want, result.Outputs["variables"]); diff != "" || result.Outputs["count"] != 2 {
+		t.Fatalf("count = %v, variables mismatch (-want +got):\n%s", result.Outputs["count"], diff)
 	}
 }
 

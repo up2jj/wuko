@@ -4,11 +4,12 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"reflect"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/google/go-cmp/cmp"
 
 	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
@@ -97,8 +98,11 @@ func TestTryCatchRecoversAndExposesStructuredError(t *testing.T) {
 		t.Fatalf("error = %#v", errorValue)
 	}
 	rollback := output["catch"].(map[string]any)["steps"].(map[string]any)["rollback"].(map[string]any)["outputs"].(map[string]any)
-	if !strings.Contains(rollback["value"].(string), "deploy:") || !reflect.DeepEqual(rollback["error"], errorValue) {
-		t.Fatalf("rollback = %#v", rollback)
+	if !strings.Contains(rollback["value"].(string), "deploy:") {
+		t.Fatalf("rollback value = %q, want it to name deploy", rollback["value"])
+	}
+	if diff := cmp.Diff(errorValue, rollback["error"]); diff != "" {
+		t.Fatalf("rollback error mismatch (-want +got):\n%s", diff)
 	}
 	if state.Steps["after"].(map[string]any)["value"] != "continued" || output["vars"].(map[string]any)["recovery"] != "reported" {
 		t.Fatalf("ordinary execution did not continue: steps=%#v vars=%#v", state.Steps, state.Vars)
@@ -145,8 +149,8 @@ func TestTryCatchCatchIsBestEffortButPublishesNothingOnFailure(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "rollback") {
 		t.Fatalf("error = %v", err)
 	}
-	if !reflect.DeepEqual(ran, []string{"deploy", "rollback", "report"}) {
-		t.Fatalf("runs = %#v", ran)
+	if diff := cmp.Diff([]string{"deploy", "rollback", "report"}, ran); diff != "" {
+		t.Fatalf("runs mismatch (-want +got):\n%s", diff)
 	}
 	if publishedStep || publishedVariable {
 		t.Fatalf("failed control published private state: step=%v variable=%v", publishedStep, publishedVariable)
@@ -370,8 +374,8 @@ func TestTryCatchExecutedCatchStepIsNotReportedSkipped(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(statuses, []ExecutionStatus{StatusSucceeded}) {
-		t.Fatalf("rollback progress statuses = %#v", statuses)
+	if diff := cmp.Diff([]ExecutionStatus{StatusSucceeded}, statuses); diff != "" {
+		t.Fatalf("rollback progress statuses mismatch (-want +got):\n%s", diff)
 	}
 }
 

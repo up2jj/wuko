@@ -5,9 +5,10 @@ import (
 	"errors"
 	"io"
 	"maps"
-	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 
 	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
@@ -274,7 +275,7 @@ func TestEnvironmentOperationsDryRunHidesValuesAndSelectors(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := "1. env: [set: REMOVE, TOKEN; unset: AWS_*, <dynamic>; unset: <dynamic>]\n   1.1 run (capture_env)\n"
-	if !reflect.DeepEqual(output.String(), want) {
+	if output.String() != want {
 		t.Fatalf("dry run = %q, want %q", output.String(), want)
 	}
 }
@@ -317,7 +318,7 @@ func TestEnvironmentOperationsLiteralUnsetRefreshesSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := map[string]string{"SEEN": "gone", "KEEP": "yes"}; !reflect.DeepEqual(environment, want) {
-		t.Fatalf("environment = %#v, want %#v", environment, want)
+	if diff := cmp.Diff(map[string]string{"SEEN": "gone", "KEEP": "yes"}, environment); diff != "" {
+		t.Fatalf("environment mismatch (-want +got):\n%s", diff)
 	}
 }

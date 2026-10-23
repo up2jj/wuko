@@ -2,9 +2,10 @@ package observe
 
 import (
 	"context"
-	"reflect"
 	"testing"
 	"time"
+
+	"github.com/google/go-cmp/cmp"
 
 	"github.com/up2jj/wuko/engine"
 	"github.com/up2jj/wuko/fswatch"
@@ -91,8 +92,8 @@ func TestFilesystemBatchMergeUnionsOperations(t *testing.T) {
 	older.Merge(newer)
 
 	binding := older.Binding()["filesystem"].(map[string]any)
-	if paths := binding["paths"].([]any); !reflect.DeepEqual(paths, []any{"a.go", "b.go", "c.go"}) {
-		t.Fatalf("paths = %#v", paths)
+	if diff := cmp.Diff([]any{"a.go", "b.go", "c.go"}, binding["paths"].([]any)); diff != "" {
+		t.Fatalf("paths mismatch (-want +got):\n%s", diff)
 	}
 	want := []any{
 		// Operations come back in canonical event order, not insertion order.
@@ -100,8 +101,8 @@ func TestFilesystemBatchMergeUnionsOperations(t *testing.T) {
 		map[string]any{"path": "b.go", "operations": []any{"create", "remove"}},
 		map[string]any{"path": "c.go", "operations": []any{"remove"}},
 	}
-	if changes := binding["changes"].([]any); !reflect.DeepEqual(changes, want) {
-		t.Fatalf("changes = %#v, want %#v", changes, want)
+	if diff := cmp.Diff(want, binding["changes"].([]any)); diff != "" {
+		t.Fatalf("changes mismatch (-want +got):\n%s", diff)
 	}
 	if older.Empty() {
 		t.Fatal("merged batch reports empty")

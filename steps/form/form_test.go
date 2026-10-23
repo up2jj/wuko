@@ -5,9 +5,10 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 
 	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/internal/testfs"
@@ -81,8 +82,8 @@ func TestFormTypedOutputsDoNotWriteVariables(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]any{"name": "Ada", "notes": "one\ntwo\n", "credential": "private", "notify": false, "region": 2, "regions": []any{false, "west"}, "replicas": int64(3), "ratio": 1.25, "manifest": "app.yaml", "files": []any{"app.yaml"}}
-	if !reflect.DeepEqual(result.Outputs, want) {
-		t.Fatalf("outputs=%#v, want %#v", result.Outputs, want)
+	if diff := cmp.Diff(want, result.Outputs); diff != "" {
+		t.Fatalf("outputs mismatch (-want +got):\n%s", diff)
 	}
 	if len(result.Variables) != 0 || request.Vars["name"] != "untouched" {
 		t.Fatalf("variables were changed: %#v %#v", result.Variables, request.Vars)
@@ -136,8 +137,8 @@ func TestFormNilExpressionDefaultsUseZeroValue(t *testing.T) {
 	)
 	runner := steptest.BuildAs[*Runner](t, New, raw)
 	runner.read = func(_ context.Context, _ step.Request, config tui.FormConfig) (map[string]any, error) {
-		if config.Fields[0].Value != "" || config.Fields[1].Value != false || !reflect.DeepEqual(config.Fields[2].Value, []any{}) {
-			t.Fatalf("prefill=%#v", config.Fields)
+		if diff := cmp.Diff([]any{"", false, []any{}}, []any{config.Fields[0].Value, config.Fields[1].Value, config.Fields[2].Value}); diff != "" {
+			t.Fatalf("prefill mismatch (-want +got):\n%s", diff)
 		}
 		return map[string]any{"name": "Ada", "notify": false, "tags": []any{}}, nil
 	}
@@ -157,8 +158,11 @@ func TestFormOptionalValues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Outputs["answer"] != "" || result.Outputs["number"] != nil || result.Outputs["selection"] != nil || !reflect.DeepEqual(result.Outputs["multi"], []any{}) {
-		t.Fatalf("outputs=%#v", result.Outputs)
+	want := map[string]any{"answer": "", "number": nil, "selection": nil, "multi": []any{}}
+	for name, value := range want {
+		if diff := cmp.Diff(value, result.Outputs[name]); diff != "" {
+			t.Errorf("%s mismatch (-want +got):\n%s", name, diff)
+		}
 	}
 }
 

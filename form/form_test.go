@@ -2,10 +2,11 @@ package form
 
 import (
 	"net/url"
-	"reflect"
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 
 	"go.yaml.in/yaml/v3"
 )
@@ -108,8 +109,11 @@ fields:
 		t.Fatal(err)
 	}
 	values, fieldErrors := Submit(fields, url.Values{"field_0": {"1", "0"}})
-	if len(fieldErrors) != 0 || !reflect.DeepEqual(values["targets"], []any{2, 1}) {
-		t.Fatalf("values = %#v, errors = %#v", values, fieldErrors)
+	if len(fieldErrors) != 0 {
+		t.Fatalf("errors = %#v", fieldErrors)
+	}
+	if diff := cmp.Diff([]any{2, 1}, values["targets"]); diff != "" {
+		t.Fatalf("targets mismatch (-want +got):\n%s", diff)
 	}
 }
 

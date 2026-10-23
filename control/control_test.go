@@ -3,11 +3,12 @@ package control
 import (
 	"context"
 	"errors"
-	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/google/go-cmp/cmp"
 )
 
 func TestForeachBindings(t *testing.T) {
@@ -19,8 +20,8 @@ func TestForeachBindings(t *testing.T) {
 		{Index: 0, Bindings: map[string]any{"foreach": map[string]any{"index": 0, "item": "linux"}}},
 		{Index: 1, Bindings: map[string]any{"foreach": map[string]any{"index": 1, "item": "darwin"}}},
 	}
-	if !reflect.DeepEqual(iterations, want) {
-		t.Fatalf("iterations = %#v, want %#v", iterations, want)
+	if diff := cmp.Diff(want, iterations); diff != "" {
+		t.Fatalf("iterations mismatch (-want +got):\n%s", diff)
 	}
 	if _, err := Foreach(map[string]any{"a": 1}); err == nil {
 		t.Fatal("expected map source error")
@@ -36,8 +37,8 @@ func TestBatchBindings(t *testing.T) {
 		{Index: 0, Bindings: map[string]any{"batch": map[string]any{"index": 0, "items": []any{"api", map[string]any{"name": "worker"}}}}},
 		{Index: 1, Bindings: map[string]any{"batch": map[string]any{"index": 1, "items": []any{"web"}}}},
 	}
-	if !reflect.DeepEqual(iterations, want) {
-		t.Fatalf("iterations = %#v, want %#v", iterations, want)
+	if diff := cmp.Diff(want, iterations); diff != "" {
+		t.Fatalf("iterations mismatch (-want +got):\n%s", diff)
 	}
 	if _, err := Batch(map[string]any{"a": 1}, 2); err == nil {
 		t.Fatal("expected map source error")
@@ -67,8 +68,8 @@ func TestMatrixExpansionOrder(t *testing.T) {
 		{"os": "linux", "go": "1.25"}, {"os": "linux", "go": "1.26"},
 		{"os": "darwin", "go": "1.25"}, {"os": "darwin", "go": "1.26"},
 	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("matrix = %#v, want %#v", got, want)
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Fatalf("matrix mismatch (-want +got):\n%s", diff)
 	}
 	empty, err := Matrix([]Axis{{Name: "os", Values: nil}})
 	if err != nil || len(empty) != 0 {
@@ -90,8 +91,8 @@ func TestExpressionHelpers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got, []string{"a", "z"}) {
-		t.Fatalf("value = %#v", got)
+	if diff := cmp.Diff([]string{"a", "z"}, got); diff != "" {
+		t.Fatalf("value mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -110,8 +111,8 @@ func TestForeachConsumesChunkedExpressionList(t *testing.T) {
 		{Index: 0, Bindings: map[string]any{"foreach": map[string]any{"index": 0, "item": []any{"api", "worker"}}}},
 		{Index: 1, Bindings: map[string]any{"foreach": map[string]any{"index": 1, "item": []any{"web"}}}},
 	}
-	if !reflect.DeepEqual(iterations, want) {
-		t.Fatalf("iterations = %#v, want %#v", iterations, want)
+	if diff := cmp.Diff(want, iterations); diff != "" {
+		t.Fatalf("iterations mismatch (-want +got):\n%s", diff)
 	}
 }
 

@@ -2,9 +2,10 @@ package jsonpath
 
 import (
 	"context"
-	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 
 	"github.com/up2jj/wuko/step"
 )
@@ -29,14 +30,17 @@ func TestAllReturnsValuesPathsAndVariable(t *testing.T) {
 	}
 	wantValues := []any{"one", "three"}
 	wantPaths := []any{"$['projects'][0]['id']", "$['projects'][2]['id']"}
-	if !reflect.DeepEqual(result.Outputs["value"], wantValues) {
-		t.Fatalf("value = %#v", result.Outputs["value"])
+	if diff := cmp.Diff(wantValues, result.Outputs["value"]); diff != "" {
+		t.Fatalf("value mismatch (-want +got):\n%s", diff)
 	}
-	if !reflect.DeepEqual(result.Outputs["paths"], wantPaths) {
-		t.Fatalf("paths = %#v", result.Outputs["paths"])
+	if diff := cmp.Diff(wantPaths, result.Outputs["paths"]); diff != "" {
+		t.Fatalf("paths mismatch (-want +got):\n%s", diff)
 	}
-	if result.Outputs["count"] != 2 || !reflect.DeepEqual(result.Variables["project_ids"], wantValues) {
-		t.Fatalf("result = %#v", result)
+	if result.Outputs["count"] != 2 {
+		t.Fatalf("count = %v, want 2", result.Outputs["count"])
+	}
+	if diff := cmp.Diff(wantValues, result.Variables["project_ids"]); diff != "" {
+		t.Fatalf("project_ids mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -56,8 +60,8 @@ func TestOneReturnsScalar(t *testing.T) {
 	if result.Outputs["value"] != "wuko" || result.Variables["name"] != "wuko" {
 		t.Fatalf("result = %#v", result)
 	}
-	if !reflect.DeepEqual(result.Outputs["paths"], []any{"$['project']['name']"}) {
-		t.Fatalf("paths = %#v", result.Outputs["paths"])
+	if diff := cmp.Diff([]any{"$['project']['name']"}, result.Outputs["paths"]); diff != "" {
+		t.Fatalf("paths mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -88,8 +92,8 @@ func TestAllAllowsNoMatches(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(result.Outputs["value"], []any{}) || result.Outputs["count"] != 0 {
-		t.Fatalf("result = %#v", result)
+	if diff := cmp.Diff([]any{}, result.Outputs["value"]); diff != "" || result.Outputs["count"] != 0 {
+		t.Fatalf("count = %v, value mismatch (-want +got):\n%s", result.Outputs["count"], diff)
 	}
 }
 

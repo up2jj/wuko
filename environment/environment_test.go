@@ -7,9 +7,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"reflect"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 
 	"github.com/up2jj/wuko/internal/testfs"
 )
@@ -87,7 +89,7 @@ func TestChainPassesProgressiveEnvironmentAndProvenance(t *testing.T) {
 		return Result{Changes: Changes{"VALUE": new("one"), "REMOVE": nil}, Applied: true}
 	}}
 	second := fakeLoader{name: "second", load: func(request Request) Result {
-		if request.Env["VALUE"] != "one" || request.Env["REMOVE"] != "" || !reflect.DeepEqual(request.Applied, []string{"first"}) {
+		if request.Env["VALUE"] != "one" || request.Env["REMOVE"] != "" || !slices.Equal(request.Applied, []string{"first"}) {
 			t.Fatalf("second request = %#v", request)
 		}
 		return Result{Changes: Changes{"VALUE": new("two")}, Applied: true}
@@ -97,7 +99,7 @@ func TestChainPassesProgressiveEnvironmentAndProvenance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Values["VALUE"] != "two" || !reflect.DeepEqual(result.Loaders, []string{"first", "second"}) {
+	if result.Values["VALUE"] != "two" || !slices.Equal(result.Loaders, []string{"first", "second"}) {
 		t.Fatalf("result = %#v", result)
 	}
 	if !maps.Equal(base, map[string]string{"BASE": "yes", "REMOVE": "me"}) {
@@ -128,7 +130,7 @@ func (loader errorLoader) Load(context.Context, Request) (Result, error) {
 
 func TestMiseLoaderDecodesJSON(t *testing.T) {
 	loader := newMiseLoader(foundLookup, func(_ context.Context, command Command) (CommandResult, error) {
-		if command.Dir == "" || !reflect.DeepEqual(command.Args, []string{"env", "--json"}) || command.Env["BASE"] != "yes" {
+		if command.Dir == "" || !slices.Equal(command.Args, []string{"env", "--json"}) || command.Env["BASE"] != "yes" {
 			t.Fatalf("command = %#v", command)
 		}
 		return CommandResult{Stdout: `{"PATH":"/mise/bin:/bin","MODE":"dev"}`}, nil
@@ -163,8 +165,8 @@ func TestASDFLoaderValidatesAndPrependsShims(t *testing.T) {
 		testfs.MkdirAll(t, dir, 0o755)
 	}
 	loader := newASDFLoader(foundLookup, func(_ context.Context, command Command) (CommandResult, error) {
-		if !reflect.DeepEqual(command.Args, []string{"current"}) {
-			t.Fatalf("args = %#v", command.Args)
+		if diff := cmp.Diff([]string{"current"}, command.Args); diff != "" {
+			t.Fatalf("args mismatch (-want +got):\n%s", diff)
 		}
 		return CommandResult{}, nil
 	})
@@ -329,8 +331,8 @@ func TestResolverAutomaticSelectionAndProgressiveLookup(t *testing.T) {
 	direnv := fakeLoader{name: LoaderDirenv, probe: func(request Request) Probe {
 		return Probe{Available: strings.HasPrefix(request.Env["PATH"], "/asdf/shims")}
 	}, load: func(request Request) Result {
-		if !reflect.DeepEqual(request.Applied, []string{LoaderASDF}) {
-			t.Fatalf("applied = %#v", request.Applied)
+		if diff := cmp.Diff([]string{LoaderASDF}, request.Applied); diff != "" {
+			t.Fatalf("applied mismatch (-want +got):\n%s", diff)
 		}
 		return Result{Applied: true}
 	}}
@@ -338,8 +340,8 @@ func TestResolverAutomaticSelectionAndProgressiveLookup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(result.Loaders, []string{LoaderASDF, LoaderDirenv}) {
-		t.Fatalf("loaders = %#v", result.Loaders)
+	if diff := cmp.Diff([]string{LoaderASDF, LoaderDirenv}, result.Loaders); diff != "" {
+		t.Fatalf("loaders mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -354,8 +356,8 @@ func TestResolverPrefersNativeMiseMarkerAtSameLevel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(result.Loaders, []string{LoaderMise}) {
-		t.Fatalf("loaders = %#v", result.Loaders)
+	if diff := cmp.Diff([]string{LoaderMise}, result.Loaders); diff != "" {
+		t.Fatalf("loaders mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -373,8 +375,8 @@ func TestResolverUsesNearestMarker(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(result.Loaders, []string{LoaderASDF}) {
-		t.Fatalf("loaders = %#v", result.Loaders)
+	if diff := cmp.Diff([]string{LoaderASDF}, result.Loaders); diff != "" {
+		t.Fatalf("loaders mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -387,8 +389,8 @@ func TestResolverFallsBackFromASDFToMise(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(result.Loaders, []string{LoaderMise}) {
-		t.Fatalf("loaders = %#v", result.Loaders)
+	if diff := cmp.Diff([]string{LoaderMise}, result.Loaders); diff != "" {
+		t.Fatalf("loaders mismatch (-want +got):\n%s", diff)
 	}
 }
 

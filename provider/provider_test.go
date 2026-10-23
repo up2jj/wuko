@@ -3,9 +3,10 @@ package provider
 import (
 	"context"
 	"errors"
-	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 )
 
 type fakeProvider struct {
@@ -65,11 +66,11 @@ func TestRegistryLoadRetainsSchemasAndActiveValuesInOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(order, []string{"first", "inactive", "second"}) {
-		t.Fatalf("load order = %v", order)
+	if diff := cmp.Diff([]string{"first", "inactive", "second"}, order); diff != "" {
+		t.Fatalf("load order mismatch (-want +got):\n%s", diff)
 	}
-	if got := set.Names(); !reflect.DeepEqual(got, []string{"first", "inactive", "second"}) {
-		t.Fatalf("schema names = %v", got)
+	if diff := cmp.Diff([]string{"first", "inactive", "second"}, set.Names()); diff != "" {
+		t.Fatalf("schema names mismatch (-want +got):\n%s", diff)
 	}
 	if _, exists := set.Values["inactive"]; exists {
 		t.Fatal("inactive provider has a value")

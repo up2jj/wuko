@@ -7,10 +7,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"reflect"
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 
 	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/internal/testfs"
@@ -200,12 +201,12 @@ func TestCompositeActionRunsSequentiallyWithTypedInputsAndDeclaredOutputs(t *tes
 		t.Fatal(err)
 	}
 	wantOrder := []string{"caller:prepare", "composite:first", "composite:second", "caller:consume"}
-	if !reflect.DeepEqual(order, wantOrder) {
-		t.Fatalf("order = %#v, want %#v", order, wantOrder)
+	if diff := cmp.Diff(wantOrder, order); diff != "" {
+		t.Fatalf("order mismatch (-want +got):\n%s", diff)
 	}
 	wantOutputs := map[string]any{"result": "done", "os": runtime.GOOS, "arch": runtime.GOARCH}
-	if got := state.Steps["remote"].(map[string]any); !reflect.DeepEqual(got, wantOutputs) {
-		t.Fatalf("remote outputs = %#v", got)
+	if diff := cmp.Diff(wantOutputs, state.Steps["remote"].(map[string]any)); diff != "" {
+		t.Fatalf("remote outputs mismatch (-want +got):\n%s", diff)
 	}
 	if _, exists := state.Steps["first"]; exists {
 		t.Fatal("internal step leaked into caller state")
@@ -213,8 +214,8 @@ func TestCompositeActionRunsSequentiallyWithTypedInputsAndDeclaredOutputs(t *tes
 	if _, exists := state.Vars["internal_only"]; exists {
 		t.Fatal("internal variable leaked into caller state")
 	}
-	if got := innerRequest.Inputs["items"]; !reflect.DeepEqual(got, []any{"a", "b"}) {
-		t.Fatalf("inner inputs = %#v", innerRequest.Inputs)
+	if diff := cmp.Diff([]any{"a", "b"}, innerRequest.Inputs["items"]); diff != "" {
+		t.Fatalf("inner inputs mismatch (-want +got):\n%s", diff)
 	}
 }
 

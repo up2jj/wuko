@@ -3,10 +3,11 @@ package path
 import (
 	"os"
 	"path/filepath"
-	"reflect"
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 
 	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/internal/testfs"
@@ -70,8 +71,14 @@ func TestPreSuppliedSingleAndMultiplePaths(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []any{"notes.txt", "main.go"}
-	if !reflect.DeepEqual(result.Outputs["values"], want) || !reflect.DeepEqual(result.Variables["sources"], want) || result.Outputs["count"] != 2 {
-		t.Fatalf("result = %#v", result)
+	if result.Outputs["count"] != 2 {
+		t.Fatalf("count = %v, want 2", result.Outputs["count"])
+	}
+	if diff := cmp.Diff(want, result.Outputs["values"]); diff != "" {
+		t.Fatalf("values mismatch (-want +got):\n%s", diff)
+	}
+	if diff := cmp.Diff(want, result.Variables["sources"]); diff != "" {
+		t.Fatalf("sources mismatch (-want +got):\n%s", diff)
 	}
 }
 

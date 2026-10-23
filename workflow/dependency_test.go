@@ -3,9 +3,10 @@ package workflow
 import (
 	"context"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 
 	"github.com/up2jj/wuko/internal/testfs"
 )
@@ -83,8 +84,8 @@ func TestResolveDependencyPlanOrdersChainsAndDeduplicatesDiamonds(t *testing.T) 
 	for _, node := range plan.Order {
 		names = append(names, node.Definition.Name)
 	}
-	if want := []string{"base", "left", "right", "root"}; !reflect.DeepEqual(names, want) {
-		t.Fatalf("order = %v, want %v", names, want)
+	if diff := cmp.Diff([]string{"base", "left", "right", "root"}, names); diff != "" {
+		t.Fatalf("order mismatch (-want +got):\n%s", diff)
 	}
 	if plan.Root.Dependencies["left"].Dependencies["base"] != plan.Root.Dependencies["right"].Dependencies["base"] {
 		t.Fatal("shared dependency was not deduplicated")

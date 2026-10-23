@@ -5,9 +5,11 @@ import (
 	"context"
 	"errors"
 	"io"
-	"reflect"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 
 	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
@@ -37,8 +39,8 @@ func TestReturnFinishesWorkflowWithTypedOutputsAndSkippedSteps(t *testing.T) {
 		"artifact": "artifact.tar.gz", "cached": true, "count": 2,
 		"items": []any{"artifact.tar.gz", "checksum"}, "metadata": map[string]any{"source": "cache"},
 	}
-	if !reflect.DeepEqual(state.Outputs, want) {
-		t.Fatalf("outputs = %#v, want %#v", state.Outputs, want)
+	if diff := cmp.Diff(want, state.Outputs); diff != "" {
+		t.Fatalf("outputs mismatch (-want +got):\n%s", diff)
 	}
 	if runs != 1 || state.Stats.Succeeded != 1 || state.Stats.Skipped != 1 || len(state.Stats.Steps) != 2 {
 		t.Fatalf("runs = %d, stats = %#v", runs, state.Stats)
@@ -84,7 +86,7 @@ func TestReturnDestinationObserverFiresOnceAfterSuccessfulReturn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state.Outputs["result"] != "done" || !reflect.DeepEqual(destinations, []workflow.ReturnDestination{workflow.ReturnDestinationPicker}) {
+	if state.Outputs["result"] != "done" || !slices.Equal(destinations, []workflow.ReturnDestination{workflow.ReturnDestinationPicker}) {
 		t.Fatalf("outputs = %#v, destinations = %#v", state.Outputs, destinations)
 	}
 }
@@ -101,8 +103,8 @@ func TestReturnObserverReportsDestinationlessReturn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(destinations, []workflow.ReturnDestination{""}) {
-		t.Fatalf("destinations = %#v", destinations)
+	if diff := cmp.Diff([]workflow.ReturnDestination{""}, destinations); diff != "" {
+		t.Fatalf("destinations mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -258,8 +260,11 @@ func TestCompositeActionReturnSuppliesDeclaredOutputsWithoutRetry(t *testing.T) 
 		t.Fatal(err)
 	}
 	want := map[string]any{"result": "returned", "cached": true}
-	if got := attemptBody(state, "call", "call_body"); !reflect.DeepEqual(got, want) || runs != 0 || observed != 0 {
-		t.Fatalf("outputs = %#v, runs = %d, observer calls = %d", got, runs, observed)
+	if runs != 0 || observed != 0 {
+		t.Fatalf("runs = %d, observer calls = %d, want none", runs, observed)
+	}
+	if diff := cmp.Diff(want, attemptBody(state, "call", "call_body")); diff != "" {
+		t.Fatalf("outputs mismatch (-want +got):\n%s", diff)
 	}
 	if attempts := len(state.Stats.Steps[0].Attempts); attempts != 1 {
 		t.Fatalf("attempts = %d", attempts)

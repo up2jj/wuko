@@ -4,8 +4,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"reflect"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 
 	"github.com/up2jj/wuko/engine"
 	"github.com/up2jj/wuko/internal/steptest"
@@ -42,8 +43,8 @@ func TestDecodeShellOutputFeedsJSONPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := state.Steps["deployment_names"].(map[string]any)["value"]; !reflect.DeepEqual(got, []any{"api", "worker"}) {
-		t.Fatalf("deployment names = %#v", got)
+	if diff := cmp.Diff([]any{"api", "worker"}, state.Steps["deployment_names"].(map[string]any)["value"]); diff != "" {
+		t.Fatalf("deployment names mismatch (-want +got):\n%s", diff)
 	}
 }
 

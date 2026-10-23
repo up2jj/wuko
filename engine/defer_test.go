@@ -3,9 +3,10 @@ package engine
 import (
 	"context"
 	"errors"
-	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 
 	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
@@ -45,8 +46,8 @@ func TestAttachedDeferUnwindsGroupsBeforeFinally(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{"first", "second", "second_a", "first_a", "first_b", "final"}
-	if !reflect.DeepEqual(events, want) {
-		t.Fatalf("events = %#v, want %#v", events, want)
+	if diff := cmp.Diff(want, events); diff != "" {
+		t.Fatalf("events mismatch (-want +got):\n%s", diff)
 	}
 	for _, id := range []string{"second_a", "first_a", "first_b"} {
 		if state.Steps[id].(map[string]any)["done"] != true {
@@ -91,8 +92,8 @@ func TestAttachedDeferRegistersOnlyAfterSuccessAndContinuesErrors(t *testing.T) 
 		t.Fatalf("Run() state = %#v, error = %v", state, err)
 	}
 	want := []string{"created", "failed", "cleanup_fail", "cleanup_after", "inspect"}
-	if !reflect.DeepEqual(events, want) {
-		t.Fatalf("events = %#v, want %#v", events, want)
+	if diff := cmp.Diff(want, events); diff != "" {
+		t.Fatalf("events mismatch (-want +got):\n%s", diff)
 	}
 	if strings.Index(err.Error(), mainFailure.Error()) > strings.Index(err.Error(), cleanupFailure.Error()) {
 		t.Fatalf("error order = %v", err)
