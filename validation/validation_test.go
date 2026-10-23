@@ -124,3 +124,32 @@ func TestSourceExcerptRedactsTopLevelAndFlowKeys(t *testing.T) {
 		t.Fatalf("non-sensitive line was redacted: %q", got)
 	}
 }
+
+func TestSourceExcerptRedactsValuesContinuedBelowSensitiveKeys(t *testing.T) {
+	lines := []string{
+		"steps:",
+		"  - id: deploy",
+		"    with:",
+		"      password: |",
+		"        line-one-abc123",
+		"",
+		"        line-two-abc123",
+		"      api_key:",
+		"        wrapped-abc123",
+		"      tokens:",
+		"      - listed-abc123",
+		"      command: echo visible",
+	}
+	index := validation.NewLazySourceIndex("wuko.yaml", []byte(strings.Join(lines, "\n")+"\n"))
+	for number := 1; number <= len(lines); number++ {
+		if got := index.Excerpt(number); strings.Contains(got, "abc123") {
+			t.Fatalf("Excerpt(%d) = %q, leaked value", number, got)
+		}
+	}
+	if got := index.Excerpt(len(lines)); got != "      command: echo visible" {
+		t.Fatalf("sibling of a sensitive key was redacted: %q", got)
+	}
+	if got := index.Excerpt(2); got != "  - id: deploy" {
+		t.Fatalf("enclosing line was redacted: %q", got)
+	}
+}

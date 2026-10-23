@@ -143,7 +143,41 @@ func (i *SourceIndex) Excerpt(line int) string {
 	if line > len(i.lines) {
 		return ""
 	}
+	if nestedUnderSensitiveKey(i.lines, line-1) {
+		text := i.lines[line-1]
+		return text[:len(text)-len(strings.TrimLeft(text, " \t"))] + "<redacted>"
+	}
 	return redactSourceLine(i.lines[line-1])
+}
+
+// nestedUnderSensitiveKey reports whether the line at index belongs to the value of a
+// sensitive key declared on an enclosing, less-indented line. A block scalar such as
+// `password: |` or a value wrapped onto the next line puts the secret itself on a line that
+// carries no key of its own.
+func nestedUnderSensitiveKey(lines []string, index int) bool {
+	indent := indentation(lines[index])
+	if strings.HasPrefix(strings.TrimSpace(lines[index]), "-") {
+		// A sequence may sit at its key's own indentation: `tokens:` then `- value`.
+		indent++
+	}
+	for previous := index - 1; previous >= 0 && indent > 0; previous-- {
+		line := lines[previous]
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if lineIndent := indentation(line); lineIndent < indent {
+			if sensitiveYAMLKey.MatchString(line) {
+				return true
+			}
+			indent = lineIndent
+		}
+	}
+	return false
+}
+
+func indentation(line string) int {
+	return len(line) - len(strings.TrimLeft(line, " \t"))
 }
 
 func parentPath(path Path) Path {
