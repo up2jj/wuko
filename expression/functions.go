@@ -77,6 +77,10 @@ func indent(spaces int, value string) (string, error) {
 	if value == "" || spaces == 0 {
 		return value, nil
 	}
+	lineCount := int64(strings.Count(value, "\n") + 1)
+	if int64(spaces) > maxTextResultBytes || int64(len(value))+int64(spaces)*lineCount > maxTextResultBytes {
+		return "", fmt.Errorf("indent result exceeds %d bytes", maxTextResultBytes)
+	}
 	prefix := strings.Repeat(" ", spaces)
 	lines := strings.Split(value, "\n")
 	for i := range lines {

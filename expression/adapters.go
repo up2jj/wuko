@@ -221,10 +221,18 @@ func exprOptions() []expr.Option {
 			return required(values[1].(string), values[0])
 		}, new(func(any, string) any)),
 		expr.Function("indent", func(values ...any) (any, error) {
-			return indent(values[1].(int), values[0].(string))
+			spaces, err := integerArgument("indent width", values[1])
+			if err != nil {
+				return nil, err
+			}
+			return indent(spaces, values[0].(string))
 		}, new(func(string, int) string)),
 		expr.Function("nindent", func(values ...any) (any, error) {
-			return nindent(values[1].(int), values[0].(string))
+			spaces, err := integerArgument("nindent width", values[1])
+			if err != nil {
+				return nil, err
+			}
+			return nindent(spaces, values[0].(string))
 		}, new(func(string, int) string)),
 		expr.Function("list", func(values ...any) (any, error) {
 			return list(values...), nil
@@ -248,7 +256,11 @@ func exprOptions() []expr.Option {
 			return indexBy(values[0], values[1].(string))
 		}, new(func(any, string) map[string]any)),
 		expr.Function("chunk", func(values ...any) (any, error) {
-			return chunk(values[0], values[1].(int))
+			size, err := integerArgument("chunk size", values[1])
+			if err != nil {
+				return nil, err
+			}
+			return chunk(values[0], size)
 		}, new(func(any, int) [][]any)),
 		expr.Function("toJSON", func(values ...any) (any, error) {
 			return toJSON(values[0])

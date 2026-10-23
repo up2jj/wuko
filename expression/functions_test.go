@@ -2,6 +2,7 @@ package expression
 
 import (
 	"bytes"
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -327,5 +328,46 @@ func TestRequiredErrorIncludesMessage(t *testing.T) {
 	_, err := Eval(`required("", "application is required")`, map[string]any{})
 	if err == nil || !strings.Contains(err.Error(), "application is required") {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestExprIntegerArgumentsAcceptDecodedNumbers(t *testing.T) {
+	// Values nested in maps reach the functions untyped, as decoded JSON and YAML do.
+	tests := []struct {
+		name   string
+		source string
+		env    map[string]any
+		want   any
+	}{
+		{name: "indent int64", source: `indent("a", vars.width)`, env: map[string]any{"vars": map[string]any{"width": int64(2)}}, want: "  a"},
+		{name: "nindent float64", source: `nindent("a", vars.width)`, env: map[string]any{"vars": map[string]any{"width": float64(1)}}, want: "\n a"},
+		{name: "chunk json number", source: `chunk(["a", "b"], vars.size)`, env: map[string]any{"vars": map[string]any{"size": json.Number("1")}}, want: [][]any{{"a"}, {"b"}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := Eval(tt.source, tt.env)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("got %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIndentRejectsOversizedResults(t *testing.T) {
+	value := strings.Repeat("x\n", 1000)
+	if _, err := indent(maxTextResultBytes/100, value); err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("error = %v, want size limit", err)
+	}
+}
+
+func TestIntegerArgumentRejectsFloatAtTwoToTheSixtyThree(t *testing.T) {
+	if _, err := integerArgument("value", float64(1<<63)); err == nil {
+		t.Fatal("2^63 was accepted as an int64")
+	}
+	if _, ok := integralFloat(float64(1 << 63)); ok {
+		t.Fatal("2^63 was accepted as an int")
 	}
 }

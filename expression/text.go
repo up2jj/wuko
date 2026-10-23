@@ -328,7 +328,8 @@ func integralFloat(value float64) (int, bool) {
 	if math.IsNaN(value) || math.IsInf(value, 0) || value != math.Trunc(value) {
 		return 0, false
 	}
-	if value > math.MaxInt || value < math.MinInt {
+	// float64(math.MaxInt) rounds up to a value int cannot hold on 64-bit platforms.
+	if value >= math.MaxInt || value < math.MinInt {
 		return 0, false
 	}
 	return int(value), true

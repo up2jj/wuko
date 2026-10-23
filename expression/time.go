@@ -171,7 +171,8 @@ func integerArgument(subject string, value any) (int, error) {
 		}
 		number = int64(typed)
 	case float64:
-		if math.Trunc(typed) != typed || typed < math.MinInt64 || typed > math.MaxInt64 {
+		// float64(math.MaxInt64) rounds up to 2^63, which int64 cannot hold.
+		if math.Trunc(typed) != typed || typed < math.MinInt64 || typed >= math.MaxInt64 {
 			return 0, fmt.Errorf("%s must be an integer", subject)
 		}
 		number = int64(typed)
