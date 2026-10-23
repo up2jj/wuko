@@ -12,6 +12,7 @@ Use the repository's `justfile` as the command entry point:
 - `just run --help` runs the CLI from source with arguments.
 - `just test` runs `go test ./...`.
 - `just test-short` skips the slow tests that compile generated plugin modules.
+- `just fuzz <package> <target> [time]` fuzzes one target locally, for example `just fuzz ./expression FuzzEval 2m`; `just fuzz-seeds` replays every seed corpus. Fuzz tests carry the `fuzz` build tag, so CI and `go test ./...` never run them.
 - `just vet` runs Go's static checks.
 - `just lint` runs staticcheck (configured in `staticcheck.conf`).
 - `just fmt` formats all Go sources with `gofmt`.

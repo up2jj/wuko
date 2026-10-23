@@ -12,6 +12,7 @@ just build        # build ./wuko
 just test         # go test ./...
 just test-race    # what CI and the pre-push hook run
 just vet          # go vet ./...
+just fuzz ./expression FuzzEval 2m  # local only; fuzz tests are not run in CI
 just fmt          # gofmt -w .
 just run --help
 ```

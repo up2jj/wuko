@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"math"
 	"runtime"
 	"slices"
@@ -515,6 +516,12 @@ func (r *Registry) SetOutputSchemaResolver(resolver OutputSchemaResolver) {
 // stricter contract.
 func (r *Registry) Register(name string, builder Builder) error {
 	return r.RegisterDefinition(name, Registration{Builder: builder, Outputs: OpenObject()})
+}
+
+// Names returns the statically registered step types in sorted order. Types a resolver
+// supplies on demand, such as plugin steps, are not included.
+func (r *Registry) Names() []string {
+	return slices.Sorted(maps.Keys(r.definitions))
 }
 
 // RegisterDefinition registers a builder and its co-located output contract.

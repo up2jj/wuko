@@ -39,6 +39,15 @@ test-devenv:
 smoke-devenv:
     WUKO_SMOKE_REQUIRED=1 go test -tags devenv_smoke -count=1 ./smoke
 
+# Fuzz one target locally; fuzz tests are excluded from CI by the fuzz build tag.
+# Example: just fuzz ./expression FuzzEval 2m
+fuzz package target time="1m":
+    go test -tags fuzz {{package}} -run '^$' -fuzz '^{{target}}$' -fuzztime {{time}}
+
+# Run every fuzz target's seed corpus as ordinary tests.
+fuzz-seeds:
+    go test -tags fuzz -run '^Fuzz' ./cmd ./expression ./form ./fswatch ./validation ./workflow
+
 # Run go vet.
 vet:
     go vet ./...

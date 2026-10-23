@@ -2,6 +2,7 @@ package step_test
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	"github.com/up2jj/wuko/step"
@@ -61,5 +62,17 @@ func TestValidateOutputKeys(t *testing.T) {
 	}
 	if err := step.ValidateOutputKeys(schema, map[string]any{"sttaus": 200}); err == nil {
 		t.Fatal("expected undeclared output failure")
+	}
+}
+
+func TestRegistryNamesListsStaticTypesInOrder(t *testing.T) {
+	registry := step.NewRegistry()
+	for _, name := range []string{"shell", "http", "lua"} {
+		if err := registry.Register(name, func(map[string]any) (step.Runner, error) { return schemaRunner{}, nil }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := registry.Names(); !slices.Equal(got, []string{"http", "lua", "shell"}) {
+		t.Fatalf("Names() = %v", got)
 	}
 }
