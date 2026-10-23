@@ -402,7 +402,10 @@ The remaining `file` operations -- `copy`, `move`, `remove`, `list`, `chmod`, `f
 `truncate`, `tail`, `disk_usage`, `atomic_swap`, `permissions`, and `touch` -- depend on host
 semantics such as links, renames, and directory walks that the session filesystem does not carry,
 and are rejected during validation. An executor that runs commands but exposes no filesystem at all,
-as [plugin executors](plugins.md) do, rejects every file step in its scope.
+as [plugin executors](plugins.md) do, rejects every file step in its scope. A
+[`transform`](steps-data.md#transform) that streams `from: {file: ...}` reads the host file item by
+item, which an executor session cannot offer, so it fails inside any executor block; use `decode`
+there instead.
 
 ## Sharing files with local steps
 

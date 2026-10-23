@@ -76,9 +76,11 @@ func collect(stream itemStream) ([]any, error) { return collectAtMost(stream, -1
 // intermediate list is built, and an operation that needs only a prefix of its input, such
 // as take or find, stops the operations before it from evaluating the rest. Any other
 // operation receives the collected list and runs exactly as it always has.
-func (runner *Runner) runPipeline(ctx context.Context, request *evaluation, source any) (any, error) {
+//
+// A source stream, such as a file read item by item, takes the place of the source value.
+func (runner *Runner) runPipeline(ctx context.Context, request *evaluation, source any, sourceStream itemStream) (any, error) {
 	current := source
-	var stream itemStream
+	stream := sourceStream
 	for position, operation := range runner.operations {
 		if err := checkContext(ctx); err != nil {
 			return nil, err

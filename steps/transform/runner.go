@@ -3,6 +3,7 @@ package transform
 import (
 	"context"
 	"fmt"
+	"io"
 
 	"github.com/expr-lang/expr"
 	"github.com/up2jj/wuko/step"
@@ -13,11 +14,20 @@ func (runner *Runner) Run(ctx context.Context, request step.Request) (step.Resul
 		return step.Result{}, err
 	}
 	evaluation := newEvaluation(request)
-	current, err := runner.resolveSource(evaluation)
-	if err != nil {
+	var current any
+	var source itemStream
+	var err error
+	if runner.config.From.file != "" {
+		var file io.Closer
+		file, source, err = runner.openFileSource(ctx, request)
+		if err != nil {
+			return step.Result{}, err
+		}
+		defer file.Close()
+	} else if current, err = runner.resolveSource(evaluation); err != nil {
 		return step.Result{}, err
 	}
-	current, err = runner.runPipeline(ctx, evaluation, current)
+	current, err = runner.runPipeline(ctx, evaluation, current, source)
 	if err != nil {
 		return step.Result{}, err
 	}

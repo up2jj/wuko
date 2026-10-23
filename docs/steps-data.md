@@ -119,10 +119,10 @@ from its caller. See [Templates](templates.md#one-off-template-rendering) for ex
 
 ## `transform`
 
-Run an ordered, deterministic pipeline over a list or object. `from` is either a dotted `steps.*`
-or `vars.*` path, or an Expr source. `operations` is required and cannot be empty. The natural
-final result is exposed only as `.steps.<id>.value`; when `variable` is present, `.vars.<variable>`
-receives the same value.
+Run an ordered, deterministic pipeline over a list or object. `from` is a dotted `steps.*` or
+`vars.*` path, an Expr source, or a file streamed item by item. `operations` is required and
+cannot be empty. The natural final result is exposed only as `.steps.<id>.value`; when `variable`
+is present, `.vars.<variable>` receives the same value.
 
 ```yaml
 - id: changed_apps
@@ -154,6 +154,27 @@ Use an expression source when the input needs to be computed first:
       - filter: item.enabled
       - map: item.name
       - sort
+```
+
+For large data, stream a file instead of decoding it first. `from: {file: ...}` reads a JSON array
+or JSON Lines file one item at a time, so memory follows what the pipeline keeps rather than the
+size of the file: a `filter`, `map`, and `take` over a multi-gigabyte export holds only the items
+it returns. The format comes from the extension (`.json`, `.jsonl`, or `.ndjson`) or from `format:
+json` or `format: jsonl`. A relative path resolves against the run directory, and `max_bytes`
+optionally caps the file size. Items are the same values `decode` would produce, and numbers are
+plain numbers that expressions can compare. A JSON file must hold one top-level array; JSON Lines
+skips blank lines. Reading stops once the result is known, so content past that point is never
+parsed. Inside an executor block the host file cannot be streamed, and the step fails.
+
+```yaml
+- id: active_emails
+  type: transform
+  with:
+    from: {file: exports/users.jsonl}
+    operations:
+      - filter: item.active
+      - map: item.email
+      - take: 100
 ```
 
 Zero-argument operations are names (`- unique`). Parameterized operations have one operation key

@@ -78,24 +78,49 @@ func OperationNames() []string { return slices.Sorted(maps.Keys(descriptors)) }
 type source struct {
 	path string
 	expr string
+	// file names a JSON array or JSONL file read item by item; format and maxBytes apply to it.
+	file     string
+	format   string
+	maxBytes string
 }
 
 func (source *source) UnmarshalYAML(node *yaml.Node) error {
 	switch node.Kind {
 	case yaml.ScalarNode:
 		if node.Tag != "!!str" || strings.TrimSpace(node.Value) == "" {
-			return fmt.Errorf("from must be a dotted path or an object containing expr")
+			return fmt.Errorf("from must be a dotted path or an object containing expr or file")
 		}
 		source.path = node.Value
 		return nil
 	case yaml.MappingNode:
-		if len(node.Content) != 2 || node.Content[0].Value != "expr" || node.Content[1].Tag != "!!str" || strings.TrimSpace(node.Content[1].Value) == "" {
-			return fmt.Errorf("from expression must contain exactly one non-empty expr field")
+		fields := make(map[string]string, len(node.Content)/2)
+		for index := 0; index+1 < len(node.Content); index += 2 {
+			key, value := node.Content[index].Value, node.Content[index+1]
+			switch key {
+			case "expr", "file", "format", "max_bytes":
+			default:
+				return fmt.Errorf("from has unknown field %q; use expr, or file with optional format and max_bytes", key)
+			}
+			if value.Kind != yaml.ScalarNode || value.Tag != "!!str" || strings.TrimSpace(value.Value) == "" {
+				return fmt.Errorf("from.%s must be a non-empty string", key)
+			}
+			fields[key] = value.Value
 		}
-		source.expr = node.Content[1].Value
+		_, hasExpr := fields["expr"]
+		_, hasFile := fields["file"]
+		switch {
+		case hasExpr && len(fields) == 1:
+			source.expr = fields["expr"]
+		case hasFile && !hasExpr:
+			source.file, source.format, source.maxBytes = fields["file"], fields["format"], fields["max_bytes"]
+		case hasExpr:
+			return fmt.Errorf("from expression must contain exactly one non-empty expr field")
+		default:
+			return fmt.Errorf("from must contain expr or file")
+		}
 		return nil
 	default:
-		return fmt.Errorf("from must be a dotted path or an object containing expr")
+		return fmt.Errorf("from must be a dotted path or an object containing expr or file")
 	}
 }
 
@@ -194,8 +219,11 @@ func New(raw map[string]any) (step.Runner, error) {
 	if err := step.DecodeConfig(raw, &config); err != nil {
 		return nil, err
 	}
-	if config.From.path == "" && config.From.expr == "" {
+	if config.From.path == "" && config.From.expr == "" && config.From.file == "" {
 		return nil, fmt.Errorf("from is required")
+	}
+	if err := config.From.validateFile(false); err != nil {
+		return nil, err
 	}
 	if config.From.path != "" && !validSourcePath(config.From.path) {
 		return nil, fmt.Errorf("from path must start with steps. or vars.")
@@ -217,6 +245,9 @@ func New(raw map[string]any) (step.Runner, error) {
 	}
 
 	known := kindUnknown
+	if config.From.file != "" {
+		known = kindList
+	}
 	for index, rawOperation := range config.Operations {
 		parsed, err := parseOperation(index, rawOperation)
 		if err != nil {
