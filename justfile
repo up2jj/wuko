@@ -59,7 +59,7 @@ tidy:
 hooks:
     prek install --hook-type pre-commit --hook-type pre-push
 
-# Run wuko in the current directory (pass flags after --, e.g. `just run -- --help`).
+# Run wuko in the current directory, e.g. `just run --help`.
 run *args:
     go run . {{ args }}
 

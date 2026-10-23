@@ -13,7 +13,7 @@ just test         # go test ./...
 just test-race    # what CI and the pre-push hook run
 just vet          # go vet ./...
 just fmt          # gofmt -w .
-just run -- --help
+just run --help
 ```
 
 Run `just hooks` once to install the [prek](https://github.com/j178/prek) pre-commit and pre-push

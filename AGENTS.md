@@ -9,7 +9,7 @@ Wuko is a Go 1.26 CLI for trusted YAML workflows. `main.go` is the entry point; 
 Use the repository's `justfile` as the command entry point:
 
 - `just build` builds `./wuko`.
-- `just run -- --help` runs the CLI from source with arguments.
+- `just run --help` runs the CLI from source with arguments.
 - `just test` runs `go test ./...`.
 - `just test-short` skips the slow tests that compile generated plugin modules.
 - `just vet` runs Go's static checks.
