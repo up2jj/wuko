@@ -215,6 +215,9 @@ func takeFilterStage(ctx context.Context, request *evaluation, upstream itemStre
 		return nil, fmt.Errorf("count must be a non-negative integer")
 	}
 	return func(yield func(any, error) bool) {
+		if count == 0 {
+			return
+		}
 		taken := 0
 		index := 0
 		for item, err := range upstream {

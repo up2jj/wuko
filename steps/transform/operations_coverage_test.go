@@ -47,6 +47,9 @@ func TestOperationsProduceExpectedValues(t *testing.T) {
 		{name: "drop removes leading items", operation: map[string]any{"drop": 2}, source: []any{1, 2, 3, 4}, want: []any{3, 4}},
 		{name: "drop rejects negative count", operation: map[string]any{"drop": -1}, source: []any{1}, wantErr: "drop must be a non-negative integer"},
 
+		{name: "take_filter of zero is empty", operation: map[string]any{"take_filter": map[string]any{"count": 0, "when": "true"}}, source: []any{1, 2}, want: []any{}},
+		{name: "take_filter stops at count", operation: map[string]any{"take_filter": map[string]any{"count": 1, "when": "item > 1"}}, source: []any{1, 2, 3}, want: []any{2}},
+
 		{name: "drop_while stops at first mismatch", operation: map[string]any{"drop_while": "item < 3"}, source: []any{1, 2, 3, 1, 4}, want: []any{3, 1, 4}},
 
 		// Operations that copy a range of the list must still return [] rather than null

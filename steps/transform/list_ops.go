@@ -471,6 +471,9 @@ func selectionOperation(ctx context.Context, request *evaluation, list []any, op
 			return nil, fmt.Errorf("count must be a non-negative integer")
 		}
 		result := make([]any, 0, min(count, len(list)))
+		if count == 0 {
+			return result, nil
+		}
 		for index, item := range list {
 			matches, err := evaluateItemBool(ctx, request, operation, "when", item, index)
 			if err != nil {
