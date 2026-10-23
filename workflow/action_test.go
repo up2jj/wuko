@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/up2jj/wuko/internal/archivetest"
 	"github.com/up2jj/wuko/internal/testfs"
+	"github.com/up2jj/wuko/internal/transporttest"
 )
 
 const validAction = `version: 1
@@ -36,12 +36,12 @@ steps:
 func TestLoaderResolvesAndCachesHTTPSActions(t *testing.T) {
 	t.Parallel()
 	var requests atomic.Int32
-	client := testHTTPClient(func(request *http.Request) (*http.Response, error) {
+	client := transporttest.Client(func(request *http.Request) (*http.Response, error) {
 		requests.Add(1)
 		if request.URL.Path != "/v1/build" {
 			t.Errorf("path = %q", request.URL.Path)
 		}
-		return testResponse(http.StatusOK, []byte(validAction)), nil
+		return transporttest.Response(http.StatusOK, []byte(validAction)), nil
 	})
 
 	digest := sha256.Sum256([]byte(validAction))
@@ -256,11 +256,11 @@ func TestLoaderRejectsInvalidLocalActionSources(t *testing.T) {
 
 func TestLoaderRendersActionSourceWithNamedTemplate(t *testing.T) {
 	t.Parallel()
-	client := testHTTPClient(func(request *http.Request) (*http.Response, error) {
+	client := transporttest.Client(func(request *http.Request) (*http.Response, error) {
 		if request.URL.Path != "/v2/build" {
 			t.Fatalf("path = %q", request.URL.Path)
 		}
-		return testResponse(http.StatusOK, []byte(validAction)), nil
+		return transporttest.Response(http.StatusOK, []byte(validAction)), nil
 	})
 	workflowPath := writeActionWorkflow(t, `version: 1
 name: caller
@@ -278,8 +278,8 @@ steps:
 
 func TestLoaderResolvesActionInsideConcurrentGroup(t *testing.T) {
 	t.Parallel()
-	client := testHTTPClient(func(*http.Request) (*http.Response, error) {
-		return testResponse(http.StatusOK, []byte(validAction)), nil
+	client := transporttest.Client(func(*http.Request) (*http.Response, error) {
+		return transporttest.Response(http.StatusOK, []byte(validAction)), nil
 	})
 	workflowPath := writeActionWorkflow(t, `version: 1
 name: caller
@@ -305,8 +305,8 @@ steps:
 
 func TestLoaderResolvesStaticActionsInsideFanoutControls(t *testing.T) {
 	t.Parallel()
-	client := testHTTPClient(func(*http.Request) (*http.Response, error) {
-		return testResponse(http.StatusOK, []byte(validAction)), nil
+	client := transporttest.Client(func(*http.Request) (*http.Response, error) {
+		return transporttest.Response(http.StatusOK, []byte(validAction)), nil
 	})
 	workflowPath := writeActionWorkflow(t, `version: 1
 name: caller
@@ -362,8 +362,8 @@ steps:
 
 func TestLoaderRejectsChecksumAndNestedAction(t *testing.T) {
 	t.Parallel()
-	client := testHTTPClient(func(*http.Request) (*http.Response, error) {
-		return testResponse(http.StatusOK, []byte(validAction)), nil
+	client := transporttest.Client(func(*http.Request) (*http.Response, error) {
+		return transporttest.Response(http.StatusOK, []byte(validAction)), nil
 	})
 
 	t.Run("checksum mismatch", func(t *testing.T) {
@@ -376,7 +376,9 @@ func TestLoaderRejectsChecksumAndNestedAction(t *testing.T) {
 
 	t.Run("nested action", func(t *testing.T) {
 		nested := strings.ReplaceAll(validAction, "type: capture", "uses: https://example.test/action")
-		nestedClient := testHTTPClient(func(*http.Request) (*http.Response, error) { return testResponse(http.StatusOK, []byte(nested)), nil })
+		nestedClient := transporttest.Client(func(*http.Request) (*http.Response, error) {
+			return transporttest.Response(http.StatusOK, []byte(nested)), nil
+		})
 		path := writeActionWorkflow(t, "version: 1\nname: caller\nsteps:\n  - id: remote\n    uses: https://actions.example.test/action\n")
 		_, err := NewLoader(nestedClient).Load(t.Context(), path, LoadOptions{})
 		if err == nil || !strings.Contains(err.Error(), "nested composite actions") {
@@ -396,7 +398,9 @@ func TestLoaderSupportsZIPAndTarGzipPackages(t *testing.T) {
 		"tar.gz": makeTarGzip(t, files),
 	} {
 		t.Run(name, func(t *testing.T) {
-			client := testHTTPClient(func(*http.Request) (*http.Response, error) { return testResponse(http.StatusOK, payload), nil })
+			client := transporttest.Client(func(*http.Request) (*http.Response, error) {
+				return transporttest.Response(http.StatusOK, payload), nil
+			})
 			path := writeActionWorkflow(t, "version: 1\nname: caller\nsteps:\n  - id: remote\n    uses: https://actions.example.test/package\n")
 			definition, err := NewLoader(client).Load(t.Context(), path, LoadOptions{})
 			if err != nil {
@@ -434,7 +438,9 @@ steps:
 		"action.yml":             {data: []byte(manifest), mode: 0o644},
 		"templates/message.tmpl": {data: []byte("Hello {{ .inputs.name }}"), mode: 0o644},
 	})
-	client := testHTTPClient(func(*http.Request) (*http.Response, error) { return testResponse(http.StatusOK, payload), nil })
+	client := transporttest.Client(func(*http.Request) (*http.Response, error) {
+		return transporttest.Response(http.StatusOK, payload), nil
+	})
 	path := writeActionWorkflow(t, "version: 1\nname: caller\nsteps:\n  - id: remote\n    uses: https://actions.example.test/package\n")
 	definition, err := NewLoader(client).Load(t.Context(), path, LoadOptions{})
 	if err != nil {
@@ -456,8 +462,8 @@ steps:
   - id: run
     type: capture
 `
-	client := testHTTPClient(func(*http.Request) (*http.Response, error) {
-		return testResponse(http.StatusOK, []byte(manifest)), nil
+	client := transporttest.Client(func(*http.Request) (*http.Response, error) {
+		return transporttest.Response(http.StatusOK, []byte(manifest)), nil
 	})
 	path := writeActionWorkflow(t, "version: 1\nname: caller\nsteps:\n  - id: remote\n    uses: https://actions.example.test/action\n")
 	_, err := NewLoader(client).Load(t.Context(), path, LoadOptions{})
@@ -625,7 +631,9 @@ func TestLoaderRejectsUnsafeArchive(t *testing.T) {
 		"action.yml": {data: []byte(validAction), mode: 0o644},
 		"../escape":  {data: []byte("bad"), mode: 0o644},
 	})
-	client := testHTTPClient(func(*http.Request) (*http.Response, error) { return testResponse(http.StatusOK, payload), nil })
+	client := transporttest.Client(func(*http.Request) (*http.Response, error) {
+		return transporttest.Response(http.StatusOK, payload), nil
+	})
 	path := writeActionWorkflow(t, "version: 1\nname: caller\nsteps:\n  - id: remote\n    uses: https://actions.example.test/package\n")
 	_, err := NewLoader(client).Load(t.Context(), path, LoadOptions{})
 	if err == nil || !strings.Contains(err.Error(), "unsafe path") {
@@ -641,7 +649,7 @@ func TestLoaderEnforcesRemotePolicyAndManifestLimits(t *testing.T) {
 		sha        string
 		status     int
 		body       []byte
-		transport  roundTripFunc
+		transport  transporttest.RoundTripFunc
 		want       string
 		notContain string
 	}{
@@ -672,7 +680,7 @@ func TestLoaderEnforcesRemotePolicyAndManifestLimits(t *testing.T) {
 					if body == nil {
 						body = []byte(validAction)
 					}
-					return testResponse(status, body), nil
+					return transporttest.Response(status, body), nil
 				}
 			}
 			shaLine := ""
@@ -680,7 +688,7 @@ func TestLoaderEnforcesRemotePolicyAndManifestLimits(t *testing.T) {
 				shaLine = "    sha256: " + tt.sha + "\n"
 			}
 			filename := writeActionWorkflow(t, "version: 1\nname: caller\nsteps:\n  - id: remote\n    uses: "+tt.uses+"\n"+shaLine)
-			_, err := NewLoader(testHTTPClient(transport)).Load(t.Context(), filename, LoadOptions{})
+			_, err := NewLoader(transporttest.Client(transport)).Load(t.Context(), filename, LoadOptions{})
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("error = %v, want substring %q", err, tt.want)
 			}
@@ -693,7 +701,7 @@ func TestLoaderEnforcesRemotePolicyAndManifestLimits(t *testing.T) {
 
 func TestLoaderHonorsCancellationAndRejectsInsecureRedirects(t *testing.T) {
 	t.Parallel()
-	client := testHTTPClient(func(request *http.Request) (*http.Response, error) {
+	client := transporttest.Client(func(request *http.Request) (*http.Response, error) {
 		<-request.Context().Done()
 		return nil, request.Context().Err()
 	})
@@ -728,7 +736,9 @@ func TestLoaderRejectsAmbiguousArchiveManifest(t *testing.T) {
 		"action.yml":  {data: []byte(validAction), mode: 0o644},
 		"action.yaml": {data: []byte(validAction), mode: 0o644},
 	})
-	client := testHTTPClient(func(*http.Request) (*http.Response, error) { return testResponse(http.StatusOK, payload), nil })
+	client := transporttest.Client(func(*http.Request) (*http.Response, error) {
+		return transporttest.Response(http.StatusOK, payload), nil
+	})
 	filename := writeActionWorkflow(t, "version: 1\nname: caller\nsteps:\n  - id: remote\n    uses: https://actions.example.test/package\n")
 	_, err := NewLoader(client).Load(t.Context(), filename, LoadOptions{})
 	if err == nil || !strings.Contains(err.Error(), "multiple action manifests") {
@@ -746,16 +756,6 @@ func TestDiscoverDoesNotFetchRemoteActions(t *testing.T) {
 	if _, err := Discover(root, "", ""); err != nil {
 		t.Fatal(err)
 	}
-}
-
-type roundTripFunc func(*http.Request) (*http.Response, error)
-
-func (function roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
-	return function(request)
-}
-
-func testHTTPClient(function roundTripFunc) *http.Client {
-	return &http.Client{Transport: function}
 }
 
 func TestDecodeActionMarksBorrowedDirectory(t *testing.T) {
@@ -777,10 +777,6 @@ func TestDecodeActionMarksBorrowedDirectory(t *testing.T) {
 	if action.DirBorrowed || action.Dir != "" {
 		t.Fatalf("archived action: DirBorrowed = %v, Dir = %q", action.DirBorrowed, action.Dir)
 	}
-}
-
-func testResponse(status int, body []byte) *http.Response {
-	return &http.Response{StatusCode: status, Status: fmt.Sprintf("%d %s", status, http.StatusText(status)), Body: io.NopCloser(bytes.NewReader(body)), Header: make(http.Header)}
 }
 
 func writeActionWorkflow(t *testing.T, data string) string {

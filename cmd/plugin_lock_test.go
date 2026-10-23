@@ -17,6 +17,7 @@ import (
 
 	"github.com/up2jj/wuko/internal/archivetest"
 	"github.com/up2jj/wuko/internal/testfs"
+	"github.com/up2jj/wuko/internal/transporttest"
 	pluginpkg "github.com/up2jj/wuko/plugin"
 	"github.com/up2jj/wuko/workflow"
 )
@@ -137,7 +138,7 @@ func TestRemoteRunLeavesExistingLocalLockUntouched(t *testing.T) {
 	original := []byte("malformed local lock must be ignored\n")
 	testfs.WriteFile(t, path, original, 0600)
 	var manifests, archives, workflows atomic.Int32
-	client := &http.Client{Transport: commandRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+	client := &http.Client{Transport: transporttest.RoundTripFunc(func(request *http.Request) (*http.Response, error) {
 		var body []byte
 		switch request.URL.Path {
 		case "/workflow.yaml":
@@ -245,7 +246,7 @@ func TestMaterializedRemoteKeepsRemotePluginPolicy(t *testing.T) {
 	path := filepath.Join(snapshot, "wuko.yaml")
 	testfs.WriteFile(t, path, pluginWorkflow("https://plugins.test/plugin.json"), 0600)
 	var manifests atomic.Int32
-	client := &http.Client{Transport: commandRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+	client := &http.Client{Transport: transporttest.RoundTripFunc(func(request *http.Request) (*http.Response, error) {
 		body := archive
 		if request.URL.Path == "/plugin.json" {
 			body = manifest
@@ -282,7 +283,7 @@ func TestRemoteInvocationDoesNotMutateDependencyLock(t *testing.T) {
 	testfs.WriteFile(t, filepath.Join(workflows, "child.yaml"), []byte(child), 0600)
 	manifest, archive := commandPluginBundle(t, "")
 	remote := strings.Replace(string(pluginWorkflow("https://plugins.test/plugin.json")), "name: demo", "name: remote\ndepends_on:\n  prerequisite: child", 1)
-	client := &http.Client{Transport: commandRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+	client := &http.Client{Transport: transporttest.RoundTripFunc(func(request *http.Request) (*http.Response, error) {
 		var body []byte
 		switch request.URL.Path {
 		case "/workflow.yaml":

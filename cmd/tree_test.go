@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/up2jj/wuko/internal/testfs"
+	"github.com/up2jj/wuko/internal/transporttest"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
 	"go.yaml.in/yaml/v3"
@@ -42,7 +43,7 @@ steps:
   - id: package
     type: shell
 `
-	client := &http.Client{Transport: commandRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+	client := &http.Client{Transport: transporttest.RoundTripFunc(func(request *http.Request) (*http.Response, error) {
 		if request.URL.String() != "https://actions.example.test/v1/build?token=secret" {
 			t.Fatalf("action URL = %q", request.URL)
 		}
@@ -92,7 +93,7 @@ func TestTreeCommandSupportsFileAndRemoteWorkflowSelectors(t *testing.T) {
 			path := filepath.Join(root, "workflow.yaml")
 			data := "version: 1\nname: selected\nsteps:\n  - id: run\n    type: shell\n"
 			testfs.WriteFile(t, path, []byte(data), 0o644)
-			client := &http.Client{Transport: commandRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+			client := &http.Client{Transport: transporttest.RoundTripFunc(func(request *http.Request) (*http.Response, error) {
 				return &http.Response{StatusCode: http.StatusOK, Status: "200 OK", Header: make(http.Header), Body: io.NopCloser(strings.NewReader(data)), Request: request}, nil
 			})}
 			var output bytes.Buffer

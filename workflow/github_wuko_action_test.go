@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/internal/archivetest"
+	"github.com/up2jj/wuko/internal/transporttest"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -141,7 +142,7 @@ steps:
 		{name: "actions/other/action.yaml", data: []byte("# a sibling action that must not be packaged")},
 	})
 	var requests atomic.Int32
-	client := testHTTPClient(func(request *http.Request) (*http.Response, error) {
+	client := transporttest.Client(func(request *http.Request) (*http.Response, error) {
 		requests.Add(1)
 		if got := request.Header.Get("Authorization"); got != "Bearer private-token" {
 			return nil, fmt.Errorf("authorization = %q", got)
@@ -152,7 +153,7 @@ steps:
 		if request.URL.EscapedPath() != "/repos/acme/private-actions/tarball/main" {
 			return nil, fmt.Errorf("unexpected request %s", request.URL)
 		}
-		return testResponse(http.StatusOK, tarball), nil
+		return transporttest.Response(http.StatusOK, tarball), nil
 	})
 	loader := NewLoader(client)
 	loader.githubStoredTokenFn = func(context.Context, map[string]string) string {
@@ -214,7 +215,7 @@ func TestLoaderGitHubHostedWukoActionUsesDefaultBranchAndAnonymousAccess(t *test
 	tarball := makeGitHubTarball(t, "acme-public-actions-0123456", []githubArchiveEntry{
 		{name: "build/action.yml", data: []byte(validAction)},
 	})
-	client := testHTTPClient(func(request *http.Request) (*http.Response, error) {
+	client := transporttest.Client(func(request *http.Request) (*http.Response, error) {
 		if request.Header.Get("Authorization") != "" {
 			return nil, fmt.Errorf("unexpected authorization")
 		}
@@ -222,7 +223,7 @@ func TestLoaderGitHubHostedWukoActionUsesDefaultBranchAndAnonymousAccess(t *test
 		if request.URL.EscapedPath() != "/repos/acme/public-actions/tarball" {
 			return nil, fmt.Errorf("unexpected request %s", request.URL)
 		}
-		return testResponse(http.StatusOK, tarball), nil
+		return transporttest.Response(http.StatusOK, tarball), nil
 	})
 	loader := NewLoader(client)
 	loader.githubStoredTokenFn = func(context.Context, map[string]string) string { return "" }
@@ -237,11 +238,11 @@ func TestLoaderGitHubHostedWukoActionAcceptsScalarLocator(t *testing.T) {
 	tarball := makeGitHubTarball(t, "acme-public-actions-0123456", []githubArchiveEntry{
 		{name: "build/action.yml", data: []byte(validAction)},
 	})
-	client := testHTTPClient(func(request *http.Request) (*http.Response, error) {
+	client := transporttest.Client(func(request *http.Request) (*http.Response, error) {
 		if request.URL.EscapedPath() != "/repos/acme/public-actions/tarball/main" {
 			return nil, fmt.Errorf("unexpected request %s", request.URL)
 		}
-		return testResponse(http.StatusOK, tarball), nil
+		return transporttest.Response(http.StatusOK, tarball), nil
 	})
 	loader := NewLoader(client)
 	loader.githubStoredTokenFn = func(context.Context, map[string]string) string { return "" }
@@ -270,8 +271,8 @@ steps:
 
 func TestLoaderGitHubHostedWukoActionRejectsSHA256AndRedactsToken(t *testing.T) {
 	t.Parallel()
-	loader := NewLoader(testHTTPClient(func(*http.Request) (*http.Response, error) {
-		return testResponse(http.StatusNotFound, nil), nil
+	loader := NewLoader(transporttest.Client(func(*http.Request) (*http.Response, error) {
+		return transporttest.Response(http.StatusNotFound, ""), nil
 	}))
 	loader.githubStoredTokenFn = func(context.Context, map[string]string) string { return "" }
 	withSHA := writeActionWorkflow(t, "version: 1\nname: caller\nsteps:\n  - id: build\n    uses:\n      github: acme/private:build\n      token: private-secret-token\n    sha256: "+strings.Repeat("a", 64)+"\n")
@@ -291,7 +292,7 @@ func TestLoaderGitHubHostedWukoActionRejectsSHA256AndRedactsToken(t *testing.T) 
 
 func TestLoaderGitHubHostedWukoActionRejectsRenderedEmptyExplicitToken(t *testing.T) {
 	t.Parallel()
-	loader := NewLoader(testHTTPClient(func(*http.Request) (*http.Response, error) {
+	loader := NewLoader(transporttest.Client(func(*http.Request) (*http.Response, error) {
 		t.Fatal("GitHub API request should not be sent")
 		return nil, nil
 	}))
@@ -334,11 +335,11 @@ func TestGitHubHostedWukoActionKeepsSlashesInRef(t *testing.T) {
 	tarball := makeGitHubTarball(t, "acme-actions-0123456", []githubArchiveEntry{
 		{name: "build/action.yml", data: []byte(validAction)},
 	})
-	client := testHTTPClient(func(request *http.Request) (*http.Response, error) {
+	client := transporttest.Client(func(request *http.Request) (*http.Response, error) {
 		if request.URL.EscapedPath() != "/repos/acme/actions/tarball/feature/release" {
 			return nil, fmt.Errorf("unexpected request %s", request.URL.EscapedPath())
 		}
-		return testResponse(http.StatusOK, tarball), nil
+		return transporttest.Response(http.StatusOK, tarball), nil
 	})
 	loader := NewLoader(client)
 	loader.githubStoredTokenFn = func(context.Context, map[string]string) string { return "" }
@@ -405,8 +406,8 @@ func TestGitHubHostedWukoActionRejectsUnsafeRepositoryArchives(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			tarball := makeGitHubTarball(t, "acme-actions-0123456", append([]githubArchiveEntry{{name: "keep/action.yml", data: []byte(validAction)}}, tt.entries...))
-			client := testHTTPClient(func(*http.Request) (*http.Response, error) {
-				return testResponse(http.StatusOK, tarball), nil
+			client := transporttest.Client(func(*http.Request) (*http.Response, error) {
+				return transporttest.Response(http.StatusOK, tarball), nil
 			})
 			loader := NewLoader(client)
 			loader.githubStoredTokenFn = func(context.Context, map[string]string) string { return "" }
@@ -421,8 +422,8 @@ func TestGitHubHostedWukoActionRejectsUnsafeRepositoryArchives(t *testing.T) {
 
 func TestGitHubHostedWukoActionReportsExhaustedRateLimit(t *testing.T) {
 	t.Parallel()
-	client := testHTTPClient(func(*http.Request) (*http.Response, error) {
-		response := testResponse(http.StatusForbidden, []byte(`{"message":"API rate limit exceeded"}`))
+	client := transporttest.Client(func(*http.Request) (*http.Response, error) {
+		response := transporttest.Response(http.StatusForbidden, []byte(`{"message":"API rate limit exceeded"}`))
 		response.Header.Set("X-RateLimit-Remaining", "0")
 		return response, nil
 	})
@@ -461,8 +462,8 @@ func TestGitHubHostedWukoActionRejectsOversizedRepositoryArchive(t *testing.T) {
 	if err := gz.Close(); err != nil {
 		t.Fatal(err)
 	}
-	client := testHTTPClient(func(*http.Request) (*http.Response, error) {
-		return testResponse(http.StatusOK, buffer.Bytes()), nil
+	client := transporttest.Client(func(*http.Request) (*http.Response, error) {
+		return transporttest.Response(http.StatusOK, buffer.Bytes()), nil
 	})
 	loader := NewLoader(client)
 	loader.githubStoredTokenFn = func(context.Context, map[string]string) string { return "" }

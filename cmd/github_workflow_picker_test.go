@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/transporttest"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/tui"
 	"github.com/up2jj/wuko/workflow"
@@ -19,7 +20,7 @@ func githubPickerDependencies(t *testing.T, root, definition string, selectWorkf
 	t.Helper()
 	t.Setenv("GH_TOKEN", "test-token")
 	tarball := commandGitHubTarballEntries(t, map[string][]byte{"build/wuko.yaml": []byte(definition)})
-	client := &http.Client{Transport: commandRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+	client := &http.Client{Transport: transporttest.RoundTripFunc(func(request *http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: http.StatusOK, Status: "200 OK", Body: io.NopCloser(bytes.NewReader(tarball)), Header: make(http.Header)}, nil
 	})}
 	deps := pickerDependencies(root, step.NewRegistry(), selectWorkflow)

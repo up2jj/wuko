@@ -18,6 +18,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/up2jj/wuko/internal/archivetest"
 	"github.com/up2jj/wuko/internal/testfs"
+	"github.com/up2jj/wuko/internal/transporttest"
 	"github.com/up2jj/wuko/marketplace"
 	pluginpkg "github.com/up2jj/wuko/plugin"
 	"github.com/up2jj/wuko/step"
@@ -727,14 +728,14 @@ install:
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := &http.Client{Transport: commandRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+	client := &http.Client{Transport: transporttest.RoundTripFunc(func(request *http.Request) (*http.Response, error) {
 		switch request.URL.Path {
 		case "/repo/manifest.json":
-			return commandTestResponse(http.StatusOK, string(manifestData)), nil
+			return transporttest.Response(http.StatusOK, string(manifestData)), nil
 		case "/repo/packages/release.tar.gz":
 			return &http.Response{StatusCode: http.StatusOK, Status: "200 OK", Body: io.NopCloser(bytes.NewReader(archiveData)), Header: make(http.Header)}, nil
 		default:
-			return commandTestResponse(http.StatusNotFound, ""), nil
+			return transporttest.Response(http.StatusNotFound, ""), nil
 		}
 	})}
 	registry := lifecycleTestRegistry(t)
@@ -807,14 +808,14 @@ func TestMarketplaceInstallRejectsDigestMismatchBeforeWriting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := &http.Client{Transport: commandRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+	client := &http.Client{Transport: transporttest.RoundTripFunc(func(request *http.Request) (*http.Response, error) {
 		switch request.URL.Path {
 		case "/repo/manifest.json":
-			return commandTestResponse(http.StatusOK, string(manifestData)), nil
+			return transporttest.Response(http.StatusOK, string(manifestData)), nil
 		case "/repo/packages/release.tar.gz":
-			return commandTestResponse(http.StatusOK, "not the recorded archive"), nil
+			return transporttest.Response(http.StatusOK, "not the recorded archive"), nil
 		default:
-			return commandTestResponse(http.StatusNotFound, ""), nil
+			return transporttest.Response(http.StatusNotFound, ""), nil
 		}
 	})}
 	command := newRootCmd(dependencies{
@@ -844,11 +845,11 @@ func TestMarketplaceInstallRequiresPackagesInNonInteractiveMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := &http.Client{Transport: commandRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+	client := &http.Client{Transport: transporttest.RoundTripFunc(func(request *http.Request) (*http.Response, error) {
 		if request.URL.Path == "/repo/manifest.json" {
-			return commandTestResponse(http.StatusOK, string(manifestData)), nil
+			return transporttest.Response(http.StatusOK, string(manifestData)), nil
 		}
-		return commandTestResponse(http.StatusNotFound, ""), nil
+		return transporttest.Response(http.StatusNotFound, ""), nil
 	})}
 	command := newRootCmd(dependencies{
 		stdin: bytes.NewReader(nil), stdout: &bytes.Buffer{}, stderr: &bytes.Buffer{},
@@ -964,10 +965,6 @@ func writeMarketplacePackage(t *testing.T, directory, name, description, default
 	data := fmt.Sprintf("version: 1\npackage_version: 1.0.0\nname: %s\ndescription: %s\n%ssteps:\n  - id: run\n    type: shell\n    with: {command: true}\n", name, description, extra)
 	testfs.WriteFile(t, filepath.Join(directory, "wuko.yaml"), []byte(data), 0o644)
 	testfs.WriteFile(t, filepath.Join(directory, "defaults.json"), []byte(defaults), 0o644)
-}
-
-func commandTestResponse(status int, body string) *http.Response {
-	return &http.Response{StatusCode: status, Status: fmt.Sprintf("%d %s", status, http.StatusText(status)), Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}
 }
 
 func writeMarketplacePluginRelease(t *testing.T, directory, namespace, version string) {

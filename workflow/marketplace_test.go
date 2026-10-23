@@ -6,16 +6,18 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/up2jj/wuko/internal/transporttest"
 )
 
 func TestDiscoverMarketplaceValidatesPackageManifest(t *testing.T) {
 	t.Parallel()
 	manifest := fmt.Sprintf(`{"version":1,"packages":[{"name":"release","package_version":"1.0.0","source":".wuko/workflows/release","path":"packages/release.tar.gz","format":"tar.gz","entry":"wuko.yaml","description":"Ship it","source_sha256":"%s","sha256":"%s"}]}`, strings.Repeat("a", 64), strings.Repeat("b", 64))
-	loader := NewLoader(testHTTPClient(func(request *http.Request) (*http.Response, error) {
+	loader := NewLoader(transporttest.Client(func(request *http.Request) (*http.Response, error) {
 		if request.URL.String() != "https://example.test/repo/manifest.json" {
 			return nil, fmt.Errorf("unexpected URL %s", request.URL)
 		}
-		return testResponse(http.StatusOK, []byte(manifest)), nil
+		return transporttest.Response(http.StatusOK, []byte(manifest)), nil
 	}))
 	got, err := loader.DiscoverMarketplace(t.Context(), "https://example.test/repo")
 	if err != nil {
@@ -38,11 +40,11 @@ func TestDiscoverMarketplaceNormalizesGitHubRepositoryURL(t *testing.T) {
 	t.Parallel()
 	item := validMarketplacePackage("release", "packages/release.tar.gz")
 	manifest := fmt.Sprintf(`{"version":1,"packages":[{"name":"%s","source":"%s","path":"%s","format":"%s","entry":"%s","source_sha256":"%s","sha256":"%s"}]}`, item.Name, item.Source, item.Path, item.Format, item.Entry, item.SourceSHA256, item.SHA256)
-	loader := NewLoader(testHTTPClient(func(request *http.Request) (*http.Response, error) {
+	loader := NewLoader(transporttest.Client(func(request *http.Request) (*http.Response, error) {
 		if request.URL.String() != "https://raw.githubusercontent.com/acme/workflows/HEAD/manifest.json" {
 			return nil, fmt.Errorf("unexpected URL %s", request.URL)
 		}
-		return testResponse(http.StatusOK, []byte(manifest)), nil
+		return transporttest.Response(http.StatusOK, []byte(manifest)), nil
 	}))
 	got, err := loader.DiscoverMarketplace(t.Context(), "https://github.com/acme/workflows/")
 	if err != nil {
@@ -59,8 +61,8 @@ func TestDiscoverMarketplaceNormalizesGitHubRepositoryURL(t *testing.T) {
 
 func TestDiscoverMarketplaceFallsBackWhenManifestIsMissing(t *testing.T) {
 	t.Parallel()
-	loader := NewLoader(testHTTPClient(func(*http.Request) (*http.Response, error) {
-		return testResponse(http.StatusNotFound, nil), nil
+	loader := NewLoader(transporttest.Client(func(*http.Request) (*http.Response, error) {
+		return transporttest.Response(http.StatusNotFound, ""), nil
 	}))
 	_, err := loader.DiscoverMarketplace(t.Context(), "https://example.test/repo/")
 	if !errors.Is(err, ErrMarketplaceNotFound) {

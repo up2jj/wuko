@@ -18,6 +18,7 @@ import (
 	"github.com/up2jj/wuko/engine"
 	"github.com/up2jj/wuko/fswatch"
 	"github.com/up2jj/wuko/internal/steptest"
+	"github.com/up2jj/wuko/internal/transporttest"
 	"github.com/up2jj/wuko/observe"
 	"github.com/up2jj/wuko/step"
 	tempstep "github.com/up2jj/wuko/steps/temp"
@@ -153,7 +154,7 @@ func TestObserveFailureCancelsForeground(t *testing.T) {
 
 func TestObserveHTTPSourceFeedsGenericBinding(t *testing.T) {
 	var requests atomic.Int32
-	client := &http.Client{Transport: engineRoundTripFunc(func(*http.Request) (*http.Response, error) {
+	client := &http.Client{Transport: transporttest.RoundTripFunc(func(*http.Request) (*http.Response, error) {
 		version := requests.Add(1)
 		return &http.Response{
 			StatusCode: http.StatusOK,
@@ -340,12 +341,6 @@ func (source *filesystemTestSource) isClosed() bool {
 	source.mu.Lock()
 	defer source.mu.Unlock()
 	return source.closed
-}
-
-type engineRoundTripFunc func(*http.Request) (*http.Response, error)
-
-func (roundTrip engineRoundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
-	return roundTrip(request)
 }
 
 func TestObserveReleasesManagedResourcesEachIteration(t *testing.T) {

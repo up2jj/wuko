@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/internal/testfs"
+	"github.com/up2jj/wuko/internal/transporttest"
 )
 
 func TestLoadConditionalBlockAndSingleStepCondition(t *testing.T) {
@@ -122,8 +123,8 @@ vars: {enabled: false}
 steps:
   - require: fragment.yaml
 `)
-	client := testHTTPClient(func(*http.Request) (*http.Response, error) {
-		return testResponse(http.StatusOK, []byte(validAction)), nil
+	client := transporttest.Client(func(*http.Request) (*http.Response, error) {
+		return transporttest.Response(http.StatusOK, []byte(validAction)), nil
 	})
 	definition, err := NewLoader(client).Load(t.Context(), workflowPath, LoadOptions{RunDir: dir})
 	if err != nil {

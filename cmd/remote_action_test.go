@@ -13,17 +13,12 @@ import (
 
 	"github.com/up2jj/wuko/internal/archivetest"
 	"github.com/up2jj/wuko/internal/testfs"
+	"github.com/up2jj/wuko/internal/transporttest"
 	"github.com/up2jj/wuko/step"
 	keyvaluestep "github.com/up2jj/wuko/steps/key_value"
 	"github.com/up2jj/wuko/steps/shell"
 	"github.com/up2jj/wuko/workflow"
 )
-
-type commandRoundTripFunc func(*http.Request) (*http.Response, error)
-
-func (function commandRoundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
-	return function(request)
-}
 
 func TestRunRemoteActionUsesCLIValuesDuringLoading(t *testing.T) {
 	t.Parallel()
@@ -53,7 +48,7 @@ steps:
       script: "printf '%s' \"$1\""
       args: ["{{ .inputs.message }}"]
 `
-	client := &http.Client{Transport: commandRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+	client := &http.Client{Transport: transporttest.RoundTripFunc(func(request *http.Request) (*http.Response, error) {
 		if request.URL.Path != "/v1/echo" {
 			t.Fatalf("path = %q, want /v1/echo", request.URL.Path)
 		}
@@ -91,7 +86,7 @@ steps:
       script: "printf '%s' \"$1\""
       args: ["{{ .vars.message }}"]
 `
-	client := &http.Client{Transport: commandRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+	client := &http.Client{Transport: transporttest.RoundTripFunc(func(request *http.Request) (*http.Response, error) {
 		if request.URL.String() != "https://workflows.example.test/release.yaml" {
 			return nil, fmt.Errorf("unexpected URL %s", request.URL)
 		}
@@ -142,7 +137,7 @@ steps:
 				body = commandGitHubTarball(t, "ci/build.yaml", body)
 			}
 			requests := 0
-			client := &http.Client{Transport: commandRoundTripFunc(func(*http.Request) (*http.Response, error) {
+			client := &http.Client{Transport: transporttest.RoundTripFunc(func(*http.Request) (*http.Response, error) {
 				requests++
 				return &http.Response{StatusCode: http.StatusOK, Status: "200 OK", Body: io.NopCloser(bytes.NewReader(body)), Header: make(http.Header)}, nil
 			})}
@@ -184,7 +179,7 @@ func TestRunPickGitHubListsCanonicalCommandsNonInteractively(t *testing.T) {
 		"workflows/deploy/wuko.yaml": []byte("version: 1\nname: deploy\ntargets:\n  prod:\n    steps:\n      - id: run\n        type: shell\n        with: {command: true}\n"),
 	})
 	requests := 0
-	client := &http.Client{Transport: commandRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+	client := &http.Client{Transport: transporttest.RoundTripFunc(func(request *http.Request) (*http.Response, error) {
 		requests++
 		if request.URL.EscapedPath() != "/repos/acme/automation/tarball/main" {
 			return nil, fmt.Errorf("unexpected URL %s", request.URL)
@@ -231,7 +226,7 @@ steps:
     type: key_value
     with: {operation: set, scope: %s, store: prefs, key: theme, value: dark}
 `, tt.scope)
-			client := &http.Client{Transport: commandRoundTripFunc(func(*http.Request) (*http.Response, error) {
+			client := &http.Client{Transport: transporttest.RoundTripFunc(func(*http.Request) (*http.Response, error) {
 				return &http.Response{StatusCode: http.StatusOK, Status: "200 OK", Body: io.NopCloser(strings.NewReader(workflowData)), Header: make(http.Header)}, nil
 			})}
 			registry := step.NewRegistry()
@@ -277,7 +272,7 @@ steps:
 	testfs.WriteFile(t, filepath.Join(dir, "remote.yaml"), []byte(caller), 0o644)
 	testfs.WriteFile(t, filepath.Join(root, "variables.toml"), []byte("release = \"v2\"\n"), 0o644)
 	manifest := "version: 1\nname: validate\nsteps:\n  - id: run\n    type: shell\n    with: {script: 'true'}\n"
-	client := &http.Client{Transport: commandRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+	client := &http.Client{Transport: transporttest.RoundTripFunc(func(request *http.Request) (*http.Response, error) {
 		if request.URL.Path != "/v2/stable" {
 			return nil, fmt.Errorf("unexpected path %s", request.URL.Path)
 		}

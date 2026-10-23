@@ -11,6 +11,7 @@ import (
 
 	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/internal/testfs"
+	"github.com/up2jj/wuko/internal/transporttest"
 )
 
 func TestGitHubWorkflowURL(t *testing.T) {
@@ -55,11 +56,11 @@ func TestGitHubWorkflowURLRejectsMalformedLocators(t *testing.T) {
 func TestLoadRemoteYAMLAndCleansUp(t *testing.T) {
 	t.Parallel()
 	workflowData := []byte("version: 1\nname: remote\nsteps:\n  - id: run\n    type: shell\n    with: {command: true}\n")
-	client := testHTTPClient(func(request *http.Request) (*http.Response, error) {
+	client := transporttest.Client(func(request *http.Request) (*http.Response, error) {
 		if request.URL.String() != "https://example.test/workflow.yaml?token=secret" {
 			return nil, fmt.Errorf("unexpected URL %s", request.URL)
 		}
-		return testResponse(http.StatusOK, workflowData), nil
+		return transporttest.Response(http.StatusOK, workflowData), nil
 	})
 
 	var events []diagnostic.Event
@@ -95,11 +96,11 @@ func TestLoadRemoteReportsPreparationFailureAsLoadFailure(t *testing.T) {
 	// concurrently-materializing test would look like a leak.
 	isolateRemoteWorkflowTempDir(t)
 	workflowData := []byte("version: 1\nname: remote\nsteps:\n  - id: action\n    uses: https://actions.example.test/missing\n")
-	client := testHTTPClient(func(request *http.Request) (*http.Response, error) {
+	client := transporttest.Client(func(request *http.Request) (*http.Response, error) {
 		if request.URL.Host == "example.test" {
-			return testResponse(http.StatusOK, workflowData), nil
+			return transporttest.Response(http.StatusOK, workflowData), nil
 		}
-		return testResponse(http.StatusNotFound, nil), nil
+		return transporttest.Response(http.StatusNotFound, ""), nil
 	})
 	before := remoteWorkflowTempDirs(t)
 	var events []diagnostic.Event
@@ -125,8 +126,8 @@ func TestDecodeRemoteRemovesMaterializedWorkflowOnDecodeFailure(t *testing.T) {
 	// Not parallel: this test snapshots the os.TempDir()/wuko-workflow-* namespace, so a
 	// concurrently-materializing test would look like a leak.
 	isolateRemoteWorkflowTempDir(t)
-	client := testHTTPClient(func(*http.Request) (*http.Response, error) {
-		return testResponse(http.StatusOK, []byte("version: [")), nil
+	client := transporttest.Client(func(*http.Request) (*http.Response, error) {
+		return transporttest.Response(http.StatusOK, []byte("version: [")), nil
 	})
 	before := remoteWorkflowTempDirs(t)
 	_, _, err := NewLoader(client).DecodeRemote(t.Context(), "https://example.test/workflow.yaml", LoadOptions{})
@@ -150,7 +151,9 @@ func TestLoadRemoteArchivesWorkflowAndCompanionFiles(t *testing.T) {
 		}),
 	} {
 		t.Run(name, func(t *testing.T) {
-			client := testHTTPClient(func(*http.Request) (*http.Response, error) { return testResponse(http.StatusOK, payload), nil })
+			client := transporttest.Client(func(*http.Request) (*http.Response, error) {
+				return transporttest.Response(http.StatusOK, payload), nil
+			})
 			definition, cleanup, err := NewLoader(client).LoadRemote(t.Context(), "https://example.test/workflow", LoadOptions{RunDir: t.TempDir()})
 			if err != nil {
 				t.Fatal(err)
@@ -177,11 +180,11 @@ func TestLoadMarketplacePackageRejectsPackageVersionMismatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := testHTTPClient(func(request *http.Request) (*http.Response, error) {
+	client := transporttest.Client(func(request *http.Request) (*http.Response, error) {
 		if request.URL.String() != "https://example.test/repo/packages/release.tar.gz" {
 			return nil, fmt.Errorf("unexpected URL %s", request.URL)
 		}
-		return testResponse(http.StatusOK, archiveData), nil
+		return transporttest.Response(http.StatusOK, archiveData), nil
 	})
 	item := MarketplacePackage{
 		Name: "release", PackageVersion: "2.0.0", Source: ".wuko/workflows/release", Path: "packages/release.tar.gz",
@@ -212,7 +215,9 @@ steps:
 		"wuko.yaml":              {data: workflowData, mode: 0o644},
 		"templates/message.tmpl": {data: []byte("Hello {{ .vars.name }}"), mode: 0o644},
 	})
-	client := testHTTPClient(func(*http.Request) (*http.Response, error) { return testResponse(http.StatusOK, payload), nil })
+	client := transporttest.Client(func(*http.Request) (*http.Response, error) {
+		return transporttest.Response(http.StatusOK, payload), nil
+	})
 	definition, cleanup, err := NewLoader(client).LoadRemote(t.Context(), "https://example.test/workflow.zip", LoadOptions{})
 	if err != nil {
 		t.Fatal(err)
@@ -231,7 +236,9 @@ func TestLoadRemoteRejectsTemplateFileOutsidePackage(t *testing.T) {
 			mode: 0o644,
 		},
 	})
-	client := testHTTPClient(func(*http.Request) (*http.Response, error) { return testResponse(http.StatusOK, payload), nil })
+	client := transporttest.Client(func(*http.Request) (*http.Response, error) {
+		return transporttest.Response(http.StatusOK, payload), nil
+	})
 	_, _, err := NewLoader(client).LoadRemote(t.Context(), "https://example.test/workflow.zip", LoadOptions{})
 	if err == nil || !strings.Contains(err.Error(), "escapes the workflow package") {
 		t.Fatalf("error = %v", err)
@@ -250,8 +257,8 @@ func TestLoadRemoteArchiveExpandsRequiredStepFiles(t *testing.T) {
 			mode: 0o644,
 		},
 	})
-	client := testHTTPClient(func(*http.Request) (*http.Response, error) {
-		return testResponse(http.StatusOK, payload), nil
+	client := transporttest.Client(func(*http.Request) (*http.Response, error) {
+		return transporttest.Response(http.StatusOK, payload), nil
 	})
 
 	definition, cleanup, err := NewLoader(client).LoadRemote(t.Context(), "https://example.test/workflow.zip", LoadOptions{})
@@ -269,7 +276,9 @@ func TestLoadRemoteRejectsArchivesWhenRequested(t *testing.T) {
 	payload := makeZIP(t, map[string]archiveTestFile{
 		"wuko.yaml": {data: []byte("version: 1\nname: remote\nsteps:\n  - id: run\n    type: shell\n"), mode: 0o644},
 	})
-	client := testHTTPClient(func(*http.Request) (*http.Response, error) { return testResponse(http.StatusOK, payload), nil })
+	client := transporttest.Client(func(*http.Request) (*http.Response, error) {
+		return transporttest.Response(http.StatusOK, payload), nil
+	})
 	_, _, err := NewLoader(client).LoadRemote(t.Context(), "https://example.test/workflow.zip", LoadOptions{RejectRemoteArchives: true})
 	if err == nil || !strings.Contains(err.Error(), "archives are not supported") {
 		t.Fatalf("error = %v, want archive rejection", err)
@@ -289,8 +298,8 @@ func TestLoadRemoteArchiveResolvesLocalActionFromRequiredFragment(t *testing.T) 
 		},
 		"actions/build/action.yaml": {data: []byte(validAction), mode: 0o644},
 	})
-	client := testHTTPClient(func(*http.Request) (*http.Response, error) {
-		return testResponse(http.StatusOK, payload), nil
+	client := transporttest.Client(func(*http.Request) (*http.Response, error) {
+		return transporttest.Response(http.StatusOK, payload), nil
 	})
 
 	definition, cleanup, err := NewLoader(client).LoadRemote(t.Context(), "https://example.test/workflow.zip", LoadOptions{RunDir: t.TempDir()})
@@ -321,7 +330,9 @@ func TestLoadRemoteRejectsInvalidWorkflowArchives(t *testing.T) {
 	}
 	for name, payload := range tests {
 		t.Run(name, func(t *testing.T) {
-			client := testHTTPClient(func(*http.Request) (*http.Response, error) { return testResponse(http.StatusOK, payload), nil })
+			client := transporttest.Client(func(*http.Request) (*http.Response, error) {
+				return transporttest.Response(http.StatusOK, payload), nil
+			})
 			_, _, err := NewLoader(client).LoadRemote(t.Context(), "https://example.test/workflow.zip", LoadOptions{})
 			if err == nil {
 				t.Fatal("expected archive validation error")
@@ -341,14 +352,14 @@ func TestLoadRemoteGitHubDownloadsWorkflowDirectoryWithCompanions(t *testing.T) 
 		{name: "ci/scripts/release.sh", data: []byte("#!/bin/sh\n"), mode: 0o755},
 		{name: "other/ignored.txt", data: []byte("ignored")},
 	})
-	client := testHTTPClient(func(request *http.Request) (*http.Response, error) {
+	client := transporttest.Client(func(request *http.Request) (*http.Response, error) {
 		if request.URL.EscapedPath() != "/repos/acme/workflows/tarball/feature/release" {
 			return nil, fmt.Errorf("path = %q", request.URL.EscapedPath())
 		}
 		if got := request.Header.Get("Accept"); got != "application/vnd.github+json" {
 			return nil, fmt.Errorf("Accept = %q", got)
 		}
-		return testResponse(http.StatusOK, tarball), nil
+		return transporttest.Response(http.StatusOK, tarball), nil
 	})
 	loader := NewLoader(client)
 	loader.githubStoredTokenFn = func(context.Context, map[string]string) string { return "" }
@@ -373,8 +384,8 @@ func TestLoadRemoteGitHubDownloadsWorkflowDirectoryWithCompanions(t *testing.T) 
 
 func TestLoadRemoteRejectsInsecureURLAndReportsGitHubFailure(t *testing.T) {
 	t.Parallel()
-	loader := NewLoader(testHTTPClient(func(*http.Request) (*http.Response, error) {
-		return testResponse(http.StatusNotFound, nil), nil
+	loader := NewLoader(transporttest.Client(func(*http.Request) (*http.Response, error) {
+		return transporttest.Response(http.StatusNotFound, ""), nil
 	}))
 	loader.githubStoredTokenFn = func(context.Context, map[string]string) string { return "" }
 	if _, _, err := loader.LoadRemote(t.Context(), "http://example.test/workflow", LoadOptions{}); err == nil || !strings.Contains(err.Error(), "HTTPS") {

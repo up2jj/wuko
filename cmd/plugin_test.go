@@ -27,6 +27,7 @@ import (
 	"github.com/up2jj/wuko/internal/archivetest"
 	"github.com/up2jj/wuko/internal/polltest"
 	"github.com/up2jj/wuko/internal/testhome"
+	"github.com/up2jj/wuko/internal/transporttest"
 	pluginpkg "github.com/up2jj/wuko/plugin"
 	"github.com/up2jj/wuko/tui"
 	"github.com/up2jj/wuko/workflow"
@@ -539,17 +540,17 @@ func TestPluginInstallFromMarketplaceVerifiesPinnedManifest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := &http.Client{Transport: commandRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+	client := &http.Client{Transport: transporttest.RoundTripFunc(func(request *http.Request) (*http.Response, error) {
 		var response *http.Response
 		switch request.URL.Path {
 		case "/repo/manifest.json":
-			response = commandTestResponse(http.StatusOK, string(marketplaceManifest))
+			response = transporttest.Response(http.StatusOK, string(marketplaceManifest))
 		case "/repo/plugins/acme/plugin.json":
-			response = commandTestResponse(http.StatusOK, string(pluginManifest))
+			response = transporttest.Response(http.StatusOK, string(pluginManifest))
 		case "/repo/plugins/acme/plugin.tar.gz":
 			response = &http.Response{StatusCode: http.StatusOK, Status: "200 OK", Body: io.NopCloser(bytes.NewReader(archive)), Header: make(http.Header)}
 		default:
-			response = commandTestResponse(http.StatusNotFound, "")
+			response = transporttest.Response(http.StatusNotFound, "")
 		}
 		response.Request = request
 		return response, nil

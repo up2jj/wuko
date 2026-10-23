@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/up2jj/wuko/internal/transporttest"
 )
 
 func TestParseGitHubWorkflowLocatorForms(t *testing.T) {
@@ -87,12 +89,12 @@ func TestDiscoverGitHubWorkflowsUsesOneTemporarySnapshot(t *testing.T) {
 		{name: "outside/wuko.yaml", data: []byte("version: 1\nname: outside\nsteps:\n  - id: run\n    type: shell\n")},
 	})
 	requests := 0
-	client := testHTTPClient(func(request *http.Request) (*http.Response, error) {
+	client := transporttest.Client(func(request *http.Request) (*http.Response, error) {
 		requests++
 		if request.URL.EscapedPath() != "/repos/acme/automation/tarball/main" {
 			return nil, fmt.Errorf("path = %q", request.URL.EscapedPath())
 		}
-		return testResponse(http.StatusOK, tarball), nil
+		return transporttest.Response(http.StatusOK, tarball), nil
 	})
 	loader := NewLoader(client)
 	loader.githubStoredTokenFn = func(context.Context, map[string]string) string { return "" }
@@ -124,8 +126,8 @@ func TestLoadRemoteGitHubBlobURLPreservesURLDiagnostics(t *testing.T) {
 		{name: "workflows/build/wuko.yaml", data: []byte("version: 1\nname: build\nsteps:\n  - id: run\n    type: shell\n    with: {command: true}\n")},
 		{name: "workflows/build/config/settings.json", data: []byte("{}")},
 	})
-	client := testHTTPClient(func(request *http.Request) (*http.Response, error) {
-		return testResponse(http.StatusOK, tarball), nil
+	client := transporttest.Client(func(request *http.Request) (*http.Response, error) {
+		return transporttest.Response(http.StatusOK, tarball), nil
 	})
 	loader := NewLoader(client)
 	loader.githubStoredTokenFn = func(context.Context, map[string]string) string { return "" }
@@ -156,14 +158,14 @@ func TestLoadRemoteGitHubRootWorkflowUsesContentsAPI(t *testing.T) {
 	for _, raw := range []string{"github:acme/automation@main", "github:acme/automation@main:release.yaml", "https://github.com/acme/automation"} {
 		t.Run(raw, func(t *testing.T) {
 			t.Parallel()
-			client := testHTTPClient(func(request *http.Request) (*http.Response, error) {
+			client := transporttest.Client(func(request *http.Request) (*http.Response, error) {
 				if !strings.HasPrefix(request.URL.EscapedPath(), "/repos/acme/automation/contents/") {
 					return nil, fmt.Errorf("path = %q, want the contents API", request.URL.EscapedPath())
 				}
 				if got := request.Header.Get("Accept"); got != "application/vnd.github.raw+json" {
 					return nil, fmt.Errorf("Accept = %q", got)
 				}
-				return testResponse(http.StatusOK, workflowData), nil
+				return transporttest.Response(http.StatusOK, workflowData), nil
 			})
 			loader := NewLoader(client)
 			loader.githubStoredTokenFn = func(context.Context, map[string]string) string { return "" }
@@ -182,8 +184,8 @@ func TestLoadRemoteGitHubRootWorkflowUsesContentsAPI(t *testing.T) {
 func TestLoadRemoteGitHubReportsExhaustedRateLimit(t *testing.T) {
 	t.Parallel()
 	for _, options := range []LoadOptions{{}, {RejectRemoteArchives: true}} {
-		client := testHTTPClient(func(*http.Request) (*http.Response, error) {
-			response := testResponse(http.StatusForbidden, []byte(`{"message":"API rate limit exceeded"}`))
+		client := transporttest.Client(func(*http.Request) (*http.Response, error) {
+			response := transporttest.Response(http.StatusForbidden, []byte(`{"message":"API rate limit exceeded"}`))
 			response.Header.Set("X-RateLimit-Remaining", "0")
 			return response, nil
 		})
@@ -207,8 +209,8 @@ func TestDiscoverGitHubWorkflowsSkipsNestedAndKeepsInvalidManifests(t *testing.T
 		{name: "workflows/build/testdata/wuko.yaml", data: valid("fixture")},
 		{name: "workflows/broken/wuko.yaml", data: []byte("version: 1\nname: broken\nsteps: nope\n")},
 	})
-	client := testHTTPClient(func(*http.Request) (*http.Response, error) {
-		return testResponse(http.StatusOK, tarball), nil
+	client := transporttest.Client(func(*http.Request) (*http.Response, error) {
+		return transporttest.Response(http.StatusOK, tarball), nil
 	})
 	loader := NewLoader(client)
 	loader.githubStoredTokenFn = func(context.Context, map[string]string) string { return "" }

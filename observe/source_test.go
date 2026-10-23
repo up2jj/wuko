@@ -15,6 +15,7 @@ import (
 
 	"github.com/up2jj/wuko/engine"
 	"github.com/up2jj/wuko/internal/testfs"
+	"github.com/up2jj/wuko/internal/transporttest"
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/workflow"
 )
@@ -39,7 +40,7 @@ func TestRegistryAcceptsFutureSourceWithoutEngineChanges(t *testing.T) {
 
 func TestHTTPSourceEmitsOnlyChangedResponsesByDefault(t *testing.T) {
 	var requests atomic.Int32
-	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+	client := &http.Client{Transport: transporttest.RoundTripFunc(func(*http.Request) (*http.Response, error) {
 		request := requests.Add(1)
 		body := `{"version":1}`
 		if request >= 3 {
@@ -94,12 +95,6 @@ func (batch *testBatch) Merge(other Batch) {
 func (batch *testBatch) Empty() bool { return len(batch.values) == 0 }
 func (batch *testBatch) Binding() map[string]any {
 	return map[string]any{"test": append([]any(nil), batch.values...)}
-}
-
-type roundTripFunc func(*http.Request) (*http.Response, error)
-
-func (roundTrip roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
-	return roundTrip(request)
 }
 
 func TestShellSourceEmitsOnlyChangedOutputByDefault(t *testing.T) {

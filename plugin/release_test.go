@@ -1,7 +1,6 @@
 package plugin
 
 import (
-	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -12,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/internal/archivetest"
+	"github.com/up2jj/wuko/internal/transporttest"
 )
 
 func TestHTTPSPluginSourceUsesQueryEphemerally(t *testing.T) {
@@ -26,7 +26,7 @@ func TestHTTPSPluginSourceUsesQueryEphemerally(t *testing.T) {
 		t.Fatal(err)
 	}
 	var paths []string
-	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+	client := &http.Client{Transport: transporttest.RoundTripFunc(func(request *http.Request) (*http.Response, error) {
 		if request.URL.Query().Get("token") != "secret-value" {
 			t.Errorf("request %s omitted query credential", request.URL.Path)
 		}
@@ -63,7 +63,7 @@ func TestHTTPSPluginSourceUsesQueryEphemerally(t *testing.T) {
 
 func TestHTTPSPluginDownloadErrorsRedactQuery(t *testing.T) {
 	t.Parallel()
-	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+	client := &http.Client{Transport: transporttest.RoundTripFunc(func(request *http.Request) (*http.Response, error) {
 		return httpResponse(request, http.StatusForbidden, []byte("denied")), nil
 	})}
 	_, err := FetchRelease(t.Context(), "https://plugins.test/acme?token=secret-value", "", client)
@@ -72,15 +72,8 @@ func TestHTTPSPluginDownloadErrorsRedactQuery(t *testing.T) {
 	}
 }
 
-type roundTripFunc func(*http.Request) (*http.Response, error)
-
-func (roundTrip roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
-	return roundTrip(request)
-}
-
 func httpResponse(request *http.Request, status int, body []byte) *http.Response {
-	return &http.Response{
-		StatusCode: status, Status: http.StatusText(status), Request: request,
-		Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(body)),
-	}
+	response := transporttest.Response(status, body)
+	response.Request = request
+	return response
 }
