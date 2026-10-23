@@ -26,6 +26,7 @@ Use this guidance when a workflow gathers input, produces typed data, transforms
 ## Typed values and structured data
 
 - Use `set` for JSON-compatible literals and Expr-based values; use Lua only when transformation needs imperative logic.
+- In Lua, keep state that must survive an error caught by `pcall` or `xpcall` in a table field, not a local captured by a closure: gopher-lua silently desynchronizes captured locals around a caught error (upstream issue #448).
 - Use `transform` for deterministic list/object pipelines, numeric aggregation, and dynamic tuple joins. Read its only output from `.steps.<id>.value`; add `variable` only when later steps should also read the result from `.vars`. Source it from a `steps.*`/`vars.*` path or `{expr: ...}` and keep scalar or named-record operations last.
 - In `transform` list expressions use `item` and `index`; in object expressions use lexically ordered `key`, `value`, and `index`. Reducers add `acc`, comparators use `left`/`right`, and tuple callbacks use `items`/`index`. Use `{expr: ...}` for a dynamic operand and `{literal: ...}` to force a literal object.
 - Prefer list-to-object-to-list pipelines over imperative Lua when the stages are naturally expressed by `group_by`, `associate`, `keyify`, `count_values`, `entries`, `map_values`, or `map_to_list`. Object iteration is sorted, duplicate transformed keys are last-write-wins, structural equality supports nested values, and `sort`/`sort_by` are stable.

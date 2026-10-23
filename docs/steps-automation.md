@@ -1153,3 +1153,26 @@ key-value stores, HTTP, filesystem operations, and direct command execution. It 
 snapshot tables for `wuko.inputs`, `wuko.steps`, `wuko.dependencies`, `wuko.workflow`, and
 `wuko.run`. Changing these Lua tables does not change workflow state. Outputs may be nil, booleans,
 strings, numbers, arrays, or string-keyed objects; cyclic and mixed-key tables are rejected.
+
+Lua runs on [gopher-lua](https://github.com/yuin/gopher-lua), which mishandles closures around a
+caught error ([upstream issue #448](https://github.com/yuin/gopher-lua/issues/448)). This applies to
+every Lua script Wuko runs, including `validation.lua` form rules:
+
+- After `pcall` catches an error, closures stop sharing local variables with the function that
+  called `pcall`. An assignment made through a closure is no longer visible to that function, and
+  the reverse.
+- A closure created inside an `xpcall` body that fails can later read an unrelated value instead of
+  the variable it captured.
+
+Neither case raises an error. Until upstream is fixed, keep state that must survive a caught error
+in a table field rather than a captured local, and do not use closures created inside a failed
+protected call:
+
+```lua
+local state = {count = 0}
+local function bump() state.count = state.count + 1 end
+bump()
+pcall(error, "boom")
+bump()
+wuko.output("count", state.count) -- 2; a captured local would report 1
+```
