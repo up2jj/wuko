@@ -43,7 +43,8 @@ func Discover(ctx context.Context, cwd string) (Repository, error) {
 	if err != nil {
 		return Repository{}, fmt.Errorf("finding common Git directory: %w", err)
 	}
-	return Repository{Root: root, GitDir: absoluteGitPath(root, gitDir), CommonDir: absoluteGitPath(root, commonDir)}, nil
+	// git prints relative directories against the directory it ran in, not the worktree root.
+	return Repository{Root: root, GitDir: absoluteGitPath(cwd, gitDir), CommonDir: absoluteGitPath(cwd, commonDir)}, nil
 }
 
 func (repository Repository) HookPath(ctx context.Context, name string) (string, error) {
@@ -103,15 +104,19 @@ func physicalPath(path string) (string, error) {
 	}
 }
 
-func absoluteGitPath(root, path string) string {
+func absoluteGitPath(base, path string) string {
 	if !filepath.IsAbs(path) {
-		path = filepath.Join(root, path)
+		path = filepath.Join(base, path)
 	}
 	absolute, err := filepath.Abs(path)
-	if err == nil {
-		return absolute
+	if err != nil {
+		return filepath.Clean(path)
 	}
-	return filepath.Clean(path)
+	// Match the symlink-free form git reports for the worktree root.
+	if physical, err := physicalPath(absolute); err == nil {
+		return physical
+	}
+	return absolute
 }
 
 func within(path, root string) bool {

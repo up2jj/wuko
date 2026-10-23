@@ -155,6 +155,21 @@ func TestDiscoverRejectsBareRepository(t *testing.T) {
 	}
 }
 
+func TestDiscoverResolvesGitDirectoriesFromSubdirectory(t *testing.T) {
+	repository := testRepository(t)
+	subdirectory := filepath.Join(repository.Root, "nested", "deeper")
+	if err := os.MkdirAll(subdirectory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	discovered, err := Discover(context.Background(), subdirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if discovered.GitDir != repository.GitDir || discovered.CommonDir != repository.CommonDir {
+		t.Fatalf("discovered = %+v, want git directories of %+v", discovered, repository)
+	}
+}
+
 func TestInstalledDispatcherForwardsArgumentsAndStdin(t *testing.T) {
 	repository := testRepository(t)
 	argumentsPath := filepath.Join(repository.Root, "arguments")
