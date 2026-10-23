@@ -180,11 +180,15 @@ func TestSetIfDifferentIsAtomicAndDoesNotRewriteUnchangedValue(t *testing.T) {
 		t.Fatalf("changed count = %d, want 1", changedCount)
 	}
 	path := filepath.Join(dir, "changed.json")
+	// Backdate the file so a rewrite is visible even on a filesystem with coarse timestamps.
+	past := time.Now().Add(-time.Hour).Truncate(time.Second)
+	if err := os.Chtimes(path, past, past); err != nil {
+		t.Fatal(err)
+	}
 	before, err := os.Stat(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(time.Millisecond)
 	changed, err := store.SetIfDifferent(t.Context(), "fingerprint", "same")
 	if err != nil || changed {
 		t.Fatalf("unchanged update = %v, %v", changed, err)

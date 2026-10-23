@@ -285,6 +285,8 @@ printf 'ready:'
 IFS= read -r value
 printf 'got=%s\n' "$value"
 printf 'diagnostic\n' >&2
+i=0
+while [ "$(stty size)" != "33 91" ] && [ "$i" -lt 500 ]; do sleep 0.01; i=$((i+1)); done
 stty size
 exit 7
 `},
@@ -307,7 +309,6 @@ exit 7
 	if err := syscall.Kill(os.Getpid(), syscall.SIGWINCH); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(50 * time.Millisecond)
 	if _, err := input.WriteString("Ada\n"); err != nil {
 		t.Fatal(err)
 	}

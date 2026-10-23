@@ -283,11 +283,10 @@ func TestRegisterExecutorHandsTheUsersTerminalToTTYRuns(t *testing.T) {
 		}
 		_ = pty.Setsize(master, &pty.Winsize{Rows: 40, Cols: 120})
 		_ = syscall.Kill(os.Getpid(), syscall.SIGWINCH)
-		time.Sleep(200 * time.Millisecond)
 		_, _ = master.Write([]byte("bob\r"))
 	}()
 	result, err := session.Run(t.Context(), process.Options{
-		Command: "sh", Args: []string{"-c", `stty size; IFS= read -r name; stty size; printf 'hello=%s\n' "$name"`},
+		Command: "sh", Args: []string{"-c", `stty size; IFS= read -r name; i=0; while [ "$(stty size)" != "40 120" ] && [ "$i" -lt 500 ]; do sleep 0.01; i=$((i+1)); done; stty size; printf 'hello=%s\n' "$name"`},
 		Env: environment(), TTY: true, Stdin: terminal, Stdout: &output, CaptureLimit: 1 << 20,
 	})
 	if err != nil {
