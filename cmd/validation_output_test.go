@@ -6,11 +6,52 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/validation"
 )
+
+func TestValidateReportsEmptyDiscovery(t *testing.T) {
+	for _, format := range []string{"text", "json"} {
+		t.Run(format, func(t *testing.T) {
+			var output bytes.Buffer
+			command := newRootCmd(listTestDependencies(t.TempDir(), &output))
+			command.SetArgs([]string{"validate", "--format", format})
+			if err := command.ExecuteContext(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if format == "text" {
+				if got := output.String(); got != "No workflows found.\n" {
+					t.Fatalf("output = %q", got)
+				}
+				return
+			}
+			var document validation.Document
+			if err := json.Unmarshal(output.Bytes(), &document); err != nil {
+				t.Fatalf("output = %q: %v", output.String(), err)
+			}
+			if !document.Valid || len(document.Issues) != 0 {
+				t.Fatalf("document = %#v", document)
+			}
+		})
+	}
+}
+
+func TestValidateEmptyDiscoveryStillChecksGitHooks(t *testing.T) {
+	root := initGitHookRepository(t)
+	writeGitHookManifest(t, root, "pre-commit:\n    - workflow: missing")
+	var output bytes.Buffer
+	command := newRootCmd(gitHookTestDependencies(t, root, &output, io.Discard, func(string) string { return "" }))
+	command.SetArgs([]string{"validate"})
+	if err := command.ExecuteContext(t.Context()); err == nil {
+		t.Fatal("expected missing hook workflow to fail validation")
+	}
+	if !strings.Contains(output.String(), "No workflows found.") {
+		t.Fatalf("output = %q", output.String())
+	}
+}
 
 func TestValidateJSONCollectsIndependentWorkflows(t *testing.T) {
 	root := t.TempDir()

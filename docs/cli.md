@@ -36,6 +36,9 @@ wuko validate --file ./draft.yaml # validate a file outside discovery
 executing steps. Use `--file -` to read from stdin; relative resources resolve from the current
 directory, and the inspection is non-interactive. Use `--file ./-` for a file named `-`.
 
+When discovery finds no workflows, `wuko validate` prints `No workflows found.` and succeeds
+unless Git hook validation fails. JSON output keeps its normal diagnostics document.
+
 Misspelled workflow names suggest a close discovered match, for example `wuko run depoly`
 suggests `deploy`. Unknown-name errors also point to `wuko list`; Wuko never runs the suggestion
 automatically.

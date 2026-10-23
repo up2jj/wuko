@@ -143,6 +143,11 @@ func validateWorkflowSources(command *cobra.Command, deps dependencies, args []s
 		}
 	}
 	diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusSucceeded, Duration: time.Since(discoveryStarted), Attributes: []diagnostic.Attribute{diagnostic.Attr("workflows", fmt.Sprint(len(sources)))}})
+	if len(sources) == 0 && config.format != "json" {
+		if _, err := fmt.Fprintln(command.OutOrStdout(), "No workflows found."); err != nil {
+			return err
+		}
+	}
 	var validationIssues validation.Collector
 	for _, source := range sources {
 		if err := command.Context().Err(); err != nil {
