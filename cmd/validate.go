@@ -68,6 +68,12 @@ func newValidateCmd(deps dependencies) *cobra.Command {
 	command.Flags().StringVar(&format, "format", "text", "validation output format: text or json")
 	command.Flags().StringVar(&reporterName, "reporter", "plain", "validation reporter: plain or github")
 	command.Flags().StringVar(&workflowFile, "file", "", "validate a workflow from a file path, or - for stdin")
+	_ = command.RegisterFlagCompletionFunc("format", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
+		return []string{"text", "json"}, cobra.ShellCompDirectiveNoFileComp
+	})
+	_ = command.RegisterFlagCompletionFunc("reporter", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
+		return []string{"plain", "github"}, cobra.ShellCompDirectiveNoFileComp
+	})
 	command.ValidArgsFunction = workflowCompletion(deps, false)
 	return command
 }

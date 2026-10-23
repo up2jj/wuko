@@ -185,3 +185,4 @@ YAML drafts are skipped so other workflow names and targets remain available. Wi
 targets from that file, for example after `wuko run --file ./deploy.yaml `, without preparing the
 workflow or starting plugins. Stdin (`--file -`) and remote workflows do not offer target
 completion. `--file` filters filenames to YAML; `--var-file` filters to JSON and TOML.
+`validate --format` and `validate --reporter` suggest their supported values.

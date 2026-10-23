@@ -122,6 +122,22 @@ func TestWorkflowFlagCompletionFiltersFileExtensions(t *testing.T) {
 	}
 }
 
+func TestValidateFlagCompletionSuggestsSupportedValues(t *testing.T) {
+	for _, test := range []struct {
+		flag string
+		want string
+	}{
+		{flag: "--format", want: "text\njson\n:4\n"},
+		{flag: "--reporter", want: "plain\ngithub\n:4\n"},
+	} {
+		t.Run(test.flag, func(t *testing.T) {
+			if got := executeCompletion(t, t.TempDir(), []string{"validate", test.flag, ""}); got != test.want {
+				t.Fatalf("completion = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
 func executeCompletion(t *testing.T, root string, args []string) string {
 	t.Helper()
 	var output bytes.Buffer
