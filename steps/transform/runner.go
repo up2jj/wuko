@@ -17,18 +17,9 @@ func (runner *Runner) Run(ctx context.Context, request step.Request) (step.Resul
 	if err != nil {
 		return step.Result{}, err
 	}
-	for index := range runner.operations {
-		if err := checkContext(ctx); err != nil {
-			return step.Result{}, err
-		}
-		operation := runner.operations[index]
-		if !operation.accepts(kindOf(current)) {
-			return step.Result{}, fmt.Errorf("operation %d (%s): cannot consume %s", index+1, operation.name, kindOf(current))
-		}
-		current, err = runOperation(ctx, evaluation, current, operation)
-		if err != nil {
-			return step.Result{}, fmt.Errorf("operation %d (%s): %w", index+1, operation.name, err)
-		}
+	current, err = runner.runPipeline(ctx, evaluation, current)
+	if err != nil {
+		return step.Result{}, err
 	}
 	// normalizeResult builds new lists and objects, so current already shares nothing with
 	// workflow state, and the engine clones outputs and variables again on commit.

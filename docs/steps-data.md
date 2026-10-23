@@ -169,6 +169,17 @@ Pipelines are type-aware. List-producing and object-producing operations can con
 named result record is terminal, so another operation after it is rejected. A runtime-only source
 kind is checked before each operation.
 
+List pipelines are evaluated item by item where the operations allow it: `filter`, `reject`, `map`,
+`flat_map`, `filter_map`, `reject_map`, `flatten`, `compact`, `take`, `take_while`, `take_filter`,
+`drop`, `drop_while`, `slice`, `unique`, `unique_by`, `unique_map`, `without`, `without_by`, and
+`concat` pass items on without building a list in between, and `first`, `find`, `find_index`,
+`contains`, `contains_by`, `some_by`, `none_by`, `every_by`, `index_of`, `count`, and `count_by` stop
+reading as soon as their result is known. Other operations, such as `sort_by`, receive the whole list.
+Results are the same either way, but evaluation is lazy: with `map` followed by `take: 3`, the `map`
+expression runs for three items only, so an item past that point that would make it fail is never
+evaluated. Put operations that shrink the list, such as `filter` and `unique_by`, before ones that
+need all of it, such as `sort_by`, to keep large inputs small.
+
 ### List operations
 
 | Family | Operations |

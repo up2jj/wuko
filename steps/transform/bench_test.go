@@ -56,10 +56,17 @@ func BenchmarkPipelineMapTake(b *testing.B) {
 	})
 }
 
-func BenchmarkPipelineFilterCount(b *testing.B) {
+func BenchmarkPipelineMapCount(b *testing.B) {
 	benchmarkPipeline(b, []any{
-		map[string]any{"filter": "item.region == 'eu'"},
-		"count",
+		map[string]any{"map": "item.region"},
+		map[string]any{"count": "eu"},
+	})
+}
+
+func BenchmarkPipelineFilterMap(b *testing.B) {
+	benchmarkPipeline(b, []any{
+		map[string]any{"filter": "item.enabled"},
+		map[string]any{"map": "{name: item.name, score: item.score}"},
 	})
 }
 
