@@ -138,10 +138,13 @@ func requiredChildContext(workflowStep Step, role ChildRole) string {
 		return "matrix group"
 	case workflowStep.Once != nil:
 		return "once block"
+	case workflowStep.Loop != nil:
+		return "loop body"
 	case workflowStep.Attempt != nil:
 		return "attempt block"
 	default:
-		panic("step has no child sequence")
+		// A diagnostic label must never crash the decoder on the error path it describes.
+		return "step body"
 	}
 }
 

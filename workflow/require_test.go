@@ -142,6 +142,26 @@ func TestLoadRejectsInvalidRequiredStepFiles(t *testing.T) {
 	}
 }
 
+func TestLoadReportsRequiredStepErrorsInsideLoopBody(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "workflow.yaml"), `version: 1
+name: loop-require
+steps:
+  - id: repeat
+    loop:
+      until: "true"
+      max_iterations: 1
+      steps:
+        - require: missing.yaml
+`)
+
+	_, err := Load(filepath.Join(dir, "workflow.yaml"))
+	if err == nil || !strings.Contains(err.Error(), "loop body at step 1") {
+		t.Fatalf("error = %v, want loop body context", err)
+	}
+}
+
 const validFragment = "- id: run\n  type: shell\n  with: {command: true}\n"
 
 func writeTestFile(t *testing.T, path, data string) {
