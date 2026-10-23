@@ -53,8 +53,9 @@ vet:
     go vet ./...
 
 # Run staticcheck (configured in staticcheck.conf).
-lint:
-    go run honnef.co/go/tools/cmd/staticcheck@2025.1.1 ./...
+[positional-arguments]
+lint *args:
+    sh scripts/lint.sh "$@"
 
 # Format all Go sources.
 fmt:

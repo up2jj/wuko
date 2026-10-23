@@ -12,6 +12,7 @@ just build        # build ./wuko
 just test         # go test ./...
 just test-race    # what CI and the pre-push hook run
 just vet          # go vet ./...
+just lint         # pinned Staticcheck, including test files
 just fuzz ./expression FuzzEval 2m  # local only; fuzz tests are not run in CI
 just fmt          # gofmt -w .
 just run --help
@@ -19,6 +20,12 @@ just run --help
 
 `just run` preserves quoted arguments, for example
 `just run run check --var 'message=hello world'`.
+
+Staticcheck uses the checks and style exceptions in `staticcheck.conf`. Run
+`just lint ./engine/...` to check a single package tree, or `just lint -version`
+to see the pinned release. The version is pinned in `scripts/lint.sh`, which is
+shared by `just lint`, CI, and the pre-push hook; no separate linter installation
+is needed. The first run downloads the tool with Go.
 
 Run `just hooks` once to install the [prek](https://github.com/j178/prek) pre-commit and pre-push
 hooks, and `prek run --all-files` before broad changes. `just snapshot` builds local release
@@ -42,7 +49,7 @@ archives into `dist/`; do not commit them.
 
 - Use [Conventional Commits](https://www.conventionalcommits.org/) such as `feat(docker): add ...`
   or `fix: ...`.
-- Add regression tests for behavior changes. `go test ./...`, `go vet ./...`, and a clean
+- Add regression tests for behavior changes. `go test ./...`, `go vet ./...`, `just lint`, and a clean
   `gofmt -l .` are required by CI.
 - Update `README.md`, `docs/`, or `examples/` when workflow syntax or CLI behavior changes.
 - For visible TUI changes, include terminal output or screenshots and re-record affected demos with
