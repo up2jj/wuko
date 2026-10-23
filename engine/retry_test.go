@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -430,4 +431,27 @@ func TestRetryAfterExtendsBackoffWithinMaxDelay(t *testing.T) {
 	if got := retryDelayForError(policy, 1, retryHTTPError{retryAfter: 10 * time.Second}); got != 5*time.Second {
 		t.Fatalf("capped delay = %s, want 5s", got)
 	}
+}
+
+func TestRunKeepsAttemptPassThatSucceededAtItsDeadline(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var runs atomic.Int32
+		registry := newTestRegistry(t, map[string]step.Builder{"finish_at_deadline": func(map[string]any) (step.Runner, error) {
+			return runnerFunc(func(ctx context.Context, _ step.Request) (step.Result, error) {
+				runs.Add(1)
+				<-ctx.Done()
+				return step.Result{Outputs: map[string]any{"ok": true}}, nil
+			}), nil
+		}})
+		timeout := workflow.Duration(time.Second)
+		definition := testDefinition(t, "deadline", attemptStep("run", attemptTimeout(immediateRetry(2), &timeout), workflow.Step{Type: "finish_at_deadline", With: map[string]any{}}))
+
+		state, err := New(registry).Run(t.Context(), definition, Options{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if runs.Load() != 1 || state.Stats.TimedOut != 0 {
+			t.Fatalf("runs = %d, stats = %#v", runs.Load(), state.Stats)
+		}
+	})
 }

@@ -204,7 +204,9 @@ func (e *Engine) executeAttempt(ctx context.Context, definition *workflow.Defini
 
 		if contextErr := executionContextError(ctx, runCtx, policy.MaxElapsedTime); contextErr != nil {
 			passErr = contextErr
-		} else if passContextErr == context.DeadlineExceeded && policy.HasTimeout {
+		} else if passErr != nil && passContextErr == context.DeadlineExceeded && policy.HasTimeout {
+			// A body that completed as its deadline fired already did its work; repeating it
+			// would duplicate side effects, so only a failed pass is attributed to the timeout.
 			passErr = attemptTimeoutError{duration: policy.Timeout, cause: passErr}
 		}
 		stats := AttemptStats{

@@ -628,3 +628,23 @@ func (b *lockedBuffer) String() string {
 	defer b.mu.Unlock()
 	return b.buffer.String()
 }
+
+func TestRunConcurrentGroupKeepsBranchesThatSucceededAtTheDeadline(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		registry := newTestRegistry(t, map[string]step.Builder{"finish_at_deadline": func(map[string]any) (step.Runner, error) {
+			return runnerFunc(func(ctx context.Context, _ step.Request) (step.Result, error) {
+				<-ctx.Done()
+				return step.Result{Outputs: map[string]any{"ok": true}}, nil
+			}), nil
+		}})
+		timeout := workflow.Duration(time.Second)
+		steps := []workflow.Step{{ID: "one", Type: "finish_at_deadline", With: map[string]any{}}, {ID: "two", Type: "finish_at_deadline", With: map[string]any{}}}
+		state, err := New(registry).Run(t.Context(), concurrentDefinition(t, &workflow.ConcurrentGroup{Steps: steps, MaxConcurrency: 2, Timeout: &timeout, FailFast: true}), Options{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if state.Steps["one"].(map[string]any)["ok"] != true || state.Steps["two"].(map[string]any)["ok"] != true {
+			t.Fatalf("steps = %#v", state.Steps)
+		}
+	})
+}

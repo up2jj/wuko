@@ -292,11 +292,22 @@ func concurrentOutcomeCounts(outcomes []concurrentBranchOutcome) (started, succe
 	return started, succeeded
 }
 
+// concurrentAllCompleted reports whether every branch ran to a successful or skipped end,
+// so a deadline that fires after the last branch finished does not discard its results.
+func concurrentAllCompleted(outcomes []concurrentBranchOutcome) bool {
+	for _, outcome := range outcomes {
+		if !outcome.started || outcome.err != nil {
+			return false
+		}
+	}
+	return true
+}
+
 func concurrentExecutionError(parent, groupCtx context.Context, concurrent *workflow.ConcurrentGroup, outcomes []concurrentBranchOutcome) error {
 	if err := parent.Err(); err != nil {
 		return err
 	}
-	if groupCtx.Err() == context.DeadlineExceeded && concurrent.Timeout != nil {
+	if groupCtx.Err() == context.DeadlineExceeded && concurrent.Timeout != nil && !concurrentAllCompleted(outcomes) {
 		return fmt.Errorf("timed out after %s: %w", concurrent.Timeout, context.DeadlineExceeded)
 	}
 	if !concurrent.FailFast {
