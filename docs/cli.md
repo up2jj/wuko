@@ -53,6 +53,12 @@ form, validate, show the tree, dry-run, print a reproducible command, edit, pin,
 manage marketplace installs. See [Workflow discovery](workflow-discovery.md) for search order,
 shadowing, and picker behavior.
 
+`wuko list` and the picker skip invalid workflow definitions and warn on stderr. Valid workflows
+remain available, and JSON listings keep stdout parseable. A broken local workflow still shadows
+global workflows with the same name; `list --all` marks those global sources as shadowed, and the
+picker hides them. Use `wuko validate` to inspect invalid definitions. Filesystem and ambiguous
+identity errors still fail discovery.
+
 The editor action uses `$VISUAL`, then `$EDITOR`, with single or double quotes for paths or
 arguments containing spaces. For example: `VISUAL='"/path/to/My Editor" --wait'`. It launches
 the editor directly; environment variables and shell commands inside the value are not expanded.

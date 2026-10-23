@@ -90,9 +90,18 @@ Discovery does not resolve composite actions referenced by `uses`, whether their
 path, HTTPS URL, or command. Action resolution happens later when a workflow is fully prepared for
 execution, validation, or tree rendering.
 
-An error in any discovered candidate aborts the discovery operation, including an error in a
-workflow that would otherwise be shadowed by a closer definition. Missing directories are the
-only discovery-time filesystem errors that are ignored.
+`wuko list` and the bare `wuko` picker skip invalid workflow definitions and report the file and
+error on stderr. Valid workflows remain available, including when a shadowed definition is invalid.
+The picker also shows a notice when files were skipped. JSON listings keep their normal document
+on stdout. Invalid definitions still reserve their names: a broken local workflow never promotes
+a global namesake to effective status. `list --all` can show that global source as shadowed; the
+picker hides it until the effective definition is fixed.
+
+Filesystem errors, duplicate selectors, and installed packages whose names cannot be recovered
+from either their manifest or installation marker still abort browsing. Missing workflow root
+directories are ignored. Other commands retain strict discovery: an invalid discovered candidate
+can abort a named run or inspection, even if that candidate would otherwise be shadowed. Use
+`wuko validate` to inspect invalid definitions, or `--file PATH` to bypass named discovery.
 
 ## Precedence and shadowing
 
@@ -101,7 +110,8 @@ workflow wins over the same name in a parent directory, and any local workflow w
 workflows. Between global locations, the home workflow wins over the platform-config workflow.
 
 `Discover` returns only effective sources. `DiscoverAll` returns effective and shadowed sources and
-marks each source with `Effective: true` or `false`.
+marks each source with `Effective: true` or `false`. Both are strict. `DiscoverForBrowsing` returns
+valid effective and shadowed sources plus warnings for invalid definitions.
 
 Use `wuko list --all` to inspect every definition. Each text row starts with `effective` or
 `shadowed`, followed by the usual name, scope, description, and path. This makes it easy to find
@@ -140,7 +150,7 @@ affects display order, not which definition wins.
   and inspect an explicit file. `--file -` consumes stdin once, uses the current directory for
   relative resources, and disables interactive input. Diagnostics use the logical source `stdin`;
   use `--file ./-` for a literal filename. Named prerequisites still use effective discovery.
-- Bare `wuko` calls `DiscoverAll`. In an interactive terminal it shows effective and shadowed
+- Bare `wuko` uses browsing discovery. In an interactive terminal it shows valid effective and shadowed
   directly invokable sources in the picker, including one row per target and each workflow's direct
   prerequisites. Enter runs the exact selected source and `a` opens a contextual action palette.
   Its actions run or open the selected target, validate it, render its tree, perform a dry run,
@@ -151,8 +161,10 @@ affects display order, not which definition wins.
   filter. Plugins used by an inspection are stopped before returning to the picker. The existing
   `u`, `e`, `p`, `s`, `m`, `r`, and Shift+Enter shortcuts respect the selected workflow's available
   actions; remote workflows cannot be edited. Editing always triggers rediscovery; a successful
-  reinstall does the same. A refresh failure leaves the last valid picker snapshot available and
-  displays a warning.
+  reinstall does the same. Invalid definitions are skipped on refresh as well, so valid workflows
+  remain available after an unfinished edit. A filesystem or discovery-identity failure leaves
+  the last valid picker snapshot available and displays a warning. If only invalid workflows
+  remain, the picker exits with guidance to run `wuko validate`.
   A root workflow can use `return: {to: picker, outputs: {}}` to finish normally, run cleanup, and
   rediscover workflows before reopening the same filter and selection. Prerequisite returns do not
   navigate. A failure before that return exits normally with an error; cleanup or reporting errors

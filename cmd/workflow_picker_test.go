@@ -462,7 +462,7 @@ func TestWorkflowPickerReturnDestinationRefreshesDiscovery(t *testing.T) {
 			return os.WriteFile(path, []byte("version: 1\nname: refreshed\ndescription: Updated\nsteps:\n  - return: {to: picker, outputs: {}}\n"), 0o644)
 		}},
 		{name: "failed rediscovery keeps snapshot", wantDesc: "Original", wantNotice: "refresh failed:", mutate: func(path string) error {
-			return os.WriteFile(path, []byte("invalid: true\n"), 0o644)
+			return os.WriteFile(path, []byte("version: 1\nname: refreshed\nsteps:\n  - require: missing.yaml\n"), 0o644)
 		}},
 		{name: "empty rediscovery exits", wantEmpty: true, mutate: os.Remove},
 	} {
@@ -765,7 +765,7 @@ func TestWorkflowPickerRefreshesAfterEditorAndKeepsSnapshotOnFailure(t *testing.
 	}{
 		{name: "refreshes valid edit", intent: tui.SelectionEditor, replacement: "version: 1\nname: release\ndescription: Updated\nsteps:\n  - return: {outputs: {}}\n", wantDesc: "Updated"},
 		{name: "refreshes successful reinstall", intent: tui.SelectionReinstall, replacement: "version: 1\nname: release\ndescription: Reinstalled\nsteps:\n  - return: {outputs: {}}\n", wantDesc: "Reinstalled"},
-		{name: "keeps snapshot after invalid edit", intent: tui.SelectionEditor, replacement: "invalid: true\n", wantDesc: "Original", wantNotice: "refresh failed:"},
+		{name: "keeps snapshot after I/O failure", intent: tui.SelectionEditor, replacement: "version: 1\nname: release\nsteps:\n  - require: missing.yaml\n", wantDesc: "Original", wantNotice: "refresh failed:"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			root := t.TempDir()

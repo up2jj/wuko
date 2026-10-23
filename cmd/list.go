@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"slices"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -49,14 +50,16 @@ func newListCmd(deps dependencies) *cobra.Command {
 			reporter := diagnosticsFor(command, deps, cwd)
 			started := time.Now()
 			diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusStarted, Time: started, Message: "listing workflows"})
-			discover := workflow.Discover
-			if all {
-				discover = workflow.DiscoverAll
-			}
-			sources, err := discover(cwd, home, config)
+			sources, warnings, err := workflow.DiscoverForBrowsing(cwd, home, config)
 			if err != nil {
 				diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusFailed, Duration: time.Since(started), Error: err})
 				return err
+			}
+			if err := writeDiscoveryWarnings(command.ErrOrStderr(), warnings); err != nil {
+				return err
+			}
+			if !all {
+				sources = slices.DeleteFunc(sources, func(source workflow.Source) bool { return !source.Effective })
 			}
 			diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusSucceeded, Duration: time.Since(started), Attributes: []diagnostic.Attribute{diagnostic.Attr("workflows", fmt.Sprint(len(sources)))}})
 			if format == "json" {

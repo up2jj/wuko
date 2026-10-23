@@ -129,13 +129,22 @@ func DiscoverForValidation(cwd, homeDir, configDir string) ([]Source, error) {
 // DiscoverAll returns every workflow definition in discovery order, including definitions
 // shadowed by a closer local or global workflow with the same name.
 func DiscoverAll(cwd, homeDir, configDir string) ([]Source, error) {
+	return discoverAll(cwd, homeDir, configDir, nil)
+}
+
+func discoverAll(cwd, homeDir, configDir string, invalid func(Source, error)) ([]Source, error) {
 	locations := discoveryLocations(cwd, homeDir, configDir)
 	var sources []Source
 	for _, location := range locations {
-		locationSources, err := discoverDirectory(location.dir, location.scope)
+		locationSources, err := discoverDirectoryWithWarnings(location.dir, location.scope, invalid)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
-				continue
+				if invalid == nil {
+					continue
+				}
+				if _, statErr := os.Stat(location.dir); errors.Is(statErr, os.ErrNotExist) {
+					continue
+				}
 			}
 			return nil, err
 		}
@@ -207,6 +216,10 @@ func FindInDirectory(directory, name string) (Source, error) {
 }
 
 func discoverDirectory(directory, scope string) ([]Source, error) {
+	return discoverDirectoryWithWarnings(directory, scope, nil)
+}
+
+func discoverDirectoryWithWarnings(directory, scope string, invalid func(Source, error)) ([]Source, error) {
 	files, err := discoverWorkflowFiles(directory)
 	if err != nil {
 		return nil, err
@@ -215,13 +228,25 @@ func discoverDirectory(directory, scope string) ([]Source, error) {
 	for _, file := range files {
 		name := file.name
 		definition, err := loadLocal(file.path)
+		if err == nil && file.packageDir != "" && !ValidWorkflowName(definition.Name) {
+			err = fmt.Errorf("installed package %s has invalid workflow name %q", file.packageDir, definition.Name)
+		}
 		if err != nil {
-			return nil, err
+			var pathError *os.PathError
+			if invalid == nil || errors.As(err, &pathError) {
+				return nil, err
+			}
+			source, sourceErr := invalidDiscoverySource(file, scope)
+			if sourceErr != nil {
+				return nil, sourceErr
+			}
+			invalid(source, err)
+			// Keep the invalid source until precedence has been assigned. Removing it
+			// here could promote a global namesake to the effective workflow.
+			sources = append(sources, source)
+			continue
 		}
 		if file.packageDir != "" {
-			if !ValidWorkflowName(definition.Name) {
-				return nil, fmt.Errorf("installed package %s has invalid workflow name %q", file.packageDir, definition.Name)
-			}
 			name = definition.Name
 		}
 		targetNames := definition.TargetNames()

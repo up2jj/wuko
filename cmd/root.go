@@ -395,10 +395,14 @@ func runWorkflowPicker(command *cobra.Command, deps dependencies) error {
 	}
 	reporter := diagnosticsFor(command, deps, cwd)
 	diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseInvocation, Status: diagnostic.StatusStarted, Message: "workflow picker", Attributes: []diagnostic.Attribute{diagnostic.Attr("run_dir", cwd)}})
-	allSources, discovered, err := discoverWorkflowPickerSources(cwd, home, config, reporter)
+	allSources, warnings, err := discoverWorkflowPickerSources(cwd, home, config, reporter)
 	if err != nil {
 		return err
 	}
+	if err := writeDiscoveryWarnings(command.ErrOrStderr(), warnings); err != nil {
+		return err
+	}
+	discovered := len(allSources)
 	sources := slices.DeleteFunc(slices.Clone(allSources), func(source workflow.Source) bool { return !source.Invokable })
 	if !deps.isInteractive(command.InOrStdin()) {
 		for _, source := range sources {
@@ -422,6 +426,10 @@ func runWorkflowPicker(command *cobra.Command, deps dependencies) error {
 			fmt.Fprint(command.OutOrStdout(), noInvokableWorkflowsHelp)
 			return nil
 		}
+		if len(warnings) > 0 {
+			fmt.Fprint(command.OutOrStdout(), noValidWorkflowsHelp)
+			return nil
+		}
 		fmt.Fprint(command.OutOrStdout(), noWorkflowsHelp)
 		return nil
 	}
@@ -429,7 +437,7 @@ func runWorkflowPicker(command *cobra.Command, deps dependencies) error {
 	sortMode := pickerState.sortMode()
 	selectedPath := ""
 	filter := ""
-	notice := ""
+	notice := discoveryWarningNotice(warnings)
 	addNotice := func(message string) {
 		if notice == "" {
 			notice = message
@@ -438,13 +446,19 @@ func runWorkflowPicker(command *cobra.Command, deps dependencies) error {
 		notice += "; " + message
 	}
 	refresh := func() bool {
-		refreshed, refreshedCount, refreshErr := discoverWorkflowPickerSources(cwd, home, config, reporter)
+		refreshed, refreshWarnings, refreshErr := discoverWorkflowPickerSources(cwd, home, config, reporter)
 		if refreshErr != nil {
 			addNotice("refresh failed: " + refreshErr.Error())
 			return false
 		}
+		if warningErr := writeDiscoveryWarnings(command.ErrOrStderr(), refreshWarnings); warningErr != nil {
+			addNotice("cannot write discovery warnings: " + warningErr.Error())
+		}
+		if message := discoveryWarningNotice(refreshWarnings); message != "" {
+			addNotice(message)
+		}
 		sources = slices.DeleteFunc(slices.Clone(refreshed), func(source workflow.Source) bool { return !source.Invokable })
-		discovered = refreshedCount
+		discovered = len(refreshed)
 		if pickerState.reconcile(refreshed) {
 			if saveErr := saveWorkflowPickerState(command.Context(), config, pickerState); saveErr != nil {
 				addNotice("cannot save picker state: " + saveErr.Error())
@@ -453,6 +467,8 @@ func runWorkflowPicker(command *cobra.Command, deps dependencies) error {
 		if len(sources) == 0 {
 			if discovered > 0 {
 				fmt.Fprint(command.OutOrStdout(), noInvokableWorkflowsHelp)
+			} else if len(refreshWarnings) > 0 {
+				fmt.Fprint(command.OutOrStdout(), noValidWorkflowsHelp)
 			} else {
 				fmt.Fprint(command.OutOrStdout(), noWorkflowsHelp)
 			}
@@ -616,17 +632,24 @@ func runWorkflowPicker(command *cobra.Command, deps dependencies) error {
 	}
 }
 
-func discoverWorkflowPickerSources(cwd, home, config string, reporter diagnostic.Reporter) ([]workflow.Source, int, error) {
+func discoverWorkflowPickerSources(cwd, home, config string, reporter diagnostic.Reporter) ([]workflow.Source, []workflow.DiscoveryWarning, error) {
 	discoveryStarted := time.Now()
 	diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusStarted, Time: discoveryStarted, Message: "discovering workflows"})
-	sources, err := workflow.DiscoverAll(cwd, home, config)
+	sources, warnings, err := workflow.DiscoverForBrowsing(cwd, home, config)
 	if err != nil {
 		diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusFailed, Duration: time.Since(discoveryStarted), Error: err})
-		return nil, 0, err
+		return nil, nil, err
 	}
+	blocked := make(map[string]bool)
+	for _, warning := range warnings {
+		if warning.Source.Effective {
+			blocked[warning.Source.Name] = true
+		}
+	}
+	sources = slices.DeleteFunc(sources, func(source workflow.Source) bool { return blocked[source.Name] })
 	discovered := len(sources)
 	diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseDiscovery, Status: diagnostic.StatusSucceeded, Duration: time.Since(discoveryStarted), Attributes: []diagnostic.Attribute{diagnostic.Attr("workflows", fmt.Sprint(discovered))}})
-	return sources, discovered, nil
+	return sources, warnings, nil
 }
 
 func runWorkflowPickerInspection(command *cobra.Command, deps dependencies, source workflow.Source, intent tui.SelectionIntent) (string, string, bool) {
