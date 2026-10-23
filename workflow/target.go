@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/up2jj/wuko/validation"
 	"gopkg.in/yaml.v3"
 )
 
@@ -53,7 +54,12 @@ func (definition *Definition) SelectTarget(name string) (*Definition, error) {
 	}
 	target, ok := definition.Targets[name]
 	if !ok {
-		return nil, fmt.Errorf("workflow %q has no target %q (available: %s)", definition.Name, name, formatTargetNames(definition.TargetNames()))
+		names := definition.TargetNames()
+		hint := ""
+		if suggestion := validation.Suggest(name, names); suggestion != "" {
+			hint = fmt.Sprintf("; did you mean %q?", suggestion)
+		}
+		return nil, fmt.Errorf("workflow %q has no target %q (available: %s)%s", definition.Name, name, formatTargetNames(names), hint)
 	}
 
 	selected := *definition

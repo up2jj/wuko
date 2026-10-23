@@ -7,6 +7,35 @@ import (
 	"testing"
 )
 
+func TestTargetSelectionSuggestsCloseMatches(t *testing.T) {
+	t.Parallel()
+	definition := &Definition{Name: "deploy", Targets: map[string]TargetDefinition{"staging": {}, "production": {}}}
+	for _, test := range []struct {
+		name string
+		want string
+	}{
+		{name: "stagng", want: `did you mean "staging"?`},
+		{name: "prodution", want: `did you mean "production"?`},
+		{name: "unrelated-environment"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			selected, err := definition.SelectTarget(test.name)
+			if selected != nil || err == nil || !strings.Contains(err.Error(), "available: production, staging") {
+				t.Fatalf("SelectTarget() = %#v, %v; want rejection with sorted available targets", selected, err)
+			}
+			if test.want != "" && !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v, want %q", err, test.want)
+			}
+			if test.want == "" && strings.Contains(err.Error(), "did you mean") {
+				t.Fatalf("unexpected weak suggestion: %v", err)
+			}
+		})
+	}
+	if selected, err := definition.SelectTarget("staging"); err != nil || selected == nil {
+		t.Fatalf("exact target = %#v, %v", selected, err)
+	}
+}
+
 func TestLoadSelectsTargetAndAppliesOverrides(t *testing.T) {
 	t.Parallel()
 	directory := t.TempDir()

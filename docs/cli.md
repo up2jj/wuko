@@ -40,8 +40,9 @@ When discovery finds no workflows, `wuko validate` prints `No workflows found.` 
 unless Git hook validation fails. JSON output keeps its normal diagnostics document.
 
 Misspelled workflow names suggest a close discovered match, for example `wuko run depoly`
-suggests `deploy`. Unknown-name errors also point to `wuko list`; Wuko never runs the suggestion
-automatically.
+suggests `deploy`. Misspelled targets also suggest a close match, such as `stagng` → `staging`,
+and list available targets. Unknown workflow names also point to `wuko list`; Wuko never runs
+the suggestion automatically.
 
 In the picker, Enter runs the selected workflow and `a` opens its action palette: open a browser
 form, validate, show the tree, dry-run, print a reproducible command, edit, pin, change sorting, or
