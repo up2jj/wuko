@@ -118,7 +118,13 @@ func runTTY(ctx context.Context, options Options, credential *syscall.Credential
 		options.Started()
 	}
 	wait := make(chan error, 1)
-	go func() { wait <- command.Wait() }()
+	go func() {
+		err := command.Wait()
+		// As for piped commands, the step owns what its leader left behind in the group:
+		// a nohup'd child survives the session hangup and would otherwise outlive the step.
+		stopLeftoverGroup(command.Process.Pid, options)
+		wait <- err
+	}()
 	session := &localTTY{ptmx: ptmx, pid: command.Process.Pid, wait: wait, options: options}
 	if options.RemoteTerminal != nil {
 		return bridgeTTY(ctx, session, options)

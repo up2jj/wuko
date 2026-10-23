@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/user"
+	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
@@ -827,5 +828,29 @@ func TestRunTTYKeepsDrainingOutputAfterWriterFails(t *testing.T) {
 	})
 	if ctx.Err() != nil {
 		t.Fatal("TTY command did not finish after its output writer failed")
+	}
+}
+
+func TestRunTTYStopsProcessesLeftInTheGroup(t *testing.T) {
+	terminal, _ := testTerminal(t, 24, 80)
+	pidPath := filepath.Join(t.TempDir(), "pid")
+	_, err := Run(t.Context(), Options{
+		Command: "sh", Args: []string{"-c", "nohup sleep 30 >/dev/null 2>&1 & echo $! > " + pidPath},
+		Env: testEnvironment(), Stdin: terminal, Stdout: io.Discard, TTY: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(pidPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if syscall.Kill(pid, 0) == nil {
+		_ = syscall.Kill(pid, syscall.SIGKILL)
+		t.Fatalf("background process %d outlived the TTY step", pid)
 	}
 }
