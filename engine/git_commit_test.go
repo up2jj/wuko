@@ -4,12 +4,12 @@ import (
 	"context"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/up2jj/wuko/engine"
+	"github.com/up2jj/wuko/internal/gittest"
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/step"
 	assertstep "github.com/up2jj/wuko/steps/assert"
@@ -19,8 +19,7 @@ import (
 
 func TestGitCommitRendersConfigurationAndCommitsOutputs(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
-	runEngineGit(t, dir, "init", "--quiet")
+	dir := gittest.Init(t)
 	if err := os.WriteFile(filepath.Join(dir, "change.txt"), []byte("content\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -48,18 +47,18 @@ func TestGitCommitRendersConfigurationAndCommitsOutputs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	commit := strings.TrimSpace(runEngineGit(t, dir, "rev-parse", "HEAD"))
+	commit := gittest.Output(t, dir, "rev-parse", "HEAD")
 	outputs := state.Steps["commit"].(map[string]any)
 	if outputs["created"] != true || outputs["commit"] != commit {
 		t.Fatalf("commit outputs = %#v, HEAD = %q", outputs, commit)
 	}
-	message := runEngineGit(t, dir, "show", "-s", "--format=%B", "HEAD")
+	message := gittest.Output(t, dir, "show", "-s", "--format=%B", "HEAD")
 	for _, want := range []string{"feat: rendered commit", "Rendered body.", "Refs: WUKO-42"} {
 		if !strings.Contains(message, want) {
 			t.Errorf("message does not contain %q:\n%s", want, message)
 		}
 	}
-	identity := strings.TrimSpace(runEngineGit(t, dir, "show", "-s", "--format=%an|%ae|%cn|%ce", "HEAD"))
+	identity := gittest.Output(t, dir, "show", "-s", "--format=%an|%ae|%cn|%ce", "HEAD")
 	if identity != "Workflow Bot|workflow@example.test|Workflow Bot|workflow@example.test" {
 		t.Fatalf("identity = %q", identity)
 	}
@@ -92,15 +91,4 @@ func TestGitCommitValidationAndDryRunDoNotExecuteGit(t *testing.T) {
 	if executor.calls != 0 {
 		t.Fatalf("dry run executed %d Git commands", executor.calls)
 	}
-}
-
-func runEngineGit(t *testing.T, dir string, args ...string) string {
-	t.Helper()
-	command := exec.Command("git", args...)
-	command.Dir = dir
-	output, err := command.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, output)
-	}
-	return string(output)
 }

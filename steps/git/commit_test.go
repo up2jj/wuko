@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/gittest"
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/step"
 	"go.yaml.in/yaml/v3"
@@ -209,11 +210,11 @@ func TestCommitEmptyPolicies(t *testing.T) {
 
 func TestCommitCreatesStructuredCommitAndStagesWholeIndex(t *testing.T) {
 	t.Parallel()
-	dir := initGitRepository(t)
+	dir := gittest.InitWithCommit(t)
 	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("changed\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	runGitTest(t, dir, "add", "README.md")
+	gittest.Run(t, dir, "add", "README.md")
 	if err := os.WriteFile(filepath.Join(dir, "new.txt"), []byte("new\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -235,11 +236,11 @@ func TestCommitCreatesStructuredCommitAndStagesWholeIndex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	commit := strings.TrimSpace(runGitTest(t, dir, "rev-parse", "HEAD"))
+	commit := gittest.Output(t, dir, "rev-parse", "HEAD")
 	if result.Outputs["created"] != true || result.Outputs["commit"] != commit {
 		t.Fatalf("result = %#v, HEAD = %q", result, commit)
 	}
-	metadata := runGitTest(t, dir, "show", "-s", "--format=%an|%ae|%cn|%ce%n%B", "HEAD")
+	metadata := gittest.Output(t, dir, "show", "-s", "--format=%an|%ae|%cn|%ce%n%B", "HEAD")
 	for _, want := range []string{
 		"Original Author|author@example.test|Commit Bot|bot@example.test",
 		"feat: structured commit\n\nBody text.",
@@ -252,7 +253,7 @@ func TestCommitCreatesStructuredCommitAndStagesWholeIndex(t *testing.T) {
 			t.Errorf("commit metadata does not contain %q:\n%s", want, metadata)
 		}
 	}
-	changed := strings.Fields(runGitTest(t, dir, "show", "--pretty=format:", "--name-only", "HEAD"))
+	changed := strings.Fields(gittest.Output(t, dir, "show", "--pretty=format:", "--name-only", "HEAD"))
 	if !slices.Equal(changed, []string{"README.md", "new.txt"}) {
 		t.Fatalf("committed paths = %#v", changed)
 	}
@@ -260,8 +261,8 @@ func TestCommitCreatesStructuredCommitAndStagesWholeIndex(t *testing.T) {
 
 func TestCommitSkipsIdempotentlyAndCanCreateEmptyCommit(t *testing.T) {
 	t.Parallel()
-	dir := initGitRepository(t)
-	before := strings.TrimSpace(runGitTest(t, dir, "rev-parse", "HEAD"))
+	dir := gittest.InitWithCommit(t)
+	before := gittest.Output(t, dir, "rev-parse", "HEAD")
 	skip, err := NewCommit(map[string]any{"message": "no changes"})
 	if err != nil {
 		t.Fatal(err)
@@ -289,7 +290,7 @@ func TestCommitSkipsIdempotentlyAndCanCreateEmptyCommit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	after := strings.TrimSpace(runGitTest(t, dir, "rev-parse", "HEAD"))
+	after := gittest.Output(t, dir, "rev-parse", "HEAD")
 	if result.Outputs["created"] != true || result.Outputs["commit"] != after || after == before {
 		t.Fatalf("empty result = %#v, before = %q, after = %q", result, before, after)
 	}
@@ -297,7 +298,7 @@ func TestCommitSkipsIdempotentlyAndCanCreateEmptyCommit(t *testing.T) {
 
 func TestCommitStagesTrackedDeletion(t *testing.T) {
 	t.Parallel()
-	dir := initGitRepository(t)
+	dir := gittest.InitWithCommit(t)
 	if err := os.Remove(filepath.Join(dir, "README.md")); err != nil {
 		t.Fatal(err)
 	}
@@ -308,15 +309,15 @@ func TestCommitStagesTrackedDeletion(t *testing.T) {
 	if _, err := runner.Run(t.Context(), step.Request{RunDir: dir}); err != nil {
 		t.Fatal(err)
 	}
-	if tracked := strings.TrimSpace(runGitTest(t, dir, "ls-files", "--", "README.md")); tracked != "" {
+	if tracked := gittest.Output(t, dir, "ls-files", "--", "README.md"); tracked != "" {
 		t.Fatalf("deleted path is still tracked: %q", tracked)
 	}
 }
 
 func TestCommitIgnoresPathsThatMatchNothing(t *testing.T) {
 	t.Parallel()
-	dir := initGitRepository(t)
-	before := strings.TrimSpace(runGitTest(t, dir, "rev-parse", "HEAD"))
+	dir := gittest.InitWithCommit(t)
+	before := gittest.Output(t, dir, "rev-parse", "HEAD")
 	skip, err := NewCommit(map[string]any{"message": "no output", "paths": []any{"dist", "generated/*.go"}})
 	if err != nil {
 		t.Fatal(err)
@@ -348,11 +349,11 @@ func TestCommitIgnoresPathsThatMatchNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	after := strings.TrimSpace(runGitTest(t, dir, "rev-parse", "HEAD"))
+	after := gittest.Output(t, dir, "rev-parse", "HEAD")
 	if result.Outputs["created"] != true || result.Outputs["commit"] != after || after == before {
 		t.Fatalf("mixed paths result = %#v", result)
 	}
-	if tracked := strings.TrimSpace(runGitTest(t, dir, "ls-files", "--", "present.txt")); tracked != "present.txt" {
+	if tracked := gittest.Output(t, dir, "ls-files", "--", "present.txt"); tracked != "present.txt" {
 		t.Fatalf("present.txt is not tracked: %q", tracked)
 	}
 }
@@ -360,8 +361,8 @@ func TestCommitIgnoresPathsThatMatchNothing(t *testing.T) {
 func TestCommitReportsMissingGitIdentity(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	runGitTest(t, dir, "init", "--quiet")
-	runGitTest(t, dir, "config", "user.useConfigOnly", "true")
+	gittest.Run(t, dir, "init", "--quiet")
+	gittest.Run(t, dir, "config", "user.useConfigOnly", "true")
 	if err := os.WriteFile(filepath.Join(dir, "file.txt"), []byte("content\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -379,7 +380,7 @@ func TestCommitReportsMissingGitIdentity(t *testing.T) {
 
 func TestCommitVerifyControlsHooks(t *testing.T) {
 	t.Parallel()
-	dir := initGitRepository(t)
+	dir := gittest.InitWithCommit(t)
 	hook := filepath.Join(dir, ".git", "hooks", "pre-commit")
 	if err := os.WriteFile(hook, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
 		t.Fatal(err)

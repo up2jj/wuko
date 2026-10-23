@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/gittest"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/validation"
 )
@@ -42,7 +43,7 @@ func TestValidateReportsEmptyDiscovery(t *testing.T) {
 
 func TestValidateEmptyDiscoveryStillChecksGitHooks(t *testing.T) {
 	t.Parallel()
-	root := initGitHookRepository(t)
+	root := gittest.Init(t)
 	writeGitHookManifest(t, root, "pre-commit:\n    - workflow: missing")
 	var output bytes.Buffer
 	command := newRootCmd(gitHookTestDependencies(t, root, &output, io.Discard, func(string) string { return "" }))
@@ -93,7 +94,7 @@ func TestValidateJSONCollectsIndependentWorkflows(t *testing.T) {
 
 func TestValidateJSONKeepsWorkflowIssuesWhenGitHookBindingFails(t *testing.T) {
 	t.Parallel()
-	root := initGitHookRepository(t)
+	root := gittest.Init(t)
 	directory := filepath.Join(root, ".wuko", "workflows")
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/gittest"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -58,8 +59,8 @@ func TestChangeSummaryHandlesRenameDestinationRecords(t *testing.T) {
 
 func TestWorktreeEnsureListMergeAndSafeRemove(t *testing.T) {
 	t.Parallel()
-	dir := initGitRepository(t)
-	base := strings.TrimSpace(runGitTest(t, dir, "branch", "--show-current"))
+	dir := gittest.InitWithCommit(t)
+	base := gittest.Output(t, dir, "branch", "--show-current")
 	runner, err := NewWorktree(map[string]any{"operation": "ensure", "branch": "feature/worktree", "base": base, "create": true})
 	if err != nil {
 		t.Fatal(err)
@@ -89,8 +90,8 @@ func TestWorktreeEnsureListMergeAndSafeRemove(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(path, "feature.txt"), []byte("feature\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	runGitTest(t, path, "add", "feature.txt")
-	runGitTest(t, path, "commit", "--quiet", "-m", "feature")
+	gittest.Run(t, path, "add", "feature.txt")
+	gittest.Run(t, path, "commit", "--quiet", "-m", "feature")
 
 	list, err := NewWorktree(map[string]any{"operation": "list", "comparison": base})
 	if err != nil {
@@ -144,7 +145,7 @@ func TestWorktreeEnsureListMergeAndSafeRemove(t *testing.T) {
 	if removed.Outputs["branch_deleted"] != true || removed.Outputs["branch_delete_reason"] != "same_commit" {
 		t.Fatalf("integrated removal = %#v", removed.Outputs)
 	}
-	if got := strings.TrimSpace(runGitTest(t, dir, "branch", "--list", "feature/worktree")); got != "" {
+	if got := gittest.Output(t, dir, "branch", "--list", "feature/worktree"); got != "" {
 		t.Fatalf("branch still exists: %q", got)
 	}
 }
@@ -160,16 +161,16 @@ func newTestWorktreeRemoval(t *testing.T, path string) step.Runner {
 
 func TestSquashCreatesOneCommitAndRecoveryRef(t *testing.T) {
 	t.Parallel()
-	dir := initGitRepository(t)
-	baseBranch := strings.TrimSpace(runGitTest(t, dir, "branch", "--show-current"))
-	base := strings.TrimSpace(runGitTest(t, dir, "rev-parse", "HEAD"))
-	runGitTest(t, dir, "switch", "-c", "topic")
+	dir := gittest.InitWithCommit(t)
+	baseBranch := gittest.Output(t, dir, "branch", "--show-current")
+	base := gittest.Output(t, dir, "rev-parse", "HEAD")
+	gittest.Run(t, dir, "switch", "-c", "topic")
 	if err := os.WriteFile(filepath.Join(dir, "one.txt"), []byte("one\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	runGitTest(t, dir, "add", "one.txt")
-	runGitTest(t, dir, "commit", "--quiet", "-m", "one")
-	oldHead := strings.TrimSpace(runGitTest(t, dir, "rev-parse", "HEAD"))
+	gittest.Run(t, dir, "add", "one.txt")
+	gittest.Run(t, dir, "commit", "--quiet", "-m", "one")
+	oldHead := gittest.Output(t, dir, "rev-parse", "HEAD")
 	if err := os.WriteFile(filepath.Join(dir, "two.txt"), []byte("two\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -184,36 +185,36 @@ func TestSquashCreatesOneCommitAndRecoveryRef(t *testing.T) {
 	if result.Outputs["old_head"] != oldHead || result.Outputs["base"] != base {
 		t.Fatalf("squash result = %#v", result.Outputs)
 	}
-	if count := strings.TrimSpace(runGitTest(t, dir, "rev-list", "--count", baseBranch+"..topic")); count != "1" {
+	if count := gittest.Output(t, dir, "rev-list", "--count", baseBranch+"..topic"); count != "1" {
 		t.Fatalf("commit count = %q", count)
 	}
-	if tree := strings.TrimSpace(runGitTest(t, dir, "ls-tree", "-r", "--name-only", "HEAD")); !strings.Contains(tree, "one.txt") || !strings.Contains(tree, "two.txt") {
+	if tree := gittest.Output(t, dir, "ls-tree", "-r", "--name-only", "HEAD"); !strings.Contains(tree, "one.txt") || !strings.Contains(tree, "two.txt") {
 		t.Fatalf("squash tree = %q", tree)
 	}
 	backup := result.Outputs["backup_ref"].(string)
-	if got := strings.TrimSpace(runGitTest(t, dir, "rev-parse", backup)); got != oldHead {
+	if got := gittest.Output(t, dir, "rev-parse", backup); got != oldHead {
 		t.Fatalf("backup ref = %q, want %q", got, oldHead)
 	}
 }
 
 func TestRebaseReplaysOntoTargetAndLeavesConflictPolicyToGit(t *testing.T) {
 	t.Parallel()
-	dir := initGitRepository(t)
-	baseBranch := strings.TrimSpace(runGitTest(t, dir, "branch", "--show-current"))
+	dir := gittest.InitWithCommit(t)
+	baseBranch := gittest.Output(t, dir, "branch", "--show-current")
 	worktree := filepath.Join(t.TempDir(), "topic")
-	runGitTest(t, dir, "worktree", "add", "-b", "topic", worktree)
-	t.Cleanup(func() { runGitTest(t, dir, "worktree", "remove", "--force", worktree) })
+	gittest.Run(t, dir, "worktree", "add", "-b", "topic", worktree)
+	t.Cleanup(func() { gittest.Run(t, dir, "worktree", "remove", "--force", worktree) })
 	if err := os.WriteFile(filepath.Join(worktree, "topic.txt"), []byte("topic\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	runGitTest(t, worktree, "add", "topic.txt")
-	runGitTest(t, worktree, "commit", "--quiet", "-m", "topic")
+	gittest.Run(t, worktree, "add", "topic.txt")
+	gittest.Run(t, worktree, "commit", "--quiet", "-m", "topic")
 	if err := os.WriteFile(filepath.Join(dir, "base.txt"), []byte("base\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	runGitTest(t, dir, "add", "base.txt")
-	runGitTest(t, dir, "commit", "--quiet", "-m", "base")
-	targetHead := strings.TrimSpace(runGitTest(t, dir, "rev-parse", "HEAD"))
+	gittest.Run(t, dir, "add", "base.txt")
+	gittest.Run(t, dir, "commit", "--quiet", "-m", "base")
+	targetHead := gittest.Output(t, dir, "rev-parse", "HEAD")
 	runner, err := NewRebase(map[string]any{"target": baseBranch})
 	if err != nil {
 		t.Fatal(err)
@@ -225,21 +226,21 @@ func TestRebaseReplaysOntoTargetAndLeavesConflictPolicyToGit(t *testing.T) {
 	if result.Outputs["rebased"] != true {
 		t.Fatalf("rebase result = %#v", result.Outputs)
 	}
-	if parent := strings.TrimSpace(runGitTest(t, worktree, "rev-parse", "HEAD^")); parent != targetHead {
+	if parent := gittest.Output(t, worktree, "rev-parse", "HEAD^"); parent != targetHead {
 		t.Fatalf("rebased parent = %q, want %q", parent, targetHead)
 	}
 }
 
 func TestNoFFMergeUsesAndCleansTemporaryTargetWorktree(t *testing.T) {
 	t.Parallel()
-	dir := initGitRepository(t)
-	runGitTest(t, dir, "branch", "release")
+	dir := gittest.InitWithCommit(t)
+	gittest.Run(t, dir, "branch", "release")
 	if err := os.WriteFile(filepath.Join(dir, "feature.txt"), []byte("feature\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	runGitTest(t, dir, "add", "feature.txt")
-	runGitTest(t, dir, "commit", "--quiet", "-m", "feature")
-	source := strings.TrimSpace(runGitTest(t, dir, "branch", "--show-current"))
+	gittest.Run(t, dir, "add", "feature.txt")
+	gittest.Run(t, dir, "commit", "--quiet", "-m", "feature")
+	source := gittest.Output(t, dir, "branch", "--show-current")
 	runner, err := NewMerge(map[string]any{"target": "release", "source": source, "mode": "no_ff", "message": "merge feature"})
 	if err != nil {
 		t.Fatal(err)
@@ -251,7 +252,7 @@ func TestNoFFMergeUsesAndCleansTemporaryTargetWorktree(t *testing.T) {
 	if result.Outputs["merge_commit"] != true || result.Outputs["changed"] != true {
 		t.Fatalf("merge result = %#v", result.Outputs)
 	}
-	if parents := strings.Fields(strings.TrimSpace(runGitTest(t, dir, "show", "-s", "--format=%P", "release"))); len(parents) != 2 {
+	if parents := strings.Fields(gittest.Output(t, dir, "show", "-s", "--format=%P", "release")); len(parents) != 2 {
 		t.Fatalf("release parents = %#v", parents)
 	}
 	matches, err := filepath.Glob(filepath.Join(filepath.Dir(dir), ".wuko-merge-*"))
@@ -292,9 +293,9 @@ func TestLifecycleRunnersAreHostLocal(t *testing.T) {
 
 func TestMatchingRemoteBranchesRequiresAnExactBranchSegment(t *testing.T) {
 	t.Parallel()
-	dir := initGitRepository(t)
-	head := strings.TrimSpace(runGitTest(t, dir, "rev-parse", "HEAD"))
-	runGitTest(t, dir, "update-ref", "refs/remotes/origin/feature/example", head)
+	dir := gittest.InitWithCommit(t)
+	head := gittest.Output(t, dir, "rev-parse", "HEAD")
+	gittest.Run(t, dir, "update-ref", "refs/remotes/origin/feature/example", head)
 	for branch, want := range map[string][]string{
 		"example":         nil,
 		"feature/example": {"origin/feature/example"},
@@ -311,16 +312,16 @@ func TestMatchingRemoteBranchesRequiresAnExactBranchSegment(t *testing.T) {
 
 func TestSafeRemovalIgnoresATagThatShadowsTheBranchName(t *testing.T) {
 	t.Parallel()
-	dir := initGitRepository(t)
-	base := strings.TrimSpace(runGitTest(t, dir, "branch", "--show-current"))
+	dir := gittest.InitWithCommit(t)
+	base := gittest.Output(t, dir, "branch", "--show-current")
 	path := filepath.Join(t.TempDir(), "topic")
-	runGitTest(t, dir, "worktree", "add", "-b", "topic", path)
+	gittest.Run(t, dir, "worktree", "add", "-b", "topic", path)
 	if err := os.WriteFile(filepath.Join(path, "topic.txt"), []byte("topic\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	runGitTest(t, path, "add", "topic.txt")
-	runGitTest(t, path, "commit", "--quiet", "-m", "topic")
-	runGitTest(t, dir, "tag", "topic", base)
+	gittest.Run(t, path, "add", "topic.txt")
+	gittest.Run(t, path, "commit", "--quiet", "-m", "topic")
+	gittest.Run(t, dir, "tag", "topic", base)
 	remove, err := NewWorktree(map[string]any{"operation": "remove", "target": "topic", "delete_branch": "safe", "integrated_into": base})
 	if err != nil {
 		t.Fatal(err)
@@ -332,24 +333,24 @@ func TestSafeRemovalIgnoresATagThatShadowsTheBranchName(t *testing.T) {
 	if removed.Outputs["branch_deleted"] != false || removed.Outputs["branch_delete_reason"] != "unintegrated" {
 		t.Fatalf("removal = %#v", removed.Outputs)
 	}
-	if got := strings.TrimSpace(runGitTest(t, dir, "branch", "--list", "topic")); got == "" {
+	if got := gittest.Output(t, dir, "branch", "--list", "topic"); got == "" {
 		t.Fatal("unintegrated branch shadowed by a tag was deleted")
 	}
 }
 
 func TestMergeResolvesTheDefaultSourceInTheCallingWorktree(t *testing.T) {
 	t.Parallel()
-	dir := initGitRepository(t)
-	runGitTest(t, dir, "branch", "release")
+	dir := gittest.InitWithCommit(t)
+	gittest.Run(t, dir, "branch", "release")
 	path := filepath.Join(t.TempDir(), "detached")
-	runGitTest(t, dir, "worktree", "add", "--detach", path)
-	t.Cleanup(func() { runGitTest(t, dir, "worktree", "remove", "--force", path) })
+	gittest.Run(t, dir, "worktree", "add", "--detach", path)
+	t.Cleanup(func() { gittest.Run(t, dir, "worktree", "remove", "--force", path) })
 	if err := os.WriteFile(filepath.Join(path, "detached.txt"), []byte("detached\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	runGitTest(t, path, "add", "detached.txt")
-	runGitTest(t, path, "commit", "--quiet", "-m", "detached work")
-	want := strings.TrimSpace(runGitTest(t, path, "rev-parse", "HEAD"))
+	gittest.Run(t, path, "add", "detached.txt")
+	gittest.Run(t, path, "commit", "--quiet", "-m", "detached work")
+	want := gittest.Output(t, path, "rev-parse", "HEAD")
 	runner, err := NewMerge(map[string]any{"target": "release", "mode": "no_ff", "message": "merge detached"})
 	if err != nil {
 		t.Fatal(err)
@@ -361,24 +362,24 @@ func TestMergeResolvesTheDefaultSourceInTheCallingWorktree(t *testing.T) {
 	if result.Outputs["merge_commit"] != true || result.Outputs["changed"] != true {
 		t.Fatalf("merge result = %#v", result.Outputs)
 	}
-	if got := strings.TrimSpace(runGitTest(t, dir, "rev-parse", "release^2")); got != want {
+	if got := gittest.Output(t, dir, "rev-parse", "release^2"); got != want {
 		t.Fatalf("merged parent = %q, want the calling worktree HEAD %q", got, want)
 	}
 }
 
 func TestSquashLeavesTheBranchUntouchedWhenThereIsNothingToSquash(t *testing.T) {
 	t.Parallel()
-	dir := initGitRepository(t)
-	base := strings.TrimSpace(runGitTest(t, dir, "branch", "--show-current"))
-	runGitTest(t, dir, "switch", "--quiet", "-c", "topic")
+	dir := gittest.InitWithCommit(t)
+	base := gittest.Output(t, dir, "branch", "--show-current")
+	gittest.Run(t, dir, "switch", "--quiet", "-c", "topic")
 	if err := os.WriteFile(filepath.Join(dir, "temp.txt"), []byte("temp\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	runGitTest(t, dir, "add", "temp.txt")
-	runGitTest(t, dir, "commit", "--quiet", "-m", "add")
-	runGitTest(t, dir, "rm", "--quiet", "temp.txt")
-	runGitTest(t, dir, "commit", "--quiet", "-m", "remove")
-	head := strings.TrimSpace(runGitTest(t, dir, "rev-parse", "HEAD"))
+	gittest.Run(t, dir, "add", "temp.txt")
+	gittest.Run(t, dir, "commit", "--quiet", "-m", "add")
+	gittest.Run(t, dir, "rm", "--quiet", "temp.txt")
+	gittest.Run(t, dir, "commit", "--quiet", "-m", "remove")
+	head := gittest.Output(t, dir, "rev-parse", "HEAD")
 	runner, err := NewSquash(map[string]any{"target": base, "message": "feat: nothing"})
 	if err != nil {
 		t.Fatal(err)
@@ -386,7 +387,7 @@ func TestSquashLeavesTheBranchUntouchedWhenThereIsNothingToSquash(t *testing.T) 
 	if _, err := runner.Run(t.Context(), step.Request{RunDir: dir}); err == nil || !strings.Contains(err.Error(), "no net changes") {
 		t.Fatalf("squash error = %v", err)
 	}
-	if got := strings.TrimSpace(runGitTest(t, dir, "rev-parse", "HEAD")); got != head {
+	if got := gittest.Output(t, dir, "rev-parse", "HEAD"); got != head {
 		t.Fatalf("HEAD = %q, want the untouched branch tip %q", got, head)
 	}
 }
@@ -395,7 +396,7 @@ func TestSquashLeavesTheBranchUntouchedWhenThereIsNothingToSquash(t *testing.T) 
 // taken as a flag and the branch silently created from HEAD.
 func TestWorktreeEnsureRejectsOptionLikeBase(t *testing.T) {
 	t.Parallel()
-	dir := initGitRepository(t)
+	dir := gittest.InitWithCommit(t)
 	runner, err := NewWorktree(map[string]any{"operation": "ensure", "branch": "feature/option", "base": "--force", "create": true})
 	if err != nil {
 		t.Fatal(err)
@@ -403,7 +404,7 @@ func TestWorktreeEnsureRejectsOptionLikeBase(t *testing.T) {
 	if _, err := runner.Run(t.Context(), step.Request{RunDir: dir}); err == nil || !strings.Contains(err.Error(), "base") {
 		t.Fatalf("Run() error = %v, want an option-like base rejected", err)
 	}
-	if branches := runGitTest(t, dir, "branch", "--list", "feature/option"); strings.TrimSpace(branches) != "" {
+	if branches := gittest.Output(t, dir, "branch", "--list", "feature/option"); strings.TrimSpace(branches) != "" {
 		t.Fatalf("branch was created from an option-like base: %q", branches)
 	}
 }

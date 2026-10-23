@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -14,6 +13,7 @@ import (
 	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/engine"
 	"github.com/up2jj/wuko/githook"
+	"github.com/up2jj/wuko/internal/gittest"
 	"github.com/up2jj/wuko/step"
 	filestep "github.com/up2jj/wuko/steps/file"
 	gitstep "github.com/up2jj/wuko/steps/git"
@@ -22,7 +22,7 @@ import (
 
 func TestGitHookRunExposesStructuredContext(t *testing.T) {
 	t.Parallel()
-	root := initGitHookRepository(t)
+	root := gittest.Init(t)
 	writeGitHookWorkflow(t, root, "inspect", `printf '%s|%s|%s' "$1" "$2" "$3"`, []string{
 		"{{ .git.hook.name }}", "{{ index .git.hook.args 0 }}", "{{ (index .git.hook.payload.updates 0).local_ref }}",
 	})
@@ -44,7 +44,7 @@ func TestGitHookRunExposesStructuredContext(t *testing.T) {
 
 func TestGitHookRunStopsAfterFirstWorkflowFailure(t *testing.T) {
 	t.Parallel()
-	root := initGitHookRepository(t)
+	root := gittest.Init(t)
 	writeGitHookWorkflow(t, root, "fail", "exit 7", nil)
 	marker := filepath.Join(root, "second-ran")
 	writeGitHookWorkflow(t, root, "second", `touch "$1"`, []string{marker})
@@ -61,7 +61,7 @@ func TestGitHookRunStopsAfterFirstWorkflowFailure(t *testing.T) {
 
 func TestGitHookRunUsesConciseFailureReporter(t *testing.T) {
 	t.Parallel()
-	root := initGitHookRepository(t)
+	root := gittest.Init(t)
 	writeGitHookWorkflow(t, root, "check", `printf 'step detail\n' >&2; exit 7`, nil)
 	writeGitHookManifest(t, root, "pre-commit:\n    - workflow: check")
 	var stdout, stderr bytes.Buffer
@@ -114,7 +114,7 @@ func TestGitHookReporterShowsOnlyFinalRetryFailure(t *testing.T) {
 
 func TestGitHookRunSelectsConfiguredTarget(t *testing.T) {
 	t.Parallel()
-	root := initGitHookRepository(t)
+	root := gittest.Init(t)
 	directory := filepath.Join(root, ".wuko", "workflows")
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
@@ -146,7 +146,7 @@ targets:
 
 func TestGitHookRunRejectsRecursion(t *testing.T) {
 	t.Parallel()
-	root := initGitHookRepository(t)
+	root := gittest.Init(t)
 	writeGitHookManifest(t, root, "pre-commit:\n    - workflow: check")
 	command := newRootCmd(gitHookTestDependencies(t, root, io.Discard, io.Discard, func(name string) string {
 		if name == gitHookStackEnvironment {
@@ -163,7 +163,7 @@ func TestGitHookRunRejectsRecursion(t *testing.T) {
 
 func TestGitHookInstallAndStatus(t *testing.T) {
 	t.Parallel()
-	root := initGitHookRepository(t)
+	root := gittest.Init(t)
 	writeGitHookWorkflow(t, root, "check", "true", nil)
 	writeGitHookManifest(t, root, "pre-commit:\n    - workflow: check")
 	executable := filepath.Join(root, "wuko")
@@ -190,7 +190,7 @@ func TestGitHookInstallAndStatus(t *testing.T) {
 
 func TestGitHookInitCreatesValidStarterConfiguration(t *testing.T) {
 	t.Parallel()
-	root := initGitHookRepository(t)
+	root := gittest.Init(t)
 	var output bytes.Buffer
 	deps := gitHookTestDependencies(t, root, &output, io.Discard, func(string) string { return "" })
 	command := newRootCmd(deps)
@@ -224,7 +224,7 @@ func TestGitHookInitCreatesValidStarterConfiguration(t *testing.T) {
 	if err := os.WriteFile(badPath, []byte("trailing whitespace \n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	runGitHookTest(t, root, "add", "bad.txt")
+	gittest.Run(t, root, "add", "bad.txt")
 	command = newRootCmd(deps)
 	command.SetArgs([]string{"git", "hook", "run", "pre-commit"})
 	if err := command.ExecuteContext(t.Context()); err == nil || !strings.Contains(err.Error(), "bad.txt:1") {
@@ -233,7 +233,7 @@ func TestGitHookInitCreatesValidStarterConfiguration(t *testing.T) {
 	if err := os.WriteFile(badPath, []byte("clean\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	runGitHookTest(t, root, "add", "bad.txt")
+	gittest.Run(t, root, "add", "bad.txt")
 	command = newRootCmd(deps)
 	command.SetArgs([]string{"git", "hook", "run", "pre-commit"})
 	if err := command.ExecuteContext(t.Context()); err != nil {
@@ -262,7 +262,7 @@ func TestGitHookInitCreatesValidStarterConfiguration(t *testing.T) {
 
 func TestGitHookInitRefusesExistingFilesWithoutMutation(t *testing.T) {
 	t.Parallel()
-	root := initGitHookRepository(t)
+	root := gittest.Init(t)
 	manifestPath := filepath.Join(root, ".wuko", "git-hooks.yaml")
 	if err := os.MkdirAll(filepath.Dir(manifestPath), 0o755); err != nil {
 		t.Fatal(err)
@@ -289,7 +289,7 @@ func TestGitHookInitRefusesExistingFilesWithoutMutation(t *testing.T) {
 // failure that blocks every push.
 func TestGitHookRunSkipsNonExecutablePreservedHook(t *testing.T) {
 	t.Parallel()
-	root := initGitHookRepository(t)
+	root := gittest.Init(t)
 	writeGitHookWorkflow(t, root, "check", "true", nil)
 	writeGitHookManifest(t, root, "pre-push:\n    - workflow: check")
 	repository, err := githook.Discover(t.Context(), root)
@@ -324,7 +324,7 @@ func TestGitHookRunSkipsNonExecutablePreservedHook(t *testing.T) {
 
 func TestGitHookRunExecutesPreservedHookBeforeLoadingManifest(t *testing.T) {
 	t.Parallel()
-	root := initGitHookRepository(t)
+	root := gittest.Init(t)
 	writeGitHookWorkflow(t, root, "check", "true", nil)
 	writeGitHookManifest(t, root, "pre-push:\n    - workflow: check")
 	repository, err := githook.Discover(t.Context(), root)
@@ -371,7 +371,7 @@ func TestGitHookRunExecutesPreservedHookBeforeLoadingManifest(t *testing.T) {
 
 func TestValidateRecognizesGitContextAndManifest(t *testing.T) {
 	t.Parallel()
-	root := initGitHookRepository(t)
+	root := gittest.Init(t)
 	writeGitHookWorkflow(t, root, "check", `printf '%s' "$1"`, []string{"{{ .git.hook.name }}"})
 	writeGitHookManifest(t, root, "pre-commit:\n    - workflow: check")
 	var output bytes.Buffer
@@ -387,30 +387,11 @@ func TestValidateRecognizesGitContextAndManifest(t *testing.T) {
 
 func TestGitHookRunToleratesMissingManifest(t *testing.T) {
 	t.Parallel()
-	root := initGitHookRepository(t)
+	root := gittest.Init(t)
 	command := newRootCmd(gitHookTestDependencies(t, root, io.Discard, io.Discard, func(string) string { return "" }))
 	command.SetArgs([]string{"git", "hook", "run", "pre-commit"})
 	if err := command.ExecuteContext(t.Context()); err != nil {
 		t.Fatalf("hook run without a manifest failed: %v", err)
-	}
-}
-
-func initGitHookRepository(t *testing.T) string {
-	t.Helper()
-	root := t.TempDir()
-	command := exec.Command("git", "init", "-q", root)
-	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("git init: %v: %s", err, output)
-	}
-	return root
-}
-
-func runGitHookTest(t *testing.T, root string, args ...string) {
-	t.Helper()
-	command := exec.Command("git", args...)
-	command.Dir = root
-	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("git %s: %v: %s", strings.Join(args, " "), err, output)
 	}
 }
 

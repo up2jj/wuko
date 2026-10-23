@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/gittest"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
 )
@@ -29,7 +30,7 @@ func TestWorktreeRunsMultipleCommitsPublishesAndCleansUp(t *testing.T) {
 					if err := testGit(request.RunDir, "add", filepath.Base(name)); err != nil {
 						return step.Result{}, err
 					}
-					if err := testGit(request.RunDir, "-c", "user.name=Wuko Test", "-c", "user.email=wuko@example.test", "commit", "-m", fmt.Sprintf("change %d", index)); err != nil {
+					if err := testGit(request.RunDir, "commit", "-m", fmt.Sprintf("change %d", index)); err != nil {
 						return step.Result{}, err
 					}
 				}
@@ -68,10 +69,10 @@ func TestWorktreeRunsMultipleCommitsPublishesAndCleansUp(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, "change-0.txt")); !os.IsNotExist(err) {
 		t.Fatalf("original repository was changed: %v", err)
 	}
-	if got := strings.TrimSpace(testGitOutput(root, "rev-list", "--count", "wuko/result")); got != "3" {
+	if got := gittest.Output(t, root, "rev-list", "--count", "wuko/result"); got != "3" {
 		t.Fatalf("result branch commit count = %q, want 3", got)
 	}
-	if got := strings.TrimSpace(testGitOutput(root, "branch", "--show-current")); got != "master" && got != "main" {
+	if got := gittest.Output(t, root, "branch", "--show-current"); got != "master" && got != "main" {
 		t.Fatalf("current branch = %q", got)
 	}
 }
@@ -94,7 +95,7 @@ func TestWorktreePublishingFailsWithoutNewCommit(t *testing.T) {
 	if _, err := New(registry).Run(t.Context(), definition, Options{RunDir: root}); err == nil || !strings.Contains(err.Error(), "created no commit") {
 		t.Fatalf("error = %v, want no-commit error", err)
 	}
-	if strings.Contains(testGitOutput(root, "branch", "--list", "wuko/noop"), "wuko/noop") {
+	if strings.Contains(gittest.Output(t, root, "branch", "--list", "wuko/noop"), "wuko/noop") {
 		t.Fatal("no-op branch was created")
 	}
 }
@@ -133,22 +134,12 @@ func TestNestedWorktreeDefersRunOnceBeforeRemoval(t *testing.T) {
 
 func initWorktreeRepository(t *testing.T) (string, string) {
 	t.Helper()
-	root := t.TempDir()
-	if err := testGit(root, "init", "-q"); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("initial\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := testGit(root, "add", "README.md"); err != nil {
-		t.Fatal(err)
-	}
-	if err := testGit(root, "-c", "user.name=Wuko Test", "-c", "user.email=wuko@example.test", "commit", "-qm", "initial"); err != nil {
-		t.Fatal(err)
-	}
-	return root, strings.TrimSpace(testGitOutput(root, "rev-parse", "HEAD"))
+	root := gittest.InitWithCommit(t)
+	return root, gittest.Output(t, root, "rev-parse", "HEAD")
 }
 
+// testGit runs git from inside a step runner, which reports failure through its result rather
+// than the test.
 func testGit(dir string, args ...string) error {
 	command := exec.Command("git", args...)
 	command.Dir = dir
@@ -156,16 +147,6 @@ func testGit(dir string, args ...string) error {
 		return fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(output)))
 	}
 	return nil
-}
-
-func testGitOutput(dir string, args ...string) string {
-	command := exec.Command("git", args...)
-	command.Dir = dir
-	output, err := command.Output()
-	if err != nil {
-		panic(fmt.Sprintf("git %s: %v", strings.Join(args, " "), err))
-	}
-	return string(output)
 }
 
 func TestWorktreeStopsItsServicesBeforeRemovingTheWorktree(t *testing.T) {

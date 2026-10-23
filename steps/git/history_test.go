@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/gittest"
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/step"
 	"go.yaml.in/yaml/v3"
@@ -131,23 +132,23 @@ func TestNewLogValidatesConfiguration(t *testing.T) {
 
 func TestRevisionAndLogAgainstRepository(t *testing.T) {
 	t.Parallel()
-	dir := initGitRepository(t)
-	initial := strings.TrimSpace(runGitTest(t, dir, "rev-parse", "HEAD"))
-	mainBranch := strings.TrimSpace(runGitTest(t, dir, "branch", "--show-current"))
+	dir := gittest.InitWithCommit(t)
+	initial := gittest.Output(t, dir, "rev-parse", "HEAD")
+	mainBranch := gittest.Output(t, dir, "branch", "--show-current")
 
-	runGitTest(t, dir, "checkout", "-q", "-b", "feature/history")
+	gittest.Run(t, dir, "checkout", "-q", "-b", "feature/history")
 	writeHistoryFile(t, dir, "feature.txt", "feature\n")
-	runGitTest(t, dir, "add", "feature.txt")
-	runGitTest(t, dir, "commit", "-q", "-m", "feat(history): add structured records", "-m", "Keep release data typed.")
-	feature := strings.TrimSpace(runGitTest(t, dir, "rev-parse", "HEAD"))
+	gittest.Run(t, dir, "add", "feature.txt")
+	gittest.Run(t, dir, "commit", "-q", "-m", "feat(history): add structured records", "-m", "Keep release data typed.")
+	feature := gittest.Output(t, dir, "rev-parse", "HEAD")
 
-	runGitTest(t, dir, "checkout", "-q", mainBranch)
-	runGitTest(t, dir, "merge", "-q", "--no-ff", "feature/history", "-m", "Merge feature history")
-	merge := strings.TrimSpace(runGitTest(t, dir, "rev-parse", "HEAD"))
+	gittest.Run(t, dir, "checkout", "-q", mainBranch)
+	gittest.Run(t, dir, "merge", "-q", "--no-ff", "feature/history", "-m", "Merge feature history")
+	merge := gittest.Output(t, dir, "rev-parse", "HEAD")
 	writeHistoryFile(t, dir, "direct.txt", "direct\n")
-	runGitTest(t, dir, "add", "direct.txt")
-	runGitTest(t, dir, "commit", "-q", "-m", "fix(log): keep newest first")
-	head := strings.TrimSpace(runGitTest(t, dir, "rev-parse", "HEAD"))
+	gittest.Run(t, dir, "add", "direct.txt")
+	gittest.Run(t, dir, "commit", "-q", "-m", "fix(log): keep newest first")
+	head := gittest.Output(t, dir, "rev-parse", "HEAD")
 
 	revision := runRevision(t, dir, map[string]any{})
 	if revision["found"] != true || revision["sha"] != head || revision["subject"] != "fix(log): keep newest first" {
@@ -198,21 +199,21 @@ func TestRevisionAndLogAgainstRepository(t *testing.T) {
 
 func TestMergeBaseAgainstDivergedRepository(t *testing.T) {
 	t.Parallel()
-	dir := initGitRepository(t)
-	base := strings.TrimSpace(runGitTest(t, dir, "rev-parse", "HEAD"))
-	mainBranch := strings.TrimSpace(runGitTest(t, dir, "branch", "--show-current"))
+	dir := gittest.InitWithCommit(t)
+	base := gittest.Output(t, dir, "rev-parse", "HEAD")
+	mainBranch := gittest.Output(t, dir, "branch", "--show-current")
 
-	runGitTest(t, dir, "checkout", "-q", "-b", "feature/merge-base")
+	gittest.Run(t, dir, "checkout", "-q", "-b", "feature/merge-base")
 	writeHistoryFile(t, dir, "feature.txt", "feature\n")
-	runGitTest(t, dir, "add", "feature.txt")
-	runGitTest(t, dir, "commit", "-q", "-m", "feat: add feature")
-	feature := strings.TrimSpace(runGitTest(t, dir, "rev-parse", "HEAD"))
+	gittest.Run(t, dir, "add", "feature.txt")
+	gittest.Run(t, dir, "commit", "-q", "-m", "feat: add feature")
+	feature := gittest.Output(t, dir, "rev-parse", "HEAD")
 
-	runGitTest(t, dir, "checkout", "-q", mainBranch)
+	gittest.Run(t, dir, "checkout", "-q", mainBranch)
 	writeHistoryFile(t, dir, "main.txt", "main\n")
-	runGitTest(t, dir, "add", "main.txt")
-	runGitTest(t, dir, "commit", "-q", "-m", "feat: advance main")
-	main := strings.TrimSpace(runGitTest(t, dir, "rev-parse", "HEAD"))
+	gittest.Run(t, dir, "add", "main.txt")
+	gittest.Run(t, dir, "commit", "-q", "-m", "feat: advance main")
+	main := gittest.Output(t, dir, "rev-parse", "HEAD")
 
 	outputs := runMergeBase(t, dir, map[string]any{"from": main, "through": feature})
 	if outputs["from"] != main || outputs["through"] != feature || outputs["sha"] != base {
@@ -276,11 +277,11 @@ func TestMergeBaseRejectsUnresolvedMissingAndAmbiguousHistory(t *testing.T) {
 
 func TestRevisionReadsAnnotatedTagAndMessageFields(t *testing.T) {
 	t.Parallel()
-	dir := initGitRepository(t)
+	dir := gittest.InitWithCommit(t)
 	writeHistoryFile(t, dir, ".mailmap", "Canonical Author <canonical@example.com> Wuko Test <wuko@example.test>\n")
-	runGitTest(t, dir, "add", ".mailmap")
-	runGitTest(t, dir, "commit", "-q", "-m", "feat(api)!: support history", "-m", "Unicode: zażółć\n\nMore detail.")
-	runGitTest(t, dir, "tag", "-a", "v1.0.0", "-m", "release")
+	gittest.Run(t, dir, "add", ".mailmap")
+	gittest.Run(t, dir, "commit", "-q", "-m", "feat(api)!: support history", "-m", "Unicode: zażółć\n\nMore detail.")
+	gittest.Run(t, dir, "tag", "-a", "v1.0.0", "-m", "release")
 
 	outputs := runRevision(t, dir, map[string]any{"revision": "v1.0.0"})
 	if outputs["found"] != true || outputs["subject"] != "feat(api)!: support history" {
@@ -302,7 +303,7 @@ func TestRevisionReadsAnnotatedTagAndMessageFields(t *testing.T) {
 func TestHistoryHandlesUnbornRepository(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	runGitTest(t, dir, "init", "--quiet")
+	gittest.Run(t, dir, "init", "--quiet")
 	outputs := runRevision(t, dir, map[string]any{})
 	if outputs["found"] != false || outputs["sha"] != "" || len(outputs["parents"].([]any)) != 0 {
 		t.Fatalf("revision outputs = %#v", outputs)

@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/gittest"
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/step"
 )
@@ -260,7 +260,7 @@ func TestGitAssertionsPropagateCancellationAndCommandFailures(t *testing.T) {
 
 func TestGitAssertionsAgainstRepositories(t *testing.T) {
 	t.Parallel()
-	dir := initGitRepository(t)
+	dir := gittest.InitWithCommit(t)
 
 	clean, err := NewClean(map[string]any{})
 	if err != nil {
@@ -280,12 +280,12 @@ func TestGitAssertionsAgainstRepositories(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runGitTest(t, dir, "branch", "topic")
+	gittest.Run(t, dir, "branch", "topic")
 	if _, err := branch.Run(t.Context(), step.Request{RunDir: dir}); err != nil {
 		t.Fatal(err)
 	}
 
-	runGitTest(t, dir, "update-ref", "refs/remotes/origin/topic", "HEAD")
+	gittest.Run(t, dir, "update-ref", "refs/remotes/origin/topic", "HEAD")
 	remote, err := NewRemoteBranch(map[string]any{"branch": "topic", "remote": "origin", "exists": true})
 	if err != nil {
 		t.Fatal(err)
@@ -293,31 +293,6 @@ func TestGitAssertionsAgainstRepositories(t *testing.T) {
 	if _, err := remote.Run(t.Context(), step.Request{RunDir: dir}); err != nil {
 		t.Fatal(err)
 	}
-}
-
-func initGitRepository(t *testing.T) string {
-	t.Helper()
-	dir := t.TempDir()
-	runGitTest(t, dir, "init", "--quiet")
-	runGitTest(t, dir, "config", "user.name", "Wuko Test")
-	runGitTest(t, dir, "config", "user.email", "wuko@example.test")
-	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("test\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	runGitTest(t, dir, "add", "README.md")
-	runGitTest(t, dir, "commit", "--quiet", "-m", "initial")
-	return dir
-}
-
-func runGitTest(t *testing.T, dir string, args ...string) string {
-	t.Helper()
-	command := exec.Command("git", args...)
-	command.Dir = dir
-	output, err := command.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, output)
-	}
-	return string(output)
 }
 
 func TestRemoteBranchExistsDoesNotMatchRemoteHead(t *testing.T) {

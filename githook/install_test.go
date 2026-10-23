@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/up2jj/wuko/internal/gittest"
 )
 
 func TestInstallRefusesConflictAndChainRestoresIt(t *testing.T) {
@@ -88,10 +90,7 @@ func TestHookPathRejectsSharedCoreHooksPath(t *testing.T) {
 	t.Parallel()
 	repository := testRepository(t)
 	shared := t.TempDir()
-	command := exec.Command("git", "-C", repository.Root, "config", "core.hooksPath", shared)
-	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("git config: %v: %s", err, output)
-	}
+	gittest.Run(t, repository.Root, "config", "core.hooksPath", shared)
 	if _, err := repository.HookPath(context.Background(), "pre-commit"); err == nil || !strings.Contains(err.Error(), "shared outside") {
 		t.Fatalf("error = %v", err)
 	}
@@ -100,10 +99,7 @@ func TestHookPathRejectsSharedCoreHooksPath(t *testing.T) {
 func TestHookPathAllowsRepositoryLocalCoreHooksPath(t *testing.T) {
 	t.Parallel()
 	repository := testRepository(t)
-	command := exec.Command("git", "-C", repository.Root, "config", "core.hooksPath", ".githooks")
-	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("git config: %v: %s", err, output)
-	}
+	gittest.Run(t, repository.Root, "config", "core.hooksPath", ".githooks")
 	path, err := repository.HookPath(context.Background(), "pre-commit")
 	if err != nil {
 		t.Fatal(err)
@@ -117,21 +113,9 @@ func TestHookPathAllowsRepositoryLocalCoreHooksPath(t *testing.T) {
 func TestLinkedWorktreesShareCommonHookPath(t *testing.T) {
 	t.Parallel()
 	primary := testRepository(t)
-	for _, arguments := range [][]string{
-		{"config", "user.name", "Wuko Test"},
-		{"config", "user.email", "wuko@example.test"},
-		{"commit", "--allow-empty", "--no-verify", "-m", "initial"},
-	} {
-		command := exec.Command("git", append([]string{"-C", primary.Root}, arguments...)...)
-		if output, err := command.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v: %s", arguments, err, output)
-		}
-	}
+	gittest.Run(t, primary.Root, "commit", "--allow-empty", "--no-verify", "-m", "initial")
 	linkedRoot := filepath.Join(t.TempDir(), "linked")
-	command := exec.Command("git", "-C", primary.Root, "worktree", "add", "-q", "-b", "linked-test", linkedRoot)
-	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("git worktree add: %v: %s", err, output)
-	}
+	gittest.Run(t, primary.Root, "worktree", "add", "-q", "-b", "linked-test", linkedRoot)
 	linked, err := Discover(context.Background(), linkedRoot)
 	if err != nil {
 		t.Fatal(err)
@@ -152,10 +136,7 @@ func TestLinkedWorktreesShareCommonHookPath(t *testing.T) {
 func TestDiscoverRejectsBareRepository(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	command := exec.Command("git", "init", "--bare", "-q", root)
-	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("git init --bare: %v: %s", err, output)
-	}
+	gittest.Run(t, root, "init", "--bare", "-q")
 	if _, err := Discover(context.Background(), root); err == nil || !strings.Contains(err.Error(), "bare Git repositories") {
 		t.Fatalf("error = %v", err)
 	}
@@ -286,12 +267,8 @@ func TestUninstallRemovesStateForMissingDispatcher(t *testing.T) {
 
 func testRepository(t *testing.T) Repository {
 	t.Helper()
-	root := t.TempDir()
-	command := exec.Command("git", "init", "-q", root)
-	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("git init: %v: %s", err, output)
-	}
-	repository, err := Discover(context.Background(), root)
+	root := gittest.Init(t)
+	repository, err := Discover(t.Context(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
