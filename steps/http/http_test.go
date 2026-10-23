@@ -311,3 +311,28 @@ func TestChunkedResponseReadsWithoutADeclaredLength(t *testing.T) {
 		t.Fatalf("value = %#v", result.Outputs["value"])
 	}
 }
+
+func TestTransportErrorsRedactQueryValues(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	address := listener.Addr().String()
+	_ = listener.Close()
+
+	runner, err := New(map[string]any{"url": "http://" + address + "/v1/items", "query": map[string]any{"api_key": "s3cr3t-token"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runner.Run(t.Context(), step.Request{})
+	if err == nil {
+		t.Fatal("request to a closed port succeeded")
+	}
+	if strings.Contains(err.Error(), "s3cr3t-token") || !strings.Contains(err.Error(), "api_key=redacted") {
+		t.Fatalf("error = %v, want the query value redacted", err)
+	}
+	var urlErr *url.Error
+	if !errors.As(err, &urlErr) {
+		t.Fatalf("error %v no longer unwraps to *url.Error", err)
+	}
+}

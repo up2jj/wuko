@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -121,6 +122,28 @@ func (requestError) HTTPRetryAfter() time.Duration { return 0 }
 // `retry.when` expression can compare `error.outputs.status` without special-casing the absence
 // of a response.
 func (requestError) RetryConditionOutputs() map[string]any { return map[string]any{"status": 0} }
+
+// redactURLError hides query values in the request URL net/http puts in transport errors.
+// Tokens passed through query parameters would otherwise reach diagnostics and retry logs;
+// only values the secret session resolved are redacted later.
+func redactURLError(err error) error {
+	var urlErr *url.Error
+	if !errors.As(err, &urlErr) {
+		return err
+	}
+	parsed, parseErr := url.Parse(urlErr.URL)
+	if parseErr != nil || parsed.RawQuery == "" {
+		return err
+	}
+	query := parsed.Query()
+	for key := range query {
+		query[key] = []string{"redacted"}
+	}
+	parsed.RawQuery = query.Encode()
+	redacted := *urlErr
+	redacted.URL = parsed.String()
+	return &redacted
+}
 
 func Register(registry *step.Registry) error {
 	return registry.RegisterDefinition("http", step.Registration{
@@ -313,7 +336,7 @@ func (r *Runner) Run(ctx context.Context, execution step.Request) (result step.R
 	}
 	response, err := client.Do(request)
 	if err != nil {
-		return step.Result{}, fmt.Errorf("performing request: %w", requestError{method: request.Method, err: err})
+		return step.Result{}, fmt.Errorf("performing request: %w", requestError{method: request.Method, err: redactURLError(err)})
 	}
 	defer response.Body.Close()
 	if download != nil && r.success(response.StatusCode) {
