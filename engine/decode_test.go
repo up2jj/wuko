@@ -9,6 +9,7 @@ import (
 
 	"github.com/up2jj/wuko/engine"
 	"github.com/up2jj/wuko/internal/steptest"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 	decodestep "github.com/up2jj/wuko/steps/decode"
 	jsonpathstep "github.com/up2jj/wuko/steps/jsonpath"
@@ -53,9 +54,7 @@ func TestDecodePathUsesWorkingDirectoryScope(t *testing.T) {
 	if err := os.Mkdir(project, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(project, "data.yaml"), []byte("name: scoped\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(project, "data.yaml"), []byte("name: scoped\n"), 0o600)
 	definition := &workflow.Definition{
 		Version: 1, Name: "decode-path", Dir: root,
 		Steps: []workflow.Step{{WorkingDirectory: "project", Steps: []workflow.Step{{

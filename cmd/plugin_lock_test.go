@@ -16,6 +16,7 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/internal/archivetest"
+	"github.com/up2jj/wuko/internal/testfs"
 	pluginpkg "github.com/up2jj/wuko/plugin"
 	"github.com/up2jj/wuko/workflow"
 )
@@ -33,13 +34,9 @@ func commandPluginBundle(t *testing.T, dir string) ([]byte, []byte) {
 		t.Fatal(err)
 	}
 	if dir != "" {
-		if err := os.MkdirAll(dir, 0700); err != nil {
-			t.Fatal(err)
-		}
+		testfs.MkdirAll(t, dir, 0700)
 		for name, data := range map[string][]byte{"plugin.json": manifest, "plugin.tar.gz": archive} {
-			if err := os.WriteFile(filepath.Join(dir, name), data, 0600); err != nil {
-				t.Fatal(err)
-			}
+			testfs.WriteFile(t, filepath.Join(dir, name), data, 0600)
 		}
 	}
 	return manifest, archive
@@ -68,9 +65,7 @@ func TestPluginLockCommandAndFrozenExecution(t *testing.T) {
 	workflows := filepath.Join(dir, ".wuko", "workflows")
 	commandPluginBundle(t, filepath.Join(workflows, "bundle"))
 	path := filepath.Join(workflows, "demo.yaml")
-	if err := os.WriteFile(path, pluginWorkflow("./bundle/plugin.json"), 0600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, pluginWorkflow("./bundle/plugin.json"), 0600)
 	for _, args := range [][]string{{"validate", "demo"}, {"tree", "demo"}, {"run", "demo", "--dry-run"}, {"run", "demo", "--frozen-lockfile"}} {
 		err := executePluginCommand(t, pluginCommandDeps(t, dir, cache, nil), args...)
 		if err == nil || !strings.Contains(err.Error(), "missing plugin pin") {
@@ -140,9 +135,7 @@ func TestRemoteRunLeavesExistingLocalLockUntouched(t *testing.T) {
 	manifest, archive := commandPluginBundle(t, "")
 	path := filepath.Join(dir, "wuko.lock")
 	original := []byte("malformed local lock must be ignored\n")
-	if err := os.WriteFile(path, original, 0600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, original, 0600)
 	var manifests, archives, workflows atomic.Int32
 	client := &http.Client{Transport: commandRoundTripFunc(func(request *http.Request) (*http.Response, error) {
 		var body []byte
@@ -189,9 +182,7 @@ func TestInlinePluginSHARequiresExplicitMigration(t *testing.T) {
 	pin := sha256.Sum256(manifest)
 	body := strings.Replace(string(pluginWorkflow("./bundle")), "    source: ./bundle", "    source: ./bundle\n    sha256: "+fmt.Sprintf("%x", pin), 1)
 	path := filepath.Join(dir, "demo.yaml")
-	if err := os.WriteFile(path, []byte(body), 0600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte(body), 0600)
 	err := executePluginCommand(t, pluginCommandDeps(t, dir, cache, nil), "run", "--file", path)
 	if err == nil || !strings.Contains(err.Error(), "--migrate") {
 		t.Fatalf("error=%v", err)
@@ -210,22 +201,14 @@ func TestFrozenPolicyReachesDependencyWorkflow(t *testing.T) {
 	workflows := filepath.Join(dir, ".wuko", "workflows")
 	commandPluginBundle(t, filepath.Join(workflows, "bundle"))
 	childDir := filepath.Join(workflows, "child")
-	if err := os.MkdirAll(childDir, 0700); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, childDir, 0700)
 	parent := filepath.Join(workflows, "parent.yaml")
 	body := strings.Replace(string(pluginWorkflow("./bundle")), "name: demo", "name: parent\ndepends_on:\n  prerequisite: child", 1)
-	if err := os.WriteFile(parent, []byte(body), 0600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, parent, []byte(body), 0600)
 	child := filepath.Join(childDir, "wuko.yaml")
-	if err := os.WriteFile(filepath.Join(childDir, workflow.WorkflowPackageMarkerName), []byte(`{"version":1,"name":"child"}`), 0600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(childDir, workflow.WorkflowPackageMarkerName), []byte(`{"version":1,"name":"child"}`), 0600)
 	childBody := strings.Replace(string(pluginWorkflow("../bundle")), "name: demo", "name: child", 1)
-	if err := os.WriteFile(child, []byte(childBody), 0600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, child, []byte(childBody), 0600)
 	if err := executePluginCommand(t, pluginCommandDeps(t, dir, cache, nil), "plugin", "lock", parent); err != nil {
 		t.Fatal(err)
 	}
@@ -246,14 +229,10 @@ func TestCompositeActionInheritsResolvedPluginPins(t *testing.T) {
 	dir, cache := t.TempDir(), t.TempDir()
 	commandPluginBundle(t, filepath.Join(dir, "bundle"))
 	action := []byte("version: 1\nname: nested\nsteps:\n  - id: upper\n    type: acme.uppercase\n    with:\n      value: hello\n")
-	if err := os.WriteFile(filepath.Join(dir, "action.yaml"), action, 0600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(dir, "action.yaml"), action, 0600)
 	main := []byte("version: 1\nname: caller\nplugins:\n  acme:\n    source: ./bundle\nsteps:\n  - id: nested\n    uses: ./action.yaml\n")
 	path := filepath.Join(dir, "workflow.yaml")
-	if err := os.WriteFile(path, main, 0600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, main, 0600)
 	if err := executePluginCommand(t, pluginCommandDeps(t, dir, cache, nil), "run", "--file", path); err != nil {
 		t.Fatal(err)
 	}
@@ -264,9 +243,7 @@ func TestMaterializedRemoteKeepsRemotePluginPolicy(t *testing.T) {
 	dir, cache, snapshot := t.TempDir(), t.TempDir(), t.TempDir()
 	manifest, archive := commandPluginBundle(t, "")
 	path := filepath.Join(snapshot, "wuko.yaml")
-	if err := os.WriteFile(path, pluginWorkflow("https://plugins.test/plugin.json"), 0600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, pluginWorkflow("https://plugins.test/plugin.json"), 0600)
 	var manifests atomic.Int32
 	client := &http.Client{Transport: commandRoundTripFunc(func(request *http.Request) (*http.Response, error) {
 		body := archive
@@ -300,13 +277,9 @@ func TestRemoteInvocationDoesNotMutateDependencyLock(t *testing.T) {
 	t.Parallel()
 	dir, cache := t.TempDir(), t.TempDir()
 	workflows := filepath.Join(dir, ".wuko", "workflows")
-	if err := os.MkdirAll(workflows, 0700); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, workflows, 0700)
 	child := strings.Replace(string(pluginWorkflow("https://plugins.test/plugin.json")), "name: demo", "name: child", 1)
-	if err := os.WriteFile(filepath.Join(workflows, "child.yaml"), []byte(child), 0600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(workflows, "child.yaml"), []byte(child), 0600)
 	manifest, archive := commandPluginBundle(t, "")
 	remote := strings.Replace(string(pluginWorkflow("https://plugins.test/plugin.json")), "name: demo", "name: remote\ndepends_on:\n  prerequisite: child", 1)
 	client := &http.Client{Transport: commandRoundTripFunc(func(request *http.Request) (*http.Response, error) {
@@ -336,16 +309,10 @@ func TestMarketplaceBuildRequiresCommittedPluginPins(t *testing.T) {
 	dir, cache := t.TempDir(), t.TempDir()
 	commandPluginBundle(t, filepath.Join(dir, "bundle"))
 	packageDir := filepath.Join(dir, ".wuko", "workflows", "demo")
-	if err := os.MkdirAll(packageDir, 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(packageDir, workflow.WorkflowPackageMarkerName), []byte(`{"version":1,"name":"demo"}`), 0600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, packageDir, 0700)
+	testfs.WriteFile(t, filepath.Join(packageDir, workflow.WorkflowPackageMarkerName), []byte(`{"version":1,"name":"demo"}`), 0600)
 	manifest := filepath.Join(packageDir, "wuko.yaml")
-	if err := os.WriteFile(manifest, pluginWorkflow("../../../bundle"), 0600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, manifest, pluginWorkflow("../../../bundle"), 0600)
 	lockPath := filepath.Join(packageDir, "wuko.lock")
 	err := executePluginCommand(t, pluginCommandDeps(t, dir, cache, nil), "marketplace", "build")
 	if err == nil || !strings.Contains(err.Error(), "missing plugin pin") {

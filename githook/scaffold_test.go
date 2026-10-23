@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/up2jj/wuko/internal/testfs"
 )
 
 func TestScaffoldCreatesStarterManifestAndWorkflows(t *testing.T) {
@@ -53,13 +55,9 @@ func TestScaffoldRefusesCollisionBeforeCreatingFiles(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	workflowDir := filepath.Join(root, ".wuko", "workflows")
-	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, workflowDir, 0o755)
 	existing := filepath.Join(workflowDir, "git-check.yaml")
-	if err := os.WriteFile(existing, []byte("keep me\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, existing, []byte("keep me\n"), 0o600)
 	_, err := Scaffold(Repository{Root: root})
 	if err == nil || !strings.Contains(err.Error(), "already exists") {
 		t.Fatalf("error = %v", err)

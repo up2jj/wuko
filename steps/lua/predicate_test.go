@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -34,9 +35,7 @@ func TestPredicateLoadsReusableWorkflowModule(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := `return { name = function(value) return value == "Ada" end }`
-	if err := os.WriteFile(filepath.Join(root, "lua", "validators.lua"), []byte(source), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(root, "lua", "validators.lua"), []byte(source), 0o600)
 	predicate, err := CompilePredicate(`require("validators").name`)
 	if err != nil {
 		t.Fatal(err)

@@ -10,6 +10,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/up2jj/wuko/internal/testfs"
 )
 
 func TestPathPickerShowsContextualShortcuts(t *testing.T) {
@@ -158,9 +159,7 @@ func TestPathPickerHiddenAndFuzzyFiltering(t *testing.T) {
 func TestPathPickerPatternAndEscapedSymlinkEntriesAreDisabled(t *testing.T) {
 	root := pathPickerTree(t)
 	outside := filepath.Join(t.TempDir(), "outside.go")
-	if err := os.WriteFile(outside, []byte("test"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, outside, []byte("test"), 0o644)
 	if err := os.Symlink(outside, filepath.Join(root, "outside.go")); err != nil {
 		t.Fatal(err)
 	}
@@ -238,9 +237,7 @@ func pathPickerTree(t *testing.T) string {
 		t.Fatal(err)
 	}
 	for name := range map[string]bool{"a.go": true, "z.txt": true, ".hidden.go": true, "nested/nested.go": true} {
-		if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(name)), []byte("test"), 0o644); err != nil {
-			t.Fatal(err)
-		}
+		testfs.WriteFile(t, filepath.Join(root, filepath.FromSlash(name)), []byte("test"), 0o644)
 	}
 	return root
 }

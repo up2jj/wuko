@@ -12,6 +12,8 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+
+	"github.com/up2jj/wuko/internal/testfs"
 )
 
 func TestParseLinuxSocketTables(t *testing.T) {
@@ -33,9 +35,7 @@ func TestLookupLinuxOwnersFromProcFixture(t *testing.T) {
 	mustWrite(t, filepath.Join(root, "net", "tcp"), fmt.Sprintf("  sl local_address rem_address st tx_queue rx_queue tr tm->when retrnsmt uid timeout inode\n0: 0100007F:1538 00000000:0000 0A 0:0 00:0 0 %d 0 12345\n", uid))
 	mustWrite(t, filepath.Join(root, "net", "tcp6"), "  sl local_address rem_address st tx_queue rx_queue tr tm->when retrnsmt uid timeout inode\n")
 	process := filepath.Join(root, "42")
-	if err := os.MkdirAll(filepath.Join(process, "fd"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, filepath.Join(process, "fd"), 0o755)
 	mustWrite(t, filepath.Join(process, "comm"), "postgres\n")
 	if err := os.Symlink("/usr/bin/postgres", filepath.Join(process, "exe")); err != nil {
 		t.Fatal(err)
@@ -58,9 +58,7 @@ func TestLookupLinuxOwnersFindsProcessThatDroppedPrivileges(t *testing.T) {
 	root := t.TempDir()
 	mustWrite(t, filepath.Join(root, "net", "tcp"), "  sl local_address rem_address st tx_queue rx_queue tr tm->when retrnsmt uid timeout inode\n0: 0100007F:1538 00000000:0000 0A 0:0 00:0 0 0 0 12345\n")
 	process := filepath.Join(root, "42")
-	if err := os.MkdirAll(filepath.Join(process, "fd"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, filepath.Join(process, "fd"), 0o755)
 	mustWrite(t, filepath.Join(process, "comm"), "postgres\n")
 	if err := os.Symlink("socket:[12345]", filepath.Join(process, "fd", "3")); err != nil {
 		t.Fatal(err)
@@ -121,10 +119,6 @@ func TestNativeLinuxOwnerLookupFindsCurrentProcess(t *testing.T) {
 
 func mustWrite(t *testing.T, path, content string) {
 	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, filepath.Dir(path), 0o755)
+	testfs.WriteFile(t, path, []byte(content), 0o600)
 }

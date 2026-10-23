@@ -1,10 +1,11 @@
 package workflow
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/up2jj/wuko/internal/testfs"
 )
 
 func TestSelectSourceSuggestsWorkflowNames(t *testing.T) {
@@ -47,9 +48,7 @@ func TestFindLocalFileHintPreservesNameLookup(t *testing.T) {
 	local := filepath.Join(root, "tools", "deploy.YML")
 	installed := filepath.Join(root, ".wuko", "workflows", "tools", "deploy.YML.yaml")
 	for _, directory := range []string{filepath.Dir(local), filepath.Dir(installed), filepath.Join(root, "directory.yaml")} {
-		if err := os.MkdirAll(directory, 0o755); err != nil {
-			t.Fatal(err)
-		}
+		testfs.MkdirAll(t, directory, 0o755)
 	}
 	writeWorkflow(t, local, "Local file")
 	_, err := Find(root, home, config, "tools/deploy.YML")
@@ -73,13 +72,9 @@ func TestFindLocalFileHintPreservesDiscoveryErrors(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	writeWorkflow(t, filepath.Join(root, "workflow.yaml"), "Local file")
-	if err := os.MkdirAll(filepath.Join(root, ".wuko"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, filepath.Join(root, ".wuko"), 0o755)
 	// A workflow directory that is actually a file must retain its discovery error.
-	if err := os.WriteFile(filepath.Join(root, ".wuko", "workflows"), nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(root, ".wuko", "workflows"), nil, 0o600)
 	_, err := Find(root, filepath.Join(root, "home"), filepath.Join(root, "config"), "workflow.yaml")
 	if err == nil || strings.Contains(err.Error(), "--file") {
 		t.Fatalf("Find() error = %v, want unmodified discovery failure", err)
@@ -94,9 +89,7 @@ func TestDiscoverPrecedence(t *testing.T) {
 	home := filepath.Join(root, "home")
 	config := filepath.Join(root, "config")
 	for _, dir := range []string{nested, filepath.Join(project, ".wuko", "workflows"), filepath.Join(home, ".wuko", "workflows"), filepath.Join(config, "wuko", "workflows")} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatal(err)
-		}
+		testfs.MkdirAll(t, dir, 0o755)
 	}
 	writeWorkflow(t, filepath.Join(config, "wuko", "workflows", "shared.yaml"), "config")
 	writeWorkflow(t, filepath.Join(home, ".wuko", "workflows", "shared.yaml"), "home")
@@ -125,9 +118,7 @@ func TestDiscoverAllIncludesScopesAndEffectivePrecedence(t *testing.T) {
 		filepath.Join(home, ".wuko", "workflows"),
 		filepath.Join(config, "wuko", "workflows"),
 	} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatal(err)
-		}
+		testfs.MkdirAll(t, dir, 0o755)
 	}
 	writeWorkflow(t, filepath.Join(project, ".wuko", "workflows", "shared.yaml"), "local")
 	writeWorkflow(t, filepath.Join(home, ".wuko", "workflows", "shared.yaml"), "global home")
@@ -163,9 +154,7 @@ func TestDiscoverHomeWorkflowsKeepGlobalScope(t *testing.T) {
 	projectShared := filepath.Join(project, ".wuko", "workflows", "shared.yaml")
 	configOnly := filepath.Join(config, "wuko", "workflows", "config-only.yaml")
 	for _, dir := range []string{nested, filepath.Dir(homeOnly), filepath.Dir(projectShared), filepath.Dir(configOnly)} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatal(err)
-		}
+		testfs.MkdirAll(t, dir, 0o755)
 	}
 	for _, path := range []string{homeOnly, homeShared, projectShared, configOnly} {
 		writeWorkflow(t, path, "Scope regression")
@@ -222,13 +211,9 @@ func TestDiscoverIncludesWorkflowDependencies(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	dir := filepath.Join(root, ".wuko", "workflows")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, dir, 0o755)
 	data := "version: 1\npackage_version: 1.4.0\nname: release\ndepends_on: {build: build-artifacts}\nsteps:\n  - return: {outputs: {}}\n"
-	if err := os.WriteFile(filepath.Join(dir, "release.yaml"), []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(dir, "release.yaml"), []byte(data), 0o644)
 	sources, err := Discover(root, "", "")
 	if err != nil {
 		t.Fatal(err)
@@ -242,9 +227,7 @@ func TestDiscoverExpandsWorkflowTargets(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	dir := filepath.Join(root, ".wuko", "workflows")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, dir, 0o755)
 	data := `version: 1
 package_version: 1.4.0
 name: deploy
@@ -263,9 +246,7 @@ targets:
         type: shell
         with: {script: true}
 `
-	if err := os.WriteFile(filepath.Join(dir, "deploy.yaml"), []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(dir, "deploy.yaml"), []byte(data), 0o644)
 	sources, err := Discover(root, "", "")
 	if err != nil {
 		t.Fatal(err)
@@ -285,13 +266,9 @@ func TestDiscoverIncludesDependencyOnlyWorkflowMetadata(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	dir := filepath.Join(root, ".wuko", "workflows")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, dir, 0o755)
 	data := "version: 1\nname: build\ninvokable: false\nsteps:\n  - return: {outputs: {}}\n"
-	if err := os.WriteFile(filepath.Join(dir, "build.yaml"), []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(dir, "build.yaml"), []byte(data), 0o644)
 	sources, err := Discover(root, "", "")
 	if err != nil {
 		t.Fatal(err)
@@ -309,16 +286,12 @@ func TestDependencyOnlyWorkflowPreservesEffectivePrecedence(t *testing.T) {
 	projectDir := filepath.Join(project, ".wuko", "workflows")
 	homeDir := filepath.Join(home, ".wuko", "workflows")
 	for _, dir := range []string{projectDir, homeDir} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatal(err)
-		}
+		testfs.MkdirAll(t, dir, 0o755)
 	}
 	writeWorkflow(t, filepath.Join(homeDir, "build.yaml"), "global")
 	data := "version: 1\nname: build\ndescription: local\ninvokable: false\nsteps:\n  - return: {outputs: {}}\n"
 	localPath := filepath.Join(projectDir, "build.yaml")
-	if err := os.WriteFile(localPath, []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, localPath, []byte(data), 0o644)
 	sources, err := Discover(project, home, "")
 	if err != nil {
 		t.Fatal(err)
@@ -332,9 +305,7 @@ func TestDiscoverRejectsDuplicateExtensions(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	dir := filepath.Join(root, ".wuko", "workflows")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, dir, 0o755)
 	writeWorkflow(t, filepath.Join(dir, "same.yaml"), "one")
 	writeWorkflow(t, filepath.Join(dir, "same.yml"), "two")
 	if _, err := Discover(root, "", ""); err == nil {
@@ -346,9 +317,7 @@ func TestDiscoverRecursesIntoWorkflowDirectories(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	directory := filepath.Join(root, ".wuko", "workflows")
-	if err := os.MkdirAll(filepath.Join(directory, "marketplace"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, filepath.Join(directory, "marketplace"), 0o755)
 	writeWorkflow(t, filepath.Join(directory, "flat.yaml"), "flat")
 	writeWorkflow(t, filepath.Join(directory, "marketplace", "release.yaml"), "nested")
 	sources, err := Discover(root, "", "")
@@ -367,15 +336,9 @@ func TestDiscoverTreatsInstalledPackagesAsSingleWorkflowUnits(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	directory := filepath.Join(root, ".wuko", "workflows", "marketplace", "release")
-	if err := os.MkdirAll(directory, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(directory, "wuko.yaml"), []byte("version: 1\nname: packaged\nsteps:\n  - id: run\n    type: shell\n    with: {command: true}\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(directory, WorkflowPackageMarkerName), []byte(`{"version":1,"name":"packaged"}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, directory, 0o755)
+	testfs.WriteFile(t, filepath.Join(directory, "wuko.yaml"), []byte("version: 1\nname: packaged\nsteps:\n  - id: run\n    type: shell\n    with: {command: true}\n"), 0o644)
+	testfs.WriteFile(t, filepath.Join(directory, WorkflowPackageMarkerName), []byte(`{"version":1,"name":"packaged"}`), 0o644)
 	sources, err := Discover(root, "", "")
 	if err != nil {
 		t.Fatal(err)
@@ -392,15 +355,9 @@ func TestDiscoverIncludesInstalledMarketplaceURL(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	directory := filepath.Join(root, ".wuko", "workflows", "marketplace", "release")
-	if err := os.MkdirAll(directory, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(directory, "wuko.yaml"), []byte("version: 1\nname: release\nsteps:\n  - id: run\n    type: shell\n    with: {command: true}\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(directory, WorkflowPackageMarkerName), []byte(`{"version":1,"marketplace":"https://example.test/marketplace?token=ignored","name":"release"}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, directory, 0o755)
+	testfs.WriteFile(t, filepath.Join(directory, "wuko.yaml"), []byte("version: 1\nname: release\nsteps:\n  - id: run\n    type: shell\n    with: {command: true}\n"), 0o644)
+	testfs.WriteFile(t, filepath.Join(directory, WorkflowPackageMarkerName), []byte(`{"version":1,"marketplace":"https://example.test/marketplace?token=ignored","name":"release"}`), 0o644)
 
 	sources, err := Discover(root, "", "")
 	if err != nil {
@@ -417,15 +374,9 @@ func TestDiscoverDeduplicatesWorkflowRootsOverlappingWorkingDirectory(t *testing
 	home := filepath.Join(base, "home")
 	workflowRoot := filepath.Join(home, ".wuko", "workflows")
 	packageDir := filepath.Join(workflowRoot, ".wuko", "workflows", "marketplace", "release")
-	if err := os.MkdirAll(packageDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(packageDir, "wuko.yaml"), []byte("version: 1\nname: packaged\nsteps:\n  - id: run\n    type: shell\n    with: {command: true}\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(packageDir, WorkflowPackageMarkerName), []byte(`{"version":1,"name":"packaged"}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, packageDir, 0o755)
+	testfs.WriteFile(t, filepath.Join(packageDir, "wuko.yaml"), []byte("version: 1\nname: packaged\nsteps:\n  - id: run\n    type: shell\n    with: {command: true}\n"), 0o644)
+	testfs.WriteFile(t, filepath.Join(packageDir, WorkflowPackageMarkerName), []byte(`{"version":1,"name":"packaged"}`), 0o644)
 
 	sources, err := Discover(workflowRoot, home, "")
 	if err != nil {
@@ -440,9 +391,7 @@ func TestLoadRejectsNonStringEnvironment(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "bad.yaml")
 	data := "version: 1\nname: bad\nenv:\n  PORT: 123\nsteps:\n  - id: run\n    type: shell\n    with: {}\n"
-	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte(data), 0o644)
 	if _, err := Load(path); err == nil {
 		t.Fatal("expected load error")
 	}
@@ -451,7 +400,5 @@ func TestLoadRejectsNonStringEnvironment(t *testing.T) {
 func writeWorkflow(t *testing.T, path, description string) {
 	t.Helper()
 	data := "version: 1\nname: shared\ndescription: " + description + "\nsteps:\n  - id: run\n    type: shell\n    with:\n      command: true\n"
-	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte(data), 0o644)
 }

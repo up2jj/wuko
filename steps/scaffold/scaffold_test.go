@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/internal/steptest"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
 )
@@ -341,9 +342,7 @@ func newRenderer(t *testing.T, definitions map[string]workflow.TemplateDefinitio
 
 func mustMkdir(t *testing.T, path string, mode os.FileMode) {
 	t.Helper()
-	if err := os.MkdirAll(path, mode); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, path, mode)
 	if err := os.Chmod(path, mode); err != nil {
 		t.Fatal(err)
 	}
@@ -356,9 +355,7 @@ func mustWrite(t *testing.T, path, content string, mode os.FileMode) {
 
 func mustWriteBytes(t *testing.T, path string, content []byte, mode os.FileMode) {
 	t.Helper()
-	if err := os.WriteFile(path, content, mode); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, content, mode)
 	if err := os.Chmod(path, mode); err != nil {
 		t.Fatal(err)
 	}

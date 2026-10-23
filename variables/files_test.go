@@ -2,22 +2,23 @@ package variables
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/up2jj/wuko/internal/testfs"
 )
 
 func TestLoadFilesMergesLeftToRightAndNormalizesKeys(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	writeTestFile(t, root, "defaults.JSON", `{
+	testfs.Write(t, filepath.Join(root, "defaults.JSON"), `{
   "Name": "json",
   "Nested": {"Keep": true, "Old": "value"},
   "Items": ["one", "two"]
 }`)
-	writeTestFile(t, root, "override.toml", `name = "toml"
+	testfs.Write(t, filepath.Join(root, "override.toml"), `name = "toml"
 [nested]
 new = "value"
 `)
@@ -43,7 +44,7 @@ new = "value"
 func TestLoadFilesPreservesNullAndEmptyObjects(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	writeTestFile(t, root, "values.json", `{
+	testfs.Write(t, filepath.Join(root, "values.json"), `{
   "Optional": null,
   "Empty": {},
   "Nested": {"Missing": null, "EmptyObject": {}}
@@ -69,10 +70,10 @@ func TestLoadFilesPreservesNullAndEmptyObjects(t *testing.T) {
 func TestLoadFilesRejectsInvalidInput(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	writeTestFile(t, root, "malformed.json", `{"name":`)
-	writeTestFile(t, root, "array.json", `["value"]`)
-	writeTestFile(t, root, "trailing.json", `{"name":"value"} true`)
-	writeTestFile(t, root, "values.yaml", `name: value`)
+	testfs.Write(t, filepath.Join(root, "malformed.json"), `{"name":`)
+	testfs.Write(t, filepath.Join(root, "array.json"), `["value"]`)
+	testfs.Write(t, filepath.Join(root, "trailing.json"), `{"name":"value"} true`)
+	testfs.Write(t, filepath.Join(root, "values.yaml"), `name: value`)
 
 	tests := []struct {
 		name string
@@ -113,12 +114,5 @@ func TestValidatePathDefersTemplatedExtension(t *testing.T) {
 	}
 	if err := ValidatePath(`{{ .vars.name }}.yaml`); err == nil {
 		t.Fatal("static unsupported extension was accepted")
-	}
-}
-
-func writeTestFile(t *testing.T, root, name, content string) {
-	t.Helper()
-	if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0o644); err != nil {
-		t.Fatal(err)
 	}
 }

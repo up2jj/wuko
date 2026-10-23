@@ -3,11 +3,11 @@ package cmd
 import (
 	"bytes"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/steps/shell"
 	"github.com/up2jj/wuko/workflow"
@@ -17,9 +17,7 @@ func TestRunWorkflowTargetSelectsOnlyRequestedSteps(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	workflowDir := filepath.Join(root, ".wuko", "workflows")
-	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, workflowDir, 0o755)
 	data := `version: 1
 name: deploy
 targets:
@@ -34,9 +32,7 @@ targets:
         type: shell
         with: {script: printf staging}
 `
-	if err := os.WriteFile(filepath.Join(workflowDir, "deploy.yaml"), []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(workflowDir, "deploy.yaml"), []byte(data), 0o644)
 	registry := step.NewRegistry()
 	if err := shell.Register(registry); err != nil {
 		t.Fatal(err)
@@ -60,9 +56,7 @@ func TestRunWorkflowTargetIsRequired(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	workflowDir := filepath.Join(root, ".wuko", "workflows")
-	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, workflowDir, 0o755)
 	data := `version: 1
 name: deploy
 targets:
@@ -72,9 +66,7 @@ targets:
         type: shell
         with: {script: true}
 `
-	if err := os.WriteFile(filepath.Join(workflowDir, "deploy.yaml"), []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(workflowDir, "deploy.yaml"), []byte(data), 0o644)
 	command := newRootCmd(dependencies{
 		stdin: bytes.NewReader(nil), stdout: io.Discard, stderr: io.Discard,
 		cwd: func() (string, error) { return root, nil }, homeDir: func() (string, error) { return "", nil },
@@ -90,9 +82,7 @@ func TestTargetCommandsAndCompletion(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	workflowDir := filepath.Join(root, ".wuko", "workflows")
-	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, workflowDir, 0o755)
 	data := `version: 1
 name: deploy
 targets:
@@ -107,9 +97,7 @@ targets:
         type: shell
         with: {script: true}
 `
-	if err := os.WriteFile(filepath.Join(workflowDir, "deploy.yaml"), []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(workflowDir, "deploy.yaml"), []byte(data), 0o644)
 	registry := step.NewRegistry()
 	if err := shell.Register(registry); err != nil {
 		t.Fatal(err)

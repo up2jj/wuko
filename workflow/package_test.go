@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/up2jj/wuko/internal/testfs"
 )
 
 func TestBuildWorkflowPackageEnforcesRemotePackageLimits(t *testing.T) {
@@ -17,9 +19,7 @@ func TestBuildWorkflowPackageEnforcesRemotePackageLimits(t *testing.T) {
 		writePackageTestManifest(t, directory, "version: 1\nname: crowded\nsteps: []\n")
 		for index := 0; index < maxEntries; index++ {
 			name := filepath.Join(directory, strings.Repeat("0", 6-len(strconv.Itoa(index)))+strconv.Itoa(index)+".txt")
-			if err := os.WriteFile(name, nil, 0o644); err != nil {
-				t.Fatal(err)
-			}
+			testfs.WriteFile(t, name, nil, 0o644)
 		}
 		if _, _, err := BuildWorkflowPackage(directory, filepath.Join(t.TempDir(), "crowded.tar.gz")); err == nil || !strings.Contains(err.Error(), "entry limit") {
 			t.Fatalf("error = %v, want entry-limit failure", err)
@@ -42,9 +42,7 @@ func TestBuildWorkflowPackageEnforcesRemotePackageLimits(t *testing.T) {
 		if _, err := random.Read(data); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(directory, "data.bin"), data, 0o644); err != nil {
-			t.Fatal(err)
-		}
+		testfs.WriteFile(t, filepath.Join(directory, "data.bin"), data, 0o644)
 		if _, _, err := BuildWorkflowPackage(directory, filepath.Join(t.TempDir(), "large.tar.gz")); err == nil || !strings.Contains(err.Error(), "download limit") {
 			t.Fatalf("error = %v, want archive-size failure", err)
 		}
@@ -53,9 +51,7 @@ func TestBuildWorkflowPackageEnforcesRemotePackageLimits(t *testing.T) {
 
 func writePackageTestManifest(t *testing.T, directory, data string) {
 	t.Helper()
-	if err := os.WriteFile(filepath.Join(directory, "wuko.yaml"), []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(directory, "wuko.yaml"), []byte(data), 0o644)
 }
 
 func TestBuildWorkflowPackageExcludesLocalValueStore(t *testing.T) {
@@ -63,20 +59,14 @@ func TestBuildWorkflowPackageExcludesLocalValueStore(t *testing.T) {
 	directory := t.TempDir()
 	writePackageTestManifest(t, directory, "version: 1\nname: stateful\nsteps: []\n")
 	values := filepath.Join(directory, ".wuko", "values")
-	if err := os.MkdirAll(values, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, values, 0o755)
 	// once completions and key_value stores are the machine's run state. Packaging
 	// them shipped one author's state, and an installed once completion made another
 	// machine skip a bootstrap it had never performed.
 	for _, name := range []string{"once.json", "build.json", "changed.json"} {
-		if err := os.WriteFile(filepath.Join(values, name), []byte(`{"seeded": true}`), 0o644); err != nil {
-			t.Fatal(err)
-		}
+		testfs.WriteFile(t, filepath.Join(values, name), []byte(`{"seeded": true}`), 0o644)
 	}
-	if err := os.WriteFile(filepath.Join(directory, "README.md"), []byte("kept\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(directory, "README.md"), []byte("kept\n"), 0o644)
 
 	files, err := collectPackageFiles(directory)
 	if err != nil {

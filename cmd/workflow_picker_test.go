@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/keyvalue"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/steps/shell"
@@ -104,7 +105,7 @@ func TestWorkflowPickerPreservesOtherProjectHistory(t *testing.T) {
 			root, configDir := t.TempDir(), t.TempDir()
 			dependency := writePickerWorkflow(t, root, "version: 1\nname: dependency\ninvokable: false\nsteps:\n  - return: {outputs: {}}\n")
 			if invokable {
-				writeWorkflowData(t, filepath.Join(filepath.Dir(dependency), "run.yaml"), "version: 1\nname: run\nsteps:\n  - return: {outputs: {}}\n")
+				testfs.Write(t, filepath.Join(filepath.Dir(dependency), "run.yaml"), "version: 1\nname: run\nsteps:\n  - return: {outputs: {}}\n")
 			}
 			missing := filepath.Join(root, "missing.yaml")
 			paths := []string{other, dependency, missing}
@@ -155,7 +156,7 @@ func TestWorkflowPickerInspectionsIsolatePlugins(t *testing.T) {
 					body = strings.Replace(body, "type: acme.uppercase", "type: missing_step", 1)
 				}
 				path := filepath.Join(dir, name+".yaml")
-				writeWorkflowData(t, path, body)
+				testfs.Write(t, path, body)
 				if err := executePluginCommand(t, pluginCommandDeps(t, root, cache, nil), "plugin", "lock", path); err != nil {
 					t.Fatal(err)
 				}
@@ -296,12 +297,8 @@ func TestWorkflowPickerStateRejectsMalformedState(t *testing.T) {
 	t.Parallel()
 	configDir := t.TempDir()
 	path := filepath.Join(configDir, "wuko", "values", "picker.json")
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte(`{"state": [}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, filepath.Dir(path), 0o755)
+	testfs.WriteFile(t, path, []byte(`{"state": [}`), 0o600)
 	if _, err := loadWorkflowPickerState(t.Context(), configDir); err == nil {
 		t.Fatal("expected malformed picker state error")
 	}
@@ -311,11 +308,9 @@ func TestWorkflowPickerInspectionReturnsToFilterWithoutMarkingRecent(t *testing.
 	t.Parallel()
 	root := t.TempDir()
 	workflowDir := filepath.Join(root, ".wuko", "workflows")
-	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, workflowDir, 0o755)
 	path := filepath.Join(workflowDir, "release.yaml")
-	writeWorkflowData(t, path, "version: 1\nname: release\nsteps:\n  - return: {outputs: {}}\n")
+	testfs.Write(t, path, "version: 1\nname: release\nsteps:\n  - return: {outputs: {}}\n")
 	configDir := filepath.Join(root, "config")
 	var selections int
 	var viewed tui.TextViewerConfig
@@ -513,11 +508,9 @@ func TestWorkflowPickerDependencyReturnDestinationStaysLocal(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	workflowDir := filepath.Join(root, ".wuko", "workflows")
-	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeWorkflowData(t, filepath.Join(workflowDir, "child.yaml"), "version: 1\nname: child\ninvokable: false\nsteps:\n  - return: {to: picker, outputs: {}}\n")
-	writeWorkflowData(t, filepath.Join(workflowDir, "root.yaml"), "version: 1\nname: root\ndepends_on: {child: child}\nsteps:\n  - return: {outputs: {}}\n")
+	testfs.MkdirAll(t, workflowDir, 0o755)
+	testfs.Write(t, filepath.Join(workflowDir, "child.yaml"), "version: 1\nname: child\ninvokable: false\nsteps:\n  - return: {to: picker, outputs: {}}\n")
+	testfs.Write(t, filepath.Join(workflowDir, "root.yaml"), "version: 1\nname: root\ndepends_on: {child: child}\nsteps:\n  - return: {outputs: {}}\n")
 	selections := 0
 	deps := pickerDependencies(root, step.NewRegistry(), func(_ context.Context, _ io.Reader, _ io.Writer, config tui.SelectionPickerConfig) (tui.Selection, error) {
 		selections++
@@ -721,10 +714,8 @@ func TestWorkflowPickerInspectionsUseExactShadowedPathAndTarget(t *testing.T) {
 	home := filepath.Join(root, "home")
 	configDir := filepath.Join(root, "config")
 	path := filepath.Join(home, ".wuko", "workflows", "release.yaml")
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeWorkflowData(t, path, `version: 1
+	testfs.MkdirAll(t, filepath.Dir(path), 0o755)
+	testfs.Write(t, path, `version: 1
 name: release
 targets:
   production:
@@ -734,10 +725,8 @@ targets:
         with: {script: "printf global"}
 `)
 	localDir := filepath.Join(root, ".wuko", "workflows")
-	if err := os.MkdirAll(localDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeWorkflowData(t, filepath.Join(localDir, "release.yaml"), "invalid: true\n")
+	testfs.MkdirAll(t, localDir, 0o755)
+	testfs.Write(t, filepath.Join(localDir, "release.yaml"), "invalid: true\n")
 	registry := step.NewRegistry()
 	if err := shell.Register(registry); err != nil {
 		t.Fatal(err)
@@ -781,11 +770,9 @@ func TestWorkflowPickerRefreshesAfterEditorAndKeepsSnapshotOnFailure(t *testing.
 		t.Run(test.name, func(t *testing.T) {
 			root := t.TempDir()
 			workflowDir := filepath.Join(root, ".wuko", "workflows")
-			if err := os.MkdirAll(workflowDir, 0o755); err != nil {
-				t.Fatal(err)
-			}
+			testfs.MkdirAll(t, workflowDir, 0o755)
 			path := filepath.Join(workflowDir, "release.yaml")
-			writeWorkflowData(t, path, "version: 1\nname: release\ndescription: Original\nsteps:\n  - return: {outputs: {}}\n")
+			testfs.Write(t, path, "version: 1\nname: release\ndescription: Original\nsteps:\n  - return: {outputs: {}}\n")
 			var selections int
 			deps := dependencies{
 				stdin: bytes.NewReader(nil), stdout: io.Discard, stderr: io.Discard,
@@ -849,11 +836,9 @@ func sourceNames(sources []workflow.Source) string {
 func writePickerWorkflow(t *testing.T, root, data string) string {
 	t.Helper()
 	dir := filepath.Join(root, ".wuko", "workflows")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, dir, 0o755)
 	path := filepath.Join(dir, "workflow.yaml")
-	writeWorkflowData(t, path, data)
+	testfs.Write(t, path, data)
 	return path
 }
 

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/up2jj/wuko/engine"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/validation"
 )
 
@@ -201,9 +202,7 @@ func TestJSONFileAtomicallyOverwritesWithPrivatePrettyReport(t *testing.T) {
 	t.Parallel()
 	directory := t.TempDir()
 	path := filepath.Join(directory, "report.json")
-	if err := os.WriteFile(path, []byte("old"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte("old"), 0o644)
 	reporter, err := NewJSONFile(path)
 	if err != nil {
 		t.Fatal(err)
@@ -240,9 +239,7 @@ func TestJSONFilePreservesExistingDestinationWhenEncodingFails(t *testing.T) {
 	t.Parallel()
 	directory := t.TempDir()
 	path := filepath.Join(directory, "report.json")
-	if err := os.WriteFile(path, []byte("old"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte("old"), 0o600)
 	reporter, err := NewJSONFile(path)
 	if err != nil {
 		t.Fatal(err)

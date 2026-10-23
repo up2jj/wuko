@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/testfs"
 	pluginpkg "github.com/up2jj/wuko/plugin"
 	"github.com/up2jj/wuko/workflow"
 )
@@ -30,12 +31,7 @@ func TestUninstallWorkflowCompletionUsesSelectedStorageScope(t *testing.T) {
 		filepath.Join(local, "marketplace", "release", "wuko.yaml"):                        "name: packaged\ndescription: Package",
 		filepath.Join(local, "marketplace", "release", workflow.WorkflowPackageMarkerName): `{"version":1,"name":"packaged"}`,
 	} {
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
+		testfs.Write(t, path, content)
 	}
 	for _, test := range []struct {
 		args []string
@@ -66,12 +62,8 @@ func TestUninstallPluginCompletionUsesValidatedInstallationsInSelectedScope(t *t
 	for _, item := range []struct{ root, name string }{{local, "zeta"}, {local, "alpha"}, {global, "global"}, {local, "tampered"}} {
 		writeCompletionPlugin(t, item.root, item.name, launched)
 	}
-	if err := os.WriteFile(filepath.Join(local, "tampered", "wuko-plugin-tampered"), []byte("changed"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(local, "unfinished"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(local, "tampered", "wuko-plugin-tampered"), []byte("changed"), 0o755)
+	testfs.MkdirAll(t, filepath.Join(local, "unfinished"), 0o755)
 	for _, test := range []struct {
 		args []string
 		want string
@@ -104,9 +96,7 @@ func TestUninstallCompletionHandlesMissingAndInvalidDirectories(t *testing.T) {
 			if got := executeUninstallCompletion(t, root, "", args); got != ":4\n" {
 				t.Fatalf("empty directory completion = %q", got)
 			}
-			if err := os.WriteFile(filepath.Join(root, ".wuko"), nil, 0o644); err != nil {
-				t.Fatal(err)
-			}
+			testfs.WriteFile(t, filepath.Join(root, ".wuko"), nil, 0o644)
 			if got := executeUninstallCompletion(t, root, "", args); got != ":1\n" {
 				t.Fatalf("invalid directory completion = %q", got)
 			}
@@ -135,13 +125,9 @@ func executeUninstallCompletion(t *testing.T, project, home string, args []strin
 func writeCompletionPlugin(t *testing.T, root, namespace, launched string) {
 	t.Helper()
 	dir := filepath.Join(root, namespace)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, dir, 0o755)
 	content := []byte("#!/bin/sh\nprintf launched > " + shellQuote(launched) + "\nexit 99\n")
-	if err := os.WriteFile(filepath.Join(dir, "wuko-plugin-"+namespace), content, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(dir, "wuko-plugin-"+namespace), content, 0o755)
 	marker := pluginpkg.InstallationMarker{
 		MarkerVersion: 2, ManifestVersion: 1, Namespace: namespace, PluginVersion: "1.0.0",
 		Protocol: pluginpkg.ProtocolV1, Source: "https://plugins.test/" + namespace,
@@ -152,7 +138,5 @@ func writeCompletionPlugin(t *testing.T, root, namespace, launched string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, pluginpkg.MarkerName), data, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(dir, pluginpkg.MarkerName), data, 0o600)
 }

@@ -1,10 +1,11 @@
 package workflow
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/up2jj/wuko/internal/testfs"
 )
 
 func TestValidateStandaloneRejectsDirectoryDependencies(t *testing.T) {
@@ -23,9 +24,7 @@ func TestValidateStandaloneRejectsDirectoryDependencies(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "workflow.yaml")
-			if err := os.WriteFile(path, []byte(test.source), 0o644); err != nil {
-				t.Fatal(err)
-			}
+			testfs.WriteFile(t, path, []byte(test.source), 0o644)
 			err := ValidateStandalone(path, &test.definition)
 			if test.want == "" {
 				if err != nil {

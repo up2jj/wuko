@@ -3,11 +3,11 @@ package cmd
 import (
 	"bytes"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/process/processtest"
 	"github.com/up2jj/wuko/step"
 	runworkflowstep "github.com/up2jj/wuko/steps/runworkflow"
@@ -38,25 +38,21 @@ func TestInstalledWorkflowElevationFollowsProvenanceAtRunTime(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			root := t.TempDir()
 			workflows := filepath.Join(root, ".wuko", "workflows")
-			if err := os.MkdirAll(workflows, 0o755); err != nil {
-				t.Fatal(err)
-			}
+			testfs.MkdirAll(t, workflows, 0o755)
 			subject := filepath.Join(workflows, "subject.yaml")
 			if test.packaged {
 				packageDir := filepath.Join(workflows, "subject")
-				if err := os.MkdirAll(packageDir, 0o755); err != nil {
-					t.Fatal(err)
-				}
+				testfs.MkdirAll(t, packageDir, 0o755)
 				subject = filepath.Join(packageDir, "wuko.yaml")
-				writeTestFile(t, filepath.Join(packageDir, workflow.WorkflowPackageMarkerName), `{"marketplace":"https://example.com/marketplace"}`)
+				testfs.Write(t, filepath.Join(packageDir, workflow.WorkflowPackageMarkerName), `{"marketplace":"https://example.com/marketplace"}`)
 			}
-			writeTestFile(t, subject, strings.ReplaceAll(elevated, "%s", "subject"))
+			testfs.Write(t, subject, strings.ReplaceAll(elevated, "%s", "subject"))
 			if test.marker != "" {
-				writeTestFile(t, workflowInstallMarkerPath(workflows, "subject"), test.marker)
+				testfs.Write(t, workflowInstallMarkerPath(workflows, "subject"), test.marker)
 			}
 			name := "subject"
 			if test.viaCaller {
-				writeTestFile(t, filepath.Join(workflows, "caller.yaml"), strings.ReplaceAll(caller, "%s", "subject"))
+				testfs.Write(t, filepath.Join(workflows, "caller.yaml"), strings.ReplaceAll(caller, "%s", "subject"))
 				name = "caller"
 			}
 			registry := step.NewRegistry()
@@ -84,12 +80,5 @@ func TestInstalledWorkflowElevationFollowsProvenanceAtRunTime(t *testing.T) {
 				t.Fatalf("error = %v, elevated runs = %d, want elevation refused", err, len(executor.Calls()))
 			}
 		})
-	}
-}
-
-func writeTestFile(t *testing.T, path, contents string) {
-	t.Helper()
-	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
-		t.Fatal(err)
 	}
 }

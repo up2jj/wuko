@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/up2jj/wuko/internal/archivetest"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/internal/testhome"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
@@ -145,9 +146,7 @@ func TestLaunchIsolatesPluginFromTerminalProcessGroup(t *testing.T) {
 	}
 	path := filepath.Join(t.TempDir(), "wuko-plugin-acme")
 	script := []byte("#!/bin/sh\nWUKO_PLUGIN_TEST_HELPER=1 exec \"" + executable + "\"\n")
-	if err := os.WriteFile(path, script, 0o700); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, script, 0o700)
 	client, err := launch(t.Context(), path, io.Discard)
 	if err != nil {
 		t.Fatal(err)
@@ -352,12 +351,8 @@ func TestWorkflowPluginStartAndStopOnce(t *testing.T) {
 func TestUndeclaredPluginCannotUseAmbientExecutable(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(root, ".wuko", "plugins", "acme"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, ".wuko", "plugins", "acme", "wuko-plugin-acme"), []byte("#!/bin/sh\nexit 99\n"), 0700); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, filepath.Join(root, ".wuko", "plugins", "acme"), 0700)
+	testfs.WriteFile(t, filepath.Join(root, ".wuko", "plugins", "acme", "wuko-plugin-acme"), []byte("#!/bin/sh\nexit 99\n"), 0700)
 	manager := NewManager(Config{CacheDir: testCache(t), CWD: func() (string, error) { return root, nil }})
 	if _, err := manager.ResolveStep(t.Context(), "acme.uppercase", nil); err == nil || !strings.Contains(err.Error(), "must be declared") {
 		t.Fatalf("error = %v", err)

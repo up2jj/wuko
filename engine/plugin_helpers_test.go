@@ -10,6 +10,7 @@ import (
 
 	"github.com/up2jj/wuko/helper"
 	"github.com/up2jj/wuko/internal/steptest"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
 )
@@ -25,9 +26,7 @@ func (fakePluginHelpers) LoadHelpers(context.Context, map[string]workflow.Resolv
 func TestCompositeActionInheritsPluginHelpersAtRuntime(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "actions", "echo"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, filepath.Join(dir, "actions", "echo"), 0o755)
 	if err := os.WriteFile(filepath.Join(dir, "actions", "echo", "action.yaml"), []byte(`version: 1
 name: echo
 inputs:

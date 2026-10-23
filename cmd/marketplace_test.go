@@ -17,6 +17,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/up2jj/wuko/internal/archivetest"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/marketplace"
 	pluginpkg "github.com/up2jj/wuko/plugin"
 	"github.com/up2jj/wuko/step"
@@ -107,9 +108,7 @@ func TestMarketplaceInitAndIncrementalBuild(t *testing.T) {
 		t.Fatal("no-op build changed timestamps")
 	}
 
-	if err := os.WriteFile(filepath.Join(workflowRoot, "release", "defaults.json"), []byte(`{"target":"production"}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(workflowRoot, "release", "defaults.json"), []byte(`{"target":"production"}`), 0o644)
 	command = marketplaceTestCommand(root, home, nil)
 	command.SetArgs([]string{"marketplace", "build"})
 	if err := command.ExecuteContext(t.Context()); err != nil {
@@ -288,12 +287,8 @@ func TestMarketplaceWorkflowRemoveAllowsInvalidManagedSource(t *testing.T) {
 	t.Parallel()
 	root, home := t.TempDir(), t.TempDir()
 	target := filepath.Join(root, ".wuko", "workflows", "broken")
-	if err := os.MkdirAll(target, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(target, "wuko.yaml"), []byte("not: [valid"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, target, 0o755)
+	testfs.WriteFile(t, filepath.Join(target, "wuko.yaml"), []byte("not: [valid"), 0o644)
 	command := marketplaceTestCommand(root, home, nil)
 	command.SetArgs([]string{"marketplace", "workflow", "remove", "broken", "--yes"})
 	if err := command.ExecuteContext(t.Context()); err != nil {
@@ -421,12 +416,8 @@ func TestMarketplacePluginReleaseRollsBackWhenBuildFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	badWorkflow := filepath.Join(root, ".wuko", "workflows", "broken")
-	if err := os.MkdirAll(badWorkflow, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(badWorkflow, "readme.txt"), []byte("missing manifest"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, badWorkflow, 0o755)
+	testfs.WriteFile(t, filepath.Join(badWorkflow, "readme.txt"), []byte("missing manifest"), 0o644)
 
 	command = marketplaceTestCommand(root, home, nil)
 	command.SetArgs([]string{"marketplace", "plugin", "release", "--version", "2.0.0", v2})
@@ -485,17 +476,13 @@ func TestMarketplacePluginReleaseValidatesWorkflowBundleAndVersion(t *testing.T)
 	source := filepath.Join(base, "plugin")
 	outside := filepath.Join(base, "outside")
 	writeMarketplacePluginRelease(t, source, "acme", "1.0.0")
-	if err := os.MkdirAll(outside, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, outside, 0o755)
 	missingOutput := `version: 1
 name: plugin-release
 steps:
   - return: {outputs: {}}
 `
-	if err := os.WriteFile(filepath.Join(source, pluginReleaseWorkflowName), []byte(missingOutput), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(source, pluginReleaseWorkflowName), []byte(missingOutput), 0o644)
 	command := marketplaceTestCommand(root, home, nil)
 	command.SetArgs([]string{"marketplace", "plugin", "release", "--version", "1.0.0", "--description", "Acme", source})
 	if err := command.ExecuteContext(t.Context()); err == nil || !strings.Contains(err.Error(), "output named bundle") {
@@ -509,9 +496,7 @@ outputs:
 steps:
   - return: {outputs: {bundle: '"../outside"'}}
 `
-	if err := os.WriteFile(filepath.Join(source, pluginReleaseWorkflowName), []byte(escaping), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(source, pluginReleaseWorkflowName), []byte(escaping), 0o644)
 	command = marketplaceTestCommand(root, home, nil)
 	command.SetArgs([]string{"marketplace", "plugin", "release", "--version", "1.0.0", "--description", "Acme", source})
 	if err := command.ExecuteContext(t.Context()); err == nil || !strings.Contains(err.Error(), "escapes the plugin project") {
@@ -525,9 +510,7 @@ outputs:
 steps:
   - return: {outputs: {bundle: '"."'}}
 `
-	if err := os.WriteFile(filepath.Join(source, pluginReleaseWorkflowName), []byte(valid), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(source, pluginReleaseWorkflowName), []byte(valid), 0o644)
 	command = marketplaceTestCommand(root, home, nil)
 	command.SetArgs([]string{"marketplace", "plugin", "release", "--version", "2.0.0", "--description", "Acme", source})
 	if err := command.ExecuteContext(t.Context()); err == nil || !strings.Contains(err.Error(), "requested version 2.0.0") {
@@ -555,9 +538,7 @@ steps:
     type: shell
     with: {script: 'printf "compiling\\n\\033[31merror: undefined function\\033[0m\\n" >&2; exit 3'}
 `
-	if err := os.WriteFile(filepath.Join(source, pluginReleaseWorkflowName), []byte(failing), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(source, pluginReleaseWorkflowName), []byte(failing), 0o644)
 	registry := step.NewRegistry()
 	if err := shell.Register(registry); err != nil {
 		t.Fatal(err)
@@ -614,9 +595,7 @@ func TestMarketplacePluginImportRejectsCorruptionAndDuplicatesTransactionally(t 
 		t.Fatal(err)
 	}
 	corruptPath := filepath.Join(source, filepath.FromSlash(bundle.Manifest.Artifacts[0].Path))
-	if err := os.WriteFile(corruptPath, []byte("corrupt"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, corruptPath, []byte("corrupt"), 0o644)
 	command := marketplaceTestCommand(root, home, nil)
 	command.SetArgs([]string{"marketplace", "plugin", "add", source})
 	if err := command.ExecuteContext(t.Context()); err == nil || !strings.Contains(err.Error(), "sha256 mismatch") {
@@ -692,9 +671,7 @@ func TestMarketplaceBuildRemovesOnlyUnmodifiedStalePluginArtifacts(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(imported, "plugin.json"), append(data, '\n'), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(imported, "plugin.json"), append(data, '\n'), 0o644)
 	command = marketplaceTestCommand(root, home, nil)
 	command.SetArgs([]string{"marketplace", "build"})
 	if err := command.ExecuteContext(t.Context()); err != nil {
@@ -707,9 +684,7 @@ func TestMarketplaceBuildRemovesOnlyUnmodifiedStalePluginArtifacts(t *testing.T)
 		t.Fatalf("replacement artifact is missing: %v", err)
 	}
 
-	if err := os.WriteFile(filepath.Join(root, "plugins", "acme", filepath.FromSlash(newRelative)), []byte("maintainer edit"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(root, "plugins", "acme", filepath.FromSlash(newRelative)), []byte("maintainer edit"), 0o644)
 	if err := os.RemoveAll(imported); err != nil {
 		t.Fatal(err)
 	}
@@ -807,9 +782,7 @@ install:
 	if marker.Marketplace != "https://example.test/repo/" {
 		t.Fatalf("installed marketplace = %q", marker.Marketplace)
 	}
-	if err := os.WriteFile(filepath.Join(installed, "obsolete.txt"), []byte("old"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(installed, "obsolete.txt"), []byte("old"), 0o644)
 	if err := reinstallMarketplaceWorkflow(command, deps, workflow.Source{
 		Name: "release", PackageDir: installed, MarketplaceURL: "https://example.test/repo/",
 	}); err != nil {
@@ -898,12 +871,8 @@ func TestMarketplaceBuildRejectsMissingManifestAndSymlink(t *testing.T) {
 	t.Run("missing root manifest", func(t *testing.T) {
 		root, home := t.TempDir(), t.TempDir()
 		directory := filepath.Join(root, ".wuko", "workflows", "broken")
-		if err := os.MkdirAll(directory, 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(directory, "defaults.json"), []byte(`{}`), 0o644); err != nil {
-			t.Fatal(err)
-		}
+		testfs.MkdirAll(t, directory, 0o755)
+		testfs.WriteFile(t, filepath.Join(directory, "defaults.json"), []byte(`{}`), 0o644)
 		command := marketplaceTestCommand(root, home, nil)
 		command.SetArgs([]string{"marketplace", "build"})
 		if err := command.ExecuteContext(t.Context()); err == nil || !strings.Contains(err.Error(), "no root wuko.yaml") {
@@ -947,9 +916,7 @@ func TestMarketplaceBuildPublicationFailureRestoresPublishedFiles(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	if err := os.WriteFile(filepath.Join(packageDir, "defaults.json"), []byte(`{"target":"production"}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(packageDir, "defaults.json"), []byte(`{"target":"production"}`), 0o644)
 	build, err := marketplace.BuildManifest(t.Context(), root, nil, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -993,16 +960,10 @@ func marketplaceTestCommand(root, home string, loader *workflow.Loader) *cobra.C
 
 func writeMarketplacePackage(t *testing.T, directory, name, description, defaults, extra string) {
 	t.Helper()
-	if err := os.MkdirAll(directory, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, directory, 0o755)
 	data := fmt.Sprintf("version: 1\npackage_version: 1.0.0\nname: %s\ndescription: %s\n%ssteps:\n  - id: run\n    type: shell\n    with: {command: true}\n", name, description, extra)
-	if err := os.WriteFile(filepath.Join(directory, "wuko.yaml"), []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(directory, "defaults.json"), []byte(defaults), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(directory, "wuko.yaml"), []byte(data), 0o644)
+	testfs.WriteFile(t, filepath.Join(directory, "defaults.json"), []byte(defaults), 0o644)
 }
 
 func commandTestResponse(status int, body string) *http.Response {
@@ -1011,9 +972,7 @@ func commandTestResponse(status int, body string) *http.Response {
 
 func writeMarketplacePluginRelease(t *testing.T, directory, namespace, version string) {
 	t.Helper()
-	if err := os.MkdirAll(filepath.Join(directory, "dist"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, filepath.Join(directory, "dist"), 0o755)
 	platforms := []workflow.MarketplacePlatform{{OS: runtime.GOOS, Arch: runtime.GOARCH}, {OS: "linux", Arch: "arm64"}}
 	if runtime.GOOS == "linux" && runtime.GOARCH == "arm64" {
 		platforms[1] = workflow.MarketplacePlatform{OS: "darwin", Arch: "amd64"}
@@ -1022,9 +981,7 @@ func writeMarketplacePluginRelease(t *testing.T, directory, namespace, version s
 	for _, platform := range platforms {
 		name := platform.OS + "-" + platform.Arch + ".tar.gz"
 		archive := archivetest.TarGz(t, archivetest.Entry{Name: "wuko-plugin-" + namespace, Mode: 0o755, Data: []byte("binary")})
-		if err := os.WriteFile(filepath.Join(directory, "dist", name), archive, 0o644); err != nil {
-			t.Fatal(err)
-		}
+		testfs.WriteFile(t, filepath.Join(directory, "dist", name), archive, 0o644)
 		digest := sha256.Sum256(archive)
 		manifest.Artifacts = append(manifest.Artifacts, pluginpkg.Artifact{OS: platform.OS, Arch: platform.Arch, Path: "dist/" + name, Format: "tar.gz", Entry: "wuko-plugin-" + namespace, SHA256: fmt.Sprintf("%x", digest[:])})
 	}
@@ -1032,9 +989,7 @@ func writeMarketplacePluginRelease(t *testing.T, directory, namespace, version s
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(directory, "plugin.json"), append(data, '\n'), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(directory, "plugin.json"), append(data, '\n'), 0o644)
 	releaseWorkflow := `version: 1
 name: plugin-release
 vars: {version: ""}
@@ -1043,9 +998,7 @@ outputs:
 steps:
   - return: {outputs: {bundle: '"."'}}
 `
-	if err := os.WriteFile(filepath.Join(directory, pluginReleaseWorkflowName), []byte(releaseWorkflow), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(directory, pluginReleaseWorkflowName), []byte(releaseWorkflow), 0o644)
 }
 
 func rewriteMarketplacePluginArtifact(t *testing.T, directory string, payload []byte) {
@@ -1060,16 +1013,12 @@ func rewriteMarketplacePluginArtifact(t *testing.T, directory string, payload []
 	}
 	archive := archivetest.TarGz(t, archivetest.Entry{Name: manifest.Artifacts[0].Entry, Mode: 0o755, Data: payload})
 	artifactPath := filepath.Join(directory, filepath.FromSlash(manifest.Artifacts[0].Path))
-	if err := os.WriteFile(artifactPath, archive, 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, artifactPath, archive, 0o644)
 	digest := sha256.Sum256(archive)
 	manifest.Artifacts[0].SHA256 = fmt.Sprintf("%x", digest[:])
 	updated, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(directory, "plugin.json"), append(updated, '\n'), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(directory, "plugin.json"), append(updated, '\n'), 0o644)
 }

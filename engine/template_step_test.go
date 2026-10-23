@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/internal/steptest"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 	setstep "github.com/up2jj/wuko/steps/set"
 	templatestep "github.com/up2jj/wuko/steps/template"
@@ -58,9 +59,7 @@ func TestTemplateStepSelectsPackagedFileWithRenderedPath(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(definition.Dir, "templates"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(definition.Dir, "templates", "service.tmpl"), []byte("service={{ .data.name }}"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(definition.Dir, "templates", "service.tmpl"), []byte("service={{ .data.name }}"), 0o644)
 	state, err := New(registry).Run(t.Context(), definition, Options{
 		RunDir: t.TempDir(), Stdout: io.Discard, Stderr: io.Discard,
 	})

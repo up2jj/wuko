@@ -1,9 +1,10 @@
 package workflow
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/up2jj/wuko/internal/testfs"
 )
 
 func TestCoreLoaderKeepsFormOpaque(t *testing.T) {
@@ -16,9 +17,7 @@ form:
 steps:
   - return: {outputs: {ok: "true"}}
 `
-	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte(data), 0o600)
 	definition, err := Load(path)
 	if err != nil {
 		t.Fatal(err)

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/diagnostic"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 	scaffoldstep "github.com/up2jj/wuko/steps/scaffold"
 	"github.com/up2jj/wuko/workflow"
@@ -17,12 +18,8 @@ func TestScaffoldUsesWorkflowTemplatesAndPackageDirectory(t *testing.T) {
 	t.Parallel()
 	workflowDir := t.TempDir()
 	templateDir := filepath.Join(workflowDir, "templates", "service")
-	if err := os.MkdirAll(templateDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(templateDir, "{{ .vars.name }}.txt"), []byte(`{{ template "header" . }}{{ .vars.name }}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, templateDir, 0o755)
+	testfs.WriteFile(t, filepath.Join(templateDir, "{{ .vars.name }}.txt"), []byte(`{{ template "header" . }}{{ .vars.name }}`), 0o644)
 	definition := &workflow.Definition{
 		Version: 1, Name: "scaffold", Dir: workflowDir,
 		Vars:      map[string]any{"name": "billing"},
@@ -97,12 +94,8 @@ func TestScaffoldRefusesRemoteManifestActionUsingCallerPackage(t *testing.T) {
 	t.Parallel()
 	callerDir := t.TempDir()
 	templateDir := filepath.Join(callerDir, "templates", "service")
-	if err := os.MkdirAll(templateDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(templateDir, "leak.txt"), []byte("caller secret"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, templateDir, 0o755)
+	testfs.WriteFile(t, filepath.Join(templateDir, "leak.txt"), []byte("caller secret"), 0o644)
 	// A remote action fetched as a plain manifest carries no files, so the loader hands it the
 	// caller's directory. The scaffold step must refuse it instead of copying the caller's tree.
 	action := &workflow.Action{

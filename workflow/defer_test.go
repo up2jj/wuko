@@ -1,10 +1,11 @@
 package workflow
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/up2jj/wuko/internal/testfs"
 )
 
 func TestLoadAttachedDeferTracksLocation(t *testing.T) {
@@ -21,9 +22,7 @@ steps:
         type: shell
         with: {command: remove}
 `)
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, data, 0o600)
 	definition, err := loadLocal(path)
 	if err != nil {
 		t.Fatal(err)
@@ -41,14 +40,10 @@ func TestLoadExpandsRequiredStepsInsideDefer(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	fragmentPath := filepath.Join(dir, "cleanup.yaml")
-	if err := os.WriteFile(fragmentPath, []byte("steps:\n  - id: remove\n    type: shell\n    with: {command: remove}\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, fragmentPath, []byte("steps:\n  - id: remove\n    type: shell\n    with: {command: remove}\n"), 0o600)
 	path := filepath.Join(dir, "workflow.yaml")
 	data := []byte("version: 1\nname: defer-require\nsteps:\n  - id: create\n    type: shell\n    defer:\n      - require: cleanup.yaml\n")
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, data, 0o600)
 	definition, err := loadLocal(path)
 	if err != nil {
 		t.Fatal(err)
@@ -96,9 +91,7 @@ func TestAttachedDeferValidation(t *testing.T) {
 func TestDecodeRejectsNonListDefer(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "workflow.yaml")
-	if err := os.WriteFile(path, []byte("version: 1\nname: invalid\nsteps:\n  - id: run\n    type: shell\n    defer: {id: cleanup, type: shell}\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte("version: 1\nname: invalid\nsteps:\n  - id: run\n    type: shell\n    defer: {id: cleanup, type: shell}\n"), 0o600)
 	_, err := loadLocal(path)
 	if err == nil || !strings.Contains(err.Error(), "defer must be a list") {
 		t.Fatalf("loadLocal() error = %v", err)

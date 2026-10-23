@@ -2,10 +2,11 @@ package workflow
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/up2jj/wuko/internal/testfs"
 )
 
 func TestCancelOnLoadsAndExposesChildRoles(t *testing.T) {
@@ -25,9 +26,7 @@ steps:
           with: {command: ./deploy}
       collect: '{"ok": cancel_on.ok}'
 `
-	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte(data), 0o644)
 	definition, err := NewLoader(nil).Decode(path, LoadOptions{})
 	if err != nil {
 		t.Fatal(err)
@@ -124,9 +123,7 @@ func TestCancelOnIsAnOrdinaryConcurrentChild(t *testing.T) {
 func TestCancelOnRejectsRequireBeforeFragmentExpansion(t *testing.T) {
 	root := t.TempDir()
 	fragment := filepath.Join(root, "fragment.yaml")
-	if err := os.WriteFile(fragment, []byte("- {id: expanded, type: shell}\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, fragment, []byte("- {id: expanded, type: shell}\n"), 0o644)
 	definition := `version: 1
 name: monitored
 steps:
@@ -138,9 +135,7 @@ steps:
         - require: fragment.yaml
 `
 	path := filepath.Join(root, "workflow.yaml")
-	if err := os.WriteFile(path, []byte(definition), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte(definition), 0o644)
 	_, err := NewLoader(nil).Decode(path, LoadOptions{})
 	if err == nil || !strings.Contains(err.Error(), "require is not supported inside cancel_on") {
 		t.Fatalf("error = %v", err)

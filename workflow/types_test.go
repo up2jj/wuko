@@ -1,11 +1,11 @@
 package workflow
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/testfs"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -100,9 +100,7 @@ func TestDefinitionInvokableDefaultsAndValidation(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "workflow.yaml")
 			data := "version: 1\nname: workflow\n" + tt.field + "steps:\n  - return: {outputs: {}}\n"
-			if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
-				t.Fatal(err)
-			}
+			testfs.WriteFile(t, path, []byte(data), 0o644)
 			definition, err := NewLoader(nil).Decode(path, LoadOptions{})
 			if tt.wantError != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.wantError) {
@@ -138,9 +136,7 @@ uninstall:
     type: shell
     with: {command: true}
 `
-	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte(data), 0o644)
 	definition, err := NewLoader(nil).Load(t.Context(), path, LoadOptions{RunDir: filepath.Dir(path)})
 	if err != nil {
 		t.Fatal(err)
@@ -166,9 +162,7 @@ install:
   - type: shell
     with: {command: true}
 `
-	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte(data), 0o644)
 	if _, err := NewLoader(nil).Load(t.Context(), path, LoadOptions{RunDir: filepath.Dir(path)}); err == nil || !strings.Contains(err.Error(), "install") {
 		t.Fatalf("error = %v, want install hook validation error", err)
 	}
@@ -178,9 +172,7 @@ func TestDefinitionLifecycleHooksExpandRequiredSteps(t *testing.T) {
 	t.Parallel()
 	directory := t.TempDir()
 	fragment := filepath.Join(directory, "install.yaml")
-	if err := os.WriteFile(fragment, []byte("- id: setup\n  type: shell\n  with: {command: true}\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, fragment, []byte("- id: setup\n  type: shell\n  with: {command: true}\n"), 0o644)
 	path := filepath.Join(directory, "workflow.yaml")
 	data := `version: 1
 name: lifecycle
@@ -191,9 +183,7 @@ steps:
 install:
   - require: install.yaml
 `
-	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte(data), 0o644)
 	definition, err := NewLoader(nil).Load(t.Context(), path, LoadOptions{RunDir: directory})
 	if err != nil {
 		t.Fatal(err)

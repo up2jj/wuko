@@ -2,10 +2,11 @@ package cmd
 
 import (
 	"bytes"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/up2jj/wuko/internal/testfs"
 )
 
 func TestTimeStepRunsWithVarOverrideAndAppearsInTree(t *testing.T) {
@@ -22,9 +23,7 @@ steps:
     type: assert
     with: {expr: 'vars.stamp == "fixture-date"', message: unexpected stamp}
 `)
-	if err := os.WriteFile(path, data, 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, data, 0o644)
 
 	command := NewRootCmd()
 	command.SetArgs([]string{"run", "--file", path, "--var", "stamp=fixture-date"})

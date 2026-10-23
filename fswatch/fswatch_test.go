@@ -1,13 +1,13 @@
 package fswatch
 
 import (
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/up2jj/wuko/internal/testfs"
 )
 
 type recordingSource struct {
@@ -68,9 +68,7 @@ func TestDescendableKeepsPatternsAliveAndPrunesUnreachableDirectories(t *testing
 func TestOpenRegistersOnlyReachableDirectories(t *testing.T) {
 	root := t.TempDir()
 	for _, directory := range []string{".git/objects", ".github/workflows", "node_modules/pkg", "src/inner", "docs/api"} {
-		if err := os.MkdirAll(filepath.Join(root, directory), 0o755); err != nil {
-			t.Fatal(err)
-		}
+		testfs.MkdirAll(t, filepath.Join(root, directory), 0o755)
 	}
 	source := newRecordingSource()
 	observer, err := Open(t.Context(), root, Config{Root: root, Patterns: []string{"**/*.go", ".github/**/*.yml", "docs/*.md"}, Events: EventNames()}, func() (Source, error) {
@@ -102,9 +100,7 @@ func TestOpenRegistersOnlyReachableDirectories(t *testing.T) {
 func TestOpenPrunesBelowPatternDepth(t *testing.T) {
 	root := t.TempDir()
 	for _, directory := range []string{"docs/api/v1", ".git/objects", "src"} {
-		if err := os.MkdirAll(filepath.Join(root, directory), 0o755); err != nil {
-			t.Fatal(err)
-		}
+		testfs.MkdirAll(t, filepath.Join(root, directory), 0o755)
 	}
 	source := newRecordingSource()
 	observer, err := Open(t.Context(), root, Config{Root: root, Patterns: []string{"docs/*.md"}, Events: EventNames()}, func() (Source, error) {
@@ -166,9 +162,7 @@ func TestIgnoreExcludesSubtreesPatternsWouldReach(t *testing.T) {
 func TestOpenSkipsIgnoredTreesAndStopsMatchingThem(t *testing.T) {
 	root := t.TempDir()
 	for _, directory := range []string{"node_modules/pkg", "src", "vendor/lib"} {
-		if err := os.MkdirAll(filepath.Join(root, directory), 0o755); err != nil {
-			t.Fatal(err)
-		}
+		testfs.MkdirAll(t, filepath.Join(root, directory), 0o755)
 	}
 	source := newRecordingSource()
 	observer, err := Open(t.Context(), root, Config{
@@ -225,12 +219,8 @@ func TestNextReportsFilesThatPredateACreatedDirectoryWatch(t *testing.T) {
 	}
 	defer observer.Close()
 	// The subtree is complete before the create event arrives, as with git checkout or unzip.
-	if err := os.MkdirAll(filepath.Join(root, "gen", "sub"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "gen", "sub", "x.go"), nil, 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, filepath.Join(root, "gen", "sub"), 0o755)
+	testfs.WriteFile(t, filepath.Join(root, "gen", "sub", "x.go"), nil, 0o644)
 	go func() { source.events <- fsnotify.Event{Name: filepath.Join(root, "gen"), Op: fsnotify.Create} }()
 
 	change, err := observer.Next(t.Context())

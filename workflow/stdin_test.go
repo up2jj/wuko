@@ -7,18 +7,19 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/validation"
 )
 
 func TestLoaderDecodeStdinUsesBaseDirectoryAndLogicalLocations(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	writeTestFile(t, filepath.Join(root, "templates", "message.tmpl"), "hello {{ .vars.name }}")
-	writeTestFile(t, filepath.Join(root, "fragments", "build.yaml"), `steps:
+	testfs.Write(t, filepath.Join(root, "templates", "message.tmpl"), "hello {{ .vars.name }}")
+	testfs.Write(t, filepath.Join(root, "fragments", "build.yaml"), `steps:
   - id: build
     uses: ./actions/build
 `)
-	writeTestFile(t, filepath.Join(root, "fragments", "actions", "build", "action.yaml"), `version: 1
+	testfs.Write(t, filepath.Join(root, "fragments", "actions", "build", "action.yaml"), `version: 1
 name: build
 steps:
   - id: run

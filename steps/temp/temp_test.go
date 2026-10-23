@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/internal/steptest"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -55,9 +56,7 @@ func TestTempCreatesAndCleansManagedResources(t *testing.T) {
 				}
 			}
 			if test.kind == kindDirectory {
-				if err := os.WriteFile(filepath.Join(path, "nested.txt"), []byte("content"), 0o600); err != nil {
-					t.Fatal(err)
-				}
+				testfs.WriteFile(t, filepath.Join(path, "nested.txt"), []byte("content"), 0o600)
 			} else {
 				moved := path + ".moved"
 				if err := os.Rename(path, moved); err != nil {
@@ -175,9 +174,7 @@ func TestTempFIFOCleanupRefusesReplacement(t *testing.T) {
 		replace func(*testing.T, string)
 	}{
 		{name: "file", replace: func(t *testing.T, path string) {
-			if err := os.WriteFile(path, []byte("replacement"), 0o600); err != nil {
-				t.Fatal(err)
-			}
+			testfs.WriteFile(t, path, []byte("replacement"), 0o600)
 		}},
 		{name: "directory", replace: func(t *testing.T, path string) {
 			if err := os.Mkdir(path, 0o700); err != nil {
@@ -186,9 +183,7 @@ func TestTempFIFOCleanupRefusesReplacement(t *testing.T) {
 		}},
 		{name: "symlink", replace: func(t *testing.T, path string) {
 			target := filepath.Join(filepath.Dir(path), "target")
-			if err := os.WriteFile(target, []byte("target"), 0o600); err != nil {
-				t.Fatal(err)
-			}
+			testfs.WriteFile(t, target, []byte("target"), 0o600)
 			if err := os.Symlink(target, path); err != nil {
 				t.Fatal(err)
 			}

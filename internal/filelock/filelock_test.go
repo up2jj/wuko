@@ -9,6 +9,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/up2jj/wuko/internal/testfs"
 )
 
 func TestAcquireExcludesASecondHolderUntilRelease(t *testing.T) {
@@ -142,9 +144,7 @@ func TestAcquireReportsAnUnopenableLockPath(t *testing.T) {
 	// A directory component that is a regular file cannot be traversed.
 	root := t.TempDir()
 	blocker := filepath.Join(root, "file")
-	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, blocker, []byte("x"), 0o600)
 	if _, err := Acquire(t.Context(), filepath.Join(blocker, "state.lock")); err == nil {
 		t.Fatal("Acquire() error = nil, want a failure opening the lock file")
 	}
@@ -166,9 +166,7 @@ func TestAcquireExistingRefusesToCreateTheLockFile(t *testing.T) {
 func TestAcquireExistingLocksAFileThatAlreadyExists(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "state.lock")
-	if err := os.WriteFile(path, nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, nil, 0o600)
 
 	handle, err := AcquireExisting(t.Context(), path)
 	if err != nil {

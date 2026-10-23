@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/up2jj/wuko/executor"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
@@ -140,9 +141,7 @@ func TestValidateAndRunFileTemplate(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(root, "templates"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "templates", "message.tmpl"), []byte(`hello {{ .data.name }}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(root, "templates", "message.tmpl"), []byte(`hello {{ .data.name }}`), 0o644)
 	runner, err := New(map[string]any{"file": "templates/message.tmpl", "data": map[string]any{"name": "world"}})
 	if err != nil {
 		t.Fatal(err)
@@ -165,9 +164,7 @@ func TestValidateAndRunFileTemplate(t *testing.T) {
 func TestFileTemplateSourceSafety(t *testing.T) {
 	root := t.TempDir()
 	outside := filepath.Join(t.TempDir(), "outside.tmpl")
-	if err := os.WriteFile(outside, []byte("outside"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, outside, []byte("outside"), 0o644)
 	symlink := filepath.Join(root, "link.tmpl")
 	if err := os.Symlink(outside, symlink); err != nil {
 		t.Fatal(err)
@@ -177,13 +174,9 @@ func TestFileTemplateSourceSafety(t *testing.T) {
 		t.Fatal(err)
 	}
 	large := filepath.Join(root, "large.tmpl")
-	if err := os.WriteFile(large, bytes.Repeat([]byte("x"), maxTemplateBytes+1), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, large, bytes.Repeat([]byte("x"), maxTemplateBytes+1), 0o644)
 	binary := filepath.Join(root, "binary.tmpl")
-	if err := os.WriteFile(binary, []byte{'a', 0xff, 'b'}, 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, binary, []byte{'a', 0xff, 'b'}, 0o644)
 	renderer := newRenderer(t, nil, map[string]any{})
 	tests := []struct {
 		name     string
@@ -216,9 +209,7 @@ func TestFileTemplateSourceSafety(t *testing.T) {
 func TestRunWritesRenderedTemplateWithFileSemantics(t *testing.T) {
 	root := t.TempDir()
 	destination := filepath.Join(root, "config.txt")
-	if err := os.WriteFile(destination, []byte("old"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, destination, []byte("old"), 0o600)
 	runner, err := New(map[string]any{
 		"source": "hello {{ .data.name }}", "data": map[string]any{"name": "world"},
 		"destination": "config.txt", "overwrite": true,
@@ -248,9 +239,7 @@ func TestRunWritesRenderedTemplateWithFileSemantics(t *testing.T) {
 
 func TestFileModePreservesWriteFailures(t *testing.T) {
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "existing.txt"), []byte("old"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(root, "existing.txt"), []byte("old"), 0o644)
 	if err := os.Mkdir(filepath.Join(root, "directory"), 0o755); err != nil {
 		t.Fatal(err)
 	}

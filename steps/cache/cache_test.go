@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/up2jj/wuko/internal/archivetest"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -74,9 +75,7 @@ func TestSaveAndRestoreMultipleDirectoriesExactly(t *testing.T) {
 	first := filepath.Join(root, "vendor")
 	second := filepath.Join(root, "build")
 	writeFile(t, filepath.Join(first, "module.txt"), "dependency", 0o640)
-	if err := os.MkdirAll(filepath.Join(first, "empty"), 0o750); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, filepath.Join(first, "empty"), 0o750)
 	writeFile(t, filepath.Join(second, "nested", "artifact"), "binary", 0o750)
 	if err := os.Symlink("artifact", filepath.Join(second, "nested", "artifact-link")); err != nil {
 		t.Fatal(err)
@@ -99,16 +98,12 @@ func TestSaveAndRestoreMultipleDirectoriesExactly(t *testing.T) {
 	if err := os.RemoveAll(first); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(first, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, first, 0o755)
 	writeFile(t, filepath.Join(first, "stale.txt"), "stale", 0o644)
 	if err := os.RemoveAll(second); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(second, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, second, 0o755)
 
 	restoreRunner := newRunner(t, root, "restore")
 	restored, err := restoreRunner.Run(t.Context(), step.Request{RunDir: root})
@@ -138,9 +133,7 @@ func TestRestoreMissAndImmutableSave(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "go.sum"), "checksum\n", 0o644)
 	writeFile(t, filepath.Join(root, "vendor", "value"), "first", 0o644)
-	if err := os.MkdirAll(filepath.Join(root, "build"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, filepath.Join(root, "build"), 0o755)
 
 	miss, err := newRunner(t, root, "restore").Run(t.Context(), step.Request{RunDir: root})
 	if err != nil || miss.Outputs["hit"] != false {
@@ -165,9 +158,7 @@ func TestConcurrentSaveInstallsOneImmutableEntry(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "go.sum"), "checksum\n", 0o644)
 	writeFile(t, filepath.Join(root, "vendor", "value"), "content", 0o644)
-	if err := os.MkdirAll(filepath.Join(root, "build"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, filepath.Join(root, "build"), 0o755)
 
 	var wait sync.WaitGroup
 	results := make(chan step.Result, 2)
@@ -202,9 +193,7 @@ func TestRejectsMissingAndConflictingPaths(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "go.sum"), "checksum\n", 0o644)
 	writeFile(t, filepath.Join(root, "not-directory"), "file", 0o644)
-	if err := os.MkdirAll(filepath.Join(root, "target"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, filepath.Join(root, "target"), 0o755)
 	if err := os.Symlink(filepath.Join(root, "target"), filepath.Join(root, "target-alias")); err != nil {
 		t.Fatal(err)
 	}
@@ -243,9 +232,7 @@ func TestRejectsCorruptAndHostileArchivesWithoutReplacingTargets(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "go.sum"), "checksum\n", 0o644)
 	writeFile(t, filepath.Join(root, "vendor", "sentinel"), "original", 0o644)
-	if err := os.MkdirAll(filepath.Join(root, "build"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, filepath.Join(root, "build"), 0o755)
 	runner := newRunner(t, root, "restore")
 	config, err := resolveConfig(root, runner.(*Runner).config)
 	if err != nil {
@@ -256,12 +243,7 @@ func TestRejectsCorruptAndHostileArchivesWithoutReplacingTargets(t *testing.T) {
 		t.Fatal(err)
 	}
 	archivePath := filepath.Join(root, "store", key+".tar.gz")
-	if err := os.MkdirAll(filepath.Dir(archivePath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(archivePath, []byte("not gzip"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.Write(t, archivePath, "not gzip")
 	if _, err := runner.Run(t.Context(), step.Request{RunDir: root}); err == nil || !strings.Contains(err.Error(), "compressed") {
 		t.Fatalf("corrupt archive error = %v", err)
 	}
@@ -316,9 +298,7 @@ func TestRejectsSymlinkChainsThatEscapeStaging(t *testing.T) {
 			root := t.TempDir()
 			writeFile(t, filepath.Join(root, "go.sum"), "checksum\n", 0o644)
 			writeFile(t, filepath.Join(root, "vendor", "sentinel"), "original", 0o644)
-			if err := os.MkdirAll(filepath.Join(root, "build"), 0o755); err != nil {
-				t.Fatal(err)
-			}
+			testfs.MkdirAll(t, filepath.Join(root, "build"), 0o755)
 			runner := newRunner(t, root, "restore")
 			config, err := resolveConfig(root, runner.(*Runner).config)
 			if err != nil {
@@ -329,9 +309,7 @@ func TestRejectsSymlinkChainsThatEscapeStaging(t *testing.T) {
 				t.Fatal(err)
 			}
 			archivePath := filepath.Join(root, "store", key+".tar.gz")
-			if err := os.MkdirAll(filepath.Dir(archivePath), 0o755); err != nil {
-				t.Fatal(err)
-			}
+			testfs.MkdirAll(t, filepath.Dir(archivePath), 0o755)
 			writeArchive(t, archivePath, test.headers)
 			if _, err := runner.Run(t.Context(), step.Request{RunDir: root}); err == nil || !strings.Contains(err.Error(), "symbolic link") {
 				t.Errorf("restore error = %v, want a rejected symbolic link", err)
@@ -433,12 +411,8 @@ func without(raw map[string]any, key string) map[string]any {
 
 func writeFile(t *testing.T, path, content string, mode os.FileMode) {
 	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte(content), mode); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, filepath.Dir(path), 0o755)
+	testfs.WriteFile(t, path, []byte(content), mode)
 	if err := os.Chmod(path, mode); err != nil {
 		t.Fatal(err)
 	}
@@ -464,7 +438,5 @@ func assertFile(t *testing.T, path, content string, mode os.FileMode) {
 
 func writeArchive(t *testing.T, archivePath string, entries []archivetest.Entry) {
 	t.Helper()
-	if err := os.WriteFile(archivePath, archivetest.TarGz(t, entries...), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, archivePath, archivetest.TarGz(t, entries...), 0o644)
 }

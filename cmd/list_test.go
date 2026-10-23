@@ -4,11 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -16,9 +16,7 @@ func TestListCommandPreservesTextOutput(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	workflowDir := filepath.Join(root, ".wuko", "workflows")
-	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, workflowDir, 0o755)
 	path := filepath.Join(workflowDir, "check.yaml")
 	writeTestWorkflow(t, path, "Run checks")
 
@@ -38,9 +36,7 @@ func TestListCommandWritesVersionedJSON(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	workflowDir := filepath.Join(root, ".wuko", "workflows")
-	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, workflowDir, 0o755)
 	dependencyPath := filepath.Join(workflowDir, "build.yaml")
 	dependency := `version: 1
 package_version: 1.4.0
@@ -52,9 +48,7 @@ form: {title: Build}
 steps:
   - return: {outputs: {}}
 `
-	if err := os.WriteFile(dependencyPath, []byte(dependency), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, dependencyPath, []byte(dependency), 0o644)
 	deployPath := filepath.Join(workflowDir, "deploy.yaml")
 	deploy := `version: 1
 name: deploy
@@ -69,9 +63,7 @@ targets:
     steps:
       - return: {outputs: {}}
 `
-	if err := os.WriteFile(deployPath, []byte(deploy), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, deployPath, []byte(deploy), 0o644)
 
 	var output bytes.Buffer
 	command := newRootCmd(listTestDependencies(root, &output))
@@ -131,13 +123,9 @@ func TestListCommandAllIncludesShadowedTargets(t *testing.T) {
 		filepath.Join(home, ".wuko", "workflows", "deploy.yaml"),
 	}
 	for _, path := range paths {
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
-		}
+		testfs.MkdirAll(t, filepath.Dir(path), 0o755)
 		data := "version: 1\nname: deploy\ntargets:\n  production:\n    steps: [{return: {outputs: {}}}]\n  staging:\n    steps: [{return: {outputs: {}}}]\n"
-		if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
-			t.Fatal(err)
-		}
+		testfs.WriteFile(t, path, []byte(data), 0o644)
 	}
 	for _, format := range []string{"text", "json"} {
 		t.Run(format, func(t *testing.T) {

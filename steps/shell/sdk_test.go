@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/helper"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -65,13 +66,9 @@ const task = async () => {
 task().catch(error => { console.error(error); process.exitCode = 1; });
 `
 			file := filepath.Join(dir, "script with spaces."+extension)
-			if err := os.WriteFile(file, []byte(source), 0o600); err != nil {
-				t.Fatal(err)
-			}
+			testfs.WriteFile(t, file, []byte(source), 0o600)
 			preload := filepath.Join(dir, "existing preload.cjs")
-			if err := os.WriteFile(preload, []byte(`globalThis.existingPreload = true; if (!globalThis.wuko) throw new Error('SDK must preload first');`), 0o600); err != nil {
-				t.Fatal(err)
-			}
+			testfs.WriteFile(t, preload, []byte(`globalThis.existingPreload = true; if (!globalThis.wuko) throw new Error('SDK must preload first');`), 0o600)
 			runner, err := New(map[string]any{
 				"sdk": "node", "command": node, "args": []any{file},
 				"sdk_args": map[string]any{"title": "release", "items": map[string]any{"expr": "vars.inventory"}},
@@ -235,9 +232,7 @@ func TestNodeSDKUsesExistingProjectDependencies(t *testing.T) {
 	node := sdkNode(t)
 	dir := t.TempDir()
 	dependency := filepath.Join(dir, "node_modules", "fixture-dependency")
-	if err := os.MkdirAll(dependency, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, dependency, 0o755)
 	files := map[string]string{
 		"package.json":      `{"name":"fixture","type":"module","dependencies":{"fixture-dependency":"1.0.0"}}`,
 		"package-lock.json": `{"name":"fixture","lockfileVersion":3,"packages":{"node_modules/fixture-dependency":{"version":"1.0.0"}}}`,
@@ -246,9 +241,7 @@ func TestNodeSDKUsesExistingProjectDependencies(t *testing.T) {
 		"script.js": `import transform from 'fixture-dependency'; await wuko.output('value', transform(wuko.args.name));`,
 	}
 	for name, content := range files {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
-			t.Fatal(err)
-		}
+		testfs.WriteFile(t, filepath.Join(dir, name), []byte(content), 0o600)
 	}
 	runner, err := New(map[string]any{"sdk": "node", "command": node, "args": []any{"script.js"}, "sdk_args": map[string]any{"name": "SDK"}})
 	if err != nil {

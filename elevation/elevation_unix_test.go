@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/process/processtest"
 	"github.com/up2jj/wuko/ptyinteract"
@@ -38,9 +39,7 @@ func TestRootExecutionResolvesCommandAndUsesSanitizedEnvironment(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	command := filepath.Join(dir, "tool")
-	if err := os.WriteFile(command, []byte("#!/bin/sh\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, command, []byte("#!/bin/sh\n"), 0o700)
 	recorder := &processtest.Executor{}
 	executor := NewExecutor()
 	executor.geteuid = func() int { return 0 }
@@ -80,9 +79,7 @@ func TestAuthorizePromptsOnlyAfterNonInteractiveValidationFails(t *testing.T) {
 	dir := t.TempDir()
 	sudo := filepath.Join(dir, "sudo")
 	script := "#!/bin/sh\nif [ \"$1\" = -n ]; then exit 1; fi\nexit 0\n"
-	if err := os.WriteFile(sudo, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, sudo, []byte(script), 0o700)
 	executor := NewExecutor()
 	executor.lookPath = func(string) (string, error) { return sudo, nil }
 	executor.getenv = func(string) string { return "" }
@@ -99,9 +96,7 @@ func TestAuthorizeRejectsMissingCredentialsWithoutInteraction(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	sudo := filepath.Join(dir, "sudo")
-	if err := os.WriteFile(sudo, []byte("#!/bin/sh\nexit 1\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, sudo, []byte("#!/bin/sh\nexit 1\n"), 0o700)
 	executor := NewExecutor()
 	executor.lookPath = func(string) (string, error) { return sudo, nil }
 	executor.getenv = func(string) string { return "" }
@@ -114,9 +109,7 @@ func TestAuthorizeRejectsMissingCredentialsWithoutInteraction(t *testing.T) {
 func TestTransportRequestIsStrictAndOwnedByCaller(t *testing.T) {
 	t.Parallel()
 	command := filepath.Join(t.TempDir(), "tool")
-	if err := os.WriteFile(command, []byte("#!/bin/sh\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, command, []byte("#!/bin/sh\n"), 0o700)
 	dir, listener, nonce, err := prepareTransport("/tmp")
 	if err != nil {
 		if errors.Is(err, syscall.EPERM) {
@@ -179,9 +172,7 @@ func secretPlan(t *testing.T) *ptyinteract.Plan {
 func TestResolveExecutableIgnoresRelativePathEntries(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "build"), []byte("#!/bin/sh\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(dir, "build"), []byte("#!/bin/sh\n"), 0o700)
 	if _, _, err := resolveExecutable("build", dir, "/nonexistent-elevation-path:"); err == nil {
 		t.Fatal("an empty PATH element resolved against the run directory")
 	}

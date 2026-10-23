@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/up2jj/wuko/engine"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/workflow"
 )
@@ -406,9 +407,7 @@ func TestLatestBatchMergeKeepsNewestObservation(t *testing.T) {
 // workflow can exclude a tree its paths would otherwise reach.
 func TestFilesystemSourceAcceptsIgnorePatterns(t *testing.T) {
 	root := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(root, "node_modules", "pkg"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, filepath.Join(root, "node_modules", "pkg"), 0o755)
 	builder := FilesystemBuilder{}
 	config := map[string]any{"paths": []any{"**/*.go"}, "ignore": []any{"node_modules"}}
 	if err := builder.Validate(config); err != nil {

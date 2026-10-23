@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/up2jj/wuko/internal/steptest"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -407,9 +408,7 @@ func TestConflictingEditsDoNotWriteFile(t *testing.T) {
 	directory := t.TempDir()
 	path := filepath.Join(directory, "README.md")
 	input := []byte("# Title\n")
-	if err := os.WriteFile(path, input, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, input, 0o600)
 	runner := steptest.Build(t, New, map[string]any{
 		"from": map[string]any{"file": "README.md"},
 		"edits": []any{
@@ -452,9 +451,7 @@ func TestFileSourceWritesAtomicallyAndPreservesMode(t *testing.T) {
 	t.Parallel()
 	directory := t.TempDir()
 	path := filepath.Join(directory, "README.md")
-	if err := os.WriteFile(path, []byte("# Old\n"), 0o640); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte("# Old\n"), 0o640)
 	runner := steptest.Build(t, New, map[string]any{
 		"from": map[string]any{"file": "README.md"},
 		"edits": []any{map[string]any{
@@ -482,9 +479,7 @@ func TestFileSourceWritesAtomicallyAndPreservesMode(t *testing.T) {
 func TestFileSourceRejectsSymlink(t *testing.T) {
 	t.Parallel()
 	directory := t.TempDir()
-	if err := os.WriteFile(filepath.Join(directory, "real.md"), []byte("# Real\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(directory, "real.md"), []byte("# Real\n"), 0o600)
 	if err := os.Symlink("real.md", filepath.Join(directory, "link.md")); err != nil {
 		t.Fatal(err)
 	}
@@ -502,9 +497,7 @@ func TestNoOpFileEditDoesNotRewrite(t *testing.T) {
 	t.Parallel()
 	directory := t.TempDir()
 	path := filepath.Join(directory, "README.md")
-	if err := os.WriteFile(path, []byte("# Same\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte("# Same\n"), 0o600)
 	stamp := time.Now().Add(-time.Hour).Truncate(time.Second)
 	if err := os.Chtimes(path, stamp, stamp); err != nil {
 		t.Fatal(err)

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/internal/gittest"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/process/processtest"
 	"github.com/up2jj/wuko/step"
@@ -190,13 +191,9 @@ func TestCommitEmptyPolicies(t *testing.T) {
 func TestCommitCreatesStructuredCommitAndStagesWholeIndex(t *testing.T) {
 	t.Parallel()
 	dir := gittest.InitWithCommit(t)
-	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("changed\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(dir, "README.md"), []byte("changed\n"), 0o644)
 	gittest.Run(t, dir, "add", "README.md")
-	if err := os.WriteFile(filepath.Join(dir, "new.txt"), []byte("new\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(dir, "new.txt"), []byte("new\n"), 0o644)
 	runner, err := NewCommit(map[string]any{
 		"message": "feat: structured commit", "body": "Body text.", "paths": []any{"new.txt"},
 		"author":    map[string]any{"name": "Original Author", "email": "author@example.test"},
@@ -317,9 +314,7 @@ func TestCommitIgnoresPathsThatMatchNothing(t *testing.T) {
 		t.Fatalf("on_empty fail error = %v", err)
 	}
 
-	if err := os.WriteFile(filepath.Join(dir, "present.txt"), []byte("content\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(dir, "present.txt"), []byte("content\n"), 0o644)
 	mixed, err := NewCommit(map[string]any{"message": "add present", "paths": []any{"dist", "present.txt"}})
 	if err != nil {
 		t.Fatal(err)
@@ -342,9 +337,7 @@ func TestCommitReportsMissingGitIdentity(t *testing.T) {
 	dir := t.TempDir()
 	gittest.Run(t, dir, "init", "--quiet")
 	gittest.Run(t, dir, "config", "user.useConfigOnly", "true")
-	if err := os.WriteFile(filepath.Join(dir, "file.txt"), []byte("content\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(dir, "file.txt"), []byte("content\n"), 0o644)
 	runner, err := NewCommit(map[string]any{"message": "initial", "paths": []any{"file.txt"}})
 	if err != nil {
 		t.Fatal(err)
@@ -361,12 +354,8 @@ func TestCommitVerifyControlsHooks(t *testing.T) {
 	t.Parallel()
 	dir := gittest.InitWithCommit(t)
 	hook := filepath.Join(dir, ".git", "hooks", "pre-commit")
-	if err := os.WriteFile(hook, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("hooked\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, hook, []byte("#!/bin/sh\nexit 1\n"), 0o755)
+	testfs.WriteFile(t, filepath.Join(dir, "README.md"), []byte("hooked\n"), 0o644)
 	verified, err := NewCommit(map[string]any{"message": "hooks run", "paths": []any{"README.md"}})
 	if err != nil {
 		t.Fatal(err)

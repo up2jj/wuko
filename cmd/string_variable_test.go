@@ -3,11 +3,11 @@ package cmd
 import (
 	"bytes"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/testfs"
 	inputstep "github.com/up2jj/wuko/steps/input"
 	passwordstep "github.com/up2jj/wuko/steps/password"
 )
@@ -20,9 +20,7 @@ func TestTextVariablesExplainJSONQuotingWithoutExposingValues(t *testing.T) {
 				root := t.TempDir()
 				path := filepath.Join(root, "workflow.yaml")
 				data := fmt.Sprintf("version: 1\nname: text\nsteps:\n  - id: input\n    type: %s\n    with: {variable: code, message: Code}\n", stepType)
-				if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
-					t.Fatal(err)
-				}
+				testfs.WriteFile(t, path, []byte(data), 0o644)
 				var output bytes.Buffer
 				deps := listTestDependencies(root, &output)
 				if err := inputstep.Register(deps.registry); err != nil {

@@ -10,6 +10,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/up2jj/wuko/internal/testfs"
 )
 
 func TestParsePolicy(t *testing.T) {
@@ -158,9 +160,7 @@ func TestASDFLoaderValidatesAndPrependsShims(t *testing.T) {
 	dataDir := t.TempDir()
 	dataShims := filepath.Join(dataDir, "shims")
 	for _, dir := range []string{homeShims, dataShims} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatal(err)
-		}
+		testfs.MkdirAll(t, dir, 0o755)
 	}
 	loader := newASDFLoader(foundLookup, func(_ context.Context, command Command) (CommandResult, error) {
 		if !reflect.DeepEqual(command.Args, []string{"current"}) {
@@ -187,9 +187,7 @@ func TestASDFLoaderValidatesAndPrependsShims(t *testing.T) {
 func TestASDFLoaderToleratesUninstalledVersions(t *testing.T) {
 	home := t.TempDir()
 	shims := filepath.Join(home, ".asdf", "shims")
-	if err := os.MkdirAll(shims, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, shims, 0o755)
 	loader := newASDFLoader(foundLookup, func(context.Context, Command) (CommandResult, error) {
 		return CommandResult{Stdout: "golang 1.24 Not installed\n"}, failedExit(t)
 	})
@@ -324,9 +322,7 @@ func TestLoaderReturnsCancellation(t *testing.T) {
 
 func TestResolverAutomaticSelectionAndProgressiveLookup(t *testing.T) {
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, ".tool-versions"), []byte("nodejs 22\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(root, ".tool-versions"), []byte("nodejs 22\n"), 0o644)
 	asdf := fakeLoader{name: LoaderASDF, probe: func(Request) Probe { return Probe{Available: true} }, load: func(Request) Result {
 		return Result{Changes: Changes{"PATH": new("/asdf/shims:/bin")}, Applied: true}
 	}}
@@ -350,9 +346,7 @@ func TestResolverAutomaticSelectionAndProgressiveLookup(t *testing.T) {
 func TestResolverPrefersNativeMiseMarkerAtSameLevel(t *testing.T) {
 	root := t.TempDir()
 	for _, name := range []string{"mise.toml", ".tool-versions"} {
-		if err := os.WriteFile(filepath.Join(root, name), nil, 0o644); err != nil {
-			t.Fatal(err)
-		}
+		testfs.WriteFile(t, filepath.Join(root, name), nil, 0o644)
 	}
 	mise := fakeLoader{name: LoaderMise, load: func(Request) Result { return Result{Applied: true} }}
 	asdf := fakeLoader{name: LoaderASDF, load: func(Request) Result { t.Fatal("asdf loaded"); return Result{} }}
@@ -371,12 +365,8 @@ func TestResolverUsesNearestMarker(t *testing.T) {
 	if err := os.Mkdir(child, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "mise.toml"), nil, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(child, ".tool-versions"), nil, 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(root, "mise.toml"), nil, 0o644)
+	testfs.WriteFile(t, filepath.Join(child, ".tool-versions"), nil, 0o644)
 	asdf := fakeLoader{name: LoaderASDF, load: func(Request) Result { return Result{Applied: true} }}
 	mise := fakeLoader{name: LoaderMise, load: func(Request) Result { t.Fatal("mise loaded"); return Result{} }}
 	result, err := NewResolver(mise, asdf).Load(t.Context(), child, map[string]string{}, AutomaticPolicy())
@@ -390,9 +380,7 @@ func TestResolverUsesNearestMarker(t *testing.T) {
 
 func TestResolverFallsBackFromASDFToMise(t *testing.T) {
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, ".tool-versions"), nil, 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(root, ".tool-versions"), nil, 0o644)
 	asdf := fakeLoader{name: LoaderASDF, probe: func(Request) Probe { return Probe{} }, load: func(Request) Result { t.Fatal("asdf loaded"); return Result{} }}
 	mise := fakeLoader{name: LoaderMise, load: func(Request) Result { return Result{Applied: true} }}
 	result, err := NewResolver(asdf, mise).Load(t.Context(), root, map[string]string{}, AutomaticPolicy())
@@ -434,9 +422,7 @@ func TestResolverAutomaticWithoutConfigurationOrDirenvIsUnchanged(t *testing.T) 
 
 func TestResolverFailsWhenConfiguredManagerIsUnavailable(t *testing.T) {
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "mise.toml"), nil, 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(root, "mise.toml"), nil, 0o644)
 	mise := fakeLoader{name: LoaderMise, probe: func(Request) Probe { return Probe{} }, load: func(Request) Result { return Result{} }}
 	_, err := NewResolver(mise).Load(t.Context(), root, map[string]string{}, AutomaticPolicy())
 	if err == nil || !strings.Contains(err.Error(), "executable not found") {
@@ -447,18 +433,12 @@ func TestResolverFailsWhenConfiguredManagerIsUnavailable(t *testing.T) {
 func TestMarkerSearchStopsAtHomeDirectory(t *testing.T) {
 	home := t.TempDir()
 	project := filepath.Join(home, "projects", "app")
-	if err := os.MkdirAll(project, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(filepath.Dir(home), "mise.toml"), nil, 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, project, 0o755)
+	testfs.WriteFile(t, filepath.Join(filepath.Dir(home), "mise.toml"), nil, 0o644)
 	if got := markerFor(project, map[string]string{"HOME": home}); got != markerNone {
 		t.Fatalf("marker = %v, want none above home", got)
 	}
-	if err := os.WriteFile(filepath.Join(home, ".tool-versions"), nil, 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(home, ".tool-versions"), nil, 0o644)
 	if got := markerFor(project, map[string]string{"HOME": home}); got != markerToolVersions {
 		t.Fatalf("marker = %v, want tool-versions at home", got)
 	}

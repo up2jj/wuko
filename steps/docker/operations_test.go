@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/containerd/errdefs"
-	"github.com/moby/docker-image-spec/specs-go/v1"
+	v1 "github.com/moby/docker-image-spec/specs-go/v1"
 	"github.com/moby/moby/api/pkg/authconfig"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/jsonstream"
@@ -27,6 +27,7 @@ import (
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 
 	"github.com/up2jj/wuko/diagnostic"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -599,9 +600,7 @@ func TestVolumeMountDoesNotResolveSourceAsHostPath(t *testing.T) {
 func TestBuildxBuildArgumentsAndMetadata(t *testing.T) {
 	t.Parallel()
 	runDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(runDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(runDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644)
 	var buildArgs []string
 	calls := 0
 	runCommand := func(_ context.Context, name string, args []string, _, _ io.Writer) error {

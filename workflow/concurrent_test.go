@@ -6,12 +6,14 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/up2jj/wuko/internal/testfs"
 )
 
 func TestLoadConcurrentGroupDefaultsAndPolicies(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "workflow.yaml")
-	writeTestFile(t, path, `version: 1
+	testfs.Write(t, path, `version: 1
 name: checks
 steps:
   - concurrent:
@@ -46,7 +48,7 @@ steps:
 func TestLoadConcurrentGroupDefaultsFailFast(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "workflow.yaml")
-	writeTestFile(t, path, `version: 1
+	testfs.Write(t, path, `version: 1
 name: checks
 steps:
   - concurrent:
@@ -66,7 +68,7 @@ steps:
 func TestLoadConcurrentGroupNeeds(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "workflow.yaml")
-	writeTestFile(t, path, `version: 1
+	testfs.Write(t, path, `version: 1
 name: checks
 steps:
   - concurrent:
@@ -114,7 +116,7 @@ func TestLoadRejectsInvalidConcurrentGroups(t *testing.T) {
 			if test.name == "combined fields" {
 				prefix = "version: 1\nname: invalid\nsteps:\n  -\n"
 			}
-			writeTestFile(t, path, prefix+test.body)
+			testfs.Write(t, path, prefix+test.body)
 			_, err := Load(path)
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("error = %v, want substring %q", err, test.want)
@@ -136,7 +138,7 @@ func TestRejectsNeedsOutsideDirectConcurrentChildren(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "workflow.yaml")
-			writeTestFile(t, path, "version: 1\nname: invalid\nsteps:\n"+test.body)
+			testfs.Write(t, path, "version: 1\nname: invalid\nsteps:\n"+test.body)
 			_, err := Load(path)
 			if err == nil || !strings.Contains(err.Error(), "needs is only supported on direct children of concurrent") {
 				t.Fatalf("error = %v", err)
@@ -148,7 +150,7 @@ func TestRejectsNeedsOutsideDirectConcurrentChildren(t *testing.T) {
 func TestLoadRejectsNonListNeeds(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "workflow.yaml")
-	writeTestFile(t, path, "version: 1\nname: invalid\nsteps:\n  - concurrent:\n      steps:\n        - {id: one, type: shell}\n        - {id: two, type: shell, needs: one}\n")
+	testfs.Write(t, path, "version: 1\nname: invalid\nsteps:\n  - concurrent:\n      steps:\n        - {id: one, type: shell}\n        - {id: two, type: shell, needs: one}\n")
 	_, err := Load(path)
 	if err == nil || !strings.Contains(err.Error(), "needs must be a list") {
 		t.Fatalf("error = %v", err)
@@ -158,12 +160,12 @@ func TestLoadRejectsNonListNeeds(t *testing.T) {
 func TestConcurrentGroupExpandsRequiredStepsAndSharesIDNamespace(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	writeTestFile(t, filepath.Join(dir, "children.yaml"), `
+	testfs.Write(t, filepath.Join(dir, "children.yaml"), `
 - id: lint
   type: shell
 `)
 	path := filepath.Join(dir, "workflow.yaml")
-	writeTestFile(t, path, `version: 1
+	testfs.Write(t, path, `version: 1
 name: checks
 steps:
   - concurrent:
@@ -181,7 +183,7 @@ steps:
 		t.Fatalf("children = %#v", children)
 	}
 
-	writeTestFile(t, path, `version: 1
+	testfs.Write(t, path, `version: 1
 name: duplicate
 steps:
   - concurrent:

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/creack/pty"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -17,7 +18,7 @@ func TestRunCommandKeepsInteractiveInputWhileStreamingReport(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	workflowPath := filepath.Join(root, "interactive.yaml")
-	writeWorkflowData(t, workflowPath, `version: 1
+	testfs.Write(t, workflowPath, `version: 1
 name: interactive
 steps:
   - id: prompt

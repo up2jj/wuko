@@ -1,22 +1,19 @@
 package githook
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/up2jj/wuko/internal/testfs"
 )
 
 func TestLoadManifest(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(root, ".wuko"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, filepath.Join(root, ".wuko"), 0o755)
 	data := "version: 1\nhooks:\n  pre-commit:\n    - workflow: check\n      target: staged\n"
-	if err := os.WriteFile(filepath.Join(root, ManifestPath), []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(root, ManifestPath), []byte(data), 0o644)
 	manifest, err := LoadManifest(root)
 	if err != nil {
 		t.Fatal(err)
@@ -35,12 +32,8 @@ func TestLoadManifestRejectsUnknownAndUnsupportedFields(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			root := t.TempDir()
-			if err := os.MkdirAll(filepath.Join(root, ".wuko"), 0o755); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(filepath.Join(root, ManifestPath), []byte(data), 0o644); err != nil {
-				t.Fatal(err)
-			}
+			testfs.MkdirAll(t, filepath.Join(root, ".wuko"), 0o755)
+			testfs.WriteFile(t, filepath.Join(root, ManifestPath), []byte(data), 0o644)
 			if _, err := LoadManifest(root); err == nil {
 				t.Fatal("LoadManifest() unexpectedly succeeded")
 			}
@@ -125,13 +118,9 @@ func TestLoadManifestRejectsRemoteWorkflowLocator(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			root := t.TempDir()
-			if err := os.MkdirAll(filepath.Join(root, ".wuko"), 0o755); err != nil {
-				t.Fatal(err)
-			}
+			testfs.MkdirAll(t, filepath.Join(root, ".wuko"), 0o755)
 			data := "version: 1\nhooks:\n  pre-commit:\n    - workflow: " + locator + "\n"
-			if err := os.WriteFile(filepath.Join(root, ManifestPath), []byte(data), 0o644); err != nil {
-				t.Fatal(err)
-			}
+			testfs.WriteFile(t, filepath.Join(root, ManifestPath), []byte(data), 0o644)
 			_, err := LoadManifest(root)
 			if err == nil || !strings.Contains(err.Error(), "locally discovered workflow") {
 				t.Fatalf("LoadManifest() error = %v", err)

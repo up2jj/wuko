@@ -2,11 +2,12 @@ package workflow
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/up2jj/wuko/internal/testfs"
 )
 
 func TestLoadWorkflowDependenciesAndTypedOutputs(t *testing.T) {
@@ -26,9 +27,7 @@ steps:
       outputs:
         artifact: dependencies.build.artifact
 `
-	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte(data), 0o644)
 	definition, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
@@ -369,9 +368,7 @@ func TestLoaderRejectsDependencyOutputsInLoadTimeFields(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "workflow.yaml")
 			data := "version: 1\nname: root\ndepends_on: {build: build}\n" + test.body
-			if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
-				t.Fatal(err)
-			}
+			testfs.WriteFile(t, path, []byte(data), 0o644)
 			_, err := NewLoader(nil).Load(t.Context(), path, LoadOptions{RunDir: t.TempDir()})
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("error = %v, want %q", err, test.want)
@@ -390,9 +387,7 @@ env:
 steps:
   - return: {outputs: {}}
 `
-	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte(data), 0o644)
 	definition, err := NewLoader(nil).Load(t.Context(), path, LoadOptions{RunDir: t.TempDir(), BaseEnv: map[string]string{}})
 	if err != nil {
 		t.Fatal(err)

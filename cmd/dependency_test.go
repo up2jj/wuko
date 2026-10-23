@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	envload "github.com/up2jj/wuko/environment"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/provider"
 	"github.com/up2jj/wuko/step"
 	setstep "github.com/up2jj/wuko/steps/set"
@@ -20,10 +21,8 @@ func TestRunCommandExecutesDependencyChainAndExportsRootOutputs(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	dir := filepath.Join(root, ".wuko", "workflows")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeWorkflowData(t, filepath.Join(dir, "build.yaml"), `version: 1
+	testfs.MkdirAll(t, dir, 0o755)
+	testfs.Write(t, filepath.Join(dir, "build.yaml"), `version: 1
 name: build
 invokable: false
 outputs:
@@ -31,7 +30,7 @@ outputs:
 steps:
   - return: {outputs: {artifact: '"dist/app.tar.gz"'}}
 `)
-	writeWorkflowData(t, filepath.Join(dir, "release.yaml"), `version: 1
+	testfs.Write(t, filepath.Join(dir, "release.yaml"), `version: 1
 name: release
 depends_on: {build: build}
 outputs:
@@ -42,9 +41,7 @@ steps:
 	outputPath := filepath.Join(root, "github-output")
 	summaryPath := filepath.Join(root, "github-summary")
 	for _, path := range []string{outputPath, summaryPath} {
-		if err := os.WriteFile(path, nil, 0o600); err != nil {
-			t.Fatal(err)
-		}
+		testfs.WriteFile(t, path, nil, 0o600)
 	}
 	values := map[string]string{"GITHUB_OUTPUT": outputPath, "GITHUB_STEP_SUMMARY": summaryPath, "GITHUB_WORKSPACE": root}
 	var terminal bytes.Buffer
@@ -85,10 +82,8 @@ func TestRunCommandPropagatesRegisteredProviderIntoDependencies(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	dir := filepath.Join(root, ".wuko", "workflows")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeWorkflowData(t, filepath.Join(dir, "build.yaml"), `version: 1
+	testfs.MkdirAll(t, dir, 0o755)
+	testfs.Write(t, filepath.Join(dir, "build.yaml"), `version: 1
 name: build
 invokable: false
 outputs:
@@ -98,7 +93,7 @@ steps:
     type: provider_capture
     with: {value: '{{ .acme.region }}'}
 `)
-	writeWorkflowData(t, filepath.Join(dir, "release.yaml"), `version: 1
+	testfs.Write(t, filepath.Join(dir, "release.yaml"), `version: 1
 name: release
 depends_on: {build: build}
 steps:
@@ -142,9 +137,7 @@ func TestRunCommandOrdersAndDeduplicatesDiamondDependencies(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	dir := filepath.Join(root, ".wuko", "workflows")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, dir, 0o755)
 	definitions := map[string]string{
 		"base":  "",
 		"left":  "depends_on: {base: base}\n",
@@ -152,7 +145,7 @@ func TestRunCommandOrdersAndDeduplicatesDiamondDependencies(t *testing.T) {
 		"root":  "depends_on: {left: left, right: right}\n",
 	}
 	for name, dependency := range definitions {
-		writeWorkflowData(t, filepath.Join(dir, name+".yaml"), "version: 1\nname: "+name+"\n"+dependency+"steps:\n  - id: record\n    type: dependency_record\n    with: {label: "+name+"}\n")
+		testfs.Write(t, filepath.Join(dir, name+".yaml"), "version: 1\nname: "+name+"\n"+dependency+"steps:\n  - id: record\n    type: dependency_record\n    with: {label: "+name+"}\n")
 	}
 	var order []string
 	registry := step.NewRegistry()

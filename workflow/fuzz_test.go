@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/testfs"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -52,12 +53,8 @@ func FuzzLoadWithRequiredFragment(f *testing.F) {
 	f.Add([]byte("version: 1\nname: x\nsteps:\n  - require: fragment.yaml\n"), []byte("- require: fragment.yaml\n"))
 	f.Fuzz(func(t *testing.T, main, fragment []byte) {
 		dir := t.TempDir()
-		if err := os.WriteFile(filepath.Join(dir, "workflow.yaml"), main, 0o644); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, "fragment.yaml"), fragment, 0o644); err != nil {
-			t.Fatal(err)
-		}
+		testfs.WriteFile(t, filepath.Join(dir, "workflow.yaml"), main, 0o644)
+		testfs.WriteFile(t, filepath.Join(dir, "fragment.yaml"), fragment, 0o644)
 		_, _ = Load(filepath.Join(dir, "workflow.yaml"))
 	})
 }

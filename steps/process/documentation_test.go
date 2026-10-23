@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
 )
@@ -23,9 +24,7 @@ func TestDocumentedProcessWorkflowsDecodeAndConfigsBuild(t *testing.T) {
 			continue
 		}
 		path := filepath.Join(t.TempDir(), "workflow.yaml")
-		if err := os.WriteFile(path, []byte(block), 0o644); err != nil {
-			t.Fatal(err)
-		}
+		testfs.WriteFile(t, path, []byte(block), 0o644)
 		definition, err := workflow.NewLoader(nil).Decode(path, workflow.LoadOptions{})
 		if err != nil {
 			t.Fatalf("documented process YAML block %d: %v\n%s", index+1, err, block)

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/internal/steptest"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -177,7 +178,5 @@ func TestSymlinkBoundary(t *testing.T) {
 
 func mustWrite(t *testing.T, path string) {
 	t.Helper()
-	if err := os.WriteFile(path, []byte("test"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte("test"), 0o644)
 }

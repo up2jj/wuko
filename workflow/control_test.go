@@ -5,12 +5,14 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/up2jj/wuko/internal/testfs"
 )
 
 func TestLoadForeachAndMatrixControls(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "workflow.yaml")
-	writeTestFile(t, path, `version: 1
+	testfs.Write(t, path, `version: 1
 name: fanout
 steps:
   - id: deploy
@@ -52,7 +54,7 @@ steps:
 func TestLoadBatchControls(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "workflow.yaml")
-	writeTestFile(t, path, `version: 1
+	testfs.Write(t, path, `version: 1
 name: batch
 steps:
   - id: static
@@ -117,7 +119,7 @@ func TestControlValidationAndScopedIDs(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "workflow.yaml")
-			writeTestFile(t, path, "version: 1\nname: invalid\nvars: {items: []}\nsteps:\n"+test.body)
+			testfs.Write(t, path, "version: 1\nname: invalid\nvars: {items: []}\nsteps:\n"+test.body)
 			_, err := Load(path)
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("error = %v, want %q", err, test.want)
@@ -129,9 +131,9 @@ func TestControlValidationAndScopedIDs(t *testing.T) {
 func TestControlsExpandRequiredStepsAndAllowLocalIDReuse(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	writeTestFile(t, filepath.Join(dir, "child.yaml"), "- {id: run, type: shell}\n")
+	testfs.Write(t, filepath.Join(dir, "child.yaml"), "- {id: run, type: shell}\n")
 	path := filepath.Join(dir, "workflow.yaml")
-	writeTestFile(t, path, `version: 1
+	testfs.Write(t, path, `version: 1
 name: reuse
 vars: {items: []}
 steps:

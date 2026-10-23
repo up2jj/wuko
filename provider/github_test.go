@@ -1,19 +1,18 @@
 package provider
 
 import (
-	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/up2jj/wuko/internal/testfs"
 )
 
 func githubTestEnvironment(t *testing.T, payload string) map[string]string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "event.json")
-	if err := os.WriteFile(path, []byte(payload), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte(payload), 0o600)
 	return map[string]string{
 		"GITHUB_ACTIONS":     "true",
 		"GITHUB_REPOSITORY":  "up2jj/wuko",
@@ -202,9 +201,7 @@ func TestGitHubRejectsInvalidMetadataAndEvents(t *testing.T) {
 		{name: "integer out of range", mutate: replaceGitHubPayload(`{"value":18446744073709551616}`), want: "out of range"},
 		{name: "oversized", mutate: func(t *testing.T, env map[string]string) {
 			path := filepath.Join(t.TempDir(), "large.json")
-			if err := os.WriteFile(path, make([]byte, maxGitHubEventBytes+1), 0o600); err != nil {
-				t.Fatal(err)
-			}
+			testfs.WriteFile(t, path, make([]byte, maxGitHubEventBytes+1), 0o600)
 			env["GITHUB_EVENT_PATH"] = path
 		}, want: "exceeds"},
 	}
@@ -226,9 +223,7 @@ func TestGitHubRejectsInvalidMetadataAndEvents(t *testing.T) {
 func replaceGitHubPayload(payload string) func(*testing.T, map[string]string) {
 	return func(t *testing.T, environment map[string]string) {
 		path := filepath.Join(t.TempDir(), "event.json")
-		if err := os.WriteFile(path, []byte(payload), 0o600); err != nil {
-			t.Fatal(err)
-		}
+		testfs.WriteFile(t, path, []byte(payload), 0o600)
 		environment["GITHUB_EVENT_PATH"] = path
 	}
 }

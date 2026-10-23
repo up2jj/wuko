@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/internal/steptest"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 	luastep "github.com/up2jj/wuko/steps/lua"
 	"github.com/up2jj/wuko/workflow"
@@ -28,9 +29,7 @@ func TestLocalActionUsesCompositeInputOutputExecutionModel(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	actionDir := filepath.Join(dir, "actions", "echo")
-	if err := os.MkdirAll(actionDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, actionDir, 0o755)
 	if err := os.WriteFile(filepath.Join(actionDir, "action.yaml"), []byte(`version: 1
 name: local-echo
 inputs:
@@ -78,9 +77,7 @@ func TestLocalActionResolvesCompanionLuaModulesFromActionRoot(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	actionDir := filepath.Join(dir, "action")
-	if err := os.MkdirAll(filepath.Join(actionDir, "scripts"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, filepath.Join(actionDir, "scripts"), 0o755)
 	if err := os.WriteFile(filepath.Join(actionDir, "action.yml"), []byte(`version: 1
 name: local-script
 outputs:
@@ -92,19 +89,11 @@ steps:
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(actionDir, "scripts", "action.lua"), []byte(`wuko.output("value", require("deploy").value)`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(actionDir, "deploy.lua"), []byte(`return {value = "from-local-action"}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "deploy.lua"), []byte(`return {value = "from-caller"}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(actionDir, "scripts", "action.lua"), []byte(`wuko.output("value", require("deploy").value)`), 0o644)
+	testfs.WriteFile(t, filepath.Join(actionDir, "deploy.lua"), []byte(`return {value = "from-local-action"}`), 0o644)
+	testfs.WriteFile(t, filepath.Join(dir, "deploy.lua"), []byte(`return {value = "from-caller"}`), 0o644)
 	workflowPath := filepath.Join(dir, "workflow.yaml")
-	if err := os.WriteFile(workflowPath, []byte("version: 1\nname: caller\nsteps:\n  - id: local\n    uses: ./action\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, workflowPath, []byte("version: 1\nname: caller\nsteps:\n  - id: local\n    uses: ./action\n"), 0o644)
 	definition, err := workflow.NewLoader(nil).Load(t.Context(), workflowPath, workflow.LoadOptions{RunDir: dir})
 	if err != nil {
 		t.Fatal(err)
@@ -312,9 +301,7 @@ func TestPackagedActionResolvesRelativeLuaModulesFromActionRoot(t *testing.T) {
 		},
 	}
 	definition := steptest.Definition(t, "caller", workflow.Step{ID: "remote", Uses: workflow.ActionSource{URL: "https://example.test/package"}, Action: action, With: map[string]any{}})
-	if err := os.WriteFile(filepath.Join(definition.Dir, "deploy.lua"), []byte(`return {value = "from-caller"}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(definition.Dir, "deploy.lua"), []byte(`return {value = "from-caller"}`), 0o644)
 	state, err := New(registry).Run(t.Context(), definition, Options{RunDir: t.TempDir(), Stdout: io.Discard, Stderr: io.Discard})
 	if err != nil {
 		t.Fatal(err)

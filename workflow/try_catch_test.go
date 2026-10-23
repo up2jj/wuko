@@ -1,10 +1,11 @@
 package workflow
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/up2jj/wuko/internal/testfs"
 )
 
 func TestTryCatchLoadsAsNamedControl(t *testing.T) {
@@ -21,9 +22,7 @@ steps:
       steps:
         - {id: rollback, type: shell, with: {command: ./rollback.sh}}
 `
-	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte(data), 0o644)
 	definition, err := NewLoader(nil).Decode(path, LoadOptions{})
 	if err != nil {
 		t.Fatal(err)

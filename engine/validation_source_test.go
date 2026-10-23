@@ -2,12 +2,12 @@ package engine
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/up2jj/wuko/internal/steptest"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/validation"
 	"github.com/up2jj/wuko/workflow"
@@ -26,9 +26,7 @@ steps:
     with:
       value: "{{ .steps.fetch.sttaus }}"
 `
-	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte(data), 0o644)
 	definition, err := workflow.Load(path)
 	if err != nil {
 		t.Fatal(err)

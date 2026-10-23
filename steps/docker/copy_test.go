@@ -16,15 +16,14 @@ import (
 	"github.com/moby/moby/client"
 
 	"github.com/up2jj/wuko/internal/archivetest"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 )
 
 func TestCopyToContainerMatchesDockerCopySemantics(t *testing.T) {
 	t.Parallel()
 	runDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(runDir, "artifact.txt"), []byte("artifact"), 0o640); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(runDir, "artifact.txt"), []byte("artifact"), 0o640)
 
 	t.Run("relative file into existing directory", func(t *testing.T) {
 		client := newCopyClient()
@@ -79,12 +78,8 @@ func TestCopyToContainerMatchesDockerCopySemantics(t *testing.T) {
 	})
 
 	t.Run("directory contents with trailing dot", func(t *testing.T) {
-		if err := os.MkdirAll(filepath.Join(runDir, "tree"), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(runDir, "tree", "nested.txt"), []byte("nested"), 0o600); err != nil {
-			t.Fatal(err)
-		}
+		testfs.MkdirAll(t, filepath.Join(runDir, "tree"), 0o755)
+		testfs.WriteFile(t, filepath.Join(runDir, "tree", "nested.txt"), []byte("nested"), 0o600)
 		client := newCopyClient()
 		client.stats["/workspace"] = container.PathStat{Mode: os.ModeDir | 0o755}
 		runner := copyRunner(Config{Operation: operationCopyTo, Container: "build", Source: "tree/.", Target: "/workspace"}, client)
@@ -219,9 +214,7 @@ func TestCopyFromContainerMatchesDockerCopySemantics(t *testing.T) {
 		if err := os.Mkdir(target, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(target, "keep.txt"), []byte("keep"), 0o600); err != nil {
-			t.Fatal(err)
-		}
+		testfs.WriteFile(t, filepath.Join(target, "keep.txt"), []byte("keep"), 0o600)
 		stream := &trackedReadCloser{Reader: bytes.NewReader(archivetest.Tar(t,
 			archivetest.Entry{Name: "tree/", Mode: 0o755, Type: tar.TypeDir},
 			archivetest.Entry{Name: "tree/nested.txt", Data: []byte("nested"), Mode: 0o600},

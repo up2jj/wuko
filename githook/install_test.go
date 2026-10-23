@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/internal/gittest"
+	"github.com/up2jj/wuko/internal/testfs"
 )
 
 func TestInstallRefusesConflictAndChainRestoresIt(t *testing.T) {
@@ -18,18 +19,12 @@ func TestInstallRefusesConflictAndChainRestoresIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Dir(hookPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, filepath.Dir(hookPath), 0o755)
 	original := []byte("#!/bin/sh\necho original\n")
-	if err := os.WriteFile(hookPath, original, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, hookPath, original, 0o755)
 	manifest := Manifest{Version: 1, Hooks: map[string][]Binding{"pre-commit": {{Workflow: "check"}}}}
 	executable := filepath.Join(repository.Root, "wuko")
-	if err := os.WriteFile(executable, []byte("binary"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, executable, []byte("binary"), 0o755)
 	if _, err := Install(t.Context(), repository, executable, manifest, false); err == nil {
 		t.Fatal("Install() unexpectedly replaced existing hook")
 	}
@@ -67,9 +62,7 @@ func TestUninstallRefusesModifiedDispatcher(t *testing.T) {
 	repository := testRepository(t)
 	manifest := Manifest{Version: 1, Hooks: map[string][]Binding{"pre-commit": {{Workflow: "check"}}}}
 	executable := filepath.Join(repository.Root, "wuko")
-	if err := os.WriteFile(executable, []byte("binary"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, executable, []byte("binary"), 0o755)
 	if _, err := Install(t.Context(), repository, executable, manifest, false); err != nil {
 		t.Fatal(err)
 	}
@@ -77,9 +70,7 @@ func TestUninstallRefusesModifiedDispatcher(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(hookPath, []byte("changed"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, hookPath, []byte("changed"), 0o755)
 	if _, err := Uninstall(t.Context(), repository, nil); err == nil {
 		t.Fatal("Uninstall() unexpectedly removed modified hook")
 	}
@@ -145,9 +136,7 @@ func TestDiscoverResolvesGitDirectoriesFromSubdirectory(t *testing.T) {
 	t.Parallel()
 	repository := testRepository(t)
 	subdirectory := filepath.Join(repository.Root, "nested", "deeper")
-	if err := os.MkdirAll(subdirectory, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, subdirectory, 0o755)
 	discovered, err := Discover(t.Context(), subdirectory)
 	if err != nil {
 		t.Fatal(err)
@@ -164,9 +153,7 @@ func TestInstalledDispatcherForwardsArgumentsAndStdin(t *testing.T) {
 	stdinPath := filepath.Join(repository.Root, "stdin")
 	executable := filepath.Join(repository.Root, "fake-wuko")
 	script := "#!/bin/sh\nprintf '%s' \"$*\" > " + shellQuote(argumentsPath) + "\ncat > " + shellQuote(stdinPath) + "\n"
-	if err := os.WriteFile(executable, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, executable, []byte(script), 0o755)
 	manifest := Manifest{Version: 1, Hooks: map[string][]Binding{"pre-push": {{Workflow: "check"}}}}
 	if _, err := Install(t.Context(), repository, executable, manifest, false); err != nil {
 		t.Fatal(err)
@@ -203,18 +190,12 @@ func TestUninstallRepeatedNameKeepsPreservedHook(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Dir(hookPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, filepath.Dir(hookPath), 0o755)
 	original := []byte("#!/bin/sh\necho original\n")
-	if err := os.WriteFile(hookPath, original, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, hookPath, original, 0o755)
 	manifest := Manifest{Version: 1, Hooks: map[string][]Binding{"pre-commit": {{Workflow: "check"}}}}
 	executable := filepath.Join(repository.Root, "wuko")
-	if err := os.WriteFile(executable, []byte("binary"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, executable, []byte("binary"), 0o755)
 	if _, err := Install(t.Context(), repository, executable, manifest, true); err != nil {
 		t.Fatal(err)
 	}
@@ -239,9 +220,7 @@ func TestUninstallRemovesStateForMissingDispatcher(t *testing.T) {
 	repository := testRepository(t)
 	manifest := Manifest{Version: 1, Hooks: map[string][]Binding{"pre-commit": {{Workflow: "check"}}, "pre-push": {{Workflow: "check"}}}}
 	executable := filepath.Join(repository.Root, "wuko")
-	if err := os.WriteFile(executable, []byte("binary"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, executable, []byte("binary"), 0o755)
 	if _, err := Install(t.Context(), repository, executable, manifest, false); err != nil {
 		t.Fatal(err)
 	}

@@ -15,6 +15,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -51,14 +52,10 @@ func TestMultipartFormAndFiles(t *testing.T) {
 	t.Parallel()
 	workflowDir := t.TempDir()
 	textPath := filepath.Join(workflowDir, "release notes.txt")
-	if err := os.WriteFile(textPath, []byte("release notes"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, textPath, []byte("release notes"), 0o600)
 	absoluteDir := t.TempDir()
 	binaryPath := filepath.Join(absoluteDir, "artifact.unknown-extension")
-	if err := os.WriteFile(binaryPath, []byte{0, 1, 2, 3}, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, binaryPath, []byte{0, 1, 2, 3}, 0o600)
 
 	server := httptest.NewServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
 		data, err := io.ReadAll(request.Body)
@@ -162,9 +159,7 @@ func TestMultipartBodyReplaysForRedirect(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "payload.txt")
-	if err := os.WriteFile(path, []byte("replayed"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte("replayed"), 0o600)
 	requests := 0
 	server := httptest.NewServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
 		requests++
@@ -211,9 +206,7 @@ func TestMultipartBodyCancellation(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "payload.bin")
-	if err := os.WriteFile(path, bytes.Repeat([]byte("x"), 1<<20), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, bytes.Repeat([]byte("x"), 1<<20), 0o600)
 	ctx, cancel := context.WithCancel(t.Context())
 	body, err := prepareMultipartBody(ctx, dir, nil, []FileConfig{{Field: "payload", Path: path}})
 	if err != nil {
@@ -237,9 +230,7 @@ func TestMultipartOpenDoesNotRetainAllUploadFiles(t *testing.T) {
 	files := make([]FileConfig, 32)
 	for i := range files {
 		name := fmt.Sprintf("upload-%02d.txt", i)
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(name), 0o600); err != nil {
-			t.Fatal(err)
-		}
+		testfs.WriteFile(t, filepath.Join(dir, name), []byte(name), 0o600)
 		files[i] = FileConfig{Field: "attachment", Path: name}
 	}
 	body, err := prepareMultipartBody(t.Context(), dir, nil, files)

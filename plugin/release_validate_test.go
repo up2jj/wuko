@@ -7,13 +7,13 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/up2jj/wuko/internal/archivetest"
+	"github.com/up2jj/wuko/internal/testfs"
 )
 
 func releaseCovArtifact(data []byte) Artifact {
@@ -179,12 +179,8 @@ func TestFetchBundleReadsLocalRelease(t *testing.T) {
 	directory := t.TempDir()
 	for name, data := range files {
 		target := filepath.Join(directory, filepath.FromSlash(strings.TrimPrefix(name, "/releases/acme/")))
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(target, data, 0o644); err != nil {
-			t.Fatal(err)
-		}
+		testfs.MkdirAll(t, filepath.Dir(target), 0o755)
+		testfs.WriteFile(t, target, data, 0o644)
 	}
 	bundle, err := FetchBundle(t.Context(), directory, nil)
 	if err != nil {

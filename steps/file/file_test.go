@@ -9,6 +9,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -59,9 +60,7 @@ func TestMkdirCopyMoveListAndRemove(t *testing.T) {
 	if directory.Outputs["created"] != true || directory.Outputs["mode"] != "0700" {
 		t.Fatalf("mkdir outputs = %#v", directory.Outputs)
 	}
-	if err := os.WriteFile(filepath.Join(root, "source"), []byte("data"), 0o640); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(root, "source"), []byte("data"), 0o640)
 	copyResult := run(t, root, map[string]any{
 		"operation": "copy", "path": "source", "destination": "nested/dist/copied",
 	})
@@ -103,9 +102,7 @@ func TestMkdirCopyMoveListAndRemove(t *testing.T) {
 
 func TestAtomicWriteDoesNotOverwriteExistingDestination(t *testing.T) {
 	destination := filepath.Join(t.TempDir(), "destination")
-	if err := os.WriteFile(destination, []byte("original"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, destination, []byte("original"), 0o600)
 	err := atomicWrite(t.Context(), destination, strings.NewReader("replacement"), 0o644, false)
 	if err == nil || !strings.Contains(err.Error(), "overwrite") {
 		t.Fatalf("error = %v", err)
@@ -152,12 +149,8 @@ func TestMoveDoesNotOverwriteExistingDestination(t *testing.T) {
 	root := t.TempDir()
 	source := filepath.Join(root, "source")
 	destination := filepath.Join(root, "destination")
-	if err := os.WriteFile(source, []byte("source"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(destination, []byte("destination"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, source, []byte("source"), 0o600)
+	testfs.WriteFile(t, destination, []byte("destination"), 0o600)
 	runner, err := New(map[string]any{"operation": "move", "path": "source", "destination": "destination"})
 	if err != nil {
 		t.Fatal(err)
@@ -184,9 +177,7 @@ func TestMoveAcrossFilesystemsPreservesDirectoryTree(t *testing.T) {
 		t.Fatal(err)
 	}
 	filePath := filepath.Join(source, "file")
-	if err := os.WriteFile(filePath, []byte("content"), 0o640); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filePath, []byte("content"), 0o640)
 	if err := os.Chmod(filePath, 0o640); err != nil {
 		t.Fatal(err)
 	}
@@ -213,9 +204,7 @@ func TestMoveAcrossFilesystemsPreservesDirectoryTree(t *testing.T) {
 func TestChmodAndSymlinkRejection(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "script")
-	if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte("x"), 0o600)
 	result := run(t, root, map[string]any{"operation": "chmod", "path": "script", "mode": "0755"})
 	if result.Outputs["mode"] != "0755" {
 		t.Fatalf("outputs = %#v", result.Outputs)
@@ -240,9 +229,7 @@ func TestChmodAndSymlinkRejection(t *testing.T) {
 func TestRemoveRefusesTheRunDirectoryAndItsAncestors(t *testing.T) {
 	parent := t.TempDir()
 	runDir := filepath.Join(parent, "project")
-	if err := os.MkdirAll(runDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, runDir, 0o755)
 	alias := filepath.Join(t.TempDir(), "alias")
 	if err := os.Symlink(runDir, alias); err != nil {
 		t.Fatal(err)

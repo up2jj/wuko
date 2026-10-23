@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/up2jj/wuko/internal/testfs"
 )
 
 // attemptWorkflow wraps one shell step in an attempt control declared by the given fields.
@@ -17,7 +19,7 @@ func TestLoadAttemptPolicy(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "workflow.yaml")
-	writeTestFile(t, path, `version: 1
+	testfs.Write(t, path, `version: 1
 name: publish
 steps:
   - id: publish
@@ -64,7 +66,7 @@ func TestAttemptPolicyDefaults(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "workflow.yaml")
-	writeTestFile(t, path, attemptWorkflow(""))
+	testfs.Write(t, path, attemptWorkflow(""))
 	definition, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
@@ -86,7 +88,7 @@ func TestAttemptPollIntervalDefaultsOnlyWithUntil(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "workflow.yaml")
-	writeTestFile(t, path, attemptWorkflow("      until: steps.work.done\n      max_elapsed_time: 1m\n"))
+	testfs.Write(t, path, attemptWorkflow("      until: steps.work.done\n      max_elapsed_time: 1m\n"))
 	definition, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
@@ -100,7 +102,7 @@ func TestAttemptOptionsAcceptExpressions(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "workflow.yaml")
-	writeTestFile(t, path, attemptWorkflow("      timeout: vars.budget\n      max_attempts: vars.tries\n      jitter: vars.spread\n"))
+	testfs.Write(t, path, attemptWorkflow("      timeout: vars.budget\n      max_attempts: vars.tries\n      jitter: vars.spread\n"))
 	definition, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
@@ -182,7 +184,7 @@ func TestLoadAttemptHTTPFilters(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "workflow.yaml")
-	writeTestFile(t, path, `version: 1
+	testfs.Write(t, path, `version: 1
 name: http-retry
 steps:
   - id: fetch
@@ -240,7 +242,7 @@ func TestLoadRejectsInvalidAttemptPolicy(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			dir := t.TempDir()
 			path := filepath.Join(dir, "workflow.yaml")
-			writeTestFile(t, path, attemptWorkflow(test.fields))
+			testfs.Write(t, path, attemptWorkflow(test.fields))
 			_, err := Load(path)
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("error = %v, want %q", err, test.want)
@@ -321,7 +323,7 @@ func TestLoadRejectsInvalidAttemptShape(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			dir := t.TempDir()
 			path := filepath.Join(dir, "workflow.yaml")
-			writeTestFile(t, path, test.workflow)
+			testfs.Write(t, path, test.workflow)
 			_, err := Load(path)
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("error = %v, want %q", err, test.want)
@@ -337,7 +339,7 @@ func TestAttemptBodyKeepsEnclosingIDScope(t *testing.T) {
 	// Outputs are isolated, but ids are not: a body step may not shadow an enclosing id, the
 	// same rule once, try/catch, and cancel_on bodies already keep. It keeps diagnostics and
 	// step references unambiguous.
-	writeTestFile(t, path, `version: 1
+	testfs.Write(t, path, `version: 1
 name: scoped
 steps:
   - id: work
@@ -377,7 +379,7 @@ func TestLoadRejectsInvalidAttemptHTTPFilters(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			dir := t.TempDir()
 			path := filepath.Join(dir, "workflow.yaml")
-			writeTestFile(t, path, "version: 1\nname: invalid\nsteps:\n  - id: fetch\n    attempt:\n      max_attempts: 2\n"+test.policy+"      steps:\n        - {id: request, type: http, with: {url: https://example.test}}\n")
+			testfs.Write(t, path, "version: 1\nname: invalid\nsteps:\n  - id: fetch\n    attempt:\n      max_attempts: 2\n"+test.policy+"      steps:\n        - {id: request, type: http, with: {url: https://example.test}}\n")
 			_, err := Load(path)
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("error = %v, want %q", err, test.want)

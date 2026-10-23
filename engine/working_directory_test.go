@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/internal/steptest"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
 )
@@ -59,9 +60,7 @@ func TestWorkingDirectoryScopesAndRestoresRunDirectory(t *testing.T) {
 	root := t.TempDir()
 	project := filepath.Join(root, "project")
 	nested := filepath.Join(project, "nested")
-	if err := os.MkdirAll(nested, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, nested, 0o755)
 	definition := &workflow.Definition{
 		Version: 1, Name: "scoped", Dir: root, Vars: map[string]any{"project": "project"},
 		Steps: []workflow.Step{
@@ -152,9 +151,7 @@ func TestWorkingDirectoryRejectsMissingAndNonDirectoryPaths(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	file := filepath.Join(root, "file.txt")
-	if err := os.WriteFile(file, []byte("content"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, file, []byte("content"), 0o600)
 	for _, test := range []struct {
 		name string
 		path string
@@ -228,9 +225,7 @@ func TestWorkingDirectoryComposesWithForeachAndCompositeActions(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	service := filepath.Join(root, "services", "api")
-	if err := os.MkdirAll(service, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, service, 0o755)
 	action := &workflow.Action{
 		Version: 1, Name: "capture action", Dir: root,
 		Outputs: map[string]workflow.ActionOutput{"dir": {Value: "steps.inside.dir"}},

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	envload "github.com/up2jj/wuko/environment"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 	keyvaluestep "github.com/up2jj/wuko/steps/key_value"
 	luastep "github.com/up2jj/wuko/steps/lua"
@@ -98,9 +99,7 @@ func TestRunCommandInMemory(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	workflowDir := filepath.Join(root, ".wuko", "workflows")
-	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, workflowDir, 0o755)
 	data := `version: 1
 name: hello
 steps:
@@ -110,9 +109,7 @@ steps:
       script: "printf '%s' \"$1\""
       args: ["{{ .vars.name }}"]
 `
-	if err := os.WriteFile(filepath.Join(workflowDir, "hello.yaml"), []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(workflowDir, "hello.yaml"), []byte(data), 0o644)
 	registry := step.NewRegistry()
 	if err := shell.Register(registry); err != nil {
 		t.Fatal(err)
@@ -141,9 +138,7 @@ func TestScheduledRunReloadsAndStopsCleanly(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	workflowDir := filepath.Join(root, ".wuko", "workflows")
-	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, workflowDir, 0o755)
 	path := filepath.Join(workflowDir, "scheduled.yaml")
 	workflowData := func(message string) string {
 		return fmt.Sprintf(`version: 1
@@ -157,9 +152,7 @@ steps:
       script: "printf %s"
 `, message)
 	}
-	if err := os.WriteFile(path, []byte(workflowData("old")), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte(workflowData("old")), 0o644)
 	registry := step.NewRegistry()
 	if err := shell.Register(registry); err != nil {
 		t.Fatal(err)
@@ -179,9 +172,7 @@ steps:
 		waitUntil: func(_ context.Context, instant time.Time) error {
 			waits++
 			if waits == 1 {
-				if err := os.WriteFile(path, []byte(workflowData("new")), 0o644); err != nil {
-					t.Fatal(err)
-				}
+				testfs.WriteFile(t, path, []byte(workflowData("new")), 0o644)
 				now = instant
 				return nil
 			}
@@ -213,9 +204,7 @@ steps:
     type: shell
     with: {script: "printf effect"}
 `
-	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte(data), 0o644)
 	registry := step.NewRegistry()
 	if err := shell.Register(registry); err != nil {
 		t.Fatal(err)
@@ -255,9 +244,7 @@ steps:
       query: $.project.name
       result: one
 `
-	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte(data), 0o644)
 	command := NewRootCmd()
 	command.SetIn(bytes.NewReader(nil))
 	command.SetOut(io.Discard)
@@ -272,9 +259,7 @@ func TestRootCommandRegistersMarkdownEditStep(t *testing.T) {
 	root := t.TempDir()
 	t.Chdir(root)
 	documentPath := filepath.Join(root, "README.md")
-	if err := os.WriteFile(documentPath, []byte("# Before\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, documentPath, []byte("# Before\n"), 0o644)
 	workflowPath := filepath.Join(root, "markdown-edit.yaml")
 	data := `version: 1
 name: markdown-edit
@@ -289,9 +274,7 @@ steps:
           field: text
           value: After
 `
-	if err := os.WriteFile(workflowPath, []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, workflowPath, []byte(data), 0o644)
 	command := NewRootCmd()
 	command.SetIn(bytes.NewReader(nil))
 	command.SetOut(io.Discard)
@@ -316,9 +299,7 @@ func TestRootCommandDoesNotRegisterExtractedHTTPServices(t *testing.T) {
 		t.Run(stepType, func(t *testing.T) {
 			path := filepath.Join(root, stepType+".yaml")
 			data := fmt.Sprintf("version: 1\nname: extracted\nsteps:\n  - id: service\n    type: %s\n    with: {}\n", stepType)
-			if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
-				t.Fatal(err)
-			}
+			testfs.WriteFile(t, path, []byte(data), 0o600)
 			command := NewRootCmd()
 			command.SetIn(bytes.NewReader(nil))
 			command.SetOut(io.Discard)
@@ -346,9 +327,7 @@ steps:
       version: 1.2.3
       part: patch
 `
-	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte(data), 0o644)
 	command := NewRootCmd()
 	command.SetIn(bytes.NewReader(nil))
 	command.SetOut(io.Discard)
@@ -372,9 +351,7 @@ steps:
       tool: sh
       version_args: [-c, "exit 0"]
 `
-	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte(data), 0o644)
 	command := NewRootCmd()
 	command.SetIn(bytes.NewReader(nil))
 	command.SetOut(io.Discard)
@@ -388,9 +365,7 @@ steps:
 func TestRootCommandRegistersGlobStep(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(root, "main.go"), []byte("package main\n"), 0o644)
 	path := filepath.Join(root, "glob.yaml")
 	data := fmt.Sprintf(`version: 1
 name: glob
@@ -406,9 +381,7 @@ steps:
       expr: steps.sources.count == 1 && steps.sources.files[0].path == "main.go"
       message: glob result was unexpected
 `, root)
-	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte(data), 0o644)
 	command := NewRootCmd()
 	command.SetIn(bytes.NewReader(nil))
 	command.SetOut(io.Discard)
@@ -437,9 +410,7 @@ steps:
             patterns: ["src/**/*.go"]
             events: [create, modify, rename, remove]
 `
-	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte(data), 0o644)
 	command := NewRootCmd()
 	command.SetIn(bytes.NewReader(nil))
 	command.SetOut(io.Discard)
@@ -468,9 +439,7 @@ steps:
       expr: steps.workspace.kind == "directory"
       message: temp result was unexpected
 `
-	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte(data), 0o644)
 	command := NewRootCmd()
 	command.SetIn(bytes.NewReader(nil))
 	command.SetOut(io.Discard)
@@ -487,15 +456,9 @@ func TestRootCommandRegistersCacheStep(t *testing.T) {
 	keyFile := filepath.Join(root, "go.sum")
 	target := filepath.Join(root, "vendor")
 	cacheDir := filepath.Join(root, "cache")
-	if err := os.WriteFile(keyFile, []byte("checksum\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(target, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(target, "module.txt"), []byte("cached"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, keyFile, []byte("checksum\n"), 0o644)
+	testfs.MkdirAll(t, target, 0o755)
+	testfs.WriteFile(t, filepath.Join(target, "module.txt"), []byte("cached"), 0o644)
 	workflowPath := filepath.Join(root, "cache.yaml")
 	data := fmt.Sprintf(`version: 1
 name: cache
@@ -508,9 +471,7 @@ steps:
       key_files: [%q]
       paths: [%q]
 `, cacheDir, keyFile, target)
-	if err := os.WriteFile(workflowPath, []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, workflowPath, []byte(data), 0o644)
 	command := NewRootCmd()
 	command.SetIn(bytes.NewReader(nil))
 	command.SetOut(io.Discard)
@@ -546,9 +507,7 @@ steps:
       expr: steps.detect.changed
       message: first changed result was false
 `
-	if err := os.WriteFile(workflowPath, []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, workflowPath, []byte(data), 0o644)
 	for range 2 {
 		command := NewRootCmd()
 		command.SetIn(bytes.NewReader(nil))
@@ -574,9 +533,7 @@ steps:
   - id: pause
     attempt: {duration: 1ns}
 `
-	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte(data), 0o644)
 	command := NewRootCmd()
 	command.SetIn(bytes.NewReader(nil))
 	command.SetOut(io.Discard)
@@ -622,9 +579,7 @@ steps:
       path: %q
       content: should not be written
 `, sentinel)
-	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte(data), 0o644)
 	command := NewRootCmd()
 	command.SetIn(bytes.NewReader(nil))
 	command.SetOut(io.Discard)
@@ -643,9 +598,7 @@ func TestRunCommandImportsVariableFilesBeforeInlineOverrides(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	workflowDir := filepath.Join(root, ".wuko", "workflows")
-	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, workflowDir, 0o755)
 	data := `version: 1
 name: imported
 vars: {name: workflow}
@@ -656,12 +609,8 @@ steps:
       script: "printf '%s:%s' \"$1\" \"$2\""
       args: ["{{ .vars.name }}", "{{ .vars.channel }}"]
 `
-	if err := os.WriteFile(filepath.Join(workflowDir, "imported.yaml"), []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "defaults.toml"), []byte("name = \"file\"\nchannel = \"stable\"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(workflowDir, "imported.yaml"), []byte(data), 0o644)
+	testfs.WriteFile(t, filepath.Join(root, "defaults.toml"), []byte("name = \"file\"\nchannel = \"stable\"\n"), 0o644)
 	registry := step.NewRegistry()
 	if err := shell.Register(registry); err != nil {
 		t.Fatal(err)
@@ -685,9 +634,7 @@ func TestRunDebugPinpointsInvalidLuaSyntax(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	workflowDir := filepath.Join(root, ".wuko", "workflows")
-	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, workflowDir, 0o755)
 	data := `version: 1
 name: bad-lua
 steps:
@@ -698,9 +645,7 @@ steps:
         local value = )
         wuko.output("value", value)
 `
-	if err := os.WriteFile(filepath.Join(workflowDir, "bad-lua.yaml"), []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(workflowDir, "bad-lua.yaml"), []byte(data), 0o644)
 	registry := step.NewRegistry()
 	if err := luastep.Register(registry); err != nil {
 		t.Fatal(err)
@@ -731,9 +676,7 @@ func TestRunDebugRedactsRenderedEnvironment(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	workflowDir := filepath.Join(root, ".wuko", "workflows")
-	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, workflowDir, 0o755)
 	data := `version: 1
 name: redacted
 steps:
@@ -744,9 +687,7 @@ steps:
       env:
         DEPLOY_TOKEN: supersecret
 `
-	if err := os.WriteFile(filepath.Join(workflowDir, "redacted.yaml"), []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(workflowDir, "redacted.yaml"), []byte(data), 0o644)
 	registry := step.NewRegistry()
 	if err := shell.Register(registry); err != nil {
 		t.Fatal(err)
@@ -771,9 +712,7 @@ func TestRunDebugReportsLuaRuntimeAttempts(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	workflowDir := filepath.Join(root, ".wuko", "workflows")
-	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, workflowDir, 0o755)
 	data := `version: 1
 name: runtime-lua
 steps:
@@ -788,9 +727,7 @@ steps:
           with:
             source: error("lua boom")
 `
-	if err := os.WriteFile(filepath.Join(workflowDir, "runtime-lua.yaml"), []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(workflowDir, "runtime-lua.yaml"), []byte(data), 0o644)
 	registry := step.NewRegistry()
 	if err := luastep.Register(registry); err != nil {
 		t.Fatal(err)
@@ -818,12 +755,8 @@ func TestDebugFlagCoversWorkflowCommands(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	workflowDir := filepath.Join(root, ".wuko", "workflows")
-	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(workflowDir, "debuggable.yaml"), []byte("version: 1\nname: debuggable\ndescription: debuggable workflow\nsteps:\n  - id: run\n    type: shell\n    with: {script: 'true'}\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, workflowDir, 0o755)
+	testfs.WriteFile(t, filepath.Join(workflowDir, "debuggable.yaml"), []byte("version: 1\nname: debuggable\ndescription: debuggable workflow\nsteps:\n  - id: run\n    type: shell\n    with: {script: 'true'}\n"), 0o644)
 	registry := step.NewRegistry()
 	if err := shell.Register(registry); err != nil {
 		t.Fatal(err)
@@ -861,9 +794,7 @@ func TestRunCommandRoutesLocalAndGlobalValueStores(t *testing.T) {
 	root := t.TempDir()
 	configDir := filepath.Join(root, "config")
 	workflowDir := filepath.Join(root, ".wuko", "workflows")
-	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, workflowDir, 0o755)
 	data := `version: 1
 name: values
 steps:
@@ -874,9 +805,7 @@ steps:
     type: key_value
     with: {operation: set, scope: global, store: prefs, key: language, value: en}
 `
-	if err := os.WriteFile(filepath.Join(workflowDir, "values.yaml"), []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(workflowDir, "values.yaml"), []byte(data), 0o644)
 	registry := step.NewRegistry()
 	if err := keyvaluestep.Register(registry); err != nil {
 		t.Fatal(err)
@@ -904,9 +833,7 @@ func TestRunCommandUsesInvocationEnvironment(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	workflowDir := filepath.Join(root, ".wuko", "workflows")
-	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, workflowDir, 0o755)
 	data := `version: 1
 name: environment
 env:
@@ -920,9 +847,7 @@ steps:
     with:
       script: "printf '%s:%s:%s' \"$DERIVED\" \"$PRIORITY\" \"$LOADER\""
 `
-	if err := os.WriteFile(filepath.Join(workflowDir, "environment.yaml"), []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(workflowDir, "environment.yaml"), []byte(data), 0o644)
 	registry := step.NewRegistry()
 	if err := shell.Register(registry); err != nil {
 		t.Fatal(err)
@@ -955,12 +880,8 @@ func TestBareCommandListsAllWorkflowsWithScope(t *testing.T) {
 	root := t.TempDir()
 	localDir := filepath.Join(root, ".wuko", "workflows")
 	globalDir := filepath.Join(root, "home", ".wuko", "workflows")
-	if err := os.MkdirAll(localDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(globalDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, localDir, 0o755)
+	testfs.MkdirAll(t, globalDir, 0o755)
 	writeTestWorkflow(t, filepath.Join(localDir, "local.yaml"), "local workflow")
 	writeTestWorkflow(t, filepath.Join(globalDir, "global.yaml"), "global workflow")
 	var output bytes.Buffer
@@ -1030,9 +951,7 @@ func TestListCommandIncludesScope(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	dir := filepath.Join(root, ".wuko", "workflows")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, dir, 0o755)
 	writeTestWorkflow(t, filepath.Join(dir, "build.yaml"), "Build locally")
 	var output bytes.Buffer
 	command := newRootCmd(dependencies{
@@ -1056,12 +975,8 @@ func TestBareCommandInteractiveEnterRunsWorkflow(t *testing.T) {
 	root := t.TempDir()
 	localDir := filepath.Join(root, ".wuko", "workflows")
 	globalDir := filepath.Join(root, "home", ".wuko", "workflows")
-	if err := os.MkdirAll(localDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(globalDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, localDir, 0o755)
+	testfs.MkdirAll(t, globalDir, 0o755)
 	writeTestWorkflow(t, filepath.Join(localDir, "local.yaml"), "local workflow")
 	writeTestWorkflow(t, filepath.Join(globalDir, "global.yaml"), "global workflow")
 	var output bytes.Buffer
@@ -1089,9 +1004,7 @@ func TestBareCommandInteractiveShiftEnterPrintsRunCommand(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	workflowDir := filepath.Join(root, ".wuko", "workflows")
-	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, workflowDir, 0o755)
 	writeTestWorkflow(t, filepath.Join(workflowDir, "build.yaml"), "build workflow")
 	var output bytes.Buffer
 	command := newRootCmd(dependencies{
@@ -1140,9 +1053,7 @@ func TestRunAndUIRejectDependencyOnlyNamedAndFileWorkflows(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	dir := filepath.Join(root, ".wuko", "workflows")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, dir, 0o755)
 	path := filepath.Join(dir, "build.yaml")
 	data := `version: 1
 name: build
@@ -1152,9 +1063,7 @@ steps:
     uses:
       command: wuko-test-must-not-run
 `
-	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte(data), 0o644)
 	for _, args := range [][]string{
 		{"run", "build"}, {"run", "--file", path},
 		{"ui", "build"}, {"ui", "--file", path},
@@ -1194,9 +1103,7 @@ func TestBareCommandShowsWorkflowDependencies(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	workflowDir := filepath.Join(root, ".wuko", "workflows")
-	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, workflowDir, 0o755)
 	writeTestWorkflow(t, filepath.Join(workflowDir, "build-artifacts.yaml"), "Build artifacts")
 	release := `version: 1
 name: release
@@ -1207,9 +1114,7 @@ depends_on:
 steps:
   - return: {outputs: {}}
 `
-	if err := os.WriteFile(filepath.Join(workflowDir, "release.yaml"), []byte(release), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(workflowDir, "release.yaml"), []byte(release), 0o644)
 	writeTestWorkflow(t, filepath.Join(workflowDir, "checks.yaml"), "Run checks")
 
 	var output bytes.Buffer
@@ -1232,14 +1137,10 @@ func TestDependencyOnlyWorkflowVisibilityAndCompletion(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	dir := filepath.Join(root, ".wuko", "workflows")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, dir, 0o755)
 	writeTestWorkflow(t, filepath.Join(dir, "release.yaml"), "Publish release")
 	dependency := "version: 1\nname: build\ndescription: Build artifacts\ninvokable: false\nsteps:\n  - return: {outputs: {}}\n"
-	if err := os.WriteFile(filepath.Join(dir, "build.yaml"), []byte(dependency), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(dir, "build.yaml"), []byte(dependency), 0o644)
 	deps := dependencies{
 		stdin: bytes.NewReader(nil), stdout: io.Discard, stderr: io.Discard,
 		cwd: func() (string, error) { return root, nil }, homeDir: func() (string, error) { return "", nil },
@@ -1301,13 +1202,9 @@ func TestBareCommandReportsNoDirectlyInvokableWorkflows(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	dir := filepath.Join(root, ".wuko", "workflows")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, dir, 0o755)
 	data := "version: 1\nname: build\ninvokable: false\nsteps:\n  - return: {outputs: {}}\n"
-	if err := os.WriteFile(filepath.Join(dir, "build.yaml"), []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(dir, "build.yaml"), []byte(data), 0o644)
 	var output bytes.Buffer
 	command := newRootCmd(dependencies{
 		stdin: bytes.NewReader(nil), stdout: &output, stderr: io.Discard,
@@ -1367,7 +1264,5 @@ func writeTestWorkflow(t *testing.T, path, description string) {
 	t.Helper()
 	name := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	data := fmt.Sprintf("version: 1\nname: %s\ndescription: %s\nsteps:\n  - id: run\n    type: shell\n    with:\n      command: true\n", name, description)
-	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte(data), 0o644)
 }

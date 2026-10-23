@@ -13,6 +13,7 @@ import (
 
 	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/engine"
+	"github.com/up2jj/wuko/internal/testfs"
 	reporterpkg "github.com/up2jj/wuko/reporter"
 	"github.com/up2jj/wuko/validation"
 )
@@ -456,9 +457,7 @@ func newTestReporter(t *testing.T, workspace string) (*Reporter, string, string,
 	output := filepath.Join(t.TempDir(), "output")
 	summary := filepath.Join(t.TempDir(), "summary")
 	for _, path := range []string{output, summary} {
-		if err := os.WriteFile(path, nil, 0o600); err != nil {
-			t.Fatal(err)
-		}
+		testfs.WriteFile(t, path, nil, 0o600)
 	}
 	commands := new(bytes.Buffer)
 	reporter, err := New(Options{OutputPath: output, SummaryPath: summary, Workspace: workspace, Commands: commands})

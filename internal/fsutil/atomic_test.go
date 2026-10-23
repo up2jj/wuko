@@ -4,14 +4,14 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/up2jj/wuko/internal/testfs"
 )
 
 func TestWriteFileAtomicReplacesContentAndLeavesNoTemporary(t *testing.T) {
 	directory := t.TempDir()
 	path := filepath.Join(directory, "state.json")
-	if err := os.WriteFile(path, []byte("old"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte("old"), 0o644)
 	if err := WriteFileAtomic(path, []byte("new"), 0o600); err != nil {
 		t.Fatal(err)
 	}

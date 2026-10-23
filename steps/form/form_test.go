@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/internal/steptest"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/tui"
 )
@@ -60,9 +61,7 @@ func TestFormRejectsInvalidConfiguration(t *testing.T) {
 
 func TestFormTypedOutputsDoNotWriteVariables(t *testing.T) {
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "app.yaml"), []byte("name: app"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(root, "app.yaml"), []byte("name: app"), 0o600)
 	fields := []map[string]any{
 		{"id": "name", "type": "text", "label": "Name", "value": "Ada"},
 		{"id": "notes", "type": "textarea", "label": "Notes", "value": "one\ntwo\n"},
@@ -242,9 +241,7 @@ func TestFormCancellationPublishesNothing(t *testing.T) {
 func TestFormPathRejectsSymlinkOutsideRoot(t *testing.T) {
 	root := t.TempDir()
 	outside := filepath.Join(t.TempDir(), "private.yaml")
-	if err := os.WriteFile(outside, []byte("private"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, outside, []byte("private"), 0o600)
 	if err := os.Symlink(outside, filepath.Join(root, "link.yaml")); err != nil {
 		t.Fatal(err)
 	}

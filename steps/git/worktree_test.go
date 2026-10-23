@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/internal/gittest"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -87,9 +88,7 @@ func TestWorktreeEnsureListMergeAndSafeRemove(t *testing.T) {
 	if result.Outputs["created"] != false {
 		t.Fatalf("second ensure result = %#v", result.Outputs)
 	}
-	if err := os.WriteFile(filepath.Join(path, "feature.txt"), []byte("feature\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(path, "feature.txt"), []byte("feature\n"), 0o644)
 	gittest.Run(t, path, "add", "feature.txt")
 	gittest.Run(t, path, "commit", "--quiet", "-m", "feature")
 
@@ -165,15 +164,11 @@ func TestSquashCreatesOneCommitAndRecoveryRef(t *testing.T) {
 	baseBranch := gittest.Output(t, dir, "branch", "--show-current")
 	base := gittest.Output(t, dir, "rev-parse", "HEAD")
 	gittest.Run(t, dir, "switch", "-c", "topic")
-	if err := os.WriteFile(filepath.Join(dir, "one.txt"), []byte("one\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(dir, "one.txt"), []byte("one\n"), 0o644)
 	gittest.Run(t, dir, "add", "one.txt")
 	gittest.Run(t, dir, "commit", "--quiet", "-m", "one")
 	oldHead := gittest.Output(t, dir, "rev-parse", "HEAD")
-	if err := os.WriteFile(filepath.Join(dir, "two.txt"), []byte("two\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(dir, "two.txt"), []byte("two\n"), 0o644)
 	runner, err := NewSquash(map[string]any{"target": baseBranch, "message": "feat: squashed", "stage": "all"})
 	if err != nil {
 		t.Fatal(err)
@@ -204,14 +199,10 @@ func TestRebaseReplaysOntoTargetAndLeavesConflictPolicyToGit(t *testing.T) {
 	worktree := filepath.Join(t.TempDir(), "topic")
 	gittest.Run(t, dir, "worktree", "add", "-b", "topic", worktree)
 	t.Cleanup(func() { gittest.Run(t, dir, "worktree", "remove", "--force", worktree) })
-	if err := os.WriteFile(filepath.Join(worktree, "topic.txt"), []byte("topic\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(worktree, "topic.txt"), []byte("topic\n"), 0o644)
 	gittest.Run(t, worktree, "add", "topic.txt")
 	gittest.Run(t, worktree, "commit", "--quiet", "-m", "topic")
-	if err := os.WriteFile(filepath.Join(dir, "base.txt"), []byte("base\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(dir, "base.txt"), []byte("base\n"), 0o644)
 	gittest.Run(t, dir, "add", "base.txt")
 	gittest.Run(t, dir, "commit", "--quiet", "-m", "base")
 	targetHead := gittest.Output(t, dir, "rev-parse", "HEAD")
@@ -235,9 +226,7 @@ func TestNoFFMergeUsesAndCleansTemporaryTargetWorktree(t *testing.T) {
 	t.Parallel()
 	dir := gittest.InitWithCommit(t)
 	gittest.Run(t, dir, "branch", "release")
-	if err := os.WriteFile(filepath.Join(dir, "feature.txt"), []byte("feature\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(dir, "feature.txt"), []byte("feature\n"), 0o644)
 	gittest.Run(t, dir, "add", "feature.txt")
 	gittest.Run(t, dir, "commit", "--quiet", "-m", "feature")
 	source := gittest.Output(t, dir, "branch", "--show-current")
@@ -316,9 +305,7 @@ func TestSafeRemovalIgnoresATagThatShadowsTheBranchName(t *testing.T) {
 	base := gittest.Output(t, dir, "branch", "--show-current")
 	path := filepath.Join(t.TempDir(), "topic")
 	gittest.Run(t, dir, "worktree", "add", "-b", "topic", path)
-	if err := os.WriteFile(filepath.Join(path, "topic.txt"), []byte("topic\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(path, "topic.txt"), []byte("topic\n"), 0o644)
 	gittest.Run(t, path, "add", "topic.txt")
 	gittest.Run(t, path, "commit", "--quiet", "-m", "topic")
 	gittest.Run(t, dir, "tag", "topic", base)
@@ -345,9 +332,7 @@ func TestMergeResolvesTheDefaultSourceInTheCallingWorktree(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "detached")
 	gittest.Run(t, dir, "worktree", "add", "--detach", path)
 	t.Cleanup(func() { gittest.Run(t, dir, "worktree", "remove", "--force", path) })
-	if err := os.WriteFile(filepath.Join(path, "detached.txt"), []byte("detached\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(path, "detached.txt"), []byte("detached\n"), 0o644)
 	gittest.Run(t, path, "add", "detached.txt")
 	gittest.Run(t, path, "commit", "--quiet", "-m", "detached work")
 	want := gittest.Output(t, path, "rev-parse", "HEAD")
@@ -372,9 +357,7 @@ func TestSquashLeavesTheBranchUntouchedWhenThereIsNothingToSquash(t *testing.T) 
 	dir := gittest.InitWithCommit(t)
 	base := gittest.Output(t, dir, "branch", "--show-current")
 	gittest.Run(t, dir, "switch", "--quiet", "-c", "topic")
-	if err := os.WriteFile(filepath.Join(dir, "temp.txt"), []byte("temp\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(dir, "temp.txt"), []byte("temp\n"), 0o644)
 	gittest.Run(t, dir, "add", "temp.txt")
 	gittest.Run(t, dir, "commit", "--quiet", "-m", "add")
 	gittest.Run(t, dir, "rm", "--quiet", "temp.txt")

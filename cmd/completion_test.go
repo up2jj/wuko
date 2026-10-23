@@ -3,12 +3,12 @@ package cmd
 import (
 	"bytes"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
+	"github.com/up2jj/wuko/internal/testfs"
 )
 
 func TestWorkflowFileCompletionUsesSelectedFile(t *testing.T) {
@@ -27,16 +27,9 @@ targets:
   production:
     steps: [{uses: ./missing-action}]
 `
-	if err := os.WriteFile(filepath.Join(root, "draft.yaml"), []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(root, "draft.yaml"), []byte(data), 0o644)
 	broken := filepath.Join(root, ".wuko", "workflows", "broken.yaml")
-	if err := os.MkdirAll(filepath.Dir(broken), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(broken, []byte("version: ["), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.Write(t, broken, "version: [")
 	for _, name := range []string{"run", "tree", "ui", "validate"} {
 		t.Run(name, func(t *testing.T) {
 			output := executeCompletion(t, root, []string{name, "--file", "draft.yaml", ""})
@@ -82,9 +75,7 @@ func TestWorkflowFileCompletionHonorsInvocationPolicyAndErrors(t *testing.T) {
 		"legacy.yaml":     "name: legacy\n",
 		"invalid.yaml":    "targets: [",
 	} {
-		if err := os.WriteFile(filepath.Join(root, filename), []byte(data), 0o644); err != nil {
-			t.Fatal(err)
-		}
+		testfs.WriteFile(t, filepath.Join(root, filename), []byte(data), 0o644)
 	}
 	for _, test := range []struct {
 		command, file, want string
@@ -159,9 +150,7 @@ func TestNamedWorkflowCompletionIgnoresBrokenDraftsAndUnpreparedSteps(t *testing
 	t.Parallel()
 	root := t.TempDir()
 	dir := filepath.Join(root, ".wuko", "workflows")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, dir, 0o755)
 	for name, data := range map[string]string{
 		"broken": "version: [",
 		"deploy": `name: deploy
@@ -178,9 +167,7 @@ targets:
 `,
 		"dependency": "invokable: false\ndescription: Internal\n",
 	} {
-		if err := os.WriteFile(filepath.Join(dir, name+".yaml"), []byte(data), 0o644); err != nil {
-			t.Fatal(err)
-		}
+		testfs.WriteFile(t, filepath.Join(dir, name+".yaml"), []byte(data), 0o644)
 	}
 	for _, name := range []string{"run", "ui", "tree", "validate"} {
 		t.Run(name, func(t *testing.T) {
@@ -209,9 +196,7 @@ func TestUICompletionFiltersEffectiveBrowserForms(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	dir := filepath.Join(root, ".wuko", "workflows")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, dir, 0o755)
 	for name, data := range map[string]string{
 		"plain":      "description: Plain\nform: null\n",
 		"browser":    "description: Browser\nform: {}\nplugins: {missing: {command: /does/not/exist}}\n",
@@ -219,9 +204,7 @@ func TestUICompletionFiltersEffectiveBrowserForms(t *testing.T) {
 		"shared":     "description: Shared\nform: {}\ntargets:\n  inherited: {}\n  fallback: {form: null}\n  override: {form: {title: Override}}\n",
 		"mixed":      "description: Mixed\ntargets:\n  cli: {form: null}\n  web: {description: Web, form: {}}\n",
 	} {
-		if err := os.WriteFile(filepath.Join(dir, name+".yaml"), []byte(data), 0o644); err != nil {
-			t.Fatal(err)
-		}
+		testfs.WriteFile(t, filepath.Join(dir, name+".yaml"), []byte(data), 0o644)
 	}
 	for _, test := range []struct {
 		args []string

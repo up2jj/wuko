@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/internal/steptest"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -52,9 +53,7 @@ func TestJSONStructuralEditsPreserveUnrelatedBytes(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			directory := t.TempDir()
 			path := filepath.Join(directory, "document.json")
-			if err := os.WriteFile(path, []byte(test.input), 0o640); err != nil {
-				t.Fatal(err)
-			}
+			testfs.WriteFile(t, path, []byte(test.input), 0o640)
 			test.config["from"] = map[string]any{"file": "document.json"}
 			runner := steptest.Build(t, New, test.config)
 			if _, err := runner.Run(t.Context(), step.Request{RunDir: directory}); err != nil {
@@ -117,9 +116,7 @@ func TestYAMLStructuralEditsPreserveUnrelatedBytes(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			directory := t.TempDir()
 			path := filepath.Join(directory, "document.yaml")
-			if err := os.WriteFile(path, []byte(test.input), 0o640); err != nil {
-				t.Fatal(err)
-			}
+			testfs.WriteFile(t, path, []byte(test.input), 0o640)
 			test.config["from"] = map[string]any{"file": "document.yaml"}
 			runner := steptest.Build(t, New, test.config)
 			if _, err := runner.Run(t.Context(), step.Request{RunDir: directory}); err != nil {
@@ -182,9 +179,7 @@ func TestTOMLStructuralEditsPreserveUnrelatedBytes(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			directory := t.TempDir()
 			path := filepath.Join(directory, "document.toml")
-			if err := os.WriteFile(path, []byte(test.input), 0o640); err != nil {
-				t.Fatal(err)
-			}
+			testfs.WriteFile(t, path, []byte(test.input), 0o640)
 			test.config["from"] = map[string]any{"file": "document.toml"}
 			runner := steptest.Build(t, New, test.config)
 			if _, err := runner.Run(t.Context(), step.Request{RunDir: directory}); err != nil {
@@ -214,9 +209,7 @@ func TestFileDeleteAllArrayElementsIsStable(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			directory := t.TempDir()
 			path := filepath.Join(directory, test.file)
-			if err := os.WriteFile(path, []byte(test.input), 0o600); err != nil {
-				t.Fatal(err)
-			}
+			testfs.WriteFile(t, path, []byte(test.input), 0o600)
 			runner := steptest.Build(t, New, map[string]any{
 				"operation": "delete", "from": map[string]any{"file": test.file},
 				"path": "$.items[*]", "result": "all",
@@ -481,9 +474,7 @@ func TestStructuralEditsSurviveAwkwardLayouts(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			directory := t.TempDir()
 			path := filepath.Join(directory, test.file)
-			if err := os.WriteFile(path, []byte(test.input), 0o640); err != nil {
-				t.Fatal(err)
-			}
+			testfs.WriteFile(t, path, []byte(test.input), 0o640)
 			test.config["from"] = map[string]any{"file": test.file}
 			runner := steptest.Build(t, New, test.config)
 			if _, err := runner.Run(t.Context(), step.Request{RunDir: directory}); err != nil {
@@ -510,9 +501,7 @@ func TestMergeWritesAddedKeysInSortedOrder(t *testing.T) {
 		t.Run(test.file, func(t *testing.T) {
 			directory := t.TempDir()
 			path := filepath.Join(directory, test.file)
-			if err := os.WriteFile(path, []byte(test.input), 0o640); err != nil {
-				t.Fatal(err)
-			}
+			testfs.WriteFile(t, path, []byte(test.input), 0o640)
 			runner := steptest.Build(t, New, map[string]any{
 				"operation": "merge", "from": map[string]any{"file": test.file}, "path": "$.api",
 				"value": map[string]any{"x": 1, "w": 2, "q": 3},
@@ -549,9 +538,7 @@ func TestTOMLInlineTableEditsAreRefused(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			directory := t.TempDir()
 			path := filepath.Join(directory, "document.toml")
-			if err := os.WriteFile(path, []byte("srv = {host = \"h\", port = 8080}\n"), 0o640); err != nil {
-				t.Fatal(err)
-			}
+			testfs.WriteFile(t, path, []byte("srv = {host = \"h\", port = 8080}\n"), 0o640)
 			test.config["from"] = map[string]any{"file": "document.toml"}
 			runner := steptest.Build(t, New, test.config)
 			if _, err := runner.Run(t.Context(), step.Request{RunDir: directory}); err == nil ||

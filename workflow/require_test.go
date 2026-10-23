@@ -1,16 +1,17 @@
 package workflow
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/up2jj/wuko/internal/testfs"
 )
 
 func TestLoadExpandsRequiredStepFilesInPlace(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	writeTestFile(t, filepath.Join(dir, "workflow.yaml"), `version: 1
+	testfs.Write(t, filepath.Join(dir, "workflow.yaml"), `version: 1
 name: split
 steps:
   - id: prepare
@@ -21,13 +22,13 @@ steps:
     type: shell
     with: {command: publish}
 `)
-	writeTestFile(t, filepath.Join(dir, "fragments", "build.yaml"), `
+	testfs.Write(t, filepath.Join(dir, "fragments", "build.yaml"), `
 - id: build
   type: shell
   with: {command: build}
 - require: nested/test.yaml
 `)
-	writeTestFile(t, filepath.Join(dir, "fragments", "nested", "test.yaml"), `steps:
+	testfs.Write(t, filepath.Join(dir, "fragments", "nested", "test.yaml"), `steps:
   - id: test
     type: shell
     with: {command: test}
@@ -54,7 +55,7 @@ steps:
 func TestLoadReplacesNestedRequiredSequenceWithExpandedSteps(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	writeTestFile(t, filepath.Join(dir, "workflow.yaml"), `version: 1
+	testfs.Write(t, filepath.Join(dir, "workflow.yaml"), `version: 1
 name: nested-expansion
 steps:
   - id: grouped
@@ -64,7 +65,7 @@ steps:
       steps:
         - require: fragment.yaml
 `)
-	writeTestFile(t, filepath.Join(dir, "fragment.yaml"), `
+	testfs.Write(t, filepath.Join(dir, "fragment.yaml"), `
 - {id: prepare, type: shell}
 - {id: run, type: shell}
 `)
@@ -82,14 +83,14 @@ steps:
 func TestLoadValidatesExpandedRequiredStepsTogether(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	writeTestFile(t, filepath.Join(dir, "workflow.yaml"), `version: 1
+	testfs.Write(t, filepath.Join(dir, "workflow.yaml"), `version: 1
 name: duplicate
 steps:
   - require: first.yaml
   - require: second.yaml
 `)
 	for _, name := range []string{"first.yaml", "second.yaml"} {
-		writeTestFile(t, filepath.Join(dir, name), "- id: repeated\n  type: shell\n  with: {command: true}\n")
+		testfs.Write(t, filepath.Join(dir, name), "- id: repeated\n  type: shell\n  with: {command: true}\n")
 	}
 
 	_, err := Load(filepath.Join(dir, "workflow.yaml"))
@@ -101,9 +102,9 @@ steps:
 func TestLoadRejectsRequiredStepCycle(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	writeTestFile(t, filepath.Join(dir, "workflow.yaml"), "version: 1\nname: cycle\nsteps:\n  - require: first.yaml\n")
-	writeTestFile(t, filepath.Join(dir, "first.yaml"), "- require: nested/second.yaml\n")
-	writeTestFile(t, filepath.Join(dir, "nested", "second.yaml"), "- require: ../first.yaml\n")
+	testfs.Write(t, filepath.Join(dir, "workflow.yaml"), "version: 1\nname: cycle\nsteps:\n  - require: first.yaml\n")
+	testfs.Write(t, filepath.Join(dir, "first.yaml"), "- require: nested/second.yaml\n")
+	testfs.Write(t, filepath.Join(dir, "nested", "second.yaml"), "- require: ../first.yaml\n")
 
 	_, err := Load(filepath.Join(dir, "workflow.yaml"))
 	if err == nil || !strings.Contains(err.Error(), "first.yaml -> second.yaml -> first.yaml") {
@@ -130,9 +131,9 @@ func TestLoadRejectsInvalidRequiredStepFiles(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
-			writeTestFile(t, filepath.Join(dir, "workflow.yaml"), "version: 1\nname: invalid\nsteps:\n"+tt.entry)
+			testfs.Write(t, filepath.Join(dir, "workflow.yaml"), "version: 1\nname: invalid\nsteps:\n"+tt.entry)
 			if tt.fragment != "" {
-				writeTestFile(t, filepath.Join(dir, "fragment.yaml"), tt.fragment)
+				testfs.Write(t, filepath.Join(dir, "fragment.yaml"), tt.fragment)
 			}
 			_, err := Load(filepath.Join(dir, "workflow.yaml"))
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
@@ -145,7 +146,7 @@ func TestLoadRejectsInvalidRequiredStepFiles(t *testing.T) {
 func TestLoadReportsRequiredStepErrorsInsideLoopBody(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	writeTestFile(t, filepath.Join(dir, "workflow.yaml"), `version: 1
+	testfs.Write(t, filepath.Join(dir, "workflow.yaml"), `version: 1
 name: loop-require
 steps:
   - id: repeat
@@ -163,13 +164,3 @@ steps:
 }
 
 const validFragment = "- id: run\n  type: shell\n  with: {command: true}\n"
-
-func writeTestFile(t *testing.T, path, data string) {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
-}

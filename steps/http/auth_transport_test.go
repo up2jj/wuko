@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -146,12 +147,8 @@ func TestClientCertificateLoadsRelativeToWorkflow(t *testing.T) {
 func TestClientCertificateRejectsInvalidPair(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "client.pem"), []byte("not a certificate"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "client-key.pem"), []byte("not a key"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(dir, "client.pem"), []byte("not a certificate"), 0o600)
+	testfs.WriteFile(t, filepath.Join(dir, "client-key.pem"), []byte("not a key"), 0o600)
 	built, err := New(map[string]any{
 		"url":                "https://example.com",
 		"client_certificate": map[string]any{"cert_file": "client.pem", "key_file": "client-key.pem"},
@@ -182,9 +179,7 @@ func writeTLSKeyPair(t *testing.T, certificate tls.Certificate, certPath, keyPat
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: key}), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, keyPath, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: key}), 0o600)
 }
 
 func TestAuthenticationTransportValidation(t *testing.T) {

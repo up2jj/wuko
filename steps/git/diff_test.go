@@ -14,6 +14,7 @@ import (
 	wukoexpr "github.com/up2jj/wuko/expression"
 	"github.com/up2jj/wuko/internal/gittest"
 	"github.com/up2jj/wuko/internal/steptest"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/process/processtest"
 	"github.com/up2jj/wuko/provider"
@@ -73,17 +74,15 @@ func TestGitDiffReadsStructuredCommitStagedAndUnstagedChanges(t *testing.T) {
 	t.Parallel()
 	dir := gittest.InitWithCommit(t)
 	base := gittest.Output(t, dir, "rev-parse", "HEAD")
-	writeHistoryFile(t, dir, "old name.txt", "one\ntwo\n")
+	testfs.Write(t, filepath.Join(dir, "old name.txt"), "one\ntwo\n")
 	gittest.Run(t, dir, "add", "old name.txt")
 	gittest.Run(t, dir, "commit", "--quiet", "-m", "add old name")
 	previous := gittest.Output(t, dir, "rev-parse", "HEAD")
 	if err := os.Rename(filepath.Join(dir, "old name.txt"), filepath.Join(dir, "new name.txt")); err != nil {
 		t.Fatal(err)
 	}
-	writeHistoryFile(t, dir, "new name.txt", "one\ntwo\nthree\n")
-	if err := os.WriteFile(filepath.Join(dir, "binary.dat"), []byte{0, 1, 2}, 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.Write(t, filepath.Join(dir, "new name.txt"), "one\ntwo\nthree\n")
+	testfs.WriteFile(t, filepath.Join(dir, "binary.dat"), []byte{0, 1, 2}, 0o644)
 	gittest.Run(t, dir, "add", "-A")
 	gittest.Run(t, dir, "commit", "--quiet", "-m", "rename and add binary")
 	head := gittest.Output(t, dir, "rev-parse", "HEAD")
@@ -108,10 +107,10 @@ func TestGitDiffReadsStructuredCommitStagedAndUnstagedChanges(t *testing.T) {
 		t.Fatalf("binary = %#v", binary)
 	}
 
-	writeHistoryFile(t, dir, "staged.txt", "staged\n")
+	testfs.Write(t, filepath.Join(dir, "staged.txt"), "staged\n")
 	gittest.Run(t, dir, "add", "staged.txt")
-	writeHistoryFile(t, dir, "README.md", "unstaged\n")
-	writeHistoryFile(t, dir, "untracked.txt", "ignored\n")
+	testfs.Write(t, filepath.Join(dir, "README.md"), "unstaged\n")
+	testfs.Write(t, filepath.Join(dir, "untracked.txt"), "ignored\n")
 	staged := runDiff(t, dir, map[string]any{"source": "staged"})
 	if got := diffPaths(staged); !slices.Equal(got, []string{"staged.txt"}) {
 		t.Fatalf("staged paths = %#v", got)
@@ -140,13 +139,13 @@ func TestGitDiffUsesFirstParentAndHandlesRootAndDivergentTrees(t *testing.T) {
 
 	main := gittest.Output(t, dir, "branch", "--show-current")
 	gittest.Run(t, dir, "checkout", "-q", "-b", "left")
-	writeHistoryFile(t, dir, "left.txt", "left\n")
+	testfs.Write(t, filepath.Join(dir, "left.txt"), "left\n")
 	gittest.Run(t, dir, "add", "left.txt")
 	gittest.Run(t, dir, "commit", "-qm", "left")
 	left := gittest.Output(t, dir, "rev-parse", "HEAD")
 	gittest.Run(t, dir, "checkout", "-q", main)
 	gittest.Run(t, dir, "checkout", "-q", "-b", "right")
-	writeHistoryFile(t, dir, "right.txt", "right\n")
+	testfs.Write(t, filepath.Join(dir, "right.txt"), "right\n")
 	gittest.Run(t, dir, "add", "right.txt")
 	gittest.Run(t, dir, "commit", "-qm", "right")
 	right := gittest.Output(t, dir, "rev-parse", "HEAD")
@@ -165,10 +164,10 @@ func TestGitDiffUsesFirstParentAndHandlesRootAndDivergentTrees(t *testing.T) {
 func TestGitDiffDetectsCopiesModesAndUnusualPaths(t *testing.T) {
 	t.Parallel()
 	dir := gittest.InitWithCommit(t)
-	writeHistoryFile(t, dir, "source.txt", "copy me\n")
+	testfs.Write(t, filepath.Join(dir, "source.txt"), "copy me\n")
 	gittest.Run(t, dir, "add", "source.txt")
 	gittest.Run(t, dir, "commit", "-qm", "add source")
-	writeHistoryFile(t, dir, "copied\nfile.txt", "copy me\n")
+	testfs.Write(t, filepath.Join(dir, "copied\nfile.txt"), "copy me\n")
 	if err := os.Chmod(filepath.Join(dir, "README.md"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +187,7 @@ func TestGitDiffHandlesUnbornStagedRepository(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	gittest.Run(t, dir, "init", "--quiet")
-	writeHistoryFile(t, dir, "first.txt", "first\n")
+	testfs.Write(t, filepath.Join(dir, "first.txt"), "first\n")
 	gittest.Run(t, dir, "add", "first.txt")
 	outputs := runDiff(t, dir, map[string]any{"source": "staged"})
 	if outputs["count"] != 1 || diffPaths(outputs)[0] != "first.txt" {
@@ -201,10 +200,10 @@ func TestGitDiffReportsUnmergedPathOnce(t *testing.T) {
 	dir := gittest.InitWithCommit(t)
 	main := gittest.Output(t, dir, "branch", "--show-current")
 	gittest.Run(t, dir, "checkout", "-qb", "conflict")
-	writeHistoryFile(t, dir, "README.md", "branch\n")
+	testfs.Write(t, filepath.Join(dir, "README.md"), "branch\n")
 	gittest.Run(t, dir, "commit", "-qam", "branch change")
 	gittest.Run(t, dir, "checkout", "-q", main)
-	writeHistoryFile(t, dir, "README.md", "main\n")
+	testfs.Write(t, filepath.Join(dir, "README.md"), "main\n")
 	gittest.Run(t, dir, "commit", "-qam", "main change")
 	command := exec.Command("git", "merge", "conflict")
 	command.Dir = dir
@@ -225,7 +224,7 @@ func TestGitDiffReportsUnmergedPathOnce(t *testing.T) {
 func TestGitDiffDisablesRenameDetectionExplicitly(t *testing.T) {
 	t.Parallel()
 	dir := gittest.InitWithCommit(t)
-	writeHistoryFile(t, dir, "old.txt", "one\ntwo\nthree\nfour\nfive\n")
+	testfs.Write(t, filepath.Join(dir, "old.txt"), "one\ntwo\nthree\nfour\nfive\n")
 	gittest.Run(t, dir, "add", "old.txt")
 	gittest.Run(t, dir, "commit", "-qm", "add old")
 	gittest.Run(t, dir, "mv", "old.txt", "new.txt")
@@ -250,7 +249,7 @@ func TestGitDiffCheckIgnoresRenamedContentAndMergeCommits(t *testing.T) {
 	t.Parallel()
 	dir := gittest.InitWithCommit(t)
 	base := gittest.Output(t, dir, "rev-parse", "HEAD")
-	writeHistoryFile(t, dir, "legacy.txt", "legacy \n")
+	testfs.Write(t, filepath.Join(dir, "legacy.txt"), "legacy \n")
 	gittest.Run(t, dir, "add", "legacy.txt")
 	gittest.Run(t, dir, "commit", "-qm", "legacy whitespace")
 	gittest.Run(t, dir, "checkout", "-qb", "legacy")
@@ -290,7 +289,7 @@ func TestGitDiffCheckIgnoresRenamedContentAndMergeCommits(t *testing.T) {
 func TestGitDiffCheckDetectsWhitespace(t *testing.T) {
 	t.Parallel()
 	dir := gittest.InitWithCommit(t)
-	writeHistoryFile(t, dir, "bad.txt", "trailing \n")
+	testfs.Write(t, filepath.Join(dir, "bad.txt"), "trailing \n")
 	gittest.Run(t, dir, "add", "bad.txt")
 	runner, err := NewDiffCheck(map[string]any{"source": "staged"})
 	if err != nil {
@@ -299,7 +298,7 @@ func TestGitDiffCheckDetectsWhitespace(t *testing.T) {
 	if _, err := runner.Run(t.Context(), step.Request{RunDir: dir}); err == nil || !strings.Contains(err.Error(), "bad.txt:1") {
 		t.Fatalf("check error = %v", err)
 	}
-	writeHistoryFile(t, dir, "bad.txt", "clean\n")
+	testfs.Write(t, filepath.Join(dir, "bad.txt"), "clean\n")
 	gittest.Run(t, dir, "add", "bad.txt")
 	if _, err := runner.Run(t.Context(), step.Request{RunDir: dir}); err != nil {
 		t.Fatal(err)
@@ -310,10 +309,10 @@ func TestGitDiffCheckPushedUsesHookContextAndChecksEveryCommit(t *testing.T) {
 	t.Parallel()
 	dir := gittest.InitWithCommit(t)
 	base := gittest.Output(t, dir, "rev-parse", "HEAD")
-	writeHistoryFile(t, dir, "temporary.txt", "bad \n")
+	testfs.Write(t, filepath.Join(dir, "temporary.txt"), "bad \n")
 	gittest.Run(t, dir, "add", "temporary.txt")
 	gittest.Run(t, dir, "commit", "-qm", "introduce whitespace")
-	writeHistoryFile(t, dir, "temporary.txt", "clean\n")
+	testfs.Write(t, filepath.Join(dir, "temporary.txt"), "clean\n")
 	gittest.Run(t, dir, "add", "temporary.txt")
 	gittest.Run(t, dir, "commit", "-qm", "fix whitespace")
 	head := gittest.Output(t, dir, "rev-parse", "HEAD")
@@ -377,7 +376,7 @@ func TestGitDiffCheckPushedRunsOneCommandPerCommit(t *testing.T) {
 	dir := gittest.InitWithCommit(t)
 	base := gittest.Output(t, dir, "rev-parse", "HEAD")
 	for _, content := range []string{"one\n", "two\n", "three\n"} {
-		writeHistoryFile(t, dir, "clean.txt", content)
+		testfs.Write(t, filepath.Join(dir, "clean.txt"), content)
 		gittest.Run(t, dir, "add", "clean.txt")
 		gittest.Run(t, dir, "commit", "-qm", "clean commit")
 	}
@@ -418,7 +417,7 @@ func TestGitDiffCheckPushedHandlesNewBranch(t *testing.T) {
 	dir := gittest.InitWithCommit(t)
 	base := gittest.Output(t, dir, "rev-parse", "HEAD")
 	gittest.Run(t, dir, "update-ref", "refs/remotes/origin/main", base)
-	writeHistoryFile(t, dir, "clean.txt", "clean\n")
+	testfs.Write(t, filepath.Join(dir, "clean.txt"), "clean\n")
 	gittest.Run(t, dir, "add", "clean.txt")
 	gittest.Run(t, dir, "commit", "-qm", "clean commit")
 	head := gittest.Output(t, dir, "rev-parse", "HEAD")

@@ -2,12 +2,12 @@ package workflow
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/secret"
 )
 
@@ -25,9 +25,7 @@ func TestWorkflowSecretTemplateUsesOccurrenceCache(t *testing.T) {
 	directory := t.TempDir()
 	path := filepath.Join(directory, "workflow.yaml")
 	data := []byte("version: 1\nname: secrets\nenv:\n  FIRST: '{{ secret \"op://Production/API/token\" }}'\n  SECOND: '{{ secret \"op://Production/API/token\" }}'\nsteps:\n  - id: done\n    type: set\n    with:\n      variable: done\n      value: true\n")
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, data, 0o600)
 	runner := &workflowSecretRunner{}
 	session := secret.NewSession(t.Context(), secret.Options{Runner: runner, BaseEnv: map[string]string{}})
 	definition, err := NewLoader(nil).Load(t.Context(), path, LoadOptions{RunDir: directory, BaseEnv: map[string]string{}, SecretSession: session})
@@ -50,9 +48,7 @@ func TestPrepareRedactsResolvedValuesInErrors(t *testing.T) {
 	directory := t.TempDir()
 	path := filepath.Join(directory, "workflow.yaml")
 	data := []byte("version: 1\nname: secrets\nenv:\n  BAD: '{{ secret \"op://Production/API/token\" | parseTime \"2006-01-02\" }}'\nsteps:\n  - id: done\n    type: set\n    with:\n      variable: done\n      value: true\n")
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, data, 0o600)
 	session := secret.NewSession(t.Context(), secret.Options{Runner: &workflowSecretRunner{}, BaseEnv: map[string]string{}})
 	_, err := NewLoader(nil).Load(t.Context(), path, LoadOptions{RunDir: directory, BaseEnv: map[string]string{}, SecretSession: session})
 	if err == nil {
@@ -85,9 +81,7 @@ func TestPrepareAuthenticatesOnlyWhenRequested(t *testing.T) {
 	directory := t.TempDir()
 	path := filepath.Join(directory, "workflow.yaml")
 	data := []byte("version: 1\nname: secrets\nsecrets:\n  ensure_auth:\n    - provider: bw\n      login:\n        fallback:\n          command: company-vault-login\nsteps:\n  - id: done\n    type: set\n    with:\n      variable: done\n      value: true\n")
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, data, 0o600)
 	for _, test := range []struct {
 		name  string
 		auth  bool

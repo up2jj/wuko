@@ -22,6 +22,7 @@ import (
 
 	"github.com/up2jj/wuko/engine"
 	"github.com/up2jj/wuko/executor"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/step"
 	editstep "github.com/up2jj/wuko/steps/edit"
@@ -381,9 +382,7 @@ func sshdFixture(t *testing.T) string {
 	}
 	server := fmt.Sprintf("Port %d\nListenAddress 127.0.0.1\nHostKey %s/host\nPidFile %s/pid\nAuthorizedKeysFile %s/client.pub\nStrictModes no\nUsePAM yes\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nPermitRootLogin prohibit-password\nAllowUsers %s\n", port, directory, directory, directory, account.Username)
 	serverFile := filepath.Join(directory, "sshd_config")
-	if err := os.WriteFile(serverFile, []byte(server), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, serverFile, []byte(server), 0o600)
 	daemon := exec.Command("/usr/sbin/sshd", "-D", "-e", "-f", serverFile)
 	var log bytes.Buffer
 	daemon.Stdout, daemon.Stderr = &log, &log
@@ -411,15 +410,11 @@ func sshdFixture(t *testing.T) string {
 		t.Fatal(err)
 	}
 	known := filepath.Join(directory, "known_hosts")
-	if err := os.WriteFile(known, []byte(fmt.Sprintf("[127.0.0.1]:%d %s", port, publicKey)), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, known, []byte(fmt.Sprintf("[127.0.0.1]:%d %s", port, publicKey)), 0o600)
 	// These user-config settings must not change executor ownership, consume stdin,
 	// force a terminal, or replace the helper command.
 	client := fmt.Sprintf("Host fixture\n HostName 127.0.0.1\n Port %d\n User %s\n IdentityFile %s/client\n IdentitiesOnly yes\n StrictHostKeyChecking yes\n UserKnownHostsFile %s\n ForkAfterAuthentication yes\n StdinNull yes\n SessionType none\n RequestTTY force\n RemoteCommand false\n", port, account.Username, directory, known)
 	clientFile := filepath.Join(directory, "ssh_config")
-	if err := os.WriteFile(clientFile, []byte(client), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, clientFile, []byte(client), 0o600)
 	return clientFile
 }

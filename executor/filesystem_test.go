@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/executor"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/process"
 )
 
@@ -59,9 +60,7 @@ func TestFileSystemForRejectsTargetWithoutFileSystem(t *testing.T) {
 func TestLocalFileSystemWritesDurablyWithoutLeavingTemporaryFiles(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "config.yaml")
-	if err := os.WriteFile(path, []byte("old"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte("old"), 0o600)
 	if err := (executor.LocalFileSystem{}).WriteFile(t.Context(), path, []byte("new"), executor.WriteOptions{Mode: 0o640, Replace: true}); err != nil {
 		t.Fatal(err)
 	}
@@ -100,9 +99,7 @@ func TestLocalFileSystemReportsMissingPathsAsNotExist(t *testing.T) {
 
 func TestLocalFileSystemBoundsReads(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "document")
-	if err := os.WriteFile(path, []byte("123456789"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte("123456789"), 0o600)
 	data, err := (executor.LocalFileSystem{}).ReadFile(t.Context(), path, 4)
 	if err != nil {
 		t.Fatal(err)
@@ -141,9 +138,7 @@ func TestLocalFileSystemHonorsCanceledContext(t *testing.T) {
 func TestLocalFileSystemDoesNotReplaceWithoutPermission(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "config.yaml")
-	if err := os.WriteFile(path, []byte("old"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte("old"), 0o600)
 	err := (executor.LocalFileSystem{}).WriteFile(t.Context(), path, []byte("new"), executor.WriteOptions{Mode: 0o640})
 	if !errors.Is(err, fs.ErrExist) {
 		t.Fatalf("WriteFile() error = %v, want fs.ErrExist", err)

@@ -5,12 +5,14 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/up2jj/wuko/internal/testfs"
 )
 
 func TestLoadConditionalBlockAndSingleStepCondition(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "workflow.yaml")
-	writeTestFile(t, path, `version: 1
+	testfs.Write(t, path, `version: 1
 name: conditional
 vars: {enabled: true}
 steps:
@@ -50,7 +52,7 @@ func TestConditionalBlockValidation(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "workflow.yaml")
-			writeTestFile(t, path, "version: 1\nname: invalid\nsteps:\n"+test.body)
+			testfs.Write(t, path, "version: 1\nname: invalid\nsteps:\n"+test.body)
 			_, err := Load(path)
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("error = %v, want substring %q", err, test.want)
@@ -62,7 +64,7 @@ func TestConditionalBlockValidation(t *testing.T) {
 func TestConditionalBlocksFollowInheritedControlNestingRules(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "workflow.yaml")
-	writeTestFile(t, path, `version: 1
+	testfs.Write(t, path, `version: 1
 name: controls
 vars: {items: [one]}
 steps:
@@ -81,7 +83,7 @@ steps:
 		t.Fatal(err)
 	}
 
-	writeTestFile(t, path, `version: 1
+	testfs.Write(t, path, `version: 1
 name: invalid
 vars: {items: [one]}
 steps:
@@ -105,8 +107,8 @@ func TestConditionalBlockExpandsRequiredStepsResolvesActionsAndPreservesLocation
 	t.Parallel()
 	dir := t.TempDir()
 	fragment := filepath.Join(dir, "fragment.yaml")
-	writeTestFile(t, filepath.Join(dir, "local.yaml"), "- {id: local, type: shell}\n")
-	writeTestFile(t, fragment, `- if: vars.enabled
+	testfs.Write(t, filepath.Join(dir, "local.yaml"), "- {id: local, type: shell}\n")
+	testfs.Write(t, fragment, `- if: vars.enabled
   steps:
     - id: remote
       uses: https://actions.example.test/build
@@ -114,7 +116,7 @@ func TestConditionalBlockExpandsRequiredStepsResolvesActionsAndPreservesLocation
     - require: local.yaml
 `)
 	workflowPath := filepath.Join(dir, "workflow.yaml")
-	writeTestFile(t, workflowPath, `version: 1
+	testfs.Write(t, workflowPath, `version: 1
 name: caller
 vars: {enabled: false}
 steps:

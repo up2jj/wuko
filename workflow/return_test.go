@@ -4,12 +4,14 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/up2jj/wuko/internal/testfs"
 )
 
 func TestLoadReturnControl(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "workflow.yaml")
-	writeTestFile(t, path, `version: 1
+	testfs.Write(t, path, `version: 1
 name: cached
 steps:
   - return:
@@ -56,7 +58,7 @@ func TestReturnSchemaValidation(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "workflow.yaml")
-			writeTestFile(t, path, "version: 1\nname: invalid\nvars: {items: []}\nsteps:\n"+test.body)
+			testfs.Write(t, path, "version: 1\nname: invalid\nvars: {items: []}\nsteps:\n"+test.body)
 			_, err := Load(path)
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("error = %v, want %q", err, test.want)
@@ -68,9 +70,9 @@ func TestReturnSchemaValidation(t *testing.T) {
 func TestReturnCanComeFromRequiredSequentialFragment(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	writeTestFile(t, filepath.Join(dir, "finish.yaml"), "- return: {to: picker, outputs: {result: '\"done\"'}}\n")
+	testfs.Write(t, filepath.Join(dir, "finish.yaml"), "- return: {to: picker, outputs: {result: '\"done\"'}}\n")
 	path := filepath.Join(dir, "workflow.yaml")
-	writeTestFile(t, path, `version: 1
+	testfs.Write(t, path, `version: 1
 name: required-return
 steps:
   - if: vars.finish

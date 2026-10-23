@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/reporter"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/steps/shell"
@@ -21,7 +22,7 @@ func TestRunCommandComposesPlainAndGitHubReporters(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	workflowPath := filepath.Join(root, "check.yaml")
-	writeWorkflowData(t, workflowPath, `version: 1
+	testfs.Write(t, workflowPath, `version: 1
 name: check
 cron: "0 0 * * *"
 steps:
@@ -36,9 +37,7 @@ steps:
 	outputPath := filepath.Join(root, "github-output")
 	summaryPath := filepath.Join(root, "github-summary")
 	for _, path := range []string{outputPath, summaryPath} {
-		if err := os.WriteFile(path, nil, 0o600); err != nil {
-			t.Fatal(err)
-		}
+		testfs.WriteFile(t, path, nil, 0o600)
 	}
 	values := map[string]string{
 		"GITHUB_OUTPUT": outputPath, "GITHUB_STEP_SUMMARY": summaryPath, "GITHUB_WORKSPACE": root,
@@ -93,7 +92,7 @@ func TestRunCommandDefaultReporterDoesNotReadGitHubFiles(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	workflowPath := filepath.Join(root, "check.yaml")
-	writeWorkflowData(t, workflowPath, "version: 1\nname: check\nsteps:\n  - return: {outputs: {ok: 'true'}}\n")
+	testfs.Write(t, workflowPath, "version: 1\nname: check\nsteps:\n  - return: {outputs: {ok: 'true'}}\n")
 	command := newRootCmd(dependencies{
 		stdin: bytes.NewReader(nil), stdout: new(bytes.Buffer), stderr: new(bytes.Buffer),
 		cwd: func() (string, error) { return root, nil }, homeDir: func() (string, error) { return root, nil },
@@ -110,7 +109,7 @@ func TestRunCommandGitHubReporterRequiresEnvironmentFiles(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	workflowPath := filepath.Join(root, "check.yaml")
-	writeWorkflowData(t, workflowPath, "version: 1\nname: check\nsteps:\n  - return: {outputs: {ok: 'true'}}\n")
+	testfs.Write(t, workflowPath, "version: 1\nname: check\nsteps:\n  - return: {outputs: {ok: 'true'}}\n")
 	command := newRootCmd(dependencies{
 		stdin: bytes.NewReader(nil), stdout: new(bytes.Buffer), stderr: new(bytes.Buffer),
 		cwd: func() (string, error) { return root, nil }, homeDir: func() (string, error) { return root, nil },
@@ -128,7 +127,7 @@ func TestRunCommandWritesRelativeExecutionReportOnSuccess(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	workflowPath := filepath.Join(root, "check.yaml")
-	writeWorkflowData(t, workflowPath, `version: 1
+	testfs.Write(t, workflowPath, `version: 1
 name: check
 steps:
   - return:
@@ -165,7 +164,7 @@ func TestRunCommandStreamsExecutionReportAndRoutesWorkflowOutputToStderr(t *test
 	t.Parallel()
 	root := t.TempDir()
 	workflowPath := filepath.Join(root, "check.yaml")
-	writeWorkflowData(t, workflowPath, `version: 1
+	testfs.Write(t, workflowPath, `version: 1
 name: check
 steps:
   - id: announce
@@ -238,7 +237,7 @@ func TestRunCommandStreamsReportsForFailurePreflightAndDryRun(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			workflowPath := filepath.Join(root, strings.ReplaceAll(test.name, " ", "-")+".yaml")
-			writeWorkflowData(t, workflowPath, test.workflow)
+			testfs.Write(t, workflowPath, test.workflow)
 			var stdout, stderr bytes.Buffer
 			command := newRootCmd(dependencies{
 				stdin: bytes.NewReader(nil), stdout: &stdout, stderr: &stderr,
@@ -270,7 +269,7 @@ func TestRunCommandReportsStreamWriteFailure(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	workflowPath := filepath.Join(root, "check.yaml")
-	writeWorkflowData(t, workflowPath, "version: 1\nname: check\nsteps:\n  - return: {outputs: {}}\n")
+	testfs.Write(t, workflowPath, "version: 1\nname: check\nsteps:\n  - return: {outputs: {}}\n")
 	command := newRootCmd(dependencies{
 		stdin: bytes.NewReader(nil), stdout: failingCommandWriter{}, stderr: io.Discard,
 		cwd: func() (string, error) { return root, nil }, homeDir: func() (string, error) { return root, nil },
@@ -287,7 +286,7 @@ func TestRunCommandWritesExecutionReportBeforeEngineStarts(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	workflowPath := filepath.Join(root, "check.yaml")
-	writeWorkflowData(t, workflowPath, "version: 1\nname: check\nsteps: []\n")
+	testfs.Write(t, workflowPath, "version: 1\nname: check\nsteps: []\n")
 	reportPath := filepath.Join(root, "report.json")
 	command := newRootCmd(dependencies{
 		stdin: bytes.NewReader(nil), stdout: new(bytes.Buffer), stderr: new(bytes.Buffer),
@@ -309,7 +308,7 @@ func TestRunCommandReportsFirstFailedStep(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	workflowPath := filepath.Join(root, "check.yaml")
-	writeWorkflowData(t, workflowPath, `version: 1
+	testfs.Write(t, workflowPath, `version: 1
 name: check
 steps:
   - id: explode
@@ -340,7 +339,7 @@ func TestRunCommandJoinsWorkflowAndReportDeliveryFailures(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	workflowPath := filepath.Join(root, "check.yaml")
-	writeWorkflowData(t, workflowPath, `version: 1
+	testfs.Write(t, workflowPath, `version: 1
 name: check
 steps:
   - id: explode
@@ -371,7 +370,7 @@ func TestRunCommandDiscardsEarlierAttemptStateWhenSchedulingFails(t *testing.T) 
 	t.Parallel()
 	root := t.TempDir()
 	workflowPath := filepath.Join(root, "check.yaml")
-	writeWorkflowData(t, workflowPath, `version: 1
+	testfs.Write(t, workflowPath, `version: 1
 name: check
 cron: "* * * * * *"
 steps:
@@ -386,9 +385,7 @@ steps:
 	outputPath := filepath.Join(root, "github-output")
 	summaryPath := filepath.Join(root, "github-summary")
 	for _, path := range []string{outputPath, summaryPath} {
-		if err := os.WriteFile(path, nil, 0o600); err != nil {
-			t.Fatal(err)
-		}
+		testfs.WriteFile(t, path, nil, 0o600)
 	}
 	values := map[string]string{
 		"GITHUB_OUTPUT": outputPath, "GITHUB_STEP_SUMMARY": summaryPath, "GITHUB_WORKSPACE": root,
@@ -428,13 +425,6 @@ steps:
 	}
 	if !strings.Contains(string(summary), "| 0 | 0 | 0 | 0 |") {
 		t.Fatalf("summary = %q, want no step counts borrowed from the successful occurrence", summary)
-	}
-}
-
-func writeWorkflowData(t *testing.T, path, data string) {
-	t.Helper()
-	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
-		t.Fatal(err)
 	}
 }
 
@@ -482,7 +472,7 @@ func TestRunCommandStreamsReportForSetupFailures(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	workflowPath := filepath.Join(root, "check.yaml")
-	writeWorkflowData(t, workflowPath, "version: 1\nname: check\nsteps:\n  - return: {outputs: {}}\n")
+	testfs.Write(t, workflowPath, "version: 1\nname: check\nsteps:\n  - return: {outputs: {}}\n")
 	tests := []struct {
 		name string
 		cwd  func() (string, error)

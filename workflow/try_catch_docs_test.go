@@ -1,11 +1,11 @@
 package workflow
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/testfs"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -13,9 +13,7 @@ func TestDocumentedTryCatchWorkflowLoads(t *testing.T) {
 	blocks := documentedYAMLBlocks(t)
 	example := documentedBlock(t, blocks, "name: recover-deployment")
 	path := filepath.Join(t.TempDir(), "workflow.yaml")
-	if err := os.WriteFile(path, []byte(example), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte(example), 0o644)
 	definition, err := NewLoader(nil).Decode(path, LoadOptions{})
 	if err != nil {
 		t.Fatal(err)

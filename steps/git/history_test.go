@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/internal/gittest"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/process/processtest"
 	"github.com/up2jj/wuko/step"
@@ -138,7 +139,7 @@ func TestRevisionAndLogAgainstRepository(t *testing.T) {
 	mainBranch := gittest.Output(t, dir, "branch", "--show-current")
 
 	gittest.Run(t, dir, "checkout", "-q", "-b", "feature/history")
-	writeHistoryFile(t, dir, "feature.txt", "feature\n")
+	testfs.Write(t, filepath.Join(dir, "feature.txt"), "feature\n")
 	gittest.Run(t, dir, "add", "feature.txt")
 	gittest.Run(t, dir, "commit", "-q", "-m", "feat(history): add structured records", "-m", "Keep release data typed.")
 	feature := gittest.Output(t, dir, "rev-parse", "HEAD")
@@ -146,7 +147,7 @@ func TestRevisionAndLogAgainstRepository(t *testing.T) {
 	gittest.Run(t, dir, "checkout", "-q", mainBranch)
 	gittest.Run(t, dir, "merge", "-q", "--no-ff", "feature/history", "-m", "Merge feature history")
 	merge := gittest.Output(t, dir, "rev-parse", "HEAD")
-	writeHistoryFile(t, dir, "direct.txt", "direct\n")
+	testfs.Write(t, filepath.Join(dir, "direct.txt"), "direct\n")
 	gittest.Run(t, dir, "add", "direct.txt")
 	gittest.Run(t, dir, "commit", "-q", "-m", "fix(log): keep newest first")
 	head := gittest.Output(t, dir, "rev-parse", "HEAD")
@@ -205,13 +206,13 @@ func TestMergeBaseAgainstDivergedRepository(t *testing.T) {
 	mainBranch := gittest.Output(t, dir, "branch", "--show-current")
 
 	gittest.Run(t, dir, "checkout", "-q", "-b", "feature/merge-base")
-	writeHistoryFile(t, dir, "feature.txt", "feature\n")
+	testfs.Write(t, filepath.Join(dir, "feature.txt"), "feature\n")
 	gittest.Run(t, dir, "add", "feature.txt")
 	gittest.Run(t, dir, "commit", "-q", "-m", "feat: add feature")
 	feature := gittest.Output(t, dir, "rev-parse", "HEAD")
 
 	gittest.Run(t, dir, "checkout", "-q", mainBranch)
-	writeHistoryFile(t, dir, "main.txt", "main\n")
+	testfs.Write(t, filepath.Join(dir, "main.txt"), "main\n")
 	gittest.Run(t, dir, "add", "main.txt")
 	gittest.Run(t, dir, "commit", "-q", "-m", "feat: advance main")
 	main := gittest.Output(t, dir, "rev-parse", "HEAD")
@@ -279,7 +280,7 @@ func TestMergeBaseRejectsUnresolvedMissingAndAmbiguousHistory(t *testing.T) {
 func TestRevisionReadsAnnotatedTagAndMessageFields(t *testing.T) {
 	t.Parallel()
 	dir := gittest.InitWithCommit(t)
-	writeHistoryFile(t, dir, ".mailmap", "Canonical Author <canonical@example.com> Wuko Test <wuko@example.test>\n")
+	testfs.Write(t, filepath.Join(dir, ".mailmap"), "Canonical Author <canonical@example.com> Wuko Test <wuko@example.test>\n")
 	gittest.Run(t, dir, "add", ".mailmap")
 	gittest.Run(t, dir, "commit", "-q", "-m", "feat(api)!: support history", "-m", "Unicode: zażółć\n\nMore detail.")
 	gittest.Run(t, dir, "tag", "-a", "v1.0.0", "-m", "release")
@@ -593,15 +594,4 @@ func commitSHAs(commits []any) []string {
 		values[index] = commit.(map[string]any)["sha"].(string)
 	}
 	return values
-}
-
-func writeHistoryFile(t *testing.T, root, relative, contents string) {
-	t.Helper()
-	path := filepath.Join(root, relative)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
-		t.Fatal(err)
-	}
 }

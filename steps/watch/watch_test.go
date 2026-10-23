@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -122,9 +123,7 @@ func TestWatchMatchesExplicitHiddenPattern(t *testing.T) {
 func TestWatchRegistersExistingTreeWithoutFollowingSymlinks(t *testing.T) {
 	root := t.TempDir()
 	nested := filepath.Join(root, "src", "nested")
-	if err := os.MkdirAll(nested, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, nested, 0o755)
 	outside := t.TempDir()
 	if err := os.Symlink(outside, filepath.Join(root, "linked")); err != nil {
 		t.Fatal(err)
@@ -161,9 +160,7 @@ func TestWatchRegistersCreatedDirectoryTree(t *testing.T) {
 	}
 	created := filepath.Join(root, "created")
 	nested := filepath.Join(created, "nested")
-	if err := os.MkdirAll(nested, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, nested, 0o755)
 	watcher.events <- fsnotify.Event{Name: created, Op: fsnotify.Create}
 	watcher.events <- fsnotify.Event{Name: filepath.Join(nested, "main.go"), Op: fsnotify.Write}
 	if err := <-done; err != nil {
@@ -242,7 +239,7 @@ func TestWatchHonorsCancellationAndSetupErrors(t *testing.T) {
 func TestWatchRejectsInvalidRuntimeRoot(t *testing.T) {
 	runDir := t.TempDir()
 	file := filepath.Join(runDir, "file")
-	writeTestFile(t, file, "content")
+	testfs.Write(t, file, "content")
 	symlink := filepath.Join(runDir, "linked")
 	if err := os.Symlink(t.TempDir(), symlink); err != nil {
 		t.Fatal(err)
@@ -279,16 +276,16 @@ func TestWatchRealFilesystemEvents(t *testing.T) {
 	}{
 		{
 			name: "create", operation: "create",
-			trigger: func(t *testing.T, target string) { writeTestFile(t, target, "created") },
+			trigger: func(t *testing.T, target string) { testfs.Write(t, target, "created") },
 		},
 		{
 			name: "modify", operation: "modify",
-			prepare: func(t *testing.T, target string) { writeTestFile(t, target, "before") },
-			trigger: func(t *testing.T, target string) { writeTestFile(t, target, "after") },
+			prepare: func(t *testing.T, target string) { testfs.Write(t, target, "before") },
+			trigger: func(t *testing.T, target string) { testfs.Write(t, target, "after") },
 		},
 		{
 			name: "rename", operation: "rename",
-			prepare: func(t *testing.T, target string) { writeTestFile(t, target, "rename") },
+			prepare: func(t *testing.T, target string) { testfs.Write(t, target, "rename") },
 			trigger: func(t *testing.T, target string) {
 				if err := os.Rename(target, target+".moved"); err != nil {
 					t.Fatal(err)
@@ -297,7 +294,7 @@ func TestWatchRealFilesystemEvents(t *testing.T) {
 		},
 		{
 			name: "remove", operation: "remove",
-			prepare: func(t *testing.T, target string) { writeTestFile(t, target, "remove") },
+			prepare: func(t *testing.T, target string) { testfs.Write(t, target, "remove") },
 			trigger: func(t *testing.T, target string) {
 				if err := os.Remove(target); err != nil {
 					t.Fatal(err)
@@ -362,13 +359,6 @@ func configuredRunner(t *testing.T, watcher eventWatcher, raw map[string]any) *R
 	configured := runner.(*Runner)
 	configured.newWatcher = func() (eventWatcher, error) { return watcher, nil }
 	return configured
-}
-
-func writeTestFile(t *testing.T, name, content string) {
-	t.Helper()
-	if err := os.WriteFile(name, []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
 }
 
 type fakeWatcher struct {

@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/internal/archivetest"
+	"github.com/up2jj/wuko/internal/testfs"
 )
 
 func TestInstallIsTransactionalAndWritesMarker(t *testing.T) {
@@ -22,13 +23,9 @@ func TestInstallIsTransactionalAndWritesMarker(t *testing.T) {
 		t.Fatal(err)
 	}
 	archive := archivetest.TarGz(t, archivetest.Entry{Name: "wuko-plugin-acme", Mode: 0755, Data: []byte("#!/bin/sh\nWUKO_PLUGIN_TEST_HELPER=1 exec \"" + executable + "\"\n")})
-	if err := os.WriteFile(filepath.Join(source, "plugin.tar.gz"), archive, 0600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(source, "plugin.tar.gz"), archive, 0600)
 	manifest, _ := json.Marshal(Manifest{Version: 1, Namespace: "acme", PluginVersion: "1.0.0", Protocol: Protocol, Artifacts: []Artifact{{OS: runtime.GOOS, Arch: runtime.GOARCH, Path: "plugin.tar.gz", Format: "tar.gz", Entry: "wuko-plugin-acme", SHA256: digest(archive)}}})
-	if err := os.WriteFile(filepath.Join(source, "plugin.json"), manifest, 0600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(source, "plugin.json"), manifest, 0600)
 	root := t.TempDir()
 	marker, err := Install(t.Context(), source, root, false, nil, io.Discard)
 	if err != nil {
@@ -64,21 +61,15 @@ func TestInstallIsTransactionalAndWritesMarker(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(installedExecutable, append(originalExecutable, '\n'), 0o700); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, installedExecutable, append(originalExecutable, '\n'), 0o700)
 	if _, err := ValidateInstallation(directory, "acme"); err == nil || !strings.Contains(err.Error(), "digest mismatch") {
 		t.Fatalf("tampered executable error = %v", err)
 	}
-	if err := os.WriteFile(installedExecutable, originalExecutable, 0o700); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, installedExecutable, originalExecutable, 0o700)
 	if _, err := Install(t.Context(), source, root, false, nil, io.Discard); err == nil {
 		t.Fatal("expected existing installation error")
 	}
-	if err := os.WriteFile(filepath.Join(directory, MarkerName), []byte("{}"), 0600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(directory, MarkerName), []byte("{}"), 0600)
 	if _, err := ValidateInstallation(directory, "acme"); err == nil {
 		t.Fatal("expected corrupted marker error")
 	}
@@ -89,12 +80,8 @@ func TestInstallReleasesRollsBackEveryCommittedPlugin(t *testing.T) {
 	root := t.TempDir()
 	for _, namespace := range []string{"acme", "beta"} {
 		directory := filepath.Join(root, namespace)
-		if err := os.MkdirAll(directory, 0o700); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(directory, "old"), []byte(namespace), 0o600); err != nil {
-			t.Fatal(err)
-		}
+		testfs.MkdirAll(t, directory, 0o700)
+		testfs.WriteFile(t, filepath.Join(directory, "old"), []byte(namespace), 0o600)
 	}
 	releases := []Release{testInstallRelease(t, "acme"), testInstallRelease(t, "beta")}
 	commitErr := errors.New("injected publish failure")
@@ -122,9 +109,7 @@ func TestInstallReleasesSurfacesBackupCleanupFailure(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	target := filepath.Join(root, "acme")
-	if err := os.MkdirAll(target, 0o700); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, target, 0o700)
 	cleanupErr := errors.New("injected cleanup failure")
 	ops := installationOps{
 		rename: os.Rename,
@@ -160,9 +145,7 @@ func TestLegacyInstallationMarkerDefaultsToV1(t *testing.T) {
 	t.Parallel()
 	directory := t.TempDir()
 	executable := filepath.Join(directory, "wuko-plugin-acme")
-	if err := os.WriteFile(executable, []byte("binary"), 0o700); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, executable, []byte("binary"), 0o700)
 	marker := map[string]any{
 		"manifest_version": 1, "namespace": "acme", "plugin_version": "1.0.0",
 		"source": "https://plugins.test/acme", "manifest_digest": strings.Repeat("a", 64),
@@ -172,9 +155,7 @@ func TestLegacyInstallationMarkerDefaultsToV1(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(directory, MarkerName), data, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(directory, MarkerName), data, 0o600)
 	validated, err := ValidateInstallation(directory, "acme")
 	if err != nil {
 		t.Fatal(err)
@@ -187,9 +168,7 @@ func TestLegacyInstallationMarkerDefaultsToV1(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(directory, MarkerName), data, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(directory, MarkerName), data, 0o600)
 	if _, err := ValidateInstallation(directory, "acme"); err == nil || !strings.Contains(err.Error(), "running on") {
 		t.Fatalf("platform mismatch error = %v", err)
 	}
@@ -199,16 +178,12 @@ func TestInstallPinnedRejectsMarketplaceManifestMismatch(t *testing.T) {
 	t.Parallel()
 	source := t.TempDir()
 	archive := archivetest.TarGz(t, archivetest.Entry{Name: "wuko-plugin-acme", Mode: 0o755, Data: []byte("binary")})
-	if err := os.WriteFile(filepath.Join(source, "plugin.tar.gz"), archive, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(source, "plugin.tar.gz"), archive, 0o600)
 	manifest, err := json.Marshal(Manifest{Version: 1, Namespace: "acme", PluginVersion: "1.0.0", Protocol: Protocol, Artifacts: []Artifact{{OS: runtime.GOOS, Arch: runtime.GOARCH, Path: "plugin.tar.gz", Format: "tar.gz", Entry: "wuko-plugin-acme", SHA256: digest(archive)}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(source, "plugin.json"), manifest, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(source, "plugin.json"), manifest, 0o600)
 	root := t.TempDir()
 	if _, err := InstallPinned(t.Context(), source, strings.Repeat("a", 64), root, false, nil, io.Discard); err == nil || !strings.Contains(err.Error(), "manifest sha256 mismatch") {
 		t.Fatalf("error = %v", err)

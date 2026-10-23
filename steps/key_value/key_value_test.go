@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -393,9 +394,7 @@ func TestRunReportsWhichFieldIsUnrendered(t *testing.T) {
 
 func TestFailedOperationsReportNoOutputs(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "prefs.json"), []byte("[1,2"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(dir, "prefs.json"), []byte("[1,2"), 0o600)
 	runner, err := New(config("get", "theme", nil, false))
 	if err != nil {
 		t.Fatal(err)
@@ -411,9 +410,7 @@ func TestFailedOperationsReportNoOutputs(t *testing.T) {
 
 func TestNumbersNoGoTypeHoldsStayJSONShapes(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "prefs.json"), []byte(`{"huge": 1e400}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(dir, "prefs.json"), []byte(`{"huge": 1e400}`), 0o600)
 	runner, err := New(config("get", "huge", nil, false))
 	if err != nil {
 		t.Fatal(err)

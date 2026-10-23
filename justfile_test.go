@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/up2jj/wuko/internal/testfs"
 )
 
 func TestJustRunPreservesQuotedArguments(t *testing.T) {
@@ -19,9 +21,7 @@ func TestJustRunPreservesQuotedArguments(t *testing.T) {
 		t.Skip("just is not installed")
 	}
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "go"), []byte("#!/bin/sh\nprintf '%s\\000' \"$@\"\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(dir, "go"), []byte("#!/bin/sh\nprintf '%s\\000' \"$@\"\n"), 0o755)
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	args := []string{"run", "check", "--var", "message=hello world", "--var", "pattern=*.go", "--var", "literal=$(printf expanded)", "--env", `QUOTE=a'b"c`}
 	command := exec.CommandContext(t.Context(), just, append([]string{"run"}, args...)...)

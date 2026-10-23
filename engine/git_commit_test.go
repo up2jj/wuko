@@ -2,7 +2,6 @@ package engine_test
 
 import (
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -10,6 +9,7 @@ import (
 	"github.com/up2jj/wuko/engine"
 	"github.com/up2jj/wuko/internal/gittest"
 	"github.com/up2jj/wuko/internal/steptest"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/process/processtest"
 	"github.com/up2jj/wuko/step"
 	assertstep "github.com/up2jj/wuko/steps/assert"
@@ -20,9 +20,7 @@ import (
 func TestGitCommitRendersConfigurationAndCommitsOutputs(t *testing.T) {
 	t.Parallel()
 	dir := gittest.Init(t)
-	if err := os.WriteFile(filepath.Join(dir, "change.txt"), []byte("content\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(dir, "change.txt"), []byte("content\n"), 0o644)
 	definition := steptest.Definition(t, "commit",
 		workflow.Step{ID: "commit", Type: "git_commit", With: map[string]any{
 			"message": "{{ .vars.message }}", "body": "{{ .vars.body }}", "paths": []any{"{{ .vars.path }}"},

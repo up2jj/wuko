@@ -4,13 +4,13 @@ import (
 	"context"
 	"errors"
 	"maps"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/up2jj/wuko/executor"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/process"
 )
 
@@ -33,9 +33,7 @@ func (r *recordedCommand) run(_ context.Context, options process.Options) (proce
 
 func TestOpenUsesActiveEnvironmentAndRuntimeSecretSpec(t *testing.T) {
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "secretspec.toml"), []byte("fixture"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(root, "secretspec.toml"), []byte("fixture"), 0o600)
 	command := &recordedCommand{}
 	provider := &ExecutorProvider{
 		config:  ExecutorConfig{Directory: root, Secrets: &SecretsConfig{Mode: "runtime"}},

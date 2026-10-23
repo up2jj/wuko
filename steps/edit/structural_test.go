@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/internal/steptest"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -23,9 +24,7 @@ func runStructuralCases(t *testing.T, file string, tests []structuralCase) {
 		t.Run(test.name, func(t *testing.T) {
 			directory := t.TempDir()
 			path := filepath.Join(directory, file)
-			if err := os.WriteFile(path, []byte(test.input), 0o640); err != nil {
-				t.Fatal(err)
-			}
+			testfs.WriteFile(t, path, []byte(test.input), 0o640)
 			test.config["from"] = map[string]any{"file": file}
 			runner := steptest.Build(t, New, test.config)
 			if _, err := runner.Run(t.Context(), step.Request{RunDir: directory}); err != nil {
@@ -617,9 +616,7 @@ func TestStructuralEditsSettleAfterOneApplication(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			directory := t.TempDir()
 			path := filepath.Join(directory, test.file)
-			if err := os.WriteFile(path, []byte(test.input), 0o640); err != nil {
-				t.Fatal(err)
-			}
+			testfs.WriteFile(t, path, []byte(test.input), 0o640)
 			test.config["from"] = map[string]any{"file": test.file}
 			runner := steptest.Build(t, New, test.config)
 			for pass := range 2 {
@@ -674,9 +671,7 @@ func TestStructuralEditsRefuseUnsupportedTargets(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			directory := t.TempDir()
 			path := filepath.Join(directory, test.file)
-			if err := os.WriteFile(path, []byte(test.input), 0o640); err != nil {
-				t.Fatal(err)
-			}
+			testfs.WriteFile(t, path, []byte(test.input), 0o640)
 			test.config["from"] = map[string]any{"file": test.file}
 			runner := steptest.Build(t, New, test.config)
 			_, err := runner.Run(t.Context(), step.Request{RunDir: directory})

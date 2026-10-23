@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/internal/archivetest"
+	"github.com/up2jj/wuko/internal/testfs"
 )
 
 const validAction = `version: 1
@@ -86,7 +87,7 @@ func TestLoaderResolvesAndCachesLocalActionFileAndDirectory(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	actionDir := filepath.Join(dir, "actions", "build")
-	writeTestFile(t, filepath.Join(actionDir, "action.yaml"), `version: 1
+	testfs.Write(t, filepath.Join(actionDir, "action.yaml"), `version: 1
 name: local-build
 templates:
   message:
@@ -100,9 +101,9 @@ steps:
     type: capture
     with: {value: '{{ template "message" . }}'}
 `)
-	writeTestFile(t, filepath.Join(actionDir, "templates", "message.tmpl"), "building {{ .inputs.target }}")
+	testfs.Write(t, filepath.Join(actionDir, "templates", "message.tmpl"), "building {{ .inputs.target }}")
 	workflowPath := filepath.Join(dir, "workflow.yaml")
-	writeTestFile(t, workflowPath, `version: 1
+	testfs.Write(t, workflowPath, `version: 1
 name: caller
 vars: {action: build}
 steps:
@@ -143,9 +144,9 @@ steps:
 func TestLoaderResolvesLocalActionScalarsThatCouldReadAsGitHubLocators(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	writeTestFile(t, filepath.Join(dir, "actions", "build", "action.yml"), validAction)
-	writeTestFile(t, filepath.Join(dir, "actions", "build:staging", "action.yml"), validAction)
-	writeTestFile(t, filepath.Join(dir, "workflow.yaml"), `version: 1
+	testfs.Write(t, filepath.Join(dir, "actions", "build", "action.yml"), validAction)
+	testfs.Write(t, filepath.Join(dir, "actions", "build:staging", "action.yml"), validAction)
+	testfs.Write(t, filepath.Join(dir, "workflow.yaml"), `version: 1
 name: caller
 steps:
   - id: bare
@@ -180,9 +181,9 @@ steps:
 func TestLoaderResolvesLocalActionRelativeToRequiredFragment(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	writeTestFile(t, filepath.Join(dir, "workflow.yaml"), "version: 1\nname: caller\nsteps:\n  - require: fragments/build.yaml\n")
-	writeTestFile(t, filepath.Join(dir, "fragments", "build.yaml"), "- id: build\n  uses: ./actions/build\n  with: {target: linux}\n")
-	writeTestFile(t, filepath.Join(dir, "fragments", "actions", "build", "action.yml"), validAction)
+	testfs.Write(t, filepath.Join(dir, "workflow.yaml"), "version: 1\nname: caller\nsteps:\n  - require: fragments/build.yaml\n")
+	testfs.Write(t, filepath.Join(dir, "fragments", "build.yaml"), "- id: build\n  uses: ./actions/build\n  with: {target: linux}\n")
+	testfs.Write(t, filepath.Join(dir, "fragments", "actions", "build", "action.yml"), validAction)
 
 	definition, err := NewLoader(nil).Load(t.Context(), filepath.Join(dir, "workflow.yaml"), LoadOptions{RunDir: t.TempDir()})
 	if err != nil {
@@ -210,34 +211,28 @@ func TestLoaderRejectsInvalidLocalActionSources(t *testing.T) {
 		{name: "missing", uses: func(string) string { return "./missing" }, want: "locating local action"},
 		{name: "empty directory", uses: func(string) string { return "./action" }, setup: func(t *testing.T, dir string) {
 			t.Helper()
-			if err := os.MkdirAll(filepath.Join(dir, "action"), 0o755); err != nil {
-				t.Fatal(err)
-			}
+			testfs.MkdirAll(t, filepath.Join(dir, "action"), 0o755)
 		}, want: "must contain action.yml or action.yaml"},
 		{name: "ambiguous directory", uses: func(string) string { return "./action" }, setup: func(t *testing.T, dir string) {
 			t.Helper()
-			writeTestFile(t, filepath.Join(dir, "action", "action.yml"), validAction)
-			writeTestFile(t, filepath.Join(dir, "action", "action.yaml"), validAction)
+			testfs.Write(t, filepath.Join(dir, "action", "action.yml"), validAction)
+			testfs.Write(t, filepath.Join(dir, "action", "action.yaml"), validAction)
 		}, want: "contains both"},
 		{name: "archive", uses: func(string) string { return "./action.zip" }, setup: func(t *testing.T, dir string) {
 			t.Helper()
-			if err := os.WriteFile(filepath.Join(dir, "action.zip"), makeZIP(t, map[string]archiveTestFile{"action.yml": {data: []byte(validAction), mode: 0o644}}), 0o644); err != nil {
-				t.Fatal(err)
-			}
+			testfs.WriteFile(t, filepath.Join(dir, "action.zip"), makeZIP(t, map[string]archiveTestFile{"action.yml": {data: []byte(validAction), mode: 0o644}}), 0o644)
 		}, want: "archives are not supported"},
 		{name: "oversized manifest", uses: func(string) string { return "./action.yaml" }, setup: func(t *testing.T, dir string) {
 			t.Helper()
-			if err := os.WriteFile(filepath.Join(dir, "action.yaml"), bytes.Repeat([]byte("x"), maxManifestSize+1), 0o644); err != nil {
-				t.Fatal(err)
-			}
+			testfs.WriteFile(t, filepath.Join(dir, "action.yaml"), bytes.Repeat([]byte("x"), maxManifestSize+1), 0o644)
 		}, want: "exceeds"},
 		{name: "malformed manifest", uses: func(string) string { return "./action.yaml" }, setup: func(t *testing.T, dir string) {
 			t.Helper()
-			writeTestFile(t, filepath.Join(dir, "action.yaml"), "version: [")
+			testfs.Write(t, filepath.Join(dir, "action.yaml"), "version: [")
 		}, want: "decoding local action manifest"},
 		{name: "checksum", uses: func(string) string { return "./action.yaml" }, setup: func(t *testing.T, dir string) {
 			t.Helper()
-			writeTestFile(t, filepath.Join(dir, "action.yaml"), validAction)
+			testfs.Write(t, filepath.Join(dir, "action.yaml"), validAction)
 		}, sha: strings.Repeat("0", 64), want: "sha256 is not supported for local actions"},
 	}
 	for _, tt := range tests {
@@ -250,7 +245,7 @@ func TestLoaderRejectsInvalidLocalActionSources(t *testing.T) {
 			if tt.sha != "" {
 				sha = "    sha256: " + tt.sha + "\n"
 			}
-			writeTestFile(t, filepath.Join(dir, "workflow.yaml"), "version: 1\nname: caller\nsteps:\n  - id: action\n    uses: "+tt.uses(dir)+"\n"+sha)
+			testfs.Write(t, filepath.Join(dir, "workflow.yaml"), "version: 1\nname: caller\nsteps:\n  - id: action\n    uses: "+tt.uses(dir)+"\n"+sha)
 			_, err := NewLoader(nil).Load(t.Context(), filepath.Join(dir, "workflow.yaml"), LoadOptions{RunDir: t.TempDir()})
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("error = %v, want substring %q", err, tt.want)
@@ -511,9 +506,7 @@ steps:
         - "{{ .workflow.dir }}/command-ran"
     with: {target: darwin}
 `
-	if err := os.WriteFile(workflowPath, []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, workflowPath, []byte(data), 0o644)
 	definition, err := NewLoader(nil).Load(t.Context(), workflowPath, LoadOptions{
 		Vars:   map[string]any{"release": "v1"},
 		Env:    map[string]string{"TOKEN": "secret", "ACTION_MANIFEST": validAction},
@@ -559,9 +552,7 @@ steps:
             - "{{ .run.dir }}"
         with: {target: linux}
 `
-	if err := os.WriteFile(workflowPath, []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, workflowPath, []byte(data), 0o644)
 	definition, err := NewLoader(nil).Load(t.Context(), workflowPath, LoadOptions{
 		Env: map[string]string{"ACTION_MANIFEST": validAction}, RunDir: root,
 	})
@@ -598,9 +589,7 @@ func TestLoaderAcceptsArchiveFromCommandSource(t *testing.T) {
 	t.Parallel()
 	payload := makeZIP(t, map[string]archiveTestFile{"action.yml": {data: []byte(validAction), mode: 0o644}})
 	archivePath := filepath.Join(t.TempDir(), "action.zip")
-	if err := os.WriteFile(archivePath, payload, 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, archivePath, payload, 0o644)
 	workflowPath := writeActionWorkflow(t, "version: 1\nname: command-archive\nsteps:\n  - id: remote\n    uses:\n      command: cat\n      args: [\""+archivePath+"\"]\n    with: {target: linux}\n")
 	definition, err := NewLoader(nil).Load(t.Context(), workflowPath, LoadOptions{RunDir: t.TempDir()})
 	if err != nil {
@@ -751,13 +740,9 @@ func TestDiscoverDoesNotFetchRemoteActions(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	dir := filepath.Join(root, ".wuko", "workflows")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, dir, 0o755)
 	data := "version: 1\nname: offline\nsteps:\n  - id: remote\n    uses: https://unreachable.invalid/action\n"
-	if err := os.WriteFile(filepath.Join(dir, "offline.yaml"), []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(dir, "offline.yaml"), []byte(data), 0o644)
 	if _, err := Discover(root, "", ""); err != nil {
 		t.Fatal(err)
 	}
@@ -801,9 +786,7 @@ func testResponse(status int, body []byte) *http.Response {
 func writeActionWorkflow(t *testing.T, data string) string {
 	t.Helper()
 	filename := filepath.Join(t.TempDir(), "workflow.yaml")
-	if err := os.WriteFile(filename, []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filename, []byte(data), 0o644)
 	return filename
 }
 

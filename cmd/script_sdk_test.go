@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/engine"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/scriptsdk"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/steps/shell"
@@ -52,9 +53,7 @@ func TestBashSDKInjectedFunctionsWithoutExternalTools(t *testing.T) {
 	}
 	dir := t.TempDir()
 	prior := filepath.Join(dir, "prior ' startup.bash")
-	if err := os.WriteFile(prior, []byte(`export PRIOR_LOADED="$(wuko_helper upper startup)"`), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, prior, []byte(`export PRIOR_LOADED="$(wuko_helper upper startup)"`), 0o600)
 	source := `set -euo pipefail
 printf 'ordinary stdout\n'
 printf 'ordinary stderr\n' >&2
@@ -81,9 +80,7 @@ if wuko_output_json bad 'not-json' >unexpected.out 2>expected.err; then exit 91;
 [[ ! -s unexpected.out && -s expected.err ]]
 `
 	file := filepath.Join(dir, "script with spaces.bash")
-	if err := os.WriteFile(file, []byte(source), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, file, []byte(source), 0o600)
 	for _, mode := range []string{"script", "file", "argv"} {
 		t.Run(mode, func(t *testing.T) {
 			raw := map[string]any{
@@ -179,9 +176,7 @@ func testBashSDKFallback(t *testing.T, bash, port string) {
 	if !replaced {
 		t.Fatal("missing bootstrap listener configuration")
 	}
-	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte(strings.Join(lines, "\n")), 0o600)
 	command := exec.CommandContext(t.Context(), bash, "-c", `set -euo pipefail; wuko_output label "$(wuko_helper upper fallback)"`)
 	for key, value := range environment {
 		command.Env = append(command.Env, key+"="+value)

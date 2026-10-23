@@ -3,12 +3,13 @@ package cmd
 import (
 	"bytes"
 	"io"
-	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/up2jj/wuko/internal/testfs"
 )
 
 func TestEditorCommandParsesQuotedArguments(t *testing.T) {
@@ -51,9 +52,7 @@ func TestOpenWorkflowEditorPreservesQuotedPathAndArguments(t *testing.T) {
 		t.Skip("fake editor requires a POSIX shell")
 	}
 	path := filepath.Join(t.TempDir(), "fake editor")
-	if err := os.WriteFile(path, []byte("#!/bin/sh\nprintf '%s\\000' \"$@\"\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte("#!/bin/sh\nprintf '%s\\000' \"$@\"\n"), 0o755)
 	for _, variable := range []string{"VISUAL", "EDITOR"} {
 		t.Run(variable, func(t *testing.T) {
 			var output bytes.Buffer

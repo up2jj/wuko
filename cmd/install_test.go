@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 	envload "github.com/up2jj/wuko/environment"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/steps/shell"
 	"github.com/up2jj/wuko/workflow"
@@ -50,9 +51,7 @@ func writeLifecycleSource(t *testing.T, directory, name, install, uninstall stri
 	if uninstall != "" {
 		data += "uninstall:\n  - id: uninstall\n    type: shell\n    with:\n      script: " + uninstall + "\n"
 	}
-	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte(data), 0o644)
 	return path
 }
 
@@ -101,18 +100,14 @@ func TestUninstallWorkflowRequiresConfirmationAndRunsHookAfterApproval(t *testin
 	t.Parallel()
 	root, home := t.TempDir(), t.TempDir()
 	directory := filepath.Join(root, ".wuko", "workflows")
-	if err := os.MkdirAll(directory, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, directory, 0o755)
 	path := writeLifecycleSource(t, root, "remove", "", "pwd > uninstall-dir")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	installed := filepath.Join(directory, "remove.yaml")
-	if err := os.WriteFile(installed, data, 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, installed, data, 0o644)
 	registry := lifecycleTestRegistry(t)
 	command := lifecycleTestCommand(root, home, registry, true, func(context.Context, io.Reader, io.Writer, string, bool) (bool, error) {
 		return false, nil
@@ -151,18 +146,14 @@ func TestUninstallGlobalFlagAndYesBypassConfirmation(t *testing.T) {
 	t.Parallel()
 	root, home := t.TempDir(), t.TempDir()
 	directory := filepath.Join(home, ".wuko", "workflows")
-	if err := os.MkdirAll(directory, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, directory, 0o755)
 	path := writeLifecycleSource(t, root, "global-remove", "", "pwd > uninstall-dir")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	installed := filepath.Join(directory, "global-remove.yaml")
-	if err := os.WriteFile(installed, data, 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, installed, data, 0o644)
 	called := false
 	command := lifecycleTestCommand(root, home, lifecycleTestRegistry(t), false, func(context.Context, io.Reader, io.Writer, string, bool) (bool, error) {
 		called = true
@@ -184,18 +175,14 @@ func TestUninstallNonInteractiveWithoutYesFailsBeforeHook(t *testing.T) {
 	t.Parallel()
 	root, home := t.TempDir(), t.TempDir()
 	directory := filepath.Join(root, ".wuko", "workflows")
-	if err := os.MkdirAll(directory, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, directory, 0o755)
 	path := writeLifecycleSource(t, root, "noninteractive", "", "touch uninstall-ran")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	installed := filepath.Join(directory, "noninteractive.yaml")
-	if err := os.WriteFile(installed, data, 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, installed, data, 0o644)
 	command := lifecycleTestCommand(root, home, lifecycleTestRegistry(t), false, func(context.Context, io.Reader, io.Writer, string, bool) (bool, error) {
 		t.Fatal("confirmation should not be called")
 		return false, nil
@@ -214,14 +201,10 @@ func TestInstallFailedHookPreservesExistingWorkflow(t *testing.T) {
 	t.Parallel()
 	root, home := t.TempDir(), t.TempDir()
 	directory := filepath.Join(root, ".wuko", "workflows")
-	if err := os.MkdirAll(directory, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, directory, 0o755)
 	existing := filepath.Join(directory, "replace.yaml")
 	old := "version: 1\nname: replace\nsteps:\n  - id: old\n    type: shell\n    with: {command: true}\n"
-	if err := os.WriteFile(existing, []byte(old), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, existing, []byte(old), 0o644)
 	source := writeLifecycleSource(t, root, "replace", "exit 1", "")
 	command := lifecycleTestCommand(root, home, lifecycleTestRegistry(t), false, nil)
 	command.SetArgs([]string{"install", source})
@@ -241,9 +224,7 @@ func TestInstallRejectsLocalCompanionFiles(t *testing.T) {
 	t.Parallel()
 	root, home := t.TempDir(), t.TempDir()
 	source := writeLifecycleSource(t, root, "standalone", "./install.sh", "")
-	if err := os.WriteFile(filepath.Join(root, "install.sh"), []byte("echo setup\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(root, "install.sh"), []byte("echo setup\n"), 0o755)
 	command := lifecycleTestCommand(root, home, lifecycleTestRegistry(t), false, nil)
 	command.SetArgs([]string{"install", source})
 
@@ -258,21 +239,13 @@ func TestUninstallGlobalDoesNotRemoveShadowingLocalWorkflow(t *testing.T) {
 	root, home := t.TempDir(), t.TempDir()
 	localDir := filepath.Join(root, ".wuko", "workflows")
 	globalDir := filepath.Join(home, ".wuko", "workflows")
-	if err := os.MkdirAll(localDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(globalDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, localDir, 0o755)
+	testfs.MkdirAll(t, globalDir, 0o755)
 	data := []byte("version: 1\nname: shared\nsteps:\n  - id: run\n    type: shell\n    with: {command: true}\n")
 	localPath := filepath.Join(localDir, "shared.yaml")
 	globalPath := filepath.Join(globalDir, "shared.yaml")
-	if err := os.WriteFile(localPath, data, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(globalPath, data, 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, localPath, data, 0o644)
+	testfs.WriteFile(t, globalPath, data, 0o644)
 	command := lifecycleTestCommand(root, home, lifecycleTestRegistry(t), false, nil)
 	command.SetArgs([]string{"uninstall", "--global", "--yes", "shared"})
 	if err := command.ExecuteContext(t.Context()); err != nil {
@@ -290,9 +263,7 @@ func TestUninstallInstalledPackageRunsHookAndRemovesSidecars(t *testing.T) {
 	t.Parallel()
 	root, home := t.TempDir(), t.TempDir()
 	packageDir := filepath.Join(root, ".wuko", "workflows", "marketplace", "release")
-	if err := os.MkdirAll(packageDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, packageDir, 0o755)
 	definition := `version: 1
 name: release
 steps:
@@ -305,15 +276,9 @@ uninstall:
     with:
       script: pwd > ../uninstall-dir
 `
-	if err := os.WriteFile(filepath.Join(packageDir, "wuko.yaml"), []byte(definition), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(packageDir, "defaults.json"), []byte(`{"target":"staging"}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(packageDir, workflow.WorkflowPackageMarkerName), []byte(`{"version":1,"name":"release"}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(packageDir, "wuko.yaml"), []byte(definition), 0o644)
+	testfs.WriteFile(t, filepath.Join(packageDir, "defaults.json"), []byte(`{"target":"staging"}`), 0o644)
+	testfs.WriteFile(t, filepath.Join(packageDir, workflow.WorkflowPackageMarkerName), []byte(`{"version":1,"name":"release"}`), 0o644)
 	wantRunDir, err := filepath.EvalSymlinks(packageDir)
 	if err != nil {
 		t.Fatal(err)
@@ -340,9 +305,7 @@ func TestInstalledWorkflowElevationFollowsRecordedProvenance(t *testing.T) {
 	t.Parallel()
 	directory := t.TempDir()
 	write := func(name, contents string) {
-		if err := os.WriteFile(workflowInstallMarkerPath(directory, name), []byte(contents), 0o644); err != nil {
-			t.Fatal(err)
-		}
+		testfs.WriteFile(t, workflowInstallMarkerPath(directory, name), []byte(contents), 0o644)
 	}
 	write("local", `{"version":1,"name":"local","source":"./local.yaml","remote":false}`)
 	write("fetched", `{"version":1,"name":"fetched","source":"https://example.com/w.yaml","remote":true}`)

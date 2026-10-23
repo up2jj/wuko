@@ -4,12 +4,14 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/up2jj/wuko/internal/testfs"
 )
 
 func TestLoadWorktreeBlock(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "workflow.yaml")
-	writeTestFile(t, path, `version: 1
+	testfs.Write(t, path, `version: 1
 name: worktree
 steps:
   - id: changes
@@ -54,7 +56,7 @@ func TestWorktreeBlockValidation(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "workflow.yaml")
-			writeTestFile(t, path, "version: 1\nname: invalid\nsteps:\n"+test.body)
+			testfs.Write(t, path, "version: 1\nname: invalid\nsteps:\n"+test.body)
 			_, err := Load(path)
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("error = %v, want substring %q", err, test.want)

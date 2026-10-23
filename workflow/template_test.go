@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/secret"
 	"go.yaml.in/yaml/v3"
 )
@@ -231,9 +232,7 @@ func TestLoadResolvesFileBackedTemplate(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(dir, "templates"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "templates", "message.tmpl"), []byte(`Hello {{ .vars.name }}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(dir, "templates", "message.tmpl"), []byte(`Hello {{ .vars.name }}`), 0o644)
 	workflowPath := filepath.Join(dir, "workflow.yaml")
 	data := `version: 1
 name: templates
@@ -245,9 +244,7 @@ steps:
     type: shell
     with: {command: echo}
 `
-	if err := os.WriteFile(workflowPath, []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, workflowPath, []byte(data), 0o644)
 	definition, err := loadLocal(workflowPath)
 	if err != nil {
 		t.Fatal(err)
@@ -289,9 +286,7 @@ func TestLoadRejectsInvalidTemplateFiles(t *testing.T) {
 			dir := t.TempDir()
 			workflowPath := filepath.Join(dir, "workflow.yaml")
 			data := "version: 1\nname: templates\ntemplates:\n  message:\n    file: " + tt.file + "\nsteps:\n  - id: run\n    type: shell\n"
-			if err := os.WriteFile(workflowPath, []byte(data), 0o644); err != nil {
-				t.Fatal(err)
-			}
+			testfs.WriteFile(t, workflowPath, []byte(data), 0o644)
 			_, err := loadLocal(workflowPath)
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("error = %v, want substring %q", err, tt.want)
@@ -303,14 +298,10 @@ func TestLoadRejectsInvalidTemplateFiles(t *testing.T) {
 func TestLoadRejectsOversizedTemplateFile(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "large.tmpl"), bytes.Repeat([]byte("x"), maxTemplateSize+1), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(dir, "large.tmpl"), bytes.Repeat([]byte("x"), maxTemplateSize+1), 0o644)
 	workflowPath := filepath.Join(dir, "workflow.yaml")
 	data := "version: 1\nname: templates\ntemplates:\n  large:\n    file: large.tmpl\nsteps:\n  - id: run\n    type: shell\n"
-	if err := os.WriteFile(workflowPath, []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, workflowPath, []byte(data), 0o644)
 	_, err := loadLocal(workflowPath)
 	if err == nil || !strings.Contains(err.Error(), "exceeds") {
 		t.Fatalf("error = %v", err)

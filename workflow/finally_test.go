@@ -4,6 +4,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/up2jj/wuko/internal/testfs"
 )
 
 func TestLoadExpandsFinallyRequirementsAndTracksLocations(t *testing.T) {
@@ -11,7 +13,7 @@ func TestLoadExpandsFinallyRequirementsAndTracksLocations(t *testing.T) {
 	dir := t.TempDir()
 	workflowPath := filepath.Join(dir, "workflow.yaml")
 	fragmentPath := filepath.Join(dir, "cleanup.yaml")
-	writeTestFile(t, workflowPath, `version: 1
+	testfs.Write(t, workflowPath, `version: 1
 name: cleanup
 steps:
   - id: work
@@ -19,7 +21,7 @@ steps:
 finally:
   - require: cleanup.yaml
 `)
-	writeTestFile(t, fragmentPath, `steps:
+	testfs.Write(t, fragmentPath, `steps:
   - id: cleanup
     type: shell
 `)
@@ -39,7 +41,7 @@ func TestLoadRejectsDuplicateIDsAcrossStepsAndFinally(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "workflow.yaml")
-	writeTestFile(t, path, `version: 1
+	testfs.Write(t, path, `version: 1
 name: duplicate
 steps:
   - id: shared
@@ -113,7 +115,7 @@ finally:
 			t.Parallel()
 			dir := t.TempDir()
 			path := filepath.Join(dir, "workflow.yaml")
-			writeTestFile(t, path, body)
+			testfs.Write(t, path, body)
 			_, err := NewLoader(nil).Load(t.Context(), path, LoadOptions{RunDir: dir})
 			if err == nil || !strings.Contains(err.Error(), "not supported inside finally or defer") {
 				t.Fatalf("Load() error = %v", err)

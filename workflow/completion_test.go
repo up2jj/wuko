@@ -1,9 +1,10 @@
 package workflow
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/up2jj/wuko/internal/testfs"
 )
 
 func TestCompletionDiscoveryPreservesPrecedenceAndPackages(t *testing.T) {
@@ -21,12 +22,7 @@ func TestCompletionDiscoveryPreservesPrecedenceAndPackages(t *testing.T) {
 		filepath.Join(local, "marketplace", "release", WorkflowPackageMarkerName): `{"version":1,"name":"packaged"}`,
 		filepath.Join(local, "marketplace", "release", "fragment.yaml"):           "version: [",
 	} {
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
+		testfs.Write(t, path, content)
 	}
 	sources, err := DiscoverForCompletion(project, home, "")
 	if err != nil {
@@ -49,9 +45,7 @@ func TestCompletionDiscoveryPreservesPrecedenceAndPackages(t *testing.T) {
 func TestCompletionDiscoveryReportsDirectoryErrors(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, ".wuko"), nil, 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(root, ".wuko"), nil, 0o644)
 	if _, err := DiscoverForCompletion(root, "", ""); err == nil {
 		t.Fatal("expected invalid workflow directory to fail discovery")
 	}

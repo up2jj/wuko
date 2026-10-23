@@ -2,7 +2,6 @@ package transform
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -10,6 +9,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 
 	"github.com/up2jj/wuko/internal/steptest"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/steps/decode"
@@ -30,9 +30,7 @@ const fileSourceLines = `{"id": 1, "name": "b", "score": 1.50, "tags": ["x"], "b
 func writeSourceFile(t *testing.T, name, content string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), name)
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte(content), 0o600)
 	return path
 }
 

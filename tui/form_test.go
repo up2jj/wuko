@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -13,6 +12,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/up2jj/wuko/internal/testfs"
 )
 
 func updateForm(model formModel, message tea.Msg) formModel {
@@ -241,9 +241,7 @@ func TestFormSelectKeepsInvalidInitialValueUntilEdited(t *testing.T) {
 
 func TestFormPathBrowserReturnsToParent(t *testing.T) {
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "a.yaml"), []byte("a"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(root, "a.yaml"), []byte("a"), 0o600)
 	m := newFormModel(FormConfig{Fields: []FormField{{ID: "manifest", Type: "path", Label: "Manifest", Value: "", Path: &PathPickerConfig{Root: root, Kind: "file", Required: true}}}})
 	m = formKey(m, tea.KeyEnter)
 	if m.picker == nil {

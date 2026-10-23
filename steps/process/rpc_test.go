@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -191,9 +192,7 @@ func TestRPCSessionIsPublishedOnlyAfterReadiness(t *testing.T) {
 	if workerSession(registry, worker) != nil {
 		t.Fatal("the session was published while readiness was still pending")
 	}
-	if err := os.WriteFile(gate, nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, gate, nil, 0o600)
 	if err := <-started; err != nil {
 		t.Fatal(err)
 	}

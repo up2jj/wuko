@@ -2,19 +2,19 @@ package importvars
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 )
 
 func TestRunImportsWorkflowRelativeFiles(t *testing.T) {
 	root := t.TempDir()
-	writeTestFile(t, root, "defaults.json", `{"Name":"default","nested":{"old":true}}`)
-	writeTestFile(t, root, "override.toml", "name = \"override\"\n[nested]\nnew = true\n")
+	testfs.Write(t, filepath.Join(root, "defaults.json"), `{"Name":"default","nested":{"old":true}}`)
+	testfs.Write(t, filepath.Join(root, "override.toml"), "name = \"override\"\n[nested]\nnew = true\n")
 	runner, err := New(map[string]any{"files": []any{"defaults.json", "override.toml"}})
 	if err != nil {
 		t.Fatal(err)
@@ -34,7 +34,7 @@ func TestRunImportsWorkflowRelativeFiles(t *testing.T) {
 
 func TestRunReturnsNoPartialResult(t *testing.T) {
 	root := t.TempDir()
-	writeTestFile(t, root, "valid.json", `{"loaded":true}`)
+	testfs.Write(t, filepath.Join(root, "valid.json"), `{"loaded":true}`)
 	runner, err := New(map[string]any{"files": []any{"valid.json", "missing.toml"}})
 	if err != nil {
 		t.Fatal(err)
@@ -73,12 +73,5 @@ func TestRunHonorsCancellation(t *testing.T) {
 	result, err := runner.Run(ctx, step.Request{WorkflowDir: t.TempDir()})
 	if err != context.Canceled || len(result.Outputs) != 0 || len(result.Variables) != 0 {
 		t.Fatalf("result = %#v, error = %v", result, err)
-	}
-}
-
-func writeTestFile(t *testing.T, root, name, content string) {
-	t.Helper()
-	if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0o644); err != nil {
-		t.Fatal(err)
 	}
 }

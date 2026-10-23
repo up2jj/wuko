@@ -4,12 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/up2jj/wuko/internal/gittest"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/validation"
 )
@@ -60,14 +60,10 @@ func TestValidateJSONCollectsIndependentWorkflows(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	directory := filepath.Join(root, ".wuko", "workflows")
-	if err := os.MkdirAll(directory, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, directory, 0o755)
 	for _, name := range []string{"first", "second"} {
 		data := []byte("version: 1\nname: " + name + "\nsteps:\n  - id: broken\n")
-		if err := os.WriteFile(filepath.Join(directory, name+".yaml"), data, 0o644); err != nil {
-			t.Fatal(err)
-		}
+		testfs.WriteFile(t, filepath.Join(directory, name+".yaml"), data, 0o644)
 	}
 	var output bytes.Buffer
 	command := newRootCmd(dependencies{
@@ -96,14 +92,10 @@ func TestValidateJSONKeepsWorkflowIssuesWhenGitHookBindingFails(t *testing.T) {
 	t.Parallel()
 	root := gittest.Init(t)
 	directory := filepath.Join(root, ".wuko", "workflows")
-	if err := os.MkdirAll(directory, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, directory, 0o755)
 	for _, name := range []string{"first", "second"} {
 		data := []byte("version: 1\nname: " + name + "\nsteps:\n  - id: broken\n")
-		if err := os.WriteFile(filepath.Join(directory, name+".yaml"), data, 0o644); err != nil {
-			t.Fatal(err)
-		}
+		testfs.WriteFile(t, filepath.Join(directory, name+".yaml"), data, 0o644)
 	}
 	writeGitHookManifest(t, root, "pre-commit:\n    - workflow: second")
 	var output bytes.Buffer

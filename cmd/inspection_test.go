@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/steps/shell"
 	"github.com/up2jj/wuko/validation"
@@ -21,16 +22,14 @@ func TestInspectionCommandsLoadFilesAndStdinWithoutExecuting(t *testing.T) {
 			t.Run(name+"/"+filename, func(t *testing.T) {
 				root := t.TempDir()
 				for _, dir := range []string{"fragments/actions/record", ".wuko/workflows"} {
-					if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {
-						t.Fatal(err)
-					}
+					testfs.MkdirAll(t, filepath.Join(root, dir), 0o755)
 				}
 				// An unrelated malformed workflow must not prevent explicit inspection.
-				writeTestFile(t, filepath.Join(root, ".wuko/workflows/broken.yaml"), "version: [")
-				writeTestFile(t, filepath.Join(root, "fragments/steps.yaml"), "- id: selected\n  uses: ./actions/record\n")
+				testfs.Write(t, filepath.Join(root, ".wuko/workflows/broken.yaml"), "version: [")
+				testfs.Write(t, filepath.Join(root, "fragments/steps.yaml"), "- id: selected\n  uses: ./actions/record\n")
 				marker := filepath.Join(root, "executed")
 				action := "version: 1\nname: record\nsteps:\n  - id: touch\n    type: shell\n    with:\n      command: touch\n      args: [" + marker + "]\n"
-				writeTestFile(t, filepath.Join(root, "fragments/actions/record/action.yaml"), action)
+				testfs.Write(t, filepath.Join(root, "fragments/actions/record/action.yaml"), action)
 				data := `version: 1
 name: inspected
 invokable: false
@@ -50,7 +49,7 @@ targets:
 					deps.stdin = &failAfterEOFReader{reader: strings.NewReader(data)}
 					deps.isInteractive = func(io.Reader) bool { return true }
 				} else {
-					writeTestFile(t, filepath.Join(root, filename), data)
+					testfs.Write(t, filepath.Join(root, filename), data)
 					deps.stdin = strings.NewReader("not workflow YAML")
 				}
 				command := newRootCmd(deps)
@@ -93,7 +92,7 @@ func TestValidateFileJSONReportsLogicalSources(t *testing.T) {
 					deps.stdin = strings.NewReader(data)
 					wantSource = "stdin"
 				} else {
-					writeTestFile(t, wantSource, data)
+					testfs.Write(t, wantSource, data)
 				}
 				command := newRootCmd(deps)
 				command.SetArgs([]string{"validate", "--file", filename, "--format", "json"})
@@ -124,10 +123,8 @@ func TestInspectionStdinValidatesNamedDependencies(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			root := t.TempDir()
 			path := filepath.Join(root, ".wuko", "workflows", "prepare.yaml")
-			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-				t.Fatal(err)
-			}
-			writeTestFile(t, path, "version: 1\nname: prepare\ninvokable: false\nsteps:\n  - id: invalid\n    type: shell\n    with: {commnad: echo}\n")
+			testfs.MkdirAll(t, filepath.Dir(path), 0o755)
+			testfs.Write(t, path, "version: 1\nname: prepare\ninvokable: false\nsteps:\n  - id: invalid\n    type: shell\n    with: {commnad: echo}\n")
 			var output bytes.Buffer
 			deps := inspectionTestDependencies(t, root, &output)
 			deps.stdin = strings.NewReader("version: 1\nname: streamed\ndepends_on: {build: prepare}\nsteps: [{return: {outputs: {}}}]\n")

@@ -11,6 +11,7 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/up2jj/wuko/internal/steptest"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -58,9 +59,7 @@ func TestNewAcceptsTemplatedConfiguration(t *testing.T) {
 func TestLogWaitContinuesAfterEventOverflow(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "app.log")
-	if err := os.WriteFile(path, []byte("starting\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte("starting\n"), 0o600)
 	runner, watcher := newRunnerWithFakeWatcher(t, map[string]any{"path": path, "pattern": "ready"})
 	resultCh := runAsync(t, runner, request(root))
 	<-watcher.added
@@ -80,9 +79,7 @@ func TestLogWaitContinuesAfterEventOverflow(t *testing.T) {
 func TestLogWaitMatchesExistingContentAndNamedCaptures(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "app.log")
-	if err := os.WriteFile(path, []byte("starting\nready id=42\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte("starting\nready id=42\n"), 0o600)
 	runner := steptest.Build(t, New, map[string]any{
 		"path": path, "pattern": `ready id=(?P<id>\d+)`,
 	})
@@ -103,9 +100,7 @@ func TestLogWaitMatchesExistingContentAndNamedCaptures(t *testing.T) {
 func TestLogWaitFollowsAppends(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "app.log")
-	if err := os.WriteFile(path, []byte("starting\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte("starting\n"), 0o600)
 	runner, ready := newRunnerWithReadyWatcher(t, map[string]any{"path": path, "pattern": "ready"})
 	resultCh := runAsync(t, runner, request(root))
 	<-ready
@@ -123,9 +118,7 @@ func TestLogWaitWaitsForCreation(t *testing.T) {
 	runner, ready := newRunnerWithReadyWatcher(t, map[string]any{"path": path, "pattern": "ready"})
 	resultCh := runAsync(t, runner, request(root))
 	<-ready
-	if err := os.WriteFile(path, []byte("ready\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte("ready\n"), 0o600)
 
 	result := receiveResult(t, resultCh)
 	if result.Outputs["match"] != "ready" {
@@ -151,9 +144,7 @@ func TestLogWaitResetsAfterTruncationAndReplacement(t *testing.T) {
 			name: "replacement",
 			update: func(t *testing.T, path string) {
 				temporary := path + ".new"
-				if err := os.WriteFile(temporary, []byte("ready\n"), 0o600); err != nil {
-					t.Fatal(err)
-				}
+				testfs.WriteFile(t, temporary, []byte("ready\n"), 0o600)
 				if err := os.Rename(temporary, path); err != nil {
 					t.Fatal(err)
 				}
@@ -164,9 +155,7 @@ func TestLogWaitResetsAfterTruncationAndReplacement(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			root := t.TempDir()
 			path := filepath.Join(root, "app.log")
-			if err := os.WriteFile(path, []byte("old content\n"), 0o600); err != nil {
-				t.Fatal(err)
-			}
+			testfs.WriteFile(t, path, []byte("old content\n"), 0o600)
 			runner, ready := newRunnerWithReadyWatcher(t, map[string]any{"path": path, "pattern": "ready"})
 			resultCh := runAsync(t, runner, request(root))
 			<-ready
@@ -183,9 +172,7 @@ func TestLogWaitResetsAfterTruncationAndReplacement(t *testing.T) {
 func TestLogWaitFailsWhenMaxBytesIsExceeded(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "app.log")
-	if err := os.WriteFile(path, []byte("long content"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte("long content"), 0o600)
 	runner := steptest.Build(t, New, map[string]any{"path": path, "pattern": "ready", "max_bytes": "4B"})
 	_, err := runner.Run(t.Context(), request(root))
 	if err == nil || !strings.Contains(err.Error(), "exceeded max_bytes") {

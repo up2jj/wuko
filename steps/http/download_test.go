@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -89,9 +90,7 @@ func TestDownloadOverwritePolicy(t *testing.T) {
 	defer server.Close()
 
 	destination := filepath.Join(t.TempDir(), "artifact.txt")
-	if err := os.WriteFile(destination, []byte("original"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, destination, []byte("original"), 0o600)
 	runner, err := New(map[string]any{
 		"url": server.URL, "download": map[string]any{"path": destination},
 	})

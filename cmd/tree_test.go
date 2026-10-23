@@ -4,12 +4,12 @@ import (
 	"bytes"
 	"io"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
 	"go.yaml.in/yaml/v3"
@@ -19,9 +19,7 @@ func TestTreeCommandDisplaysWorkflowAndRemoteActionSteps(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	workflowDir := filepath.Join(root, ".wuko", "workflows")
-	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, workflowDir, 0o755)
 	definition := `version: 1
 name: release
 vars: {release: default}
@@ -34,12 +32,8 @@ steps:
     type: shell
     if: steps.build.ready
 `
-	if err := os.WriteFile(filepath.Join(workflowDir, "release.yaml"), []byte(definition), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "variables.json"), []byte(`{"release":"v1"}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(workflowDir, "release.yaml"), []byte(definition), 0o644)
+	testfs.WriteFile(t, filepath.Join(root, "variables.json"), []byte(`{"release":"v1"}`), 0o644)
 	action := `version: 1
 name: build
 steps:
@@ -97,9 +91,7 @@ func TestTreeCommandSupportsFileAndRemoteWorkflowSelectors(t *testing.T) {
 			root := t.TempDir()
 			path := filepath.Join(root, "workflow.yaml")
 			data := "version: 1\nname: selected\nsteps:\n  - id: run\n    type: shell\n"
-			if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
-				t.Fatal(err)
-			}
+			testfs.WriteFile(t, path, []byte(data), 0o644)
 			client := &http.Client{Transport: commandRoundTripFunc(func(request *http.Request) (*http.Response, error) {
 				return &http.Response{StatusCode: http.StatusOK, Status: "200 OK", Header: make(http.Header), Body: io.NopCloser(strings.NewReader(data)), Request: request}, nil
 			})}

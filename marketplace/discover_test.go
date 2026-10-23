@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/workflow"
 )
 
@@ -15,12 +16,7 @@ func discoverWriteFiles(t *testing.T, root string, files ...string) {
 	t.Helper()
 	for _, name := range files {
 		target := filepath.Join(root, filepath.FromSlash(name))
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(target, []byte("version: 1\n"), 0o644); err != nil {
-			t.Fatal(err)
-		}
+		testfs.Write(t, target, "version: 1\n")
 	}
 }
 
@@ -33,9 +29,7 @@ func TestDiscoverPackagesFindsNestedPackagesInOrder(t *testing.T) {
 		"alpha/deploy/scripts/run.sh",
 		"alpha/build/wuko.yaml",
 	)
-	if err := os.MkdirAll(filepath.Join(root, "empty", "deeper"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, filepath.Join(root, "empty", "deeper"), 0o755)
 	packages, err := DiscoverPackages(root)
 	if err != nil {
 		t.Fatal(err)
@@ -88,9 +82,7 @@ func TestDiscoverPackagesRejectsInvalidLayouts(t *testing.T) {
 		{
 			name: "manifest is a directory",
 			setup: func(t *testing.T, root string) {
-				if err := os.MkdirAll(filepath.Join(root, "pkg", "wuko.yaml"), 0o755); err != nil {
-					t.Fatal(err)
-				}
+				testfs.MkdirAll(t, filepath.Join(root, "pkg", "wuko.yaml"), 0o755)
 			},
 			want: "is not a regular file",
 		},

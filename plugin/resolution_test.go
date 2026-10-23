@@ -19,6 +19,7 @@ import (
 
 	"github.com/up2jj/wuko/internal/archivetest"
 	"github.com/up2jj/wuko/internal/filelock"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/workflow"
 )
 
@@ -77,12 +78,8 @@ func mustRead(t *testing.T, path string) []byte {
 }
 func mustWrite(t *testing.T, path string, data []byte) {
 	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, data, 0600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, filepath.Dir(path), 0700)
+	testfs.WriteFile(t, path, data, 0600)
 }
 
 func TestLocalPinsReuseOfflineAndUpdateExplicitly(t *testing.T) {
@@ -415,9 +412,7 @@ func TestCachePopulationCancellationLeavesNoRelease(t *testing.T) {
 	manifest, archive := releaseBytes(t, "acme", "1")
 	manager := resolutionManager(t, t.TempDir(), transportFor(manifest, archive))
 	directory, _ := manager.store.directory(digest(manifest))
-	if err := os.MkdirAll(filepath.Dir(directory), 0700); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, filepath.Dir(directory), 0700)
 	handle, err := filelock.Acquire(t.Context(), directory+".lock")
 	if err != nil {
 		t.Fatal(err)

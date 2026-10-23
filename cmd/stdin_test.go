@@ -5,12 +5,12 @@ import (
 	"context"
 	"errors"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/steps/shell"
 )
@@ -18,12 +18,8 @@ import (
 func TestRunCommandReadsWorkflowFromStdinNonInteractively(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(root, "fragments"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "fragments", "run.yaml"), []byte("- id: inspect\n  type: capture_stdin\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, filepath.Join(root, "fragments"), 0o755)
+	testfs.WriteFile(t, filepath.Join(root, "fragments", "run.yaml"), []byte("- id: inspect\n  type: capture_stdin\n"), 0o644)
 	data := `version: 1
 name: streamed
 targets:
@@ -120,9 +116,7 @@ func TestRunCommandTreatsDotSlashDashAsFile(t *testing.T) {
 	root := t.TempDir()
 	t.Chdir(root)
 	data := "version: 1\nname: dash-file\nsteps:\n  - id: run\n    type: capture_stdin\n"
-	if err := os.WriteFile(filepath.Join(root, "-"), []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(root, "-"), []byte(data), 0o644)
 	ran := false
 	registry := step.NewRegistry()
 	if err := registry.Register("capture_stdin", func(map[string]any) (step.Runner, error) {

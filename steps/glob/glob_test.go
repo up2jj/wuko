@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -199,12 +200,8 @@ func run(t *testing.T, runDir string, raw map[string]any) step.Result {
 func writeFile(t *testing.T, root, relative, content string, mode os.FileMode) {
 	t.Helper()
 	filePath := filepath.Join(root, filepath.FromSlash(relative))
-	if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filePath, []byte(content), mode); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, filepath.Dir(filePath), 0o755)
+	testfs.WriteFile(t, filePath, []byte(content), mode)
 	if err := os.Chmod(filePath, mode); err != nil {
 		t.Fatal(err)
 	}

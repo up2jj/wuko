@@ -6,11 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"os"
 	"strings"
 	"testing"
 
 	"github.com/up2jj/wuko/helper"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -107,9 +107,7 @@ func TestBashClientCancellationAndAuthentication(t *testing.T) {
 	bad := b.descriptor
 	bad.Token = "wrong"
 	data, _ := json.Marshal(bad)
-	if err := os.WriteFile(descriptor, data, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, descriptor, data, 0o600)
 	if err := RunBashClient(t.Context(), descriptor, []string{"helper", "wait"}, io.Discard); err == nil || !strings.Contains(err.Error(), "HTTP 401") {
 		t.Fatalf("authentication error = %v", err)
 	}

@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/internal/archivetest"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 	keyvaluestep "github.com/up2jj/wuko/steps/key_value"
 	"github.com/up2jj/wuko/steps/shell"
@@ -28,9 +29,7 @@ func TestRunRemoteActionUsesCLIValuesDuringLoading(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	workflowDir := filepath.Join(root, ".wuko", "workflows")
-	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, workflowDir, 0o755)
 	caller := `version: 1
 name: remote
 vars: {release: default, message: default}
@@ -40,9 +39,7 @@ steps:
     with:
       message: "{{ .vars.message }}"
 `
-	if err := os.WriteFile(filepath.Join(workflowDir, "remote.yaml"), []byte(caller), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(workflowDir, "remote.yaml"), []byte(caller), 0o644)
 	manifest := `version: 1
 name: echo
 inputs:
@@ -270,21 +267,15 @@ func TestValidateRemoteActionAcceptsVarFileAndEnvFlags(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	dir := filepath.Join(root, ".wuko", "workflows")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, dir, 0o755)
 	caller := `version: 1
 name: remote
 steps:
   - id: call
     uses: https://actions.example.test/{{ .vars.release }}/{{ .env.CHANNEL }}
 `
-	if err := os.WriteFile(filepath.Join(dir, "remote.yaml"), []byte(caller), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "variables.toml"), []byte("release = \"v2\"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(dir, "remote.yaml"), []byte(caller), 0o644)
+	testfs.WriteFile(t, filepath.Join(root, "variables.toml"), []byte("release = \"v2\"\n"), 0o644)
 	manifest := "version: 1\nname: validate\nsteps:\n  - id: run\n    type: shell\n    with: {script: 'true'}\n"
 	client := &http.Client{Transport: commandRoundTripFunc(func(request *http.Request) (*http.Response, error) {
 		if request.URL.Path != "/v2/stable" {
@@ -315,9 +306,7 @@ func TestValidateCommandBasedActionSource(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	dir := filepath.Join(root, ".wuko", "workflows")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, dir, 0o755)
 	caller := `version: 1
 name: command-source
 steps:
@@ -326,9 +315,7 @@ steps:
       command: sh
       args: [-c, 'printf "%s" "$ACTION_MANIFEST"']
 `
-	if err := os.WriteFile(filepath.Join(dir, "command-source.yaml"), []byte(caller), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(dir, "command-source.yaml"), []byte(caller), 0o644)
 	manifest := "version: 1\nname: command-action\nsteps:\n  - id: run\n    type: shell\n    with: {script: 'true'}\n"
 	registry := step.NewRegistry()
 	if err := shell.Register(registry); err != nil {

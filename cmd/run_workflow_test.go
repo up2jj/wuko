@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/spf13/cobra"
 	envload "github.com/up2jj/wuko/environment"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 	runworkflowstep "github.com/up2jj/wuko/steps/runworkflow"
 )
@@ -131,14 +131,14 @@ func (runner runWorkflowCountingRunner) Run(context.Context, step.Request) (step
 func TestRunWorkflowValidatesOneCallShapeOnce(t *testing.T) {
 	t.Parallel()
 	root, workflowDir := runWorkflowFixture(t)
-	writeWorkflowData(t, filepath.Join(workflowDir, "child.yaml"), `version: 1
+	testfs.Write(t, filepath.Join(workflowDir, "child.yaml"), `version: 1
 name: child
 steps:
   - id: work
     type: run_workflow_count
     with: {}
 `)
-	writeWorkflowData(t, filepath.Join(workflowDir, "parent.yaml"), `version: 1
+	testfs.Write(t, filepath.Join(workflowDir, "parent.yaml"), `version: 1
 name: parent
 vars: {items: [1, 2, 3]}
 steps:
@@ -176,7 +176,7 @@ steps:
 func TestRunWorkflowCommandReturnsTargetOutputsWithDependencies(t *testing.T) {
 	t.Parallel()
 	root, workflowDir := runWorkflowFixture(t)
-	writeWorkflowData(t, filepath.Join(workflowDir, "base.yaml"), `version: 1
+	testfs.Write(t, filepath.Join(workflowDir, "base.yaml"), `version: 1
 name: base
 invokable: false
 outputs:
@@ -184,7 +184,7 @@ outputs:
 steps:
   - return: {outputs: {prefix: '"base"'}}
 `)
-	writeWorkflowData(t, filepath.Join(workflowDir, "package.yaml"), `version: 1
+	testfs.Write(t, filepath.Join(workflowDir, "package.yaml"), `version: 1
 name: package
 vars: {revision: ""}
 outputs:
@@ -192,7 +192,7 @@ outputs:
 steps:
   - return: {outputs: {revision: vars.revision}}
 `)
-	writeWorkflowData(t, filepath.Join(workflowDir, "build.yaml"), `version: 1
+	testfs.Write(t, filepath.Join(workflowDir, "build.yaml"), `version: 1
 name: build
 vars: {revision: "", nested: []}
 targets:
@@ -208,7 +208,7 @@ targets:
           vars: {revision: {expr: vars.revision}}
       - return: {outputs: {artifact: 'dependencies.base.prefix + ":" + steps.package.revision'}}
 `)
-	writeWorkflowData(t, filepath.Join(workflowDir, "parent.yaml"), `version: 1
+	testfs.Write(t, filepath.Join(workflowDir, "parent.yaml"), `version: 1
 name: parent
 vars: {revision: abc123, parent_only: hidden}
 env: {PARENT_ONLY: hidden}
@@ -240,12 +240,12 @@ steps:
 func TestRunWorkflowCommandFailureUsesStepPrefixAndTryCatchRecord(t *testing.T) {
 	t.Parallel()
 	root, workflowDir := runWorkflowFixture(t)
-	writeWorkflowData(t, filepath.Join(workflowDir, "child.yaml"), `version: 1
+	testfs.Write(t, filepath.Join(workflowDir, "child.yaml"), `version: 1
 name: child
 steps:
   - {id: fail, type: run_workflow_fail}
 `)
-	writeWorkflowData(t, filepath.Join(workflowDir, "parent.yaml"), `version: 1
+	testfs.Write(t, filepath.Join(workflowDir, "parent.yaml"), `version: 1
 name: parent
 steps:
   - id: guarded
@@ -273,12 +273,12 @@ steps:
 func TestRunWorkflowCommandRejectsInvocationCycle(t *testing.T) {
 	t.Parallel()
 	root, workflowDir := runWorkflowFixture(t)
-	writeWorkflowData(t, filepath.Join(workflowDir, "a.yaml"), `version: 1
+	testfs.Write(t, filepath.Join(workflowDir, "a.yaml"), `version: 1
 name: a
 steps:
   - {id: call_b, type: run_workflow, with: {workflow: b}}
 `)
-	writeWorkflowData(t, filepath.Join(workflowDir, "b.yaml"), `version: 1
+	testfs.Write(t, filepath.Join(workflowDir, "b.yaml"), `version: 1
 name: b
 steps:
   - {id: call_a, type: run_workflow, with: {workflow: a}}
@@ -307,9 +307,9 @@ func TestRunWorkflowCommandValidatesStaticReference(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			root, workflowDir := runWorkflowFixture(t)
 			if test.child != "" {
-				writeWorkflowData(t, filepath.Join(workflowDir, "child.yaml"), test.child)
+				testfs.Write(t, filepath.Join(workflowDir, "child.yaml"), test.child)
 			}
-			writeWorkflowData(t, filepath.Join(workflowDir, "parent.yaml"), "version: 1\nname: parent\nsteps:\n  - {id: child, type: run_workflow, with: "+test.call+"}\n")
+			testfs.Write(t, filepath.Join(workflowDir, "parent.yaml"), "version: 1\nname: parent\nsteps:\n  - {id: child, type: run_workflow, with: "+test.call+"}\n")
 			command := runWorkflowCommand(t, root, nil)
 			command.SetArgs([]string{"run", "parent"})
 			err := command.ExecuteContext(t.Context())
@@ -323,12 +323,12 @@ func TestRunWorkflowCommandValidatesStaticReference(t *testing.T) {
 func TestRunWorkflowCommandDryRunDoesNotExecuteChild(t *testing.T) {
 	t.Parallel()
 	root, workflowDir := runWorkflowFixture(t)
-	writeWorkflowData(t, filepath.Join(workflowDir, "child.yaml"), `version: 1
+	testfs.Write(t, filepath.Join(workflowDir, "child.yaml"), `version: 1
 name: child
 steps:
   - {id: capture, type: run_workflow_capture, with: {value: child-ran}}
 `)
-	writeWorkflowData(t, filepath.Join(workflowDir, "parent.yaml"), `version: 1
+	testfs.Write(t, filepath.Join(workflowDir, "parent.yaml"), `version: 1
 name: parent
 steps:
   - {id: child, type: run_workflow, with: {workflow: child}}
@@ -352,7 +352,7 @@ steps:
 func TestRunWorkflowCommandRejectsStdinParent(t *testing.T) {
 	t.Parallel()
 	root, workflowDir := runWorkflowFixture(t)
-	writeWorkflowData(t, filepath.Join(workflowDir, "child.yaml"), "version: 1\nname: child\nsteps:\n  - return: {outputs: {}}\n")
+	testfs.Write(t, filepath.Join(workflowDir, "child.yaml"), "version: 1\nname: child\nsteps:\n  - return: {outputs: {}}\n")
 	data := "version: 1\nname: parent\nsteps:\n  - {id: child, type: run_workflow, with: {workflow: child}}\n"
 	command := runWorkflowCommand(t, root, nil)
 	command.SetIn(strings.NewReader(data))
@@ -366,7 +366,7 @@ func TestRunWorkflowCommandRejectsStdinParent(t *testing.T) {
 func TestRunWorkflowCommandDoesNotInheritParentWorkflowEnvironment(t *testing.T) {
 	t.Parallel()
 	root, workflowDir := runWorkflowFixture(t)
-	writeWorkflowData(t, filepath.Join(workflowDir, "child.yaml"), `version: 1
+	testfs.Write(t, filepath.Join(workflowDir, "child.yaml"), `version: 1
 name: child
 outputs:
   parent: {type: string, value: steps.probe.parent}
@@ -374,7 +374,7 @@ outputs:
 steps:
   - {id: probe, type: run_workflow_env}
 `)
-	writeWorkflowData(t, filepath.Join(workflowDir, "parent.yaml"), `version: 1
+	testfs.Write(t, filepath.Join(workflowDir, "parent.yaml"), `version: 1
 name: parent
 env: {PARENT_ONLY: hidden}
 steps:
@@ -397,7 +397,7 @@ steps:
 func TestRunWorkflowInsideLocalActionDoesNotInheritScopedEnvironment(t *testing.T) {
 	t.Parallel()
 	root, workflowDir := runWorkflowFixture(t)
-	writeWorkflowData(t, filepath.Join(workflowDir, "child.yaml"), `version: 1
+	testfs.Write(t, filepath.Join(workflowDir, "child.yaml"), `version: 1
 name: child
 outputs:
   parent: {type: string, value: steps.probe.parent}
@@ -405,17 +405,15 @@ steps:
   - {id: probe, type: run_workflow_env}
 `)
 	actionDir := filepath.Join(root, "actions", "call-child")
-	if err := os.MkdirAll(actionDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeWorkflowData(t, filepath.Join(actionDir, "action.yaml"), `version: 1
+	testfs.MkdirAll(t, actionDir, 0o755)
+	testfs.Write(t, filepath.Join(actionDir, "action.yaml"), `version: 1
 name: call-child
 outputs:
   parent: {value: steps.child.parent}
 steps:
   - {id: child, type: run_workflow, with: {workflow: child}}
 `)
-	writeWorkflowData(t, filepath.Join(workflowDir, "parent.yaml"), `version: 1
+	testfs.Write(t, filepath.Join(workflowDir, "parent.yaml"), `version: 1
 name: parent
 steps:
   - env: {PARENT_ONLY: scoped}
@@ -440,7 +438,7 @@ steps:
 func TestRunWorkflowForeachBoundsActiveChildren(t *testing.T) {
 	t.Parallel()
 	root, workflowDir := runWorkflowFixture(t)
-	writeWorkflowData(t, filepath.Join(workflowDir, "child.yaml"), `version: 1
+	testfs.Write(t, filepath.Join(workflowDir, "child.yaml"), `version: 1
 name: child
 vars: {item: 0}
 outputs:
@@ -448,7 +446,7 @@ outputs:
 steps:
   - {id: overlap, type: run_workflow_overlap}
 `)
-	writeWorkflowData(t, filepath.Join(workflowDir, "parent.yaml"), `version: 1
+	testfs.Write(t, filepath.Join(workflowDir, "parent.yaml"), `version: 1
 name: parent
 vars: {items: [1, 2, 3, 4]}
 steps:
@@ -484,14 +482,14 @@ steps:
 func TestRunWorkflowCompletesChildCleanupBeforeReturning(t *testing.T) {
 	t.Parallel()
 	root, workflowDir := runWorkflowFixture(t)
-	writeWorkflowData(t, filepath.Join(workflowDir, "child.yaml"), `version: 1
+	testfs.Write(t, filepath.Join(workflowDir, "child.yaml"), `version: 1
 name: child
 outputs:
   resource: {type: string, value: steps.resource.resource}
 steps:
   - {id: resource, type: run_workflow_resource}
 `)
-	writeWorkflowData(t, filepath.Join(workflowDir, "parent.yaml"), `version: 1
+	testfs.Write(t, filepath.Join(workflowDir, "parent.yaml"), `version: 1
 name: parent
 steps:
   - {id: child, type: run_workflow, with: {workflow: child}}
@@ -520,9 +518,7 @@ func runWorkflowFixture(t *testing.T) (string, string) {
 	t.Helper()
 	root := t.TempDir()
 	directory := filepath.Join(root, ".wuko", "workflows")
-	if err := os.MkdirAll(directory, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, directory, 0o755)
 	return root, directory
 }
 

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/up2jj/wuko/helper"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/secret"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
@@ -93,9 +94,7 @@ func TestBarePluginIsAcceptedOnTheProtocolItAnswersWith(t *testing.T) {
 	launches := filepath.Join(directory, "launches")
 	script := []byte("#!/bin/sh\nprintf x >> \"" + launches + "\"\nWUKO_PLUGIN_TEST_HELPER=1 exec \"" + executable + "\"\n")
 	path := filepath.Join(directory, "wuko-plugin-acme")
-	if err := os.WriteFile(path, script, 0o700); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, script, 0o700)
 	client, initialized, protocol, err := launchInitialized(t.Context(), path, "acme", "", "test", io.Discard)
 	if err != nil {
 		t.Fatal(err)

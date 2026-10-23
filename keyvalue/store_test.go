@@ -16,6 +16,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/up2jj/wuko/internal/testfs"
 )
 
 func TestStoreOperationsAndPersistence(t *testing.T) {
@@ -110,9 +112,7 @@ func TestOpenAndValueValidation(t *testing.T) {
 func TestMalformedStoreIsPreserved(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "broken.json")
-	if err := os.WriteFile(path, []byte("[1,2"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte("[1,2"), 0o600)
 	store, err := Open(dir, "broken")
 	if err != nil {
 		t.Fatal(err)
@@ -395,9 +395,7 @@ func TestLockAcquisitionHonorsContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, dir, 0o700)
 	lock, err := os.OpenFile(filepath.Join(dir, "busy.lock"), os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		t.Fatal(err)
@@ -450,9 +448,7 @@ func TestReadsDoNotCreateALockFileBesideAnExistingStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "preferences.json"), []byte(`{"theme":"dark"}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(root, "preferences.json"), []byte(`{"theme":"dark"}`), 0o600)
 	value, found, err := store.Get(t.Context(), "theme")
 	if err != nil || !found || value != "dark" {
 		t.Fatalf("get = %#v, %v, %v", value, found, err)
@@ -722,9 +718,7 @@ func TestClearRemovesEveryKey(t *testing.T) {
 
 func TestEmptyStoreFileReadsAsAnEmptyStore(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "interrupted.json"), nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(dir, "interrupted.json"), nil, 0o600)
 	store, err := Open(dir, "interrupted")
 	if err != nil {
 		t.Fatal(err)

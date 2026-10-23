@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/diagnostic"
+	"github.com/up2jj/wuko/internal/testfs"
 )
 
 func TestGitHubWorkflowURL(t *testing.T) {
@@ -166,9 +167,7 @@ func TestLoadMarketplacePackageRejectsPackageVersionMismatch(t *testing.T) {
 	t.Parallel()
 	sourceDir := t.TempDir()
 	workflowData := []byte("version: 1\npackage_version: 1.0.0\nname: release\nsteps:\n  - id: run\n    type: shell\n    with: {command: true}\n")
-	if err := os.WriteFile(filepath.Join(sourceDir, "wuko.yaml"), workflowData, 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(sourceDir, "wuko.yaml"), workflowData, 0o644)
 	archivePath := filepath.Join(t.TempDir(), "release.tar.gz")
 	_, archiveDigest, err := BuildWorkflowPackage(sourceDir, archivePath)
 	if err != nil {

@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -81,9 +82,7 @@ func TestPersistentJarLoadsDeletesAndWritesDeterministically(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "cookies.txt")
 	initial := "# Netscape HTTP Cookie File\n.example.test\tTRUE\t/\tFALSE\t0\tzeta\tlast\n#HttpOnly_.example.test\tTRUE\t/\tTRUE\t0\talpha\tfirst\n"
-	if err := os.WriteFile(path, []byte(initial), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte(initial), 0o600)
 	jar, closeJar, err := openPersistentJar(t.Context(), path)
 	if err != nil {
 		t.Fatal(err)
@@ -157,9 +156,7 @@ func TestPersistentJarSupportsConcurrentUse(t *testing.T) {
 func TestCookieJarRejectsMalformedFile(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "cookies.txt"), []byte("not-a-cookie\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(dir, "cookies.txt"), []byte("not-a-cookie\n"), 0o600)
 	runner, err := New(map[string]any{"url": "https://example.com", "cookies": map[string]any{"jar": "cookies.txt"}})
 	if err != nil {
 		t.Fatal(err)
@@ -282,9 +279,7 @@ func TestPersistentJarBoundsCookieLines(t *testing.T) {
 	initial := "# Netscape HTTP Cookie File\n" +
 		".example.test\tTRUE\t/\tFALSE\t0\tbloated\t" + strings.Repeat("x", maxJarLineBytes) + "\n" +
 		".example.test\tTRUE\t/\tFALSE\t0\tsmall\tvalue\n"
-	if err := os.WriteFile(path, []byte(initial), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte(initial), 0o600)
 	jar, closeJar, err := openPersistentJar(t.Context(), path)
 	if err != nil {
 		t.Fatal(err)
@@ -366,9 +361,7 @@ func TestPersistentJarDoesNotResurrectADeletedCookie(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "cookies.txt")
 	initial := "# Netscape HTTP Cookie File\n.example.test\tTRUE\t/\tFALSE\t0\tshared\tvalue\n"
-	if err := os.WriteFile(path, []byte(initial), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte(initial), 0o600)
 	deleter, closeDeleter, err := openPersistentJar(t.Context(), path)
 	if err != nil {
 		t.Fatal(err)

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/testfs"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -125,13 +126,13 @@ func TestScopedEnvironmentOperationsLoadActionsAndRequiredFragments(t *testing.T
 	fragment := filepath.Join(dir, "steps.yaml")
 	actionPath := filepath.Join(dir, "action.yaml")
 	workflowPath := filepath.Join(dir, "workflow.yaml")
-	writeTestFile(t, fragment, `- env:
+	testfs.Write(t, fragment, `- env:
     - unset: [TOKEN]
   steps:
     - id: action
       uses: ./action.yaml
 `)
-	writeTestFile(t, actionPath, `version: 1
+	testfs.Write(t, actionPath, `version: 1
 name: action
 steps:
   - env:
@@ -142,7 +143,7 @@ steps:
         type: shell
         with: {command: echo, args: [done]}
 `)
-	writeTestFile(t, workflowPath, "version: 1\nname: caller\nsteps:\n  - require: steps.yaml\n")
+	testfs.Write(t, workflowPath, "version: 1\nname: caller\nsteps:\n  - require: steps.yaml\n")
 	definition, err := NewLoader(nil).Load(t.Context(), workflowPath, LoadOptions{RunDir: dir})
 	if err != nil {
 		t.Fatal(err)

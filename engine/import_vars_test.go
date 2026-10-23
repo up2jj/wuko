@@ -2,12 +2,12 @@ package engine_test
 
 import (
 	"io"
-	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/up2jj/wuko/engine"
 	"github.com/up2jj/wuko/internal/steptest"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 	importvarsstep "github.com/up2jj/wuko/steps/import_vars"
 	setstep "github.com/up2jj/wuko/steps/set"
@@ -17,9 +17,7 @@ import (
 func TestImportedVariablesAreVisibleToLaterSteps(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "variables.json"), []byte(`{"target":"linux"}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(root, "variables.json"), []byte(`{"target":"linux"}`), 0o644)
 	definition := &workflow.Definition{
 		Version: 1, Name: "imports", Dir: root, Vars: map[string]any{"target": "initial"},
 		Steps: []workflow.Step{

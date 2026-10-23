@@ -3,13 +3,13 @@ package git
 import (
 	"context"
 	"errors"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/up2jj/wuko/internal/gittest"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/process/processtest"
 	"github.com/up2jj/wuko/step"
@@ -259,9 +259,7 @@ func TestGitAssertionsAgainstRepositories(t *testing.T) {
 	if _, err := clean.Run(t.Context(), step.Request{RunDir: dir}); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "untracked.txt"), []byte("dirty\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(dir, "untracked.txt"), []byte("dirty\n"), 0o644)
 	if _, err := clean.Run(t.Context(), step.Request{RunDir: dir}); err == nil || !strings.Contains(err.Error(), "uncommitted changes") {
 		t.Fatalf("dirty tree error = %v", err)
 	}

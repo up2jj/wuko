@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/diagnostic"
+	"github.com/up2jj/wuko/internal/testfs"
 )
 
 func TestRequiredStepsPreserveSourceLocations(t *testing.T) {
@@ -63,9 +64,7 @@ func TestRemapDefinitionLocationsUsesLogicalRemoteSources(t *testing.T) {
 func TestSchemaDiagnosticUsesFailingStepLocation(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "workflow.yaml")
-	if err := os.WriteFile(path, []byte("version: 1\nname: invalid\nsteps:\n  - id: broken\n    with: {}\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte("version: 1\nname: invalid\nsteps:\n  - id: broken\n    with: {}\n"), 0o644)
 	var events []diagnostic.Event
 	_, err := loadLocalWithDiagnostics(path, func(event diagnostic.Event) { events = append(events, event) }, "", "")
 	if err == nil {

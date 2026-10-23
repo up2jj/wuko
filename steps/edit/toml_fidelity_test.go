@@ -9,6 +9,7 @@ import (
 
 	toml "github.com/pelletier/go-toml/v2"
 	"github.com/up2jj/wuko/internal/steptest"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -17,9 +18,7 @@ func editFile(t *testing.T, name, body string, config map[string]any) string {
 	t.Helper()
 	directory := t.TempDir()
 	path := filepath.Join(directory, name)
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte(body), 0o600)
 	config["from"] = map[string]any{"file": name}
 	if _, err := steptest.Build(t, New, config).Run(t.Context(), step.Request{RunDir: directory}); err != nil {
 		t.Fatalf("edit failed: %v", err)

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/up2jj/wuko/internal/steptest"
+	"github.com/up2jj/wuko/internal/testfs"
 	storepkg "github.com/up2jj/wuko/keyvalue"
 	"github.com/up2jj/wuko/step"
 )
@@ -26,10 +27,10 @@ func TestSnapshotStoreNameIsReservedFromWorkflows(t *testing.T) {
 func TestChangedTracksFilesDirectoriesGlobsAndValues(t *testing.T) {
 	runDir := t.TempDir()
 	localDir := filepath.Join(runDir, ".wuko", "values")
-	writeTestFile(t, runDir, "go.mod", "module example\n")
-	writeTestFile(t, runDir, "src/main.go", "package main\n")
-	writeTestFile(t, runDir, "assets/logo.txt", "logo\n")
-	writeTestFile(t, runDir, "assets/.ignored", "hidden\n")
+	testfs.Write(t, filepath.Join(runDir, "go.mod"), "module example\n")
+	testfs.Write(t, filepath.Join(runDir, "src/main.go"), "package main\n")
+	testfs.Write(t, filepath.Join(runDir, "assets/logo.txt"), "logo\n")
+	testfs.Write(t, filepath.Join(runDir, "assets/.ignored"), "hidden\n")
 	runner := steptest.Build(t, New, map[string]any{
 		"files":  []any{"go.mod", "src/**/*.go", "assets", "src/**/*.go"},
 		"values": map[string]any{"target": "linux", "options": map[string]any{"race": true, "count": 2}},
@@ -54,11 +55,11 @@ func TestChangedTracksFilesDirectoriesGlobsAndValues(t *testing.T) {
 		t.Fatal("metadata-only update reported a change")
 	}
 
-	writeTestFile(t, runDir, "src/main.go", "package changed\n")
+	testfs.Write(t, filepath.Join(runDir, "src/main.go"), "package changed\n")
 	if !runChanged(t, runner, request) || runChanged(t, runner, request) {
 		t.Fatal("content update was not reported exactly once")
 	}
-	writeTestFile(t, runDir, "src/extra.go", "package changed\n")
+	testfs.Write(t, filepath.Join(runDir, "src/extra.go"), "package changed\n")
 	if !runChanged(t, runner, request) {
 		t.Fatal("glob addition was not reported")
 	}
@@ -69,7 +70,7 @@ func TestChangedTracksFilesDirectoriesGlobsAndValues(t *testing.T) {
 		t.Fatal("glob deletion was not reported")
 	}
 
-	writeTestFile(t, runDir, "assets/.ignored", "changed hidden content\n")
+	testfs.Write(t, filepath.Join(runDir, "assets/.ignored"), "changed hidden content\n")
 	if runChanged(t, runner, request) {
 		t.Fatal("implicitly selected hidden file affected the fingerprint")
 	}
@@ -94,12 +95,12 @@ func TestChangedTracksMissingPathsAndExcludesOwnStore(t *testing.T) {
 	if !runChanged(t, runner, request) || runChanged(t, runner, request) {
 		t.Fatal("snapshot file caused self-triggering")
 	}
-	writeTestFile(t, runDir, ".wuko/values/prefs.json", `{"theme":"dark"}`)
-	writeTestFile(t, runDir, ".wuko/values/prefs.lock", "")
+	testfs.Write(t, filepath.Join(runDir, ".wuko/values/prefs.json"), `{"theme":"dark"}`)
+	testfs.Write(t, filepath.Join(runDir, ".wuko/values/prefs.lock"), "")
 	if runChanged(t, runner, request) {
 		t.Fatal("a key_value store in the values root triggered the detector")
 	}
-	writeTestFile(t, runDir, "missing.txt", "present")
+	testfs.Write(t, filepath.Join(runDir, "missing.txt"), "present")
 	if !runChanged(t, runner, request) {
 		t.Fatal("creation of a missing literal path was not reported")
 	}
@@ -114,7 +115,7 @@ func TestChangedTracksMissingPathsAndExcludesOwnStore(t *testing.T) {
 func TestChangedDoesNotFollowSymlinksInLiteralPrefixes(t *testing.T) {
 	runDir := t.TempDir()
 	outside := t.TempDir()
-	writeTestFile(t, outside, "secret.txt", "first\n")
+	testfs.Write(t, filepath.Join(outside, "secret.txt"), "first\n")
 	if err := os.Symlink(outside, filepath.Join(runDir, "linked")); err != nil {
 		t.Skipf("creating directory symlink: %v", err)
 	}
@@ -125,7 +126,7 @@ func TestChangedDoesNotFollowSymlinksInLiteralPrefixes(t *testing.T) {
 	if !runChanged(t, runner, request) || runChanged(t, runner, request) {
 		t.Fatal("symlinked inputs did not stabilize as excluded")
 	}
-	writeTestFile(t, outside, "secret.txt", "second\n")
+	testfs.Write(t, filepath.Join(outside, "secret.txt"), "second\n")
 	if runChanged(t, runner, request) {
 		t.Fatal("content reached through a symlink changed the fingerprint")
 	}
@@ -241,16 +242,5 @@ func testRequest(runDir, localDir string) step.Request {
 	return step.Request{
 		StepID: "detect", WorkflowName: "build", WorkflowSource: "/project/workflow.yaml",
 		RunDir: runDir, LocalValueDir: localDir,
-	}
-}
-
-func writeTestFile(t *testing.T, root, relative, contents string) {
-	t.Helper()
-	filename := filepath.Join(root, filepath.FromSlash(relative))
-	if err := os.MkdirAll(filepath.Dir(filename), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filename, []byte(contents), 0o644); err != nil {
-		t.Fatal(err)
 	}
 }

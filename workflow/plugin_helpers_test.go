@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/helper"
+	"github.com/up2jj/wuko/internal/testfs"
 )
 
 type fakePluginHelpers struct{ loads int }
@@ -22,7 +23,7 @@ func (loader *fakePluginHelpers) LoadHelpers(_ context.Context, plugins map[stri
 func TestLoaderInitializesPluginHelpersBeforeTemplateValidation(t *testing.T) {
 	directory := t.TempDir()
 	path := filepath.Join(directory, "workflow.yaml")
-	writeTestFile(t, path, `version: 1
+	testfs.Write(t, path, `version: 1
 name: helpers
 plugins:
   acme:
@@ -63,7 +64,7 @@ steps:
 
 func TestDiscoveryAcceptsPluginHelperTemplatesWithoutAHelperLoader(t *testing.T) {
 	directory := t.TempDir()
-	writeTestFile(t, filepath.Join(directory, "demo.yaml"), `version: 1
+	testfs.Write(t, filepath.Join(directory, "demo.yaml"), `version: 1
 name: demo
 plugins:
   acme:

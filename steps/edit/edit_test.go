@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/up2jj/wuko/internal/steptest"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -126,9 +127,7 @@ func TestFileEditsPreserveUnrelatedBytes(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			directory := t.TempDir()
 			path := filepath.Join(directory, test.file)
-			if err := os.WriteFile(path, []byte(test.input), 0o640); err != nil {
-				t.Fatal(err)
-			}
+			testfs.WriteFile(t, path, []byte(test.input), 0o640)
 			runner := steptest.Build(t, New, map[string]any{
 				"operation": "set", "from": map[string]any{"file": test.file},
 				"path": test.path, "value": test.value,
@@ -163,9 +162,7 @@ func TestFileMissingIgnoreDoesNotRewrite(t *testing.T) {
 	directory := t.TempDir()
 	path := filepath.Join(directory, "package.json")
 	input := []byte("{\"version\":\"1.0.0\"}\n")
-	if err := os.WriteFile(path, input, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, input, 0o600)
 	before, err := os.Stat(path)
 	if err != nil {
 		t.Fatal(err)
@@ -196,9 +193,7 @@ func TestAllFileEditIsAtomicWhenReplacementFails(t *testing.T) {
 	directory := t.TempDir()
 	path := filepath.Join(directory, "values.json")
 	input := []byte("[1, 2]\n")
-	if err := os.WriteFile(path, input, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, input, 0o600)
 	runner := steptest.Build(t, New, map[string]any{
 		"operation": "set", "from": map[string]any{"file": "values.json"},
 		"path": "$[*]", "expr": "index == 0 ? current + 1 : current.missing", "result": "all",
@@ -220,9 +215,7 @@ func TestAllFileEditDoesNotReencodeUnchangedMatches(t *testing.T) {
 	directory := t.TempDir()
 	path := filepath.Join(directory, "values.toml")
 	input := []byte("first = 'keep-style'\nsecond = 1\n")
-	if err := os.WriteFile(path, input, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, input, 0o600)
 	runner := steptest.Build(t, New, map[string]any{
 		"operation": "set", "from": map[string]any{"file": "values.toml"},
 		"path": "$.*", "expr": `path == "$['second']" ? current + 1 : current`, "result": "all",
@@ -266,9 +259,7 @@ func TestFileSourceRejectsSymlink(t *testing.T) {
 	directory := t.TempDir()
 	target := filepath.Join(directory, "real.json")
 	input := []byte("{\"a\": 1}\n")
-	if err := os.WriteFile(target, input, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, target, input, 0o600)
 	if err := os.Symlink("real.json", filepath.Join(directory, "link.json")); err != nil {
 		t.Fatal(err)
 	}
@@ -301,9 +292,7 @@ func TestJSONNumbersCompareByValue(t *testing.T) {
 	directory := t.TempDir()
 	path := filepath.Join(directory, "values.json")
 	input := []byte("{\"replicas\": 2}\n")
-	if err := os.WriteFile(path, input, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, input, 0o600)
 	before, err := os.Stat(path)
 	if err != nil {
 		t.Fatal(err)
@@ -336,9 +325,7 @@ func TestExpressionsSeeJSONNumbersAsNumbers(t *testing.T) {
 	t.Parallel()
 	directory := t.TempDir()
 	path := filepath.Join(directory, "values.json")
-	if err := os.WriteFile(path, []byte("{\"replicas\": 2, \"ratio\": 1.5}\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte("{\"replicas\": 2, \"ratio\": 1.5}\n"), 0o600)
 	runner := steptest.Build(t, New, map[string]any{
 		"operation": "set", "from": map[string]any{"file": "values.json"},
 		"path": "$.*", "expr": "current * 2", "result": "all",
@@ -372,9 +359,7 @@ func TestTOMLKeyWithEscapedQuote(t *testing.T) {
 	t.Parallel()
 	directory := t.TempDir()
 	path := filepath.Join(directory, "config.toml")
-	if err := os.WriteFile(path, []byte("\"a\\\"=b\" = 1\nother = 2\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte("\"a\\\"=b\" = 1\nother = 2\n"), 0o600)
 	runner := steptest.Build(t, New, map[string]any{
 		"operation": "set", "from": map[string]any{"file": "config.toml"},
 		"path": "$.other", "value": 3,
@@ -435,9 +420,7 @@ func TestYAMLScalarSpans(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			directory := t.TempDir()
 			path := filepath.Join(directory, "config.yaml")
-			if err := os.WriteFile(path, []byte(test.input), 0o600); err != nil {
-				t.Fatal(err)
-			}
+			testfs.WriteFile(t, path, []byte(test.input), 0o600)
 			runner := steptest.Build(t, New, map[string]any{
 				"operation": "set", "from": map[string]any{"file": "config.yaml"},
 				"path": test.path, "value": test.value,
@@ -559,9 +542,7 @@ func benchFile(b *testing.B, name string, count int) string {
 	}
 	body := "[\n" + strings.Join(values, ",\n") + "\n]\n"
 	path := filepath.Join(directory, name)
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		b.Fatal(err)
-	}
+	testfs.WriteFile(b, path, []byte(body), 0o600)
 	b.Logf("%s: %d bytes, %d matches", name, len(body), count)
 	return directory
 }
@@ -622,9 +603,7 @@ func TestStructuralEditKeepsCRLFLineEndings(t *testing.T) {
 		t.Run(test.file, func(t *testing.T) {
 			directory := t.TempDir()
 			path := filepath.Join(directory, test.file)
-			if err := os.WriteFile(path, []byte(test.input), 0o644); err != nil {
-				t.Fatal(err)
-			}
+			testfs.WriteFile(t, path, []byte(test.input), 0o644)
 			runner := steptest.Build(t, New, map[string]any{
 				"operation": "set", "from": map[string]any{"file": test.file},
 				"path": "$.services.worker", "value": 2, "missing": "create",

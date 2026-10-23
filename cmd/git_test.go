@@ -14,6 +14,7 @@ import (
 	"github.com/up2jj/wuko/engine"
 	"github.com/up2jj/wuko/githook"
 	"github.com/up2jj/wuko/internal/gittest"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 	filestep "github.com/up2jj/wuko/steps/file"
 	gitstep "github.com/up2jj/wuko/steps/git"
@@ -116,9 +117,7 @@ func TestGitHookRunSelectsConfiguredTarget(t *testing.T) {
 	t.Parallel()
 	root := gittest.Init(t)
 	directory := filepath.Join(root, ".wuko", "workflows")
-	if err := os.MkdirAll(directory, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, directory, 0o755)
 	data := `version: 1
 name: check
 targets:
@@ -129,9 +128,7 @@ targets:
     steps:
       - {id: run, type: shell, with: {script: "printf thorough"}}
 `
-	if err := os.WriteFile(filepath.Join(directory, "check.yaml"), []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(directory, "check.yaml"), []byte(data), 0o644)
 	writeGitHookManifest(t, root, "pre-commit:\n    - workflow: check\n      target: thorough")
 	var output bytes.Buffer
 	command := newRootCmd(gitHookTestDependencies(t, root, &output, io.Discard, func(string) string { return "" }))
@@ -167,9 +164,7 @@ func TestGitHookInstallAndStatus(t *testing.T) {
 	writeGitHookWorkflow(t, root, "check", "true", nil)
 	writeGitHookManifest(t, root, "pre-commit:\n    - workflow: check")
 	executable := filepath.Join(root, "wuko")
-	if err := os.WriteFile(executable, []byte("binary"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, executable, []byte("binary"), 0o755)
 	var output bytes.Buffer
 	deps := gitHookTestDependencies(t, root, &output, io.Discard, func(string) string { return "" })
 	deps.executable = func() (string, error) { return executable, nil }
@@ -221,18 +216,14 @@ func TestGitHookInitCreatesValidStarterConfiguration(t *testing.T) {
 		}
 	}
 	badPath := filepath.Join(root, "bad.txt")
-	if err := os.WriteFile(badPath, []byte("trailing whitespace \n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, badPath, []byte("trailing whitespace \n"), 0o600)
 	gittest.Run(t, root, "add", "bad.txt")
 	command = newRootCmd(deps)
 	command.SetArgs([]string{"git", "hook", "run", "pre-commit"})
 	if err := command.ExecuteContext(t.Context()); err == nil || !strings.Contains(err.Error(), "bad.txt:1") {
 		t.Fatalf("generated pre-commit workflow error = %v", err)
 	}
-	if err := os.WriteFile(badPath, []byte("clean\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, badPath, []byte("clean\n"), 0o600)
 	gittest.Run(t, root, "add", "bad.txt")
 	command = newRootCmd(deps)
 	command.SetArgs([]string{"git", "hook", "run", "pre-commit"})
@@ -241,17 +232,13 @@ func TestGitHookInitCreatesValidStarterConfiguration(t *testing.T) {
 	}
 
 	messagePath := filepath.Join(root, "COMMIT_EDITMSG")
-	if err := os.WriteFile(messagePath, []byte("feat(cli): initialize Git hooks\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, messagePath, []byte("feat(cli): initialize Git hooks\n"), 0o600)
 	command = newRootCmd(deps)
 	command.SetArgs([]string{"git", "hook", "run", "commit-msg", "--", messagePath})
 	if err := command.ExecuteContext(t.Context()); err != nil {
 		t.Fatalf("generated commit-msg workflow rejected a conventional commit: %v", err)
 	}
-	if err := os.WriteFile(messagePath, []byte("not conventional\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, messagePath, []byte("not conventional\n"), 0o600)
 	command = newRootCmd(deps)
 	command.SetArgs([]string{"git", "hook", "run", "commit-msg", "--", messagePath})
 	err := command.ExecuteContext(t.Context())
@@ -264,12 +251,8 @@ func TestGitHookInitRefusesExistingFilesWithoutMutation(t *testing.T) {
 	t.Parallel()
 	root := gittest.Init(t)
 	manifestPath := filepath.Join(root, ".wuko", "git-hooks.yaml")
-	if err := os.MkdirAll(filepath.Dir(manifestPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(manifestPath, []byte("existing\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, filepath.Dir(manifestPath), 0o755)
+	testfs.WriteFile(t, manifestPath, []byte("existing\n"), 0o600)
 	command := newRootCmd(gitHookTestDependencies(t, root, io.Discard, io.Discard, func(string) string { return "" }))
 	command.SetArgs([]string{"git", "hook", "init"})
 	err := command.ExecuteContext(t.Context())
@@ -300,13 +283,9 @@ func TestGitHookRunSkipsNonExecutablePreservedHook(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(hookPath, []byte("#!/bin/sh\nexit 1\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, hookPath, []byte("#!/bin/sh\nexit 1\n"), 0o644)
 	executable := filepath.Join(root, "wuko")
-	if err := os.WriteFile(executable, []byte("binary"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, executable, []byte("binary"), 0o755)
 	manifest, err := githook.LoadManifest(root)
 	if err != nil {
 		t.Fatal(err)
@@ -336,13 +315,9 @@ func TestGitHookRunExecutesPreservedHookBeforeLoadingManifest(t *testing.T) {
 		t.Fatal(err)
 	}
 	inputPath := filepath.Join(root, "preserved-input")
-	if err := os.WriteFile(hookPath, []byte("#!/bin/sh\ncat > "+strconvQuote(inputPath)+"\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, hookPath, []byte("#!/bin/sh\ncat > "+strconvQuote(inputPath)+"\n"), 0o755)
 	executable := filepath.Join(root, "wuko")
-	if err := os.WriteFile(executable, []byte("binary"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, executable, []byte("binary"), 0o755)
 	manifest, err := githook.LoadManifest(root)
 	if err != nil {
 		t.Fatal(err)
@@ -350,9 +325,7 @@ func TestGitHookRunExecutesPreservedHookBeforeLoadingManifest(t *testing.T) {
 	if _, err := githook.Install(t.Context(), repository, executable, manifest, true); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, ".wuko", "git-hooks.yaml"), []byte("invalid: true\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(root, ".wuko", "git-hooks.yaml"), []byte("invalid: true\n"), 0o644)
 	command := newRootCmd(gitHookTestDependencies(t, root, io.Discard, io.Discard, func(string) string { return "" }))
 	input := "refs/heads/main aaaa refs/heads/main bbbb\n"
 	command.SetIn(strings.NewReader(input))
@@ -397,21 +370,15 @@ func TestGitHookRunToleratesMissingManifest(t *testing.T) {
 
 func writeGitHookManifest(t *testing.T, root, hooks string) {
 	t.Helper()
-	if err := os.MkdirAll(filepath.Join(root, ".wuko"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, filepath.Join(root, ".wuko"), 0o755)
 	data := "version: 1\nhooks:\n  " + hooks + "\n"
-	if err := os.WriteFile(filepath.Join(root, ".wuko", "git-hooks.yaml"), []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(root, ".wuko", "git-hooks.yaml"), []byte(data), 0o644)
 }
 
 func writeGitHookWorkflow(t *testing.T, root, name, script string, args []string) {
 	t.Helper()
 	directory := filepath.Join(root, ".wuko", "workflows")
-	if err := os.MkdirAll(directory, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, directory, 0o755)
 	var arguments strings.Builder
 	if len(args) > 0 {
 		arguments.WriteString("\n      args:")
@@ -420,9 +387,7 @@ func writeGitHookWorkflow(t *testing.T, root, name, script string, args []string
 		}
 	}
 	data := "version: 1\nname: " + name + "\nsteps:\n  - id: run\n    type: shell\n    with:\n      script: " + strconvQuote(script) + arguments.String() + "\n"
-	if err := os.WriteFile(filepath.Join(directory, name+".yaml"), []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(directory, name+".yaml"), []byte(data), 0o644)
 }
 
 func strconvQuote(value string) string {

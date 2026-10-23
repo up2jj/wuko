@@ -3,13 +3,13 @@ package cmd
 import (
 	"bytes"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/engine"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
 )
@@ -187,9 +187,7 @@ steps:
       outputs:
         greeting: '"Hello " + steps.settings.name'
 `
-	if err := os.WriteFile(file, []byte(source), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, file, []byte(source), 0o600)
 	var output bytes.Buffer
 	command := newRootCmd(dependencies{stdin: strings.NewReader(""), stdout: &output, stderr: io.Discard, cwd: func() (string, error) { return root, nil }, homeDir: func() (string, error) { return root, nil }, configDir: func() (string, error) { return root, nil }, registry: formRegistry(t), getenv: func(string) string { return "" }})
 	command.SetArgs([]string{"run", "--file", file, "--var", "name=Grace"})

@@ -24,6 +24,7 @@ import (
 
 	"github.com/up2jj/wuko/engine"
 	"github.com/up2jj/wuko/executor"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 	assertstep "github.com/up2jj/wuko/steps/assert"
 	devenvstep "github.com/up2jj/wuko/steps/devenv"
@@ -241,9 +242,7 @@ func writeFakeScript(t *testing.T, dir string, script fakeScript) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, fakeScriptFile), encoded, 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(dir, fakeScriptFile), encoded, 0o644)
 }
 
 // recordedArgv returns every fake invocation in order, as space-joined argv.
@@ -576,9 +575,7 @@ func TestDevenvExecutorLeavesProcessesItDoesNotOwnRunning(t *testing.T) {
 func secretspecFixture(t *testing.T, dir string) {
 	t.Helper()
 	content := "[project]\nname = \"wuko-devenv-e2e\"\nrevision = \"1.0\"\n"
-	if err := os.WriteFile(filepath.Join(dir, "secretspec.toml"), []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(dir, "secretspec.toml"), []byte(content), 0o644)
 }
 
 func invocationsOf(records []invocation, first string) []invocation {

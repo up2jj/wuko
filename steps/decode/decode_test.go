@@ -6,7 +6,6 @@ import (
 	"errors"
 	"math"
 	"math/rand"
-	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -15,6 +14,7 @@ import (
 
 	toml "github.com/pelletier/go-toml/v2"
 	"github.com/up2jj/wuko/expression"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -217,9 +217,7 @@ func TestParseErrorsContainLocationsAndRejectExtraDocuments(t *testing.T) {
 func TestReadsRelativeAndAbsoluteRegularFiles(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "data.json")
-	if err := os.WriteFile(path, []byte(`{"name":"wuko"}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte(`{"name":"wuko"}`), 0o600)
 	for _, configured := range []string{"data.json", path} {
 		runner, err := New(map[string]any{"format": "json", "path": configured})
 		if err != nil {
@@ -238,9 +236,7 @@ func TestReadsRelativeAndAbsoluteRegularFiles(t *testing.T) {
 func TestFileFailuresAreAtomic(t *testing.T) {
 	root := t.TempDir()
 	large := filepath.Join(root, "large")
-	if err := os.WriteFile(large, []byte("12345"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, large, []byte("12345"), 0o600)
 	tests := []struct {
 		name string
 		path string

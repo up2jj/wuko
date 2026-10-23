@@ -3,19 +3,18 @@ package docker
 import (
 	"bytes"
 	"context"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/up2jj/wuko/internal/testfs"
 )
 
 func TestDefaultCommandRunnerStopsDescendantsOnCancel(t *testing.T) {
 	t.Parallel()
 	script := filepath.Join(t.TempDir(), "fake-docker")
 	// The background sleep inherits stdout, as a buildx plugin process would.
-	if err := os.WriteFile(script, []byte("#!/bin/sh\nsleep 30 &\nsleep 30\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, script, []byte("#!/bin/sh\nsleep 30 &\nsleep 30\n"), 0o755)
 	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
 	defer cancel()
 	started := time.Now()

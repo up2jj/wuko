@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -14,6 +13,7 @@ import (
 	"github.com/up2jj/wuko/correlation"
 	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/engine"
+	"github.com/up2jj/wuko/internal/testfs"
 	reporterpkg "github.com/up2jj/wuko/reporter"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/webui"
@@ -299,9 +299,7 @@ func TestNewRunReportersDefaultsToPlainAndComposesExplicitReporters(t *testing.T
 	output := filepath.Join(t.TempDir(), "output")
 	summary := filepath.Join(t.TempDir(), "summary")
 	for _, path := range []string{output, summary} {
-		if err := os.WriteFile(path, nil, 0o600); err != nil {
-			t.Fatal(err)
-		}
+		testfs.WriteFile(t, path, nil, 0o600)
 	}
 	values := map[string]string{"GITHUB_OUTPUT": output, "GITHUB_STEP_SUMMARY": summary}
 	deps.getenv = func(name string) string { return values[name] }

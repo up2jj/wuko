@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 	"go.yaml.in/yaml/v3"
 )
@@ -19,18 +20,12 @@ func TestFindFiltersAndSortsEntries(t *testing.T) {
 	root := t.TempDir()
 	old := filepath.Join(root, "logs", "old.log")
 	newer := filepath.Join(root, "logs", "new.log")
-	if err := os.MkdirAll(filepath.Dir(old), 0o750); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(old, []byte("old-data"), 0o640); err != nil {
-		t.Fatal(err)
-	}
+	testfs.MkdirAll(t, filepath.Dir(old), 0o750)
+	testfs.WriteFile(t, old, []byte("old-data"), 0o640)
 	if err := os.Chmod(old, 0o640); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(newer, []byte("new-data"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, newer, []byte("new-data"), 0o600)
 	oldTime := time.Now().Add(-48 * time.Hour)
 	if err := os.Chtimes(old, oldTime, oldTime); err != nil {
 		t.Fatal(err)
@@ -63,9 +58,7 @@ func TestFindFiltersAndSortsEntries(t *testing.T) {
 func TestLinkReplacementPolicies(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "target")
-	if err := os.WriteFile(target, []byte("content"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, target, []byte("content"), 0o600)
 	symbolic := run(t, root, map[string]any{
 		"operation": "link", "path": "missing-target", "destination": "symbolic", "link_type": "symbolic",
 	})
@@ -76,18 +69,14 @@ func TestLinkReplacementPolicies(t *testing.T) {
 		t.Fatalf("link target = %q, error = %v", linkTarget, err)
 	}
 
-	if err := os.WriteFile(filepath.Join(root, "hard"), []byte("old"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(root, "hard"), []byte("old"), 0o600)
 	hard := run(t, root, map[string]any{
 		"operation": "link", "path": "target", "destination": "hard", "link_type": "hard", "replace": "file",
 	})
 	if hard.Outputs["replaced"] != true {
 		t.Fatalf("outputs = %#v", hard.Outputs)
 	}
-	if err := os.WriteFile(target, []byte("changed"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, target, []byte("changed"), 0o600)
 	content, err := os.ReadFile(filepath.Join(root, "hard"))
 	if err != nil || string(content) != "changed" {
 		t.Fatalf("hard-link content = %q, error = %v", content, err)
@@ -110,9 +99,7 @@ func TestLinkReplacementRejectsRunDirectoryThroughSymlinkedParent(t *testing.T) 
 		t.Fatal(err)
 	}
 	marker := filepath.Join(runDir, "marker")
-	if err := os.WriteFile(marker, []byte("keep"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, marker, []byte("keep"), 0o600)
 	alias := filepath.Join(root, "alias")
 	if err := os.Symlink(root, alias); err != nil {
 		t.Fatal(err)
@@ -135,9 +122,7 @@ func TestLinkReplacementRejectsRunDirectoryThroughSymlinkedParent(t *testing.T) 
 func TestTruncateAndTail(t *testing.T) {
 	root := t.TempDir()
 	filePath := filepath.Join(root, "log")
-	if err := os.WriteFile(filePath, []byte("one\ntwo\nthree\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filePath, []byte("one\ntwo\nthree\n"), 0o600)
 	tailed := run(t, root, map[string]any{"operation": "tail", "path": "log", "lines": 2})
 	if tailed.Outputs["content"] != "two\nthree\n" || tailed.Outputs["truncated"] != true {
 		t.Fatalf("tail outputs = %#v", tailed.Outputs)
@@ -158,9 +143,7 @@ func TestTruncateAndTail(t *testing.T) {
 
 func TestTailBoundsLineMemory(t *testing.T) {
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "large"), []byte(strings.Repeat("x", 32)), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(root, "large"), []byte(strings.Repeat("x", 32)), 0o600)
 	result := run(t, root, map[string]any{
 		"operation": "tail", "path": "large", "lines": 1, "max_bytes": "8B",
 	})
@@ -174,12 +157,8 @@ func TestDiskUsageCountsAndLargestEntries(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(root, "nested"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "small"), []byte("123"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "nested", "large"), []byte("1234567"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filepath.Join(root, "small"), []byte("123"), 0o600)
+	testfs.WriteFile(t, filepath.Join(root, "nested", "large"), []byte("1234567"), 0o600)
 	if err := os.Symlink("small", filepath.Join(root, "link")); err != nil {
 		t.Fatal(err)
 	}
@@ -201,9 +180,7 @@ func TestAtomicSwapInstallsAndConsumesStaging(t *testing.T) {
 		if err := os.Mkdir(directory, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(directory, "value"), []byte(content), 0o600); err != nil {
-			t.Fatal(err)
-		}
+		testfs.WriteFile(t, filepath.Join(directory, "value"), []byte(content), 0o600)
 	}
 	result := run(t, root, map[string]any{
 		"operation": "atomic_swap", "path": "staging", "destination": "current", "replace": "any",
@@ -244,9 +221,7 @@ func TestAtomicSwapRejectsRunDirectoryThroughSymlinkedParent(t *testing.T) {
 		}
 	}
 	marker := filepath.Join(runDir, "marker")
-	if err := os.WriteFile(marker, []byte("keep"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, marker, []byte("keep"), 0o600)
 	alias := filepath.Join(root, "alias")
 	if err := os.Symlink(root, alias); err != nil {
 		t.Fatal(err)
@@ -273,13 +248,9 @@ func TestRecursivePermissionsSkipSymlinks(t *testing.T) {
 		t.Fatal(err)
 	}
 	filePath := filepath.Join(directory, "file")
-	if err := os.WriteFile(filePath, []byte("x"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, filePath, []byte("x"), 0o600)
 	outside := filepath.Join(root, "outside")
-	if err := os.WriteFile(outside, []byte("x"), 0o640); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, outside, []byte("x"), 0o640)
 	if err := os.Symlink(outside, filepath.Join(directory, "link")); err != nil {
 		t.Fatal(err)
 	}

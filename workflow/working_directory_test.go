@@ -4,12 +4,14 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/up2jj/wuko/internal/testfs"
 )
 
 func TestLoadWorkingDirectoryBlock(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "workflow.yaml")
-	writeTestFile(t, path, `version: 1
+	testfs.Write(t, path, `version: 1
 name: scoped
 steps:
   - working_directory: "{{ .vars.project }}"
@@ -51,7 +53,7 @@ func TestWorkingDirectoryBlockValidation(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "workflow.yaml")
-			writeTestFile(t, path, "version: 1\nname: invalid\nsteps:\n"+test.body)
+			testfs.Write(t, path, "version: 1\nname: invalid\nsteps:\n"+test.body)
 			_, err := Load(path)
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("error = %v, want substring %q", err, test.want)
@@ -63,7 +65,7 @@ func TestWorkingDirectoryBlockValidation(t *testing.T) {
 func TestWorkingDirectoryBlockPreservesInheritedNestingRules(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "workflow.yaml")
-	writeTestFile(t, path, `version: 1
+	testfs.Write(t, path, `version: 1
 name: invalid
 steps:
   - concurrent:
@@ -83,16 +85,16 @@ func TestWorkingDirectoryBlockExpandsRequiredStepsAndPreservesLocations(t *testi
 	t.Parallel()
 	dir := t.TempDir()
 	fragment := filepath.Join(dir, "fragment.yaml")
-	writeTestFile(t, fragment, `- working_directory: backend
+	testfs.Write(t, fragment, `- working_directory: backend
   steps:
     - require: nested.yaml
 `)
 	nested := filepath.Join(dir, "nested.yaml")
-	writeTestFile(t, nested, `- id: build
+	testfs.Write(t, nested, `- id: build
   type: shell
 `)
 	workflowPath := filepath.Join(dir, "workflow.yaml")
-	writeTestFile(t, workflowPath, `version: 1
+	testfs.Write(t, workflowPath, `version: 1
 name: required
 steps:
   - require: fragment.yaml

@@ -1,10 +1,11 @@
 package workflow
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/up2jj/wuko/internal/testfs"
 )
 
 func TestTargetSelectionSuggestsCloseMatches(t *testing.T) {
@@ -71,9 +72,7 @@ targets:
         type: shell
         with: {script: echo cleanup}
 `
-	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testfs.WriteFile(t, path, []byte(data), 0o600)
 
 	definition, err := NewLoader(nil).Load(t.Context(), path, LoadOptions{
 		Target:  "production",
@@ -154,9 +153,7 @@ steps:
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "workflow.yaml")
-			if err := os.WriteFile(path, []byte(tt.data), 0o600); err != nil {
-				t.Fatal(err)
-			}
+			testfs.WriteFile(t, path, []byte(tt.data), 0o600)
 			tt.load.RunDir = filepath.Dir(path)
 			_, err := NewLoader(nil).Load(t.Context(), path, tt.load)
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
@@ -207,9 +204,7 @@ targets:
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "workflow.yaml")
-			if err := os.WriteFile(path, []byte(tt.data), 0o600); err != nil {
-				t.Fatal(err)
-			}
+			testfs.WriteFile(t, path, []byte(tt.data), 0o600)
 			_, err := NewLoader(nil).Load(t.Context(), path, LoadOptions{RunDir: filepath.Dir(path)})
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("error = %v, want substring %q", err, tt.want)

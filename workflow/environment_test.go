@@ -3,11 +3,13 @@ package workflow
 import (
 	"strings"
 	"testing"
+
+	"github.com/up2jj/wuko/internal/testfs"
 )
 
 func TestLoadEnvironmentBlock(t *testing.T) {
 	path := t.TempDir() + "/workflow.yml"
-	writeTestFile(t, path, `version: 1
+	testfs.Write(t, path, `version: 1
 name: scoped-env
 steps:
   - env:
@@ -50,7 +52,7 @@ func TestEnvironmentBlockValidation(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			path := t.TempDir() + "/workflow.yml"
-			writeTestFile(t, path, "version: 1\nname: invalid\nsteps:\n"+test.body)
+			testfs.Write(t, path, "version: 1\nname: invalid\nsteps:\n"+test.body)
 			_, err := NewLoader(nil).Load(t.Context(), path, LoadOptions{RunDir: t.TempDir()})
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("error = %v, want substring %q", err, test.want)
@@ -62,12 +64,12 @@ func TestEnvironmentBlockValidation(t *testing.T) {
 func TestEnvironmentBlockExpandsRequiredSteps(t *testing.T) {
 	dir := t.TempDir()
 	fragment := dir + "/steps.yml"
-	writeTestFile(t, fragment, `- env: {MODE: scoped}
+	testfs.Write(t, fragment, `- env: {MODE: scoped}
   steps:
     - {id: build, type: shell, with: {command: go}}
 `)
 	workflowPath := dir + "/workflow.yml"
-	writeTestFile(t, workflowPath, "version: 1\nname: required-env\nsteps:\n  - require: steps.yml\n")
+	testfs.Write(t, workflowPath, "version: 1\nname: required-env\nsteps:\n  - require: steps.yml\n")
 	definition, err := NewLoader(nil).Load(t.Context(), workflowPath, LoadOptions{RunDir: dir})
 	if err != nil {
 		t.Fatal(err)
