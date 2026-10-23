@@ -325,6 +325,10 @@ func (m *pathPickerModel) open(entry pathEntry) {
 		m.err = err.Error()
 		return
 	}
+	m.filter.SetValue("")
+	m.filter.Blur()
+	m.filtering = false
+	m.refreshVisible()
 	m.cursor = 0
 }
 

@@ -88,6 +88,53 @@ func TestPathPickerNavigatesAndSelects(t *testing.T) {
 	}
 }
 
+func TestPathPickerClearsFilterAfterDirectoryChange(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	testfs.WriteTree(t, root, map[string]string{"z/child.txt": "child", "other.txt": "other"})
+	m := mustPathModel(t, PathPickerConfig{Root: root, Kind: "file", Required: true})
+	for _, key := range []tea.KeyPressMsg{
+		{Code: '/', Text: "/"}, {Code: 'z', Text: "z"}, {Code: tea.KeyEnter}, {Code: tea.KeyRight},
+	} {
+		updated, _ := m.Update(key)
+		m = updated.(pathPickerModel)
+	}
+	if filepath.Base(m.current) != "z" || m.filter.Value() != "" || m.filtering || m.filter.Focused() {
+		t.Fatalf("current = %s, filter = %q, filtering = %t", m.current, m.filter.Value(), m.filtering)
+	}
+	if pathEntryIndex(m.visible, "child.txt") < 0 || !strings.Contains(ansi.Strip(m.View().Content), "child.txt") {
+		t.Fatalf("child was hidden after navigation: %s", m.View().Content)
+	}
+	// Returning to the parent also drops a filter that only matched its child.
+	m.filter.SetValue("child")
+	m.refreshVisible()
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyLeft})
+	m = updated.(pathPickerModel)
+	if m.filter.Value() != "" || pathEntryIndex(m.visible, "other.txt") < 0 {
+		t.Fatalf("parent listing kept the child filter: query = %q, entries = %#v", m.filter.Value(), m.visible)
+	}
+}
+
+func TestPathPickerKeepsFilterWhenDirectoryChangeFails(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	child := filepath.Join(root, "vanishing")
+	testfs.MkdirAll(t, child, 0o755)
+	m := mustPathModel(t, PathPickerConfig{Root: root, Kind: "file", Required: true})
+	m.filter.SetValue("vanishing")
+	m.refreshVisible()
+	setPathCursor(t, &m, "vanishing")
+	previous := m.current
+	if err := os.Remove(child); err != nil {
+		t.Fatal(err)
+	}
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
+	m = updated.(pathPickerModel)
+	if m.current != previous || m.filter.Value() != "vanishing" || m.err == "" {
+		t.Fatalf("failed navigation changed the listing: current = %s, filter = %q, error = %q", m.current, m.filter.Value(), m.err)
+	}
+}
+
 func TestPathPickerDirectorySelectionAndRootBoundary(t *testing.T) {
 	root := pathPickerTree(t)
 	model := mustPathModel(t, PathPickerConfig{Message: "Select", Root: root, Kind: "directory", Required: true})
