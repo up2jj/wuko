@@ -330,6 +330,14 @@ func (m *pathPickerModel) open(entry pathEntry) {
 	m.filtering = false
 	m.refreshVisible()
 	m.cursor = 0
+	if filepath.Clean(m.current) == filepath.Dir(previous) {
+		for index, candidate := range m.visible {
+			if candidate.absolute == previous {
+				m.cursor = index
+				break
+			}
+		}
+	}
 }
 
 func (m *pathPickerModel) goParent() {

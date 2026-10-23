@@ -10,6 +10,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/google/go-cmp/cmp"
 	"github.com/up2jj/wuko/internal/testfs"
 )
 
@@ -132,6 +133,82 @@ func TestPathPickerKeepsFilterWhenDirectoryChangeFails(t *testing.T) {
 	m = updated.(pathPickerModel)
 	if m.current != previous || m.filter.Value() != "vanishing" || m.err == "" {
 		t.Fatalf("failed navigation changed the listing: current = %s, filter = %q, error = %q", m.current, m.filter.Value(), m.err)
+	}
+}
+
+func TestPathPickerRestoresFolderCursorWhenReturning(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name      string
+		key       rune
+		parentRow bool
+	}{
+		{name: "left", key: tea.KeyLeft},
+		{name: "h", key: 'h'},
+		{name: "backspace", key: tea.KeyBackspace},
+		{name: "enter parent row", key: tea.KeyEnter, parentRow: true},
+		{name: "open parent row", key: tea.KeyRight, parentRow: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			testfs.WriteTree(t, root, map[string]string{"a/one.txt": "one", "z/two.txt": "two"})
+			m := mustPathModel(t, PathPickerConfig{Root: root, Kind: "file", Required: true})
+			parent := m.current
+			setPathCursor(t, &m, "z")
+			updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
+			m = updated.(pathPickerModel)
+			setPathCursor(t, &m, "two.txt")
+			if test.parentRow {
+				setPathCursor(t, &m, "..")
+			}
+			updated, _ = m.Update(tea.KeyPressMsg{Code: test.key})
+			m = updated.(pathPickerModel)
+			if m.current != parent || m.visible[m.cursor].name != "z" || m.done {
+				t.Fatalf("current = %s, highlighted = %s, done = %t", m.current, m.visible[m.cursor].name, m.done)
+			}
+		})
+	}
+}
+
+func TestPathPickerRestoresFolderCursorWithoutLosingSelections(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	testfs.WriteTree(t, root, map[string]string{"a/one.txt": "one", "z/two.txt": "two", "keep.txt": "keep"})
+	m := mustPathModel(t, PathPickerConfig{Root: root, Kind: "file", Multiple: true, Required: true})
+	for _, action := range []struct {
+		entry string
+		key   rune
+	}{{"keep.txt", tea.KeySpace}, {"z", tea.KeyRight}, {"two.txt", tea.KeySpace}, {"..", tea.KeyLeft}} {
+		setPathCursor(t, &m, action.entry)
+		updated, _ := m.Update(tea.KeyPressMsg{Code: action.key})
+		m = updated.(pathPickerModel)
+	}
+	if m.visible[m.cursor].name != "z" {
+		t.Fatalf("highlighted = %s, want z", m.visible[m.cursor].name)
+	}
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = updated.(pathPickerModel)
+	if diff := cmp.Diff([]string{"keep.txt", "z/two.txt"}, m.result); !m.done || diff != "" {
+		t.Fatalf("done = %t, selected paths (-want +got):\n%s", m.done, diff)
+	}
+}
+
+func TestPathPickerReturnsWhenPreviousFolderDisappears(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	testfs.MkdirAll(t, filepath.Join(root, "a"), 0o755)
+	testfs.MkdirAll(t, filepath.Join(root, "z"), 0o755)
+	m := mustPathModel(t, PathPickerConfig{Root: root, Kind: "file", Required: true})
+	setPathCursor(t, &m, "z")
+	m.openSelected()
+	if err := os.Remove(m.current); err != nil {
+		t.Fatal(err)
+	}
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyLeft})
+	m = updated.(pathPickerModel)
+	if m.err != "" || len(m.visible) != 1 || m.cursor != 0 || m.visible[0].name != "a" {
+		t.Fatalf("cursor = %d, entries = %#v, error = %q", m.cursor, m.visible, m.err)
 	}
 }
 

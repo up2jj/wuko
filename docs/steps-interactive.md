@@ -556,7 +556,8 @@ open a directory, and left, `h`, or backspace to return. Enter selects in single
 toggles paths and Enter confirms in multiple mode. `/` filters the current listing, `ctrl+h`
 toggles hidden entries, and Ctrl+C cancels. While filtering, Enter applies the filter and Esc clears
 the filter; Esc does not cancel the picker. Moving to another directory clears the listing filter;
-a failed directory change keeps it. Shortcut help wraps on narrow terminals instead of
+a failed directory change keeps it. Returning to the parent highlights the folder just left when
+it is still visible. Shortcut help wraps on narrow terminals instead of
 disappearing.
 
 Single selection exposes `.steps.<id>.value` and `.steps.<id>.root`. Multiple selection exposes
