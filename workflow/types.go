@@ -1,10 +1,8 @@
 package workflow
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"path"
 	"path/filepath"
@@ -15,6 +13,7 @@ import (
 
 	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/helper"
+	"github.com/up2jj/wuko/internal/yamlstrict"
 	workflowschedule "github.com/up2jj/wuko/schedule"
 	"github.com/up2jj/wuko/secret"
 	"github.com/up2jj/wuko/validation"
@@ -604,21 +603,9 @@ func decodeWorkflowData(data []byte, source workflowDecodeSource, reporter diagn
 	sourceLabel := source.sourceLabel
 	sourceIndex := validation.NewLazySourceIndex(displaySource, data)
 
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
 	var definition Definition
-	if err := decoder.Decode(&definition); err != nil {
+	if err := yamlstrict.Decode(data, &definition); err != nil {
 		err = decodeValidationError(err, displaySource, sourceIndex)
-		traceFinish(reporter, loadStarted, diagnostic.PhaseDecode, diagnostic.StatusFailed, diagnostic.Location{Source: displaySource}, "", "", "", "", err)
-		return nil, fmt.Errorf("decoding workflow %s: %w", displaySource, err)
-	}
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		if err == nil {
-			multipleErr := fmt.Errorf("multiple YAML documents are not supported")
-			traceFinish(reporter, loadStarted, diagnostic.PhaseDecode, diagnostic.StatusFailed, diagnostic.Location{Source: displaySource}, "", "", "", "", multipleErr)
-			return nil, fmt.Errorf("decoding workflow %s: multiple YAML documents are not supported", displaySource)
-		}
 		traceFinish(reporter, loadStarted, diagnostic.PhaseDecode, diagnostic.StatusFailed, diagnostic.Location{Source: displaySource}, "", "", "", "", err)
 		return nil, fmt.Errorf("decoding workflow %s: %w", displaySource, err)
 	}

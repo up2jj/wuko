@@ -1,13 +1,12 @@
 package workflow
 
 import (
-	"bytes"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/up2jj/wuko/internal/yamlstrict"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -174,7 +173,7 @@ func loadStepFragment(path string) ([]Step, error) {
 	}
 
 	var document yaml.Node
-	if err := decodeOneYAML(data, path, &document, false); err != nil {
+	if err := decodeOneYAML(data, path, &document); err != nil {
 		return nil, err
 	}
 	if len(document.Content) != 1 {
@@ -184,7 +183,7 @@ func loadStepFragment(path string) ([]Step, error) {
 	switch document.Content[0].Kind {
 	case yaml.SequenceNode:
 		var steps []Step
-		if err := decodeOneYAML(data, path, &steps, true); err != nil {
+		if err := decodeOneYAML(data, path, &steps); err != nil {
 			return nil, err
 		}
 		if len(steps) == 0 {
@@ -194,7 +193,7 @@ func loadStepFragment(path string) ([]Step, error) {
 		return steps, nil
 	case yaml.MappingNode:
 		var fragment stepFragment
-		if err := decodeOneYAML(data, path, &fragment, true); err != nil {
+		if err := decodeOneYAML(data, path, &fragment); err != nil {
 			return nil, err
 		}
 		if len(fragment.Steps) == 0 {
@@ -207,17 +206,8 @@ func loadStepFragment(path string) ([]Step, error) {
 	}
 }
 
-func decodeOneYAML(data []byte, path string, target any, knownFields bool) error {
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(knownFields)
-	if err := decoder.Decode(target); err != nil {
-		return fmt.Errorf("decoding required steps %s: %w", path, err)
-	}
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		if err == nil {
-			return fmt.Errorf("decoding required steps %s: multiple YAML documents are not supported", path)
-		}
+func decodeOneYAML(data []byte, path string, target any) error {
+	if err := yamlstrict.Decode(data, target); err != nil {
 		return fmt.Errorf("decoding required steps %s: %w", path, err)
 	}
 	return nil

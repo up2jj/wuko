@@ -2,15 +2,13 @@
 package githook
 
 import (
-	"bytes"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"slices"
 
+	"github.com/up2jj/wuko/internal/yamlstrict"
 	"github.com/up2jj/wuko/workflow"
-	"go.yaml.in/yaml/v3"
 )
 
 const ManifestPath = ".wuko/git-hooks.yaml"
@@ -39,17 +37,8 @@ func LoadManifest(root string) (Manifest, error) {
 	if err != nil {
 		return Manifest{}, fmt.Errorf("reading Git hook manifest %s: %w", path, err)
 	}
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
 	var manifest Manifest
-	if err := decoder.Decode(&manifest); err != nil {
-		return Manifest{}, fmt.Errorf("decoding Git hook manifest %s: %w", path, err)
-	}
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		if err == nil {
-			err = fmt.Errorf("multiple YAML documents are not supported")
-		}
+	if err := yamlstrict.Decode(data, &manifest); err != nil {
 		return Manifest{}, fmt.Errorf("decoding Git hook manifest %s: %w", path, err)
 	}
 	if err := manifest.Validate(); err != nil {

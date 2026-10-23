@@ -2,14 +2,12 @@
 package observe
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"slices"
 	"sync"
 
 	"github.com/up2jj/wuko/step"
-	"go.yaml.in/yaml/v3"
 )
 
 // Batch is bounded source-owned coalescing state. The observe scheduler controls when
@@ -157,13 +155,7 @@ func (batch *latestBatch) Binding() map[string]any {
 }
 
 func decodeConfig(raw map[string]any, target any) error {
-	data, err := yaml.Marshal(step.Encodable(raw))
-	if err != nil {
-		return fmt.Errorf("encoding source configuration: %w", err)
-	}
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(target); err != nil {
+	if err := step.DecodeConfig(raw, target); err != nil {
 		return fmt.Errorf("decoding source configuration: %w", err)
 	}
 	return nil

@@ -1,7 +1,6 @@
 package step
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -14,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/up2jj/wuko/helper"
+	"github.com/up2jj/wuko/internal/yamlstrict"
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/provider"
 	"github.com/up2jj/wuko/workflow"
@@ -673,16 +673,7 @@ func (r *Registry) BuildContext(ctx context.Context, name string, raw map[string
 
 // DecodeConfig converts an untyped YAML mapping into a strict typed step configuration.
 func DecodeConfig(raw map[string]any, target any) error {
-	data, err := yaml.Marshal(Encodable(raw))
-	if err != nil {
-		return fmt.Errorf("encoding step configuration: %w", err)
-	}
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(target); err != nil {
-		return err
-	}
-	return nil
+	return yamlstrict.Convert(Encodable(raw), target)
 }
 
 // yamlFloat keeps a float looking like one across the encode/decode round trip

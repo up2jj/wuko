@@ -24,6 +24,7 @@ import (
 
 	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/helper"
+	"github.com/up2jj/wuko/internal/yamlstrict"
 	"github.com/up2jj/wuko/process"
 	"go.yaml.in/yaml/v3"
 )
@@ -663,17 +664,8 @@ func archivedActionSource(source string, files map[string]ActionFile) string {
 }
 
 func decodeActionWithRenderer(data []byte, description, dir string, files map[string]ActionFile, logicalSource, localFileRoot string, renderer *Renderer) (*Action, error) {
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
 	var action Action
-	if err := decoder.Decode(&action); err != nil {
-		return nil, fmt.Errorf("decoding %s: %w", description, err)
-	}
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		if err == nil {
-			return nil, fmt.Errorf("decoding %s: multiple YAML documents are not supported", description)
-		}
+	if err := yamlstrict.Decode(data, &action); err != nil {
 		return nil, fmt.Errorf("decoding %s: %w", description, err)
 	}
 	action.Dir = dir

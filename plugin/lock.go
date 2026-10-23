@@ -1,11 +1,9 @@
 package plugin
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"maps"
 	"os"
 	"path/filepath"
@@ -13,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/up2jj/wuko/internal/filelock"
+	"github.com/up2jj/wuko/internal/yamlstrict"
 	"github.com/up2jj/wuko/workflow"
 	"go.yaml.in/yaml/v3"
 )
@@ -39,15 +38,9 @@ func readLock(path string) (lockDocument, error) {
 	if err != nil {
 		return lockDocument{}, err
 	}
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
 	var doc lockDocument
-	if err := decoder.Decode(&doc); err != nil {
+	if err := yamlstrict.Decode(data, &doc); err != nil {
 		return doc, fmt.Errorf("invalid %s: %w", LockfileName, err)
-	}
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		return doc, fmt.Errorf("invalid %s: expected one YAML document", LockfileName)
 	}
 	if doc.Version != 1 {
 		return doc, fmt.Errorf("unsupported %s version %d", LockfileName, doc.Version)

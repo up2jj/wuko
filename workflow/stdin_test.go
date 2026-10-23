@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/up2jj/wuko/validation"
 )
 
 func TestLoaderDecodeStdinUsesBaseDirectoryAndLogicalLocations(t *testing.T) {
@@ -66,6 +68,7 @@ func TestLoaderDecodeStdinReportsLogicalSource(t *testing.T) {
 	}{
 		{name: "invalid", data: "version: [", want: "decoding workflow stdin"},
 		{name: "multiple documents", data: "version: 1\nname: first\nsteps: [{id: run, type: shell}]\n---\n{}\n", want: "multiple YAML documents"},
+		{name: "broken second document", data: "version: 1\nname: first\nsteps: [{id: run, type: shell}]\n---\nname: [\n", want: "did not find expected node content"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -73,6 +76,10 @@ func TestLoaderDecodeStdinReportsLogicalSource(t *testing.T) {
 			_, err := NewLoader(nil).DecodeStdin(strings.NewReader(test.data), root, LoadOptions{})
 			if err == nil || !strings.Contains(err.Error(), test.want) || strings.Contains(err.Error(), root) {
 				t.Fatalf("error = %v", err)
+			}
+			// Every decode failure must reach validate --format json as an issue.
+			if !validation.Is(err) {
+				t.Fatalf("error is not a validation issue: %v", err)
 			}
 		})
 	}

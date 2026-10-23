@@ -2,7 +2,6 @@
 package form
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -13,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/up2jj/wuko/internal/yamlstrict"
 	"github.com/up2jj/wuko/workflow"
 	"go.yaml.in/yaml/v3"
 )
@@ -96,14 +96,8 @@ func Decode(node *yaml.Node, vars map[string]any) (*Definition, error) {
 	if node == nil || node.Kind == 0 || node.Tag == "!!null" {
 		return nil, fmt.Errorf("workflow does not declare a form")
 	}
-	data, err := yaml.Marshal(node)
-	if err != nil {
-		return nil, fmt.Errorf("encoding form declaration: %w", err)
-	}
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
 	var definition Definition
-	if err := decoder.Decode(&definition); err != nil {
+	if err := yamlstrict.Convert(node, &definition); err != nil {
 		return nil, fmt.Errorf("decoding form: %w", err)
 	}
 	if err := definition.validate(vars); err != nil {

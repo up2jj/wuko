@@ -4,13 +4,13 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"maps"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 
+	"github.com/up2jj/wuko/internal/yamlstrict"
 	"github.com/up2jj/wuko/workflow"
 	"go.yaml.in/yaml/v3"
 )
@@ -30,13 +30,8 @@ func readWorkflowLockInput(path string, migrate bool) (*workflowLockInput, error
 		return nil, err
 	}
 	input := &workflowLockInput{path: path, original: data}
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	if err := decoder.Decode(&input.document); err != nil {
+	if err := yamlstrict.Decode(data, &input.document); err != nil {
 		return nil, err
-	}
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		return nil, fmt.Errorf("expected one workflow YAML document")
 	}
 	if len(input.document.Content) != 1 || input.document.Content[0].Kind != yaml.MappingNode {
 		return nil, fmt.Errorf("workflow must be an object")
