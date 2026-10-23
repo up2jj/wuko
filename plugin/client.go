@@ -143,6 +143,15 @@ type eventFrame struct {
 	decoded []byte
 }
 
+const (
+	// stalledWriteGrace is how long a write may continue after its context ends.
+	stalledWriteGrace = time.Second
+	// unsolicitedWriteTimeout bounds frames written without a caller context: callback
+	// responses and cancel notifications. Each is small, so only a plugin that has stopped
+	// reading its input can hold one this long.
+	unsolicitedWriteTimeout = 30 * time.Second
+)
+
 type client struct {
 	cmd *exec.Cmd
 	// untrack releases the plugin's process group from the forced-shutdown sweep once the
@@ -374,9 +383,9 @@ func (c *client) writeResponse(frame outgoingResponseFrame) {
 	if len(data) > maxFrameSize {
 		data, _ = json.Marshal(outgoingResponseFrame{ID: frame.ID, Error: &wireError{Code: "frame_too_large", Message: "host callback response exceeds 10 MiB"}})
 	}
-	c.writeMu.Lock()
-	_, _ = c.stdin.Write(append(data, '\n'))
-	c.writeMu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), unsolicitedWriteTimeout)
+	defer cancel()
+	_ = c.writeFrame(ctx, data)
 }
 
 func decodeFrame(data []byte, target any) error {
@@ -444,7 +453,7 @@ func (c *client) callWithOptions(ctx context.Context, method string, params, res
 	if err != nil {
 		return err
 	}
-	if err := c.send(id, method, params); err != nil {
+	if err := c.send(ctx, id, method, params); err != nil {
 		c.discard(id, state)
 		return err
 	}
@@ -480,7 +489,7 @@ func (c *client) discard(id string, state *callState) {
 	_ = state.detach()
 }
 
-func (c *client) send(id, method string, params any) error {
+func (c *client) send(ctx context.Context, id, method string, params any) error {
 	data, err := json.Marshal(requestFrame{ID: id, Method: method, Params: params})
 	if err != nil {
 		return err
@@ -488,13 +497,39 @@ func (c *client) send(id, method string, params any) error {
 	if len(data) > maxFrameSize {
 		return fmt.Errorf("plugin request exceeds 10 MiB")
 	}
-	c.writeMu.Lock()
-	_, err = c.stdin.Write(append(data, '\n'))
-	c.writeMu.Unlock()
-	if err != nil {
+	if err := c.writeFrame(ctx, data); err != nil {
 		return fmt.Errorf("writing plugin request: %w", err)
 	}
 	return nil
+}
+
+// writeFrame writes one newline-terminated frame to the plugin. A plugin that stops reading its
+// input would otherwise hold the write, and every writer queued behind writeMu, forever. Once
+// ctx ends the write gets a short grace period, so a healthy plugin still receives a frame sent
+// with an already-canceled context, and is then interrupted by closing the plugin's input.
+func (c *client) writeFrame(ctx context.Context, data []byte) error {
+	written := make(chan error, 1)
+	go func() {
+		c.writeMu.Lock()
+		defer c.writeMu.Unlock()
+		_, err := c.stdin.Write(append(data, '\n'))
+		written <- err
+	}()
+	select {
+	case err := <-written:
+		return err
+	case <-ctx.Done():
+	}
+	timer := time.NewTimer(stalledWriteGrace)
+	defer timer.Stop()
+	select {
+	case err := <-written:
+		return err
+	case <-timer.C:
+	}
+	_ = c.stdin.Close()
+	<-written
+	return fmt.Errorf("plugin stopped reading its input: %w", context.Cause(ctx))
 }
 
 func (c *client) decodeResponse(frame responseFrame, result any) error {
@@ -606,9 +641,9 @@ func (c *client) readError() error {
 
 func (c *client) notify(method string, params any) {
 	data, _ := json.Marshal(requestFrame{Method: method, Params: params})
-	c.writeMu.Lock()
-	_, _ = c.stdin.Write(append(data, '\n'))
-	c.writeMu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), unsolicitedWriteTimeout)
+	defer cancel()
+	_ = c.writeFrame(ctx, data)
 }
 
 func (c *client) close(ctx context.Context) error {

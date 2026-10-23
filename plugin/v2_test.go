@@ -716,3 +716,22 @@ func TestPanickingHostCallbackAnswersWithAnError(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestCallReturnsWhenPluginStopsReadingInput(t *testing.T) {
+	client, _, _ := newPipeClient(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		var result any
+		done <- client.call(ctx, "work", map[string]any{}, &result, nil)
+	}()
+	select {
+	case err := <-done:
+		if err == nil || !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("error = %v, want deadline exceeded", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("call blocked on a plugin that does not read its input")
+	}
+}
