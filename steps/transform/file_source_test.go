@@ -4,9 +4,10 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 
 	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/process"
@@ -84,8 +85,8 @@ func TestFileSourceMatchesDecodeThenTransform(t *testing.T) {
 			if err != nil {
 				t.Fatalf("%v from %s: %v", operations, filepath.Base(path), err)
 			}
-			if !reflect.DeepEqual(got, want.Outputs["value"]) {
-				t.Fatalf("%v from %s = %#v, want %#v", operations, filepath.Base(path), got, want.Outputs["value"])
+			if diff := cmp.Diff(want.Outputs["value"], got); diff != "" {
+				t.Fatalf("%v from %s mismatch (-want +got):\n%s", operations, filepath.Base(path), diff)
 			}
 		}
 	}
@@ -101,8 +102,11 @@ func TestFileSourceStopsReadingOnceTheResultIsKnown(t *testing.T) {
 	} {
 		path := writeSourceFile(t, name, content)
 		got, err := runFileSource(t, map[string]any{"file": path}, []any{map[string]any{"map": "item.id"}, map[string]any{"take": 2}}, step.Request{})
-		if err != nil || !reflect.DeepEqual(got, []any{1, 2}) {
-			t.Fatalf("%s: value = %#v, error = %v", name, got, err)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if diff := cmp.Diff([]any{1, 2}, got); diff != "" {
+			t.Fatalf("%s: value mismatch (-want +got):\n%s", name, diff)
 		}
 	}
 }
@@ -111,8 +115,11 @@ func TestFileSourceResolvesRelativePathsAgainstTheRunDirectory(t *testing.T) {
 	t.Parallel()
 	path := writeSourceFile(t, "items.jsonl", "1\n2\n")
 	got, err := runFileSource(t, map[string]any{"file": "items.jsonl"}, []any{map[string]any{"map": "item * 10"}}, step.Request{RunDir: filepath.Dir(path)})
-	if err != nil || !reflect.DeepEqual(got, []any{10, 20}) {
-		t.Fatalf("value = %#v, error = %v", got, err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if diff := cmp.Diff([]any{10, 20}, got); diff != "" {
+		t.Fatalf("value mismatch (-want +got):\n%s", diff)
 	}
 }
 

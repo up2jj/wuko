@@ -2,8 +2,9 @@ package transform
 
 import (
 	"encoding/json"
-	"reflect"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 
 	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
@@ -45,8 +46,8 @@ func TestOperationsLeaveTheirSourceUntouched(t *testing.T) {
 				want := workflow.Clone(source)
 				runner := steptest.BuildAs[*Runner](t, New, map[string]any{"from": "vars.source", "operations": []any{operationFixture(name)}})
 				_, _ = runner.Run(t.Context(), step.Request{Vars: map[string]any{"source": source}})
-				if !reflect.DeepEqual(source, want) {
-					t.Fatalf("%s changed its source:\n got %#v\nwant %#v", name, source, want)
+				if diff := cmp.Diff(want, source); diff != "" {
+					t.Fatalf("%s changed its source (-want +got):\n%s", name, diff)
 				}
 			}
 		})

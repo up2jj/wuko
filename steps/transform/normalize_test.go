@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/google/go-cmp/cmp"
 )
 
 type namedString string
@@ -152,8 +154,8 @@ func assertNormalizesLikeJSON(t *testing.T, value any) {
 	if (gotErr != nil) != (wantErr != nil) || (gotErr != nil && gotErr.Error() != wantErr.Error()) {
 		t.Fatalf("normalizeResult(%#v) error = %v, want %v", value, gotErr, wantErr)
 	}
-	if gotErr == nil && !reflect.DeepEqual(got, want) {
-		t.Fatalf("normalizeResult(%#v) = %#v, want %#v", value, got, want)
+	if diff := cmp.Diff(want, got); gotErr == nil && diff != "" {
+		t.Fatalf("normalizeResult(%#v) mismatch (-want +got):\n%s", value, diff)
 	}
 }
 

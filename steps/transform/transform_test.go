@@ -2,9 +2,11 @@ package transform
 
 import (
 	"context"
-	"reflect"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 
 	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
@@ -161,11 +163,11 @@ func TestListPipelineAndVariable(t *testing.T) {
 		map[string]any{"name": "web", "release_tag": "v2"},
 		map[string]any{"name": "worker", "release_tag": "v3"},
 	}
-	if !reflect.DeepEqual(result.Outputs["value"], want) {
-		t.Fatalf("value = %#v, want %#v", result.Outputs["value"], want)
+	if diff := cmp.Diff(want, result.Outputs["value"]); diff != "" {
+		t.Fatalf("value mismatch (-want +got):\n%s", diff)
 	}
-	if !reflect.DeepEqual(result.Variables["changed_apps"], want) {
-		t.Fatalf("variable = %#v, want %#v", result.Variables["changed_apps"], want)
+	if diff := cmp.Diff(want, result.Variables["changed_apps"]); diff != "" {
+		t.Fatalf("variable mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -185,8 +187,8 @@ func TestObjectPipelineUsesSortedKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []any{map[string]any{"name": "api", "index": 0}, map[string]any{"name": "web", "index": 1}}
-	if !reflect.DeepEqual(result.Outputs["value"], want) {
-		t.Fatalf("value = %#v, want %#v", result.Outputs["value"], want)
+	if diff := cmp.Diff(want, result.Outputs["value"]); diff != "" {
+		t.Fatalf("value mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -218,8 +220,8 @@ func TestNumericAndTupleOperations(t *testing.T) {
 			map[string]any{"app": "api", "tag": "v1", "index": 0},
 			map[string]any{"app": "web", "tag": nil, "index": 1},
 		}
-		if !reflect.DeepEqual(result.Outputs["value"], want) {
-			t.Fatalf("value = %#v, want %#v", result.Outputs["value"], want)
+		if diff := cmp.Diff(want, result.Outputs["value"]); diff != "" {
+			t.Fatalf("value mismatch (-want +got):\n%s", diff)
 		}
 	})
 }
@@ -241,8 +243,8 @@ func TestStructuralEqualityAndTypedChaining(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []any{"eu", "us"}; !reflect.DeepEqual(result.Outputs["value"], want) {
-		t.Fatalf("value = %#v, want %#v", result.Outputs["value"], want)
+	if diff := cmp.Diff([]any{"eu", "us"}, result.Outputs["value"]); diff != "" {
+		t.Fatalf("value mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -271,7 +273,7 @@ func TestReferencesExposeCallbackLocals(t *testing.T) {
 		t.Fatalf("references = %#v", declared)
 	}
 	expressions := declared.Expressions
-	if !reflect.DeepEqual(expressions[0].Locals, []string{"index", "item"}) || len(expressions[1].Locals) != 0 {
+	if !slices.Equal(expressions[0].Locals, []string{"index", "item"}) || len(expressions[1].Locals) != 0 {
 		t.Fatalf("locals = %#v, %#v", expressions[0].Locals, expressions[1].Locals)
 	}
 }
@@ -299,8 +301,8 @@ func TestAggregationSemantics(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !reflect.DeepEqual(result.Outputs["value"], test.want) {
-				t.Fatalf("value = %#v, want %#v", result.Outputs["value"], test.want)
+			if diff := cmp.Diff(test.want, result.Outputs["value"]); diff != "" {
+				t.Fatalf("value mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}
@@ -346,8 +348,8 @@ func TestStableSortAndStageReindexing(t *testing.T) {
 		map[string]any{"id": "a", "stage_index": 0, "rank": 1},
 		map[string]any{"id": "b", "stage_index": 1, "rank": 1},
 	}
-	if !reflect.DeepEqual(result.Outputs["value"], want) {
-		t.Fatalf("value = %#v, want %#v", result.Outputs["value"], want)
+	if diff := cmp.Diff(want, result.Outputs["value"]); diff != "" {
+		t.Fatalf("value mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -386,8 +388,8 @@ func TestObjectCombinationCollisionAndRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]any{"same": map[string]any{"source": "c", "value": 3}}
-	if !reflect.DeepEqual(result.Outputs["value"], want) {
-		t.Fatalf("value = %#v, want %#v", result.Outputs["value"], want)
+	if diff := cmp.Diff(want, result.Outputs["value"]); diff != "" {
+		t.Fatalf("value mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -405,8 +407,8 @@ func TestMultiObjectExtractionOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []any{"a", "b", "c", "d"}; !reflect.DeepEqual(result.Outputs["value"], want) {
-		t.Fatalf("value = %#v, want %#v", result.Outputs["value"], want)
+	if diff := cmp.Diff([]any{"a", "b", "c", "d"}, result.Outputs["value"]); diff != "" {
+		t.Fatalf("value mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -431,8 +433,8 @@ func TestTupleOperations(t *testing.T) {
 			t.Fatal(err)
 		}
 		want := []any{[]any{"a", 1}, []any{"a", 2}, []any{"b", 1}, []any{"b", 2}}
-		if !reflect.DeepEqual(result.Outputs["value"], want) {
-			t.Fatalf("value = %#v, want %#v", result.Outputs["value"], want)
+		if diff := cmp.Diff(want, result.Outputs["value"]); diff != "" {
+			t.Fatalf("value mismatch (-want +got):\n%s", diff)
 		}
 	})
 }
@@ -447,8 +449,8 @@ func TestNamedTerminalRecordsAndOnlyValueOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]any{"value": 2, "index": 1, "found": true}
-	if !reflect.DeepEqual(result.Outputs, map[string]any{"value": want}) {
-		t.Fatalf("outputs = %#v", result.Outputs)
+	if diff := cmp.Diff(map[string]any{"value": want}, result.Outputs); diff != "" {
+		t.Fatalf("outputs mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -461,8 +463,8 @@ func TestSourceExpressionAndRuntimeKindValidation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []any{4, 6}; !reflect.DeepEqual(result.Outputs["value"], want) {
-		t.Fatalf("value = %#v, want %#v", result.Outputs["value"], want)
+	if diff := cmp.Diff([]any{4, 6}, result.Outputs["value"]); diff != "" {
+		t.Fatalf("value mismatch (-want +got):\n%s", diff)
 	}
 
 	wrongKind := steptest.BuildAs[*Runner](t, New, map[string]any{"from": "vars.value", "operations": []any{"unique"}})
@@ -480,8 +482,8 @@ func TestResultNormalizesNestedTypedCollections(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []any{map[string]any{"ports": []any{80, 443}}}
-	if !reflect.DeepEqual(result.Outputs["value"], want) {
-		t.Fatalf("value = %#v, want %#v", result.Outputs["value"], want)
+	if diff := cmp.Diff(want, result.Outputs["value"]); diff != "" {
+		t.Fatalf("value mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -553,8 +555,8 @@ func TestFilteringOperationsGuardTheirValueExpressions(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !reflect.DeepEqual(result.Outputs["value"], test.want) {
-				t.Fatalf("value = %#v, want %#v", result.Outputs["value"], test.want)
+			if diff := cmp.Diff(test.want, result.Outputs["value"]); diff != "" {
+				t.Fatalf("value mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}
@@ -586,7 +588,7 @@ func TestCallbackLocalsDoNotLeakBetweenOperations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(result.Outputs["value"], map[string]any{"eu": nil}) {
-		t.Fatalf("value = %#v, want the list local to be unbound", result.Outputs["value"])
+	if diff := cmp.Diff(map[string]any{"eu": nil}, result.Outputs["value"]); diff != "" {
+		t.Fatalf("list local is bound (-want +got):\n%s", diff)
 	}
 }

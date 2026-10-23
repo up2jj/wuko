@@ -5,9 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 
 	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
@@ -144,8 +145,8 @@ func assertStreamingMatches(t *testing.T, operations []any, source any, sameErro
 		}
 		return
 	}
-	if got := result.Outputs["value"]; !reflect.DeepEqual(got, want) {
-		t.Errorf("%v over %#v = %#v, want %#v", operations, source, got, want)
+	if diff := cmp.Diff(want, result.Outputs["value"]); diff != "" {
+		t.Errorf("%v over %#v mismatch (-want +got):\n%s", operations, source, diff)
 	}
 }
 
@@ -196,8 +197,8 @@ func TestStreamingKeepsStageLocalIndexes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []any{0, 1, 2}; !reflect.DeepEqual(result.Outputs["value"], want) {
-		t.Fatalf("value = %#v, want %#v", result.Outputs["value"], want)
+	if diff := cmp.Diff([]any{0, 1, 2}, result.Outputs["value"]); diff != "" {
+		t.Fatalf("value mismatch (-want +got):\n%s", diff)
 	}
 }
 

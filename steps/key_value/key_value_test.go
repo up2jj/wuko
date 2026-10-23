@@ -4,9 +4,10 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 
 	"github.com/up2jj/wuko/step"
 )
@@ -93,20 +94,20 @@ func TestOperationsReturnRuntimeNumbers(t *testing.T) {
 	value := map[string]any{"integer": 3, "decimal": 1.5, "items": []any{4}}
 	set := run(config("set", "numbers", value, true)).Outputs["value"]
 	want := map[string]any{"integer": int64(3), "decimal": 1.5, "items": []any{int64(4)}}
-	if !reflect.DeepEqual(set, want) {
-		t.Fatalf("set value = %#v", set)
+	if diff := cmp.Diff(want, set); diff != "" {
+		t.Fatalf("set value mismatch (-want +got):\n%s", diff)
 	}
 	get := run(config("get", "numbers", nil, false)).Outputs["value"]
-	if !reflect.DeepEqual(get, want) {
-		t.Fatalf("get value = %#v", get)
+	if diff := cmp.Diff(want, get); diff != "" {
+		t.Fatalf("get value mismatch (-want +got):\n%s", diff)
 	}
 	entries := run(config("list", "", nil, false)).Outputs["entries"].([]any)
-	if !reflect.DeepEqual(entries[0].(map[string]any)["value"], want) {
-		t.Fatalf("list entries = %#v", entries)
+	if diff := cmp.Diff(want, entries[0].(map[string]any)["value"]); diff != "" {
+		t.Fatalf("list entries mismatch (-want +got):\n%s", diff)
 	}
 	deleted := run(config("delete", "numbers", nil, false)).Outputs["value"]
-	if !reflect.DeepEqual(deleted, want) {
-		t.Fatalf("deleted value = %#v", deleted)
+	if diff := cmp.Diff(want, deleted); diff != "" {
+		t.Fatalf("deleted value mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -127,20 +128,20 @@ func TestOperations(t *testing.T) {
 	run(config("set", "theme", "dark", true))
 	run(config("set", "nothing", nil, true))
 	got := run(config("get", "theme", nil, false)).Outputs
-	if !reflect.DeepEqual(got, map[string]any{"value": "dark", "found": true}) {
-		t.Fatalf("get outputs = %#v", got)
+	if diff := cmp.Diff(map[string]any{"value": "dark", "found": true}, got); diff != "" {
+		t.Fatalf("get outputs mismatch (-want +got):\n%s", diff)
 	}
 	missing := run(config("get", "missing", nil, false)).Outputs
-	if !reflect.DeepEqual(missing, map[string]any{"value": nil, "found": false}) {
-		t.Fatalf("missing outputs = %#v", missing)
+	if diff := cmp.Diff(map[string]any{"value": nil, "found": false}, missing); diff != "" {
+		t.Fatalf("missing outputs mismatch (-want +got):\n%s", diff)
 	}
 	entries := run(config("list", "", nil, false)).Outputs["entries"].([]any)
 	if len(entries) != 2 || entries[0].(map[string]any)["key"] != "nothing" || entries[1].(map[string]any)["key"] != "theme" {
 		t.Fatalf("entries = %#v", entries)
 	}
 	deleted := run(config("delete", "theme", nil, false)).Outputs
-	if !reflect.DeepEqual(deleted, map[string]any{"value": "dark", "deleted": true}) {
-		t.Fatalf("delete outputs = %#v", deleted)
+	if diff := cmp.Diff(map[string]any{"value": "dark", "deleted": true}, deleted); diff != "" {
+		t.Fatalf("delete outputs mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -207,12 +208,12 @@ func TestSetExprKeepsResultTypes(t *testing.T) {
 
 	set := run(withExpr(config("set", "report", nil, false), `{"total": vars.count + 1, "items": steps.previous.items}`))
 	want := map[string]any{"total": int64(3), "items": []any{"a", "b"}}
-	if !reflect.DeepEqual(set.Outputs["value"], want) {
-		t.Fatalf("set value = %#v", set.Outputs["value"])
+	if diff := cmp.Diff(want, set.Outputs["value"]); diff != "" {
+		t.Fatalf("set value mismatch (-want +got):\n%s", diff)
 	}
 	got := run(config("get", "report", nil, false)).Outputs["value"]
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("get value = %#v", got)
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Fatalf("get value mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -233,16 +234,16 @@ func TestUpdateReadsAndWritesUnderOneLock(t *testing.T) {
 
 	increment := withExpr(config("update", "runs", nil, false), "found ? current + 1 : 1")
 	first := run(increment)
-	if !reflect.DeepEqual(first, map[string]any{"value": int64(1), "found": false, "changed": true}) {
-		t.Fatalf("first update = %#v", first)
+	if diff := cmp.Diff(map[string]any{"value": int64(1), "found": false, "changed": true}, first); diff != "" {
+		t.Fatalf("first update mismatch (-want +got):\n%s", diff)
 	}
 	second := run(withExpr(config("update", "runs", nil, false), "found ? current + 1 : 1"))
-	if !reflect.DeepEqual(second, map[string]any{"value": int64(2), "found": true, "changed": true}) {
-		t.Fatalf("second update = %#v", second)
+	if diff := cmp.Diff(map[string]any{"value": int64(2), "found": true, "changed": true}, second); diff != "" {
+		t.Fatalf("second update mismatch (-want +got):\n%s", diff)
 	}
 	unchanged := run(withExpr(config("update", "runs", nil, false), "current"))
-	if !reflect.DeepEqual(unchanged, map[string]any{"value": int64(2), "found": true, "changed": false}) {
-		t.Fatalf("unchanged update = %#v", unchanged)
+	if diff := cmp.Diff(map[string]any{"value": int64(2), "found": true, "changed": false}, unchanged); diff != "" {
+		t.Fatalf("unchanged update mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -262,21 +263,21 @@ func TestVariableReceivesTheOperationResult(t *testing.T) {
 		return result.Variables
 	}
 
-	if got := run(config("set", "theme", "dark", true), "saved"); !reflect.DeepEqual(got, map[string]any{"saved": "dark"}) {
-		t.Fatalf("set variables = %#v", got)
+	if diff := cmp.Diff(map[string]any{"saved": "dark"}, run(config("set", "theme", "dark", true), "saved")); diff != "" {
+		t.Fatalf("set variables mismatch (-want +got):\n%s", diff)
 	}
-	if got := run(config("get", "theme", nil, false), "theme"); !reflect.DeepEqual(got, map[string]any{"theme": "dark"}) {
-		t.Fatalf("get variables = %#v", got)
+	if diff := cmp.Diff(map[string]any{"theme": "dark"}, run(config("get", "theme", nil, false), "theme")); diff != "" {
+		t.Fatalf("get variables mismatch (-want +got):\n%s", diff)
 	}
-	if got := run(withExpr(config("update", "theme", nil, false), `current + "-high-contrast"`), "theme"); !reflect.DeepEqual(got, map[string]any{"theme": "dark-high-contrast"}) {
-		t.Fatalf("update variables = %#v", got)
+	if diff := cmp.Diff(map[string]any{"theme": "dark-high-contrast"}, run(withExpr(config("update", "theme", nil, false), `current + "-high-contrast"`), "theme")); diff != "" {
+		t.Fatalf("update variables mismatch (-want +got):\n%s", diff)
 	}
 	want := map[string]any{"all": []any{map[string]any{"key": "theme", "value": "dark-high-contrast"}}}
-	if got := run(config("list", "", nil, false), "all"); !reflect.DeepEqual(got, want) {
-		t.Fatalf("list variables = %#v", got)
+	if diff := cmp.Diff(want, run(config("list", "", nil, false), "all")); diff != "" {
+		t.Fatalf("list variables mismatch (-want +got):\n%s", diff)
 	}
-	if got := run(config("delete", "theme", nil, false), "removed"); !reflect.DeepEqual(got, map[string]any{"removed": "dark-high-contrast"}) {
-		t.Fatalf("delete variables = %#v", got)
+	if diff := cmp.Diff(map[string]any{"removed": "dark-high-contrast"}, run(config("delete", "theme", nil, false), "removed")); diff != "" {
+		t.Fatalf("delete variables mismatch (-want +got):\n%s", diff)
 	}
 	runner, err := New(config("get", "theme", nil, false))
 	if err != nil {
@@ -309,13 +310,13 @@ func TestGetDefaultListPrefixAndClear(t *testing.T) {
 	missing := run(map[string]any{
 		"operation": "get", "scope": "local", "store": "prefs", "key": "theme", "default": map[string]any{"name": "light"},
 	})
-	if !reflect.DeepEqual(missing, map[string]any{"value": map[string]any{"name": "light"}, "found": false}) {
-		t.Fatalf("default = %#v", missing)
+	if diff := cmp.Diff(map[string]any{"value": map[string]any{"name": "light"}, "found": false}, missing); diff != "" {
+		t.Fatalf("default mismatch (-want +got):\n%s", diff)
 	}
 	run(config("set", "theme", "dark", true))
 	stored := run(map[string]any{"operation": "get", "scope": "local", "store": "prefs", "key": "theme", "default": "light"})
-	if !reflect.DeepEqual(stored, map[string]any{"value": "dark", "found": true}) {
-		t.Fatalf("stored value = %#v", stored)
+	if diff := cmp.Diff(map[string]any{"value": "dark", "found": true}, stored); diff != "" {
+		t.Fatalf("stored value mismatch (-want +got):\n%s", diff)
 	}
 
 	run(config("set", "build-linux", 1, true))
@@ -325,20 +326,20 @@ func TestGetDefaultListPrefixAndClear(t *testing.T) {
 		map[string]any{"key": "build-darwin", "value": int64(2)},
 		map[string]any{"key": "build-linux", "value": int64(1)},
 	}
-	if !reflect.DeepEqual(filtered["entries"], want) {
-		t.Fatalf("prefixed entries = %#v", filtered["entries"])
+	if diff := cmp.Diff(want, filtered["entries"]); diff != "" {
+		t.Fatalf("prefixed entries mismatch (-want +got):\n%s", diff)
 	}
 
 	cleared := run(map[string]any{"operation": "clear", "scope": "local", "store": "prefs"})
-	if !reflect.DeepEqual(cleared, map[string]any{"cleared": int64(3)}) {
-		t.Fatalf("clear = %#v", cleared)
+	if diff := cmp.Diff(map[string]any{"cleared": int64(3)}, cleared); diff != "" {
+		t.Fatalf("clear mismatch (-want +got):\n%s", diff)
 	}
 	empty := run(config("list", "", nil, false))
 	if len(empty["entries"].([]any)) != 0 {
 		t.Fatalf("entries after clear = %#v", empty["entries"])
 	}
-	if again := run(map[string]any{"operation": "clear", "scope": "local", "store": "prefs"}); !reflect.DeepEqual(again, map[string]any{"cleared": int64(0)}) {
-		t.Fatalf("repeated clear = %#v", again)
+	if diff := cmp.Diff(map[string]any{"cleared": int64(0)}, run(map[string]any{"operation": "clear", "scope": "local", "store": "prefs"})); diff != "" {
+		t.Fatalf("repeated clear mismatch (-want +got):\n%s", diff)
 	}
 }
 

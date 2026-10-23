@@ -1,9 +1,10 @@
 package transform
 
 import (
-	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 
 	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
@@ -141,8 +142,8 @@ func TestOperationsProduceExpectedValues(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !reflect.DeepEqual(result.Outputs["value"], test.want) {
-				t.Fatalf("value = %#v, want %#v", result.Outputs["value"], test.want)
+			if diff := cmp.Diff(test.want, result.Outputs["value"]); diff != "" {
+				t.Fatalf("value mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}

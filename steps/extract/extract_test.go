@@ -4,10 +4,11 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"reflect"
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 
 	"github.com/up2jj/wuko/step"
 	"go.yaml.in/yaml/v3"
@@ -33,8 +34,8 @@ func TestFormatExtractsEveryTypeAndMapsVariables(t *testing.T) {
 		"metadata": map[string]any{"tags": []any{"go"}, "attempt": int64(2)},
 	}
 	wantVariables := map[string]any{"release_name": "wuko", "build_number": int64(-7)}
-	if !reflect.DeepEqual(result.Outputs, wantOutputs) || !reflect.DeepEqual(result.Variables, wantVariables) {
-		t.Fatalf("result = %#v, want outputs %#v variables %#v", result, wantOutputs, wantVariables)
+	if diff := cmp.Diff(step.Result{Outputs: wantOutputs, Variables: wantVariables}, result); diff != "" {
+		t.Fatalf("result mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -51,8 +52,8 @@ func TestFormatUsesFlexibleWhitespaceAndCRLFLines(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]any{"version": "1.2.3", "build": int64(42)}
-	if !reflect.DeepEqual(result.Outputs, want) {
-		t.Fatalf("outputs = %#v, want %#v", result.Outputs, want)
+	if diff := cmp.Diff(want, result.Outputs); diff != "" {
+		t.Fatalf("outputs mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -87,8 +88,8 @@ func TestPatternSearchesTextAndDefaultsCapturesToString(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]any{"version": "1.4.2", "build": int64(9)}
-	if !reflect.DeepEqual(result.Outputs, want) {
-		t.Fatalf("outputs = %#v, want %#v", result.Outputs, want)
+	if diff := cmp.Diff(want, result.Outputs); diff != "" {
+		t.Fatalf("outputs mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -137,8 +138,8 @@ func TestJSONNormalizesRuntimeNumbers(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]any{"signed": int64(-2), "unsigned": uint64(18446744073709551615), "decimal": 1.5}
-	if !reflect.DeepEqual(result.Outputs["payload"], want) {
-		t.Fatalf("payload = %#v, want %#v", result.Outputs["payload"], want)
+	if diff := cmp.Diff(want, result.Outputs["payload"]); diff != "" {
+		t.Fatalf("payload mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -166,8 +167,11 @@ func TestPatternMatchAllReturnsTypedRecordsAndVariableLists(t *testing.T) {
 	wantVariables := map[string]any{
 		"queries": []any{"SELECT 1", "SELECT 2"}, "row_counts": []any{int64(1), int64(2)},
 	}
-	if !reflect.DeepEqual(result.Outputs["matches"], wantMatches) || result.Outputs["count"] != 2 || !reflect.DeepEqual(result.Variables, wantVariables) {
-		t.Fatalf("result = %#v, want matches %#v variables %#v", result, wantMatches, wantVariables)
+	if diff := cmp.Diff(wantMatches, result.Outputs["matches"]); diff != "" || result.Outputs["count"] != 2 {
+		t.Fatalf("count = %v, matches mismatch (-want +got):\n%s", result.Outputs["count"], diff)
+	}
+	if diff := cmp.Diff(wantVariables, result.Variables); diff != "" {
+		t.Fatalf("variables mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -183,8 +187,14 @@ func TestFormatMatchAllAllowsNoMatches(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(result.Outputs["matches"], []any{}) || result.Outputs["count"] != 0 || !reflect.DeepEqual(result.Variables["values"], []any{}) {
-		t.Fatalf("result = %#v", result)
+	if result.Outputs["count"] != 0 {
+		t.Fatalf("count = %v, want 0", result.Outputs["count"])
+	}
+	if diff := cmp.Diff([]any{}, result.Outputs["matches"]); diff != "" {
+		t.Fatalf("matches mismatch (-want +got):\n%s", diff)
+	}
+	if diff := cmp.Diff([]any{}, result.Variables["values"]); diff != "" {
+		t.Fatalf("values mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -200,8 +210,8 @@ func TestFormatMatchAllReturnsRecordsInLineOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []any{map[string]any{"value": int64(2)}, map[string]any{"value": int64(1)}}
-	if !reflect.DeepEqual(result.Outputs["matches"], want) || result.Outputs["count"] != 2 {
-		t.Fatalf("outputs = %#v", result.Outputs)
+	if diff := cmp.Diff(want, result.Outputs["matches"]); diff != "" || result.Outputs["count"] != 2 {
+		t.Fatalf("count = %v, matches mismatch (-want +got):\n%s", result.Outputs["count"], diff)
 	}
 }
 
@@ -241,8 +251,8 @@ func TestFieldsExtractMarkerPayloadRegexValuesAndVariables(t *testing.T) {
 		"warnings":     []any{"unused import", "slow query"},
 	}
 	wantVariables := map[string]any{"test_binary": "dist/action.test", "build_warnings": []any{"unused import", "slow query"}}
-	if !reflect.DeepEqual(result.Outputs, wantOutputs) || !reflect.DeepEqual(result.Variables, wantVariables) {
-		t.Fatalf("result = %#v, want outputs %#v variables %#v", result, wantOutputs, wantVariables)
+	if diff := cmp.Diff(step.Result{Outputs: wantOutputs, Variables: wantVariables}, result); diff != "" {
+		t.Fatalf("result mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -271,8 +281,11 @@ WUKO_OUTPUT_V1 {"event":"end","key":"query"}
 	}
 	wantBlocks := []any{"SQL: SELECT 1;\nSQL: SELECT 2;\n", "SQL: SELECT 3;\n"}
 	wantQueries := []any{"SELECT 1;", "SELECT 2;", "SELECT 3;"}
-	if !reflect.DeepEqual(result.Outputs["blocks"], wantBlocks) || !reflect.DeepEqual(result.Outputs["queries"], wantQueries) {
-		t.Fatalf("outputs = %#v", result.Outputs)
+	if diff := cmp.Diff(wantBlocks, result.Outputs["blocks"]); diff != "" {
+		t.Fatalf("blocks mismatch (-want +got):\n%s", diff)
+	}
+	if diff := cmp.Diff(wantQueries, result.Outputs["queries"]); diff != "" {
+		t.Fatalf("queries mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -290,8 +303,11 @@ func TestFieldsMatchAllAllowsNoMatches(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(result.Outputs["warnings"], []any{}) || !reflect.DeepEqual(result.Outputs["blocks"], []any{}) {
-		t.Fatalf("outputs = %#v", result.Outputs)
+	if diff := cmp.Diff([]any{}, result.Outputs["warnings"]); diff != "" {
+		t.Fatalf("warnings mismatch (-want +got):\n%s", diff)
+	}
+	if diff := cmp.Diff([]any{}, result.Outputs["blocks"]); diff != "" {
+		t.Fatalf("blocks mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -372,8 +388,8 @@ func TestMarkerProtocolTreatsPrefixedProseAsPayload(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]any{"block": "payload\nWUKO_OUTPUT_V1 marks a block\n", "warning": "unrelated"}
-	if !reflect.DeepEqual(result.Outputs, want) {
-		t.Fatalf("outputs = %#v, want %#v", result.Outputs, want)
+	if diff := cmp.Diff(want, result.Outputs); diff != "" {
+		t.Fatalf("outputs mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -389,8 +405,8 @@ func TestFormatMatchAllReadsCRLFAndTrailingNewlineLines(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(result.Variables["values"], []any{int64(1), int64(22)}) || result.Outputs["count"] != 2 {
-		t.Fatalf("result = %#v", result)
+	if diff := cmp.Diff([]any{int64(1), int64(22)}, result.Variables["values"]); diff != "" || result.Outputs["count"] != 2 {
+		t.Fatalf("count = %v, values mismatch (-want +got):\n%s", result.Outputs["count"], diff)
 	}
 }
 

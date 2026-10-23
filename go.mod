@@ -14,6 +14,7 @@ require (
 	github.com/creack/pty v1.1.24
 	github.com/expr-lang/expr v1.17.8
 	github.com/fsnotify/fsnotify v1.10.1
+	github.com/google/go-cmp v0.7.0
 	github.com/google/uuid v1.6.0
 	github.com/moby/docker-image-spec v1.3.1
 	github.com/moby/go-archive v0.3.3
