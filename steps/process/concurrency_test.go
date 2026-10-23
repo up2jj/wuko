@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	processpkg "github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/step"
 )
@@ -86,12 +87,9 @@ func (executor *streamingExecutor) Run(ctx context.Context, options processpkg.O
 
 func TestConcurrentReplicaReadinessOutputAndShutdown(t *testing.T) {
 	const replicas = 64
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"command": "worker", "readiness": map[string]any{"log": map[string]any{"pattern": "ready", "timeout": "2s"}},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	group := newServiceGroup(t)
 	executor := &streamingExecutor{}
 	output := &lockedBuffer{}
@@ -144,10 +142,7 @@ func (executor *immediateExitExecutor) Run(_ context.Context, options processpkg
 
 func TestSpawnAndImmediateExitOrderingIsDeterministic(t *testing.T) {
 	const iterations = 256
-	runner, err := New(map[string]any{"command": "short-lived"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"command": "short-lived"})
 	group := newServiceGroup(t)
 	executor := &immediateExitExecutor{}
 	for index := range iterations {
@@ -162,12 +157,9 @@ func TestSpawnAndImmediateExitOrderingIsDeterministic(t *testing.T) {
 
 func TestConcurrentRestartBudgetsAreIsolated(t *testing.T) {
 	const replicas = 32
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"command": "unstable", "restart": map[string]any{"policy": "on_failure", "backoff": "1ms", "max_restarts": 3},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	group := newServiceGroup(t)
 	executors := make([]*immediateExitExecutor, replicas)
 	var ready sync.WaitGroup

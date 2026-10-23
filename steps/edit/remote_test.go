@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/up2jj/wuko/executor"
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/step"
 )
@@ -67,10 +68,7 @@ func (commandOnlySession) Run(context.Context, process.Options) (process.Result,
 }
 
 func TestEditIsUsableInsideExecutorBlocks(t *testing.T) {
-	runner, err := New(map[string]any{"operation": "set", "from": map[string]any{"file": "config.json"}, "path": "$.version", "value": "2"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"operation": "set", "from": map[string]any{"file": "config.json"}, "path": "$.version", "value": "2"})
 	if _, ok := runner.(step.ExecutorAware); !ok {
 		t.Fatal("edit is not usable inside executor blocks")
 	}
@@ -83,10 +81,7 @@ func TestEditPatchesTheDocumentOnTheExecutorTarget(t *testing.T) {
 		files: map[string][]byte{target: []byte("{\n  \"version\": \"1\"\n}\n")},
 		modes: map[string]fs.FileMode{target: 0o640},
 	}
-	runner, err := New(map[string]any{"operation": "set", "from": map[string]any{"file": "config.json"}, "path": "$.version", "value": "2"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"operation": "set", "from": map[string]any{"file": "config.json"}, "path": "$.version", "value": "2"})
 
 	if _, err := runner.Run(t.Context(), step.Request{RunDir: root, Executor: session}); err != nil {
 		t.Fatal(err)
@@ -114,14 +109,11 @@ func TestEditBoundsTargetReadsByMaxBytes(t *testing.T) {
 		modes:        map[string]fs.FileMode{target: 0o640},
 		reportedSize: &reportedSize,
 	}
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"operation": "set", "from": map[string]any{"file": "config.json"},
 		"path": "$.version", "value": "2", "max_bytes": "4B",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = runner.Run(t.Context(), step.Request{RunDir: root, Executor: session})
+	_, err := runner.Run(t.Context(), step.Request{RunDir: root, Executor: session})
 	if err == nil || !strings.Contains(err.Error(), "exceeds max_bytes") {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -131,21 +123,15 @@ func TestEditBoundsTargetReadsByMaxBytes(t *testing.T) {
 }
 
 func TestEditRefusesATargetWithoutAFileSystem(t *testing.T) {
-	runner, err := New(map[string]any{"operation": "set", "from": map[string]any{"file": "config.json"}, "path": "$.version", "value": "2"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = runner.Run(t.Context(), step.Request{RunDir: t.TempDir(), Executor: commandOnlySession{}})
+	runner := steptest.Build(t, New, map[string]any{"operation": "set", "from": map[string]any{"file": "config.json"}, "path": "$.version", "value": "2"})
+	_, err := runner.Run(t.Context(), step.Request{RunDir: t.TempDir(), Executor: commandOnlySession{}})
 	if err == nil || !strings.Contains(err.Error(), "does not expose a filesystem") {
 		t.Fatalf("Run() error = %v, want a refusal rather than a host edit", err)
 	}
 }
 
 func TestEditFromAVariableIgnoresTheTargetFileSystem(t *testing.T) {
-	runner, err := New(map[string]any{"operation": "set", "from": map[string]any{"var": "release"}, "path": "$.version", "value": "2"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"operation": "set", "from": map[string]any{"var": "release"}, "path": "$.version", "value": "2"})
 	// No document is read or written, so a session without a filesystem is no obstacle.
 	result, err := runner.Run(t.Context(), step.Request{
 		RunDir: t.TempDir(), Executor: commandOnlySession{},

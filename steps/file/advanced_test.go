@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 	"go.yaml.in/yaml/v3"
@@ -81,12 +82,9 @@ func TestLinkReplacementPolicies(t *testing.T) {
 	if err != nil || string(content) != "changed" {
 		t.Fatalf("hard-link content = %q, error = %v", content, err)
 	}
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"operation": "link", "path": "symbolic", "destination": "hard-link-to-symlink", "link_type": "hard",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	if _, err := runner.Run(t.Context(), step.Request{RunDir: root}); err == nil || !strings.Contains(err.Error(), "regular file") {
 		t.Fatalf("hard link to symlink error = %v", err)
 	}
@@ -104,13 +102,10 @@ func TestLinkReplacementRejectsRunDirectoryThroughSymlinkedParent(t *testing.T) 
 	if err := os.Symlink(root, alias); err != nil {
 		t.Fatal(err)
 	}
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"operation": "link", "path": "target", "destination": filepath.Join(alias, "run"),
 		"link_type": "symbolic", "replace": "any",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	if _, err := runner.Run(t.Context(), step.Request{RunDir: runDir}); err == nil || !strings.Contains(err.Error(), "run directory") {
 		t.Fatalf("error = %v", err)
 	}
@@ -226,13 +221,10 @@ func TestAtomicSwapRejectsRunDirectoryThroughSymlinkedParent(t *testing.T) {
 	if err := os.Symlink(root, alias); err != nil {
 		t.Fatal(err)
 	}
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"operation": "atomic_swap", "path": staging,
 		"destination": filepath.Join(alias, "run"), "replace": "any",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	if _, err := runner.Run(t.Context(), step.Request{RunDir: runDir}); err == nil || !strings.Contains(err.Error(), "run directory") {
 		t.Fatalf("error = %v", err)
 	}
@@ -324,10 +316,7 @@ func TestAdvancedOperationsRejectInvalidConfiguration(t *testing.T) {
 }
 
 func TestDiskUsageHonorsCancellation(t *testing.T) {
-	runner, err := New(map[string]any{"operation": "disk_usage", "path": "."})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"operation": "disk_usage", "path": "."})
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	if _, err := runner.Run(ctx, step.Request{RunDir: t.TempDir()}); !errors.Is(err, context.Canceled) {

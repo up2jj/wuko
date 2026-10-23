@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/internal/gittest"
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/process/processtest"
@@ -88,10 +89,7 @@ func TestSuccessfulAssertionsReturnEmptyResults(t *testing.T) {
 func TestGitCommandsUseExecutorEnvironmentAndArguments(t *testing.T) {
 	t.Parallel()
 	executor := &processtest.Executor{}
-	runner, err := NewBranch(map[string]any{"operation": "assert", "branch": "main", "exists": true})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, NewBranch, map[string]any{"operation": "assert", "branch": "main", "exists": true})
 	result, err := runner.Run(t.Context(), step.Request{
 		Executor: executor, RunDir: "/workspace", Env: map[string]string{"MODE": "test"},
 		Attempt: 2, MaxAttempts: 3, OperationID: "git-branch",
@@ -128,15 +126,12 @@ func TestBranchAssertionsClassifyMissingReferences(t *testing.T) {
 		{"unexpected git failure", 128, true, "checking local branch"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			runner, err := NewBranch(map[string]any{"operation": "assert", "branch": "main", "exists": tt.expects})
-			if err != nil {
-				t.Fatal(err)
-			}
+			runner := steptest.Build(t, NewBranch, map[string]any{"operation": "assert", "branch": "main", "exists": tt.expects})
 			executor := &processtest.Executor{Reply: processtest.Reply{Err: &process.ExitError{Command: "git", Code: tt.existsCode}}}
 			if tt.existsCode == 0 {
 				executor.Reply.Err = nil
 			}
-			_, err = runner.Run(t.Context(), step.Request{Executor: executor})
+			_, err := runner.Run(t.Context(), step.Request{Executor: executor})
 			if tt.wantError == "" {
 				if err != nil {
 					t.Fatalf("Run() error = %v", err)
@@ -171,11 +166,8 @@ func TestRemoteBranchAssertionsMatchAnyOrNamedRemote(t *testing.T) {
 			if tt.remote != "" {
 				raw["remote"] = tt.remote
 			}
-			runner, err := NewRemoteBranch(raw)
-			if err != nil {
-				t.Fatal(err)
-			}
-			_, err = runner.Run(t.Context(), step.Request{Executor: &processtest.Executor{Reply: processtest.Reply{Result: process.Result{Stdout: tt.remoteRefs}}}})
+			runner := steptest.Build(t, NewRemoteBranch, raw)
+			_, err := runner.Run(t.Context(), step.Request{Executor: &processtest.Executor{Reply: processtest.Reply{Result: process.Result{Stdout: tt.remoteRefs}}}})
 			if tt.wantError == "" {
 				if err != nil {
 					t.Fatalf("Run() error = %v", err)
@@ -191,27 +183,18 @@ func TestRemoteBranchAssertionsMatchAnyOrNamedRemote(t *testing.T) {
 
 func TestBranchNameAndCurrentBranchAssertions(t *testing.T) {
 	t.Parallel()
-	valid, err := NewBranchName(map[string]any{"name": "feature/release"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	valid := steptest.Build(t, NewBranchName, map[string]any{"name": "feature/release"})
 	if _, err := valid.Run(t.Context(), step.Request{Executor: &processtest.Executor{}}); err != nil {
 		t.Fatal(err)
 	}
 
-	invalid, err := NewBranchName(map[string]any{"name": "bad branch"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	invalid := steptest.Build(t, NewBranchName, map[string]any{"name": "bad branch"})
 	executor := &processtest.Executor{Reply: processtest.Reply{Err: &process.ExitError{Command: "git", Code: 1}}}
 	if _, err := invalid.Run(t.Context(), step.Request{Executor: executor}); err == nil || !strings.Contains(err.Error(), "not a valid Git branch name") {
 		t.Fatalf("invalid branch error = %v", err)
 	}
 
-	onBranch, err := NewOnBranch(map[string]any{"branch": "main"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	onBranch := steptest.Build(t, NewOnBranch, map[string]any{"branch": "main"})
 	if _, err := onBranch.Run(t.Context(), step.Request{Executor: &processtest.Executor{Reply: processtest.Reply{Result: process.Result{Stdout: "main\n"}}}}); err != nil {
 		t.Fatal(err)
 	}
@@ -225,21 +208,15 @@ func TestBranchNameAndCurrentBranchAssertions(t *testing.T) {
 
 func TestGitAssertionsPropagateCancellationAndCommandFailures(t *testing.T) {
 	t.Parallel()
-	runner, err := NewClean(map[string]any{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, NewClean, map[string]any{})
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	if _, err := runner.Run(ctx, step.Request{}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancellation error = %v", err)
 	}
 
-	runner, err = NewClean(map[string]any{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = runner.Run(t.Context(), step.Request{Executor: &processtest.Executor{Reply: processtest.Reply{
+	runner = steptest.Build(t, NewClean, map[string]any{})
+	_, err := runner.Run(t.Context(), step.Request{Executor: &processtest.Executor{Reply: processtest.Reply{
 		Result: process.Result{Stderr: "not a repository\n"},
 		Err:    errors.New("git failed"),
 	}}})
@@ -252,10 +229,7 @@ func TestGitAssertionsAgainstRepositories(t *testing.T) {
 	t.Parallel()
 	dir := gittest.InitWithCommit(t)
 
-	clean, err := NewClean(map[string]any{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	clean := steptest.Build(t, NewClean, map[string]any{})
 	if _, err := clean.Run(t.Context(), step.Request{RunDir: dir}); err != nil {
 		t.Fatal(err)
 	}
@@ -264,20 +238,14 @@ func TestGitAssertionsAgainstRepositories(t *testing.T) {
 		t.Fatalf("dirty tree error = %v", err)
 	}
 
-	branch, err := NewBranch(map[string]any{"operation": "assert", "branch": "topic", "exists": true})
-	if err != nil {
-		t.Fatal(err)
-	}
+	branch := steptest.Build(t, NewBranch, map[string]any{"operation": "assert", "branch": "topic", "exists": true})
 	gittest.Run(t, dir, "branch", "topic")
 	if _, err := branch.Run(t.Context(), step.Request{RunDir: dir}); err != nil {
 		t.Fatal(err)
 	}
 
 	gittest.Run(t, dir, "update-ref", "refs/remotes/origin/topic", "HEAD")
-	remote, err := NewRemoteBranch(map[string]any{"branch": "topic", "remote": "origin", "exists": true})
-	if err != nil {
-		t.Fatal(err)
-	}
+	remote := steptest.Build(t, NewRemoteBranch, map[string]any{"branch": "topic", "remote": "origin", "exists": true})
 	if _, err := remote.Run(t.Context(), step.Request{RunDir: dir}); err != nil {
 		t.Fatal(err)
 	}

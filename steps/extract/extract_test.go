@@ -10,21 +10,19 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 	"go.yaml.in/yaml/v3"
 )
 
 func TestFormatExtractsEveryTypeAndMapsVariables(t *testing.T) {
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"text":   "ignored\nRelease wuko build -7 ratio +1.25 enabled true metadata {\"tags\":[\"go\"],\"attempt\":2}\n",
 		"format": `Release {name} build {build:integer} ratio {ratio:number} enabled {enabled:boolean} metadata {metadata:json}`,
 		"variables": map[string]any{
 			"name": "release_name", "build": "build_number",
 		},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{})
 	if err != nil {
 		t.Fatal(err)
@@ -40,13 +38,10 @@ func TestFormatExtractsEveryTypeAndMapsVariables(t *testing.T) {
 }
 
 func TestFormatUsesFlexibleWhitespaceAndCRLFLines(t *testing.T) {
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"text":   "skip\r\nRelease\t\t1.2.3   build\t42\r\n",
 		"format": "Release {version} build {build:integer}",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{})
 	if err != nil {
 		t.Fatal(err)
@@ -58,13 +53,10 @@ func TestFormatUsesFlexibleWhitespaceAndCRLFLines(t *testing.T) {
 }
 
 func TestFormatEscapesLiteralBracesAndBackslash(t *testing.T) {
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"text":   `path={root}\wuko`,
 		"format": `path=\{root\}\\{name}`,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{})
 	if err != nil {
 		t.Fatal(err)
@@ -75,14 +67,11 @@ func TestFormatEscapesLiteralBracesAndBackslash(t *testing.T) {
 }
 
 func TestPatternSearchesTextAndDefaultsCapturesToString(t *testing.T) {
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"text":    "prefix version=1.4.2 build=9 suffix",
 		"pattern": `version=(?P<version>\S+) build=(?P<build>[0-9]+)`,
 		"types":   map[string]any{"build": "integer"},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{})
 	if err != nil {
 		t.Fatal(err)
@@ -94,12 +83,9 @@ func TestPatternSearchesTextAndDefaultsCapturesToString(t *testing.T) {
 }
 
 func TestPatternReadsStringFromWorkflowState(t *testing.T) {
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"from": "steps.build.stdout", "pattern": `artifact=(?P<artifact>\S+)`,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{Steps: map[string]any{
 		"build": map[string]any{"stdout": "artifact=wuko.tar.gz"},
 	}})
@@ -112,10 +98,7 @@ func TestPatternReadsStringFromWorkflowState(t *testing.T) {
 }
 
 func TestPatternAllowsEmptyParticipatingStringCapture(t *testing.T) {
-	runner, err := New(map[string]any{"text": "value=", "pattern": `value=(?P<value>.*)`})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"text": "value=", "pattern": `value=(?P<value>.*)`})
 	result, err := runner.Run(t.Context(), step.Request{})
 	if err != nil {
 		t.Fatal(err)
@@ -126,13 +109,10 @@ func TestPatternAllowsEmptyParticipatingStringCapture(t *testing.T) {
 }
 
 func TestJSONNormalizesRuntimeNumbers(t *testing.T) {
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"text":    `payload={"signed":-2,"unsigned":18446744073709551615,"decimal":1.5}`,
 		"pattern": `payload=(?P<payload>.+)`, "types": map[string]any{"payload": "json"},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{})
 	if err != nil {
 		t.Fatal(err)
@@ -144,7 +124,7 @@ func TestJSONNormalizesRuntimeNumbers(t *testing.T) {
 }
 
 func TestPatternMatchAllReturnsTypedRecordsAndVariableLists(t *testing.T) {
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"text":    "query=SELECT 1; rows=1\nquery=SELECT 2; rows=2\n",
 		"pattern": `(?m)^query=(?P<query>.+); rows=(?P<rows>[0-9]+)$`,
 		"match":   "all",
@@ -153,9 +133,6 @@ func TestPatternMatchAllReturnsTypedRecordsAndVariableLists(t *testing.T) {
 			"query": "queries", "rows": "row_counts",
 		},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{})
 	if err != nil {
 		t.Fatal(err)
@@ -176,13 +153,10 @@ func TestPatternMatchAllReturnsTypedRecordsAndVariableLists(t *testing.T) {
 }
 
 func TestFormatMatchAllAllowsNoMatches(t *testing.T) {
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"text": "ignored", "format": "value={value:integer}", "match": "all",
 		"variables": map[string]any{"value": "values"},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{})
 	if err != nil {
 		t.Fatal(err)
@@ -199,12 +173,9 @@ func TestFormatMatchAllAllowsNoMatches(t *testing.T) {
 }
 
 func TestFormatMatchAllReturnsRecordsInLineOrder(t *testing.T) {
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"text": "value=2\nignored\nvalue=1\n", "format": "value={value:integer}", "match": "all",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{})
 	if err != nil {
 		t.Fatal(err)
@@ -221,7 +192,7 @@ func TestFieldsExtractMarkerPayloadRegexValuesAndVariables(t *testing.T) {
 		"binary=dist/action.test\r\nsize=128\r\n" +
 		`WUKO_OUTPUT_V1 {"event":"end","key":"action_test_binary"}` + "\r\n" +
 		"warning: unused import\r\nwarning: slow query\r\n"
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"text": text,
 		"fields": map[string]any{
 			"build_output": map[string]any{"marker": "action_test_binary"},
@@ -237,9 +208,6 @@ func TestFieldsExtractMarkerPayloadRegexValuesAndVariables(t *testing.T) {
 		},
 		"variables": map[string]any{"binary_path": "test_binary", "warnings": "build_warnings"},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{})
 	if err != nil {
 		t.Fatal(err)
@@ -265,16 +233,13 @@ WUKO_OUTPUT_V1 {"event":"begin","key":"query"}
 SQL: SELECT 3;
 WUKO_OUTPUT_V1 {"event":"end","key":"query"}
 `
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"text": text,
 		"fields": map[string]any{
 			"blocks":  map[string]any{"marker": "query", "match": "all"},
 			"queries": map[string]any{"marker": "query", "regex": `SQL: (?P<value>[^\r\n]+)`, "match": "all"},
 		},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{})
 	if err != nil {
 		t.Fatal(err)
@@ -290,15 +255,12 @@ WUKO_OUTPUT_V1 {"event":"end","key":"query"}
 }
 
 func TestFieldsMatchAllAllowsNoMatches(t *testing.T) {
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"text": "clean", "fields": map[string]any{
 			"warnings": map[string]any{"regex": `warning: (?P<value>.+)`, "match": "all"},
 			"blocks":   map[string]any{"marker": "missing", "match": "all"},
 		},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{})
 	if err != nil {
 		t.Fatal(err)
@@ -312,16 +274,13 @@ func TestFieldsMatchAllAllowsNoMatches(t *testing.T) {
 }
 
 func TestFieldsFailAtomicallyWhenOneConversionFails(t *testing.T) {
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"text": "name=wuko count=many", "fields": map[string]any{
 			"name":  map[string]any{"regex": `name=(?P<value>\S+)`},
 			"count": map[string]any{"regex": `count=(?P<value>\S+)`, "type": "integer"},
 		},
 		"variables": map[string]any{"name": "name"},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{})
 	if err == nil || !strings.Contains(err.Error(), `field "count"`) {
 		t.Fatalf("result = %#v, error = %v", result, err)
@@ -349,12 +308,9 @@ func TestMarkerProtocolRejectsInvalidStreams(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			runner, err := New(map[string]any{
+			runner := steptest.Build(t, New, map[string]any{
 				"text": tt.text, "fields": map[string]any{"value": map[string]any{"marker": "x", "match": "all"}},
 			})
-			if err != nil {
-				t.Fatal(err)
-			}
 			result, err := runner.Run(t.Context(), step.Request{})
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("result = %#v, error = %v, want %q", result, err, tt.want)
@@ -367,7 +323,7 @@ func TestMarkerProtocolRejectsInvalidStreams(t *testing.T) {
 }
 
 func TestMarkerProtocolTreatsPrefixedProseAsPayload(t *testing.T) {
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"text": "WUKO_OUTPUT_V1 is the marker protocol\n" +
 			"WUKO_OUTPUT_V1\n" +
 			"warning: unrelated\n" +
@@ -380,9 +336,6 @@ func TestMarkerProtocolTreatsPrefixedProseAsPayload(t *testing.T) {
 			"warning": map[string]any{"regex": `warning: (?P<value>[^\r\n]+)`},
 		},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{})
 	if err != nil {
 		t.Fatal(err)
@@ -394,13 +347,10 @@ func TestMarkerProtocolTreatsPrefixedProseAsPayload(t *testing.T) {
 }
 
 func TestFormatMatchAllReadsCRLFAndTrailingNewlineLines(t *testing.T) {
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"text": "value=1\r\n\nvalue=22\r\n", "format": "value={value:integer}", "match": "all",
 		"variables": map[string]any{"value": "values"},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{})
 	if err != nil {
 		t.Fatal(err)
@@ -495,10 +445,7 @@ func TestRunRejectsInvalidExtraction(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			runner, err := New(tt.raw)
-			if err != nil {
-				t.Fatal(err)
-			}
+			runner := steptest.Build(t, New, tt.raw)
 			result, err := runner.Run(t.Context(), tt.req)
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("Run() result = %#v, error = %v, want %q", result, err, tt.want)
@@ -534,10 +481,7 @@ func TestTemplatedMatcherAndSourceValidateBeforeRendering(t *testing.T) {
 }
 
 func TestRunHonorsCancellation(t *testing.T) {
-	runner, err := New(map[string]any{"text": "value=1", "format": "value={value:integer}"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"text": "value=1", "format": "value={value:integer}"})
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	result, err := runner.Run(ctx, step.Request{})

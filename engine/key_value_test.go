@@ -132,10 +132,7 @@ func TestCompositeActionInheritsCallerValueRoots(t *testing.T) {
 	if got := state.Steps["call"].(map[string]any)["value"]; got != true {
 		t.Fatalf("action output = %#v", got)
 	}
-	reader, err := keyvaluestep.New(map[string]any{"operation": "get", "scope": "local", "store": "shared", "key": "from_action"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	reader := steptest.Build(t, keyvaluestep.New, map[string]any{"operation": "get", "scope": "local", "store": "shared", "key": "from_action"})
 	result, err := reader.Run(t.Context(), step.Request{LocalValueDir: localRoot})
 	if err != nil {
 		t.Fatal(err)

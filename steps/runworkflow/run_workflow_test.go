@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -38,7 +39,7 @@ func (runner *fakeWorkflowRunner) RunWorkflow(_ context.Context, call step.Workf
 }
 
 func TestRunWorkflowReturnsDirectOutputsAndResolvesVars(t *testing.T) {
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"workflow": "build-artifacts",
 		"target":   "linux",
 		"vars": map[string]any{
@@ -47,9 +48,6 @@ func TestRunWorkflowReturnsDirectOutputsAndResolvesVars(t *testing.T) {
 			"literal":  map[string]any{"literal": map[string]any{"expr": "keep"}},
 		},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	host := &fakeWorkflowRunner{outputs: map[string]any{"artifact": "dist/app.tar.gz", "count": 3}}
 	result, err := runner.Run(t.Context(), step.Request{
 		Vars:      map[string]any{"count": 2},
@@ -77,7 +75,7 @@ func TestRunWorkflowReturnsDirectOutputsAndResolvesVars(t *testing.T) {
 }
 
 func TestRunWorkflowValidationResolvesOnlyStaticReference(t *testing.T) {
-	built, err := New(map[string]any{
+	built := steptest.Build(t, New, map[string]any{
 		"workflow": "build",
 		"vars": map[string]any{
 			"dynamic":       map[string]any{"expr": "steps.previous.value"},
@@ -86,9 +84,6 @@ func TestRunWorkflowValidationResolvesOnlyStaticReference(t *testing.T) {
 			"nestedLiteral": []any{1, map[string]any{"literal": "keep"}},
 		},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	host := &fakeWorkflowRunner{}
 	validator := built.(step.Validator)
 	if err := validator.Validate(t.Context(), step.Request{Workflows: host}); err != nil {
@@ -114,24 +109,18 @@ func TestRunWorkflowValidationResolvesOnlyStaticReference(t *testing.T) {
 }
 
 func TestRunWorkflowWrapsChildFailure(t *testing.T) {
-	built, err := New(map[string]any{"workflow": "build", "target": "linux"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = built.Run(t.Context(), step.Request{Workflows: &fakeWorkflowRunner{err: errors.New("compile failed")}})
+	built := steptest.Build(t, New, map[string]any{"workflow": "build", "target": "linux"})
+	_, err := built.Run(t.Context(), step.Request{Workflows: &fakeWorkflowRunner{err: errors.New("compile failed")}})
 	if err == nil || err.Error() != `running workflow "build" target "linux": compile failed` {
 		t.Fatalf("error = %v", err)
 	}
 }
 
 func TestRunWorkflowPropagatesCancellation(t *testing.T) {
-	built, err := New(map[string]any{"workflow": "build"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	built := steptest.Build(t, New, map[string]any{"workflow": "build"})
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	_, err = built.Run(ctx, step.Request{Workflows: cancelWorkflowRunner{}})
+	_, err := built.Run(ctx, step.Request{Workflows: cancelWorkflowRunner{}})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("error = %v, want context canceled", err)
 	}

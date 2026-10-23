@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 )
@@ -38,13 +39,10 @@ func TestCookieJarPersistsAcrossRunsAndStatusErrors(t *testing.T) {
 	}))
 	defer server.Close()
 	runDir := t.TempDir()
-	first, err := New(map[string]any{
+	first := steptest.Build(t, New, map[string]any{
 		"url":     server.URL,
 		"cookies": map[string]any{"values": map[string]any{"configured": "first"}, "jar": "state/cookies.txt"},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	if _, err := first.Run(t.Context(), step.Request{RunDir: runDir}); err == nil || !strings.Contains(err.Error(), "status 418") {
 		t.Fatalf("first error = %v", err)
 	} else {
@@ -53,10 +51,7 @@ func TestCookieJarPersistsAcrossRunsAndStatusErrors(t *testing.T) {
 			t.Fatalf("status error does not expose an observation: %T %v", err, err)
 		}
 	}
-	second, err := New(map[string]any{"url": server.URL, "cookies": map[string]any{"jar": "state/cookies.txt"}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	second := steptest.Build(t, New, map[string]any{"url": server.URL, "cookies": map[string]any{"jar": "state/cookies.txt"}})
 	if _, err := second.Run(t.Context(), step.Request{RunDir: runDir}); err != nil {
 		t.Fatal(err)
 	}
@@ -157,11 +152,8 @@ func TestCookieJarRejectsMalformedFile(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	testfs.WriteFile(t, filepath.Join(dir, "cookies.txt"), []byte("not-a-cookie\n"), 0o600)
-	runner, err := New(map[string]any{"url": "https://example.com", "cookies": map[string]any{"jar": "cookies.txt"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = runner.Run(t.Context(), step.Request{RunDir: dir})
+	runner := steptest.Build(t, New, map[string]any{"url": "https://example.com", "cookies": map[string]any{"jar": "cookies.txt"}})
+	_, err := runner.Run(t.Context(), step.Request{RunDir: dir})
 	if err == nil || !strings.Contains(err.Error(), "expected 7") {
 		t.Fatalf("error = %v", err)
 	}
@@ -253,11 +245,8 @@ func TestCookieJarCloseFailureKeepsStatusError(t *testing.T) {
 	}))
 	defer server.Close()
 	t.Cleanup(func() { _ = os.Chmod(jarDir, 0o700) })
-	runner, err := New(map[string]any{"url": server.URL, "cookies": map[string]any{"jar": "state/cookies.txt"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = runner.Run(t.Context(), step.Request{RunDir: runDir})
+	runner := steptest.Build(t, New, map[string]any{"url": server.URL, "cookies": map[string]any{"jar": "state/cookies.txt"}})
+	_, err := runner.Run(t.Context(), step.Request{RunDir: runDir})
 	if err == nil || strings.Contains(err.Error(), "saving cookie jar") {
 		t.Fatalf("error = %v", err)
 	}

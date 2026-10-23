@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/helper"
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 )
@@ -69,14 +70,11 @@ task().catch(error => { console.error(error); process.exitCode = 1; });
 			testfs.WriteFile(t, file, []byte(source), 0o600)
 			preload := filepath.Join(dir, "existing preload.cjs")
 			testfs.WriteFile(t, preload, []byte(`globalThis.existingPreload = true; if (!globalThis.wuko) throw new Error('SDK must preload first');`), 0o600)
-			runner, err := New(map[string]any{
+			runner := steptest.Build(t, New, map[string]any{
 				"sdk": "node", "command": node, "args": []any{file},
 				"sdk_args": map[string]any{"title": "release", "items": map[string]any{"expr": "vars.inventory"}},
 				"env":      map[string]any{"CUSTOM": "step", "NODE_OPTIONS": `--require "` + preload + `"`},
 			})
-			if err != nil {
-				t.Fatal(err)
-			}
 			var stdout, stderr bytes.Buffer
 			result, err := runner.Run(t.Context(), step.Request{
 				RunDir: dir, Attempt: 2, MaxAttempts: 3,
@@ -110,7 +108,7 @@ task().catch(error => { console.error(error); process.exitCode = 1; });
 
 func TestNodeSDKInlineAndInheritedChild(t *testing.T) {
 	node := sdkNode(t)
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"sdk": "node", "script": `"$1" --input-type=module <<'JS'
 import { spawn } from 'node:child_process';
 const child = spawn(process.execPath, ['--input-type=module', '-e', 'await wuko.output("child", true)'], {stdio: 'inherit'});
@@ -118,9 +116,6 @@ await new Promise((resolve, reject) => { child.on('error', reject); child.on('ex
 await wuko.output('parent', true);
 JS`, "args": []any{node},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{RunDir: t.TempDir(), Stdout: io.Discard, Stderr: io.Discard})
 	if err != nil {
 		t.Fatal(err)
@@ -133,7 +128,7 @@ JS`, "args": []any{node},
 
 func TestNodeSDKRejectsUnsupportedValues(t *testing.T) {
 	node := sdkNode(t)
-	runner, err := New(map[string]any{"sdk": "node", "command": node, "args": []any{"--input-type=module", "-e", `
+	runner := steptest.Build(t, New, map[string]any{"sdk": "node", "command": node, "args": []any{"--input-type=module", "-e", `
 const cycle = {}; cycle.self = cycle;
 for (const value of [undefined, NaN, Infinity, 9007199254740992, 1n, new Date(), () => {}, cycle, [undefined], {nested: undefined}]) {
   try { await wuko.output('invalid', value); throw new Error('unexpected success'); }
@@ -145,9 +140,6 @@ await Promise.all(Array.from({length: 12}, (_, i) => wuko.output('item'+i, i)));
 await wuko.output('__proto__', {safe: true});
 await wuko.output('done', true);
 `}})
-	if err != nil {
-		t.Fatal(err)
-	}
 	var stderr bytes.Buffer
 	result, err := runner.Run(t.Context(), step.Request{RunDir: t.TempDir(), Stderr: &stderr})
 	if err != nil {
@@ -167,11 +159,8 @@ func TestNodeSDKCancellationStopsHostCalls(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	finished := make(chan struct{})
-	runner, err := New(map[string]any{"sdk": "node", "command": node, "args": []any{"--input-type=module", "-e", `await wuko.helpers.wait()`}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = runner.Run(ctx, step.Request{RunDir: t.TempDir(), Helpers: helper.Set{
+	runner := steptest.Build(t, New, map[string]any{"sdk": "node", "command": node, "args": []any{"--input-type=module", "-e", `await wuko.helpers.wait()`}})
+	_, err := runner.Run(ctx, step.Request{RunDir: t.TempDir(), Helpers: helper.Set{
 		"wait": func(ctx context.Context, _ []any) (any, error) {
 			cancel()
 			<-ctx.Done()
@@ -201,10 +190,7 @@ func TestNodeSDKConfigurationAndOutputContracts(t *testing.T) {
 			t.Fatalf("accepted invalid configuration: %#v", raw)
 		}
 	}
-	runner, err := New(map[string]any{"command": "node", "sdk": "node"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"command": "node", "sdk": "node"})
 	if err := runner.(step.Validator).Validate(t.Context(), step.Request{InsideExecutor: true}); err == nil || !strings.Contains(err.Error(), "executor") {
 		t.Fatalf("executor restriction: %v", err)
 	}
@@ -243,10 +229,7 @@ func TestNodeSDKUsesExistingProjectDependencies(t *testing.T) {
 	for name, content := range files {
 		testfs.WriteFile(t, filepath.Join(dir, name), []byte(content), 0o600)
 	}
-	runner, err := New(map[string]any{"sdk": "node", "command": node, "args": []any{"script.js"}, "sdk_args": map[string]any{"name": "SDK"}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"sdk": "node", "command": node, "args": []any{"script.js"}, "sdk_args": map[string]any{"name": "SDK"}})
 	var stderr bytes.Buffer
 	result, err := runner.Run(t.Context(), step.Request{RunDir: dir, Stderr: &stderr})
 	if err != nil {
@@ -265,7 +248,7 @@ func TestNodeSDKUsesExistingProjectDependencies(t *testing.T) {
 
 func TestNodeSDKPreservesStdinCaptureAndAllowedExitCodes(t *testing.T) {
 	node := sdkNode(t)
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"sdk": "node", "command": node,
 		"args": []any{"--input-type=module", "-e", `
 import {readFileSync} from 'node:fs';
@@ -275,9 +258,6 @@ process.exitCode = 7;
 `},
 		"stdin": "payload", "stdout": "capture", "stderr": "capture", "capture_limit": "4B", "allowed_exit_codes": []any{7},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	var stdout, stderr bytes.Buffer
 	result, err := runner.Run(t.Context(), step.Request{RunDir: t.TempDir(), Stdout: &stdout, Stderr: &stderr})
 	if err != nil {
@@ -296,10 +276,7 @@ func TestNodeSDKAttemptsDoNotShareBridgeState(t *testing.T) {
 	for i := range 4 {
 		t.Run(strconv.Itoa(i), func(t *testing.T) {
 			t.Parallel()
-			runner, err := New(map[string]any{"sdk": "node", "command": node, "args": []any{"--input-type=module", "-e", `await wuko.output('value', wuko.args.value)`}, "sdk_args": map[string]any{"value": i}})
-			if err != nil {
-				t.Fatal(err)
-			}
+			runner := steptest.Build(t, New, map[string]any{"sdk": "node", "command": node, "args": []any{"--input-type=module", "-e", `await wuko.output('value', wuko.args.value)`}, "sdk_args": map[string]any{"value": i}})
 			result, err := runner.Run(t.Context(), step.Request{RunDir: t.TempDir()})
 			if err != nil {
 				t.Fatal(err)

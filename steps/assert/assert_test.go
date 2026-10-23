@@ -6,17 +6,15 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 )
 
 func TestAssertionUsesAllExpressionRoots(t *testing.T) {
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"expr":    `hasKey(inputs, "enabled") && inputs.enabled && vars.enabled && env.MODE == "test" && steps.prepare.ready && workflow.name == "release" && workflow.dir == "/workflow" && run.dir == "/run"`,
 		"message": "release is not ready",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{
 		Inputs:       map[string]any{"enabled": true},
 		Vars:         map[string]any{"enabled": true},
@@ -35,11 +33,8 @@ func TestAssertionUsesAllExpressionRoots(t *testing.T) {
 }
 
 func TestAssertionUsesControlBindings(t *testing.T) {
-	runner, err := New(map[string]any{"expr": `len(batch.items) == 2 && foreach.item == "api" && matrix.os == "linux"`, "message": "wrong binding"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = runner.Run(t.Context(), step.Request{Bindings: map[string]any{
+	runner := steptest.Build(t, New, map[string]any{"expr": `len(batch.items) == 2 && foreach.item == "api" && matrix.os == "linux"`, "message": "wrong binding"})
+	_, err := runner.Run(t.Context(), step.Request{Bindings: map[string]any{
 		"batch":   map[string]any{"items": []any{"api", "worker"}},
 		"foreach": map[string]any{"item": "api"}, "matrix": map[string]any{"os": "linux"},
 	}})
@@ -49,10 +44,7 @@ func TestAssertionUsesControlBindings(t *testing.T) {
 }
 
 func TestFalseAssertionReturnsConfiguredMessage(t *testing.T) {
-	runner, err := New(map[string]any{"expr": "false", "message": "build must succeed"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"expr": "false", "message": "build must succeed"})
 	result, err := runner.Run(t.Context(), step.Request{})
 	if err == nil || err.Error() != "assertion failed: build must succeed" {
 		t.Fatalf("error = %v", err)
@@ -63,10 +55,7 @@ func TestFalseAssertionReturnsConfiguredMessage(t *testing.T) {
 }
 
 func TestExpressionEvaluationFailure(t *testing.T) {
-	runner, err := New(map[string]any{"expr": "vars.missing.ready", "message": "not ready"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"expr": "vars.missing.ready", "message": "not ready"})
 	result, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{}})
 	if err == nil || !strings.Contains(err.Error(), "evaluating expr:") {
 		t.Fatalf("error = %v", err)
@@ -102,10 +91,7 @@ func TestRejectsInvalidConfiguration(t *testing.T) {
 }
 
 func TestAssertionPropagatesCancellation(t *testing.T) {
-	runner, err := New(map[string]any{"expr": "true", "message": "failed"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"expr": "true", "message": "failed"})
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	result, err := runner.Run(ctx, step.Request{})

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/up2jj/wuko/internal/archivetest"
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 )
@@ -364,10 +365,7 @@ func TestCleanupStagedPreservesRollbackBackup(t *testing.T) {
 func TestCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	runner, err := New(cacheConfig("save"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, cacheConfig("save"))
 	if _, err := runner.Run(ctx, step.Request{RunDir: t.TempDir()}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancellation error = %v", err)
 	}
@@ -375,15 +373,12 @@ func TestCancellation(t *testing.T) {
 
 func newRunner(t *testing.T, root, operation string) step.Runner {
 	t.Helper()
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"operation": operation,
 		"cache_dir": "store",
 		"key_files": []any{"go.sum"},
 		"paths":     []any{"vendor", "build"},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	return runner
 }
 

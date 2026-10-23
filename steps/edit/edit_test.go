@@ -553,13 +553,10 @@ func BenchmarkFileEditAll(b *testing.B) {
 	for _, count := range []int{100, 1000, 5000} {
 		b.Run(strconv.Itoa(count), func(b *testing.B) {
 			directory := benchFile(b, "values.json", count)
-			runner, err := New(map[string]any{
+			runner := steptest.Build(b, New, map[string]any{
 				"operation": "set", "from": map[string]any{"file": "values.json"},
 				"path": "$[*].replicas", "expr": "index + 2", "result": "all",
 			})
-			if err != nil {
-				b.Fatal(err)
-			}
 			b.ResetTimer()
 			b.ReportAllocs()
 			for range b.N {

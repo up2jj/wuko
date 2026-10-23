@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/process/processtest"
 	"github.com/up2jj/wuko/step"
@@ -46,10 +47,7 @@ func TestDefaultAndExplicitEmptyVersionArguments(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			executor := &processtest.Executor{}
-			runner, err := New(tt.raw)
-			if err != nil {
-				t.Fatal(err)
-			}
+			runner := steptest.Build(t, New, tt.raw)
 			if _, err := runner.Run(t.Context(), step.Request{Executor: executor}); err != nil {
 				t.Fatal(err)
 			}
@@ -71,10 +69,7 @@ func TestRequiredDefaultsToTrue(t *testing.T) {
 		{"explicit false", map[string]any{"tool": "go", "required": false}, false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			runner, err := New(tt.raw)
-			if err != nil {
-				t.Fatal(err)
-			}
+			runner := steptest.Build(t, New, tt.raw)
 			if got := runner.(*Runner).required(); got != tt.want {
 				t.Fatalf("required() = %t, want %t", got, tt.want)
 			}
@@ -84,10 +79,7 @@ func TestRequiredDefaultsToTrue(t *testing.T) {
 
 func TestRunUsesExecutorEnvironmentAndReturnsName(t *testing.T) {
 	executor := &processtest.Executor{}
-	runner, err := New(map[string]any{"tool": "go", "version_args": []any{"version"}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"tool": "go", "version_args": []any{"version"}})
 	result, err := runner.Run(t.Context(), step.Request{
 		Executor: executor, RunDir: "/workspace", Env: map[string]string{"CHANNEL": "stable"},
 		Attempt: 2, MaxAttempts: 3, OperationID: "probe-go",
@@ -111,10 +103,7 @@ func TestRunUsesExecutorEnvironmentAndReturnsName(t *testing.T) {
 
 func TestRunReturnsBestEffortVersionWithoutConstraint(t *testing.T) {
 	executor := &processtest.Executor{Reply: processtest.Reply{Result: process.Result{Stdout: "tool v1.2.3\n"}}}
-	runner, err := New(map[string]any{"tool": "tool"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"tool": "tool"})
 	result, err := runner.Run(t.Context(), step.Request{Executor: executor})
 	if err != nil {
 		t.Fatal(err)
@@ -140,10 +129,7 @@ func TestRunExtractsAndConstrainsVersions(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			executor := &processtest.Executor{Reply: processtest.Reply{Result: process.Result{Stdout: tt.stdout, Stderr: tt.stderr}}}
-			runner, err := New(map[string]any{"tool": "tool", "constraint": tt.constraint})
-			if err != nil {
-				t.Fatal(err)
-			}
+			runner := steptest.Build(t, New, map[string]any{"tool": "tool", "constraint": tt.constraint})
 			result, err := runner.Run(t.Context(), step.Request{Executor: executor})
 			if err != nil {
 				t.Fatal(err)
@@ -166,10 +152,7 @@ func TestRunRejectsMissingOrUnsupportedVersion(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			executor := &processtest.Executor{Reply: processtest.Reply{Result: process.Result{Stdout: tt.output}}}
-			runner, err := New(map[string]any{"tool": "tool", "constraint": ">= 2.0.0"})
-			if err != nil {
-				t.Fatal(err)
-			}
+			runner := steptest.Build(t, New, map[string]any{"tool": "tool", "constraint": ">= 2.0.0"})
 			result, err := runner.Run(t.Context(), step.Request{Executor: executor})
 			if err == nil || !strings.Contains(err.Error(), tt.want) || len(result.Outputs) != 0 {
 				t.Fatalf("result = %#v, error = %v", result, err)
@@ -183,10 +166,7 @@ func TestRunReportsUnavailableToolWithoutOutputs(t *testing.T) {
 		Result: process.Result{Stderr: "not found\n", ExitCode: 127},
 		Err:    &process.ExitError{Command: "missing", Code: 127},
 	}}
-	runner, err := New(map[string]any{"tool": "missing"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"tool": "missing"})
 	result, err := runner.Run(t.Context(), step.Request{Executor: executor})
 	if err == nil || !strings.Contains(err.Error(), `required tool "missing" is unavailable: not found`) || len(result.Outputs) != 0 {
 		t.Fatalf("result = %#v, error = %v", result, err)
@@ -213,10 +193,7 @@ func TestOptionalRunReturnsCheckOutcomes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			executor := &processtest.Executor{Reply: processtest.Reply{Result: tt.result, Err: tt.err}}
-			runner, err := New(map[string]any{"tool": "tool", "constraint": ">= 2.0.0", "required": false})
-			if err != nil {
-				t.Fatal(err)
-			}
+			runner := steptest.Build(t, New, map[string]any{"tool": "tool", "constraint": ">= 2.0.0", "required": false})
 			result, err := runner.Run(t.Context(), step.Request{Executor: executor})
 			if err != nil {
 				t.Fatal(err)
@@ -237,10 +214,7 @@ func TestOptionalRunReturnsCheckOutcomes(t *testing.T) {
 
 func TestRunPreservesCancellation(t *testing.T) {
 	executor := &processtest.Executor{Reply: processtest.Reply{Err: context.Canceled}}
-	runner, err := New(map[string]any{"tool": "tool", "required": false})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"tool": "tool", "required": false})
 	result, err := runner.Run(t.Context(), step.Request{Executor: executor})
 	if !errors.Is(err, context.Canceled) || len(result.Outputs) != 0 {
 		t.Fatalf("result = %#v, error = %v", result, err)
@@ -256,10 +230,7 @@ func TestTemplatedConfigurationIsAcceptedBeforeRendering(t *testing.T) {
 }
 
 func TestLocalRunReturnsResolvedPathWithoutProbeOutput(t *testing.T) {
-	runner, err := New(map[string]any{"tool": "sh", "version_args": []any{"-c", "printf 1.2.3"}, "constraint": "= 1.2.3"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"tool": "sh", "version_args": []any{"-c", "printf 1.2.3"}, "constraint": "= 1.2.3"})
 	result, err := runner.Run(t.Context(), step.Request{Stdout: io.Discard, Stderr: io.Discard})
 	if err != nil {
 		t.Fatal(err)

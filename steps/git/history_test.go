@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/internal/gittest"
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/process/processtest"
@@ -234,10 +235,7 @@ func TestMergeBaseAgainstDivergedRepository(t *testing.T) {
 
 func TestMergeBaseRejectsUnresolvedMissingAndAmbiguousHistory(t *testing.T) {
 	t.Parallel()
-	runner, err := NewMergeBase(map[string]any{"from": "{{ .vars.base }}"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, NewMergeBase, map[string]any{"from": "{{ .vars.base }}"})
 	if _, err := runner.Run(t.Context(), step.Request{}); err == nil || !strings.Contains(err.Error(), "unresolved template") {
 		t.Fatalf("unresolved error = %v", err)
 	}
@@ -245,10 +243,7 @@ func TestMergeBaseRejectsUnresolvedMissingAndAmbiguousHistory(t *testing.T) {
 	missing := &processtest.Executor{Replies: []processtest.Reply{
 		{Err: &process.ExitError{Command: "git", Code: 1}},
 	}}
-	runner, err = NewMergeBase(map[string]any{"from": "missing"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner = steptest.Build(t, NewMergeBase, map[string]any{"from": "missing"})
 	if _, err := runner.Run(t.Context(), step.Request{Executor: missing}); err == nil || !strings.Contains(err.Error(), `resolving Git revision "missing"`) {
 		t.Fatalf("missing revision error = %v", err)
 	}
@@ -258,7 +253,7 @@ func TestMergeBaseRejectsUnresolvedMissingAndAmbiguousHistory(t *testing.T) {
 		{Result: process.Result{Stdout: "through-id\n"}},
 		{Err: &process.ExitError{Command: "git", Code: 1}},
 	}}
-	runner, err = NewMergeBase(map[string]any{"from": "main", "through": "feature"})
+	runner, err := NewMergeBase(map[string]any{"from": "main", "through": "feature"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -314,10 +309,7 @@ func TestHistoryHandlesUnbornRepository(t *testing.T) {
 	if log["through"] != "" || log["count"] != 0 || len(outputCommits(t, log)) != 0 {
 		t.Fatalf("log outputs = %#v", log)
 	}
-	runner, err := NewRevision(map[string]any{"revision": "HEAD"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, NewRevision, map[string]any{"revision": "HEAD"})
 	if _, err := runner.Run(t.Context(), step.Request{RunDir: dir}); err == nil || !strings.Contains(err.Error(), "resolving Git revision") {
 		t.Fatalf("explicit HEAD error = %v", err)
 	}
@@ -325,17 +317,11 @@ func TestHistoryHandlesUnbornRepository(t *testing.T) {
 
 func TestHistoryRejectsUnresolvedTemplatesAndDivergentBoundary(t *testing.T) {
 	t.Parallel()
-	revision, err := NewRevision(map[string]any{"revision": "{{ .vars.ref }}"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	revision := steptest.Build(t, NewRevision, map[string]any{"revision": "{{ .vars.ref }}"})
 	if _, err := revision.Run(t.Context(), step.Request{}); err == nil || !strings.Contains(err.Error(), "unresolved template") {
 		t.Fatalf("revision error = %v", err)
 	}
-	log, err := NewLog(map[string]any{"paths": []any{"{{ .vars.path }}"}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	log := steptest.Build(t, NewLog, map[string]any{"paths": []any{"{{ .vars.path }}"}})
 	if _, err := log.Run(t.Context(), step.Request{}); err == nil || !strings.Contains(err.Error(), "unresolved template") {
 		t.Fatalf("log error = %v", err)
 	}
@@ -345,10 +331,7 @@ func TestHistoryRejectsUnresolvedTemplatesAndDivergentBoundary(t *testing.T) {
 		{Result: process.Result{Stdout: "after-id\n"}},
 		{Err: &process.ExitError{Command: "git", Code: 1}},
 	}}
-	log, err = NewLog(map[string]any{"after": "release", "through": "main"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	log = steptest.Build(t, NewLog, map[string]any{"after": "release", "through": "main"})
 	if _, err := log.Run(t.Context(), step.Request{Executor: executor}); err == nil || !strings.Contains(err.Error(), `"release" is not an ancestor of "main"`) {
 		t.Fatalf("boundary error = %v", err)
 	}
@@ -377,11 +360,8 @@ func TestHistoryUsesCaptureOnlyExecutorAndRejectsTruncation(t *testing.T) {
 		{Result: process.Result{Stdout: "commit-id\n"}},
 		{Result: process.Result{StdoutTruncated: true}},
 	}}
-	runner, err := NewRevision(map[string]any{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = runner.Run(t.Context(), step.Request{Executor: executor, Env: map[string]string{"MODE": "test"}})
+	runner := steptest.Build(t, NewRevision, map[string]any{})
+	_, err := runner.Run(t.Context(), step.Request{Executor: executor, Env: map[string]string{"MODE": "test"}})
 	if err == nil || !strings.Contains(err.Error(), "output exceeded 16 MiB") {
 		t.Fatalf("truncation error = %v", err)
 	}
@@ -402,10 +382,7 @@ func TestHistoryUsesCaptureOnlyExecutorAndRejectsTruncation(t *testing.T) {
 		{Result: process.Result{Stdout: "base-id\n"}},
 		{Result: process.Result{Stdout: "base\n"}},
 	}}
-	mergeBase, err := NewMergeBase(map[string]any{"from": "main", "through": "feature"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	mergeBase := steptest.Build(t, NewMergeBase, map[string]any{"from": "main", "through": "feature"})
 	result, err := mergeBase.Run(t.Context(), step.Request{
 		Executor: mergeExecutor, RunDir: "/workspace", Env: map[string]string{"MODE": "test"},
 		Attempt: 2, MaxAttempts: 3, OperationID: "merge-base",
@@ -430,10 +407,7 @@ func TestHistoryUsesCaptureOnlyExecutorAndRejectsTruncation(t *testing.T) {
 	if _, ok := mergeBase.(step.ExecutorAware); !ok {
 		t.Fatal("git_merge_base is not executor-aware")
 	}
-	log, err := NewLog(map[string]any{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	log := steptest.Build(t, NewLog, map[string]any{})
 	if _, ok := log.(step.ExecutorAware); !ok {
 		t.Fatal("git_log is not executor-aware")
 	}
@@ -542,10 +516,7 @@ func regexpYAMLBlocks(section []byte) [][]byte {
 
 func runRevision(t *testing.T, dir string, raw map[string]any) map[string]any {
 	t.Helper()
-	runner, err := NewRevision(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, NewRevision, raw)
 	result, err := runner.Run(t.Context(), step.Request{RunDir: dir})
 	if err != nil {
 		t.Fatal(err)
@@ -555,10 +526,7 @@ func runRevision(t *testing.T, dir string, raw map[string]any) map[string]any {
 
 func runMergeBase(t *testing.T, dir string, raw map[string]any) map[string]any {
 	t.Helper()
-	runner, err := NewMergeBase(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, NewMergeBase, raw)
 	result, err := runner.Run(t.Context(), step.Request{RunDir: dir})
 	if err != nil {
 		t.Fatal(err)
@@ -568,10 +536,7 @@ func runMergeBase(t *testing.T, dir string, raw map[string]any) map[string]any {
 
 func runLog(t *testing.T, dir string, raw map[string]any) map[string]any {
 	t.Helper()
-	runner, err := NewLog(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, NewLog, raw)
 	result, err := runner.Run(t.Context(), step.Request{RunDir: dir})
 	if err != nil {
 		t.Fatal(err)

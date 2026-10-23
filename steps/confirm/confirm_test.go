@@ -4,14 +4,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 )
 
 func TestPreSuppliedBoolean(t *testing.T) {
-	runner, err := New(map[string]any{"variable": "approved", "message": "Continue?"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"variable": "approved", "message": "Continue?"})
 	result, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{"approved": true}})
 	if err != nil {
 		t.Fatal(err)
@@ -22,11 +20,8 @@ func TestPreSuppliedBoolean(t *testing.T) {
 }
 
 func TestNonInteractiveRequiresBooleanVariable(t *testing.T) {
-	runner, err := New(map[string]any{"variable": "approved", "message": "Continue?", "default": true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = runner.Run(t.Context(), step.Request{Vars: map[string]any{}, Interactive: false})
+	runner := steptest.Build(t, New, map[string]any{"variable": "approved", "message": "Continue?", "default": true})
+	_, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{}, Interactive: false})
 	if err == nil || !strings.Contains(err.Error(), "supply it with --var") {
 		t.Fatalf("error = %v", err)
 	}

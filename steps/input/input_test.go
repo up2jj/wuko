@@ -8,14 +8,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 )
 
 func TestInputAcceptsPrepopulatedValue(t *testing.T) {
-	runner, err := New(map[string]any{"variable": "name", "message": "Enter the release name", "value": "from an earlier step"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"variable": "name", "message": "Enter the release name", "value": "from an earlier step"})
 	result, err := runner.Run(t.Context(), step.Request{
 		Vars:        map[string]any{},
 		Stdin:       bytes.NewBufferString("\r"),
@@ -31,12 +29,9 @@ func TestInputAcceptsPrepopulatedValue(t *testing.T) {
 }
 
 func TestInputAcceptsMultilineValue(t *testing.T) {
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"variable": "notes", "message": "Enter release notes", "multiline": true,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{
 		Vars:        map[string]any{},
 		Stdin:       bytes.NewBufferString("First line\rSecond line\x13"),
@@ -87,12 +82,9 @@ func TestMultilineInputAppliesModifiers(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			runner, err := New(map[string]any{
+			runner := steptest.Build(t, New, map[string]any{
 				"variable": "value", "message": "Enter value", "multiline": true, "modifiers": tt.modifiers,
 			})
-			if err != nil {
-				t.Fatal(err)
-			}
 			result, err := runner.Run(t.Context(), step.Request{
 				Vars:        map[string]any{},
 				Stdin:       bytes.NewBufferString(tt.input),
@@ -108,10 +100,7 @@ func TestMultilineInputAppliesModifiers(t *testing.T) {
 }
 
 func TestInputUsesPreSuppliedVariable(t *testing.T) {
-	runner, err := New(map[string]any{"variable": "name", "message": "Name", "value": "suggested"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"variable": "name", "message": "Name", "value": "suggested"})
 	result, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{"name": "chosen"}})
 	if err != nil {
 		t.Fatal(err)
@@ -122,14 +111,11 @@ func TestInputUsesPreSuppliedVariable(t *testing.T) {
 }
 
 func TestInputSplitsValueByPattern(t *testing.T) {
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"variable":  "reviewers",
 		"message":   "Enter reviewers",
 		"modifiers": map[string]any{"split": `\s*[,;]\s*`},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{
 		Vars: map[string]any{"reviewers": "alice, bob;carol"},
 	})
@@ -145,7 +131,7 @@ func TestInputSplitsValueByPattern(t *testing.T) {
 }
 
 func TestInputTrimsValueBeforeValidation(t *testing.T) {
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"variable": "project",
 		"message":  "Enter project",
 		"validation": map[string]any{
@@ -153,9 +139,6 @@ func TestInputTrimsValueBeforeValidation(t *testing.T) {
 		},
 		"modifiers": map[string]any{"trim": true},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{
 		Vars: map[string]any{"project": " \t wuko \n"},
 	})
@@ -168,14 +151,11 @@ func TestInputTrimsValueBeforeValidation(t *testing.T) {
 }
 
 func TestInputTrimCombinesWithSplit(t *testing.T) {
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"variable":  "reviewers",
 		"message":   "Enter reviewers",
 		"modifiers": map[string]any{"trim": true, "split": ","},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{
 		Vars: map[string]any{"reviewers": " alice , bob , carol "},
 	})
@@ -190,14 +170,11 @@ func TestInputTrimCombinesWithSplit(t *testing.T) {
 }
 
 func TestInputDecodesJSON(t *testing.T) {
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"variable":  "metadata",
 		"message":   "Enter metadata",
 		"modifiers": map[string]any{"json": true},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{
 		Vars: map[string]any{"metadata": `{"enabled":true,"retries":3}`},
 	})
@@ -211,30 +188,24 @@ func TestInputDecodesJSON(t *testing.T) {
 }
 
 func TestInputRejectsInvalidJSON(t *testing.T) {
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"variable":  "metadata",
 		"message":   "Enter metadata",
 		"modifiers": map[string]any{"json": true},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = runner.Run(t.Context(), step.Request{Vars: map[string]any{"metadata": `{"broken":`}})
+	_, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{"metadata": `{"broken":`}})
 	if err == nil || !strings.Contains(err.Error(), "valid JSON") {
 		t.Fatalf("Run() error = %v", err)
 	}
 }
 
 func TestInputRejectsMultipleJSONValues(t *testing.T) {
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"variable":  "metadata",
 		"message":   "Enter metadata",
 		"modifiers": map[string]any{"json": true},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = runner.Run(t.Context(), step.Request{Vars: map[string]any{"metadata": `{}` + `[]`}})
+	_, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{"metadata": `{}` + `[]`}})
 	if err == nil || !strings.Contains(err.Error(), "exactly one JSON value") {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -252,12 +223,9 @@ func TestInputModifiersAcceptOptionalEmptyValue(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			runner, err := New(map[string]any{
+			runner := steptest.Build(t, New, map[string]any{
 				"variable": "value", "message": "Enter value", "required": optional, "modifiers": tt.modifiers,
 			})
-			if err != nil {
-				t.Fatal(err)
-			}
 			result, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{"value": ""}})
 			if err != nil {
 				t.Fatal(err)
@@ -292,17 +260,14 @@ func TestInputRejectsInvalidModifierConfiguration(t *testing.T) {
 }
 
 func TestInputRejectsNonStringVariable(t *testing.T) {
-	runner, err := New(map[string]any{"variable": "name", "message": "Name"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"variable": "name", "message": "Name"})
 	if _, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{"name": 42}}); err == nil {
 		t.Fatal("expected non-string variable error")
 	}
 }
 
 func TestInputValidatesPreSuppliedVariable(t *testing.T) {
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"variable": "name",
 		"message":  "Name",
 		"validation": map[string]any{
@@ -311,10 +276,7 @@ func TestInputValidatesPreSuppliedVariable(t *testing.T) {
 			"message":    "Use at least three lowercase letters",
 		},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = runner.Run(t.Context(), step.Request{Vars: map[string]any{"name": "AB"}})
+	_, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{"name": "AB"}})
 	if err == nil || !strings.Contains(err.Error(), "Use at least three lowercase letters") {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -332,10 +294,7 @@ func TestInputRejectsInvalidValidationConfiguration(t *testing.T) {
 }
 
 func TestInputFailsNonInteractive(t *testing.T) {
-	runner, err := New(map[string]any{"variable": "name", "message": "Name", "value": "suggested"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"variable": "name", "message": "Name", "value": "suggested"})
 	if _, err := runner.Run(t.Context(), step.Request{}); err == nil {
 		t.Fatal("expected non-interactive input error")
 	}

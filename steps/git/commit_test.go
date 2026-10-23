@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/internal/gittest"
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/process/processtest"
@@ -69,7 +70,7 @@ func TestCommitUsesExecutorWithStructuredConfiguration(t *testing.T) {
 		{},
 		{Result: process.Result{Stdout: "abc123\n"}},
 	}}
-	runner, err := NewCommit(map[string]any{
+	runner := steptest.Build(t, NewCommit, map[string]any{
 		"message": "feat: add commit", "body": "Body text.", "paths": []any{"src", "-literal"},
 		"trailers": []any{
 			map[string]any{"token": "Refs", "value": "WUKO-1"},
@@ -80,9 +81,6 @@ func TestCommitUsesExecutorWithStructuredConfiguration(t *testing.T) {
 		"signoff":   true,
 		"verify":    false,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{
 		Executor: executor, RunDir: "/repo", Env: map[string]string{"MODE": "test", "GIT_AUTHOR_NAME": "Old"},
 		Attempt: 2, MaxAttempts: 3, OperationID: "commit-op",
@@ -160,10 +158,7 @@ func TestCommitEmptyPolicies(t *testing.T) {
 			if tt.onEmpty != "" {
 				raw["on_empty"] = tt.onEmpty
 			}
-			runner, err := NewCommit(raw)
-			if err != nil {
-				t.Fatal(err)
-			}
+			runner := steptest.Build(t, NewCommit, raw)
 			executor := &processtest.Executor{Replies: tt.results}
 			result, err := runner.Run(t.Context(), step.Request{Executor: executor})
 			if tt.wantError != "" {
@@ -194,7 +189,7 @@ func TestCommitCreatesStructuredCommitAndStagesWholeIndex(t *testing.T) {
 	testfs.WriteFile(t, filepath.Join(dir, "README.md"), []byte("changed\n"), 0o644)
 	gittest.Run(t, dir, "add", "README.md")
 	testfs.WriteFile(t, filepath.Join(dir, "new.txt"), []byte("new\n"), 0o644)
-	runner, err := NewCommit(map[string]any{
+	runner := steptest.Build(t, NewCommit, map[string]any{
 		"message": "feat: structured commit", "body": "Body text.", "paths": []any{"new.txt"},
 		"author":    map[string]any{"name": "Original Author", "email": "author@example.test"},
 		"committer": map[string]any{"name": "Commit Bot", "email": "bot@example.test"},
@@ -205,9 +200,6 @@ func TestCommitCreatesStructuredCommitAndStagesWholeIndex(t *testing.T) {
 			map[string]any{"token": "Co-authored-by", "value": "John <john@example.test>"},
 		},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{RunDir: dir})
 	if err != nil {
 		t.Fatal(err)
@@ -239,10 +231,7 @@ func TestCommitSkipsIdempotentlyAndCanCreateEmptyCommit(t *testing.T) {
 	t.Parallel()
 	dir := gittest.InitWithCommit(t)
 	before := gittest.Output(t, dir, "rev-parse", "HEAD")
-	skip, err := NewCommit(map[string]any{"message": "no changes"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	skip := steptest.Build(t, NewCommit, map[string]any{"message": "no changes"})
 	result, err := skip.Run(t.Context(), step.Request{RunDir: dir})
 	if err != nil {
 		t.Fatal(err)
@@ -250,18 +239,12 @@ func TestCommitSkipsIdempotentlyAndCanCreateEmptyCommit(t *testing.T) {
 	if result.Outputs["created"] != false || result.Outputs["commit"] != before {
 		t.Fatalf("skip result = %#v", result)
 	}
-	fail, err := NewCommit(map[string]any{"message": "no changes", "on_empty": "fail"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	fail := steptest.Build(t, NewCommit, map[string]any{"message": "no changes", "on_empty": "fail"})
 	if _, err := fail.Run(t.Context(), step.Request{RunDir: dir}); err == nil || !strings.Contains(err.Error(), "nothing to commit") {
 		t.Fatalf("on_empty fail error = %v", err)
 	}
 
-	empty, err := NewCommit(map[string]any{"message": "empty", "on_empty": "commit"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	empty := steptest.Build(t, NewCommit, map[string]any{"message": "empty", "on_empty": "commit"})
 	result, err = empty.Run(t.Context(), step.Request{RunDir: dir})
 	if err != nil {
 		t.Fatal(err)
@@ -278,10 +261,7 @@ func TestCommitStagesTrackedDeletion(t *testing.T) {
 	if err := os.Remove(filepath.Join(dir, "README.md")); err != nil {
 		t.Fatal(err)
 	}
-	runner, err := NewCommit(map[string]any{"message": "remove README", "paths": []any{"README.md"}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, NewCommit, map[string]any{"message": "remove README", "paths": []any{"README.md"}})
 	if _, err := runner.Run(t.Context(), step.Request{RunDir: dir}); err != nil {
 		t.Fatal(err)
 	}
@@ -294,10 +274,7 @@ func TestCommitIgnoresPathsThatMatchNothing(t *testing.T) {
 	t.Parallel()
 	dir := gittest.InitWithCommit(t)
 	before := gittest.Output(t, dir, "rev-parse", "HEAD")
-	skip, err := NewCommit(map[string]any{"message": "no output", "paths": []any{"dist", "generated/*.go"}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	skip := steptest.Build(t, NewCommit, map[string]any{"message": "no output", "paths": []any{"dist", "generated/*.go"}})
 	result, err := skip.Run(t.Context(), step.Request{RunDir: dir})
 	if err != nil {
 		t.Fatal(err)
@@ -306,19 +283,13 @@ func TestCommitIgnoresPathsThatMatchNothing(t *testing.T) {
 		t.Fatalf("unmatched paths result = %#v", result)
 	}
 
-	fail, err := NewCommit(map[string]any{"message": "no output", "paths": []any{"dist"}, "on_empty": "fail"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	fail := steptest.Build(t, NewCommit, map[string]any{"message": "no output", "paths": []any{"dist"}, "on_empty": "fail"})
 	if _, err := fail.Run(t.Context(), step.Request{RunDir: dir}); err == nil || !strings.Contains(err.Error(), "nothing to commit") {
 		t.Fatalf("on_empty fail error = %v", err)
 	}
 
 	testfs.WriteFile(t, filepath.Join(dir, "present.txt"), []byte("content\n"), 0o644)
-	mixed, err := NewCommit(map[string]any{"message": "add present", "paths": []any{"dist", "present.txt"}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	mixed := steptest.Build(t, NewCommit, map[string]any{"message": "add present", "paths": []any{"dist", "present.txt"}})
 	result, err = mixed.Run(t.Context(), step.Request{RunDir: dir})
 	if err != nil {
 		t.Fatal(err)
@@ -338,11 +309,8 @@ func TestCommitReportsMissingGitIdentity(t *testing.T) {
 	gittest.Run(t, dir, "init", "--quiet")
 	gittest.Run(t, dir, "config", "user.useConfigOnly", "true")
 	testfs.WriteFile(t, filepath.Join(dir, "file.txt"), []byte("content\n"), 0o644)
-	runner, err := NewCommit(map[string]any{"message": "initial", "paths": []any{"file.txt"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = runner.Run(t.Context(), step.Request{RunDir: dir, Env: map[string]string{
+	runner := steptest.Build(t, NewCommit, map[string]any{"message": "initial", "paths": []any{"file.txt"}})
+	_, err := runner.Run(t.Context(), step.Request{RunDir: dir, Env: map[string]string{
 		"HOME": t.TempDir(), "XDG_CONFIG_HOME": t.TempDir(), "GIT_CONFIG_NOSYSTEM": "1",
 	}})
 	if err == nil || !strings.Contains(err.Error(), "creating Git commit") {
@@ -356,17 +324,11 @@ func TestCommitVerifyControlsHooks(t *testing.T) {
 	hook := filepath.Join(dir, ".git", "hooks", "pre-commit")
 	testfs.WriteFile(t, hook, []byte("#!/bin/sh\nexit 1\n"), 0o755)
 	testfs.WriteFile(t, filepath.Join(dir, "README.md"), []byte("hooked\n"), 0o644)
-	verified, err := NewCommit(map[string]any{"message": "hooks run", "paths": []any{"README.md"}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	verified := steptest.Build(t, NewCommit, map[string]any{"message": "hooks run", "paths": []any{"README.md"}})
 	if _, err := verified.Run(t.Context(), step.Request{RunDir: dir}); err == nil || !strings.Contains(err.Error(), "creating Git commit") {
 		t.Fatalf("verified commit error = %v", err)
 	}
-	bypassed, err := NewCommit(map[string]any{"message": "hooks bypassed", "verify": false})
-	if err != nil {
-		t.Fatal(err)
-	}
+	bypassed := steptest.Build(t, NewCommit, map[string]any{"message": "hooks bypassed", "verify": false})
 	if _, err := bypassed.Run(t.Context(), step.Request{RunDir: dir}); err != nil {
 		t.Fatal(err)
 	}
@@ -374,10 +336,7 @@ func TestCommitVerifyControlsHooks(t *testing.T) {
 
 func TestCommitPropagatesCancellationAndGitFailures(t *testing.T) {
 	t.Parallel()
-	runner, err := NewCommit(map[string]any{"message": "subject"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, NewCommit, map[string]any{"message": "subject"})
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	if _, err := runner.Run(ctx, step.Request{}); !errors.Is(err, context.Canceled) {

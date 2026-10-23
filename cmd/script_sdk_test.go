@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/engine"
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/scriptsdk"
 	"github.com/up2jj/wuko/step"
@@ -96,10 +97,7 @@ if wuko_output_json bad 'not-json' >unexpected.out 2>expected.err; then exit 91;
 			case "argv":
 				raw["argv"] = map[string]any{"expr": "[vars.bash, vars.file]"}
 			}
-			runner, err := shell.New(raw)
-			if err != nil {
-				t.Fatal(err)
-			}
+			runner := steptest.Build(t, shell.New, raw)
 			var stdout, stderr bytes.Buffer
 			result, err := runner.Run(t.Context(), step.Request{
 				RunDir: dir, Stdout: &stdout, Stderr: &stderr,

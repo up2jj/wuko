@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/tui"
 )
@@ -70,10 +71,7 @@ func dashboardRaw() map[string]any {
 }
 
 func TestNewAppliesDashboardDefaults(t *testing.T) {
-	built, err := New(dashboardRaw())
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
+	built := steptest.Build(t, New, dashboardRaw())
 	runner := built.(*Runner)
 	if runner.config.Title != "Dashboard" || runner.config.MaxConcurrency != 4 {
 		t.Fatalf("defaults = title %q concurrency %d", runner.config.Title, runner.config.MaxConcurrency)
@@ -84,12 +82,9 @@ func TestNewAppliesDashboardDefaults(t *testing.T) {
 }
 
 func TestValidateChecksRefreshAndActionCallbacks(t *testing.T) {
-	built, err := New(dashboardRaw())
-	if err != nil {
-		t.Fatal(err)
-	}
+	built := steptest.Build(t, New, dashboardRaw())
 	fake := &fakeInline{}
-	err = built.(*Runner).Validate(t.Context(), step.Request{
+	err := built.(*Runner).Validate(t.Context(), step.Request{
 		Steps: map[string]any{"before": map[string]any{"value": "ready"}}, TemplateRenderer: fakeRenderer{}, InlineWorkflows: fake,
 	})
 	if err != nil {
@@ -104,21 +99,15 @@ func TestValidateChecksRefreshAndActionCallbacks(t *testing.T) {
 }
 
 func TestRunRequiresInteractiveTerminal(t *testing.T) {
-	built, err := New(dashboardRaw())
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = built.Run(t.Context(), step.Request{})
+	built := steptest.Build(t, New, dashboardRaw())
+	_, err := built.Run(t.Context(), step.Request{})
 	if err == nil || !strings.Contains(err.Error(), "interactive terminal") {
 		t.Fatalf("Run() error = %v", err)
 	}
 }
 
 func TestRunReturnsDashboardSnapshot(t *testing.T) {
-	built, err := New(dashboardRaw())
-	if err != nil {
-		t.Fatal(err)
-	}
+	built := steptest.Build(t, New, dashboardRaw())
 	runner := built.(*Runner)
 	runner.show = func(_ context.Context, _ io.Reader, _ io.Writer, config tui.DashboardConfig) (tui.DashboardResult, error) {
 		if got, want := config.Title, "Dashboard"; got != want {
@@ -144,10 +133,7 @@ func TestRunReturnsDashboardSnapshot(t *testing.T) {
 }
 
 func TestDashboardTemplatesReceiveWidgetDimensions(t *testing.T) {
-	built, err := New(dashboardRaw())
-	if err != nil {
-		t.Fatal(err)
-	}
+	built := steptest.Build(t, New, dashboardRaw())
 	renderer := &capturingRenderer{}
 	config := built.(*Runner).tuiConfig(renderer, &fakeInline{})
 	dimensions := tui.DashboardWidgetDimensions{Width: 37, Height: 6}

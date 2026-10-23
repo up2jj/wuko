@@ -5,16 +5,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 )
 
 func TestParseReturnsCanonicalVersionPartsAndVariable(t *testing.T) {
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"operation": "parse", "version": "v1.2.3-rc.1+build.7", "variable": "release",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{})
 	if err != nil {
 		t.Fatal(err)
@@ -45,10 +43,7 @@ func TestCompareUsesSemVerPrecedence(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			runner, err := New(map[string]any{"operation": "compare", "version": tt.version, "other": tt.other})
-			if err != nil {
-				t.Fatal(err)
-			}
+			runner := steptest.Build(t, New, map[string]any{"operation": "compare", "version": tt.version, "other": tt.other})
 			result, err := runner.Run(t.Context(), step.Request{})
 			if err != nil {
 				t.Fatal(err)
@@ -72,10 +67,7 @@ func TestConstrainSupportsRanges(t *testing.T) {
 		{"1.5.0-beta.1", ">= 1.0.0", false},
 		{"1.5.0-beta.1", ">= 1.5.0-beta.1, < 2.0.0", true},
 	} {
-		runner, err := New(map[string]any{"operation": "constrain", "version": tt.version, "constraint": tt.constraint})
-		if err != nil {
-			t.Fatal(err)
-		}
+		runner := steptest.Build(t, New, map[string]any{"operation": "constrain", "version": tt.version, "constraint": tt.constraint})
 		result, err := runner.Run(t.Context(), step.Request{})
 		if err != nil {
 			t.Fatal(err)
@@ -95,10 +87,7 @@ func TestIncrementRejectsOverflow(t *testing.T) {
 		{"1.18446744073709551615.0", "minor"},
 		{"1.2.18446744073709551615", "patch"},
 	} {
-		runner, err := New(map[string]any{"operation": "increment", "version": tt.version, "part": tt.part})
-		if err != nil {
-			t.Fatal(err)
-		}
+		runner := steptest.Build(t, New, map[string]any{"operation": "increment", "version": tt.version, "part": tt.part})
 		result, err := runner.Run(t.Context(), step.Request{})
 		if err == nil || !strings.Contains(err.Error(), "cannot be incremented") || len(result.Outputs) != 0 {
 			t.Fatalf("%s result = %#v, error = %v", tt.part, result, err)
@@ -117,10 +106,7 @@ func TestIncrementResetsLowerPartsAndQualifiers(t *testing.T) {
 		{"1.2.3-rc.1+build.7", "minor", "1.3.0"},
 		{"1.2.3-rc.1+build.7", "major", "2.0.0"},
 	} {
-		runner, err := New(map[string]any{"operation": "increment", "version": tt.version, "part": tt.part})
-		if err != nil {
-			t.Fatal(err)
-		}
+		runner := steptest.Build(t, New, map[string]any{"operation": "increment", "version": tt.version, "part": tt.part})
 		result, err := runner.Run(t.Context(), step.Request{})
 		if err != nil {
 			t.Fatal(err)
@@ -163,10 +149,7 @@ func TestTemplatedConfigurationIsAcceptedDuringValidation(t *testing.T) {
 }
 
 func TestRunHonorsCancellation(t *testing.T) {
-	runner, err := New(map[string]any{"operation": "parse", "version": "1.2.3"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"operation": "parse", "version": "1.2.3"})
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	result, err := runner.Run(ctx, step.Request{})

@@ -9,10 +9,7 @@ import (
 )
 
 func TestConfigDefaultsAndValidation(t *testing.T) {
-	runnerValue, err := New(map[string]any{"variable": "approved", "message": "Review", "content": "change"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runnerValue := steptest.Build(t, New, map[string]any{"variable": "approved", "message": "Review", "content": "change"})
 	if runnerValue.(*Runner).config.Format != formatPlain {
 		t.Fatalf("format = %q", runnerValue.(*Runner).config.Format)
 	}

@@ -9,6 +9,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 )
@@ -26,10 +27,7 @@ func TestWriteReadStatAndOverwriteModes(t *testing.T) {
 		t.Fatalf("stat = %#v, error = %v", info, err)
 	}
 
-	runner, err := New(map[string]any{"operation": "write", "path": "script.sh", "content": "changed"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"operation": "write", "path": "script.sh", "content": "changed"})
 	if _, err := runner.Run(t.Context(), step.Request{RunDir: root}); err == nil || !strings.Contains(err.Error(), "overwrite") {
 		t.Fatalf("error = %v", err)
 	}
@@ -83,10 +81,7 @@ func TestMkdirCopyMoveListAndRemove(t *testing.T) {
 		t.Fatalf("paths = %#v", paths)
 	}
 
-	runner, err := New(map[string]any{"operation": "remove", "path": "nested"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"operation": "remove", "path": "nested"})
 	if _, err := runner.Run(t.Context(), step.Request{RunDir: root}); err == nil {
 		t.Fatal("non-recursive removal succeeded")
 	}
@@ -151,10 +146,7 @@ func TestMoveDoesNotOverwriteExistingDestination(t *testing.T) {
 	destination := filepath.Join(root, "destination")
 	testfs.WriteFile(t, source, []byte("source"), 0o600)
 	testfs.WriteFile(t, destination, []byte("destination"), 0o600)
-	runner, err := New(map[string]any{"operation": "move", "path": "source", "destination": "destination"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"operation": "move", "path": "source", "destination": "destination"})
 	if _, err := runner.Run(t.Context(), step.Request{RunDir: root}); err == nil || !strings.Contains(err.Error(), "overwrite") {
 		t.Fatalf("error = %v", err)
 	}
@@ -217,10 +209,7 @@ func TestChmodAndSymlinkRejection(t *testing.T) {
 	if err := os.Symlink(path, link); err != nil {
 		t.Fatal(err)
 	}
-	runner, err := New(map[string]any{"operation": "chmod", "path": "link", "mode": "0644"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"operation": "chmod", "path": "link", "mode": "0644"})
 	if _, err := runner.Run(t.Context(), step.Request{RunDir: root}); err == nil || !strings.Contains(err.Error(), "symbolic link") {
 		t.Fatalf("error = %v", err)
 	}
@@ -244,10 +233,7 @@ func TestRemoveRefusesTheRunDirectoryAndItsAncestors(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.path+" from "+test.runDir, func(t *testing.T) {
-			runner, err := New(map[string]any{"operation": "remove", "path": test.path, "recursive": true})
-			if err != nil {
-				t.Fatal(err)
-			}
+			runner := steptest.Build(t, New, map[string]any{"operation": "remove", "path": test.path, "recursive": true})
 			if _, err := runner.Run(t.Context(), step.Request{RunDir: test.runDir}); err == nil || !strings.Contains(err.Error(), "run directory") {
 				t.Errorf("error = %v, want the run directory protected", err)
 			}
@@ -259,18 +245,12 @@ func TestRemoveRefusesTheRunDirectoryAndItsAncestors(t *testing.T) {
 }
 
 func TestRejectsUnsafeRemovalAndCanceledOperation(t *testing.T) {
-	runner, err := New(map[string]any{"operation": "remove", "path": string(filepath.Separator), "recursive": true})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"operation": "remove", "path": string(filepath.Separator), "recursive": true})
 	if _, err := runner.Run(t.Context(), step.Request{RunDir: t.TempDir()}); err == nil || !strings.Contains(err.Error(), "filesystem root") {
 		t.Fatalf("error = %v", err)
 	}
 
-	runner, err = New(map[string]any{"operation": "stat", "path": "anything"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner = steptest.Build(t, New, map[string]any{"operation": "stat", "path": "anything"})
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	if _, err := runner.Run(ctx, step.Request{RunDir: t.TempDir()}); !errors.Is(err, context.Canceled) {
@@ -300,10 +280,7 @@ func TestRejectsInvalidConfiguration(t *testing.T) {
 
 func run(t *testing.T, root string, raw map[string]any) step.Result {
 	t.Helper()
-	runner, err := New(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, raw)
 	result, err := runner.Run(t.Context(), step.Request{RunDir: root})
 	if err != nil {
 		t.Fatal(err)

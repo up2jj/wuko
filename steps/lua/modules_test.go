@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 )
@@ -38,10 +39,7 @@ func TestLuaRequiresWorkflowRelativeModules(t *testing.T) {
 					testfs.Write(t, filepath.Join(dir, "scripts/main.lua"), source)
 					config = map[string]any{"file": "scripts/main.lua"}
 				}
-				runner, err := New(config)
-				if err != nil {
-					t.Fatal(err)
-				}
+				runner := steptest.Build(t, New, config)
 				result, err := runner.Run(t.Context(), step.Request{WorkflowDir: dir, RunDir: runDir})
 				if err != nil {
 					t.Fatal(err)
@@ -70,13 +68,10 @@ func TestLuaModuleSearchPrecedenceAndFallback(t *testing.T) {
 			for _, location := range locations[first:] {
 				testfs.Write(t, filepath.Join(dir, location), fmt.Sprintf(`return {value = %q}`, location))
 			}
-			runner, err := New(map[string]any{"source": `
+			runner := steptest.Build(t, New, map[string]any{"source": `
 wuko.output("value", require("deploy").value)
 wuko.output("fallback", require("fallback").value)
 `})
-			if err != nil {
-				t.Fatal(err)
-			}
 			result, err := runner.Run(t.Context(), step.Request{WorkflowDir: dir})
 			if err != nil {
 				t.Fatal(err)
@@ -96,13 +91,10 @@ func TestLuaEmptyWorkflowDirPreservesModulePath(t *testing.T) {
 	modulePath := filepath.Join(dir, "?.lua") + ";" + filepath.Join(dir, "?", "init.lua")
 	t.Setenv("LUA_PATH", modulePath)
 	testfs.Write(t, filepath.Join(dir, "deploy.lua"), `return {value = "external"}`)
-	runner, err := New(map[string]any{"source": `
+	runner := steptest.Build(t, New, map[string]any{"source": `
 wuko.output("path", package.path)
 wuko.output("value", require("deploy").value)
 `})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{RunDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -118,14 +110,11 @@ wuko.output("value", require("deploy").value)
 func TestLuaModuleCacheIsIsolatedPerExecution(t *testing.T) {
 	dir := t.TempDir()
 	testfs.Write(t, filepath.Join(dir, "deploy.lua"), `return {count = 0}`)
-	runner, err := New(map[string]any{"source": `
+	runner := steptest.Build(t, New, map[string]any{"source": `
 local deploy = require("deploy")
 deploy.count = deploy.count + 1
 wuko.output("count", require("deploy").count)
 `})
-	if err != nil {
-		t.Fatal(err)
-	}
 	for range 2 {
 		result, err := runner.Run(t.Context(), step.Request{WorkflowDir: dir})
 		if err != nil {
@@ -138,11 +127,8 @@ wuko.output("count", require("deploy").count)
 }
 
 func TestLuaMissingModuleFailsAtRuntime(t *testing.T) {
-	runner, err := New(map[string]any{"source": `require("wuko_nonexistent_test_module")`})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = runner.Run(t.Context(), step.Request{WorkflowDir: t.TempDir()})
+	runner := steptest.Build(t, New, map[string]any{"source": `require("wuko_nonexistent_test_module")`})
+	_, err := runner.Run(t.Context(), step.Request{WorkflowDir: t.TempDir()})
 	if err == nil || !strings.Contains(err.Error(), "wuko_nonexistent_test_module") || !strings.Contains(err.Error(), "not found") {
 		t.Fatalf("missing module error = %v", err)
 	}
@@ -163,10 +149,7 @@ func TestLuaValidationDoesNotLoadModules(t *testing.T) {
 			if module.source != "" {
 				testfs.Write(t, filepath.Join(dir, module.name+".lua"), module.source)
 			}
-			runner, err := New(map[string]any{"source": fmt.Sprintf(`require(%q); error("entry script executed")`, module.name)})
-			if err != nil {
-				t.Fatal(err)
-			}
+			runner := steptest.Build(t, New, map[string]any{"source": fmt.Sprintf(`require(%q); error("entry script executed")`, module.name)})
 			if err := runner.(step.Validator).Validate(t.Context(), step.Request{WorkflowDir: dir, RunDir: runDir}); err != nil {
 				t.Fatalf("validation executed or loaded Lua: %v", err)
 			}
@@ -183,10 +166,7 @@ func TestLuaBorrowedWorkflowDirDoesNotExposeCallerFiles(t *testing.T) {
 	testfs.Write(t, filepath.Join(dir, "main.lua"), `wuko.output("value", "caller script")`)
 	request := step.Request{WorkflowDir: dir, WorkflowDirBorrowed: true}
 
-	runner, err := New(map[string]any{"source": `wuko.output("ok", pcall(require, "deploy"))`})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"source": `wuko.output("ok", pcall(require, "deploy"))`})
 	result, err := runner.Run(t.Context(), request)
 	if err != nil {
 		t.Fatal(err)

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 )
@@ -45,35 +46,26 @@ func TestWatchRejectsInvalidConfiguration(t *testing.T) {
 }
 
 func TestWatchDefaultsAndNormalizesEvents(t *testing.T) {
-	runner, err := New(map[string]any{"patterns": []any{"**"}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"patterns": []any{"**"}})
 	got := runner.(*Runner)
 	if got.config.Root != "." || !slices.Equal(got.config.Events, []string{"create", "modify", "rename", "remove"}) {
 		t.Fatalf("config = %#v", got.config)
 	}
 
-	runner, err = New(map[string]any{
+	runner = steptest.Build(t, New, map[string]any{
 		"patterns": []any{"**"},
 		"events":   []any{"remove", "create", "remove", "modify", "create"},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	if got := runner.(*Runner).config.Events; !slices.Equal(got, []string{"create", "modify", "remove"}) {
 		t.Fatalf("events = %v", got)
 	}
 }
 
 func TestWatchAcceptsTemplatesDuringStaticValidation(t *testing.T) {
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"root": "{{ .vars.root }}", "patterns": []any{"{{ .vars.pattern }}"}, "events": []any{"{{ .vars.event }}"},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = runner.Run(t.Context(), step.Request{RunDir: t.TempDir()})
+	_, err := runner.Run(t.Context(), step.Request{RunDir: t.TempDir()})
 	if err == nil || !strings.Contains(err.Error(), "unresolved template") {
 		t.Fatalf("error = %v", err)
 	}
@@ -255,11 +247,8 @@ func TestWatchRejectsInvalidRuntimeRoot(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			runnerValue, err := New(map[string]any{"root": test.root, "patterns": []any{"**"}})
-			if err != nil {
-				t.Fatal(err)
-			}
-			_, err = runnerValue.Run(t.Context(), step.Request{RunDir: runDir})
+			runnerValue := steptest.Build(t, New, map[string]any{"root": test.root, "patterns": []any{"**"}})
+			_, err := runnerValue.Run(t.Context(), step.Request{RunDir: runDir})
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("error = %v, want substring %q", err, test.want)
 			}
@@ -310,12 +299,9 @@ func TestWatchRealFilesystemEvents(t *testing.T) {
 				test.prepare(t, target)
 			}
 			ready := make(chan struct{})
-			runnerValue, err := New(map[string]any{
+			runnerValue := steptest.Build(t, New, map[string]any{
 				"patterns": []any{"target.txt"}, "events": []any{test.operation},
 			})
-			if err != nil {
-				t.Fatal(err)
-			}
 			runner := runnerValue.(*Runner)
 			runner.newWatcher = func() (eventWatcher, error) {
 				watcher, err := fsnotify.NewWatcher()
@@ -352,10 +338,7 @@ func TestWatchRealFilesystemEvents(t *testing.T) {
 
 func configuredRunner(t *testing.T, watcher eventWatcher, raw map[string]any) *Runner {
 	t.Helper()
-	runner, err := New(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, raw)
 	configured := runner.(*Runner)
 	configured.newWatcher = func() (eventWatcher, error) { return watcher, nil }
 	return configured

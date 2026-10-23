@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/process/processtest"
 	"github.com/up2jj/wuko/step"
@@ -40,10 +41,7 @@ func TestRunReportsCurrentRepositoryAndUsesDefaultBranch(t *testing.T) {
 		{Result: process.Result{Stdout: `{"tag_name":"v1.2.3","html_url":"https://github.com/acme/wuko/releases/tag/v1.2.3","published_at":"2026-08-20T10:00:00Z"}`}},
 		{Result: process.Result{Stdout: `{"html_url":"https://github.com/acme/wuko/compare/v1.2.3...main","ahead_by":0,"behind_by":2,"total_commits":0}`}},
 	}}
-	runner, err := New(map[string]any{"operation": operationCheckDrift, "repository": "acme/wuko"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"operation": operationCheckDrift, "repository": "acme/wuko"})
 	result, err := runner.Run(t.Context(), step.Request{
 		Executor: executor, RunDir: "/workspace", Env: map[string]string{"GITHUB_TOKEN": "secret"},
 		Attempt: 2, MaxAttempts: 3, OperationID: "release-check",
@@ -94,10 +92,7 @@ func TestRunReportsChangedRepository(t *testing.T) {
 		{Result: process.Result{Stdout: `{"tag_name":"v2.0.0"}`}},
 		{Result: process.Result{Stdout: `{"ahead_by":4,"behind_by":0,"total_commits":4}`}},
 	}}
-	runner, err := New(map[string]any{"operation": operationCheckDrift, "repository": "acme/project"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"operation": operationCheckDrift, "repository": "acme/project"})
 	result, err := runner.Run(t.Context(), step.Request{Executor: executor})
 	if err != nil {
 		t.Fatal(err)
@@ -112,10 +107,7 @@ func TestRunReportsRepositoryWithoutStableRelease(t *testing.T) {
 		{Result: process.Result{Stdout: `{"default_branch":"main"}`}},
 		{Result: process.Result{Stderr: "gh: Not Found (HTTP 404)"}, Err: &process.ExitError{Command: "gh", Code: 1}},
 	}}
-	runner, err := New(map[string]any{"operation": operationCheckDrift, "repository": "acme/project"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"operation": operationCheckDrift, "repository": "acme/project"})
 	result, err := runner.Run(t.Context(), step.Request{Executor: executor})
 	if err != nil {
 		t.Fatal(err)
@@ -175,10 +167,7 @@ func TestRunReportsMalformedResponsesAndCommandFailures(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			runner, err := New(map[string]any{"operation": operationCheckDrift, "repository": "acme/project"})
-			if err != nil {
-				t.Fatal(err)
-			}
+			runner := steptest.Build(t, New, map[string]any{"operation": operationCheckDrift, "repository": "acme/project"})
 			executor := &processtest.Executor{Strict: true, Replies: tt.steps}
 			result, err := runner.Run(t.Context(), step.Request{Executor: executor})
 			if err == nil || !strings.Contains(err.Error(), tt.want) || result.Outputs != nil {
@@ -190,10 +179,7 @@ func TestRunReportsMalformedResponsesAndCommandFailures(t *testing.T) {
 
 func TestRunPreservesCancellation(t *testing.T) {
 	executor := &processtest.Executor{Strict: true, Replies: []processtest.Reply{{Err: context.Canceled}}}
-	runner, err := New(map[string]any{"operation": operationCheckDrift, "repository": "acme/project"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"operation": operationCheckDrift, "repository": "acme/project"})
 	result, err := runner.Run(t.Context(), step.Request{Executor: executor})
 	if !errors.Is(err, context.Canceled) || result.Outputs != nil {
 		t.Fatalf("result = %#v, error = %v", result, err)
@@ -201,10 +187,7 @@ func TestRunPreservesCancellation(t *testing.T) {
 }
 
 func TestRunRejectsUnresolvedRepositoryTemplate(t *testing.T) {
-	runner, err := New(map[string]any{"operation": operationCheckDrift, "repository": "{{ .vars.repository }}"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"operation": operationCheckDrift, "repository": "{{ .vars.repository }}"})
 	if _, err := runner.Run(t.Context(), step.Request{}); err == nil || !strings.Contains(err.Error(), "unresolved template") {
 		t.Fatalf("Run() error = %v", err)
 	}

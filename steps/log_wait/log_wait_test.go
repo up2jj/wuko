@@ -206,10 +206,7 @@ func TestLogWaitStopsOnCancellation(t *testing.T) {
 
 func newRunnerWithReadyWatcher(t *testing.T, raw map[string]any) (*Runner, <-chan struct{}) {
 	t.Helper()
-	runner, err := New(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, raw)
 	concrete := runner.(*Runner)
 	ready := make(chan struct{})
 	concrete.newWatcher = func() (eventWatcher, error) {
@@ -224,10 +221,7 @@ func newRunnerWithReadyWatcher(t *testing.T, raw map[string]any) (*Runner, <-cha
 
 func newRunnerWithFakeWatcher(t *testing.T, raw map[string]any) (*Runner, *fakeWatcher) {
 	t.Helper()
-	runner, err := New(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, raw)
 	concrete := runner.(*Runner)
 	watcher := &fakeWatcher{
 		events: make(chan fsnotify.Event, 1),

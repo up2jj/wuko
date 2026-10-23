@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	processpkg "github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/step"
 )
@@ -38,10 +39,7 @@ func TestElevatedProcessValidationAndExecutionContext(t *testing.T) {
 	if _, err := New(map[string]any{"command": "worker", "elevated": true, "user": "root"}); err == nil || !strings.Contains(err.Error(), "cannot be combined with user") {
 		t.Fatalf("New() error = %v", err)
 	}
-	built, err := New(map[string]any{"command": "worker", "elevated": true, "env": map[string]any{"EXPLICIT": "yes"}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	built := steptest.Build(t, New, map[string]any{"command": "worker", "elevated": true, "env": map[string]any{"EXPLICIT": "yes"}})
 	runner := built.(*Runner)
 	elevated := &recordingProcessExecutor{}
 	request := step.Request{
@@ -113,10 +111,7 @@ func (services *testServices) StartService(_ string, _ string, options step.Serv
 }
 
 func TestProcessBecomesReadyOnSpawnAndStopsWithScope(t *testing.T) {
-	runner, err := New(map[string]any{"command": "sh", "args": []any{"-c", "while :; do sleep 1; done"}, "shutdown": map[string]any{"timeout": "100ms"}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"command": "sh", "args": []any{"-c", "while :; do sleep 1; done"}, "shutdown": map[string]any{"timeout": "100ms"}})
 	services := newTestServices(t)
 	var output bytes.Buffer
 	result, err := runner.Run(t.Context(), step.Request{StepID: "api", Services: services, Env: map[string]string{}, Stdout: &output, Stderr: io.Discard})
@@ -132,14 +127,11 @@ func TestProcessBecomesReadyOnSpawnAndStopsWithScope(t *testing.T) {
 }
 
 func TestProcessWaitsForReadinessLogAndPrefixesOutput(t *testing.T) {
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"script":    "printf 'booting\\n'; sleep 0.05; printf 'listening on 8080\\n'; while :; do sleep 1; done",
 		"readiness": map[string]any{"log": map[string]any{"pattern": "listening on [0-9]+", "timeout": "2s"}},
 		"shutdown":  map[string]any{"timeout": "100ms"},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	services := newTestServices(t)
 	var output bytes.Buffer
 	result, err := runner.Run(t.Context(), step.Request{StepID: "web", Services: services, Env: map[string]string{}, Stdout: &output, Stderr: io.Discard})
@@ -161,10 +153,7 @@ func TestProcessWaitsForReadinessLogAndPrefixesOutput(t *testing.T) {
 }
 
 func TestProcessReportsUnexpectedExitAfterReadiness(t *testing.T) {
-	runner, err := New(map[string]any{"command": "sh", "args": []any{"-c", "sleep 0.05; exit 7"}, "exit_on_failure": true})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"command": "sh", "args": []any{"-c", "sleep 0.05; exit 7"}, "exit_on_failure": true})
 	services := newTestServices(t)
 	if _, err := runner.Run(t.Context(), step.Request{StepID: "worker", Services: services, Env: map[string]string{}, Stdout: io.Discard, Stderr: io.Discard}); err != nil {
 		t.Fatal(err)
@@ -186,13 +175,10 @@ func TestProcessReportsUnexpectedExitAfterReadiness(t *testing.T) {
 func TestProcessRestartsUntilBudgetIsExhausted(t *testing.T) {
 	directory := t.TempDir()
 	attempts := directory + "/attempts"
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"script": "printf x >> \"$1\"; sleep 0.03; exit 7", "args": []any{attempts},
 		"restart": map[string]any{"policy": "on_failure", "backoff": "1ms", "max_restarts": 2},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	services := newTestServices(t)
 	if _, err := runner.Run(t.Context(), step.Request{StepID: "worker", Services: services, RunDir: directory, Env: map[string]string{}, Stdout: io.Discard, Stderr: io.Discard}); err != nil {
 		t.Fatal(err)

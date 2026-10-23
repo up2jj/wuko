@@ -12,13 +12,10 @@ import (
 
 func TestConfigValidation(t *testing.T) {
 	width := 12
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"message": "Releases", "from": "steps.fetch.items",
 		"columns": []any{map[string]any{"header": "Version", "field": "version", "width": width}},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	if got := *runner.(*Runner).config.Columns[0].Width; got != width {
 		t.Fatalf("width = %d", got)
 	}

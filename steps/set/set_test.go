@@ -7,15 +7,13 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 )
 
 func TestLiteralValue(t *testing.T) {
 	value := map[string]any{"enabled": true, "regions": []any{"eu", "us"}}
-	runner, err := New(map[string]any{"variable": "deployment", "value": value})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"variable": "deployment", "value": value})
 	result, err := runner.Run(t.Context(), step.Request{})
 	if err != nil {
 		t.Fatal(err)
@@ -26,16 +24,13 @@ func TestLiteralValue(t *testing.T) {
 }
 
 func TestMultipleVariables(t *testing.T) {
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"variables": map[string]any{
 			"application": "wuko",
 			"artifact":    map[string]any{"expr": "vars.application + \"-\" + vars.version"},
 			"version":     map[string]any{"value": 3},
 		},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{"application": "old", "version": "7"}})
 	if err != nil {
 		t.Fatal(err)
@@ -50,15 +45,12 @@ func TestMultipleVariables(t *testing.T) {
 }
 
 func TestMultipleVariablesFailureIsAtomic(t *testing.T) {
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"variables": map[string]any{
 			"good": "value",
 			"bad":  map[string]any{"expr": "vars.missing.name"},
 		},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{}})
 	if err == nil || len(result.Outputs) != 0 || len(result.Variables) != 0 {
 		t.Fatalf("result = %#v, error = %v", result, err)
@@ -66,13 +58,10 @@ func TestMultipleVariablesFailureIsAtomic(t *testing.T) {
 }
 
 func TestExpressionUsesAllRoots(t *testing.T) {
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"variable": "artifact",
 		"expr":     `steps.release.version + "-" + vars.target + "-" + inputs.suffix + "-" + env.CHANNEL + "-" + workflow.name + "-" + run.dir`,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{
 		WorkflowName: "publish", RunDir: "/work",
 		Inputs: map[string]any{"suffix": "archive"}, Vars: map[string]any{"target": "linux"},
@@ -87,10 +76,7 @@ func TestExpressionUsesAllRoots(t *testing.T) {
 }
 
 func TestExpressionUsesControlBindings(t *testing.T) {
-	runner, err := New(map[string]any{"variable": "value", "expr": `len(batch.items) + foreach.index + matrix.offset`})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"variable": "value", "expr": `len(batch.items) + foreach.index + matrix.offset`})
 	result, err := runner.Run(t.Context(), step.Request{Bindings: map[string]any{
 		"batch": map[string]any{"items": []any{"api", "worker"}}, "foreach": map[string]any{"index": 2}, "matrix": map[string]any{"offset": 3},
 	}})
@@ -103,13 +89,10 @@ func TestExpressionUsesControlBindings(t *testing.T) {
 }
 
 func TestExpressionUsesSharedHelpers(t *testing.T) {
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"variable": "manifest",
 		"expr":     `toYAML(dict("name", default(vars.name, "wuko")))`,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{"name": ""}})
 	if err != nil {
 		t.Fatal(err)
@@ -120,10 +103,7 @@ func TestExpressionUsesSharedHelpers(t *testing.T) {
 }
 
 func TestExpressionUsesSecretHelper(t *testing.T) {
-	runner, err := New(map[string]any{"variable": "token", "expr": `secret("op://Production/API/token")`})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"variable": "token", "expr": `secret("op://Production/API/token")`})
 	result, err := runner.Run(t.Context(), step.Request{Secret: func(reference string) (string, error) {
 		if reference != "op://Production/API/token" {
 			t.Fatalf("reference = %q", reference)
@@ -166,10 +146,7 @@ func TestExpressionStoresTypedCollectionResults(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			runner, err := New(map[string]any{"variable": "result", "expr": tt.expr})
-			if err != nil {
-				t.Fatal(err)
-			}
+			runner := steptest.Build(t, New, map[string]any{"variable": "result", "expr": tt.expr})
 			result, err := runner.Run(t.Context(), step.Request{Vars: tt.vars})
 			if err != nil {
 				t.Fatal(err)
@@ -182,10 +159,7 @@ func TestExpressionStoresTypedCollectionResults(t *testing.T) {
 }
 
 func TestExpressionFailureDoesNotReturnResult(t *testing.T) {
-	runner, err := New(map[string]any{"variable": "value", "expr": `vars.missing.name`})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"variable": "value", "expr": `vars.missing.name`})
 	result, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{}})
 	if err == nil || len(result.Outputs) != 0 || len(result.Variables) != 0 {
 		t.Fatalf("result = %#v, error = %v", result, err)

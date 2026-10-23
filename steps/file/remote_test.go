@@ -98,10 +98,7 @@ func TestFileMarksOnlyRemoteCapableOperationsExecutorAware(t *testing.T) {
 	}
 	for name, config := range hostOnly {
 		t.Run(name, func(t *testing.T) {
-			runner, err := New(config)
-			if err != nil {
-				t.Fatal(err)
-			}
+			runner := steptest.Build(t, New, config)
 			if _, ok := runner.(step.ExecutorAware); ok {
 				t.Fatalf("file %v claims executor support it cannot honor", config["operation"])
 			}

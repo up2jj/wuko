@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -25,11 +26,8 @@ func TestBashSDKRequiresCompatibleShell(t *testing.T) {
 		{"argv": map[string]any{"expr": "['sh', '-c', 'true']"}},
 	} {
 		raw["sdk"] = "bash"
-		runner, err := New(raw)
-		if err != nil {
-			t.Fatal(err)
-		}
-		_, _, err = runner.(*sdkRunner).command(step.Request{})
+		runner := steptest.Build(t, New, raw)
+		_, _, err := runner.(*sdkRunner).command(step.Request{})
 		if err == nil || !strings.Contains(err.Error(), "Bash") && !strings.Contains(err.Error(), "POSIX") {
 			t.Fatalf("config=%#v error=%v", raw, err)
 		}

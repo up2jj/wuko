@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/executor"
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/step"
 )
@@ -29,16 +30,13 @@ func (r *taskRecorder) RunTask(_ context.Context, request executor.TaskRequest) 
 }
 
 func TestTaskRunnerPassesConfigurationAndReturnsTypedOutputs(t *testing.T) {
-	runner, err := NewTask(map[string]any{
+	runner := steptest.Build(t, NewTask, map[string]any{
 		"names":         []any{"app:prepare", "app:build"},
 		"mode":          "all",
 		"inputs":        map[string]any{"target": "production"},
 		"show_output":   true,
 		"capture_limit": "1MiB",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	recorder := &taskRecorder{result: process.Result{
 		Stdout: `{"app:prepare":{"ready":true,"count":3,"ratio":1.5,"large":18446744073709551615,"items":["one",null],"devenv":{"env":{"TOKEN":"data-only"}}},"app:build":{"artifact":"dist/app"}}` + "\n",
 		Stderr: "diagnostic\n",
@@ -107,10 +105,7 @@ func TestNewTaskValidatesRootsModeAndCaptureLimit(t *testing.T) {
 }
 
 func TestTaskRunnerDefaultsModeAndCaptureLimit(t *testing.T) {
-	runner, err := NewTask(map[string]any{"name": "app:build"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, NewTask, map[string]any{"name": "app:build"})
 	recorder := &taskRecorder{result: process.Result{Stdout: "{}\n"}}
 	if _, err := runner.Run(t.Context(), step.Request{Executor: recorder}); err != nil {
 		t.Fatal(err)
@@ -132,10 +127,7 @@ func TestTaskRunnerDecodesUnusableTypedOutputWithoutFailing(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			runner, err := NewTask(map[string]any{"name": "app:build"})
-			if err != nil {
-				t.Fatal(err)
-			}
+			runner := steptest.Build(t, NewTask, map[string]any{"name": "app:build"})
 			result, err := runner.Run(t.Context(), step.Request{Executor: &taskRecorder{result: test.result}})
 			if err != nil {
 				t.Fatalf("Run() error = %v, want a successful step", err)
@@ -151,10 +143,7 @@ func TestTaskRunnerDecodesUnusableTypedOutputWithoutFailing(t *testing.T) {
 }
 
 func TestTaskRunnerTreatsEmptyStdoutAsNoTaskOutputs(t *testing.T) {
-	runner, err := NewTask(map[string]any{"name": "app:build"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, NewTask, map[string]any{"name": "app:build"})
 	result, err := runner.Run(t.Context(), step.Request{Executor: &taskRecorder{result: process.Result{Stdout: "\n"}}})
 	if err != nil {
 		t.Fatal(err)
@@ -166,10 +155,7 @@ func TestTaskRunnerTreatsEmptyStdoutAsNoTaskOutputs(t *testing.T) {
 }
 
 func TestTaskRunnerPreservesProcessOutputsOnFailure(t *testing.T) {
-	runner, err := NewTask(map[string]any{"name": "app:build"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, NewTask, map[string]any{"name": "app:build"})
 	recorder := &taskRecorder{
 		result: process.Result{Stdout: "partial", Stderr: "failed", ExitCode: 7, StdoutTruncated: true, StderrTruncated: true},
 		err:    errors.New("task failed"),
@@ -190,10 +176,7 @@ func TestTaskRunnerPreservesProcessOutputsOnFailure(t *testing.T) {
 }
 
 func TestTaskRunnerAllowsTruncatedStderr(t *testing.T) {
-	runner, err := NewTask(map[string]any{"name": "app:build", "capture_limit": "4B"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, NewTask, map[string]any{"name": "app:build", "capture_limit": "4B"})
 	result, err := runner.Run(t.Context(), step.Request{Executor: &taskRecorder{result: process.Result{Stdout: "{}", Stderr: "warn", StderrTruncated: true}}})
 	if err != nil {
 		t.Fatal(err)
@@ -204,21 +187,15 @@ func TestTaskRunnerAllowsTruncatedStderr(t *testing.T) {
 }
 
 func TestTaskRunnerRejectsUnsupportedExecutor(t *testing.T) {
-	runner, err := NewTask(map[string]any{"name": "app:build"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = runner.Run(t.Context(), step.Request{Executor: process.LocalExecutor{}})
+	runner := steptest.Build(t, NewTask, map[string]any{"name": "app:build"})
+	_, err := runner.Run(t.Context(), step.Request{Executor: process.LocalExecutor{}})
 	if err == nil {
 		t.Fatal("expected unsupported executor error")
 	}
 }
 
 func TestTaskRunnerIsExecutorAware(t *testing.T) {
-	runner, err := NewTask(map[string]any{"name": "app:build"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, NewTask, map[string]any{"name": "app:build"})
 	if _, ok := runner.(step.ExecutorAware); !ok {
 		t.Fatal("task runner is not executor-aware")
 	}

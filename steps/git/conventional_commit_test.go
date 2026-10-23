@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 	"go.yaml.in/yaml/v3"
 )
@@ -45,13 +46,10 @@ func TestNewConventionalCommitValidatesConfiguration(t *testing.T) {
 
 func TestConventionalCommitCreateReturnsStructuredOutputAndVariable(t *testing.T) {
 	t.Parallel()
-	runner, err := NewConventionalCommit(map[string]any{
+	runner := steptest.Build(t, NewConventionalCommit, map[string]any{
 		"operation": "create", "type": "feat", "scope": "workflow", "subject": "add commit support",
 		"breaking": true, "body": "A body.", "task": "WUKO-142", "variable": "commit_message",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{})
 	if err != nil {
 		t.Fatal(err)
@@ -70,12 +68,9 @@ func TestConventionalCommitCreateReturnsStructuredOutputAndVariable(t *testing.T
 
 func TestConventionalCommitCreateOptionallyValidatesTask(t *testing.T) {
 	t.Parallel()
-	valid, err := NewConventionalCommit(map[string]any{
+	valid := steptest.Build(t, NewConventionalCommit, map[string]any{
 		"operation": "create", "type": "fix", "subject": "correct sessions", "task": "WUKO-12", "task_regex": `WUKO-[0-9]+`,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := valid.Run(t.Context(), step.Request{})
 	if err != nil || result.Outputs["task"] != "WUKO-12" || result.Outputs["subject"] != "correct sessions" {
 		t.Fatalf("result = %#v, error = %v", result, err)
@@ -90,13 +85,10 @@ func TestConventionalCommitCreateOptionallyValidatesTask(t *testing.T) {
 func TestConventionalCommitValidateReturnsStructuredOutput(t *testing.T) {
 	t.Parallel()
 	message := "fix(auth): correct sessions WUKO-12\n\nClear cached credentials."
-	runner, err := NewConventionalCommit(map[string]any{
+	runner := steptest.Build(t, NewConventionalCommit, map[string]any{
 		"operation": "validate", "message": message, "strict": true, "types": []any{"fix"},
 		"scopes": []any{"auth"}, "force_scope": true, "task_regex": `WUKO-[0-9]+`,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{})
 	if err != nil {
 		t.Fatal(err)
@@ -109,12 +101,9 @@ func TestConventionalCommitValidateReturnsStructuredOutput(t *testing.T) {
 
 func TestConventionalCommitDefersTemplatedValues(t *testing.T) {
 	t.Parallel()
-	runner, err := NewConventionalCommit(map[string]any{
+	runner := steptest.Build(t, NewConventionalCommit, map[string]any{
 		"operation": "create", "type": "{{ .vars.type }}", "subject": "{{ .vars.subject }}",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	if _, err := runner.Run(t.Context(), step.Request{}); err == nil || !strings.Contains(err.Error(), "unresolved template") {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -122,10 +111,7 @@ func TestConventionalCommitDefersTemplatedValues(t *testing.T) {
 
 func TestConventionalCommitPropagatesCancellation(t *testing.T) {
 	t.Parallel()
-	runner, err := NewConventionalCommit(map[string]any{"operation": "create", "type": "feat", "subject": "message"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, NewConventionalCommit, map[string]any{"operation": "create", "type": "feat", "subject": "message"})
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	if _, err := runner.Run(ctx, step.Request{}); !errors.Is(err, context.Canceled) {
@@ -167,10 +153,7 @@ func TestConventionalCommitDocumentationExamples(t *testing.T) {
 func TestConventionalCommitAllowsBracesInFreeText(t *testing.T) {
 	t.Parallel()
 	message := "fix(tmpl): escape {{ .Values.name }} in the chart"
-	runner, err := NewConventionalCommit(map[string]any{"operation": "validate", "message": message})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, NewConventionalCommit, map[string]any{"operation": "validate", "message": message})
 	result, err := runner.Run(t.Context(), step.Request{})
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)

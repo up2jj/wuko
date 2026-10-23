@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 )
@@ -16,10 +17,7 @@ func TestRunImportsWorkflowRelativeFiles(t *testing.T) {
 	root := t.TempDir()
 	testfs.Write(t, filepath.Join(root, "defaults.json"), `{"Name":"default","nested":{"old":true}}`)
 	testfs.Write(t, filepath.Join(root, "override.toml"), "name = \"override\"\n[nested]\nnew = true\n")
-	runner, err := New(map[string]any{"files": []any{"defaults.json", "override.toml"}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"files": []any{"defaults.json", "override.toml"}})
 	result, err := runner.Run(t.Context(), step.Request{WorkflowDir: root, Vars: map[string]any{"name": "existing"}})
 	if err != nil {
 		t.Fatal(err)
@@ -36,10 +34,7 @@ func TestRunImportsWorkflowRelativeFiles(t *testing.T) {
 func TestRunReturnsNoPartialResult(t *testing.T) {
 	root := t.TempDir()
 	testfs.Write(t, filepath.Join(root, "valid.json"), `{"loaded":true}`)
-	runner, err := New(map[string]any{"files": []any{"valid.json", "missing.toml"}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"files": []any{"valid.json", "missing.toml"}})
 	result, err := runner.Run(t.Context(), step.Request{WorkflowDir: root})
 	if err == nil || len(result.Outputs) != 0 || len(result.Variables) != 0 {
 		t.Fatalf("result = %#v, error = %v", result, err)
@@ -65,10 +60,7 @@ func TestRejectsInvalidConfiguration(t *testing.T) {
 }
 
 func TestRunHonorsCancellation(t *testing.T) {
-	runner, err := New(map[string]any{"files": []any{"missing.json"}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"files": []any{"missing.json"}})
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	result, err := runner.Run(ctx, step.Request{WorkflowDir: t.TempDir()})

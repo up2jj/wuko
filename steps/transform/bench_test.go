@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -26,10 +27,7 @@ func benchmarkItems(count int) []any {
 }
 
 func benchmarkPipeline(b *testing.B, operations []any) {
-	runner, err := New(map[string]any{"from": "vars.items", "operations": operations})
-	if err != nil {
-		b.Fatal(err)
-	}
+	runner := steptest.Build(b, New, map[string]any{"from": "vars.items", "operations": operations})
 	request := step.Request{Vars: map[string]any{"items": benchmarkItems(100_000)}}
 	b.ReportAllocs()
 	for b.Loop() {

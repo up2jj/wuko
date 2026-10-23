@@ -9,19 +9,17 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/tui"
 )
 
 func TestDynamicMultiplePreSupplied(t *testing.T) {
 	t.Parallel()
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"variable": "projects", "message": "Projects", "multiple": true,
 		"from": "steps.fetch.projects", "label_field": "name", "value_field": "id",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{
 		Vars: map[string]any{"projects": []any{"frontend", "backend"}},
 		Steps: map[string]any{"fetch": map[string]any{"projects": []any{
@@ -48,12 +46,9 @@ func TestDynamicObjectSelectionPreservesClonedItem(t *testing.T) {
 		"label": "API", "value": "default/api", "namespace": "default",
 		"commands": map[string]any{"shell": "/bin/bash"},
 	}
-	runnerValue, err := New(map[string]any{
+	runnerValue := steptest.Build(t, New, map[string]any{
 		"variable": "service", "message": "Service", "from": "steps.fetch.services",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	runner := runnerValue.(*Runner)
 	options, err := runner.options(step.Request{Steps: map[string]any{"fetch": map[string]any{
 		"services": []any{source},
@@ -77,13 +72,10 @@ func TestDynamicObjectSelectionPreservesClonedItem(t *testing.T) {
 
 func TestDynamicMixedSelectionAlignsItemsWithValues(t *testing.T) {
 	t.Parallel()
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"variable": "services", "message": "Services", "multiple": true,
 		"from": "steps.fetch.services",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{
 		Vars: map[string]any{"services": []any{"manual", "default/api"}},
 		Steps: map[string]any{"fetch": map[string]any{"services": []any{
@@ -102,13 +94,10 @@ func TestDynamicMixedSelectionAlignsItemsWithValues(t *testing.T) {
 
 func TestOptionalChoiceCanSelectNothing(t *testing.T) {
 	t.Parallel()
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"variable": "item", "message": "Item", "required": false,
 		"from": "steps.fetch.items",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{
 		Steps: map[string]any{"fetch": map[string]any{"items": []any{"one"}}},
 	})
@@ -125,13 +114,10 @@ func TestOptionalChoiceCanSelectNothing(t *testing.T) {
 		t.Fatalf("variables = %#v", result.Variables)
 	}
 
-	multiple, err := New(map[string]any{
+	multiple := steptest.Build(t, New, map[string]any{
 		"variable": "items", "message": "Items", "multiple": true, "required": false,
 		"choices": []any{map[string]any{"label": "One", "value": "one"}},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err = multiple.Run(t.Context(), step.Request{})
 	if err != nil {
 		t.Fatal(err)
@@ -146,16 +132,13 @@ func TestOptionalChoiceCanSelectNothing(t *testing.T) {
 
 func TestChoiceAutoSelectsSingleEnabledStaticChoice(t *testing.T) {
 	t.Parallel()
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"variable": "mode", "message": "Mode", "auto_select_single": true,
 		"choices": []any{
 			map[string]any{"label": "Console", "value": "console", "disabled": true, "reason": "unavailable"},
 			map[string]any{"label": "Shell", "value": "shell"},
 		},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	var output bytes.Buffer
 	result, err := runner.Run(t.Context(), step.Request{
 		Interactive: true, Stdin: strings.NewReader(""), Stdout: &output,
@@ -176,13 +159,10 @@ func TestChoiceAutoSelectsSingleEnabledStaticChoice(t *testing.T) {
 
 func TestChoiceAutoSelectsSingleEnabledDynamicObject(t *testing.T) {
 	t.Parallel()
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"variable": "mode", "message": "Mode", "auto_select_single": true,
 		"from": "steps.resolve.modes", "disabled_field": "disabled", "reason_field": "reason",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{
 		Interactive: true,
 		Steps: map[string]any{"resolve": map[string]any{"modes": []any{
@@ -214,13 +194,10 @@ func TestChoiceAutoSelectSinglePreservesNonInteractiveBehavior(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			runner, err := New(map[string]any{
+			runner := steptest.Build(t, New, map[string]any{
 				"variable": "mode", "message": "Mode", "required": tt.required, "auto_select_single": true,
 				"choices": []any{map[string]any{"label": "Shell", "value": "shell"}},
 			})
-			if err != nil {
-				t.Fatal(err)
-			}
 			result, err := runner.Run(t.Context(), step.Request{})
 			if tt.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
@@ -240,13 +217,10 @@ func TestChoiceAutoSelectSinglePreservesNonInteractiveBehavior(t *testing.T) {
 
 func TestChoiceAutoSelectSinglePreservesZeroChoiceSemantics(t *testing.T) {
 	t.Parallel()
-	optional, err := New(map[string]any{
+	optional := steptest.Build(t, New, map[string]any{
 		"variable": "mode", "message": "Mode", "required": false, "auto_select_single": true,
 		"from": "steps.resolve.modes",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := optional.Run(t.Context(), step.Request{
 		Steps: map[string]any{"resolve": map[string]any{"modes": []any{}}},
 	})
@@ -268,13 +242,10 @@ func TestChoiceAutoSelectSinglePreservesZeroChoiceSemantics(t *testing.T) {
 		t.Fatalf("interactive optional error = %v", err)
 	}
 
-	required, err := New(map[string]any{
+	required := steptest.Build(t, New, map[string]any{
 		"variable": "mode", "message": "Mode", "auto_select_single": true,
 		"from": "steps.resolve.modes",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	_, err = required.Run(t.Context(), step.Request{
 		Interactive: true,
 		Steps:       map[string]any{"resolve": map[string]any{"modes": []any{}}},
@@ -286,19 +257,16 @@ func TestChoiceAutoSelectSinglePreservesZeroChoiceSemantics(t *testing.T) {
 
 func TestChoiceAutoSelectSinglePromptsForMultipleEnabledChoices(t *testing.T) {
 	t.Parallel()
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"variable": "mode", "message": "Mode", "auto_select_single": true,
 		"choices": []any{
 			map[string]any{"label": "Shell", "value": "shell"},
 			map[string]any{"label": "Console", "value": "console"},
 		},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	_, err = runner.Run(ctx, step.Request{Interactive: true, Stdout: io.Discard})
+	_, err := runner.Run(ctx, step.Request{Interactive: true, Stdout: io.Discard})
 	if err == nil || !strings.Contains(err.Error(), "choosing:") || !strings.Contains(err.Error(), "context canceled") {
 		t.Fatalf("error = %v", err)
 	}
@@ -306,16 +274,13 @@ func TestChoiceAutoSelectSinglePromptsForMultipleEnabledChoices(t *testing.T) {
 
 func TestChoiceAutoSelectSinglePreservesPreSuppliedValidation(t *testing.T) {
 	t.Parallel()
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"variable": "mode", "message": "Mode", "auto_select_single": true,
 		"choices": []any{
 			map[string]any{"label": "Console", "value": "console", "disabled": true, "reason": "unavailable"},
 			map[string]any{"label": "Shell", "value": "shell"},
 		},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	result, err := runner.Run(t.Context(), step.Request{Interactive: true, Vars: map[string]any{"mode": "shell"}})
 	if err != nil {
@@ -378,13 +343,10 @@ func TestOptionalObjectChoicesExposeEmptyItemOutputs(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			runner, err := New(map[string]any{
+			runner := steptest.Build(t, New, map[string]any{
 				"variable": "selection", "message": "Selection", "required": false,
 				"multiple": tt.multiple, "from": "steps.fetch.items",
 			})
-			if err != nil {
-				t.Fatal(err)
-			}
 			result, err := runner.Run(t.Context(), step.Request{Steps: map[string]any{
 				"fetch": map[string]any{"items": source},
 			}})
@@ -407,13 +369,10 @@ func TestOptionalObjectChoicesExposeEmptyItemOutputs(t *testing.T) {
 
 func TestSingleNullChoiceIsDistinguishedFromNoSelection(t *testing.T) {
 	t.Parallel()
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"variable": "item", "message": "Item", "required": false,
 		"choices": []any{map[string]any{"label": "Null", "value": nil}},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{"item": nil}})
 	if err != nil {
 		t.Fatal(err)
@@ -425,13 +384,10 @@ func TestSingleNullChoiceIsDistinguishedFromNoSelection(t *testing.T) {
 
 func TestDynamicChoiceDescriptions(t *testing.T) {
 	t.Parallel()
-	runnerValue, err := New(map[string]any{
+	runnerValue := steptest.Build(t, New, map[string]any{
 		"variable": "item", "message": "Item", "from": "steps.fetch.items",
 		"label_field": "name", "value_field": "id", "description_field": "summary",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	runner := runnerValue.(*Runner)
 	options, err := runner.options(step.Request{Steps: map[string]any{"fetch": map[string]any{"items": []any{
 		map[string]any{"name": "First", "id": "one", "summary": "Primary option"},
@@ -446,13 +402,10 @@ func TestDynamicChoiceDescriptions(t *testing.T) {
 
 func TestChoiceRejectsDuplicateValues(t *testing.T) {
 	t.Parallel()
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"variable": "item", "message": "Item",
 		"choices": []any{map[string]any{"label": "A", "value": "same"}, map[string]any{"label": "B", "value": "same"}},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	if _, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{"item": "same"}}); err == nil {
 		t.Fatal("expected duplicate value error")
 	}
@@ -460,14 +413,11 @@ func TestChoiceRejectsDuplicateValues(t *testing.T) {
 
 func TestDynamicChoiceRejectsDuplicateMappedValues(t *testing.T) {
 	t.Parallel()
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"variable": "item", "message": "Item", "from": "steps.fetch.items",
 		"label_field": "name", "value_field": "id",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = runner.Run(t.Context(), step.Request{
+	_, err := runner.Run(t.Context(), step.Request{
 		Vars: map[string]any{"item": "same"},
 		Steps: map[string]any{"fetch": map[string]any{"items": []any{
 			map[string]any{"name": "A", "id": "same"},
@@ -481,14 +431,11 @@ func TestDynamicChoiceRejectsDuplicateMappedValues(t *testing.T) {
 
 func TestDynamicChoiceMetadata(t *testing.T) {
 	t.Parallel()
-	runnerValue, err := New(map[string]any{
+	runnerValue := steptest.Build(t, New, map[string]any{
 		"variable": "item", "message": "Item", "from": "steps.fetch.items",
 		"label_field": "name", "value_field": "id", "disabled_field": "state.disabled",
 		"reason_field": "state.reason", "default_field": "preferred",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	runner := runnerValue.(*Runner)
 	options, err := runner.options(step.Request{Steps: map[string]any{"fetch": map[string]any{"items": []any{
 		map[string]any{"name": "First", "id": "one", "preferred": false, "state": map[string]any{"disabled": true, "reason": "archived"}},
@@ -504,7 +451,7 @@ func TestDynamicChoiceMetadata(t *testing.T) {
 
 func TestStaticChoiceMarkersAreDisplayOnly(t *testing.T) {
 	t.Parallel()
-	runnerValue, err := New(map[string]any{
+	runnerValue := steptest.Build(t, New, map[string]any{
 		"variable": "items", "message": "Items", "multiple": true,
 		"choices": []any{
 			map[string]any{"section": "Common"},
@@ -515,9 +462,6 @@ func TestStaticChoiceMarkersAreDisplayOnly(t *testing.T) {
 			map[string]any{"label": "Production", "value": "prod"},
 		},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	runner := runnerValue.(*Runner)
 	choices, err := runner.resolveChoices(step.Request{})
 	if err != nil {
@@ -549,13 +493,10 @@ func TestStaticChoiceMarkersAreDisplayOnly(t *testing.T) {
 
 func TestDynamicChoiceMarkersBypassMappingsAndExpressions(t *testing.T) {
 	t.Parallel()
-	runnerValue, err := New(map[string]any{
+	runnerValue := steptest.Build(t, New, map[string]any{
 		"variable": "item", "message": "Item", "from": "steps.fetch.items",
 		"label_expr": `item.name`, "value_expr": `item.id`,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	runner := runnerValue.(*Runner)
 	source := []any{
 		map[string]string{"section": "Common"},
@@ -587,13 +528,10 @@ func TestDynamicChoiceMarkersBypassMappingsAndExpressions(t *testing.T) {
 
 func TestDynamicChoiceMarkerKeysWithAdditionalFieldsRemainChoices(t *testing.T) {
 	t.Parallel()
-	runnerValue, err := New(map[string]any{
+	runnerValue := steptest.Build(t, New, map[string]any{
 		"variable": "item", "message": "Item", "from": "vars.items",
 		"label_field": "name", "value_field": "id",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	choices, err := runnerValue.(*Runner).resolveChoices(step.Request{Vars: map[string]any{"items": []any{
 		map[string]any{"section": "metadata", "name": "Development", "id": "dev"},
 		map[string]any{"separator": false, "name": "Staging", "id": "staging"},
@@ -609,7 +547,7 @@ func TestDynamicChoiceMarkerKeysWithAdditionalFieldsRemainChoices(t *testing.T) 
 func TestDynamicChoiceExpressionsUseOrderedEnvironment(t *testing.T) {
 	t.Parallel()
 	source := map[string]any{"name": "dev", "label": "Development", "context": "dev-cluster"}
-	runnerValue, err := New(map[string]any{
+	runnerValue := steptest.Build(t, New, map[string]any{
 		"variable": "environment", "message": "Environment", "from": "steps.fetch.items",
 		"label_expr":       `item.label + ":" + workflow.name`,
 		"value_expr":       `item.name + ":" + label`,
@@ -618,9 +556,6 @@ func TestDynamicChoiceExpressionsUseOrderedEnvironment(t *testing.T) {
 		"reason_expr":      `disabled ? "Context is not configured" : ""`,
 		"default_expr":     `!disabled && reason == "" && item.name == vars.preferred_environment`,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	runner := runnerValue.(*Runner)
 	options, err := runner.options(step.Request{
 		WorkflowName: "jump", RunDir: "/run",
@@ -662,7 +597,7 @@ func TestDynamicChoiceExpressionsUseOrderedEnvironment(t *testing.T) {
 
 func TestDynamicChoiceExpressionsSupportScalarItems(t *testing.T) {
 	t.Parallel()
-	runnerValue, err := New(map[string]any{
+	runnerValue := steptest.Build(t, New, map[string]any{
 		"variable": "number", "message": "Number", "from": "vars.numbers",
 		"label_expr": `"item-" + string(item)`, "value_expr": `item * 10`,
 		"description_expr": `label + ":" + string(value)`,
@@ -670,9 +605,6 @@ func TestDynamicChoiceExpressionsSupportScalarItems(t *testing.T) {
 		"reason_expr":      `disabled ? "Unavailable" : ""`,
 		"default_expr":     `!disabled && reason == "" && value == 20`,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	options, err := runnerValue.(*Runner).options(step.Request{Vars: map[string]any{"numbers": []any{1, 2}}})
 	if err != nil {
 		t.Fatal(err)
@@ -687,13 +619,10 @@ func TestDynamicChoiceExpressionsSupportScalarItems(t *testing.T) {
 
 func TestDynamicChoiceSkipsReasonExpressionForEnabledItem(t *testing.T) {
 	t.Parallel()
-	runnerValue, err := New(map[string]any{
+	runnerValue := steptest.Build(t, New, map[string]any{
 		"variable": "item", "message": "Item", "from": "vars.items",
 		"disabled_expr": `false`, "reason_expr": `item.missing.value`,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	options, err := runnerValue.(*Runner).options(step.Request{Vars: map[string]any{"items": []any{"available"}}})
 	if err != nil {
 		t.Fatal(err)
@@ -755,11 +684,8 @@ func TestDynamicChoiceExpressionResultValidation(t *testing.T) {
 			for key, value := range tt.raw {
 				raw[key] = value
 			}
-			runner, err := New(raw)
-			if err != nil {
-				t.Fatal(err)
-			}
-			_, err = runner.Run(t.Context(), step.Request{
+			runner := steptest.Build(t, New, raw)
+			_, err := runner.Run(t.Context(), step.Request{
 				Vars: map[string]any{
 					"items": []any{
 						map[string]any{"name": "a", "label": "A", "value": "a"},
@@ -777,14 +703,11 @@ func TestDynamicChoiceExpressionResultValidation(t *testing.T) {
 
 func TestDynamicChoiceRejectsDuplicateComputedValues(t *testing.T) {
 	t.Parallel()
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"variable": "item", "message": "Item", "from": "vars.items",
 		"label_field": "name", "value_expr": `"same"`,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = runner.Run(t.Context(), step.Request{
+	_, err := runner.Run(t.Context(), step.Request{
 		Vars: map[string]any{
 			"items": []any{map[string]any{"name": "A"}, map[string]any{"name": "B"}},
 			"item":  "same",
@@ -837,12 +760,9 @@ func TestDynamicChoiceMetadataValidation(t *testing.T) {
 			for key, value := range tt.raw {
 				raw[key] = value
 			}
-			runnerValue, err := New(raw)
-			if err != nil {
-				t.Fatal(err)
-			}
+			runnerValue := steptest.Build(t, New, raw)
 			runner := runnerValue.(*Runner)
-			_, err = runner.options(step.Request{Steps: map[string]any{"fetch": map[string]any{"items": []any{tt.item}}}})
+			_, err := runner.options(step.Request{Steps: map[string]any{"fetch": map[string]any{"items": []any{tt.item}}}})
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("error = %v, want %q", err, tt.want)
 			}
@@ -919,13 +839,10 @@ func TestChoiceMarkerConfigurationValidation(t *testing.T) {
 
 func TestDynamicChoiceMarkerPlacementIsValidatedAtRuntime(t *testing.T) {
 	t.Parallel()
-	runnerValue, err := New(map[string]any{
+	runnerValue := steptest.Build(t, New, map[string]any{
 		"variable": "item", "message": "Item", "from": "vars.items",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = runnerValue.Run(t.Context(), step.Request{Vars: map[string]any{
+	_, err := runnerValue.Run(t.Context(), step.Request{Vars: map[string]any{
 		"items": []any{map[string]any{"separator": true}, "value"},
 	}})
 	if err == nil || !strings.Contains(err.Error(), "cannot be first") {
@@ -972,11 +889,8 @@ func TestChoiceOptionValidation(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			runner, err := New(tt.raw)
-			if err != nil {
-				t.Fatal(err)
-			}
-			_, err = runner.Run(t.Context(), step.Request{Vars: map[string]any{"item": []any{}}})
+			runner := steptest.Build(t, New, tt.raw)
+			_, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{"item": []any{}}})
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("error = %v, want %q", err, tt.want)
 			}
@@ -986,17 +900,14 @@ func TestChoiceOptionValidation(t *testing.T) {
 
 func TestChoiceRejectsDisabledPreSuppliedValue(t *testing.T) {
 	t.Parallel()
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"variable": "item", "message": "Item",
 		"choices": []any{
 			map[string]any{"label": "A", "value": "a", "disabled": true, "reason": "retired"},
 			map[string]any{"label": "B", "value": "b"},
 		},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = runner.Run(t.Context(), step.Request{Vars: map[string]any{"item": "a"}})
+	_, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{"item": "a"}})
 	if err == nil || !strings.Contains(err.Error(), "disabled choice") || !strings.Contains(err.Error(), "retired") {
 		t.Fatalf("error = %v", err)
 	}
@@ -1004,7 +915,7 @@ func TestChoiceRejectsDisabledPreSuppliedValue(t *testing.T) {
 
 func TestChoiceBoundsApplyAfterDeduplication(t *testing.T) {
 	t.Parallel()
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"variable": "items", "message": "Items", "multiple": true, "min_selected": 2, "max_selected": 2,
 		"choices": []any{
 			map[string]any{"label": "A", "value": "a"},
@@ -1012,10 +923,7 @@ func TestChoiceBoundsApplyAfterDeduplication(t *testing.T) {
 			map[string]any{"label": "C", "value": "c"},
 		},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = runner.Run(t.Context(), step.Request{Vars: map[string]any{"items": []any{"a", "a"}}})
+	_, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{"items": []any{"a", "a"}}})
 	if err == nil || !strings.Contains(err.Error(), "at least 2") {
 		t.Fatalf("deduplicated minimum error = %v", err)
 	}
@@ -1027,13 +935,10 @@ func TestChoiceBoundsApplyAfterDeduplication(t *testing.T) {
 
 func TestChoiceDefaultsAreInteractiveOnly(t *testing.T) {
 	t.Parallel()
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"variable": "items", "message": "Items", "multiple": true, "required": false,
 		"choices": []any{map[string]any{"label": "A", "value": "a", "default": true}},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{})
 	if err != nil {
 		t.Fatal(err)
@@ -1045,16 +950,13 @@ func TestChoiceDefaultsAreInteractiveOnly(t *testing.T) {
 
 func TestChoiceSelectAllIsInteractiveOnly(t *testing.T) {
 	t.Parallel()
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"variable": "items", "message": "Items", "multiple": true, "required": false, "select_all": true,
 		"choices": []any{
 			map[string]any{"label": "A", "value": "a"},
 			map[string]any{"label": "B", "value": "b"},
 		},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	result, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{"items": []any{"b"}}})
 	if err != nil {
@@ -1097,13 +999,10 @@ func TestChoiceFilterOnTypeRequiresSingleSelection(t *testing.T) {
 
 func TestChoiceFilterOnTypeConfiguration(t *testing.T) {
 	t.Parallel()
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"variable": "item", "message": "Item", "filter_on_type": true,
 		"choices": []any{map[string]any{"label": "A", "value": "a"}},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	if !runner.(*Runner).config.FilterOnType {
 		t.Fatal("filter_on_type was not decoded")
 	}
@@ -1111,17 +1010,14 @@ func TestChoiceFilterOnTypeConfiguration(t *testing.T) {
 
 func TestChoiceSelectAllRejectsSmallMaximum(t *testing.T) {
 	t.Parallel()
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"variable": "items", "message": "Items", "multiple": true, "select_all": true, "max_selected": 1,
 		"choices": []any{
 			map[string]any{"label": "A", "value": "a"},
 			map[string]any{"label": "B", "value": "b"},
 		},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = runner.Run(t.Context(), step.Request{})
+	_, err := runner.Run(t.Context(), step.Request{})
 	if err == nil || !strings.Contains(err.Error(), "select all would select 2 choices") {
 		t.Fatalf("error = %v", err)
 	}
@@ -1129,13 +1025,10 @@ func TestChoiceSelectAllRejectsSmallMaximum(t *testing.T) {
 
 func TestChoiceExplicitBoundsSupersedeRequired(t *testing.T) {
 	t.Parallel()
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"variable": "items", "message": "Items", "multiple": true, "max_selected": 0,
 		"choices": []any{map[string]any{"label": "A", "value": "a"}},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{})
 	if err != nil {
 		t.Fatal(err)

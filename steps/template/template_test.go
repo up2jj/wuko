@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/up2jj/wuko/executor"
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/step"
@@ -107,7 +108,7 @@ func TestNewValidatesConfiguration(t *testing.T) {
 }
 
 func TestRunRendersInlineTemplateToMemory(t *testing.T) {
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"source": `{{ template "header" . }}{{ .data.name }}:{{ .data.replicas }}:{{ index .data.payload "expr" }}`,
 		"data": map[string]any{
 			"name":     "billing",
@@ -115,9 +116,6 @@ func TestRunRendersInlineTemplateToMemory(t *testing.T) {
 			"payload":  map[string]any{"literal": map[string]any{"expr": "literal"}},
 		},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	request := step.Request{
 		Vars: map[string]any{"replicas": 3},
 		TemplateRenderer: newRenderer(t, map[string]workflow.TemplateDefinition{
@@ -142,10 +140,7 @@ func TestValidateAndRunFileTemplate(t *testing.T) {
 		t.Fatal(err)
 	}
 	testfs.WriteFile(t, filepath.Join(root, "templates", "message.tmpl"), []byte(`hello {{ .data.name }}`), 0o644)
-	runner, err := New(map[string]any{"file": "templates/message.tmpl", "data": map[string]any{"name": "world"}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"file": "templates/message.tmpl", "data": map[string]any{"name": "world"}})
 	request := step.Request{WorkflowDir: root, TemplateRenderer: newRenderer(t, nil, map[string]any{})}
 	if validator, ok := runner.(step.Validator); !ok {
 		t.Fatal("template runner does not validate external content")
@@ -192,11 +187,8 @@ func TestFileTemplateSourceSafety(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			runner, err := New(map[string]any{"file": test.file})
-			if err != nil {
-				t.Fatal(err)
-			}
-			_, err = runner.Run(t.Context(), step.Request{
+			runner := steptest.Build(t, New, map[string]any{"file": test.file})
+			_, err := runner.Run(t.Context(), step.Request{
 				WorkflowDir: root, WorkflowDirBorrowed: test.borrowed, TemplateRenderer: renderer,
 			})
 			if err == nil || !strings.Contains(err.Error(), test.want) {
@@ -210,13 +202,10 @@ func TestRunWritesRenderedTemplateWithFileSemantics(t *testing.T) {
 	root := t.TempDir()
 	destination := filepath.Join(root, "config.txt")
 	testfs.WriteFile(t, destination, []byte("old"), 0o600)
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"source": "hello {{ .data.name }}", "data": map[string]any{"name": "world"},
 		"destination": "config.txt", "overwrite": true,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{RunDir: root, TemplateRenderer: newRenderer(t, nil, map[string]any{})})
 	if err != nil {
 		t.Fatal(err)
@@ -255,11 +244,8 @@ func TestFileModePreservesWriteFailures(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			runner, err := New(map[string]any{"source": "new", "destination": test.destination, "overwrite": test.overwrite})
-			if err != nil {
-				t.Fatal(err)
-			}
-			_, err = runner.Run(t.Context(), step.Request{
+			runner := steptest.Build(t, New, map[string]any{"source": "new", "destination": test.destination, "overwrite": test.overwrite})
+			_, err := runner.Run(t.Context(), step.Request{
 				RunDir: root, TemplateRenderer: newRenderer(t, nil, map[string]any{}),
 			})
 			if err == nil || !strings.Contains(err.Error(), test.want) {
@@ -287,11 +273,8 @@ func TestRunRejectsInvalidOrMissingTemplateValues(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			runner, err := New(map[string]any{"source": test.source})
-			if err != nil {
-				t.Fatal(err)
-			}
-			_, err = runner.Run(t.Context(), step.Request{TemplateRenderer: newRenderer(t, nil, map[string]any{})})
+			runner := steptest.Build(t, New, map[string]any{"source": test.source})
+			_, err := runner.Run(t.Context(), step.Request{TemplateRenderer: newRenderer(t, nil, map[string]any{})})
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("Run() error = %v, want %q", err, test.want)
 			}
@@ -340,10 +323,7 @@ func (*targetFileSystem) MkdirAll(context.Context, string, fs.FileMode) error { 
 func TestRunWritesThroughExecutorFileSystem(t *testing.T) {
 	root := t.TempDir()
 	target := &targetFileSystem{files: map[string][]byte{}, modes: map[string]fs.FileMode{}}
-	runner, err := New(map[string]any{"source": "target", "destination": "rendered.txt", "mode": "0640"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"source": "target", "destination": "rendered.txt", "mode": "0640"})
 	result, err := runner.Run(t.Context(), step.Request{
 		RunDir: root, Executor: target, TemplateRenderer: newRenderer(t, nil, map[string]any{}),
 	})
@@ -364,18 +344,12 @@ func TestRunWritesThroughExecutorFileSystem(t *testing.T) {
 
 func TestOnlyFileModeRequiresExecutorFileSystem(t *testing.T) {
 	renderer := newRenderer(t, nil, map[string]any{})
-	memory, err := New(map[string]any{"source": "memory"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	memory := steptest.Build(t, New, map[string]any{"source": "memory"})
 	if _, err := memory.Run(t.Context(), step.Request{Executor: commandOnlyExecutor{}, TemplateRenderer: renderer}); err != nil {
 		t.Fatalf("memory mode failed with command-only executor: %v", err)
 	}
-	file, err := New(map[string]any{"source": "file", "destination": "rendered.txt"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = file.Run(t.Context(), step.Request{
+	file := steptest.Build(t, New, map[string]any{"source": "file", "destination": "rendered.txt"})
+	_, err := file.Run(t.Context(), step.Request{
 		RunDir: t.TempDir(), Executor: commandOnlyExecutor{}, TemplateRenderer: renderer,
 	})
 	if err == nil || !strings.Contains(err.Error(), "does not expose a filesystem") {
@@ -384,13 +358,10 @@ func TestOnlyFileModeRequiresExecutorFileSystem(t *testing.T) {
 }
 
 func TestRunHonorsCancellation(t *testing.T) {
-	runner, err := New(map[string]any{"source": "hello"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"source": "hello"})
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	_, err = runner.Run(ctx, step.Request{TemplateRenderer: newRenderer(t, nil, map[string]any{})})
+	_, err := runner.Run(ctx, step.Request{TemplateRenderer: newRenderer(t, nil, map[string]any{})})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Run() error = %v", err)
 	}

@@ -15,6 +15,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 )
@@ -36,13 +37,10 @@ func TestURLEncodedForm(t *testing.T) {
 	}))
 	defer server.Close()
 
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"url": server.URL, "method": "post",
 		"form": map[string]any{"title": "release candidate", "channel": "stable"},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	if _, err := runner.Run(t.Context(), step.Request{}); err != nil {
 		t.Fatal(err)
 	}
@@ -93,16 +91,13 @@ func TestMultipartFormAndFiles(t *testing.T) {
 	}))
 	defer server.Close()
 
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"url": server.URL, "method": "post", "form": map[string]any{"metadata": "stable"},
 		"files": []any{
 			map[string]any{"field": "attachment", "path": filepath.Base(textPath)},
 			map[string]any{"field": "attachment", "path": binaryPath},
 		},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	if _, err := runner.Run(t.Context(), step.Request{WorkflowDir: workflowDir}); err != nil {
 		t.Fatal(err)
 	}
@@ -143,13 +138,10 @@ func TestLargeMultipartUploadHasLengthAndStreams(t *testing.T) {
 	}))
 	defer server.Close()
 
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"url": server.URL, "method": "post",
 		"files": []any{map[string]any{"field": "payload", "path": path}},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	if _, err := runner.Run(t.Context(), step.Request{}); err != nil {
 		t.Fatal(err)
 	}
@@ -187,13 +179,10 @@ func TestMultipartBodyReplaysForRedirect(t *testing.T) {
 	}))
 	defer server.Close()
 
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"url": server.URL + "/start", "method": "post",
 		"files": []any{map[string]any{"field": "payload", "path": path}},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	if _, err := runner.Run(t.Context(), step.Request{}); err != nil {
 		t.Fatal(err)
 	}
@@ -301,14 +290,11 @@ func TestRejectsInvalidUploadPaths(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			runner, err := New(map[string]any{
+			runner := steptest.Build(t, New, map[string]any{
 				"url":   "http://127.0.0.1:1",
 				"files": []any{map[string]any{"field": "upload", "path": test.path}},
 			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			_, err = runner.Run(t.Context(), step.Request{WorkflowDir: dir})
+			_, err := runner.Run(t.Context(), step.Request{WorkflowDir: dir})
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("error = %v, want containing %q", err, test.want)
 			}

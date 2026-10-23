@@ -5,14 +5,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 )
 
 func TestPasswordMasksInteractiveInput(t *testing.T) {
-	runner, err := New(map[string]any{"variable": "token", "message": "Token"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"variable": "token", "message": "Token"})
 	var output bytes.Buffer
 	result, err := runner.Run(t.Context(), step.Request{
 		Vars:        map[string]any{},
@@ -32,10 +30,7 @@ func TestPasswordMasksInteractiveInput(t *testing.T) {
 }
 
 func TestPasswordUsesPreSuppliedVariable(t *testing.T) {
-	runner, err := New(map[string]any{"variable": "token", "message": "Token"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"variable": "token", "message": "Token"})
 	result, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{"token": "secret"}})
 	if err != nil {
 		t.Fatal(err)
@@ -46,25 +41,19 @@ func TestPasswordUsesPreSuppliedVariable(t *testing.T) {
 }
 
 func TestPasswordRejectsEmptyRequiredVariable(t *testing.T) {
-	runner, err := New(map[string]any{"variable": "token", "message": "Token"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"variable": "token", "message": "Token"})
 	if _, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{"token": " "}}); err == nil {
 		t.Fatal("expected empty password error")
 	}
 }
 
 func TestPasswordValidationDoesNotExposeValue(t *testing.T) {
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"variable":   "token",
 		"message":    "Token",
 		"validation": map[string]any{"min_length": 12},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = runner.Run(t.Context(), step.Request{Vars: map[string]any{"token": "secret"}})
+	_, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{"token": "secret"}})
 	if err == nil {
 		t.Fatal("expected password validation error")
 	}
@@ -74,10 +63,7 @@ func TestPasswordValidationDoesNotExposeValue(t *testing.T) {
 }
 
 func TestPasswordFailsNonInteractive(t *testing.T) {
-	runner, err := New(map[string]any{"variable": "token", "message": "Token"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"variable": "token", "message": "Token"})
 	if _, err := runner.Run(t.Context(), step.Request{}); err == nil {
 		t.Fatal("expected non-interactive password error")
 	}

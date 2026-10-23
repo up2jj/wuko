@@ -15,6 +15,7 @@ import (
 
 	toml "github.com/pelletier/go-toml/v2"
 	"github.com/up2jj/wuko/expression"
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 )
@@ -153,21 +154,15 @@ func TestRejectsInvalidConfiguration(t *testing.T) {
 }
 
 func TestTemplatedConfigurationIsAcceptedDuringValidation(t *testing.T) {
-	_, err := New(map[string]any{
+	steptest.Build(t, New, map[string]any{
 		"format": "{{ .vars.format }}", "from": "{{ .vars.from }}", "max_bytes": "{{ .vars.limit }}",
 		"trim": true,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 }
 
 func TestFromMustResolveToString(t *testing.T) {
-	runner, err := New(map[string]any{"format": "json", "from": "vars.data"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = runner.Run(t.Context(), step.Request{Vars: map[string]any{"data": map[string]any{}}})
+	runner := steptest.Build(t, New, map[string]any{"format": "json", "from": "vars.data"})
+	_, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{"data": map[string]any{}}})
 	if err == nil || !strings.Contains(err.Error(), "want string") {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -178,11 +173,8 @@ func TestInputLimitAllowsExactSizeAndRejectsLargerInput(t *testing.T) {
 	if diff := cmp.Diff([]any{"four"}, result.Outputs["value"]); diff != "" {
 		t.Fatalf("result mismatch (-want +got):\n%s", diff)
 	}
-	runner, err := New(map[string]any{"format": "lines", "from": "vars.data", "max_bytes": "4B"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	result, err = runner.Run(t.Context(), step.Request{Vars: map[string]any{"data": "five!"}})
+	runner := steptest.Build(t, New, map[string]any{"format": "lines", "from": "vars.data", "max_bytes": "4B"})
+	result, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{"data": "five!"}})
 	if err == nil || !strings.Contains(err.Error(), "exceeds max_bytes") || len(result.Outputs) != 0 {
 		t.Fatalf("result = %#v, error = %v", result, err)
 	}
@@ -203,11 +195,8 @@ func TestParseErrorsContainLocationsAndRejectExtraDocuments(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			runner, err := New(map[string]any{"format": test.format, "from": "vars.data"})
-			if err != nil {
-				t.Fatal(err)
-			}
-			_, err = runner.Run(t.Context(), step.Request{Vars: map[string]any{"data": test.input}})
+			runner := steptest.Build(t, New, map[string]any{"format": test.format, "from": "vars.data"})
+			_, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{"data": test.input}})
 			if err == nil || !strings.Contains(err.Error(), test.want) || !strings.Contains(err.Error(), "from \"vars.data\"") {
 				t.Fatalf("Run() error = %v, want %q with source context", err, test.want)
 			}
@@ -220,10 +209,7 @@ func TestReadsRelativeAndAbsoluteRegularFiles(t *testing.T) {
 	path := filepath.Join(root, "data.json")
 	testfs.WriteFile(t, path, []byte(`{"name":"wuko"}`), 0o600)
 	for _, configured := range []string{"data.json", path} {
-		runner, err := New(map[string]any{"format": "json", "path": configured})
-		if err != nil {
-			t.Fatal(err)
-		}
+		runner := steptest.Build(t, New, map[string]any{"format": "json", "path": configured})
 		result, err := runner.Run(t.Context(), step.Request{RunDir: root})
 		if err != nil {
 			t.Fatal(err)
@@ -249,10 +235,7 @@ func TestFileFailuresAreAtomic(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			runner, err := New(map[string]any{"format": "lines", "path": test.path, "max_bytes": "4B"})
-			if err != nil {
-				t.Fatal(err)
-			}
+			runner := steptest.Build(t, New, map[string]any{"format": "lines", "path": test.path, "max_bytes": "4B"})
 			result, err := runner.Run(t.Context(), step.Request{RunDir: root})
 			if err == nil || !strings.Contains(err.Error(), test.want) || len(result.Outputs) != 0 {
 				t.Fatalf("result = %#v, error = %v", result, err)
@@ -271,10 +254,7 @@ func TestReadBoundedHonorsCancellation(t *testing.T) {
 }
 
 func TestRunHonorsCancellationBeforeReadingFile(t *testing.T) {
-	runner, err := New(map[string]any{"format": "lines", "path": "data.txt"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"format": "lines", "path": "data.txt"})
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	result, err := runner.Run(ctx, step.Request{RunDir: t.TempDir()})
@@ -289,10 +269,7 @@ func runFrom(t *testing.T, format, input string, options map[string]any) step.Re
 	for key, value := range options {
 		raw[key] = value
 	}
-	runner, err := New(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, raw)
 	result, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{"data": input}})
 	if err != nil {
 		t.Fatal(err)

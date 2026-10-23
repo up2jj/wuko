@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/process/processtest"
 	"github.com/up2jj/wuko/ptyinteract"
@@ -19,14 +20,11 @@ import (
 )
 
 func TestInlineShellArgumentsAndEnvironment(t *testing.T) {
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"script": `printf '%s:%s' "$1" "$VALUE"`,
 		"args":   []any{"argument"},
 		"env":    map[string]any{"VALUE": "step"},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{
 		RunDir: t.TempDir(), Env: map[string]string{"VALUE": "base"}, Stdout: io.Discard, Stderr: io.Discard,
 	})
@@ -51,10 +49,7 @@ func TestElevatedShellValidation(t *testing.T) {
 	if _, err := New(map[string]any{"command": "id", "elevated": true, "user": "root"}); err == nil || !strings.Contains(err.Error(), "cannot be combined with user") {
 		t.Fatalf("New() error = %v", err)
 	}
-	runner, err := New(map[string]any{"command": "id", "elevated": true})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"command": "id", "elevated": true})
 	tests := []struct {
 		name    string
 		request step.Request
@@ -77,11 +72,8 @@ func TestElevatedShellValidation(t *testing.T) {
 func TestElevatedShellUsesDedicatedExecutorAndExplicitEnvironment(t *testing.T) {
 	local := &processtest.Executor{}
 	elevated := &processtest.Executor{Reply: processtest.Reply{Result: process.Result{Stdout: "root"}}}
-	runner, err := New(map[string]any{"command": "id", "elevated": true, "env": map[string]any{"EXPLICIT": "yes"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = runner.Run(t.Context(), step.Request{
+	runner := steptest.Build(t, New, map[string]any{"command": "id", "elevated": true, "env": map[string]any{"EXPLICIT": "yes"}})
+	_, err := runner.Run(t.Context(), step.Request{
 		RunDir: t.TempDir(), Env: map[string]string{"WORKFLOW_ONLY": "no"}, Executor: local,
 		ElevatedExecutor: elevated, ElevationAllowed: true, Interactive: true,
 		Stdin: os.Stdin, Stdout: io.Discard, Stderr: io.Discard, Attempt: 2, MaxAttempts: 3, OperationID: "op",
@@ -104,12 +96,9 @@ func TestElevatedShellUsesDedicatedExecutorAndExplicitEnvironment(t *testing.T) 
 }
 
 func TestElevatedInfrastructureErrorCannotBeAllowed(t *testing.T) {
-	runner, err := New(map[string]any{"command": "id", "elevated": true, "allowed_exit_codes": "any"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"command": "id", "elevated": true, "allowed_exit_codes": "any"})
 	executor := &processtest.Executor{Reply: processtest.Reply{Result: process.Result{ExitCode: 1}, Err: errors.New("sudo transport failed")}}
-	_, err = runner.Run(t.Context(), step.Request{
+	_, err := runner.Run(t.Context(), step.Request{
 		RunDir: t.TempDir(), Env: map[string]string{}, ElevatedExecutor: executor, ElevationAllowed: true,
 		Stdout: io.Discard, Stderr: io.Discard,
 	})
@@ -163,16 +152,13 @@ func TestNewValidatesArgvConfiguration(t *testing.T) {
 
 func TestShellEvaluatesTypedArgvWithoutParsing(t *testing.T) {
 	executor := &processtest.Executor{}
-	runner, err := New(map[string]any{"argv": map[string]any{"expr": "steps.resolve.argv"}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"argv": map[string]any{"expr": "steps.resolve.argv"}})
 	want := []string{"/app/bin/recruitee", "with spaces", `a"quote`, "*.go", "$HOME", "", "x; rm -rf ignored"}
 	values := make([]any, len(want))
 	for i, value := range want {
 		values[i] = value
 	}
-	_, err = runner.Run(t.Context(), step.Request{
+	_, err := runner.Run(t.Context(), step.Request{
 		RunDir: t.TempDir(), Env: map[string]string{}, Steps: map[string]any{"resolve": map[string]any{"argv": values}},
 		Stdout: io.Discard, Stderr: io.Discard, Executor: executor,
 	})
@@ -187,12 +173,9 @@ func TestShellEvaluatesTypedArgvWithoutParsing(t *testing.T) {
 
 func TestShellArgvExpressionUsesRuntimeRoots(t *testing.T) {
 	executor := &processtest.Executor{}
-	runner, err := New(map[string]any{"argv": map[string]any{
+	runner := steptest.Build(t, New, map[string]any{"argv": map[string]any{
 		"expr": "list(inputs.command, vars.arg, env.MODE, dependencies.build.artifact, batch.name, foreach.item, matrix.os, finally.status, workflow.name, workflow.dir, run.dir)",
 	}})
-	if err != nil {
-		t.Fatal(err)
-	}
 	request := step.Request{
 		WorkflowName: "release", WorkflowDir: "/workflow", RunDir: "/run",
 		Inputs: map[string]any{"command": "tool"}, Vars: map[string]any{"arg": "value"}, Env: map[string]string{"MODE": "test"},
@@ -240,11 +223,8 @@ func TestShellRejectsInvalidArgvResults(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			runner, err := New(map[string]any{"argv": map[string]any{"expr": "steps.resolve.argv"}})
-			if err != nil {
-				t.Fatal(err)
-			}
-			_, err = runner.Run(t.Context(), step.Request{
+			runner := steptest.Build(t, New, map[string]any{"argv": map[string]any{"expr": "steps.resolve.argv"}})
+			_, err := runner.Run(t.Context(), step.Request{
 				RunDir: t.TempDir(), Env: map[string]string{}, Steps: map[string]any{"resolve": map[string]any{"argv": test.value}},
 				Stdout: io.Discard, Stderr: io.Discard, Executor: &processtest.Executor{},
 			})
@@ -376,13 +356,10 @@ func TestNewAcceptsImmediatePromptAndTemplatedInteractions(t *testing.T) {
 
 func TestShellEvaluatesDynamicInteractionsWithRuntimeRoots(t *testing.T) {
 	executor := &interactionPlanExecutor{output: "prompt>"}
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"command": "sh", "tty": true,
 		"interactions": map[string]any{"expr": `[{"expect": inputs.prompt, "send": vars.prefix + env.SUFFIX + steps.seed.value + dependencies.build.artifact + batch.name + foreach.item + matrix.os + finally.status + workflow.name + workflow.dir + run.dir, "newline": true, "timeout": "1s", "sensitive": true}]`},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	request := step.Request{
 		WorkflowName: "release", WorkflowDir: "/workflow", RunDir: "/run",
 		Inputs: map[string]any{"prompt": "prompt>"}, Vars: map[string]any{"prefix": "value:"}, Env: map[string]string{"SUFFIX": "env:"},
@@ -404,13 +381,10 @@ func TestShellEvaluatesDynamicInteractionsWithRuntimeRoots(t *testing.T) {
 
 func TestShellReevaluatesDynamicInteractionsForEveryRun(t *testing.T) {
 	executor := &interactionPlanExecutor{}
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"command": "sh", "tty": true,
 		"interactions": map[string]any{"expr": `[{"send": vars.value}]`},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	for _, value := range []string{"first", "second"} {
 		_, err := runner.Run(t.Context(), step.Request{
 			RunDir: t.TempDir(), Env: map[string]string{}, Vars: map[string]any{"value": value}, Executor: executor,
@@ -440,11 +414,8 @@ func TestShellValidatesDynamicInteractionResults(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			runner, err := New(map[string]any{"command": "sh", "tty": true, "interactions": map[string]any{"expr": test.expr}})
-			if err != nil {
-				t.Fatal(err)
-			}
-			_, err = runner.Run(t.Context(), step.Request{RunDir: t.TempDir(), Env: map[string]string{}, Executor: &processtest.Executor{}})
+			runner := steptest.Build(t, New, map[string]any{"command": "sh", "tty": true, "interactions": map[string]any{"expr": test.expr}})
+			_, err := runner.Run(t.Context(), step.Request{RunDir: t.TempDir(), Env: map[string]string{}, Executor: &processtest.Executor{}})
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("Run() error = %v, want %q", err, test.want)
 			}
@@ -466,12 +437,9 @@ func TestShellEmptyInteractionsHonorInteract(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			executor := &processtest.Executor{}
-			runner, err := New(map[string]any{
+			runner := steptest.Build(t, New, map[string]any{
 				"command": "sh", "tty": true, "interactions": test.interactions, "interact": test.interact,
 			})
-			if err != nil {
-				t.Fatal(err)
-			}
 			terminalInput := strings.NewReader("terminal")
 			request := step.Request{RunDir: t.TempDir(), Env: map[string]string{}, Executor: executor}
 			if test.interact {
@@ -496,13 +464,10 @@ func TestShellEmptyInteractionsHonorInteract(t *testing.T) {
 
 func TestShellHeadlessInteractionsDelegateWithoutTerminalInput(t *testing.T) {
 	executor := &processtest.Executor{}
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"command": "sh", "tty": true,
 		"interactions": []any{map[string]any{"send": "first", "newline": true}, map[string]any{"expect": "ready", "send": "second"}},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	if _, err := runner.Run(t.Context(), step.Request{RunDir: t.TempDir(), Env: map[string]string{}, Executor: executor}); err != nil {
 		t.Fatal(err)
 	}
@@ -512,12 +477,9 @@ func TestShellHeadlessInteractionsDelegateWithoutTerminalInput(t *testing.T) {
 }
 
 func TestShellInteractionHandoffRequiresInteractiveTerminal(t *testing.T) {
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"command": "sh", "tty": true, "interactions": []any{map[string]any{"send": "first"}}, "interact": true,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	if _, err := runner.Run(t.Context(), step.Request{RunDir: t.TempDir(), Env: map[string]string{}}); err == nil || !strings.Contains(err.Error(), "interactive terminal") {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -653,10 +615,7 @@ func TestShellAppliesAllowedExitCodes(t *testing.T) {
 			if test.allowed != nil {
 				raw["allowed_exit_codes"] = test.allowed
 			}
-			runner, err := New(raw)
-			if err != nil {
-				t.Fatal(err)
-			}
+			runner := steptest.Build(t, New, raw)
 			result, err := runner.Run(t.Context(), step.Request{
 				RunDir: t.TempDir(), Env: map[string]string{}, Stdout: io.Discard, Stderr: io.Discard,
 				Executor: &processtest.Executor{Reply: processtest.Reply{Result: test.result, Err: test.runErr}},
@@ -686,12 +645,9 @@ func TestNewAcceptsTemplatedOutputConfiguration(t *testing.T) {
 
 func TestShellPassesOutputConfigurationToExecutor(t *testing.T) {
 	executor := &processtest.Executor{Reply: processtest.Reply{Result: process.Result{Stdout: "1234", StdoutTruncated: true}}}
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"command": "generate", "stdout": "capture", "capture_limit": "4B",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{
 		RunDir: t.TempDir(), Env: map[string]string{}, Stdout: io.Discard, Stderr: io.Discard, Executor: executor,
 	})
@@ -707,11 +663,8 @@ func TestShellPassesOutputConfigurationToExecutor(t *testing.T) {
 }
 
 func TestShellTTYRequiresInteractiveRequest(t *testing.T) {
-	runner, err := New(map[string]any{"command": "sh", "tty": true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = runner.Run(t.Context(), step.Request{RunDir: t.TempDir(), Env: map[string]string{}})
+	runner := steptest.Build(t, New, map[string]any{"command": "sh", "tty": true})
+	_, err := runner.Run(t.Context(), step.Request{RunDir: t.TempDir(), Env: map[string]string{}})
 	if err == nil || !strings.Contains(err.Error(), "tty requires an interactive terminal") {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -720,13 +673,10 @@ func TestShellTTYRequiresInteractiveRequest(t *testing.T) {
 func TestShellTTYSuppliesTerminalAndBoundedCapture(t *testing.T) {
 	executor := &processtest.Executor{Reply: processtest.Reply{Result: process.Result{Stdout: "transcript", StdoutTruncated: true}}}
 	terminalInput := strings.NewReader("terminal")
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"command": "sh", "tty": true,
 		"terminal": map[string]any{"background": "rgb(30, 30, 46)", "foreground": "white", "title": "Console"},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{
 		RunDir: t.TempDir(), Env: map[string]string{}, Stdin: terminalInput,
 		Stdout: io.Discard, Stderr: io.Discard, Interactive: true, Executor: executor,
@@ -747,13 +697,10 @@ func TestShellTTYSuppliesTerminalAndBoundedCapture(t *testing.T) {
 }
 
 func TestShellExportsAttemptMetadataAfterStepEnvironment(t *testing.T) {
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"script": `printf '%s:%s:%s' "$WUKO_STEP_ATTEMPT" "$WUKO_STEP_MAX_ATTEMPTS" "$WUKO_STEP_OPERATION_ID"`,
 		"env":    map[string]any{"WUKO_STEP_ATTEMPT": "spoofed"},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{
 		Attempt: 2, MaxAttempts: 4, OperationID: "release-42",
 		RunDir: t.TempDir(), Env: map[string]string{}, Stdout: io.Discard, Stderr: io.Discard,
@@ -771,13 +718,10 @@ func TestShellRunsAsConfiguredUser(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"script": "id -u",
 		"user":   current.Username,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{
 		RunDir: t.TempDir(), Env: map[string]string{}, Stdout: io.Discard, Stderr: io.Discard,
 	})

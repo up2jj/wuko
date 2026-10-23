@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/process/processtest"
 	"github.com/up2jj/wuko/step"
@@ -34,10 +35,7 @@ func TestNewValidatesConfiguration(t *testing.T) {
 
 func TestExplicitBranchAndRepositoryTakePrecedence(t *testing.T) {
 	executor := &processtest.Executor{Strict: true, Replies: []processtest.Reply{{Result: process.Result{Stdout: `[{"number":17,"url":"https://github.com/acme/wuko/pull/17","title":"Improve release","state":"OPEN","isDraft":true,"headRefName":"feature/release","baseRefName":"main"}]`}}}}
-	runner, err := New(map[string]any{"operation": "find", "repository": "acme/wuko", "branch": "feature/release"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"operation": "find", "repository": "acme/wuko", "branch": "feature/release"})
 	result, err := runner.Run(t.Context(), step.Request{
 		Executor: executor, RunDir: "/workspace", Env: map[string]string{
 			"GITHUB_REPOSITORY": "other/repository", "GITHUB_REF": "refs/pull/99/merge", "GITHUB_HEAD_REF": "other",
@@ -63,10 +61,7 @@ func TestExplicitBranchAndRepositoryTakePrecedence(t *testing.T) {
 
 func TestPullRequestEventRefUsesExactNumber(t *testing.T) {
 	executor := &processtest.Executor{Strict: true, Replies: []processtest.Reply{{Result: process.Result{Stdout: `{"number":42,"url":"https://github.com/acme/wuko/pull/42","title":"Fix CI","state":"OPEN","isDraft":false,"headRefName":"ci/fix","headRefOid":"0123456789abcdef0123456789abcdef01234567","baseRefName":"main"}`}}}}
-	runner, err := New(map[string]any{"operation": "find"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"operation": "find"})
 	result, err := runner.Run(t.Context(), step.Request{Executor: executor, Env: map[string]string{
 		"GITHUB_REF": "refs/pull/42/merge", "GITHUB_REPOSITORY": "acme/wuko",
 	}})
@@ -83,10 +78,7 @@ func TestPullRequestEventRefUsesExactNumber(t *testing.T) {
 
 func TestHeadRefIsUsedBeforeCurrentBranch(t *testing.T) {
 	executor := &processtest.Executor{Strict: true, Replies: []processtest.Reply{{Result: process.Result{Stdout: `[{"number":8,"url":"url","title":"title","state":"OPEN","isDraft":false,"headRefName":"feature/head","baseRefName":"main"}]`}}}}
-	runner, err := New(map[string]any{"operation": "find"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"operation": "find"})
 	if _, err := runner.Run(t.Context(), step.Request{Executor: executor, Env: map[string]string{"GITHUB_HEAD_REF": "feature/head"}}); err != nil {
 		t.Fatal(err)
 	}
@@ -100,10 +92,7 @@ func TestCurrentBranchIsUsedWhenNoSelectorIsAvailable(t *testing.T) {
 		{Result: process.Result{Stdout: "feature/local\n"}},
 		{Result: process.Result{Stdout: `[{"number":9,"url":"url","title":"title","state":"OPEN","isDraft":false,"headRefName":"feature/local","baseRefName":"main"}]`}},
 	}}
-	runner, err := New(map[string]any{"operation": "find"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"operation": "find"})
 	if _, err := runner.Run(t.Context(), step.Request{Executor: executor, RunDir: "/repo"}); err != nil {
 		t.Fatal(err)
 	}
@@ -114,10 +103,7 @@ func TestCurrentBranchIsUsedWhenNoSelectorIsAvailable(t *testing.T) {
 
 func TestNoMatchesReturnEmptyResult(t *testing.T) {
 	executor := &processtest.Executor{Strict: true, Replies: []processtest.Reply{{Result: process.Result{Stdout: "[]\n"}}}}
-	runner, err := New(map[string]any{"operation": "find", "branch": "feature/missing"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"operation": "find", "branch": "feature/missing"})
 	result, err := runner.Run(t.Context(), step.Request{Executor: executor})
 	if err != nil {
 		t.Fatal(err)
@@ -132,10 +118,7 @@ func TestNoMatchesReturnEmptyResult(t *testing.T) {
 
 func TestMultipleMatchesFailAsAmbiguous(t *testing.T) {
 	executor := &processtest.Executor{Strict: true, Replies: []processtest.Reply{{Result: process.Result{Stdout: `[{"number":1},{"number":2}]`}}}}
-	runner, err := New(map[string]any{"operation": "find", "branch": "feature/shared"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"operation": "find", "branch": "feature/shared"})
 	if _, err := runner.Run(t.Context(), step.Request{Executor: executor}); err == nil || !strings.Contains(err.Error(), "matches multiple open GitHub pull requests") {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -151,10 +134,7 @@ func TestRunReportsMalformedAndCommandFailures(t *testing.T) {
 		{"authentication failure", processtest.Reply{Result: process.Result{Stderr: "not logged in"}, Err: &process.ExitError{Command: "gh", Code: 4}}, "listing GitHub pull requests: not logged in"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			runner, err := New(map[string]any{"operation": "find", "branch": "feature/failure"})
-			if err != nil {
-				t.Fatal(err)
-			}
+			runner := steptest.Build(t, New, map[string]any{"operation": "find", "branch": "feature/failure"})
 			executor := &processtest.Executor{Strict: true, Replies: []processtest.Reply{tt.call}}
 			result, err := runner.Run(t.Context(), step.Request{Executor: executor})
 			if err == nil || !strings.Contains(err.Error(), tt.want) || result.Outputs != nil {
@@ -166,10 +146,7 @@ func TestRunReportsMalformedAndCommandFailures(t *testing.T) {
 
 func TestRunPreservesCancellation(t *testing.T) {
 	executor := &processtest.Executor{Strict: true, Replies: []processtest.Reply{{Err: context.Canceled}}}
-	runner, err := New(map[string]any{"operation": "find", "branch": "feature/canceled"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"operation": "find", "branch": "feature/canceled"})
 	result, err := runner.Run(t.Context(), step.Request{Executor: executor})
 	if !errors.Is(err, context.Canceled) || result.Outputs != nil {
 		t.Fatalf("result = %#v, error = %v", result, err)
@@ -178,10 +155,7 @@ func TestRunPreservesCancellation(t *testing.T) {
 
 func TestDetachedHeadFailsWithoutSelector(t *testing.T) {
 	executor := &processtest.Executor{Strict: true, Replies: []processtest.Reply{{Result: process.Result{}}}}
-	runner, err := New(map[string]any{"operation": "find"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"operation": "find"})
 	if _, err := runner.Run(t.Context(), step.Request{Executor: executor}); err == nil || !strings.Contains(err.Error(), "detached HEAD") {
 		t.Fatalf("Run() error = %v", err)
 	}

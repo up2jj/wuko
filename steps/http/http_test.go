@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -38,14 +39,11 @@ func TestJSONRequestAndResponse(t *testing.T) {
 	}))
 	defer server.Close()
 
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"url": server.URL, "method": "post", "headers": map[string]any{"Authorization": "Bearer token"},
 		"query": map[string]any{"channel": "stable"}, "json": map[string]any{"name": "wuko"},
 		"response": "json", "success_statuses": []any{201},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{})
 	if err != nil {
 		t.Fatal(err)
@@ -66,10 +64,7 @@ func TestStatusAndResponseErrors(t *testing.T) {
 		fmt.Fprint(writer, "no")
 	}))
 	defer server.Close()
-	runner, err := New(map[string]any{"url": server.URL})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"url": server.URL})
 	result, err := runner.Run(t.Context(), step.Request{})
 	if err == nil || result.Outputs["status"] != nethttp.StatusTeapot {
 		t.Fatalf("result = %#v, error = %v", result, err)
@@ -97,10 +92,7 @@ func TestResponseLimitAndCancellation(t *testing.T) {
 		writer.WriteHeader(nethttp.StatusOK)
 	}))
 	defer large.Close()
-	runner, err := New(map[string]any{"url": large.URL})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"url": large.URL})
 	if _, err := runner.Run(t.Context(), step.Request{}); err == nil || !strings.Contains(err.Error(), "exceeds") {
 		t.Fatalf("error = %v", err)
 	} else {
@@ -114,13 +106,10 @@ func TestResponseLimitAndCancellation(t *testing.T) {
 		<-request.Context().Done()
 	}))
 	defer canceled.Close()
-	runner, err = New(map[string]any{"url": canceled.URL})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner = steptest.Build(t, New, map[string]any{"url": canceled.URL})
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	_, err = runner.Run(ctx, step.Request{})
+	_, err := runner.Run(ctx, step.Request{})
 	if err == nil || !errors.Is(err, context.Canceled) {
 		t.Fatalf("error = %v", err)
 	}
@@ -269,10 +258,7 @@ func TestRetryAttemptsShareOneConnection(t *testing.T) {
 	}
 	server.Start()
 	defer server.Close()
-	built, err := New(map[string]any{"url": server.URL})
-	if err != nil {
-		t.Fatal(err)
-	}
+	built := steptest.Build(t, New, map[string]any{"url": server.URL})
 	runner := built.(*Runner)
 	for attempt := 1; attempt <= 3; attempt++ {
 		if _, err := runner.Run(t.Context(), step.Request{RunDir: t.TempDir(), Attempt: attempt, MaxAttempts: 3}); err == nil {
@@ -305,10 +291,7 @@ func TestChunkedResponseReadsWithoutADeclaredLength(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	built, err := New(map[string]any{"url": server.URL, "response": "json"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	built := steptest.Build(t, New, map[string]any{"url": server.URL, "response": "json"})
 	result, err := built.Run(t.Context(), step.Request{RunDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -331,10 +314,7 @@ func TestTransportErrorsRedactQueryValues(t *testing.T) {
 	address := listener.Addr().String()
 	_ = listener.Close()
 
-	runner, err := New(map[string]any{"url": "http://" + address + "/v1/items", "query": map[string]any{"api_key": "s3cr3t-token"}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"url": "http://" + address + "/v1/items", "query": map[string]any{"api_key": "s3cr3t-token"}})
 	_, err = runner.Run(t.Context(), step.Request{})
 	if err == nil {
 		t.Fatal("request to a closed port succeeded")

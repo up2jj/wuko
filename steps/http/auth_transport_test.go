@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 )
@@ -37,10 +38,7 @@ func TestAuthenticationHelpers(t *testing.T) {
 				writer.WriteHeader(http.StatusNoContent)
 			}))
 			defer server.Close()
-			runner, err := New(map[string]any{"url": server.URL, "auth": tt.auth})
-			if err != nil {
-				t.Fatal(err)
-			}
+			runner := steptest.Build(t, New, map[string]any{"url": server.URL, "auth": tt.auth})
 			if _, err := runner.Run(t.Context(), step.Request{}); err != nil {
 				t.Fatal(err)
 			}
@@ -61,13 +59,10 @@ func TestConfiguredProxyOverridesDefaultSelection(t *testing.T) {
 		t.Fatal(err)
 	}
 	parsedProxy.User = url.UserPassword("proxy-user", "proxy-password")
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"url":   "http://origin.invalid/resource",
 		"proxy": map[string]any{"url": parsedProxy.String()},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{})
 	if err != nil {
 		t.Fatal(err)
@@ -83,10 +78,7 @@ func TestConfiguredProxyOverridesDefaultSelection(t *testing.T) {
 
 func TestTransportRetainsEnvironmentProxyFallback(t *testing.T) {
 	t.Parallel()
-	built, err := New(map[string]any{"url": "https://example.com"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	built := steptest.Build(t, New, map[string]any{"url": "https://example.com"})
 	transport, err := built.(*Runner).newTransport("")
 	if err != nil {
 		t.Fatal(err)
@@ -117,10 +109,7 @@ func TestClientCertificateLoadsRelativeToWorkflow(t *testing.T) {
 		"url":                server.URL,
 		"client_certificate": map[string]any{"cert_file": "client.pem", "key_file": "client-key.pem"},
 	}
-	built, err := New(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
+	built := steptest.Build(t, New, raw)
 	runner := built.(*Runner)
 	transport, err := runner.newTransport(dir)
 	if err != nil {
@@ -149,13 +138,10 @@ func TestClientCertificateRejectsInvalidPair(t *testing.T) {
 	dir := t.TempDir()
 	testfs.WriteFile(t, filepath.Join(dir, "client.pem"), []byte("not a certificate"), 0o600)
 	testfs.WriteFile(t, filepath.Join(dir, "client-key.pem"), []byte("not a key"), 0o600)
-	built, err := New(map[string]any{
+	built := steptest.Build(t, New, map[string]any{
 		"url":                "https://example.com",
 		"client_certificate": map[string]any{"cert_file": "client.pem", "key_file": "client-key.pem"},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	if _, err := built.(*Runner).newTransport(dir); err == nil || !strings.Contains(err.Error(), "loading client certificate") {
 		t.Fatalf("error = %v", err)
 	}
@@ -222,13 +208,10 @@ func TestClientCertificateIsLoadedOncePerRunner(t *testing.T) {
 	certPath := filepath.Join(dir, "client.pem")
 	keyPath := filepath.Join(dir, "client-key.pem")
 	writeTLSKeyPair(t, server.TLS.Certificates[0], certPath, keyPath)
-	built, err := New(map[string]any{
+	built := steptest.Build(t, New, map[string]any{
 		"url":                server.URL,
 		"client_certificate": map[string]any{"cert_file": "client.pem", "key_file": "client-key.pem"},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	runner := built.(*Runner)
 	first, err := runner.transportFor(dir)
 	if err != nil {

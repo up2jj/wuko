@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 )
@@ -34,13 +35,10 @@ func TestLargeResponseStreamsToDownload(t *testing.T) {
 	defer server.Close()
 
 	runDir := t.TempDir()
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"url":      server.URL,
 		"download": map[string]any{"path": "downloads/release.bin"},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	if err := os.Mkdir(filepath.Join(runDir, "downloads"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -91,12 +89,9 @@ func TestDownloadOverwritePolicy(t *testing.T) {
 
 	destination := filepath.Join(t.TempDir(), "artifact.txt")
 	testfs.WriteFile(t, destination, []byte("original"), 0o600)
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"url": server.URL, "download": map[string]any{"path": destination},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	if _, err := runner.Run(t.Context(), step.Request{}); err == nil || !strings.Contains(err.Error(), "overwrite") {
 		t.Fatalf("error = %v", err)
 	}
@@ -104,12 +99,9 @@ func TestDownloadOverwritePolicy(t *testing.T) {
 		t.Fatalf("server received %d requests before destination validation", requests.Load())
 	}
 
-	runner, err = New(map[string]any{
+	runner = steptest.Build(t, New, map[string]any{
 		"url": server.URL, "download": map[string]any{"path": destination, "overwrite": true},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	if _, err := runner.Run(t.Context(), step.Request{}); err != nil {
 		t.Fatal(err)
 	}
@@ -134,12 +126,9 @@ func TestFailedResponseDoesNotInstallDownload(t *testing.T) {
 	defer server.Close()
 
 	dir := t.TempDir()
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"url": server.URL, "download": map[string]any{"path": "artifact.bin"},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{RunDir: dir})
 	if err == nil || result.Outputs["status"] != nethttp.StatusServiceUnavailable || result.Outputs["body"] != "retry later" {
 		t.Fatalf("result = %#v, error = %v", result, err)

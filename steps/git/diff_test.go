@@ -257,10 +257,7 @@ func TestGitDiffCheckIgnoresRenamedContentAndMergeCommits(t *testing.T) {
 	gittest.Run(t, dir, "update-ref", "refs/remotes/origin/legacy", legacy)
 
 	gittest.Run(t, dir, "mv", "legacy.txt", "moved.txt")
-	staged, err := NewDiffCheck(map[string]any{"source": "staged"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	staged := steptest.Build(t, NewDiffCheck, map[string]any{"source": "staged"})
 	// A pure move must not report the moved file's pre-existing whitespace as newly introduced.
 	if _, err := staged.Run(t.Context(), step.Request{RunDir: dir}); err != nil {
 		t.Fatalf("staged check rejected a pure rename: %v", err)
@@ -271,10 +268,7 @@ func TestGitDiffCheckIgnoresRenamedContentAndMergeCommits(t *testing.T) {
 	gittest.Run(t, dir, "checkout", "-qb", "release")
 	gittest.Run(t, dir, "merge", "-q", "--no-ff", "legacy", "-m", "merge legacy")
 	head := gittest.Output(t, dir, "rev-parse", "HEAD")
-	pushed, err := NewDiffCheck(map[string]any{"source": "pushed"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	pushed := steptest.Build(t, NewDiffCheck, map[string]any{"source": "pushed"})
 	// Only the merge commit is new: the merged branch is already on the remote. Comparing the
 	// merge with its first parent would blame it for the merged branch's whitespace.
 	request := step.Request{RunDir: dir, Providers: gitHookProviders([]any{map[string]any{
@@ -291,10 +285,7 @@ func TestGitDiffCheckDetectsWhitespace(t *testing.T) {
 	dir := gittest.InitWithCommit(t)
 	testfs.Write(t, filepath.Join(dir, "bad.txt"), "trailing \n")
 	gittest.Run(t, dir, "add", "bad.txt")
-	runner, err := NewDiffCheck(map[string]any{"source": "staged"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, NewDiffCheck, map[string]any{"source": "staged"})
 	if _, err := runner.Run(t.Context(), step.Request{RunDir: dir}); err == nil || !strings.Contains(err.Error(), "bad.txt:1") {
 		t.Fatalf("check error = %v", err)
 	}
@@ -316,10 +307,7 @@ func TestGitDiffCheckPushedUsesHookContextAndChecksEveryCommit(t *testing.T) {
 	gittest.Run(t, dir, "add", "temporary.txt")
 	gittest.Run(t, dir, "commit", "-qm", "fix whitespace")
 	head := gittest.Output(t, dir, "rev-parse", "HEAD")
-	runner, err := NewDiffCheck(map[string]any{"source": "pushed"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, NewDiffCheck, map[string]any{"source": "pushed"})
 	request := step.Request{RunDir: dir, Providers: gitHookProviders([]any{map[string]any{
 		"local_ref": "refs/heads/main", "local_oid": head,
 		"remote_ref": "refs/heads/main", "remote_oid": base,
@@ -339,12 +327,9 @@ func TestGitDiffCheckPushedUsesHookContextAndChecksEveryCommit(t *testing.T) {
 
 func TestGitDiffCheckPushedAcceptsExplicitUpdatesExpression(t *testing.T) {
 	t.Parallel()
-	runner, err := NewDiffCheck(map[string]any{
+	runner := steptest.Build(t, NewDiffCheck, map[string]any{
 		"source": "pushed", "updates": map[string]any{"expr": "vars.updates"},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	value := []any{map[string]any{
 		"local_ref": "(delete)", "local_oid": strings.Repeat("0", 40),
 		"remote_ref": "refs/heads/old", "remote_oid": strings.Repeat("a", 40),
@@ -352,10 +337,7 @@ func TestGitDiffCheckPushedAcceptsExplicitUpdatesExpression(t *testing.T) {
 	if _, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{"updates": value}}); err != nil {
 		t.Fatal(err)
 	}
-	withoutContext, err := NewDiffCheck(map[string]any{"source": "pushed"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	withoutContext := steptest.Build(t, NewDiffCheck, map[string]any{"source": "pushed"})
 	if _, err := withoutContext.Run(t.Context(), step.Request{}); err == nil || !strings.Contains(err.Error(), "active Git hook context") {
 		t.Fatalf("missing context error = %v", err)
 	}
@@ -381,10 +363,7 @@ func TestGitDiffCheckPushedRunsOneCommandPerCommit(t *testing.T) {
 		gittest.Run(t, dir, "commit", "-qm", "clean commit")
 	}
 	head := gittest.Output(t, dir, "rev-parse", "HEAD")
-	runner, err := NewDiffCheck(map[string]any{"source": "pushed"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, NewDiffCheck, map[string]any{"source": "pushed"})
 	executor := &recordingGitExecutor{}
 	request := step.Request{RunDir: dir, Executor: executor, Providers: gitHookProviders([]any{map[string]any{
 		"local_ref": "refs/heads/main", "local_oid": head,
@@ -421,10 +400,7 @@ func TestGitDiffCheckPushedHandlesNewBranch(t *testing.T) {
 	gittest.Run(t, dir, "add", "clean.txt")
 	gittest.Run(t, dir, "commit", "-qm", "clean commit")
 	head := gittest.Output(t, dir, "rev-parse", "HEAD")
-	runner, err := NewDiffCheck(map[string]any{"source": "pushed"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, NewDiffCheck, map[string]any{"source": "pushed"})
 	request := step.Request{RunDir: dir, Providers: gitHookProviders([]any{map[string]any{
 		"local_ref": "refs/heads/topic", "local_oid": head,
 		"remote_ref": "refs/heads/topic", "remote_oid": strings.Repeat("0", 40),
@@ -445,11 +421,8 @@ func TestGitDiffRejectsMalformedAndTruncatedOutput(t *testing.T) {
 		{"truncated raw", []processtest.Reply{{Result: process.Result{Stdout: "id\n"}}, {Result: process.Result{Stdout: "id parent\n"}}, {Result: process.Result{StdoutTruncated: true}, Err: &process.ExitError{Command: "git", Code: 1}}}, "output exceeded 16 MiB"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			runner, err := NewDiff(map[string]any{})
-			if err != nil {
-				t.Fatal(err)
-			}
-			_, err = runner.Run(t.Context(), step.Request{Executor: &processtest.Executor{Replies: test.results}})
+			runner := steptest.Build(t, NewDiff, map[string]any{})
+			_, err := runner.Run(t.Context(), step.Request{Executor: &processtest.Executor{Replies: test.results}})
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("error = %v, want %q", err, test.want)
 			}
@@ -576,10 +549,7 @@ func compileDocumentedExpressions(t *testing.T, path string, block int, value ma
 
 func runDiff(t *testing.T, dir string, raw map[string]any) map[string]any {
 	t.Helper()
-	runner, err := NewDiff(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, NewDiff, raw)
 	result, err := runner.Run(t.Context(), step.Request{RunDir: dir})
 	if err != nil {
 		t.Fatal(err)

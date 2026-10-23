@@ -5,14 +5,12 @@ import (
 	"os"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 )
 
 func TestAgentSendsPromptOnStdin(t *testing.T) {
-	runner, err := New(map[string]any{"command": "sh", "args": []any{"-c", "cat"}, "prompt": "do work"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"command": "sh", "args": []any{"-c", "cat"}, "prompt": "do work"})
 	result, err := runner.Run(t.Context(), step.Request{RunDir: t.TempDir(), Env: map[string]string{"PATH": os.Getenv("PATH")}, Stdout: io.Discard, Stderr: io.Discard})
 	if err != nil {
 		t.Fatal(err)

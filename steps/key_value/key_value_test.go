@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 )
@@ -81,10 +82,7 @@ func TestOperationsReturnRuntimeNumbers(t *testing.T) {
 	request := step.Request{LocalValueDir: t.TempDir()}
 	run := func(raw map[string]any) step.Result {
 		t.Helper()
-		runner, err := New(raw)
-		if err != nil {
-			t.Fatal(err)
-		}
+		runner := steptest.Build(t, New, raw)
 		result, err := runner.Run(t.Context(), request)
 		if err != nil {
 			t.Fatal(err)
@@ -116,10 +114,7 @@ func TestOperations(t *testing.T) {
 	request := step.Request{LocalValueDir: t.TempDir(), GlobalValueDir: t.TempDir()}
 	run := func(raw map[string]any) step.Result {
 		t.Helper()
-		runner, err := New(raw)
-		if err != nil {
-			t.Fatal(err)
-		}
+		runner := steptest.Build(t, New, raw)
 		result, err := runner.Run(t.Context(), request)
 		if err != nil {
 			t.Fatal(err)
@@ -148,10 +143,7 @@ func TestOperations(t *testing.T) {
 
 func TestValidateDoesNotTouchFilesystem(t *testing.T) {
 	root := t.TempDir() + "/not-created"
-	runner, err := New(config("list", "", nil, false))
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, config("list", "", nil, false))
 	if err := runner.(step.Validator).Validate(t.Context(), step.Request{LocalValueDir: root}); err != nil {
 		t.Fatal(err)
 	}
@@ -164,10 +156,7 @@ func TestReadOperationsDoNotTouchFilesystem(t *testing.T) {
 	root := t.TempDir() + "/not-created"
 	request := step.Request{LocalValueDir: root}
 	for _, raw := range []map[string]any{config("get", "missing", nil, false), config("list", "", nil, false)} {
-		runner, err := New(raw)
-		if err != nil {
-			t.Fatal(err)
-		}
+		runner := steptest.Build(t, New, raw)
 		if _, err := runner.Run(t.Context(), request); err != nil {
 			t.Fatalf("%s: %v", raw["operation"], err)
 		}
@@ -178,11 +167,8 @@ func TestReadOperationsDoNotTouchFilesystem(t *testing.T) {
 }
 
 func TestLocalUnavailable(t *testing.T) {
-	runner, err := New(config("list", "", nil, false))
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = runner.Run(t.Context(), step.Request{GlobalValueDir: t.TempDir()})
+	runner := steptest.Build(t, New, config("list", "", nil, false))
+	_, err := runner.Run(t.Context(), step.Request{GlobalValueDir: t.TempDir()})
 	if err == nil || !strings.Contains(err.Error(), "local key-value storage is unavailable") {
 		t.Fatalf("error = %v", err)
 	}
@@ -196,10 +182,7 @@ func TestSetExprKeepsResultTypes(t *testing.T) {
 	}
 	run := func(raw map[string]any) step.Result {
 		t.Helper()
-		runner, err := New(raw)
-		if err != nil {
-			t.Fatal(err)
-		}
+		runner := steptest.Build(t, New, raw)
 		result, err := runner.Run(t.Context(), request)
 		if err != nil {
 			t.Fatal(err)
@@ -222,10 +205,7 @@ func TestUpdateReadsAndWritesUnderOneLock(t *testing.T) {
 	request := step.Request{LocalValueDir: t.TempDir()}
 	run := func(raw map[string]any) map[string]any {
 		t.Helper()
-		runner, err := New(raw)
-		if err != nil {
-			t.Fatal(err)
-		}
+		runner := steptest.Build(t, New, raw)
 		result, err := runner.Run(t.Context(), request)
 		if err != nil {
 			t.Fatal(err)
@@ -253,10 +233,7 @@ func TestVariableReceivesTheOperationResult(t *testing.T) {
 	run := func(raw map[string]any, variable string) map[string]any {
 		t.Helper()
 		raw["variable"] = variable
-		runner, err := New(raw)
-		if err != nil {
-			t.Fatal(err)
-		}
+		runner := steptest.Build(t, New, raw)
 		result, err := runner.Run(t.Context(), request)
 		if err != nil {
 			t.Fatal(err)
@@ -280,10 +257,7 @@ func TestVariableReceivesTheOperationResult(t *testing.T) {
 	if diff := cmp.Diff(map[string]any{"removed": "dark-high-contrast"}, run(config("delete", "theme", nil, false), "removed")); diff != "" {
 		t.Fatalf("delete variables mismatch (-want +got):\n%s", diff)
 	}
-	runner, err := New(config("get", "theme", nil, false))
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, config("get", "theme", nil, false))
 	result, err := runner.Run(t.Context(), request)
 	if err != nil {
 		t.Fatal(err)
@@ -297,10 +271,7 @@ func TestGetDefaultListPrefixAndClear(t *testing.T) {
 	request := step.Request{LocalValueDir: t.TempDir()}
 	run := func(raw map[string]any) map[string]any {
 		t.Helper()
-		runner, err := New(raw)
-		if err != nil {
-			t.Fatal(err)
-		}
+		runner := steptest.Build(t, New, raw)
 		result, err := runner.Run(t.Context(), request)
 		if err != nil {
 			t.Fatal(err)
@@ -355,11 +326,8 @@ func TestSetExprRejectsUnusableResults(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			runner, err := New(withExpr(config("set", "key", nil, false), tt.expression))
-			if err != nil {
-				t.Fatal(err)
-			}
-			_, err = runner.Run(t.Context(), step.Request{LocalValueDir: t.TempDir()})
+			runner := steptest.Build(t, New, withExpr(config("set", "key", nil, false), tt.expression))
+			_, err := runner.Run(t.Context(), step.Request{LocalValueDir: t.TempDir()})
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("error = %v, want %q", err, tt.want)
 			}
@@ -379,11 +347,8 @@ func TestRunReportsWhichFieldIsUnrendered(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			runner, err := New(tt.raw)
-			if err != nil {
-				t.Fatal(err)
-			}
-			_, err = runner.Run(t.Context(), step.Request{LocalValueDir: t.TempDir()})
+			runner := steptest.Build(t, New, tt.raw)
+			_, err := runner.Run(t.Context(), step.Request{LocalValueDir: t.TempDir()})
 			want := tt.field + " contains an unresolved template"
 			if err == nil || !strings.Contains(err.Error(), want) {
 				t.Fatalf("error = %v, want %q", err, want)
@@ -395,10 +360,7 @@ func TestRunReportsWhichFieldIsUnrendered(t *testing.T) {
 func TestFailedOperationsReportNoOutputs(t *testing.T) {
 	dir := t.TempDir()
 	testfs.WriteFile(t, filepath.Join(dir, "prefs.json"), []byte("[1,2"), 0o600)
-	runner, err := New(config("get", "theme", nil, false))
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, config("get", "theme", nil, false))
 	result, err := runner.Run(t.Context(), step.Request{LocalValueDir: dir})
 	if err == nil || !strings.Contains(err.Error(), "decoding store") {
 		t.Fatalf("error = %v", err)
@@ -411,10 +373,7 @@ func TestFailedOperationsReportNoOutputs(t *testing.T) {
 func TestNumbersNoGoTypeHoldsStayJSONShapes(t *testing.T) {
 	dir := t.TempDir()
 	testfs.WriteFile(t, filepath.Join(dir, "prefs.json"), []byte(`{"huge": 1e400}`), 0o600)
-	runner, err := New(config("get", "huge", nil, false))
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, config("get", "huge", nil, false))
 	result, err := runner.Run(t.Context(), step.Request{LocalValueDir: dir})
 	if err != nil {
 		t.Fatal(err)
@@ -425,11 +384,8 @@ func TestNumbersNoGoTypeHoldsStayJSONShapes(t *testing.T) {
 }
 
 func TestSetRejectsAnUnrenderedExpr(t *testing.T) {
-	runner, err := New(withExpr(config("set", "key", nil, false), "{{ .vars.expression }}"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = runner.Run(t.Context(), step.Request{LocalValueDir: t.TempDir()})
+	runner := steptest.Build(t, New, withExpr(config("set", "key", nil, false), "{{ .vars.expression }}"))
+	_, err := runner.Run(t.Context(), step.Request{LocalValueDir: t.TempDir()})
 	if err == nil || !strings.Contains(err.Error(), "expr contains an unresolved template") {
 		t.Fatalf("error = %v", err)
 	}

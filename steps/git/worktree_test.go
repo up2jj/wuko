@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/internal/gittest"
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 )
@@ -62,10 +63,7 @@ func TestWorktreeEnsureListMergeAndSafeRemove(t *testing.T) {
 	t.Parallel()
 	dir := gittest.InitWithCommit(t)
 	base := gittest.Output(t, dir, "branch", "--show-current")
-	runner, err := NewWorktree(map[string]any{"operation": "ensure", "branch": "feature/worktree", "base": base, "create": true})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, NewWorktree, map[string]any{"operation": "ensure", "branch": "feature/worktree", "base": base, "create": true})
 	result, err := runner.Run(t.Context(), step.Request{RunDir: dir})
 	if err != nil {
 		t.Fatal(err)
@@ -92,10 +90,7 @@ func TestWorktreeEnsureListMergeAndSafeRemove(t *testing.T) {
 	gittest.Run(t, path, "add", "feature.txt")
 	gittest.Run(t, path, "commit", "--quiet", "-m", "feature")
 
-	list, err := NewWorktree(map[string]any{"operation": "list", "comparison": base})
-	if err != nil {
-		t.Fatal(err)
-	}
+	list := steptest.Build(t, NewWorktree, map[string]any{"operation": "list", "comparison": base})
 	listed, err := list.Run(t.Context(), step.Request{RunDir: path})
 	if err != nil {
 		t.Fatal(err)
@@ -113,10 +108,7 @@ func TestWorktreeEnsureListMergeAndSafeRemove(t *testing.T) {
 		t.Fatalf("feature item = %#v", feature)
 	}
 
-	remove, err := NewWorktree(map[string]any{"operation": "remove", "target": "feature/worktree", "delete_branch": "safe", "integrated_into": base})
-	if err != nil {
-		t.Fatal(err)
-	}
+	remove := steptest.Build(t, NewWorktree, map[string]any{"operation": "remove", "target": "feature/worktree", "delete_branch": "safe", "integrated_into": base})
 	removed, err := remove.Run(t.Context(), step.Request{RunDir: dir})
 	if err != nil {
 		t.Fatal(err)
@@ -125,10 +117,7 @@ func TestWorktreeEnsureListMergeAndSafeRemove(t *testing.T) {
 		t.Fatalf("unintegrated removal = %#v", removed.Outputs)
 	}
 
-	merge, err := NewMerge(map[string]any{"target": base, "source": "feature/worktree", "mode": "ff_only"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	merge := steptest.Build(t, NewMerge, map[string]any{"target": base, "source": "feature/worktree", "mode": "ff_only"})
 	if _, err := merge.Run(t.Context(), step.Request{RunDir: dir}); err != nil {
 		t.Fatal(err)
 	}
@@ -151,10 +140,7 @@ func TestWorktreeEnsureListMergeAndSafeRemove(t *testing.T) {
 
 func newTestWorktreeRemoval(t *testing.T, path string) step.Runner {
 	t.Helper()
-	runner, err := NewWorktree(map[string]any{"operation": "remove", "target": path, "force": true, "delete_branch": "never"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, NewWorktree, map[string]any{"operation": "remove", "target": path, "force": true, "delete_branch": "never"})
 	return runner
 }
 
@@ -169,10 +155,7 @@ func TestSquashCreatesOneCommitAndRecoveryRef(t *testing.T) {
 	gittest.Run(t, dir, "commit", "--quiet", "-m", "one")
 	oldHead := gittest.Output(t, dir, "rev-parse", "HEAD")
 	testfs.WriteFile(t, filepath.Join(dir, "two.txt"), []byte("two\n"), 0o644)
-	runner, err := NewSquash(map[string]any{"target": baseBranch, "message": "feat: squashed", "stage": "all"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, NewSquash, map[string]any{"target": baseBranch, "message": "feat: squashed", "stage": "all"})
 	result, err := runner.Run(t.Context(), step.Request{RunDir: dir})
 	if err != nil {
 		t.Fatal(err)
@@ -206,10 +189,7 @@ func TestRebaseReplaysOntoTargetAndLeavesConflictPolicyToGit(t *testing.T) {
 	gittest.Run(t, dir, "add", "base.txt")
 	gittest.Run(t, dir, "commit", "--quiet", "-m", "base")
 	targetHead := gittest.Output(t, dir, "rev-parse", "HEAD")
-	runner, err := NewRebase(map[string]any{"target": baseBranch})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, NewRebase, map[string]any{"target": baseBranch})
 	result, err := runner.Run(t.Context(), step.Request{RunDir: worktree})
 	if err != nil {
 		t.Fatal(err)
@@ -230,10 +210,7 @@ func TestNoFFMergeUsesAndCleansTemporaryTargetWorktree(t *testing.T) {
 	gittest.Run(t, dir, "add", "feature.txt")
 	gittest.Run(t, dir, "commit", "--quiet", "-m", "feature")
 	source := gittest.Output(t, dir, "branch", "--show-current")
-	runner, err := NewMerge(map[string]any{"target": "release", "source": source, "mode": "no_ff", "message": "merge feature"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, NewMerge, map[string]any{"target": "release", "source": source, "mode": "no_ff", "message": "merge feature"})
 	result, err := runner.Run(t.Context(), step.Request{RunDir: dir})
 	if err != nil {
 		t.Fatal(err)
@@ -309,10 +286,7 @@ func TestSafeRemovalIgnoresATagThatShadowsTheBranchName(t *testing.T) {
 	gittest.Run(t, path, "add", "topic.txt")
 	gittest.Run(t, path, "commit", "--quiet", "-m", "topic")
 	gittest.Run(t, dir, "tag", "topic", base)
-	remove, err := NewWorktree(map[string]any{"operation": "remove", "target": "topic", "delete_branch": "safe", "integrated_into": base})
-	if err != nil {
-		t.Fatal(err)
-	}
+	remove := steptest.Build(t, NewWorktree, map[string]any{"operation": "remove", "target": "topic", "delete_branch": "safe", "integrated_into": base})
 	removed, err := remove.Run(t.Context(), step.Request{RunDir: dir})
 	if err != nil {
 		t.Fatal(err)
@@ -336,10 +310,7 @@ func TestMergeResolvesTheDefaultSourceInTheCallingWorktree(t *testing.T) {
 	gittest.Run(t, path, "add", "detached.txt")
 	gittest.Run(t, path, "commit", "--quiet", "-m", "detached work")
 	want := gittest.Output(t, path, "rev-parse", "HEAD")
-	runner, err := NewMerge(map[string]any{"target": "release", "mode": "no_ff", "message": "merge detached"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, NewMerge, map[string]any{"target": "release", "mode": "no_ff", "message": "merge detached"})
 	result, err := runner.Run(t.Context(), step.Request{RunDir: path})
 	if err != nil {
 		t.Fatal(err)
@@ -363,10 +334,7 @@ func TestSquashLeavesTheBranchUntouchedWhenThereIsNothingToSquash(t *testing.T) 
 	gittest.Run(t, dir, "rm", "--quiet", "temp.txt")
 	gittest.Run(t, dir, "commit", "--quiet", "-m", "remove")
 	head := gittest.Output(t, dir, "rev-parse", "HEAD")
-	runner, err := NewSquash(map[string]any{"target": base, "message": "feat: nothing"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, NewSquash, map[string]any{"target": base, "message": "feat: nothing"})
 	if _, err := runner.Run(t.Context(), step.Request{RunDir: dir}); err == nil || !strings.Contains(err.Error(), "no net changes") {
 		t.Fatalf("squash error = %v", err)
 	}
@@ -380,10 +348,7 @@ func TestSquashLeavesTheBranchUntouchedWhenThereIsNothingToSquash(t *testing.T) 
 func TestWorktreeEnsureRejectsOptionLikeBase(t *testing.T) {
 	t.Parallel()
 	dir := gittest.InitWithCommit(t)
-	runner, err := NewWorktree(map[string]any{"operation": "ensure", "branch": "feature/option", "base": "--force", "create": true})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, NewWorktree, map[string]any{"operation": "ensure", "branch": "feature/option", "base": "--force", "create": true})
 	if _, err := runner.Run(t.Context(), step.Request{RunDir: dir}); err == nil || !strings.Contains(err.Error(), "base") {
 		t.Fatalf("Run() error = %v, want an option-like base rejected", err)
 	}

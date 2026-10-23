@@ -7,17 +7,15 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 )
 
 func TestAllReturnsValuesPathsAndVariable(t *testing.T) {
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"from": "steps.fetch.value", "query": `$.projects[?@.active == true].id`,
 		"variable": "project_ids",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{Steps: map[string]any{
 		"fetch": map[string]any{"value": map[string]any{"projects": []any{
 			map[string]any{"id": "one", "active": true},
@@ -45,12 +43,9 @@ func TestAllReturnsValuesPathsAndVariable(t *testing.T) {
 }
 
 func TestOneReturnsScalar(t *testing.T) {
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"from": "vars.document", "query": `$.project.name`, "result": "one", "variable": "name",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{
 		"document": map[string]any{"project": map[string]any{"name": "wuko"}},
 	}})
@@ -67,10 +62,7 @@ func TestOneReturnsScalar(t *testing.T) {
 
 func TestOneRejectsZeroOrMultipleMatchesWithoutResult(t *testing.T) {
 	for _, query := range []string{`$.missing`, `$.items[*]`} {
-		runner, err := New(map[string]any{"from": "vars.document", "query": query, "result": "one", "variable": "selected"})
-		if err != nil {
-			t.Fatal(err)
-		}
+		runner := steptest.Build(t, New, map[string]any{"from": "vars.document", "query": query, "result": "one", "variable": "selected"})
 		result, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{
 			"document": map[string]any{"items": []any{1, 2}},
 		}})
@@ -84,10 +76,7 @@ func TestOneRejectsZeroOrMultipleMatchesWithoutResult(t *testing.T) {
 }
 
 func TestAllAllowsNoMatches(t *testing.T) {
-	runner, err := New(map[string]any{"from": "vars.document", "query": `$.missing`})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"from": "vars.document", "query": `$.missing`})
 	result, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{"document": map[string]any{}}})
 	if err != nil {
 		t.Fatal(err)
@@ -123,10 +112,7 @@ func TestTemplatedConfigurationIsAcceptedDuringValidation(t *testing.T) {
 }
 
 func TestRunHonorsCancellation(t *testing.T) {
-	runner, err := New(map[string]any{"from": "vars.document", "query": "$"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"from": "vars.document", "query": "$"})
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	result, err := runner.Run(ctx, step.Request{Vars: map[string]any{"document": true}})

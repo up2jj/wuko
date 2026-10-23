@@ -15,10 +15,7 @@ import (
 )
 
 func TestConfigDefaultsAndValidation(t *testing.T) {
-	runnerValue, err := New(map[string]any{"variable": "source", "message": "Select a file"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runnerValue := steptest.Build(t, New, map[string]any{"variable": "source", "message": "Select a file"})
 	runner := runnerValue.(*Runner)
 	if runner.config.Root != "." || runner.config.Kind != kindFile || !runner.required() {
 		t.Fatalf("config = %#v", runner.config)

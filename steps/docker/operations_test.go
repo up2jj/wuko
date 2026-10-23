@@ -27,6 +27,7 @@ import (
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 
 	"github.com/up2jj/wuko/diagnostic"
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 )
@@ -418,10 +419,7 @@ func TestManagedResourcesCreateAndCleanup(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			built, err := New(test.raw)
-			if err != nil {
-				t.Fatalf("New() error = %v", err)
-			}
+			built := steptest.Build(t, New, test.raw)
 			managed, ok := built.(*managedRunner)
 			if !ok {
 				t.Fatalf("runner type = %T, want managed runner", built)
@@ -449,10 +447,7 @@ func TestManagedResourcesCreateAndCleanup(t *testing.T) {
 
 func TestManagedResourceCleanupCanBeDisabled(t *testing.T) {
 	t.Parallel()
-	built, err := New(map[string]any{"operation": "volume_create", "name": "persistent", "cleanup": false})
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
+	built := steptest.Build(t, New, map[string]any{"operation": "volume_create", "name": "persistent", "cleanup": false})
 	if _, ok := built.(step.Cleaner); ok {
 		t.Fatalf("runner type %T unexpectedly implements step.Cleaner", built)
 	}
@@ -477,10 +472,7 @@ func TestManagedResourceCleanupCanBeDisabled(t *testing.T) {
 
 func TestManagedResourcesRejectCollisionsAndIgnoreMissingCleanup(t *testing.T) {
 	t.Parallel()
-	built, err := New(map[string]any{"operation": "network_create", "name": "existing"})
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
+	built := steptest.Build(t, New, map[string]any{"operation": "network_create", "name": "existing"})
 	managed := built.(*managedRunner)
 	client := &operationClient{fakeClient: &fakeClient{}, networkExists: true}
 	managed.newClient = func() (dockerClient, error) { return client, nil }
@@ -505,10 +497,7 @@ func TestManagedResourcesRejectCollisionsAndIgnoreMissingCleanup(t *testing.T) {
 
 func TestManagedResourceCloseErrorStillRegistersUsableResult(t *testing.T) {
 	t.Parallel()
-	built, err := New(map[string]any{"operation": "network_create", "name": "managed"})
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
+	built := steptest.Build(t, New, map[string]any{"operation": "network_create", "name": "managed"})
 	managed := built.(*managedRunner)
 	client := &operationClient{
 		fakeClient: &fakeClient{closeErr: errors.New("close failed")},
@@ -527,10 +516,7 @@ func TestManagedResourceCloseErrorStillRegistersUsableResult(t *testing.T) {
 
 func TestManagedCreationCleansUpAfterCancellation(t *testing.T) {
 	t.Parallel()
-	built, err := New(map[string]any{"operation": "volume_create", "name": "transient"})
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
+	built := steptest.Build(t, New, map[string]any{"operation": "volume_create", "name": "transient"})
 	managed := built.(*managedRunner)
 	client := &operationClient{
 		fakeClient: &fakeClient{},
@@ -549,10 +535,7 @@ func TestManagedCreationCleansUpAfterCancellation(t *testing.T) {
 
 func TestVolumeCreationAndCleanupRejectChangedOwnership(t *testing.T) {
 	t.Parallel()
-	built, err := New(map[string]any{"operation": "volume_create", "name": "shared"})
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
+	built := steptest.Build(t, New, map[string]any{"operation": "volume_create", "name": "shared"})
 	managed := built.(*managedRunner)
 	client := &operationClient{
 		fakeClient: &fakeClient{},

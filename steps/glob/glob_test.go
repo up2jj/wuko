@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 )
@@ -115,25 +116,19 @@ func TestGlobRejectsInvalidConfiguration(t *testing.T) {
 }
 
 func TestGlobRejectsInvalidRootAndHonorsCancellation(t *testing.T) {
-	runner, err := New(map[string]any{"root": "missing", "patterns": []any{"**"}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"root": "missing", "patterns": []any{"**"}})
 	if _, err := runner.Run(t.Context(), step.Request{RunDir: t.TempDir()}); err == nil || !strings.Contains(err.Error(), "inspecting glob root") {
 		t.Fatalf("missing root error = %v", err)
 	}
 
 	runDir := t.TempDir()
 	writeFile(t, runDir, "not-directory", "file", 0o644)
-	runner, err = New(map[string]any{"root": "not-directory", "patterns": []any{"**"}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner = steptest.Build(t, New, map[string]any{"root": "not-directory", "patterns": []any{"**"}})
 	if _, err := runner.Run(t.Context(), step.Request{RunDir: runDir}); err == nil || !strings.Contains(err.Error(), "not a directory") {
 		t.Fatalf("file root error = %v", err)
 	}
 
-	runner, err = New(map[string]any{"patterns": []any{"**"}})
+	runner, err := New(map[string]any{"patterns": []any{"**"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,10 +140,7 @@ func TestGlobRejectsInvalidRootAndHonorsCancellation(t *testing.T) {
 }
 
 func TestGlobReturnsFilesystemErrors(t *testing.T) {
-	runner, err := New(map[string]any{"patterns": []any{"**"}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"patterns": []any{"**"}})
 	runner.(*Runner).fsys = errorFS{}
 	if _, err := runner.Run(t.Context(), step.Request{RunDir: t.TempDir()}); !errors.Is(err, fs.ErrPermission) {
 		t.Fatalf("filesystem error = %v", err)
@@ -158,10 +150,7 @@ func TestGlobReturnsFilesystemErrors(t *testing.T) {
 func TestGlobCancelsDuringTraversal(t *testing.T) {
 	runDir := t.TempDir()
 	writeFile(t, runDir, "nested/file.go", "content", 0o644)
-	runner, err := New(map[string]any{"patterns": []any{"**/*.txt"}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"patterns": []any{"**/*.txt"}})
 	ctx, cancel := context.WithCancel(t.Context())
 	runner.(*Runner).fsys = cancelOnOpenFS{FS: os.DirFS(runDir), cancel: cancel}
 	if _, err := runner.Run(ctx, step.Request{RunDir: runDir}); !errors.Is(err, context.Canceled) {
@@ -186,10 +175,7 @@ func (f cancelOnOpenFS) Open(name string) (fs.File, error) {
 
 func run(t *testing.T, runDir string, raw map[string]any) step.Result {
 	t.Helper()
-	runner, err := New(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, raw)
 	result, err := runner.Run(t.Context(), step.Request{RunDir: runDir})
 	if err != nil {
 		t.Fatal(err)

@@ -15,14 +15,12 @@ import (
 	"github.com/google/go-cmp/cmp"
 
 	"github.com/up2jj/wuko/helper"
+	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 )
 
 func TestLuaExposesPluginHelpers(t *testing.T) {
-	runner, err := New(map[string]any{"source": `wuko.output("value", wuko.helpers.acme_slug("Hello World"))`})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := steptest.Build(t, New, map[string]any{"source": `wuko.output("value", wuko.helpers.acme_slug("Hello World"))`})
 	result, err := runner.Run(t.Context(), step.Request{HelperContext: t.Context(), Helpers: helper.Set{
 		"acme_slug": func(_ context.Context, args []any) (any, error) {
 			return strings.ToLower(strings.ReplaceAll(args[0].(string), " ", "-")), nil
@@ -37,7 +35,7 @@ func TestLuaExposesPluginHelpers(t *testing.T) {
 }
 
 func TestInlineLuaStateAndEnvironment(t *testing.T) {
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"source": `
 local decoded = wuko.json.decode('{"ok":true}')
 wuko.output("result", {name = wuko.args.name, token = wuko.env.get("TOKEN"), ok = decoded.ok, attempt = wuko.env.get("WUKO_STEP_ATTEMPT"), operation_id = wuko.env.get("WUKO_STEP_OPERATION_ID")})
@@ -46,9 +44,6 @@ wuko.set_var("done", true)
 		"args": map[string]any{"name": "example"},
 		"env":  map[string]any{"TOKEN": "step-secret"},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{
 		StepID: "lua", WorkflowName: "test", RunDir: t.TempDir(), Env: map[string]string{"TOKEN": "secret"}, Stdout: io.Discard, Stderr: io.Discard,
 		Attempt: 2, MaxAttempts: 3, OperationID: "lua-operation",
@@ -66,12 +61,9 @@ wuko.set_var("done", true)
 }
 
 func TestLuaControlBindings(t *testing.T) {
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"source": `wuko.output("binding", {batch_index = wuko.batch.index, batch_items = wuko.batch.items, item = wuko.foreach.item, os = wuko.matrix.os})`,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{Bindings: map[string]any{
 		"batch":   map[string]any{"index": 1, "items": []any{"api", "worker"}},
 		"foreach": map[string]any{"item": "api"}, "matrix": map[string]any{"os": "linux"},
@@ -89,16 +81,13 @@ func TestLuaControlBindings(t *testing.T) {
 }
 
 func TestLuaArgumentExpressionsUseRuntimeRootsAndPreserveTypes(t *testing.T) {
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"source": `wuko.output("args", wuko.args)`,
 		"args": map[string]any{
 			"inventory": map[string]any{"expr": "steps.decode.value"},
 			"summary":   map[string]any{"expr": `inputs.prefix + ":" + dependencies.build.artifact + ":" + batch.name + ":" + foreach.item + ":" + matrix.os + ":" + finally.status + ":" + workflow.name + ":" + workflow.dir + ":" + run.dir + ":" + run.os + ":" + run.arch`},
 		},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	request := step.Request{
 		WorkflowName: "release", WorkflowDir: "/workflow", RunDir: "/run",
 		Inputs:       map[string]any{"prefix": "deploy"},
@@ -125,7 +114,7 @@ func TestLuaArgumentExpressionsUseRuntimeRootsAndPreserveTypes(t *testing.T) {
 }
 
 func TestLuaExposesRuntimeRoots(t *testing.T) {
-	runner, err := New(map[string]any{"source": `
+	runner := steptest.Build(t, New, map[string]any{"source": `
 wuko.steps.decode.value[1].name = "changed"
 wuko.output("roots", {
   input = wuko.inputs.target,
@@ -139,9 +128,6 @@ wuko.output("roots", {
   arch = wuko.run.arch,
 })
 `})
-	if err != nil {
-		t.Fatal(err)
-	}
 	steps := map[string]any{"decode": map[string]any{"value": []any{map[string]any{"name": "api"}}}}
 	result, err := runner.Run(t.Context(), step.Request{
 		WorkflowName: "release", WorkflowDir: "/workflow", RunDir: "/run", EnvironmentLoaders: []string{"mise", "direnv"},
@@ -185,7 +171,7 @@ func TestLuaRejectsInvalidArgumentExpressions(t *testing.T) {
 }
 
 func TestLuaHelpers(t *testing.T) {
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"source": `
 local h = wuko.helpers
 local original = {"b", "a"}
@@ -219,9 +205,6 @@ wuko.output("helpers", {
 })
 `,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{StepID: "helpers", WorkflowName: "test"})
 	if err != nil {
 		t.Fatal(err)
@@ -251,7 +234,7 @@ wuko.output("helpers", {
 }
 
 func TestLuaCaseHelpers(t *testing.T) {
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"source": `
 local h = wuko.helpers
 wuko.output("cases", {
@@ -270,9 +253,6 @@ wuko.output("cases", {
 })
 `,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{StepID: "cases", WorkflowName: "test"})
 	if err != nil {
 		t.Fatal(err)
@@ -297,10 +277,7 @@ func TestLuaCaseHelpersRejectNonStrings(t *testing.T) {
 		"pascal_case", "sentence_case", "snake_case", "swap_case", "title_case", "train_case",
 	} {
 		t.Run(name, func(t *testing.T) {
-			runner, err := New(map[string]any{"source": "wuko.helpers." + name + "(1)"})
-			if err != nil {
-				t.Fatal(err)
-			}
+			runner := steptest.Build(t, New, map[string]any{"source": "wuko.helpers." + name + "(1)"})
 			if _, err := runner.Run(t.Context(), step.Request{StepID: "cases", WorkflowName: "test"}); err == nil {
 				t.Fatalf("Lua helper %s accepted a number", name)
 			}
@@ -315,7 +292,7 @@ func TestLuaCaseCatalogExcludesRandomCase(t *testing.T) {
 }
 
 func TestLuaUtilityHelpers(t *testing.T) {
-	runner, err := New(map[string]any{"source": `
+	runner := steptest.Build(t, New, map[string]any{"source": `
 local h = wuko.helpers
 local generated_uuid = h.uuid({version = 4})
 local generated_password = h.password(12)
@@ -348,9 +325,6 @@ wuko.output("helpers", {
   timestamp = h.unix_timestamp(),
 })
 `})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{StepID: "helpers", WorkflowName: "test"})
 	if err != nil {
 		t.Fatal(err)
@@ -384,15 +358,12 @@ wuko.output("helpers", {
 
 func TestLuaTimeHelpersAndWorkflowTimezone(t *testing.T) {
 	t.Parallel()
-	runner, err := New(map[string]any{"source": `
+	runner := steptest.Build(t, New, map[string]any{"source": `
 local h = wuko.helpers
 local parsed = h.parse_time("2026-03-28 12:00", "2006-01-02 15:04", wuko.workflow.timezone)
 local tomorrow = h.add_time(parsed, {days = 1, timezone = wuko.workflow.timezone})
 wuko.output("value", h.format_time(tomorrow, "2006-01-02 15:04 Z07:00", wuko.workflow.timezone))
 `})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{StepID: "time", WorkflowName: "release", WorkflowTimezone: "Europe/Warsaw"})
 	if err != nil {
 		t.Fatal(err)
@@ -404,7 +375,7 @@ wuko.output("value", h.format_time(tomorrow, "2006-01-02 15:04 Z07:00", wuko.wor
 
 func TestLuaNaturalTimeHelper(t *testing.T) {
 	t.Parallel()
-	runner, err := New(map[string]any{"source": `
+	runner := steptest.Build(t, New, map[string]any{"source": `
 local h = wuko.helpers
 local options = {
   reference = "2026-09-08T10:15:00+02:00",
@@ -414,9 +385,6 @@ local options = {
 wuko.output("next", h.parse_natural_time("next monday", options))
 wuko.output("later", h.parse_natural_time("in two weeks", options))
 `})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{StepID: "time", WorkflowName: "release", WorkflowTimezone: "Europe/Warsaw"})
 	if err != nil {
 		t.Fatal(err)
@@ -438,11 +406,8 @@ func TestLuaNaturalTimeHelperRejectsInvalidInput(t *testing.T) {
 		{name: "argument count", source: `wuko.helpers.parse_natural_time()`, want: "expected a value"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			runner, err := New(map[string]any{"source": test.source})
-			if err != nil {
-				t.Fatal(err)
-			}
-			_, err = runner.Run(t.Context(), step.Request{StepID: "time"})
+			runner := steptest.Build(t, New, map[string]any{"source": test.source})
+			_, err := runner.Run(t.Context(), step.Request{StepID: "time"})
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("error = %v, want %q", err, test.want)
 			}
@@ -451,7 +416,7 @@ func TestLuaNaturalTimeHelperRejectsInvalidInput(t *testing.T) {
 }
 
 func TestLuaURIHelpers(t *testing.T) {
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"source": `
 local h = wuko.helpers
 local uri = h.build_uri({
@@ -472,9 +437,6 @@ wuko.output("tags", parts.query.tag)
 wuko.output("mailto", mailto)
 `,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{StepID: "helpers", WorkflowName: "test"})
 	if err != nil {
 		t.Fatal(err)
@@ -498,11 +460,8 @@ func TestLuaURIHelperErrors(t *testing.T) {
 		{name: "build", source: `wuko.helpers.build_uri({path = "/", query = {q = 1}})`, want: "string or list"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			runner, err := New(map[string]any{"source": test.source})
-			if err != nil {
-				t.Fatal(err)
-			}
-			_, err = runner.Run(t.Context(), step.Request{StepID: "helpers", WorkflowName: "test"})
+			runner := steptest.Build(t, New, map[string]any{"source": test.source})
+			_, err := runner.Run(t.Context(), step.Request{StepID: "helpers", WorkflowName: "test"})
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("error = %v, want %q", err, test.want)
 			}
@@ -511,7 +470,7 @@ func TestLuaURIHelperErrors(t *testing.T) {
 }
 
 func TestLuaConventionalCommitHelpers(t *testing.T) {
-	runner, err := New(map[string]any{"source": `
+	runner := steptest.Build(t, New, map[string]any{"source": `
 local h = wuko.helpers
 local message = h.build_conventional_commit({
   type = "fix",
@@ -524,9 +483,6 @@ wuko.output("valid", h.is_conventional_commit(message, {task_regex = "WUKO-[0-9]
 wuko.output("invalid", h.is_conventional_commit("bad message"))
 wuko.output("nil_options", h.is_conventional_commit(message, nil))
 `})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{StepID: "helpers", WorkflowName: "test"})
 	if err != nil {
 		t.Fatal(err)
@@ -542,10 +498,7 @@ func TestLuaConventionalCommitHelperErrors(t *testing.T) {
 		`wuko.helpers.build_conventional_commit({type = "feat"})`,
 		`wuko.helpers.is_conventional_commit("feat: message", {task_regex = "("})`,
 	} {
-		runner, err := New(map[string]any{"source": source})
-		if err != nil {
-			t.Fatal(err)
-		}
+		runner := steptest.Build(t, New, map[string]any{"source": source})
 		if _, err := runner.Run(t.Context(), step.Request{StepID: "helpers"}); err == nil {
 			t.Fatalf("source %q succeeded", source)
 		}
@@ -554,13 +507,10 @@ func TestLuaConventionalCommitHelperErrors(t *testing.T) {
 
 func TestLuaHelpersExposeNoClockFunction(t *testing.T) {
 	t.Parallel()
-	runner, err := New(map[string]any{"source": `
+	runner := steptest.Build(t, New, map[string]any{"source": `
 if wuko.helpers.now ~= nil then error("clock helper exposed") end
 wuko.output("pure", true)
 `})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{StepID: "time"})
 	if err != nil {
 		t.Fatal(err)
@@ -591,11 +541,8 @@ func TestLuaHelpersRejectInvalidArguments(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			runner, err := New(map[string]any{"source": tt.source})
-			if err != nil {
-				t.Fatal(err)
-			}
-			_, err = runner.Run(t.Context(), step.Request{StepID: "helpers", WorkflowName: "test"})
+			runner := steptest.Build(t, New, map[string]any{"source": tt.source})
+			_, err := runner.Run(t.Context(), step.Request{StepID: "helpers", WorkflowName: "test"})
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("error = %v, want %q", err, tt.want)
 			}
@@ -604,7 +551,7 @@ func TestLuaHelpersRejectInvalidArguments(t *testing.T) {
 }
 
 func TestLuaTextHelpers(t *testing.T) {
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"source": `
 local h = wuko.helpers
 wuko.output("reverse_text", h.reverse_text("A👩‍❤️‍💋‍👩B"))
@@ -633,9 +580,6 @@ wuko.output("normalize_unicode", h.normalize_unicode("é", "nfc"))
 wuko.output("normalize_unicode_default", h.normalize_unicode("é"))
 `,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{StepID: "text-helpers", WorkflowName: "test"})
 	if err != nil {
 		t.Fatal(err)
@@ -672,7 +616,7 @@ wuko.output("normalize_unicode_default", h.normalize_unicode("é"))
 }
 
 func TestLuaSlugifyHelper(t *testing.T) {
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"source": `
 local h = wuko.helpers
 wuko.output("slugs", {
@@ -683,9 +627,6 @@ wuko.output("slugs", {
 })
 `,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{StepID: "slugify", WorkflowName: "test"})
 	if err != nil {
 		t.Fatal(err)
@@ -717,11 +658,8 @@ func TestLuaSlugifyHelperRejectsInvalidArguments(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			runner, err := New(map[string]any{"source": tt.source})
-			if err != nil {
-				t.Fatal(err)
-			}
-			_, err = runner.Run(t.Context(), step.Request{StepID: "slugify", WorkflowName: "test"})
+			runner := steptest.Build(t, New, map[string]any{"source": tt.source})
+			_, err := runner.Run(t.Context(), step.Request{StepID: "slugify", WorkflowName: "test"})
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("error = %v, want %q", err, tt.want)
 			}
@@ -730,12 +668,9 @@ func TestLuaSlugifyHelperRejectsInvalidArguments(t *testing.T) {
 }
 
 func TestLuaFinallyBinding(t *testing.T) {
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"source": `wuko.output("outcome", {status = wuko.finally.status, step = wuko.finally.errors[1].step_id})`,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{Bindings: map[string]any{
 		"finally": map[string]any{
 			"status": "failed",
@@ -752,7 +687,7 @@ func TestLuaFinallyBinding(t *testing.T) {
 }
 
 func TestLuaKeyValueAPI(t *testing.T) {
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"source": `
 local saved = wuko.kv.set({scope = "local", store = "prefs", key = "theme", value = {name = "dark"}})
 wuko.kv.set({scope = "local", store = "prefs", key = "nothing"})
@@ -774,9 +709,6 @@ wuko.output("result", {
 })
 `,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := runner.Run(t.Context(), step.Request{
 		StepID: "kv", WorkflowName: "test", LocalValueDir: t.TempDir(), GlobalValueDir: t.TempDir(),
 		Env: map[string]string{}, Stdout: io.Discard, Stderr: io.Discard,
@@ -806,11 +738,8 @@ func TestLuaKeyValueRejectsInvalidOptionsAndUnavailableLocalStore(t *testing.T) 
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			runner, err := New(map[string]any{"source": tt.source})
-			if err != nil {
-				t.Fatal(err)
-			}
-			_, err = runner.Run(t.Context(), step.Request{GlobalValueDir: t.TempDir(), Env: map[string]string{}, Stdout: io.Discard, Stderr: io.Discard})
+			runner := steptest.Build(t, New, map[string]any{"source": tt.source})
+			_, err := runner.Run(t.Context(), step.Request{GlobalValueDir: t.TempDir(), Env: map[string]string{}, Stdout: io.Discard, Stderr: io.Discard})
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("error = %v, want %q", err, tt.want)
 			}
@@ -832,7 +761,7 @@ func TestLuaHostHTTPFilesystemAndProcess(t *testing.T) {
 		}, nil
 	}
 
-	runner, err := New(map[string]any{
+	runner := steptest.Build(t, New, map[string]any{
 		"source": `
 local response = wuko.http.request({url = wuko.args.url, headers = { ["X-Test"] = "yes" }})
 local decoded = wuko.json.decode(response.body)
@@ -848,9 +777,6 @@ wuko.output("host", {status = response.status, text = text, size = info.size, co
 `,
 		"args": map[string]any{"url": "https://example.test/task"},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	runner.(*Runner).doHTTP = doHTTP
 	runDir := t.TempDir()
 	result, err := runner.Run(t.Context(), step.Request{StepID: "host", WorkflowName: "test", RunDir: runDir, Env: map[string]string{}, Stdout: io.Discard, Stderr: io.Discard})
@@ -870,7 +796,7 @@ wuko.output("host", {status = response.status, text = text, size = info.size, co
 }
 
 func TestLuaExecRunOutputPoliciesAndCaptureLimit(t *testing.T) {
-	runner, err := New(map[string]any{"source": `
+	runner := steptest.Build(t, New, map[string]any{"source": `
 local result = wuko.exec.run({
   command = "sh",
   args = {"-c", "printf 12345; printf abcde >&2"},
@@ -880,9 +806,6 @@ local result = wuko.exec.run({
 })
 wuko.output("command", result)
 `})
-	if err != nil {
-		t.Fatal(err)
-	}
 	var stdout, stderr bytes.Buffer
 	result, err := runner.Run(t.Context(), step.Request{
 		StepID: "lua", WorkflowName: "test", RunDir: t.TempDir(), Env: map[string]string{}, Stdout: &stdout, Stderr: &stderr,
@@ -912,11 +835,8 @@ func TestLuaExecRunValidatesOutputConfiguration(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			runner, err := New(map[string]any{"source": `wuko.exec.run({command = "true", ` + test.option + ` = "` + test.value + `"})`})
-			if err != nil {
-				t.Fatal(err)
-			}
-			_, err = runner.Run(t.Context(), step.Request{
+			runner := steptest.Build(t, New, map[string]any{"source": `wuko.exec.run({command = "true", ` + test.option + ` = "` + test.value + `"})`})
+			_, err := runner.Run(t.Context(), step.Request{
 				StepID: "lua", WorkflowName: "test", RunDir: t.TempDir(), Env: map[string]string{}, Stdout: io.Discard, Stderr: io.Discard,
 			})
 			if err == nil || !strings.Contains(err.Error(), test.want) {
@@ -939,14 +859,11 @@ func TestLuaHTTPRequestRejectsUnsafeOptionsAndOversizedBodies(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			runner, err := New(map[string]any{"source": tt.source})
-			if err != nil {
-				t.Fatal(err)
-			}
+			runner := steptest.Build(t, New, map[string]any{"source": tt.source})
 			runner.(*Runner).doHTTP = func(*http.Request, time.Duration) (*http.Response, error) {
 				return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(tt.body)}, nil
 			}
-			_, err = runner.Run(t.Context(), step.Request{StepID: "http", WorkflowName: "test", RunDir: t.TempDir(), Env: map[string]string{}, Stdout: io.Discard, Stderr: io.Discard})
+			_, err := runner.Run(t.Context(), step.Request{StepID: "http", WorkflowName: "test", RunDir: t.TempDir(), Env: map[string]string{}, Stdout: io.Discard, Stderr: io.Discard})
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("error = %v, want %q", err, tt.want)
 			}
