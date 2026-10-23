@@ -1128,6 +1128,9 @@ local result = wuko.exec.run({command = "git", args = {"status", "--short"}})
 wuko.output("clean", result.stdout == "")
 ```
 
+`wuko.http.request` takes a `timeout` in seconds (default 30), which must be positive. Response
+bodies are limited to 10 MiB, the same limit as the `http` step.
+
 `wuko.exec.run` accepts the same `stdout`, `stderr`, and `capture_limit` options as a shell step:
 
 ```lua
