@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/creack/pty"
+	"github.com/up2jj/wuko/internal/polltest"
 	"github.com/up2jj/wuko/ptyinteract"
 	"golang.org/x/term"
 )
@@ -154,7 +155,7 @@ func TestRunStopsBackgroundedChildWhenCommandExits(t *testing.T) {
 			if elapsed := time.Since(started); elapsed > terminationGracePeriod+time.Second {
 				t.Fatalf("Run() took %s", elapsed)
 			}
-			if waitForProcessGroupExit(leader, time.Second) {
+			if !polltest.Wait(time.Second, func() bool { return !processGroupAlive(leader) }) {
 				t.Fatalf("backgrounded child in group %d outlived the command", leader)
 			}
 		})
@@ -197,7 +198,7 @@ wait
 	case <-time.After(2*terminationGracePeriod + time.Second):
 		t.Fatal("Run did not return after cancellation escalation")
 	}
-	if waitForProcessGroupExit(processIDs[0], time.Second) {
+	if !polltest.Wait(time.Second, func() bool { return !processGroupAlive(processIDs[0]) }) {
 		t.Fatalf("process group %d is still alive after Run returned", processIDs[0])
 	}
 }
@@ -783,23 +784,6 @@ func (writer *processReadyWriter) Write(data []byte) (int, error) {
 		writer.once.Do(func() { writer.ready <- [2]int{parent, child} })
 	}
 	return length, nil
-}
-
-func waitForProcessGroupExit(processID int, timeout time.Duration) bool {
-	deadline := time.NewTimer(timeout)
-	defer deadline.Stop()
-	ticker := time.NewTicker(10 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		if !processGroupAlive(processID) {
-			return false
-		}
-		select {
-		case <-deadline.C:
-			return true
-		case <-ticker.C:
-		}
-	}
 }
 
 type failingWriter struct{}

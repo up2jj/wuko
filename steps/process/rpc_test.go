@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/up2jj/wuko/internal/polltest"
 	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 )
@@ -187,7 +188,7 @@ func TestRPCSessionIsPublishedOnlyAfterReadiness(t *testing.T) {
 		})
 		started <- runErr
 	}()
-	waitForCondition(t, "the worker to be registered", func() bool { return workerRegistered(registry, worker) })
+	polltest.Until(t, 5*time.Second, "the worker to be registered", func() bool { return workerRegistered(registry, worker) })
 	time.Sleep(50 * time.Millisecond)
 	if workerSession(registry, worker) != nil {
 		t.Fatal("the session was published while readiness was still pending")
@@ -239,7 +240,7 @@ func TestRPCCallReachesTheRestartedWorker(t *testing.T) {
 		if out.Outputs["result"] != "pong" {
 			t.Fatalf("call %d result = %#v", attempt, out.Outputs["result"])
 		}
-		waitForCondition(t, "the replacement worker to become callable", func() bool {
+		polltest.Until(t, 5*time.Second, "the replacement worker to become callable", func() bool {
 			session := workerSession(registry, worker)
 			return session != nil && session != previous
 		})
@@ -289,17 +290,6 @@ func workerSession(registry *rpcRegistry, id string) *rpcSession {
 		return worker.session
 	}
 	return nil
-}
-
-func waitForCondition(t *testing.T, what string, condition func() bool) {
-	t.Helper()
-	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); {
-		if condition() {
-			return
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for %s", what)
 }
 
 func TestProcessCallServesConcurrentCallersFromThePool(t *testing.T) {

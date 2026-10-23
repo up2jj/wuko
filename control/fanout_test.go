@@ -6,41 +6,45 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
 func TestFanOutBoundsConcurrencyAndCoversEveryIndex(t *testing.T) {
 	t.Parallel()
-	const count, limit = 12, 3
+	// The sleep keeps tasks overlapping; synctest makes it instant.
+	synctest.Test(t, func(t *testing.T) {
+		const count, limit = 12, 3
 
-	var active, peak atomic.Int32
-	var mu sync.Mutex
-	seen := make([]bool, count)
+		var active, peak atomic.Int32
+		var mu sync.Mutex
+		seen := make([]bool, count)
 
-	FanOut(t.Context(), count, limit, false, func(_ context.Context, index int) error {
-		current := active.Add(1)
-		defer active.Add(-1)
-		for {
-			previous := peak.Load()
-			if current <= previous || peak.CompareAndSwap(previous, current) {
-				break
+		FanOut(t.Context(), count, limit, false, func(_ context.Context, index int) error {
+			current := active.Add(1)
+			defer active.Add(-1)
+			for {
+				previous := peak.Load()
+				if current <= previous || peak.CompareAndSwap(previous, current) {
+					break
+				}
+			}
+			time.Sleep(time.Millisecond)
+			mu.Lock()
+			seen[index] = true
+			mu.Unlock()
+			return nil
+		})
+
+		for index, ran := range seen {
+			if !ran {
+				t.Errorf("index %d never ran", index)
 			}
 		}
-		time.Sleep(time.Millisecond)
-		mu.Lock()
-		seen[index] = true
-		mu.Unlock()
-		return nil
-	})
-
-	for index, ran := range seen {
-		if !ran {
-			t.Errorf("index %d never ran", index)
+		if got := peak.Load(); got > limit {
+			t.Errorf("peak concurrency = %d, want <= %d", got, limit)
 		}
-	}
-	if got := peak.Load(); got > limit {
-		t.Errorf("peak concurrency = %d, want <= %d", got, limit)
-	}
+	})
 }
 
 func TestFanOutFailFastStopsAdmittingAfterAnError(t *testing.T) {

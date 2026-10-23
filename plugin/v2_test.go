@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/up2jj/wuko/helper"
+	"github.com/up2jj/wuko/internal/polltest"
 	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/secret"
 	"github.com/up2jj/wuko/step"
@@ -325,10 +326,7 @@ func TestV2ServiceReadinessAndPostReadyFailure(t *testing.T) {
 	if result.Outputs["url"] != "http://127.0.0.1:43125" || !launcher.options.KeepAlive || !launcher.options.FailFast || !launcher.options.ExitOnEnd {
 		t.Fatalf("result = %#v, options = %#v", result, launcher.options)
 	}
-	deadline := time.Now().Add(time.Second)
-	for stdout.String() != "after-ready" && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
-	}
+	polltest.Wait(time.Second, func() bool { return stdout.String() == "after-ready" })
 	if stdout.String() != "after-ready" {
 		t.Fatalf("late service output = %q", stdout.String())
 	}

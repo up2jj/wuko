@@ -25,6 +25,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/up2jj/wuko/internal/archivetest"
+	"github.com/up2jj/wuko/internal/polltest"
 	"github.com/up2jj/wuko/internal/testhome"
 	pluginpkg "github.com/up2jj/wuko/plugin"
 	"github.com/up2jj/wuko/tui"
@@ -391,10 +392,7 @@ func TestGoPluginScaffoldCancelsExecutorProcessGroup(t *testing.T) {
 			break
 		}
 	}
-	deadline := time.Now().Add(2 * time.Second)
-	for syscall.Kill(childPID, 0) == nil && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
+	polltest.Wait(2*time.Second, func() bool { return syscall.Kill(childPID, 0) != nil })
 	if err := syscall.Kill(childPID, 0); !errors.Is(err, syscall.ESRCH) {
 		t.Fatalf("executor descendant %d survived cancellation: %v", childPID, err)
 	}

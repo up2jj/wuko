@@ -20,6 +20,7 @@ import (
 	"github.com/moby/moby/api/types/mount"
 
 	"github.com/up2jj/wuko/executor"
+	"github.com/up2jj/wuko/internal/polltest"
 	"github.com/up2jj/wuko/process"
 )
 
@@ -506,13 +507,11 @@ func TestDockerServiceScriptsRecordAndStopTheService(t *testing.T) {
 			defer func() { _ = launch.Process.Kill() }()
 
 			recorded := ""
-			for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); {
-				if data, err := os.ReadFile(service.pidPath); err == nil && len(strings.TrimSpace(string(data))) > 0 {
-					recorded = strings.TrimSpace(string(data))
-					break
-				}
-				time.Sleep(10 * time.Millisecond)
-			}
+			polltest.Wait(10*time.Second, func() bool {
+				data, err := os.ReadFile(service.pidPath)
+				recorded = strings.TrimSpace(string(data))
+				return err == nil && recorded != ""
+			})
 			// exec replaces the shell, so the recorded PID is the service itself.
 			if recorded != strconv.Itoa(launch.Process.Pid) {
 				t.Fatalf("recorded pid = %q, want the service pid %d", recorded, launch.Process.Pid)

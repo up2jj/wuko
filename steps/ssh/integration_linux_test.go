@@ -22,6 +22,7 @@ import (
 
 	"github.com/up2jj/wuko/engine"
 	"github.com/up2jj/wuko/executor"
+	"github.com/up2jj/wuko/internal/polltest"
 	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/step"
@@ -267,7 +268,7 @@ steps:
 			_, err := s.Run(ctx, process.Options{Command: "sh", Args: []string{"-c", `sleep 300 & echo $! > "$1"; wait`, "sh", pidFile}})
 			done <- err
 		}()
-		waitFor(t, func() bool { _, err := os.Stat(pidFile); return err == nil })
+		polltest.Until(t, 10*time.Second, "the SSH fixture", func() bool { _, err := os.Stat(pidFile); return err == nil })
 		cancel()
 		if err := <-done; !errors.Is(err, context.Canceled) {
 			t.Fatalf("cancellation = %v", err)
@@ -291,7 +292,7 @@ steps:
 			_, err := s.Run(ctx, process.Options{Command: "sh", Args: []string{"-c", `trap 'sleep 0.3; touch "$2"; exit 0' TERM; echo $$ > "$1"; while :; do sleep 0.05; done`, "sh", pidFile, marker}})
 			done <- err
 		}()
-		waitFor(t, func() bool { _, err := os.Stat(pidFile); return err == nil })
+		polltest.Until(t, 10*time.Second, "the SSH fixture", func() bool { _, err := os.Stat(pidFile); return err == nil })
 		cancel()
 		if err := <-done; !errors.Is(err, context.Canceled) {
 			t.Fatalf("graceful cancellation = %v", err)
@@ -308,7 +309,7 @@ steps:
 			_, err := s.Run(t.Context(), process.Options{Command: "sh", Args: []string{"-c", `echo $$ > "$1"; sleep 300`, "sh", pidFile}})
 			done <- err
 		}()
-		waitFor(t, func() bool { _, err := os.Stat(pidFile); return err == nil })
+		polltest.Until(t, 10*time.Second, "the SSH fixture", func() bool { _, err := os.Stat(pidFile); return err == nil })
 		s.stopMaster()
 		if err := <-done; err == nil || !strings.Contains(err.Error(), "remote termination could not be confirmed") {
 			t.Fatalf("lost transport = %v", err)
@@ -331,21 +332,6 @@ func hostEnvironment() map[string]string {
 	return values
 }
 
-func waitFor(t *testing.T, ready func() bool) {
-	t.Helper()
-	timer := time.NewTimer(10 * time.Second)
-	defer timer.Stop()
-	ticker := time.NewTicker(20 * time.Millisecond)
-	defer ticker.Stop()
-	for !ready() {
-		select {
-		case <-timer.C:
-			t.Fatal("timed out waiting for SSH fixture")
-		case <-ticker.C:
-		}
-	}
-}
-
 func assertProcessStopped(t *testing.T, file string) {
 	t.Helper()
 	data, err := os.ReadFile(file)
@@ -356,7 +342,7 @@ func assertProcessStopped(t *testing.T, file string) {
 	if err != nil || pid <= 1 {
 		t.Fatalf("invalid child PID %q", data)
 	}
-	waitFor(t, func() bool {
+	polltest.Until(t, 10*time.Second, "the SSH fixture", func() bool {
 		stat, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
 		return errors.Is(err, fs.ErrNotExist) || strings.HasPrefix(string(stat[strings.LastIndex(string(stat), ")")+1:]), " Z")
 	})
@@ -398,7 +384,7 @@ func sshdFixture(t *testing.T) string {
 			t.Log(log.String())
 		}
 	})
-	waitFor(t, func() bool {
+	polltest.Until(t, 10*time.Second, "the SSH fixture", func() bool {
 		connection, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 100*time.Millisecond)
 		if err == nil {
 			_ = connection.Close()

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -170,32 +171,31 @@ func TestBackgroundSupervisorExternalCancellation(t *testing.T) {
 
 func TestBackgroundSupervisorCountsOnlyRunningJobs(t *testing.T) {
 	t.Parallel()
-	supervisor := newBackgroundSupervisor(t.Context())
-	release := make(chan struct{})
-	if err := supervisor.start("short", "test", func(context.Context) error { return nil }); err != nil {
-		t.Fatal(err)
-	}
-	if err := supervisor.start("long", "test", func(context.Context) error {
-		<-release
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	deadline := time.Now().Add(5 * time.Second)
-	for supervisor.count() != 1 {
-		if time.Now().After(deadline) {
-			t.Fatalf("count = %d after the short job finished, want 1", supervisor.count())
+	synctest.Test(t, func(t *testing.T) {
+		supervisor := newBackgroundSupervisor(t.Context())
+		release := make(chan struct{})
+		if err := supervisor.start("short", "test", func(context.Context) error { return nil }); err != nil {
+			t.Fatal(err)
 		}
-		time.Sleep(time.Millisecond)
-	}
-	supervisor.seal()
-	close(release)
-	if err := supervisor.wait(); err != nil {
-		t.Fatal(err)
-	}
-	if count := supervisor.count(); count != 0 {
-		t.Fatalf("count = %d after join, want 0", count)
-	}
+		if err := supervisor.start("long", "test", func(context.Context) error {
+			<-release
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		synctest.Wait()
+		if count := supervisor.count(); count != 1 {
+			t.Fatalf("count = %d after the short job finished, want 1", count)
+		}
+		supervisor.seal()
+		close(release)
+		if err := supervisor.wait(); err != nil {
+			t.Fatal(err)
+		}
+		if count := supervisor.count(); count != 0 {
+			t.Fatalf("count = %d after join, want 0", count)
+		}
+	})
 }
 
 // A panicking job must fail the run rather than end the process. Jobs run in their own
