@@ -14,6 +14,7 @@ import (
 	"time"
 
 	toml "github.com/pelletier/go-toml/v2"
+	"github.com/up2jj/wuko/expression"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -27,13 +28,13 @@ func TestStructuredFormatsDecodeJSONCompatibleValues(t *testing.T) {
 		{
 			name: "json", format: "json",
 			input: `{"name":"wukó","items":[1,true,null]}`,
-			want:  map[string]any{"name": "wukó", "items": []any{json.Number("1"), true, nil}},
+			want:  map[string]any{"name": "wukó", "items": []any{int64(1), true, nil}},
 		},
 		{
 			name: "yaml", format: "yaml",
 			input: "name: wukó\nitems: [1, true, null]\nreleased: 2026-08-26T12:30:00Z\n",
 			want: map[string]any{
-				"name": "wukó", "items": []any{json.Number("1"), true, nil},
+				"name": "wukó", "items": []any{int64(1), true, nil},
 				"released": "2026-08-26T12:30:00Z",
 			},
 		},
@@ -41,7 +42,7 @@ func TestStructuredFormatsDecodeJSONCompatibleValues(t *testing.T) {
 			name: "toml", format: "toml",
 			input: "name = \"wukó\"\nreleased = 2026-08-26\nitems = [1, 2]\n",
 			want: map[string]any{
-				"name": "wukó", "released": "2026-08-26", "items": []any{json.Number("1"), json.Number("2")},
+				"name": "wukó", "released": "2026-08-26", "items": []any{int64(1), int64(2)},
 			},
 		},
 	}
@@ -55,13 +56,30 @@ func TestStructuredFormatsDecodeJSONCompatibleValues(t *testing.T) {
 	}
 }
 
+// Decoded numbers reach workflow state as plain numbers, so expressions can order them and do
+// arithmetic; integers stay exact rather than rounding through float64.
+func TestDecodedNumbersAreUsableInExpressions(t *testing.T) {
+	result := runFrom(t, "json", `{"score": 1.50, "count": 2, "big": 9007199254740993, "huge": 18446744073709551615}`, nil)
+	value := result.Outputs["value"].(map[string]any)
+	want := map[string]any{"score": 1.5, "count": int64(2), "big": int64(9007199254740993), "huge": uint64(18446744073709551615)}
+	if !reflect.DeepEqual(value, want) {
+		t.Fatalf("value = %#v, want %#v", value, want)
+	}
+	for _, source := range []string{"value.score > 1", "value.count * 2 == 4"} {
+		matched, err := expression.Eval(source, map[string]any{"value": value})
+		if err != nil || matched != true {
+			t.Fatalf("%s = %v, %v", source, matched, err)
+		}
+	}
+}
+
 func TestStructuredFormatsAcceptTopLevelScalarsAndNull(t *testing.T) {
 	tests := []struct {
 		format string
 		input  string
 		want   any
 	}{
-		{format: "json", input: "42", want: json.Number("42")},
+		{format: "json", input: "42", want: int64(42)},
 		{format: "json", input: "null", want: nil},
 		{format: "yaml", input: "true\n", want: true},
 		{format: "yaml", input: "null\n", want: nil},

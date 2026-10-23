@@ -376,6 +376,8 @@ follow `working_directory` scopes:
 The default `max_bytes` is `1MiB`. Inputs larger than the limit fail before parsing. JSON and YAML
 may contain any single structured value; multiple JSON values or YAML documents are rejected. TOML
 returns its root table. All structured results are normalized to JSON-compatible Wuko values.
+Numbers become plain numbers that expressions can compare and calculate with: an integer stays
+exact as a 64-bit integer, and any other number becomes a float.
 
 For command output with one item per line, use `lines`. CRLF and LF endings are normalized, a final
 line terminator does not add an empty item, and the optional filters apply in order:

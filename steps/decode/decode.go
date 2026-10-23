@@ -18,6 +18,7 @@ import (
 
 	toml "github.com/pelletier/go-toml/v2"
 	"github.com/up2jj/wuko/step"
+	"github.com/up2jj/wuko/workflow"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -81,7 +82,10 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 	if err := ctx.Err(); err != nil {
 		return step.Result{}, err
 	}
-	return step.Result{Outputs: map[string]any{"value": value}}, nil
+	// Numbers are decoded as json.Number so no integer rounds through float64, but workflow
+	// state carries plain numbers: an expression compares json.Number values as strings, or
+	// refuses to order them at all.
+	return step.Result{Outputs: map[string]any{"value": workflow.RuntimeValue(value)}}, nil
 }
 
 func (r *Runner) validate(resolved bool) error {
