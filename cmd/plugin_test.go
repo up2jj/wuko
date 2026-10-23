@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/up2jj/wuko/internal/testhome"
 	pluginpkg "github.com/up2jj/wuko/plugin"
 	"github.com/up2jj/wuko/tui"
 	"github.com/up2jj/wuko/workflow"
@@ -43,15 +44,15 @@ func TestMain(main *testing.M) {
 		runCommandPluginHelper()
 		os.Exit(0)
 	}
-	cacheRoot, err := os.MkdirTemp("", "wuko-plugin-test-cache-")
+	root, err := testhome.Setup()
 	if err != nil {
 		panic(err)
 	}
-	if err := os.Setenv("WUKO_PLUGIN_CACHE_DIR", cacheRoot); err != nil {
+	if err := os.Setenv("WUKO_PLUGIN_CACHE_DIR", filepath.Join(root, "plugin-cache")); err != nil {
 		panic(err)
 	}
 	code := main.Run()
-	_ = os.RemoveAll(cacheRoot)
+	_ = os.RemoveAll(root)
 	os.Exit(code)
 }
 

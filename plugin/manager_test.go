@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/up2jj/wuko/internal/testhome"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
 )
@@ -26,15 +27,15 @@ func TestMain(main *testing.M) {
 		runProtocolHelper()
 		os.Exit(0)
 	}
-	cacheRoot, err := os.MkdirTemp("", "wuko-plugin-test-cache-")
+	root, err := testhome.Setup()
 	if err != nil {
 		panic(err)
 	}
-	if err := os.Setenv("WUKO_PLUGIN_CACHE_DIR", cacheRoot); err != nil {
+	if err := os.Setenv("WUKO_PLUGIN_CACHE_DIR", filepath.Join(root, "plugin-cache")); err != nil {
 		panic(err)
 	}
 	code := main.Run()
-	_ = os.RemoveAll(cacheRoot)
+	_ = os.RemoveAll(root)
 	os.Exit(code)
 }
 
