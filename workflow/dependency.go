@@ -124,8 +124,8 @@ func validateDependencyReferences(node *DependencyNode) error {
 
 func definitionDependencyReferences(definition *Definition) []dependencyOutputReference {
 	var references []dependencyOutputReference
-	for _, output := range definition.Outputs {
-		references = append(references, expressionDependencyReferences(output.Value)...)
+	for _, name := range slices.Sorted(maps.Keys(definition.Outputs)) {
+		references = append(references, expressionDependencyReferences(definition.Outputs[name].Value)...)
 	}
 	references = append(references, stepDependencyReferences(definition.Steps)...)
 	return append(references, stepDependencyReferences(definition.Finally)...)

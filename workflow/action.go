@@ -11,12 +11,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -713,7 +715,9 @@ func validateAction(action *Action, parentRenderer *Renderer) error {
 	if err != nil {
 		return err
 	}
-	for name, input := range action.Inputs {
+	// Sorted iteration keeps the first reported problem stable from run to run.
+	for _, name := range slices.Sorted(maps.Keys(action.Inputs)) {
+		input := action.Inputs[name]
 		if !identifierPattern.MatchString(name) {
 			return fmt.Errorf("invalid input name %q", name)
 		}
@@ -732,7 +736,8 @@ func validateAction(action *Action, parentRenderer *Renderer) error {
 			return fmt.Errorf("input %q default is not a YAML/JSON-compatible value", name)
 		}
 	}
-	for name, output := range action.Outputs {
+	for _, name := range slices.Sorted(maps.Keys(action.Outputs)) {
+		output := action.Outputs[name]
 		if !identifierPattern.MatchString(name) {
 			return fmt.Errorf("invalid output name %q", name)
 		}
@@ -771,12 +776,12 @@ func validateActionReturnContracts(steps []Step, outputs map[string]ActionOutput
 		if workflowStep.Return.To != "" {
 			return fmt.Errorf("return destination %q is not supported in composite actions", workflowStep.Return.To)
 		}
-		for name := range outputs {
+		for _, name := range slices.Sorted(maps.Keys(outputs)) {
 			if _, exists := workflowStep.Return.Outputs[name]; !exists {
 				return fmt.Errorf("return outputs do not match action outputs: missing %q", name)
 			}
 		}
-		for name := range workflowStep.Return.Outputs {
+		for _, name := range slices.Sorted(maps.Keys(workflowStep.Return.Outputs)) {
 			if _, exists := outputs[name]; !exists {
 				return fmt.Errorf("return outputs do not match action outputs: unexpected %q", name)
 			}

@@ -886,3 +886,19 @@ func TestActionWorkingDirectoryScopeKeepsInvocationProvenance(t *testing.T) {
 		t.Fatalf("source data mutated: %#v", data["run"])
 	}
 }
+
+func TestValidateActionReportsTheSameProblemEveryRun(t *testing.T) {
+	action := &Action{
+		Version: 1, Name: "deterministic",
+		Inputs: map[string]ActionInput{
+			"b-input": {Type: "string"}, "c-input": {Type: "string"}, "a-input": {Type: "string"},
+			"d-input": {Type: "string"}, "e-input": {Type: "string"},
+		},
+		Steps: []Step{{ID: "run", Type: "shell", With: map[string]any{"command": "true"}}},
+	}
+	for range 50 {
+		if err := validateAction(action, nil); err == nil || err.Error() != `invalid input name "a-input"` {
+			t.Fatalf("error = %v, want the first invalid name in sorted order", err)
+		}
+	}
+}
