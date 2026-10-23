@@ -125,6 +125,15 @@ func (m pathPickerModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m.updateKey(message)
 	}
+	if m.filtering {
+		query := m.filter.Value()
+		var command tea.Cmd
+		m.filter, command = m.filter.Update(message)
+		if m.filter.Value() != query {
+			m.refreshVisible()
+		}
+		return m, command
+	}
 	return m, nil
 }
 

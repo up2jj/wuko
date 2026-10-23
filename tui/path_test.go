@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -173,6 +174,38 @@ func TestPathPickerPatternAndEscapedSymlinkEntriesAreDisabled(t *testing.T) {
 	escaped := model.entries[pathEntryIndex(model.entries, "outside.go")]
 	if escaped.selectable || !strings.Contains(escaped.description, "outside root") {
 		t.Fatalf("escaped entry = %#v", escaped)
+	}
+}
+
+func TestPathPickerPastesFilterOnlyWhileFiltering(t *testing.T) {
+	model := mustPathModel(t, PathPickerConfig{Root: pathPickerTree(t), Kind: "file", Required: true})
+	updated, _ := model.Update(tea.PasteMsg{Content: "z.txt"})
+	model = updated.(pathPickerModel)
+	if model.filter.Value() != "" {
+		t.Fatal("paste outside filtering changed the query")
+	}
+	updated, _ = model.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
+	model = updated.(pathPickerModel)
+	updated, _ = model.Update(tea.PasteMsg{Content: "z.txt"})
+	model = updated.(pathPickerModel)
+	if model.filter.Value() != "z.txt" || len(model.visible) != 1 || model.visible[0].name != "z.txt" {
+		t.Fatalf("filter = %q, visible = %#v", model.filter.Value(), model.visible)
+	}
+	updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = updated.(pathPickerModel)
+	updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if got := updated.(pathPickerModel).result; !slices.Equal(got, []string{"z.txt"}) {
+		t.Fatalf("result = %#v", got)
+	}
+}
+
+func TestPathPickerFilterForwardsCursorMessages(t *testing.T) {
+	model := mustPathModel(t, PathPickerConfig{Root: pathPickerTree(t), Kind: "file"})
+	updated, _ := model.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
+	model = updated.(pathPickerModel)
+	_, command := model.Update(textinput.Blink())
+	if command == nil {
+		t.Fatal("cursor initialization did not schedule a blink")
 	}
 }
 
