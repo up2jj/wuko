@@ -2,9 +2,11 @@ package tui
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
+	"charm.land/bubbles/v2/cursor"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 )
@@ -81,6 +83,42 @@ func TestTextModelCancelsWithCtrlC(t *testing.T) {
 	model = updated.(textModel)
 	if command == nil || !model.cancelled {
 		t.Fatalf("cancelled = %v, command nil = %v", model.cancelled, command == nil)
+	}
+}
+
+func TestTextModelKeepsRequiredErrorUntilValueChanges(t *testing.T) {
+	for _, mode := range []textinput.EchoMode{textinput.EchoNormal, textinput.EchoPassword} {
+		for _, paste := range []bool{false, true} {
+			t.Run(fmt.Sprintf("echo=%d/paste=%t", mode, paste), func(t *testing.T) {
+				model := newTextModel("Value", "", true, mode, nil)
+				updated, _ := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+				model = updated.(textModel)
+				for _, message := range []tea.Msg{
+					cursor.BlinkMsg{},
+					tea.WindowSizeMsg{Width: 40, Height: 12},
+					tea.KeyPressMsg{Code: tea.KeyLeft},
+				} {
+					updated, _ = model.Update(message)
+					model = updated.(textModel)
+					if model.err != "a value is required" || !strings.Contains(model.View().Content, model.err) {
+						t.Fatalf("after %T: error = %q, want visible required error", message, model.err)
+					}
+				}
+				var edit tea.Msg = tea.KeyPressMsg{Code: 'x', Text: "x"}
+				if paste {
+					edit = tea.PasteMsg{Content: "x"}
+				}
+				updated, _ = model.Update(edit)
+				model = updated.(textModel)
+				if model.err != "" || model.input.Value() != "x" {
+					t.Fatalf("after edit: error = %q, value = %q", model.err, model.input.Value())
+				}
+				updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+				if !updated.(textModel).done {
+					t.Fatal("valid value did not submit")
+				}
+			})
+		}
 	}
 }
 

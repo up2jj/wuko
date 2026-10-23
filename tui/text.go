@@ -70,9 +70,12 @@ func (m textModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 	}
+	previousValue := m.input.Value()
 	var command tea.Cmd
 	m.input, command = m.input.Update(message)
-	if m.err != "" {
+	// Background events and cursor movement must not dismiss an error before
+	// the user changes the value that caused it. Pasting is an edit too.
+	if m.err != "" && m.input.Value() != previousValue {
 		m.err = ""
 		if m.input.Err != nil {
 			m.err = m.input.Err.Error()
