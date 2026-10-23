@@ -10,7 +10,7 @@ import (
 	"slices"
 
 	"github.com/up2jj/wuko/workflow"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 const ManifestPath = ".wuko/git-hooks.yaml"

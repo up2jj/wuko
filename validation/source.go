@@ -9,7 +9,7 @@ import (
 	"strings"
 	"sync"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 // SourceIndex maps stable YAML paths to exact source spans and redacted lines.

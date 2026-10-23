@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"testing"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 // FuzzDecodeResolveSubmit checks that form declarations and browser submissions, however

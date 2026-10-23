@@ -12,7 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/theory/jsonpath/spec"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 // patchMutations applies semantic mutations through the syntax model for the

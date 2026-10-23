@@ -14,7 +14,7 @@ import (
 
 	"github.com/up2jj/wuko/internal/filelock"
 	"github.com/up2jj/wuko/workflow"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 const LockfileName = "wuko.lock"

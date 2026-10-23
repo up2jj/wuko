@@ -18,7 +18,7 @@ import (
 	"github.com/up2jj/wuko/expression"
 	"github.com/up2jj/wuko/helper"
 	"github.com/up2jj/wuko/secret"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 const (

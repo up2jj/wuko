@@ -15,7 +15,7 @@ import (
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/provider"
 	"github.com/up2jj/wuko/step"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 func TestNewDiffValidatesConfiguration(t *testing.T) {

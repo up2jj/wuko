@@ -15,8 +15,8 @@ import (
 
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
+	"go.yaml.in/yaml/v3"
 	"golang.org/x/sync/errgroup"
-	"gopkg.in/yaml.v3"
 )
 
 const (

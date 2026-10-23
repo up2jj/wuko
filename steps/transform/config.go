@@ -12,7 +12,7 @@ import (
 	"github.com/expr-lang/expr/vm"
 	wukoexpr "github.com/up2jj/wuko/expression"
 	"github.com/up2jj/wuko/step"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 type valueKind uint8

@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/step"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 // FuzzBuiltinStepConfigs builds every built-in step type from arbitrary `with:` maps. It only

@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/up2jj/wuko/validation"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 // TargetDefinition overrides workflow execution metadata for one named target.

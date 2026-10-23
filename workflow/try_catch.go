@@ -3,7 +3,7 @@ package workflow
 import (
 	"fmt"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 // TryBlock is the primary sequence of a named recovery control.

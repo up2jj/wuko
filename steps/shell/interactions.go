@@ -8,7 +8,7 @@ import (
 
 	"github.com/up2jj/wuko/ptyinteract"
 	"github.com/up2jj/wuko/step"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 type interactionsConfig struct {

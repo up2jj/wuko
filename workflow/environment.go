@@ -7,7 +7,7 @@ import (
 	"slices"
 	"strings"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 // ScopedEnvironment is an ordered sequence of environment changes. A YAML map is

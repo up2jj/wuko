@@ -17,7 +17,7 @@ import (
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/provider"
 	"github.com/up2jj/wuko/workflow"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 // TemplateRenderer validates and renders text with the current workflow or action template set

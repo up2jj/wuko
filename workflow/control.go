@@ -7,7 +7,7 @@ import (
 
 	controlpkg "github.com/up2jj/wuko/control"
 	"github.com/up2jj/wuko/validation"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 // LoopDelay is either a positive literal duration or an Expr expression that returns

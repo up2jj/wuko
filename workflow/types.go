@@ -18,7 +18,7 @@ import (
 	workflowschedule "github.com/up2jj/wuko/schedule"
 	"github.com/up2jj/wuko/secret"
 	"github.com/up2jj/wuko/validation"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 var (

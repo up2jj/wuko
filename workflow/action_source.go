@@ -5,7 +5,7 @@ import (
 	"net/url"
 	"strings"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 // ActionSource identifies a Wuko action loaded from HTTPS, a GitHub repository,

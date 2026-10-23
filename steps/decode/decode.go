@@ -18,7 +18,7 @@ import (
 
 	toml "github.com/pelletier/go-toml/v2"
 	"github.com/up2jj/wuko/step"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 const defaultMaxBytes = "1MiB"

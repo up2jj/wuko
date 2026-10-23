@@ -12,7 +12,7 @@ import (
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/steps/shell"
 	"github.com/up2jj/wuko/workflow"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 func scopedEnvironment(t *testing.T, body string) workflow.ScopedEnvironment {

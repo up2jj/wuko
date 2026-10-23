@@ -34,11 +34,11 @@ require (
 	github.com/theory/jsonpath v0.12.2
 	github.com/yuin/goldmark/v2 v2.1.8
 	github.com/yuin/gopher-lua v1.1.2
+	go.yaml.in/yaml/v3 v3.0.5
 	golang.org/x/sync v0.24.0
 	golang.org/x/sys v0.49.0
 	golang.org/x/term v0.47.0
 	golang.org/x/text v0.43.0
-	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -83,5 +83,4 @@ require (
 	go.opentelemetry.io/otel v1.46.0 // indirect
 	go.opentelemetry.io/otel/metric v1.46.0 // indirect
 	go.opentelemetry.io/otel/trace v1.46.0 // indirect
-	go.yaml.in/yaml/v3 v3.0.5 // indirect
 )

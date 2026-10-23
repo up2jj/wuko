@@ -9,7 +9,7 @@ import (
 	"sync"
 
 	"github.com/up2jj/wuko/step"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 // Batch is bounded source-owned coalescing state. The observe scheduler controls when
