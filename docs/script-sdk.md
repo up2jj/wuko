@@ -211,3 +211,6 @@ process argument size limits, which may be substantially smaller than the bridge
 JavaScript editors can use the supplied [TypeScript declarations](../scriptsdk/node.d.ts).
 The [bridge protocol](script-sdk-protocol.md) is language-independent, allowing a future Python
 adapter to share the same host implementation.
+
+See [bridge benchmarks](script-sdk-benchmarks.md) for measured setup, invocation,
+and SDK-call costs, including the command to reproduce them.

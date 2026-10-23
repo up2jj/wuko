@@ -1,0 +1,23 @@
+go build -o wuko ./
+WUKO_BENCH_EXECUTABLE="/Users/up2jj/Projekty/wuko/wuko" go test ./scriptsdk -run '^$' -bench 'Benchmark(BridgeLifecycle|ScriptInvocation|SDKCall)$' -benchtime=1s -count=5 -bench BenchmarkSDKCall/node -benchtime=2s
+goos: darwin
+goarch: arm64
+pkg: github.com/up2jj/wuko/scriptsdk
+cpu: Apple M1 Max
+BenchmarkSDKCall/node/output-10         	      21	 108511435 ns/op	    244092 ns/call
+BenchmarkSDKCall/node/output-10         	      21	 107424397 ns/op	    238369 ns/call
+BenchmarkSDKCall/node/output-10         	      21	 108913657 ns/op	    243317 ns/call
+BenchmarkSDKCall/node/output-10         	      20	 112470458 ns/op	    250246 ns/call
+BenchmarkSDKCall/node/output-10         	      20	 111279781 ns/op	    251966 ns/call
+BenchmarkSDKCall/node/set_var-10        	      21	 108551827 ns/op	    245593 ns/call
+BenchmarkSDKCall/node/set_var-10        	      21	 108223613 ns/op	    240538 ns/call
+BenchmarkSDKCall/node/set_var-10        	      20	 111505115 ns/op	    248569 ns/call
+BenchmarkSDKCall/node/set_var-10        	      21	 109699286 ns/op	    247068 ns/call
+BenchmarkSDKCall/node/set_var-10        	      21	 109791540 ns/op	    249648 ns/call
+BenchmarkSDKCall/node/helper-10         	      20	 114712102 ns/op	    271954 ns/call
+BenchmarkSDKCall/node/helper-10         	      20	 135442633 ns/op	    308373 ns/call
+BenchmarkSDKCall/node/helper-10         	      18	 126978778 ns/op	    322920 ns/call
+BenchmarkSDKCall/node/helper-10         	      18	 136037310 ns/op	    368900 ns/call
+BenchmarkSDKCall/node/helper-10         	      21	 125918385 ns/op	    321697 ns/call
+PASS
+ok  	github.com/up2jj/wuko/scriptsdk	35.813s

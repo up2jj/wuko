@@ -22,6 +22,10 @@ test:
 test-short:
     go test -short ./...
 
+# Measure script bridge lifecycle, runtime invocation and sequential SDK calls.
+bench-script-sdk *args: build
+    WUKO_BENCH_EXECUTABLE="{{justfile_directory()}}/wuko" go test ./scriptsdk -run '^$' -bench 'Benchmark(BridgeLifecycle|ScriptInvocation|SDKCall)$' -benchtime=1s -count=5 {{args}}
+
 # Run the test suite under the race detector (what CI and the pre-push hook run).
 test-race:
     go test -race ./...
