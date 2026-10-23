@@ -44,12 +44,18 @@ func (matcher *logMatcher) add(data []byte) {
 	}
 }
 
+// maxPendingLine bounds the bytes held while waiting for a newline. Output that never ends a
+// line, such as a progress bar redrawn with carriage returns, is written through once it
+// exceeds the limit and continues without a repeated prefix.
+const maxPendingLine = 64 << 10
+
 type linePrefixWriter struct {
 	mu      sync.Mutex
 	writer  io.Writer
 	prefix  []byte
 	matcher *logMatcher
 	pending []byte
+	midLine bool
 }
 
 func prefixedWriter(writer io.Writer, label string, matcher *logMatcher) io.Writer {
@@ -68,14 +74,36 @@ func (writer *linePrefixWriter) Write(data []byte) (int, error) {
 	for {
 		index := bytes.IndexByte(writer.pending, '\n')
 		if index < 0 {
-			return inputLength, nil
+			break
 		}
-		line := append(append(make([]byte, 0, len(writer.prefix)+index+1), writer.prefix...), writer.pending[:index+1]...)
-		if _, err := writer.writer.Write(line); err != nil {
+		// Consume the line before writing it, so a failed write is not repeated next time.
+		line := writer.pending[:index+1]
+		writer.pending = writer.pending[index+1:]
+		if err := writer.emit(line, false); err != nil {
 			return inputLength, err
 		}
-		writer.pending = writer.pending[index+1:]
 	}
+	if len(writer.pending) > maxPendingLine {
+		partial := writer.pending
+		writer.pending = nil
+		if err := writer.emit(partial, true); err != nil {
+			return inputLength, err
+		}
+	}
+	return inputLength, nil
+}
+
+// emit writes data, prefixed unless it continues a partial line already written.
+func (writer *linePrefixWriter) emit(data []byte, partial bool) error {
+	var line []byte
+	if writer.midLine {
+		line = data
+	} else {
+		line = append(append(make([]byte, 0, len(writer.prefix)+len(data)), writer.prefix...), data...)
+	}
+	writer.midLine = partial
+	_, err := writer.writer.Write(line)
+	return err
 }
 
 func (writer *linePrefixWriter) Flush() error {
@@ -84,8 +112,7 @@ func (writer *linePrefixWriter) Flush() error {
 	if len(writer.pending) == 0 {
 		return nil
 	}
-	line := append(append(make([]byte, 0, len(writer.prefix)+len(writer.pending)), writer.prefix...), writer.pending...)
+	partial := writer.pending
 	writer.pending = nil
-	_, err := writer.writer.Write(line)
-	return err
+	return writer.emit(partial, false)
 }
