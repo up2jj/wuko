@@ -25,7 +25,7 @@ Follow idiomatic Go and let `gofmt` control tabs and layout. Keep packages flat 
 
 ## Testing Guidelines
 
-Tests use the standard `testing` package and are colocated as `*_test.go`. Name tests `TestBehaviorScenario` and prefer table-driven subtests. Use `t.TempDir()`, injected dependencies, and buffers to isolate filesystem and CLI behavior. Add regression tests for behavior changes. There is no coverage threshold, but `go test ./...`, `go vet ./...`, staticcheck, and a clean `gofmt -l .` are required by CI.
+Tests use the standard `testing` package and are colocated as `*_test.go`. Name tests `TestBehaviorScenario` and prefer table-driven subtests. Use `t.TempDir()`, injected dependencies, and buffers to isolate filesystem and CLI behavior. A package whose tests run `git`, launch plugins, or build the real root command calls `testhome.Run` (`internal/testhome`) from `TestMain`, so it never touches the developer's home directory or Git config. Call `t.Parallel()` unless the test changes process-wide state (environment, working directory, signals, package variables). Add regression tests for behavior changes. There is no coverage threshold, but `go test ./...`, `go vet ./...`, staticcheck, and a clean `gofmt -l .` are required by CI.
 
 ## Commit & Pull Request Guidelines
 
