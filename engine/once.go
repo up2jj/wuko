@@ -125,27 +125,43 @@ func (e *Engine) executeOnce(ctx context.Context, definition *workflow.Definitio
 	// walking the wait-for graph sees the edge, and collect those claim paths so this
 	// side sees the contender's. Whichever of the two looks second refuses; announcing
 	// before looking is what stops both from missing each other and blocking.
+	// Concurrent branches share their ancestors' claims, so each wait adds its own edge
+	// and withdraws only that one, leaving a sibling's announced wait in place.
 	announce := wait && len(options.onceClaims) > 0
 	held := make([]string, 0, len(options.onceClaims))
+	claimPath := store.ClaimPath(key)
+	var announced []*storepkg.Claim
+	withdraw := func() error {
+		var errs []error
+		for _, ancestor := range announced {
+			errs = append(errs, ancestor.RemoveWanted(key, claimPath))
+		}
+		return errors.Join(errs...)
+	}
 	if announce {
-		claimPath := store.ClaimPath(key)
 		for _, ancestor := range options.onceClaims {
 			held = append(held, ancestor.Path())
-			if announceErr := ancestor.SetWanted(key, claimPath); announceErr != nil {
-				stepErr := fmt.Errorf("workflow %q step %q (once): %w", definition.Name, workflowStep.ID, announceErr)
+			if announceErr := ancestor.AddWanted(key, claimPath); announceErr != nil {
+				stepErr := fmt.Errorf("workflow %q step %q (once): %w", definition.Name, workflowStep.ID, errors.Join(announceErr, withdraw()))
 				finish(StatusFailed, stepErr, RunStats{})
 				outcome.err = stepErr
 				return outcome
 			}
+			announced = append(announced, ancestor)
 		}
 	}
 	claim, err := store.ClaimKey(ctx, key, wait, held...)
-	if announce {
-		// Withdraw the edge as soon as the wait is over, however it ended, so the body
-		// below does not run with ancestors still advertising a wait they finished.
-		for _, ancestor := range options.onceClaims {
-			_ = ancestor.SetWanted("", "")
+	// Withdraw the edges as soon as the wait is over, however it ended, so the body below
+	// does not run with ancestors still advertising a wait they finished. A marker left
+	// behind would make other waiters refuse a deadlock that does not exist.
+	if withdrawErr := withdraw(); withdrawErr != nil {
+		if claim != nil {
+			withdrawErr = errors.Join(withdrawErr, claim.Release())
 		}
+		stepErr := fmt.Errorf("workflow %q step %q (once): withdrawing wait announcement: %w", definition.Name, workflowStep.ID, withdrawErr)
+		finish(StatusFailed, stepErr, RunStats{})
+		outcome.err = stepErr
+		return outcome
 	}
 	if errors.Is(err, storepkg.ErrClaimBusy) {
 		result, found, readErr := readOnceRecord(ctx, store, key)

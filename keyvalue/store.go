@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -89,6 +90,26 @@ type claimRecord struct {
 	// when it runs through a different store or scope than the one it started in.
 	Wanted     string `json:"wanted,omitempty"`
 	WantedPath string `json:"wanted_path,omitempty"`
+	// Waits lists every key the holder is waiting for. Concurrent branches under one claim
+	// can each wait on a different key; Wanted and WantedPath repeat the first of them for
+	// readers that predate this field.
+	Waits []claimEdge `json:"waits,omitempty"`
+}
+
+// claimEdge is one wait-for edge: a wanted key and the path of its claim file.
+type claimEdge struct {
+	Key  string `json:"key"`
+	Path string `json:"path"`
+}
+
+func (record claimRecord) edges() []claimEdge {
+	if len(record.Waits) > 0 {
+		return record.Waits
+	}
+	if record.WantedPath != "" {
+		return []claimEdge{{Key: record.Wanted, Path: record.WantedPath}}
+	}
+	return nil
 }
 
 // Claim owns one per-key advisory lock until Release is called.
@@ -96,6 +117,9 @@ type Claim struct {
 	handle *filelock.Handle
 	key    string
 	path   string
+	// mu serializes updates to the published record; waits holds one entry per active wait.
+	mu    sync.Mutex
+	waits []claimEdge
 }
 
 // Release gives up a per-key claim. It is safe to call more than once.
@@ -116,17 +140,54 @@ func (claim *Claim) Path() string {
 }
 
 // SetWanted publishes the key this claim's holder is now waiting for, together with that
-// key's claim path, or clears both when key is empty. Waiters walk these edges to find a
-// cycle before blocking, so a holder that is about to wait must announce it first:
-// announcing late risks two holders each missing the other, while announcing early only
-// costs a redundant check.
+// key's claim path, or clears every published wait when key is empty. Waiters walk these
+// edges to find a cycle before blocking, so a holder that is about to wait must announce it
+// first: announcing late risks two holders each missing the other, while announcing early
+// only costs a redundant check.
 func (claim *Claim) SetWanted(key, claimPath string) error {
 	if claim == nil {
 		return nil
 	}
-	payload, err := json.Marshal(claimRecord{
-		PID: os.Getpid(), Key: claim.key, Wanted: key, WantedPath: claimPath,
-	})
+	claim.mu.Lock()
+	defer claim.mu.Unlock()
+	claim.waits = nil
+	if key != "" {
+		claim.waits = []claimEdge{{Key: key, Path: claimPath}}
+	}
+	return claim.publishLocked()
+}
+
+// AddWanted announces one more wait alongside any already published, for holders whose
+// concurrent work waits on several keys at once. Each call is undone by one RemoveWanted.
+func (claim *Claim) AddWanted(key, claimPath string) error {
+	if claim == nil {
+		return nil
+	}
+	claim.mu.Lock()
+	defer claim.mu.Unlock()
+	claim.waits = append(claim.waits, claimEdge{Key: key, Path: claimPath})
+	return claim.publishLocked()
+}
+
+// RemoveWanted withdraws one wait announced by AddWanted, leaving the others published.
+func (claim *Claim) RemoveWanted(key, claimPath string) error {
+	if claim == nil {
+		return nil
+	}
+	claim.mu.Lock()
+	defer claim.mu.Unlock()
+	if index := slices.Index(claim.waits, claimEdge{Key: key, Path: claimPath}); index >= 0 {
+		claim.waits = slices.Delete(claim.waits, index, index+1)
+	}
+	return claim.publishLocked()
+}
+
+func (claim *Claim) publishLocked() error {
+	record := claimRecord{PID: os.Getpid(), Key: claim.key, Waits: slices.Clone(claim.waits)}
+	if len(record.Waits) > 0 {
+		record.Wanted, record.WantedPath = record.Waits[0].Key, record.Waits[0].Path
+	}
+	payload, err := json.Marshal(record)
 	if err != nil {
 		return fmt.Errorf("encoding claim record: %w", err)
 	}
@@ -163,24 +224,28 @@ func readClaimRecord(claimPath string) (claimRecord, bool) {
 // waiting. The returned chain names the keys involved, starting with the one wanted.
 func claimCycle(wantKey, wantPath string, held map[string]struct{}) ([]string, bool) {
 	visited := make(map[string]struct{}, claimWalkLimit)
-	chain := []string{}
-	key, current := wantKey, wantPath
-	for len(chain) < claimWalkLimit {
+	var walk func(key, current string, chain []string) ([]string, bool)
+	walk = func(key, current string, chain []string) ([]string, bool) {
 		if _, mine := held[current]; mine {
 			return append(chain, key), true
 		}
-		if _, seen := visited[current]; seen {
+		if _, seen := visited[current]; seen || len(visited) >= claimWalkLimit {
 			return nil, false
 		}
 		visited[current] = struct{}{}
 		record, ok := readClaimRecord(current)
-		if !ok || record.WantedPath == "" {
+		if !ok {
 			return nil, false
 		}
 		chain = append(chain, key)
-		key, current = record.Wanted, record.WantedPath
+		for _, edge := range record.edges() {
+			if found, cyclic := walk(edge.Key, edge.Path, slices.Clone(chain)); cyclic {
+				return found, true
+			}
+		}
+		return nil, false
 	}
-	return nil, false
+	return walk(wantKey, wantPath, []string{})
 }
 
 // processAlive reports whether pid still names a running process. Signal 0 performs the

@@ -593,6 +593,69 @@ func TestClaimKeyRefusesAWaitThatWouldCloseACycle(t *testing.T) {
 	}
 }
 
+func TestClaimKeyFollowsEveryConcurrentWaitOfAHolder(t *testing.T) {
+	t.Parallel()
+	store, err := Open(t.TempDir(), "claims")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mine, err := store.ClaimKey(t.Context(), "a", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = mine.Release() }()
+	theirs, err := store.ClaimKey(t.Context(), "b", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = theirs.Release() }()
+
+	// Two branches under the holder of "b" wait at once; the one waiting for "c" finishes
+	// first, and its withdrawal must leave the sibling's wait for "a" published.
+	for _, key := range []string{"c", "a"} {
+		if err := theirs.AddWanted(key, store.ClaimPath(key)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := theirs.RemoveWanted("c", store.ClaimPath("c")); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	_, err = store.ClaimKey(ctx, "b", true, mine.Path())
+	if !errors.Is(err, ErrClaimDeadlock) || !strings.Contains(err.Error(), "b -> a") {
+		t.Fatalf("waiting claim error = %v, want ErrClaimDeadlock through b -> a", err)
+	}
+}
+
+func TestClaimKeyFindsCycleBehindADeadEndWait(t *testing.T) {
+	t.Parallel()
+	store, err := Open(t.TempDir(), "claims")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mine, err := store.ClaimKey(t.Context(), "a", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = mine.Release() }()
+	theirs, err := store.ClaimKey(t.Context(), "b", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = theirs.Release() }()
+	for _, key := range []string{"unheld", "a"} {
+		if err := theirs.AddWanted(key, store.ClaimPath(key)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	if _, err := store.ClaimKey(ctx, "b", true, mine.Path()); !errors.Is(err, ErrClaimDeadlock) {
+		t.Fatalf("waiting claim error = %v, want ErrClaimDeadlock", err)
+	}
+}
+
 func TestClaimKeyWaitsWhenTheHolderWantsNothing(t *testing.T) {
 	t.Parallel()
 	store, err := Open(t.TempDir(), "claims")
