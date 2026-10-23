@@ -1,9 +1,7 @@
 package cmd
 
 import (
-	"archive/tar"
 	"bytes"
-	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -18,6 +16,7 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+	"github.com/up2jj/wuko/internal/archivetest"
 	"github.com/up2jj/wuko/marketplace"
 	pluginpkg "github.com/up2jj/wuko/plugin"
 	"github.com/up2jj/wuko/step"
@@ -1022,7 +1021,7 @@ func writeMarketplacePluginRelease(t *testing.T, directory, namespace, version s
 	manifest := pluginpkg.Manifest{Version: 1, Namespace: namespace, PluginVersion: version, Protocol: pluginpkg.Protocol}
 	for _, platform := range platforms {
 		name := platform.OS + "-" + platform.Arch + ".tar.gz"
-		archive := pluginTestArchive(t, "wuko-plugin-"+namespace, []byte("binary"))
+		archive := archivetest.TarGz(t, archivetest.Entry{Name: "wuko-plugin-" + namespace, Mode: 0o755, Data: []byte("binary")})
 		if err := os.WriteFile(filepath.Join(directory, "dist", name), archive, 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -1059,7 +1058,7 @@ func rewriteMarketplacePluginArtifact(t *testing.T, directory string, payload []
 	if err := json.Unmarshal(data, &manifest); err != nil {
 		t.Fatal(err)
 	}
-	archive := pluginTestArchive(t, manifest.Artifacts[0].Entry, payload)
+	archive := archivetest.TarGz(t, archivetest.Entry{Name: manifest.Artifacts[0].Entry, Mode: 0o755, Data: payload})
 	artifactPath := filepath.Join(directory, filepath.FromSlash(manifest.Artifacts[0].Path))
 	if err := os.WriteFile(artifactPath, archive, 0o644); err != nil {
 		t.Fatal(err)
@@ -1073,24 +1072,4 @@ func rewriteMarketplacePluginArtifact(t *testing.T, directory string, payload []
 	if err := os.WriteFile(filepath.Join(directory, "plugin.json"), append(updated, '\n'), 0o644); err != nil {
 		t.Fatal(err)
 	}
-}
-
-func pluginTestArchive(t *testing.T, name string, data []byte) []byte {
-	t.Helper()
-	var result bytes.Buffer
-	gzipWriter := gzip.NewWriter(&result)
-	tarWriter := tar.NewWriter(gzipWriter)
-	if err := tarWriter.WriteHeader(&tar.Header{Name: name, Mode: 0o755, Size: int64(len(data)), Typeflag: tar.TypeReg}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := tarWriter.Write(data); err != nil {
-		t.Fatal(err)
-	}
-	if err := tarWriter.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := gzipWriter.Close(); err != nil {
-		t.Fatal(err)
-	}
-	return result.Bytes()
 }

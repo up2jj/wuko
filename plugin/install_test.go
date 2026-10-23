@@ -10,6 +10,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/up2jj/wuko/internal/archivetest"
 )
 
 func TestInstallIsTransactionalAndWritesMarker(t *testing.T) {
@@ -19,7 +21,7 @@ func TestInstallIsTransactionalAndWritesMarker(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	archive := makeArchive(t, "wuko-plugin-acme", 0755, []byte("#!/bin/sh\nWUKO_PLUGIN_TEST_HELPER=1 exec \""+executable+"\"\n"))
+	archive := archivetest.TarGz(t, archivetest.Entry{Name: "wuko-plugin-acme", Mode: 0755, Data: []byte("#!/bin/sh\nWUKO_PLUGIN_TEST_HELPER=1 exec \"" + executable + "\"\n")})
 	if err := os.WriteFile(filepath.Join(source, "plugin.tar.gz"), archive, 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +147,7 @@ func TestInstallReleasesSurfacesBackupCleanupFailure(t *testing.T) {
 func testInstallRelease(t *testing.T, namespace string) Release {
 	t.Helper()
 	script := []byte("#!/bin/sh\nread line\nprintf '{\"id\":\"1\",\"result\":{\"protocol\":\"" + Protocol + "\",\"namespace\":\"" + namespace + "\",\"steps\":[],\"executors\":[],\"helpers\":[]}}\\n'\nread line\nprintf '{\"id\":\"2\",\"result\":{}}\\n'\n")
-	archive := makeArchive(t, "wuko-plugin-"+namespace, 0o755, script)
+	archive := archivetest.TarGz(t, archivetest.Entry{Name: "wuko-plugin-" + namespace, Mode: 0o755, Data: script})
 	manifest := Manifest{Version: 1, Namespace: namespace, PluginVersion: "1.0.0", Protocol: Protocol, Artifacts: []Artifact{{OS: runtime.GOOS, Arch: runtime.GOARCH, Path: "plugin.tar.gz", Format: "tar.gz", Entry: "wuko-plugin-" + namespace, SHA256: digest(archive)}}}
 	manifestData, err := json.Marshal(manifest)
 	if err != nil {
@@ -196,7 +198,7 @@ func TestLegacyInstallationMarkerDefaultsToV1(t *testing.T) {
 func TestInstallPinnedRejectsMarketplaceManifestMismatch(t *testing.T) {
 	t.Parallel()
 	source := t.TempDir()
-	archive := makeArchive(t, "wuko-plugin-acme", 0o755, []byte("binary"))
+	archive := archivetest.TarGz(t, archivetest.Entry{Name: "wuko-plugin-acme", Mode: 0o755, Data: []byte("binary")})
 	if err := os.WriteFile(filepath.Join(source, "plugin.tar.gz"), archive, 0o600); err != nil {
 		t.Fatal(err)
 	}

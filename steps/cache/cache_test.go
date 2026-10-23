@@ -2,7 +2,6 @@ package cache
 
 import (
 	"archive/tar"
-	"compress/gzip"
 	"context"
 	"errors"
 	"io/fs"
@@ -13,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/up2jj/wuko/internal/archivetest"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -267,7 +267,7 @@ func TestRejectsCorruptAndHostileArchivesWithoutReplacingTargets(t *testing.T) {
 	}
 	assertFile(t, filepath.Join(root, "vendor", "sentinel"), "original", 0o644)
 
-	writeArchive(t, archivePath, []*tar.Header{{Name: "../escape", Typeflag: tar.TypeDir, Mode: 0o755}})
+	writeArchive(t, archivePath, []archivetest.Entry{{Name: "../escape", Type: tar.TypeDir, Mode: 0o755}})
 	if _, err := runner.Run(t.Context(), step.Request{RunDir: root}); err == nil || !strings.Contains(err.Error(), "invalid path") {
 		t.Fatalf("hostile archive error = %v", err)
 	}
@@ -276,9 +276,9 @@ func TestRejectsCorruptAndHostileArchivesWithoutReplacingTargets(t *testing.T) {
 	}
 	assertFile(t, filepath.Join(root, "vendor", "sentinel"), "original", 0o644)
 
-	writeArchive(t, archivePath, []*tar.Header{
-		{Name: "0", Typeflag: tar.TypeDir, Mode: 0o755},
-		{Name: "0/link", Typeflag: tar.TypeSymlink, Linkname: "../../escape", Mode: 0o777},
+	writeArchive(t, archivePath, []archivetest.Entry{
+		{Name: "0", Type: tar.TypeDir, Mode: 0o755},
+		{Name: "0/link", Type: tar.TypeSymlink, Link: "../../escape", Mode: 0o777},
 	})
 	if _, err := runner.Run(t.Context(), step.Request{RunDir: root}); err == nil || !strings.Contains(err.Error(), "escapes") {
 		t.Fatalf("escaping symlink error = %v", err)
@@ -289,26 +289,26 @@ func TestRejectsCorruptAndHostileArchivesWithoutReplacingTargets(t *testing.T) {
 func TestRejectsSymlinkChainsThatEscapeStaging(t *testing.T) {
 	tests := []struct {
 		name    string
-		headers []*tar.Header
+		headers []archivetest.Entry
 	}{
-		{name: "link through restored link", headers: []*tar.Header{
-			{Name: "0", Typeflag: tar.TypeDir, Mode: 0o755},
-			{Name: "0/b", Typeflag: tar.TypeDir, Mode: 0o755},
-			{Name: "0/b/c", Typeflag: tar.TypeSymlink, Linkname: "..", Mode: 0o777},
-			{Name: "0/d", Typeflag: tar.TypeSymlink, Linkname: "b/c/..", Mode: 0o777},
-			{Name: "0/d/escaped", Typeflag: tar.TypeReg, Mode: 0o644},
+		{name: "link through restored link", headers: []archivetest.Entry{
+			{Name: "0", Type: tar.TypeDir, Mode: 0o755},
+			{Name: "0/b", Type: tar.TypeDir, Mode: 0o755},
+			{Name: "0/b/c", Type: tar.TypeSymlink, Link: "..", Mode: 0o777},
+			{Name: "0/d", Type: tar.TypeSymlink, Link: "b/c/..", Mode: 0o777},
+			{Name: "0/d/escaped", Type: tar.TypeReg, Mode: 0o644},
 		}},
-		{name: "dangling chain left behind", headers: []*tar.Header{
-			{Name: "0", Typeflag: tar.TypeDir, Mode: 0o755},
-			{Name: "0/b", Typeflag: tar.TypeDir, Mode: 0o755},
-			{Name: "0/b/c", Typeflag: tar.TypeSymlink, Linkname: "..", Mode: 0o777},
-			{Name: "0/d", Typeflag: tar.TypeSymlink, Linkname: "b/c/..", Mode: 0o777},
-			{Name: "1", Typeflag: tar.TypeDir, Mode: 0o755},
+		{name: "dangling chain left behind", headers: []archivetest.Entry{
+			{Name: "0", Type: tar.TypeDir, Mode: 0o755},
+			{Name: "0/b", Type: tar.TypeDir, Mode: 0o755},
+			{Name: "0/b/c", Type: tar.TypeSymlink, Link: "..", Mode: 0o777},
+			{Name: "0/d", Type: tar.TypeSymlink, Link: "b/c/..", Mode: 0o777},
+			{Name: "1", Type: tar.TypeDir, Mode: 0o755},
 		}},
-		{name: "entry below restored link", headers: []*tar.Header{
-			{Name: "0", Typeflag: tar.TypeDir, Mode: 0o755},
-			{Name: "0/up", Typeflag: tar.TypeSymlink, Linkname: ".", Mode: 0o777},
-			{Name: "0/up/escaped", Typeflag: tar.TypeReg, Mode: 0o644},
+		{name: "entry below restored link", headers: []archivetest.Entry{
+			{Name: "0", Type: tar.TypeDir, Mode: 0o755},
+			{Name: "0/up", Type: tar.TypeSymlink, Link: ".", Mode: 0o777},
+			{Name: "0/up/escaped", Type: tar.TypeReg, Mode: 0o644},
 		}},
 	}
 	for _, test := range tests {
@@ -462,26 +462,9 @@ func assertFile(t *testing.T, path, content string, mode os.FileMode) {
 	}
 }
 
-func writeArchive(t *testing.T, archivePath string, headers []*tar.Header) {
+func writeArchive(t *testing.T, archivePath string, entries []archivetest.Entry) {
 	t.Helper()
-	output, err := os.Create(archivePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	gzipWriter := gzip.NewWriter(output)
-	tarWriter := tar.NewWriter(gzipWriter)
-	for _, header := range headers {
-		if err := tarWriter.WriteHeader(header); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := tarWriter.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := gzipWriter.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := output.Close(); err != nil {
+	if err := os.WriteFile(archivePath, archivetest.TarGz(t, entries...), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }

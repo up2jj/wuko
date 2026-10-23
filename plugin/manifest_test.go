@@ -1,14 +1,13 @@
 package plugin
 
 import (
-	"archive/tar"
-	"bytes"
-	"compress/gzip"
 	"encoding/json"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/up2jj/wuko/internal/archivetest"
 )
 
 func TestParseManifestSelectsCurrentArtifact(t *testing.T) {
@@ -62,7 +61,7 @@ func TestParseManifestRejectsDuplicatePlatform(t *testing.T) {
 
 func TestExtractRejectsTraversalAndAcceptsExecutable(t *testing.T) {
 	t.Parallel()
-	archive := makeArchive(t, "wuko-plugin-acme", 0755, []byte("binary"))
+	archive := archivetest.TarGz(t, archivetest.Entry{Name: "wuko-plugin-acme", Mode: 0755, Data: []byte("binary")})
 	release := Release{Artifact: Artifact{Entry: "wuko-plugin-acme"}, ArtifactData: archive}
 	entry, err := Extract(release, t.TempDir())
 	if err != nil {
@@ -71,30 +70,10 @@ func TestExtractRejectsTraversalAndAcceptsExecutable(t *testing.T) {
 	if filepath.Base(entry) != "wuko-plugin-acme" {
 		t.Fatal(entry)
 	}
-	bad := Release{Artifact: Artifact{Entry: "wuko-plugin-acme"}, ArtifactData: makeArchive(t, "../wuko-plugin-acme", 0755, []byte("bad"))}
+	bad := Release{Artifact: Artifact{Entry: "wuko-plugin-acme"}, ArtifactData: archivetest.TarGz(t, archivetest.Entry{Name: "../wuko-plugin-acme", Mode: 0755, Data: []byte("bad")})}
 	if _, err := Extract(bad, t.TempDir()); err == nil {
 		t.Fatal("expected traversal error")
 	}
-}
-
-func makeArchive(t *testing.T, name string, mode int64, data []byte) []byte {
-	t.Helper()
-	var output bytes.Buffer
-	gzipWriter := gzip.NewWriter(&output)
-	writer := tar.NewWriter(gzipWriter)
-	if err := writer.WriteHeader(&tar.Header{Name: name, Mode: mode, Size: int64(len(data)), Typeflag: tar.TypeReg}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := writer.Write(data); err != nil {
-		t.Fatal(err)
-	}
-	if err := writer.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := gzipWriter.Close(); err != nil {
-		t.Fatal(err)
-	}
-	return output.Bytes()
 }
 
 func TestParseManifestRejectsPaddedPluginVersionAndEmptyArtifacts(t *testing.T) {

@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/up2jj/wuko/internal/archivetest"
 	"github.com/up2jj/wuko/internal/testhome"
 	pluginpkg "github.com/up2jj/wuko/plugin"
 	"github.com/up2jj/wuko/tui"
@@ -520,7 +521,7 @@ func TestPluginInstallFromMarketplaceVerifiesPinnedManifest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	archive := pluginTestArchive(t, "wuko-plugin-acme", []byte("#!/bin/sh\nWUKO_CMD_PLUGIN_HELPER=1 exec \""+executable+"\"\n"))
+	archive := archivetest.TarGz(t, archivetest.Entry{Name: "wuko-plugin-acme", Mode: 0o755, Data: []byte("#!/bin/sh\nWUKO_CMD_PLUGIN_HELPER=1 exec \"" + executable + "\"\n")})
 	archiveDigest := sha256.Sum256(archive)
 	pluginManifest, err := json.Marshal(pluginpkg.Manifest{
 		Version: 1, Namespace: "acme", PluginVersion: "1.0.0", Protocol: pluginpkg.Protocol,

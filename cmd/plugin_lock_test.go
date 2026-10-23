@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/archivetest"
 	pluginpkg "github.com/up2jj/wuko/plugin"
 	"github.com/up2jj/wuko/workflow"
 )
@@ -25,7 +26,7 @@ func commandPluginBundle(t *testing.T, dir string) ([]byte, []byte) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	archive := pluginTestArchive(t, "wuko-plugin-acme", []byte("#!/bin/sh\nWUKO_CMD_PLUGIN_HELPER=1 exec \""+executable+"\"\n"))
+	archive := archivetest.TarGz(t, archivetest.Entry{Name: "wuko-plugin-acme", Mode: 0o755, Data: []byte("#!/bin/sh\nWUKO_CMD_PLUGIN_HELPER=1 exec \"" + executable + "\"\n")})
 	hash := sha256.Sum256(archive)
 	manifest, err := json.Marshal(pluginpkg.Manifest{Version: 1, Namespace: "acme", PluginVersion: "1.0.0", Protocol: pluginpkg.Protocol, Artifacts: []pluginpkg.Artifact{{OS: runtime.GOOS, Arch: runtime.GOARCH, Path: "plugin.tar.gz", Format: "tar.gz", Entry: "wuko-plugin-acme", SHA256: fmt.Sprintf("%x", hash)}}})
 	if err != nil {

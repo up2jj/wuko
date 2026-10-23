@@ -10,12 +10,14 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/up2jj/wuko/internal/archivetest"
 )
 
 func TestHTTPSPluginSourceUsesQueryEphemerally(t *testing.T) {
 	t.Parallel()
 	script := []byte("#!/bin/sh\nread line\nprintf '{\"id\":\"1\",\"result\":{\"protocol\":\"" + Protocol + "\",\"namespace\":\"acme\",\"steps\":[],\"executors\":[],\"helpers\":[]}}\\n'\nread line\nprintf '{\"id\":\"2\",\"result\":{}}\\n'\n")
-	archive := makeArchive(t, "wuko-plugin-acme", 0o755, script)
+	archive := archivetest.TarGz(t, archivetest.Entry{Name: "wuko-plugin-acme", Mode: 0o755, Data: script})
 	manifestData, err := json.Marshal(Manifest{
 		Version: 1, Namespace: "acme", PluginVersion: "1.0.0", Protocol: Protocol,
 		Artifacts: []Artifact{{OS: runtime.GOOS, Arch: runtime.GOARCH, Path: "plugin.tar.gz", Format: "tar.gz", Entry: "wuko-plugin-acme", SHA256: digest(archive)}},

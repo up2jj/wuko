@@ -15,6 +15,7 @@ import (
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
 
+	"github.com/up2jj/wuko/internal/archivetest"
 	"github.com/up2jj/wuko/step"
 )
 
@@ -171,7 +172,7 @@ func TestCopyFromContainerMatchesDockerCopySemantics(t *testing.T) {
 		if err := os.Mkdir(filepath.Join(runDir, "out"), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		stream := &trackedReadCloser{Reader: bytes.NewReader(tarBytes(t, tarEntry{name: "result.txt", body: "result", mode: 0o640}))}
+		stream := &trackedReadCloser{Reader: bytes.NewReader(archivetest.Tar(t, archivetest.Entry{Name: "result.txt", Data: []byte("result"), Mode: 0o640}))}
 		client := newCopyClient()
 		client.copyFrom = clientpkgCopyFromResult(stream, container.PathStat{Name: "result.txt", Size: 6, Mode: 0o640})
 		runner := copyRunner(Config{Operation: operationCopyFrom, Container: "build", Source: "/tmp/result.txt", Target: "out/renamed.txt"}, client)
@@ -195,9 +196,9 @@ func TestCopyFromContainerMatchesDockerCopySemantics(t *testing.T) {
 
 	t.Run("renames directory tree", func(t *testing.T) {
 		runDir := t.TempDir()
-		stream := &trackedReadCloser{Reader: bytes.NewReader(tarBytes(t,
-			tarEntry{name: "tree/", mode: 0o755, typeflag: tar.TypeDir},
-			tarEntry{name: "tree/nested.txt", body: "nested", mode: 0o600},
+		stream := &trackedReadCloser{Reader: bytes.NewReader(archivetest.Tar(t,
+			archivetest.Entry{Name: "tree/", Mode: 0o755, Type: tar.TypeDir},
+			archivetest.Entry{Name: "tree/nested.txt", Data: []byte("nested"), Mode: 0o600},
 		))}
 		client := newCopyClient()
 		client.copyFrom = clientpkgCopyFromResult(stream, container.PathStat{Name: "tree", Mode: os.ModeDir | 0o755})
@@ -221,9 +222,9 @@ func TestCopyFromContainerMatchesDockerCopySemantics(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(target, "keep.txt"), []byte("keep"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		stream := &trackedReadCloser{Reader: bytes.NewReader(tarBytes(t,
-			tarEntry{name: "tree/", mode: 0o755, typeflag: tar.TypeDir},
-			tarEntry{name: "tree/nested.txt", body: "nested", mode: 0o600},
+		stream := &trackedReadCloser{Reader: bytes.NewReader(archivetest.Tar(t,
+			archivetest.Entry{Name: "tree/", Mode: 0o755, Type: tar.TypeDir},
+			archivetest.Entry{Name: "tree/nested.txt", Data: []byte("nested"), Mode: 0o600},
 		))}
 		client := newCopyClient()
 		client.copyFrom = clientpkgCopyFromResult(stream, container.PathStat{Name: "tree", Mode: os.ModeDir | 0o755})
@@ -242,7 +243,7 @@ func TestCopyFromContainerMatchesDockerCopySemantics(t *testing.T) {
 
 	t.Run("preserves source symlink", func(t *testing.T) {
 		runDir := t.TempDir()
-		stream := &trackedReadCloser{Reader: bytes.NewReader(tarBytes(t, tarEntry{name: "latest", mode: 0o777, typeflag: tar.TypeSymlink, linkname: "result.txt"}))}
+		stream := &trackedReadCloser{Reader: bytes.NewReader(archivetest.Tar(t, archivetest.Entry{Name: "latest", Mode: 0o777, Type: tar.TypeSymlink, Link: "result.txt"}))}
 		client := newCopyClient()
 		client.copyFrom = clientpkgCopyFromResult(stream, container.PathStat{Name: "latest", Mode: os.ModeSymlink | 0o777, LinkTarget: "result.txt"})
 		runner := copyRunner(Config{Operation: operationCopyFrom, Container: "build", Source: "/tmp/latest", Target: "latest"}, client)
@@ -258,7 +259,7 @@ func TestCopyFromContainerMatchesDockerCopySemantics(t *testing.T) {
 
 	t.Run("requires target parent", func(t *testing.T) {
 		runDir := t.TempDir()
-		stream := &trackedReadCloser{Reader: bytes.NewReader(tarBytes(t, tarEntry{name: "result.txt", body: "result", mode: 0o600}))}
+		stream := &trackedReadCloser{Reader: bytes.NewReader(archivetest.Tar(t, archivetest.Entry{Name: "result.txt", Data: []byte("result"), Mode: 0o600}))}
 		client := newCopyClient()
 		client.copyFrom = clientpkgCopyFromResult(stream, container.PathStat{Name: "result.txt", Mode: 0o600})
 		runner := copyRunner(Config{Operation: operationCopyFrom, Container: "build", Source: "/tmp/result.txt", Target: "missing/result.txt"}, client)
@@ -273,7 +274,7 @@ func TestCopyFromContainerMatchesDockerCopySemantics(t *testing.T) {
 
 	t.Run("rejects path traversal archive", func(t *testing.T) {
 		runDir := t.TempDir()
-		stream := &trackedReadCloser{Reader: bytes.NewReader(tarBytes(t, tarEntry{name: "../escape", body: "unsafe", mode: 0o600}))}
+		stream := &trackedReadCloser{Reader: bytes.NewReader(archivetest.Tar(t, archivetest.Entry{Name: "../escape", Data: []byte("unsafe"), Mode: 0o600}))}
 		client := newCopyClient()
 		client.copyFrom = clientpkgCopyFromResult(stream, container.PathStat{Name: "result", Mode: os.ModeDir | 0o755})
 		runner := copyRunner(Config{Operation: operationCopyFrom, Container: "build", Source: "/tmp/result", Target: "result"}, client)
@@ -309,7 +310,7 @@ func TestCopyFromContainerMatchesDockerCopySemantics(t *testing.T) {
 		}
 
 		closeErr := errors.New("close failed")
-		stream := &trackedReadCloser{Reader: bytes.NewReader(tarBytes(t, tarEntry{name: "result", body: "ok", mode: 0o600})), closeErr: closeErr}
+		stream := &trackedReadCloser{Reader: bytes.NewReader(archivetest.Tar(t, archivetest.Entry{Name: "result", Data: []byte("ok"), Mode: 0o600})), closeErr: closeErr}
 		closeClient := newCopyClient()
 		closeClient.copyFrom = clientpkgCopyFromResult(stream, container.PathStat{Name: "result", Mode: 0o600})
 		runner = copyRunner(Config{Operation: operationCopyFrom, Container: "build", Source: "/tmp/result", Target: "result"}, closeClient)
@@ -382,45 +383,6 @@ type trackedReadCloser struct {
 func (r *trackedReadCloser) Close() error {
 	r.closeCalls++
 	return r.closeErr
-}
-
-type tarEntry struct {
-	name     string
-	body     string
-	mode     int64
-	typeflag byte
-	linkname string
-}
-
-func tarBytes(t *testing.T, entries ...tarEntry) []byte {
-	t.Helper()
-	var content bytes.Buffer
-	writer := tar.NewWriter(&content)
-	for _, entry := range entries {
-		typeflag := entry.typeflag
-		if typeflag == 0 {
-			typeflag = tar.TypeReg
-		}
-		header := &tar.Header{
-			Name: entry.name, Mode: entry.mode, Size: int64(len(entry.body)),
-			Typeflag: typeflag, Linkname: entry.linkname,
-		}
-		if typeflag != tar.TypeReg {
-			header.Size = 0
-		}
-		if err := writer.WriteHeader(header); err != nil {
-			t.Fatal(err)
-		}
-		if header.Size > 0 {
-			if _, err := io.WriteString(writer, entry.body); err != nil {
-				t.Fatal(err)
-			}
-		}
-	}
-	if err := writer.Close(); err != nil {
-		t.Fatal(err)
-	}
-	return content.Bytes()
 }
 
 type archivedEntry struct {

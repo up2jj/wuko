@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/up2jj/wuko/internal/archivetest"
 	"github.com/up2jj/wuko/internal/testhome"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
@@ -98,7 +99,7 @@ func TestLoadActionIsValidatedCachedAndDoesNotStartLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	script := []byte("#!/bin/sh\nWUKO_PLUGIN_TEST_HELPER=1 exec \"" + executable + "\"\n")
-	archive := makeArchive(t, "wuko-plugin-acme", 0755, script)
+	archive := archivetest.TarGz(t, archivetest.Entry{Name: "wuko-plugin-acme", Mode: 0755, Data: script})
 	manifestData, _ := json.Marshal(Manifest{Version: 1, Namespace: "acme", PluginVersion: "1.0.0", Protocol: ProtocolV3, Artifacts: []Artifact{{OS: runtime.GOOS, Arch: runtime.GOARCH, Path: "plugin.tar.gz", Format: "tar.gz", Entry: "wuko-plugin-acme", SHA256: digest(archive)}}})
 	var diagnostics synchronizedBuffer
 	manager := NewManager(Config{CacheDir: testCache(t), HTTPClient: &http.Client{Transport: memoryTransport{manifest: manifestData, archive: archive}}, Stderr: &diagnostics})
@@ -168,7 +169,7 @@ func TestWorkflowPluginHelpersStartAndCall(t *testing.T) {
 		t.Fatal(err)
 	}
 	script := []byte("#!/bin/sh\nWUKO_PLUGIN_TEST_HELPER=1 exec \"" + executable + "\"\n")
-	archive := makeArchive(t, "wuko-plugin-acme", 0755, script)
+	archive := archivetest.TarGz(t, archivetest.Entry{Name: "wuko-plugin-acme", Mode: 0755, Data: script})
 	manifestData, _ := json.Marshal(Manifest{Version: 1, Namespace: "acme", PluginVersion: "1.0.0", Protocol: Protocol, Artifacts: []Artifact{{OS: runtime.GOOS, Arch: runtime.GOARCH, Path: "plugin.tar.gz", Format: "tar.gz", Entry: "wuko-plugin-acme", SHA256: digest(archive)}}})
 	var diagnostics synchronizedBuffer
 	manager := NewManager(Config{CacheDir: testCache(t), HTTPClient: &http.Client{Transport: memoryTransport{manifest: manifestData, archive: archive}}, Stderr: &diagnostics})
@@ -311,7 +312,7 @@ func TestWorkflowPluginStartAndStopOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	script := []byte("#!/bin/sh\nWUKO_PLUGIN_TEST_HELPER=1 exec \"" + executable + "\"\n")
-	archive := makeArchive(t, "wuko-plugin-acme", 0755, script)
+	archive := archivetest.TarGz(t, archivetest.Entry{Name: "wuko-plugin-acme", Mode: 0755, Data: script})
 	manifestData, _ := json.Marshal(Manifest{Version: 1, Namespace: "acme", PluginVersion: "1.0.0", Protocol: Protocol, Artifacts: []Artifact{{OS: runtime.GOOS, Arch: runtime.GOARCH, Path: "plugin.tar.gz", Format: "tar.gz", Entry: "wuko-plugin-acme", SHA256: digest(archive)}}})
 	var diagnostics synchronizedBuffer
 	manager := NewManager(Config{CacheDir: testCache(t), HTTPClient: &http.Client{Transport: memoryTransport{manifest: manifestData, archive: archive}}, Stderr: &diagnostics})
@@ -373,7 +374,7 @@ func TestManagerResetReleasesRunScopedState(t *testing.T) {
 		t.Fatal(err)
 	}
 	script := []byte("#!/bin/sh\nWUKO_PLUGIN_TEST_HELPER=1 exec \"" + executable + "\"\n")
-	archive := makeArchive(t, "wuko-plugin-acme", 0755, script)
+	archive := archivetest.TarGz(t, archivetest.Entry{Name: "wuko-plugin-acme", Mode: 0755, Data: script})
 	manifestData, _ := json.Marshal(Manifest{Version: 1, Namespace: "acme", PluginVersion: "1.0.0", Protocol: Protocol, Artifacts: []Artifact{{OS: runtime.GOOS, Arch: runtime.GOARCH, Path: "plugin.tar.gz", Format: "tar.gz", Entry: "wuko-plugin-acme", SHA256: digest(archive)}}})
 	var diagnostics synchronizedBuffer
 	manager := NewManager(Config{CacheDir: testCache(t), HTTPClient: &http.Client{Transport: memoryTransport{manifest: manifestData, archive: archive}}, Stderr: &diagnostics})
@@ -466,7 +467,7 @@ func pluginFixture(t *testing.T, namespace string) (manifest, archive []byte) {
 		t.Fatal(err)
 	}
 	script := []byte("#!/bin/sh\nWUKO_PLUGIN_TEST_HELPER=1 WUKO_PLUGIN_TEST_NAMESPACE=" + namespace + " exec \"" + executable + "\"\n")
-	archive = makeArchive(t, "wuko-plugin-"+namespace, 0755, script)
+	archive = archivetest.TarGz(t, archivetest.Entry{Name: "wuko-plugin-" + namespace, Mode: 0755, Data: script})
 	manifest, err = json.Marshal(Manifest{Version: 1, Namespace: namespace, PluginVersion: "1.0.0", Protocol: Protocol, Artifacts: []Artifact{{OS: runtime.GOOS, Arch: runtime.GOARCH, Path: namespace + ".tar.gz", Format: "tar.gz", Entry: "wuko-plugin-" + namespace, SHA256: digest(archive)}}})
 	if err != nil {
 		t.Fatal(err)

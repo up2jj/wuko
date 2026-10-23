@@ -3,7 +3,6 @@ package cmd
 import (
 	"archive/tar"
 	"bytes"
-	"compress/gzip"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/archivetest"
 	"github.com/up2jj/wuko/step"
 	keyvaluestep "github.com/up2jj/wuko/steps/key_value"
 	"github.com/up2jj/wuko/steps/shell"
@@ -173,27 +173,11 @@ func commandGitHubTarball(t *testing.T, name string, data []byte) []byte {
 
 func commandGitHubTarballEntries(t *testing.T, files map[string][]byte) []byte {
 	t.Helper()
-	var buffer bytes.Buffer
-	gz := gzip.NewWriter(&buffer)
-	writer := tar.NewWriter(gz)
-	if err := writer.WriteHeader(&tar.Header{Name: "acme-workflows-0123456/", Mode: 0o755, Typeflag: tar.TypeDir}); err != nil {
-		t.Fatal(err)
-	}
+	entries := []archivetest.Entry{{Name: "acme-workflows-0123456/", Mode: 0o755, Type: tar.TypeDir}}
 	for name, data := range files {
-		if err := writer.WriteHeader(&tar.Header{Name: "acme-workflows-0123456/" + name, Mode: 0o644, Size: int64(len(data)), Typeflag: tar.TypeReg}); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := writer.Write(data); err != nil {
-			t.Fatal(err)
-		}
+		entries = append(entries, archivetest.Entry{Name: "acme-workflows-0123456/" + name, Mode: 0o644, Data: data})
 	}
-	if err := writer.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := gz.Close(); err != nil {
-		t.Fatal(err)
-	}
-	return buffer.Bytes()
+	return archivetest.TarGz(t, entries...)
 }
 
 func TestRunPickGitHubListsCanonicalCommandsNonInteractively(t *testing.T) {

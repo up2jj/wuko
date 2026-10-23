@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/archivetest"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -485,17 +486,8 @@ type githubArchiveEntry struct {
 // owner-repository-commit root directory.
 func makeGitHubTarball(t *testing.T, root string, entries []githubArchiveEntry) []byte {
 	t.Helper()
-	var buffer bytes.Buffer
-	gz := gzip.NewWriter(&buffer)
-	writer := tar.NewWriter(gz)
-	if err := writer.WriteHeader(&tar.Header{Name: root + "/", Mode: 0o755, Typeflag: tar.TypeDir, Format: tar.FormatPAX}); err != nil {
-		t.Fatal(err)
-	}
+	members := []archivetest.Entry{{Name: root + "/", Mode: 0o755, Type: tar.TypeDir, Format: tar.FormatPAX}}
 	for _, entry := range entries {
-		typeflag := entry.typeflag
-		if typeflag == 0 {
-			typeflag = tar.TypeReg
-		}
 		mode := entry.mode
 		if mode == 0 {
 			mode = 0o644
@@ -504,24 +496,7 @@ func makeGitHubTarball(t *testing.T, root string, entries []githubArchiveEntry) 
 		if entry.root != "" {
 			prefix = entry.root
 		}
-		header := &tar.Header{Name: prefix + "/" + entry.name, Mode: int64(mode), Typeflag: typeflag, Linkname: entry.link, Format: tar.FormatPAX}
-		if typeflag == tar.TypeReg {
-			header.Size = int64(len(entry.data))
-		}
-		if err := writer.WriteHeader(header); err != nil {
-			t.Fatal(err)
-		}
-		if typeflag == tar.TypeReg {
-			if _, err := writer.Write(entry.data); err != nil {
-				t.Fatal(err)
-			}
-		}
+		members = append(members, archivetest.Entry{Name: prefix + "/" + entry.name, Data: entry.data, Mode: int64(mode), Type: entry.typeflag, Link: entry.link, Format: tar.FormatPAX})
 	}
-	if err := writer.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := gz.Close(); err != nil {
-		t.Fatal(err)
-	}
-	return buffer.Bytes()
+	return archivetest.TarGz(t, members...)
 }

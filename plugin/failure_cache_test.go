@@ -13,6 +13,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/up2jj/wuko/internal/archivetest"
 	"github.com/up2jj/wuko/workflow"
 )
 
@@ -44,7 +45,7 @@ func TestTransientPluginLoadFailuresAreNotCached(t *testing.T) {
 		t.Fatal(err)
 	}
 	script := []byte("#!/bin/sh\nWUKO_PLUGIN_TEST_HELPER=1 exec \"" + executable + "\"\n")
-	archive := makeArchive(t, "wuko-plugin-acme", 0755, script)
+	archive := archivetest.TarGz(t, archivetest.Entry{Name: "wuko-plugin-acme", Mode: 0755, Data: script})
 	manifestData, _ := json.Marshal(Manifest{Version: 1, Namespace: "acme", PluginVersion: "1.0.0", Protocol: Protocol, Artifacts: []Artifact{{OS: runtime.GOOS, Arch: runtime.GOARCH, Path: "plugin.tar.gz", Format: "tar.gz", Entry: "wuko-plugin-acme", SHA256: digest(archive)}}})
 	good := memoryTransport{manifest: manifestData, archive: archive}
 	status := func(code int) func(*http.Request) (*http.Response, error) {

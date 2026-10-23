@@ -3,7 +3,6 @@ package plugin
 import (
 	"archive/tar"
 	"bytes"
-	"compress/gzip"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -13,50 +12,9 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/up2jj/wuko/internal/archivetest"
 )
-
-// releaseCovEntry is one tar member written by releaseCovArchive.
-type releaseCovEntry struct {
-	name     string
-	mode     int64
-	typeflag byte
-	body     []byte
-	linkname string
-}
-
-// releaseCovArchive builds a gzip-compressed tar holding entries in order, so a test can
-// describe archives with several, duplicate, or non-regular members.
-func releaseCovArchive(t *testing.T, entries ...releaseCovEntry) []byte {
-	t.Helper()
-	var output bytes.Buffer
-	gzipWriter := gzip.NewWriter(&output)
-	writer := tar.NewWriter(gzipWriter)
-	for _, entry := range entries {
-		typeflag := entry.typeflag
-		if typeflag == 0 {
-			typeflag = tar.TypeReg
-		}
-		header := &tar.Header{Name: entry.name, Mode: entry.mode, Typeflag: typeflag, Linkname: entry.linkname}
-		if typeflag == tar.TypeReg {
-			header.Size = int64(len(entry.body))
-		}
-		if err := writer.WriteHeader(header); err != nil {
-			t.Fatal(err)
-		}
-		if typeflag == tar.TypeReg {
-			if _, err := writer.Write(entry.body); err != nil {
-				t.Fatal(err)
-			}
-		}
-	}
-	if err := writer.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := gzipWriter.Close(); err != nil {
-		t.Fatal(err)
-	}
-	return output.Bytes()
-}
 
 func releaseCovArtifact(data []byte) Artifact {
 	return Artifact{OS: "linux", Arch: "amd64", Path: "plugin.tar.gz", Format: "tar.gz", Entry: "wuko-plugin-acme", SHA256: digest(data)}
@@ -64,17 +22,17 @@ func releaseCovArtifact(data []byte) Artifact {
 
 func TestValidateArtifactAcceptsExecutableEntry(t *testing.T) {
 	t.Parallel()
-	tests := map[string][]releaseCovEntry{
-		"entry only": {{name: "wuko-plugin-acme", mode: 0o755, body: []byte("binary")}},
+	tests := map[string][]archivetest.Entry{
+		"entry only": {{Name: "wuko-plugin-acme", Mode: 0o755, Data: []byte("binary")}},
 		"entry with supporting files": {
-			{name: "README.md", mode: 0o644, body: []byte("docs")},
-			{name: "share/data.json", mode: 0o600, body: []byte("{}")},
-			{name: "wuko-plugin-acme", mode: 0o700, body: []byte("binary")},
+			{Name: "README.md", Mode: 0o644, Data: []byte("docs")},
+			{Name: "share/data.json", Mode: 0o600, Data: []byte("{}")},
+			{Name: "wuko-plugin-acme", Mode: 0o700, Data: []byte("binary")},
 		},
 	}
 	for name, entries := range tests {
 		t.Run(name, func(t *testing.T) {
-			data := releaseCovArchive(t, entries...)
+			data := archivetest.TarGz(t, entries...)
 			if err := ValidateArtifact(releaseCovArtifact(data), data); err != nil {
 				t.Fatalf("ValidateArtifact() error = %v", err)
 			}
@@ -84,7 +42,7 @@ func TestValidateArtifactAcceptsExecutableEntry(t *testing.T) {
 
 func TestValidateArtifactRejectsDigestMismatch(t *testing.T) {
 	t.Parallel()
-	data := releaseCovArchive(t, releaseCovEntry{name: "wuko-plugin-acme", mode: 0o755, body: []byte("binary")})
+	data := archivetest.TarGz(t, archivetest.Entry{Name: "wuko-plugin-acme", Mode: 0o755, Data: []byte("binary")})
 	tests := map[string]string{
 		"different digest": strings.Repeat("a", 64),
 		"uppercase digest": strings.ToUpper(digest(data)),
@@ -104,26 +62,26 @@ func TestValidateArtifactRejectsDigestMismatch(t *testing.T) {
 
 func TestValidateArtifactRejectsUnsafeArchives(t *testing.T) {
 	t.Parallel()
-	entry := releaseCovEntry{name: "wuko-plugin-acme", mode: 0o755, body: []byte("binary")}
+	entry := archivetest.Entry{Name: "wuko-plugin-acme", Mode: 0o755, Data: []byte("binary")}
 	tests := []struct {
 		name    string
-		entries []releaseCovEntry
+		entries []archivetest.Entry
 		raw     []byte
 		want    string
 	}{
-		{name: "parent traversal", entries: []releaseCovEntry{entry, {name: "../escape", mode: 0o644, body: []byte("x")}}, want: "unsafe plugin path"},
-		{name: "nested traversal", entries: []releaseCovEntry{entry, {name: "share/../../escape", mode: 0o644, body: []byte("x")}}, want: "unsafe plugin path"},
-		{name: "absolute path", entries: []releaseCovEntry{entry, {name: "/tmp/escape", mode: 0o644, body: []byte("x")}}, want: "unsafe plugin path"},
-		{name: "unclean path", entries: []releaseCovEntry{{name: "./wuko-plugin-acme", mode: 0o755, body: []byte("binary")}}, want: "unsafe plugin path"},
-		{name: "backslash path", entries: []releaseCovEntry{entry, {name: `share\escape`, mode: 0o644, body: []byte("x")}}, want: "unsafe plugin path"},
-		{name: "installation marker", entries: []releaseCovEntry{entry, {name: MarkerName, mode: 0o644, body: []byte("{}")}}, want: "reserved installation metadata"},
-		{name: "release directory", entries: []releaseCovEntry{entry, {name: releaseDirectory + "/manifest", mode: 0o644, body: []byte("{}")}}, want: "reserved installation metadata"},
-		{name: "duplicate entry", entries: []releaseCovEntry{entry, entry}, want: "duplicate plugin archive entry"},
-		{name: "symlink entry", entries: []releaseCovEntry{{name: "wuko-plugin-acme", mode: 0o755, typeflag: tar.TypeSymlink, linkname: "/bin/sh"}}, want: "not a regular file"},
-		{name: "hardlink entry", entries: []releaseCovEntry{entry, {name: "copy", mode: 0o755, typeflag: tar.TypeLink, linkname: "wuko-plugin-acme"}}, want: "not a regular file"},
-		{name: "directory entry", entries: []releaseCovEntry{{name: "share", mode: 0o755, typeflag: tar.TypeDir}, entry}, want: "not a regular file"},
-		{name: "entry not executable", entries: []releaseCovEntry{{name: "wuko-plugin-acme", mode: 0o644, body: []byte("binary")}}, want: "not executable"},
-		{name: "entry missing", entries: []releaseCovEntry{{name: "wuko-plugin-other", mode: 0o755, body: []byte("binary")}}, want: "entry is missing"},
+		{name: "parent traversal", entries: []archivetest.Entry{entry, {Name: "../escape", Mode: 0o644, Data: []byte("x")}}, want: "unsafe plugin path"},
+		{name: "nested traversal", entries: []archivetest.Entry{entry, {Name: "share/../../escape", Mode: 0o644, Data: []byte("x")}}, want: "unsafe plugin path"},
+		{name: "absolute path", entries: []archivetest.Entry{entry, {Name: "/tmp/escape", Mode: 0o644, Data: []byte("x")}}, want: "unsafe plugin path"},
+		{name: "unclean path", entries: []archivetest.Entry{{Name: "./wuko-plugin-acme", Mode: 0o755, Data: []byte("binary")}}, want: "unsafe plugin path"},
+		{name: "backslash path", entries: []archivetest.Entry{entry, {Name: `share\escape`, Mode: 0o644, Data: []byte("x")}}, want: "unsafe plugin path"},
+		{name: "installation marker", entries: []archivetest.Entry{entry, {Name: MarkerName, Mode: 0o644, Data: []byte("{}")}}, want: "reserved installation metadata"},
+		{name: "release directory", entries: []archivetest.Entry{entry, {Name: releaseDirectory + "/manifest", Mode: 0o644, Data: []byte("{}")}}, want: "reserved installation metadata"},
+		{name: "duplicate entry", entries: []archivetest.Entry{entry, entry}, want: "duplicate plugin archive entry"},
+		{name: "symlink entry", entries: []archivetest.Entry{{Name: "wuko-plugin-acme", Mode: 0o755, Type: tar.TypeSymlink, Link: "/bin/sh"}}, want: "not a regular file"},
+		{name: "hardlink entry", entries: []archivetest.Entry{entry, {Name: "copy", Mode: 0o755, Type: tar.TypeLink, Link: "wuko-plugin-acme"}}, want: "not a regular file"},
+		{name: "directory entry", entries: []archivetest.Entry{{Name: "share", Mode: 0o755, Type: tar.TypeDir}, entry}, want: "not a regular file"},
+		{name: "entry not executable", entries: []archivetest.Entry{{Name: "wuko-plugin-acme", Mode: 0o644, Data: []byte("binary")}}, want: "not executable"},
+		{name: "entry missing", entries: []archivetest.Entry{{Name: "wuko-plugin-other", Mode: 0o755, Data: []byte("binary")}}, want: "entry is missing"},
 		{name: "empty archive", entries: nil, want: "entry is missing"},
 		{name: "not gzip", raw: []byte("plain bytes"), want: "opening plugin archive"},
 	}
@@ -131,7 +89,7 @@ func TestValidateArtifactRejectsUnsafeArchives(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			data := test.raw
 			if data == nil {
-				data = releaseCovArchive(t, test.entries...)
+				data = archivetest.TarGz(t, test.entries...)
 			}
 			err := ValidateArtifact(releaseCovArtifact(data), data)
 			if err == nil || !strings.Contains(err.Error(), test.want) {
@@ -143,12 +101,12 @@ func TestValidateArtifactRejectsUnsafeArchives(t *testing.T) {
 
 func TestValidateArtifactRejectsTooManyEntries(t *testing.T) {
 	t.Parallel()
-	entries := make([]releaseCovEntry, 0, maxArchiveEntries+1)
-	entries = append(entries, releaseCovEntry{name: "wuko-plugin-acme", mode: 0o755, body: []byte("binary")})
+	entries := make([]archivetest.Entry, 0, maxArchiveEntries+1)
+	entries = append(entries, archivetest.Entry{Name: "wuko-plugin-acme", Mode: 0o755, Data: []byte("binary")})
 	for index := range maxArchiveEntries {
-		entries = append(entries, releaseCovEntry{name: "files/" + strconv.Itoa(index), mode: 0o644})
+		entries = append(entries, archivetest.Entry{Name: "files/" + strconv.Itoa(index), Mode: 0o644})
 	}
-	data := releaseCovArchive(t, entries...)
+	data := archivetest.TarGz(t, entries...)
 	err := ValidateArtifact(releaseCovArtifact(data), data)
 	if err == nil || !strings.Contains(err.Error(), "too many entries") {
 		t.Fatalf("ValidateArtifact() error = %v, want too many entries", err)
@@ -158,8 +116,8 @@ func TestValidateArtifactRejectsTooManyEntries(t *testing.T) {
 // releaseCovBundle describes a two-platform release whose files a test server serves.
 func releaseCovBundle(t *testing.T) (manifest []byte, files map[string][]byte) {
 	t.Helper()
-	linux := releaseCovArchive(t, releaseCovEntry{name: "wuko-plugin-acme", mode: 0o755, body: []byte("linux")})
-	darwin := releaseCovArchive(t, releaseCovEntry{name: "wuko-plugin-acme", mode: 0o755, body: []byte("darwin")})
+	linux := archivetest.TarGz(t, archivetest.Entry{Name: "wuko-plugin-acme", Mode: 0o755, Data: []byte("linux")})
+	darwin := archivetest.TarGz(t, archivetest.Entry{Name: "wuko-plugin-acme", Mode: 0o755, Data: []byte("darwin")})
 	manifest, err := json.Marshal(Manifest{
 		Version: 1, Namespace: "acme", PluginVersion: "1.0.0", Protocol: Protocol,
 		Artifacts: []Artifact{
@@ -240,8 +198,8 @@ func TestFetchBundleReadsLocalRelease(t *testing.T) {
 func TestFetchBundleRejectsBadReleases(t *testing.T) {
 	t.Parallel()
 	manifest, files := releaseCovBundle(t)
-	tamperedArchive := releaseCovArchive(t, releaseCovEntry{name: "wuko-plugin-acme", mode: 0o755, body: []byte("tampered")})
-	unsafeArchive := releaseCovArchive(t, releaseCovEntry{name: "../wuko-plugin-acme", mode: 0o755, body: []byte("x")})
+	tamperedArchive := archivetest.TarGz(t, archivetest.Entry{Name: "wuko-plugin-acme", Mode: 0o755, Data: []byte("tampered")})
+	unsafeArchive := archivetest.TarGz(t, archivetest.Entry{Name: "../wuko-plugin-acme", Mode: 0o755, Data: []byte("x")})
 	var unsafeManifest Manifest
 	if err := json.Unmarshal(manifest, &unsafeManifest); err != nil {
 		t.Fatal(err)

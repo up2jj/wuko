@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/up2jj/wuko/internal/archivetest"
 	"github.com/up2jj/wuko/internal/filelock"
 	"github.com/up2jj/wuko/workflow"
 )
@@ -49,7 +50,7 @@ func (r *releaseTransport) replace(bodies map[string][]byte) {
 }
 func releaseBytes(t *testing.T, namespace, version string) ([]byte, []byte) {
 	t.Helper()
-	archive := makeArchive(t, "wuko-plugin-"+namespace, 0700, []byte("#!/bin/sh\n# "+version+"\nexit 97\n"))
+	archive := archivetest.TarGz(t, archivetest.Entry{Name: "wuko-plugin-" + namespace, Mode: 0700, Data: []byte("#!/bin/sh\n# " + version + "\nexit 97\n")})
 	manifest, err := json.Marshal(Manifest{Version: 1, Namespace: namespace, PluginVersion: version, Protocol: Protocol, Artifacts: []Artifact{{OS: runtime.GOOS, Arch: runtime.GOARCH, Path: "plugin.tar.gz", Format: "tar.gz", Entry: "wuko-plugin-" + namespace, SHA256: digest(archive)}}})
 	if err != nil {
 		t.Fatal(err)
@@ -644,7 +645,7 @@ func TestUnsafeCachedArchiveCannotEstablishPin(t *testing.T) {
 	if err := json.Unmarshal(manifest, &object); err != nil {
 		t.Fatal(err)
 	}
-	archive := makeArchive(t, "../wuko-plugin-acme", 0700, []byte("bad"))
+	archive := archivetest.TarGz(t, archivetest.Entry{Name: "../wuko-plugin-acme", Mode: 0700, Data: []byte("bad")})
 	object.Artifacts[0].SHA256 = digest(archive)
 	manifest, err := json.Marshal(object)
 	if err != nil {

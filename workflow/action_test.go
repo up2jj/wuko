@@ -1,10 +1,7 @@
 package workflow
 
 import (
-	"archive/tar"
-	"archive/zip"
 	"bytes"
-	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"fmt"
@@ -15,6 +12,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/up2jj/wuko/internal/archivetest"
 )
 
 const validAction = `version: 1
@@ -815,45 +814,20 @@ type archiveTestFile struct {
 
 func makeZIP(t *testing.T, files map[string]archiveTestFile) []byte {
 	t.Helper()
-	var buffer bytes.Buffer
-	writer := zip.NewWriter(&buffer)
-	for name, file := range files {
-		header := &zip.FileHeader{Name: name, Method: zip.Deflate}
-		header.SetMode(file.mode)
-		entry, err := writer.CreateHeader(header)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := entry.Write(file.data); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := writer.Close(); err != nil {
-		t.Fatal(err)
-	}
-	return buffer.Bytes()
+	return archivetest.Zip(t, archiveEntries(files)...)
 }
 
 func makeTarGzip(t *testing.T, files map[string]archiveTestFile) []byte {
 	t.Helper()
-	var buffer bytes.Buffer
-	gz := gzip.NewWriter(&buffer)
-	writer := tar.NewWriter(gz)
+	return archivetest.TarGz(t, archiveEntries(files)...)
+}
+
+func archiveEntries(files map[string]archiveTestFile) []archivetest.Entry {
+	entries := make([]archivetest.Entry, 0, len(files))
 	for name, file := range files {
-		if err := writer.WriteHeader(&tar.Header{Name: name, Mode: int64(file.mode), Size: int64(len(file.data)), Typeflag: tar.TypeReg}); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := writer.Write(file.data); err != nil {
-			t.Fatal(err)
-		}
+		entries = append(entries, archivetest.Entry{Name: name, Mode: int64(file.mode), Data: file.data})
 	}
-	if err := writer.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := gz.Close(); err != nil {
-		t.Fatal(err)
-	}
-	return buffer.Bytes()
+	return entries
 }
 
 func TestActionWorkingDirectoryScopeKeepsInvocationProvenance(t *testing.T) {
