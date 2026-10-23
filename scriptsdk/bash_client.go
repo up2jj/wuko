@@ -19,11 +19,17 @@ import (
 // never shell source. Successful writes produce no stdout; reads produce a raw
 // string or JSON followed by a newline. JSON variants always return JSON.
 func RunBashClient(ctx context.Context, descriptorPath string, args []string, out io.Writer) error {
+	return runBashCall(args, out, func(method string, params any) (json.RawMessage, error) {
+		return requestBridge(ctx, descriptorPath, method, params)
+	})
+}
+
+func runBashCall(args []string, out io.Writer, request func(string, any) (json.RawMessage, error)) error {
 	method, params, err := bashCall(args)
 	if err != nil {
 		return err
 	}
-	result, err := requestBridge(ctx, descriptorPath, method, params)
+	result, err := request(method, params)
 	if err != nil {
 		return err
 	}
@@ -266,6 +272,10 @@ func postBridge(ctx context.Context, descriptor Descriptor, method string, param
 	if err != nil || len(data) > maxMessageBytes {
 		return nil, fmt.Errorf("cannot read SDK response or it exceeds 10 MiB")
 	}
+	return decodeBridgeResponse(data)
+}
+
+func decodeBridgeResponse(data []byte) (json.RawMessage, error) {
 	var envelope struct {
 		Version int             `json:"version"`
 		Result  json.RawMessage `json:"result"`

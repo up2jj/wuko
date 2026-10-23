@@ -27,6 +27,18 @@ UTF-8 JSON body. Do not use process stdin, stdout, or stderr for protocol traffi
 Each HTTP request carries one call; HTTP handles request/response correlation. Calls can run
 concurrently. There is no persistent connection requirement.
 
+The Bash adapter additionally uses an attempt-scoped IPv4 loopback HTTP listener because
+Bash builtins cannot open Unix sockets. Its private `/v1/bash` endpoint accepts the same
+bearer token and NUL-delimited UTF-8 command arguments. The HTTP body must end with NUL
+and is limited to 10 MiB; the converted JSON request and response retain the ordinary
+10 MiB limits. Results use NUL-delimited status, stdout, and stderr fields, with backslashes
+and NUL bytes escaped for Bash's `printf %b`. This endpoint shares host dispatch, call slots,
+cancellation, and shutdown with `/v1/call`. Credentials are read from a private attempt
+file; they are kept out of Bash verbose output and xtrace. When the host cannot open the
+listener, it leaves the port empty and the adapter uses the executable client over the Unix
+socket. Other language adapters
+should continue using the language-neutral JSON protocol.
+
 ```json
 {"version":1,"method":"output","params":{"name":"artifact","value":{"path":"dist/app"}}}
 ```

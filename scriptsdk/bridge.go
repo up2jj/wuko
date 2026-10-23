@@ -67,6 +67,8 @@ type Bridge struct {
 	server     *http.Server
 	cancel     context.CancelFunc
 	served     chan struct{}
+	bashPort   string
+	bashServed chan struct{}
 	slots      chan struct{}
 	mu         sync.Mutex
 	closing    bool
@@ -173,10 +175,14 @@ func (b *Bridge) Close() error {
 	b.closeOnce.Do(func() {
 		b.mu.Lock()
 		b.closing = true
+		bashServed := b.bashServed
 		b.mu.Unlock()
 		b.cancel()
 		err := b.server.Close()
 		<-b.served
+		if bashServed != nil {
+			<-bashServed
+		}
 		joined := make(chan struct{})
 		go func() { b.calls.Wait(); close(joined) }()
 		timer := time.NewTimer(b.closeGrace)
@@ -203,13 +209,19 @@ func (b *Bridge) handle(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	if r.Method != http.MethodPost || r.URL.Path != "/v1/call" {
+	if r.Method != http.MethodPost || (r.URL.Path != "/v1/call" && r.URL.Path != "/v1/bash") {
 		http.Error(w, "use POST /v1/call", http.StatusNotFound)
 		return
 	}
+	bash := r.URL.Path == "/v1/bash"
 	b.mu.Lock()
 	if b.closing {
 		b.mu.Unlock()
+		if bash {
+			// Bash writes the whole request before reading; replying first would
+			// make its next write raise SIGPIPE and kill the script silently.
+			drainBashRequest(r)
+		}
 		http.Error(w, "bridge closed", http.StatusServiceUnavailable)
 		return
 	}
@@ -221,7 +233,17 @@ func (b *Bridge) handle(w http.ResponseWriter, r *http.Request) {
 	case b.slots <- struct{}{}:
 		defer func() { <-b.slots }()
 	case <-r.Context().Done():
-		b.reply(w, nil, &callError{Code: "canceled", Message: r.Context().Err().Error()})
+		failure := &callError{Code: "canceled", Message: r.Context().Err().Error()}
+		if bash {
+			drainBashRequest(r)
+			writeBash(w, nil, fmt.Errorf("SDK %s: %s", failure.Code, failure.Message))
+			return
+		}
+		b.reply(w, nil, failure)
+		return
+	}
+	if bash {
+		b.handleBash(w, r)
 		return
 	}
 	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxMessageBytes))
@@ -239,23 +261,35 @@ func (b *Bridge) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := b.dispatch(r.Context(), call.Method, call.Params)
 	if err != nil {
-		code := "host_error"
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			code = "canceled"
-		}
-		b.reply(w, nil, &callError{Code: code, Message: err.Error()})
+		b.reply(w, nil, callFailure(err))
 		return
 	}
 	b.reply(w, result, nil)
 }
 
 func (b *Bridge) reply(w http.ResponseWriter, result any, failure *callError) {
+	data := encodeResponse(result, failure)
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write(data)
+}
+
+func callFailure(err error) *callError {
+	if err == nil {
+		return nil
+	}
+	code := "host_error"
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		code = "canceled"
+	}
+	return &callError{Code: code, Message: err.Error()}
+}
+
+func encodeResponse(result any, failure *callError) []byte {
 	data, err := json.Marshal(callResponse{Version: Version, Result: result, Error: failure})
 	if err != nil || len(data) > maxMessageBytes {
 		data, _ = json.Marshal(callResponse{Version: Version, Error: &callError{Code: "invalid_result", Message: "SDK result is not JSON-compatible or exceeds 10 MiB"}})
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_, _ = w.Write(data)
+	return data
 }
 
 func decode(data []byte, target any) error {

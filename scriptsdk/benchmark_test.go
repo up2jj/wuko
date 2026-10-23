@@ -20,7 +20,7 @@ import (
 )
 
 // These opt-in benchmarks use the actual Node/Bash adapters and built Wuko
-// executable, rather than a test-binary substitute for Bash's client process.
+// executable (needed by Bash's fallback client), rather than a test substitute.
 // Run through `just bench-script-sdk`; compilation is outside measured time.
 func BenchmarkBridgeLifecycle(b *testing.B) {
 	for _, size := range []int{1 << 10, 100 << 10, 1 << 20} {

@@ -1,0 +1,58 @@
+go build -o wuko ./
+WUKO_BENCH_EXECUTABLE="/Users/up2jj/Projekty/wuko/wuko" go test ./scriptsdk -run '^$' -bench 'Benchmark(BridgeLifecycle|ScriptInvocation|SDKCall)$' -benchtime=1s -count=5 "$@"
+goos: darwin
+goarch: arm64
+pkg: github.com/up2jj/wuko/scriptsdk
+cpu: Apple M1 Max
+BenchmarkBridgeLifecycle/bash/1KiB-10         	    1484	    760635 ns/op
+BenchmarkBridgeLifecycle/bash/1KiB-10         	    1689	    731716 ns/op
+BenchmarkBridgeLifecycle/bash/1KiB-10         	    1593	    744081 ns/op
+BenchmarkBridgeLifecycle/bash/1KiB-10         	    1674	    729785 ns/op
+BenchmarkBridgeLifecycle/bash/1KiB-10         	    1622	    762775 ns/op
+BenchmarkBridgeLifecycle/bash/100KiB-10       	     883	   1357365 ns/op
+BenchmarkBridgeLifecycle/bash/100KiB-10       	     906	   1390658 ns/op
+BenchmarkBridgeLifecycle/bash/100KiB-10       	     874	   1378844 ns/op
+BenchmarkBridgeLifecycle/bash/100KiB-10       	     880	   1378494 ns/op
+BenchmarkBridgeLifecycle/bash/100KiB-10       	     843	   1390081 ns/op
+BenchmarkBridgeLifecycle/bash/1024KiB-10      	     166	   7261427 ns/op
+BenchmarkBridgeLifecycle/bash/1024KiB-10      	     165	   7213683 ns/op
+BenchmarkBridgeLifecycle/bash/1024KiB-10      	     165	   7192281 ns/op
+BenchmarkBridgeLifecycle/bash/1024KiB-10      	     156	   7472567 ns/op
+BenchmarkBridgeLifecycle/bash/1024KiB-10      	     165	   7215955 ns/op
+BenchmarkScriptInvocation/bash/plain-10       	      68	  15395046 ns/op
+BenchmarkScriptInvocation/bash/plain-10       	      80	  15200445 ns/op
+BenchmarkScriptInvocation/bash/plain-10       	      78	  15281574 ns/op
+BenchmarkScriptInvocation/bash/plain-10       	      76	  15344133 ns/op
+BenchmarkScriptInvocation/bash/plain-10       	      79	  14943293 ns/op
+BenchmarkScriptInvocation/bash/sdk_no_calls-10         	      68	  17489286 ns/op
+BenchmarkScriptInvocation/bash/sdk_no_calls-10         	      66	  17856494 ns/op
+BenchmarkScriptInvocation/bash/sdk_no_calls-10         	      67	  17053591 ns/op
+BenchmarkScriptInvocation/bash/sdk_no_calls-10         	      69	  17401190 ns/op
+BenchmarkScriptInvocation/bash/sdk_no_calls-10         	      66	  17668577 ns/op
+BenchmarkScriptInvocation/bash/sdk_one_output-10       	      61	  19097313 ns/op
+BenchmarkScriptInvocation/bash/sdk_one_output-10       	      62	  18231650 ns/op
+BenchmarkScriptInvocation/bash/sdk_one_output-10       	      63	  18388059 ns/op
+BenchmarkScriptInvocation/bash/sdk_one_output-10       	      62	  18163282 ns/op
+BenchmarkScriptInvocation/bash/sdk_one_output-10       	      68	  17965148 ns/op
+BenchmarkSDKCall/bash/output-10                        	      10	 102265592 ns/op	    390462 ns/call
+BenchmarkSDKCall/bash/output-10                        	      10	 103558012 ns/op	    395542 ns/call
+BenchmarkSDKCall/bash/output-10                        	      12	  99307833 ns/op	    381355 ns/call
+BenchmarkSDKCall/bash/output-10                        	      12	 105748917 ns/op	    411412 ns/call
+BenchmarkSDKCall/bash/output-10                        	      10	 103402079 ns/op	    393387 ns/call
+BenchmarkSDKCall/bash/set_var-10                       	      12	 100490872 ns/op	    382746 ns/call
+BenchmarkSDKCall/bash/set_var-10                       	      10	 103047892 ns/op	    394223 ns/call
+BenchmarkSDKCall/bash/set_var-10                       	      10	 103423688 ns/op	    396795 ns/call
+BenchmarkSDKCall/bash/set_var-10                       	      10	 104229467 ns/op	    404501 ns/call
+BenchmarkSDKCall/bash/set_var-10                       	      10	 103029171 ns/op	    392450 ns/call
+BenchmarkSDKCall/bash/helper-10                        	       9	 115394574 ns/op	    455429 ns/call
+BenchmarkSDKCall/bash/helper-10                        	       9	 116931718 ns/op	    460113 ns/call
+BenchmarkSDKCall/bash/helper-10                        	       9	 115867037 ns/op	    452498 ns/call
+BenchmarkSDKCall/bash/helper-10                        	       9	 116997889 ns/op	    456779 ns/call
+BenchmarkSDKCall/bash/helper-10                        	       9	 116713403 ns/op	    458252 ns/call
+BenchmarkSDKCall/bash/get-10                           	       9	 125833704 ns/op	    502759 ns/call
+BenchmarkSDKCall/bash/get-10                           	       9	 123208375 ns/op	    491804 ns/call
+BenchmarkSDKCall/bash/get-10                           	       9	 122589051 ns/op	    490648 ns/call
+BenchmarkSDKCall/bash/get-10                           	       9	 125989486 ns/op	    507537 ns/call
+BenchmarkSDKCall/bash/get-10                           	       9	 125711292 ns/op	    504567 ns/call
+PASS
+ok  	github.com/up2jj/wuko/scriptsdk	58.176s

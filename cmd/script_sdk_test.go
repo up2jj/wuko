@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -129,6 +130,64 @@ if wuko_output_json bad 'not-json' >unexpected.out 2>expected.err; then exit 91;
 				t.Fatalf("descriptor survived attempt: %v", err)
 			}
 		})
+	}
+}
+
+func TestBashSDKFallsBackWhenNetworkRedirectionsAreUnavailable(t *testing.T) {
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("Bash is unavailable")
+	}
+	// "0" models a Bash build without /dev/tcp; "" models a host without IPv4 loopback.
+	for _, port := range []string{"0", ""} {
+		t.Run(fmt.Sprintf("port=%q", port), func(t *testing.T) { testBashSDKFallback(t, bash, port) })
+	}
+}
+
+func testBashSDKFallback(t *testing.T, bash, port string) {
+	bridge, err := scriptsdk.Open(t.Context(), step.Request{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = bridge.Close() })
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	environment := map[string]string{"PATH": "", "GORACE": "atexit_sleep_ms=0"}
+	if err := bridge.InjectBash(environment, executable); err != nil {
+		t.Fatal(err)
+	}
+	path := environment["BASH_ENV"]
+	bootstrap, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Force the bootstrap capability probe to fail without changing the real
+	// Unix socket endpoint used by the executable fallback.
+	lines := strings.Split(string(bootstrap), "\n")
+	replaced := false
+	for i, line := range lines {
+		if strings.HasPrefix(line, "__wuko_sdk_port=") {
+			lines[i] = "__wuko_sdk_port='" + port + "'"
+			replaced = true
+		}
+	}
+	if !replaced {
+		t.Fatal("missing bootstrap listener configuration")
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	command := exec.CommandContext(t.Context(), bash, "-c", `set -euo pipefail; wuko_output label "$(wuko_helper upper fallback)"`)
+	for key, value := range environment {
+		command.Env = append(command.Env, key+"="+value)
+	}
+	if output, err := command.CombinedOutput(); err != nil || len(output) != 0 {
+		t.Fatalf("fallback: %v: %s", err, output)
+	}
+	if bridge.Result().Outputs["label"] != "FALLBACK" {
+		t.Fatal("fallback did not stage the output")
 	}
 }
 

@@ -4,6 +4,11 @@ Measured on 2026-10-23 using an Apple M1 Max MacBook Pro (10 CPU cores, 64 GB RA
 macOS 26.4, Go 1.26.8, Node.js 22.14.0, and Homebrew Bash 5.3.15.
 The source was the working tree based on `00f47fe`, including uncommitted changes.
 
+The original measurements below describe the executable-per-call Bash adapter.
+The [builtin transport follow-up](#bash-builtin-transport-follow-up) measures its
+replacement. Running the benchmark command uses whichever adapter is currently
+checked out.
+
 ## Reproduce
 
 ```sh
@@ -20,8 +25,9 @@ just bench-script-sdk -bench 'BenchmarkSDKCall/node' -benchtime=2s
 ```
 
 `WUKO_BENCH_NODE` and `WUKO_BENCH_BASH` select other runtime executables.
-The harness resolves Node version-manager shims before timing. Bash uses the
-actual built Wuko executable for every SDK function call.
+The harness resolves Node version-manager shims before timing. The original Bash
+adapter uses the actual built Wuko executable for every SDK function call; the
+builtin adapter keeps that executable only for its compatibility fallback.
 
 The following tables show the median of five benchmark sample averages, with the
 minimum and maximum sample averages in parentheses. These are wall-clock costs,
@@ -116,9 +122,9 @@ concurrent calls, and host load can all change the results.
 
 Every SDK-enabled shell attempt repeats the invocation costs. For many small
 items, batching work into one script amortizes runtime and bridge setup.
-Node calls stay inside the running Node process until their socket request;
-Bash starts Wuko for every SDK function call. Publishing a single result object
-or array also reduces call count. Increasing `foreach.max_concurrency` overlaps
+Node and builtin Bash calls each make one socket request without starting a
+process; the executable Bash fallback starts Wuko for every SDK function call.
+Publishing a single result object or array also reduces call count. Increasing `foreach.max_concurrency` overlaps
 work but does not remove these costs.
 
 The benchmarks do not exercise retries, the 64-call concurrency limit, large
@@ -128,3 +134,60 @@ Raw samples: [main run](benchmarks/script-sdk-2026-10-23.txt) and
 [Node follow-up](benchmarks/script-sdk-node-2026-10-23.txt).
 
 Validation: `just test`, `just vet`, and `just lint` passed; `gofmt -l .` was empty.
+
+## Bash builtin transport follow-up
+
+The replacement calls an authenticated HTTP endpoint on `127.0.0.1` from Bash
+builtins. Function-scoped descriptor redirection restores the caller's descriptor
+on return, so calls need neither a Wuko client process nor an extra Bash subshell.
+Each call owns its connection and can run independently in command substitutions
+or background jobs. JSON conversion, context access, and host operations run in
+the existing Wuko host. The original executable remains the fallback for Bash
+builds without network redirections or hosts without IPv4 loopback, selected by
+a capability probe before the first SDK call.
+
+The same host, runtimes, fixtures, 10-call warmup, 200-call batches, and five-sample
+methodology were used. The baseline and follow-up are separate runs, so their
+ratios are approximate. Large payloads still pass through Bash's read and printf
+builtins; these small-message timings do not characterize bulk data throughput.
+
+Reproduce only the Bash cases, including lifecycle measurements:
+
+```sh
+just bench-script-sdk -bench 'Benchmark(BridgeLifecycle|ScriptInvocation|SDKCall)/bash'
+```
+
+| Operation | Original client median | Builtin median (range) | Approximate speedup |
+| --- | --- | --- | --- |
+| Output | 19.027 ms | 0.393 ms (0.381–0.411) | 48.4× |
+| Set variable | 19.861 ms | 0.394 ms (0.383–0.405) | 50.4× |
+| Helper `upper` | 21.239 ms | 0.457 ms (0.452–0.460) | 46.5× |
+| Read context | 18.474 ms | 0.503 ms (0.491–0.508) | 36.7× |
+
+| Script invocation | Original client median | Builtin median (range) |
+| --- | --- | --- |
+| Plain empty script | 15.879 ms | 15.282 ms (14.943–15.395) |
+| Empty SDK script | 17.140 ms | 17.489 ms (17.054–17.856) |
+| SDK script publishing one output | 43.083 ms | 18.232 ms (17.965–19.097) |
+
+| Bridge lifecycle, including Bash adapter | Builtin median (range) |
+| --- | --- |
+| 1 KiB payload | 0.744 ms (0.730–0.763) |
+| 100 KiB payload | 1.379 ms (1.357–1.391) |
+| 1 MiB payload | 7.216 ms (7.192–7.473) |
+
+The empty SDK script pays for the loopback listener and private credential file.
+These runs also probed the listener at startup; the probe now runs before the first
+SDK call, so scripts that make no call no longer pay for it. Per-call savings amortize
+the remaining cost. This follow-up used the working tree based on `568f63d`, including
+the builtin implementation.
+
+Regression checks cover Bash 3.2 and 5.x; a deliberately nonexistent Wuko client
+path proves the native path does not execute it. They also cover concurrent jobs,
+inherited shells, command substitutions, UTF-8, embedded NUL output, trailing
+newlines, large values, stdin, caller descriptors and traps, authentication,
+size limits, disconnect cancellation, shutdown, the executable fallback, and
+credential privacy under Bash `-xv`. Full tests, focused race tests, vet, lint,
+and repository hooks passed.
+
+Raw samples: [Bash builtin follow-up](benchmarks/script-sdk-bash-builtins-2026-10-23.txt).

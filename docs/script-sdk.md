@@ -108,9 +108,11 @@ snapshot or the state seen by child calls.
 
 Set `sdk: bash` on a local shell step. Inline `script` defaults to Bash with this SDK;
 `shell`, `command`, and `argv.expr` may also select an explicit Bash executable. Bash 3.2+
-must already be available. No curl, jq, Python, Node, or separately installed SDK is required:
-every function calls a private client command inside the running Wuko executable using its
-absolute path. JSON encoding, decoding, authentication, and socket communication run in Go.
+must already be available. No curl, jq, Python, Node, or separately installed SDK is required.
+Functions use Bash builtins to call an authenticated HTTP listener bound to `127.0.0.1`
+in the existing Wuko host. No client process starts for each call. JSON conversion runs in Go.
+Bash builds without `/dev/tcp` network redirections fall back to the private client command
+in the Wuko executable, using its absolute path.
 
 ```yaml
 - id: metadata
@@ -179,10 +181,15 @@ background jobs explicitly.
 Shell variables hold strings. Quote expansions, use JSON variants for structured values, and
 encode binary data as text. Command substitution strips trailing newlines; redirect a function's
 stdout to a file when exact trailing newlines matter (the function adds one output newline).
-Each SDK call starts a Wuko process and rereads its descriptor, so very tight loops have more
-overhead than Node's in-process client. Calls preserve script stdin. The helper functions also
-work with an empty `PATH` once Bash has started. Arguments are subject to the operating system's
-process argument size limits, which may be substantially smaller than the bridge's 10 MiB limit.
+Each builtin call owns its connection, so command substitutions, inherited Bash processes,
+and background jobs can call the SDK independently. Calls preserve script stdin and the
+caller's file descriptors. The listener shares the attempt's token, immutable context, 10 MiB
+JSON message limit, 64-call concurrency bound, and cleanup lifecycle with the Unix socket bridge.
+Bash reads a builtin response one byte per system call, so multi-megabyte results from
+`wuko_get` or helpers cost noticeably more CPU than small ones; pass large data through files.
+The helper functions work with an empty `PATH` once Bash has started. The executable fallback
+starts a client process and rereads the descriptor per call; its arguments are also subject to
+the operating system's process argument size limits.
 
 [Run the Bash example](../examples/bash-sdk.yaml) with `wuko run --file examples/bash-sdk.yaml`.
 
