@@ -145,6 +145,7 @@ func TestWorkflowPickerInspectionsIsolatePlugins(t *testing.T) {
 		{name: "failed dry run", intent: tui.SelectionDryRun, failed: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
 			root, cache := t.TempDir(), t.TempDir()
 			dir := filepath.Join(root, ".wuko", "workflows")
 			commandPluginBundle(t, filepath.Join(dir, "bundle"))

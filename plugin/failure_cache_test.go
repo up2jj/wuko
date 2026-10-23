@@ -71,6 +71,7 @@ func TestTransientPluginLoadFailuresAreNotCached(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
 			transport := &scriptedTransport{failure: test.failure, next: good}
 			manager := NewManager(Config{CacheDir: testCache(t), HTTPClient: &http.Client{Transport: transport}, Stderr: io.Discard})
 			t.Cleanup(func() { _ = manager.Close(context.Background(), "completed") })
