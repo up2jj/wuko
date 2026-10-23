@@ -44,6 +44,10 @@ suggests `deploy`. Misspelled targets also suggest a close match, such as `stagn
 and list available targets. Unknown workflow names also point to `wuko list`; Wuko never runs
 the suggestion automatically.
 
+Local YAML paths use `--file`, for example `wuko run --file ./workflow.yaml`. If a selector
+matches an existing YAML file but no named workflow, the error points to `--file`. The same
+guidance applies to `tree`, `validate`, and `ui`.
+
 In the picker, Enter runs the selected workflow and `a` opens its action palette: open a browser
 form, validate, show the tree, dry-run, print a reproducible command, edit, pin, change sorting, or
 manage marketplace installs. See [Workflow discovery](workflow-discovery.md) for search order,

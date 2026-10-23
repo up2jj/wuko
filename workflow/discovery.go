@@ -359,13 +359,36 @@ func installedPackageManifest(directory string) (string, string, bool, error) {
 // Find returns the effective workflow matching name.
 func Find(cwd, homeDir, configDir, name string) (Source, error) {
 	if !ValidWorkflowSelector(name) {
-		return Source{}, fmt.Errorf("invalid workflow name %q", name)
+		return Source{}, localWorkflowFileHint(cwd, name, fmt.Errorf("invalid workflow name %q", name))
 	}
 	sources, err := Discover(cwd, homeDir, configDir)
 	if err != nil {
 		return Source{}, err
 	}
-	return SelectSource(sources, name)
+	source, err := SelectSource(sources, name)
+	if err != nil {
+		return Source{}, localWorkflowFileHint(cwd, name, err)
+	}
+	return source, nil
+}
+
+// localWorkflowFileHint explains how to load an existing YAML file after name
+// lookup fails. Successful named lookups and unrelated discovery errors keep
+// their normal behavior, even when a matching local filename exists.
+func localWorkflowFileHint(cwd, name string, err error) error {
+	extension := strings.ToLower(filepath.Ext(name))
+	if extension != ".yaml" && extension != ".yml" {
+		return err
+	}
+	filename := name
+	if !filepath.IsAbs(filename) {
+		filename = filepath.Join(cwd, filename)
+	}
+	info, statErr := os.Stat(filename)
+	if statErr != nil || !info.Mode().IsRegular() {
+		return err
+	}
+	return fmt.Errorf("%w; use --file to load a local workflow", err)
 }
 
 // SelectSource returns the source matching name among already discovered sources.

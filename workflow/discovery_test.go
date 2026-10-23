@@ -40,6 +40,52 @@ func TestSelectSourceSuggestsWorkflowNames(t *testing.T) {
 	}
 }
 
+func TestFindLocalFileHintPreservesNameLookup(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	home, config := filepath.Join(root, "home"), filepath.Join(root, "config")
+	local := filepath.Join(root, "tools", "deploy.YML")
+	installed := filepath.Join(root, ".wuko", "workflows", "tools", "deploy.YML.yaml")
+	for _, directory := range []string{filepath.Dir(local), filepath.Dir(installed), filepath.Join(root, "directory.yaml")} {
+		if err := os.MkdirAll(directory, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeWorkflow(t, local, "Local file")
+	_, err := Find(root, home, config, "tools/deploy.YML")
+	if err == nil || !strings.Contains(err.Error(), "--file") || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("Find() error = %v, want original error and file hint", err)
+	}
+	for _, selector := range []string{"missing.yaml", "directory.yaml", "unknown"} {
+		_, err := Find(root, home, config, selector)
+		if err == nil || strings.Contains(err.Error(), "--file") {
+			t.Fatalf("Find(%q) error = %v, want no file hint", selector, err)
+		}
+	}
+	writeWorkflow(t, installed, "Installed workflow")
+	source, err := Find(root, home, config, "tools/deploy.YML")
+	if err != nil || source.Path != installed {
+		t.Fatalf("Find() = %#v, %v, want named workflow", source, err)
+	}
+}
+
+func TestFindLocalFileHintPreservesDiscoveryErrors(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeWorkflow(t, filepath.Join(root, "workflow.yaml"), "Local file")
+	if err := os.MkdirAll(filepath.Join(root, ".wuko"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A workflow directory that is actually a file must retain its discovery error.
+	if err := os.WriteFile(filepath.Join(root, ".wuko", "workflows"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Find(root, filepath.Join(root, "home"), filepath.Join(root, "config"), "workflow.yaml")
+	if err == nil || strings.Contains(err.Error(), "--file") {
+		t.Fatalf("Find() error = %v, want unmodified discovery failure", err)
+	}
+}
+
 func TestDiscoverPrecedence(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
