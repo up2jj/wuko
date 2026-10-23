@@ -62,6 +62,7 @@ func nodeSDKStep(node, id, source string) workflow.Step {
 }
 
 func TestScriptSDKCallsEngineWithIsolatedState(t *testing.T) {
+	t.Parallel()
 	node := scriptSDKNode(t)
 	registry := scriptSDKRegistry(t)
 	if err := registry.Register("inspect", func(raw map[string]any) (step.Runner, error) {
@@ -117,6 +118,7 @@ func (host *sdkChildWorkflowHost) RunWorkflow(_ context.Context, call WorkflowIn
 }
 
 func TestScriptSDKInvokesNamedWorkflow(t *testing.T) {
+	t.Parallel()
 	node := scriptSDKNode(t)
 	host := &sdkChildWorkflowHost{}
 	definition := testDefinition(t, "caller", nodeSDKStep(node, "script", `
@@ -134,6 +136,7 @@ await wuko.output('child', await wuko.runWorkflow('build', {target: 'release', v
 }
 
 func TestScriptSDKRetriesDiscardFailedAttemptWrites(t *testing.T) {
+	t.Parallel()
 	node := scriptSDKNode(t)
 	body := nodeSDKStep(node, "", `
 if (wuko.attempt.number === 1) {
@@ -164,6 +167,7 @@ if (wuko.attempt.number === 1) {
 }
 
 func TestScriptSDKReferenceValidation(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name                 string
 		sdk                  bool

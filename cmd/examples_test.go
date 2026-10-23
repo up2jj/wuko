@@ -22,6 +22,7 @@ import (
 // projects are validated through the validate command, which also resolves their dependencies
 // and child workflows.
 func TestExamplesValidate(t *testing.T) {
+	t.Parallel()
 	root, err := filepath.Abs(filepath.Join("..", "examples"))
 	if err != nil {
 		t.Fatal(err)

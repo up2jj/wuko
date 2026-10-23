@@ -23,6 +23,7 @@ import (
 )
 
 func TestExecuteWithSignalsCancelsGracefully(t *testing.T) {
+	t.Parallel()
 	signals := make(chan os.Signal, 1)
 	started := make(chan struct{})
 	go func() {
@@ -40,6 +41,8 @@ func TestExecuteWithSignalsCancelsGracefully(t *testing.T) {
 	}
 }
 
+// A forced shutdown kills every tracked process group in the test binary, so this test and
+// the grace-period one below must not run alongside tests that start processes.
 func TestExecuteWithSignalsForcesSecondSignal(t *testing.T) {
 	signals := make(chan os.Signal, 2)
 	started := make(chan struct{})
@@ -92,6 +95,7 @@ func TestExecuteWithSignalsForcesExpiredGracePeriod(t *testing.T) {
 }
 
 func TestRunCommandInMemory(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	workflowDir := filepath.Join(root, ".wuko", "workflows")
 	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
@@ -134,6 +138,7 @@ steps:
 }
 
 func TestScheduledRunReloadsAndStopsCleanly(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	workflowDir := filepath.Join(root, ".wuko", "workflows")
 	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
@@ -197,6 +202,7 @@ steps:
 }
 
 func TestScheduledDryRunDoesNotWait(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	path := filepath.Join(root, "scheduled.yaml")
 	data := `version: 1
@@ -234,6 +240,7 @@ steps:
 }
 
 func TestRootCommandRegistersJSONPathStep(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	path := filepath.Join(root, "jsonpath.yaml")
 	data := `version: 1
@@ -326,6 +333,7 @@ func TestRootCommandDoesNotRegisterExtractedHTTPServices(t *testing.T) {
 }
 
 func TestRootCommandRegistersSemVerStep(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	path := filepath.Join(root, "semver.yaml")
 	data := `version: 1
@@ -352,6 +360,7 @@ steps:
 }
 
 func TestRootCommandRegistersRequireToolStep(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	path := filepath.Join(root, "require-tool.yaml")
 	data := `version: 1
@@ -377,6 +386,7 @@ steps:
 }
 
 func TestRootCommandRegistersGlobStep(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -410,6 +420,7 @@ steps:
 }
 
 func TestRootCommandRegistersWatchStepWithoutWaiting(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	path := filepath.Join(root, "watch.yaml")
 	data := `version: 1
@@ -440,6 +451,7 @@ steps:
 }
 
 func TestRootCommandRegistersTempStep(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	path := filepath.Join(root, "temp.yaml")
 	data := `version: 1
@@ -470,6 +482,7 @@ steps:
 }
 
 func TestRootCommandRegistersCacheStep(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	keyFile := filepath.Join(root, "go.sum")
 	target := filepath.Join(root, "vendor")
@@ -516,6 +529,7 @@ steps:
 }
 
 func TestRootCommandRegistersChangedStep(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	workflowPath := filepath.Join(root, "changed.yaml")
 	data := `version: 1
@@ -551,6 +565,7 @@ steps:
 }
 
 func TestRootCommandRunsBuiltInWaitStep(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	path := filepath.Join(root, "wait.yaml")
 	data := `version: 1
@@ -573,6 +588,7 @@ steps:
 }
 
 func TestRootCommandRegistersAssertStep(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	path := filepath.Join(root, "assert.yaml")
 	sentinel := filepath.Join(root, "should-not-exist")
@@ -624,6 +640,7 @@ steps:
 }
 
 func TestRunCommandImportsVariableFilesBeforeInlineOverrides(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	workflowDir := filepath.Join(root, ".wuko", "workflows")
 	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
@@ -665,6 +682,7 @@ steps:
 }
 
 func TestRunDebugPinpointsInvalidLuaSyntax(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	workflowDir := filepath.Join(root, ".wuko", "workflows")
 	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
@@ -710,6 +728,7 @@ steps:
 }
 
 func TestRunDebugRedactsRenderedEnvironment(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	workflowDir := filepath.Join(root, ".wuko", "workflows")
 	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
@@ -749,6 +768,7 @@ steps:
 }
 
 func TestRunDebugReportsLuaRuntimeAttempts(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	workflowDir := filepath.Join(root, ".wuko", "workflows")
 	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
@@ -795,6 +815,7 @@ steps:
 }
 
 func TestDebugFlagCoversWorkflowCommands(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	workflowDir := filepath.Join(root, ".wuko", "workflows")
 	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
@@ -836,6 +857,7 @@ func TestDebugFlagCoversWorkflowCommands(t *testing.T) {
 }
 
 func TestRunCommandRoutesLocalAndGlobalValueStores(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	configDir := filepath.Join(root, "config")
 	workflowDir := filepath.Join(root, ".wuko", "workflows")
@@ -879,6 +901,7 @@ steps:
 }
 
 func TestRunCommandUsesInvocationEnvironment(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	workflowDir := filepath.Join(root, ".wuko", "workflows")
 	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
@@ -928,6 +951,7 @@ steps:
 }
 
 func TestBareCommandListsAllWorkflowsWithScope(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	localDir := filepath.Join(root, ".wuko", "workflows")
 	globalDir := filepath.Join(root, "home", ".wuko", "workflows")
@@ -958,6 +982,7 @@ func TestBareCommandListsAllWorkflowsWithScope(t *testing.T) {
 }
 
 func TestBareCommandInteractiveWithoutWorkflowsPrintsGuidance(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	var output bytes.Buffer
 	command := newRootCmd(dependencies{
@@ -1002,6 +1027,7 @@ More help:
 }
 
 func TestListCommandIncludesScope(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	dir := filepath.Join(root, ".wuko", "workflows")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -1026,6 +1052,7 @@ func TestListCommandIncludesScope(t *testing.T) {
 }
 
 func TestBareCommandInteractiveEnterRunsWorkflow(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	localDir := filepath.Join(root, ".wuko", "workflows")
 	globalDir := filepath.Join(root, "home", ".wuko", "workflows")
@@ -1059,6 +1086,7 @@ func TestBareCommandInteractiveEnterRunsWorkflow(t *testing.T) {
 }
 
 func TestBareCommandInteractiveShiftEnterPrintsRunCommand(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	workflowDir := filepath.Join(root, ".wuko", "workflows")
 	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
@@ -1083,6 +1111,7 @@ func TestBareCommandInteractiveShiftEnterPrintsRunCommand(t *testing.T) {
 }
 
 func TestRunCommandFromFile(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	path := filepath.Join(root, "workflow.yaml")
 	writeTestWorkflow(t, path, "file workflow")
@@ -1108,6 +1137,7 @@ func TestRunCommandFromFile(t *testing.T) {
 }
 
 func TestRunAndUIRejectDependencyOnlyNamedAndFileWorkflows(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	dir := filepath.Join(root, ".wuko", "workflows")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -1145,6 +1175,7 @@ steps:
 }
 
 func TestRunCommandRejectsMissingOrConflictingWorkflowSelector(t *testing.T) {
+	t.Parallel()
 	for _, args := range [][]string{{"run"}, {"run", "name", "--file", "workflow.yaml"}} {
 		command := newRootCmd(dependencies{
 			stdin: bytes.NewReader(nil), stdout: io.Discard, stderr: io.Discard,
@@ -1160,6 +1191,7 @@ func TestRunCommandRejectsMissingOrConflictingWorkflowSelector(t *testing.T) {
 }
 
 func TestBareCommandShowsWorkflowDependencies(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	workflowDir := filepath.Join(root, ".wuko", "workflows")
 	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
@@ -1197,6 +1229,7 @@ steps:
 }
 
 func TestDependencyOnlyWorkflowVisibilityAndCompletion(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	dir := filepath.Join(root, ".wuko", "workflows")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -1265,6 +1298,7 @@ func TestDependencyOnlyWorkflowVisibilityAndCompletion(t *testing.T) {
 }
 
 func TestBareCommandReportsNoDirectlyInvokableWorkflows(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	dir := filepath.Join(root, ".wuko", "workflows")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -1290,6 +1324,7 @@ func TestBareCommandReportsNoDirectlyInvokableWorkflows(t *testing.T) {
 }
 
 func TestWorkflowPickerOptionShowsWorkflowDependencies(t *testing.T) {
+	t.Parallel()
 	option := workflowPickerOption(workflow.Source{
 		Name: "release", Scope: "local", Description: "Publish",
 		Path: "/project/release.yaml", DependsOn: map[string]string{"checks": "checks", "build": "build-artifacts"},
@@ -1303,6 +1338,7 @@ func TestWorkflowPickerOptionShowsWorkflowDependencies(t *testing.T) {
 }
 
 func TestWorkflowPickerOptionShowsFormAvailability(t *testing.T) {
+	t.Parallel()
 	option := workflowPickerOption(workflow.Source{
 		Name: "release", Scope: "local", Description: "Publish", Path: "/project/release.yaml", HasForm: true,
 	})
@@ -1315,6 +1351,7 @@ func TestWorkflowPickerOptionShowsFormAvailability(t *testing.T) {
 }
 
 func TestPluginStopReason(t *testing.T) {
+	t.Parallel()
 	if got := pluginStopReason(nil); got != "completed" {
 		t.Fatalf("success reason = %q", got)
 	}

@@ -20,6 +20,7 @@ import (
 )
 
 func TestManagedTempRemainsAvailableThroughFinally(t *testing.T) {
+	t.Parallel()
 	var observedPath string
 	registry := newTestRegistry(t, map[string]step.Builder{"observe_path": func(raw map[string]any) (step.Runner, error) {
 		path, _ := raw["path"].(string)
@@ -52,6 +53,7 @@ func TestManagedTempRemainsAvailableThroughFinally(t *testing.T) {
 }
 
 func TestManagedTempInsideActionLivesUntilRootCleanup(t *testing.T) {
+	t.Parallel()
 	var observedPath string
 	registry := newTestRegistry(t, map[string]step.Builder{"observe_action_path": func(raw map[string]any) (step.Runner, error) {
 		path, _ := raw["path"].(string)
@@ -89,6 +91,7 @@ func TestManagedTempInsideActionLivesUntilRootCleanup(t *testing.T) {
 }
 
 func TestManagedTempValidationAndDryRunCreateNothing(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, nil)
 	if err := tempstep.Register(registry); err != nil {
 		t.Fatal(err)
@@ -124,6 +127,7 @@ func TestManagedTempValidationAndDryRunCreateNothing(t *testing.T) {
 }
 
 func TestManagedFIFOConnectsConcurrentProcessesAndLivesThroughFinally(t *testing.T) {
+	t.Parallel()
 	var observed bool
 	registry := newTestRegistry(t, map[string]step.Builder{"observe_fifo": func(raw map[string]any) (step.Runner, error) {
 		path, _ := raw["path"].(string)
@@ -186,6 +190,7 @@ func TestManagedFIFOConnectsConcurrentProcessesAndLivesThroughFinally(t *testing
 }
 
 func TestManagedCleanupRunsInReverseAndJoinsErrors(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, nil)
 	var mu sync.Mutex
 	var cleaned []string
@@ -219,6 +224,7 @@ func TestManagedCleanupRunsInReverseAndJoinsErrors(t *testing.T) {
 // not accumulate a container or temporary directory per iteration. Only the winning pass promotes
 // its resources to the scope that owns the attempt, where they live until that scope ends.
 func TestManagedCleanupReleasesDiscardedPassesAndPromotesTheWinner(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, nil)
 	runner := &pollCleanupRunner{}
 	if err := registry.Register("managed_poll", func(map[string]any) (step.Runner, error) { return runner, nil }); err != nil {
@@ -268,6 +274,7 @@ func TestManagedCleanupReleasesDiscardedPassesAndPromotesTheWinner(t *testing.T)
 // The leak block retry introduces that leaf retry could not: a body step that succeeds inside a
 // pass that later fails. Its resource belongs to the discarded pass, not to the workflow.
 func TestManagedCleanupReleasesSucceededStepsOfAFailedPass(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, nil)
 	runner := &pollCleanupRunner{}
 	if err := registry.Register("managed_poll", func(map[string]any) (step.Runner, error) { return runner, nil }); err != nil {
@@ -323,6 +330,7 @@ func TestManagedCleanupReleasesSucceededStepsOfAFailedPass(t *testing.T) {
 }
 
 func TestManagedCleanupRegistersOnlySuccessfulRetry(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, nil)
 	runner := &retryCleanupRunner{}
 	if err := registry.Register("managed_retry", func(map[string]any) (step.Runner, error) { return runner, nil }); err != nil {
@@ -341,6 +349,7 @@ func TestManagedCleanupRegistersOnlySuccessfulRetry(t *testing.T) {
 }
 
 func TestManagedCleanupConcurrentAndFanoutRegistration(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, nil)
 	var mu sync.Mutex
 	var cleaned []string
@@ -440,6 +449,7 @@ var _ step.Cleaner = (*retryCleanupRunner)(nil)
 // Ctrl-C. Before Cleanup took a context, implementations had to invent
 // context.Background() themselves and the engine could not express this.
 func TestManagedCleanupContextSurvivesRunCancellation(t *testing.T) {
+	t.Parallel()
 	type ctxKey struct{}
 
 	started := make(chan struct{})

@@ -14,6 +14,7 @@ import (
 )
 
 func TestRunWorkflowTargetSelectsOnlyRequestedSteps(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	workflowDir := filepath.Join(root, ".wuko", "workflows")
 	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
@@ -56,6 +57,7 @@ targets:
 }
 
 func TestRunWorkflowTargetIsRequired(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	workflowDir := filepath.Join(root, ".wuko", "workflows")
 	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
@@ -85,6 +87,7 @@ targets:
 }
 
 func TestTargetCommandsAndCompletion(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	workflowDir := filepath.Join(root, ".wuko", "workflows")
 	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
@@ -153,6 +156,7 @@ targets:
 }
 
 func TestTargetPickerOptionAndCommand(t *testing.T) {
+	t.Parallel()
 	option := workflowPickerOption(workflow.Source{
 		Name: "deploy", Target: "production", Scope: "local", Description: "Deploy", Path: "/project/deploy.yaml",
 	})

@@ -18,6 +18,7 @@ import (
 )
 
 func TestCookieJarPersistsAcrossRunsAndStatusErrors(t *testing.T) {
+	t.Parallel()
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		requests++
@@ -77,6 +78,7 @@ func TestCookieJarPersistsAcrossRunsAndStatusErrors(t *testing.T) {
 }
 
 func TestPersistentJarLoadsDeletesAndWritesDeterministically(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "cookies.txt")
 	initial := "# Netscape HTTP Cookie File\n.example.test\tTRUE\t/\tFALSE\t0\tzeta\tlast\n#HttpOnly_.example.test\tTRUE\t/\tTRUE\t0\talpha\tfirst\n"
 	if err := os.WriteFile(path, []byte(initial), 0o600); err != nil {
@@ -110,6 +112,7 @@ func TestPersistentJarLoadsDeletesAndWritesDeterministically(t *testing.T) {
 }
 
 func TestPersistentJarSupportsConcurrentUse(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "cookies.txt")
 	jar, closeJar, err := openPersistentJar(t.Context(), path)
 	if err != nil {
@@ -152,6 +155,7 @@ func TestPersistentJarSupportsConcurrentUse(t *testing.T) {
 }
 
 func TestCookieJarRejectsMalformedFile(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "cookies.txt"), []byte("not-a-cookie\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -167,6 +171,7 @@ func TestCookieJarRejectsMalformedFile(t *testing.T) {
 }
 
 func TestCookieJarLockPreservesUpdatesAndHonorsCancellation(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "cookies.txt")
 	first, closeFirst, err := openPersistentJar(t.Context(), path)
 	if err != nil {
@@ -218,6 +223,7 @@ func cookieValue(cookies []*http.Cookie, name string) string {
 }
 
 func TestJarEntryValidation(t *testing.T) {
+	t.Parallel()
 	tests := []string{
 		"example.test\tMAYBE\t/\tFALSE\t0\tname\tvalue",
 		"example.test\tFALSE\trelative\tFALSE\t0\tname\tvalue",
@@ -233,6 +239,7 @@ func TestJarEntryValidation(t *testing.T) {
 }
 
 func TestCookieJarCloseFailureKeepsStatusError(t *testing.T) {
+	t.Parallel()
 	if os.Geteuid() == 0 {
 		t.Skip("root ignores directory permissions")
 	}
@@ -270,6 +277,7 @@ func TestCookieJarCloseFailureKeepsStatusError(t *testing.T) {
 }
 
 func TestPersistentJarBoundsCookieLines(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "cookies.txt")
 	initial := "# Netscape HTTP Cookie File\n" +
 		".example.test\tTRUE\t/\tFALSE\t0\tbloated\t" + strings.Repeat("x", maxJarLineBytes) + "\n" +
@@ -321,6 +329,7 @@ func TestPersistentJarBoundsCookieLines(t *testing.T) {
 }
 
 func TestPersistentJarLockCoversTheFileNotTheSession(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "cookies.txt")
 	first, closeFirst, err := openPersistentJar(t.Context(), path)
 	if err != nil {
@@ -354,6 +363,7 @@ func TestPersistentJarLockCoversTheFileNotTheSession(t *testing.T) {
 }
 
 func TestPersistentJarDoesNotResurrectADeletedCookie(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "cookies.txt")
 	initial := "# Netscape HTTP Cookie File\n.example.test\tTRUE\t/\tFALSE\t0\tshared\tvalue\n"
 	if err := os.WriteFile(path, []byte(initial), 0o600); err != nil {

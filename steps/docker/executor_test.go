@@ -24,6 +24,7 @@ import (
 )
 
 func TestDockerExecutorFileSystemRequiresShellInit(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name      string
 		raw       map[string]any
@@ -50,6 +51,7 @@ func TestDockerExecutorFileSystemRequiresShellInit(t *testing.T) {
 }
 
 func TestDockerExecutorSharesWorkspaceAndRunsCommands(t *testing.T) {
+	t.Parallel()
 	runDir := t.TempDir()
 	client := &fakeClient{output: multiplexedOutput("built\n", "warning\n")}
 	providerValue, err := NewExecutor(map[string]any{
@@ -94,6 +96,7 @@ func TestDockerExecutorSharesWorkspaceAndRunsCommands(t *testing.T) {
 }
 
 func TestDockerExecutorRejectsTTYBeforeStartingSession(t *testing.T) {
+	t.Parallel()
 	client := &fakeClient{}
 	session := &dockerExecutorSession{client: client}
 	_, err := session.Run(t.Context(), process.Options{Command: "sh", TTY: true})
@@ -106,6 +109,7 @@ func TestDockerExecutorRejectsTTYBeforeStartingSession(t *testing.T) {
 }
 
 func TestDockerExecutorHonorsOutputPolicies(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name          string
 		policy        process.OutputPolicy
@@ -140,6 +144,7 @@ func TestDockerExecutorHonorsOutputPolicies(t *testing.T) {
 }
 
 func TestDockerExecutorConfigurationValidation(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		raw  map[string]any
@@ -162,6 +167,7 @@ func TestDockerExecutorConfigurationValidation(t *testing.T) {
 }
 
 func TestDockerExecutorAllowsTemplatedMountTypeBeforeRendering(t *testing.T) {
+	t.Parallel()
 	_, err := NewExecutor(map[string]any{
 		"image": "alpine",
 		"mounts": []any{map[string]any{
@@ -174,6 +180,7 @@ func TestDockerExecutorAllowsTemplatedMountTypeBeforeRendering(t *testing.T) {
 }
 
 func TestDockerExecutorRetainsContainerAfterFailedRemoval(t *testing.T) {
+	t.Parallel()
 	removeErr := errors.New("Docker unavailable")
 	client := &fakeClient{removeErr: removeErr}
 	session := &dockerExecutorSession{
@@ -197,6 +204,7 @@ func TestDockerExecutorRetainsContainerAfterFailedRemoval(t *testing.T) {
 }
 
 func TestDockerExecutorFailedStartUsesBoundedDetachedCleanup(t *testing.T) {
+	t.Parallel()
 	startErr := errors.New("start failed")
 	removeErr := errors.New("remove failed")
 	client := &fakeClient{startErr: startErr, removeErr: removeErr}
@@ -235,6 +243,7 @@ func TestDockerExecutorFailedStartUsesBoundedDetachedCleanup(t *testing.T) {
 }
 
 func TestDockerExecutorRejectsUnmappedHostWorkingDirectory(t *testing.T) {
+	t.Parallel()
 	runDir := t.TempDir()
 	session := &dockerExecutorSession{
 		config:  ExecutorConfig{Workspace: &WorkspaceConfig{Enabled: false}},
@@ -270,6 +279,7 @@ func (r *blockingStdin) Read([]byte) (int, error) {
 }
 
 func TestDockerExecutorCancellationWaitsForStdinPump(t *testing.T) {
+	t.Parallel()
 	client := &fakeClient{execStreamBlocks: true}
 	providerValue, err := NewExecutor(map[string]any{"image": "golang:1.26"})
 	if err != nil {
@@ -340,6 +350,7 @@ func dockerServiceSession(t *testing.T, client *fakeClient, config map[string]an
 }
 
 func TestDockerExecutorSignalsCanceledServiceInsideTheContainer(t *testing.T) {
+	t.Parallel()
 	client := &fakeClient{execStreamBlocks: true}
 	session := dockerServiceSession(t, client, map[string]any{"image": "alpine:3.22"})
 	if !session.CancelStopsProcess() {
@@ -401,6 +412,7 @@ func TestDockerExecutorSignalsCanceledServiceInsideTheContainer(t *testing.T) {
 // A canceled one-shot exec is reaped by removing the container only when nothing else runs in
 // it: removing a shared container would kill every sibling service and exec with it.
 func TestDockerExecutorCanceledExecKeepsContainerWhileAServiceRuns(t *testing.T) {
+	t.Parallel()
 	client := &fakeClient{blockingAttaches: 2}
 	session := dockerServiceSession(t, client, map[string]any{"image": "alpine:3.22"})
 	serviceCtx, stopService := context.WithCancel(t.Context())
@@ -432,6 +444,7 @@ func TestDockerExecutorCanceledExecKeepsContainerWhileAServiceRuns(t *testing.T)
 }
 
 func TestDockerExecutorWithoutAShellLeavesServicesUnsupervised(t *testing.T) {
+	t.Parallel()
 	client := &fakeClient{}
 	session := dockerServiceSession(t, client, map[string]any{
 		"image": "gcr.io/distroless/base", "init": map[string]any{"command": "/pause"},
@@ -452,6 +465,7 @@ func TestDockerExecutorWithoutAShellLeavesServicesUnsupervised(t *testing.T) {
 // The supervision scripts only ever run inside a container, so they are exercised here against a
 // local shell: a syntax error or a wrong signal would otherwise surface only against a daemon.
 func TestDockerServiceScriptsAreValidPOSIXShell(t *testing.T) {
+	t.Parallel()
 	service := serviceExec{shell: "/bin/sh", pidPath: "/tmp/wuko-service-1.pid"}
 	for name, script := range map[string]string{
 		"launch":           service.launchScript(),
@@ -469,6 +483,7 @@ func TestDockerServiceScriptsAreValidPOSIXShell(t *testing.T) {
 }
 
 func TestDockerServiceScriptsRecordAndStopTheService(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name    string
 		command []string
@@ -520,6 +535,7 @@ func TestDockerServiceScriptsRecordAndStopTheService(t *testing.T) {
 }
 
 func TestDockerExecutorAppliesEnvironmentPerExec(t *testing.T) {
+	t.Parallel()
 	client := &fakeClient{output: multiplexedOutput("", "")}
 	providerValue, err := NewExecutor(map[string]any{"image": "alpine"})
 	if err != nil {

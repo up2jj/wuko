@@ -66,6 +66,7 @@ func dockerPlugin(t *testing.T, client dockerClient) *plugin.Manager {
 }
 
 func TestDockerStepThroughPlugin(t *testing.T) {
+	t.Parallel()
 	client := &fakeClient{output: []byte("hi"), exitCode: 0}
 	manager := dockerPlugin(t, client)
 	runner, err := manager.ResolveStep(t.Context(), "docker.run", map[string]any{"image": "alpine", "command": "cat", "tty": true, "stdin": "hi"})
@@ -90,6 +91,7 @@ func TestDockerStepThroughPlugin(t *testing.T) {
 }
 
 func TestFailedDockerStepThroughPluginKeepsItsExitCode(t *testing.T) {
+	t.Parallel()
 	manager := dockerPlugin(t, &fakeClient{output: multiplexedOutput("", "failed\n"), exitCode: 17})
 	runner, err := manager.ResolveStep(t.Context(), "docker.run", map[string]any{"image": "alpine", "command": "false"})
 	if err != nil {
@@ -119,6 +121,7 @@ func openPluginContainer(t *testing.T, client dockerClient) (executor.Provider, 
 }
 
 func TestDockerExecutorThroughPlugin(t *testing.T) {
+	t.Parallel()
 	client := &fakeClient{output: multiplexedOutput("built\n", "warning\n")}
 	_, session, runDir := openPluginContainer(t, client)
 	result, err := session.Run(t.Context(), process.Options{Command: "go", Args: []string{"build"}, Dir: runDir, Stdout: io.Discard, Stderr: io.Discard})
@@ -137,6 +140,7 @@ func TestDockerExecutorThroughPlugin(t *testing.T) {
 }
 
 func TestDockerExecutorFileSystemThroughPlugin(t *testing.T) {
+	t.Parallel()
 	client := newFilesystemClient()
 	provider, session, runDir := openPluginContainer(t, client)
 	defer session.Close(context.Background())

@@ -28,6 +28,7 @@ func (runner retryTestRunner) Run(_ context.Context, request step.Request) (step
 }
 
 func TestRunRetriesAndCommitsOnlySuccessfulAttempt(t *testing.T) {
+	t.Parallel()
 	var requests []step.Request
 	registry := newTestRegistry(t, map[string]step.Builder{"retry": func(map[string]any) (step.Runner, error) {
 		return retryTestRunner{failures: 2, requests: &requests}, nil
@@ -81,6 +82,7 @@ func (runner *conditionalRetryRunner) Run(_ context.Context, request step.Reques
 }
 
 func TestRetryWhenUsesStructuredFailureAndNormalRoots(t *testing.T) {
+	t.Parallel()
 	runner := &conditionalRetryRunner{
 		outputs: map[string]any{
 			"exit_code": 75, "stderr": "rate limit", "status": 503,
@@ -109,6 +111,7 @@ func TestRetryWhenUsesStructuredFailureAndNormalRoots(t *testing.T) {
 }
 
 func TestRetryWhenFalseReturnsOriginalFailure(t *testing.T) {
+	t.Parallel()
 	runner := &conditionalRetryRunner{err: errors.New("permanent failure")}
 	registry := newTestRegistry(t, map[string]step.Builder{
 		"conditional": func(map[string]any) (step.Runner, error) { return runner, nil },
@@ -127,6 +130,7 @@ func TestRetryWhenFalseReturnsOriginalFailure(t *testing.T) {
 }
 
 func TestRetryWhenEvaluationFailureIsTerminal(t *testing.T) {
+	t.Parallel()
 	runner := &conditionalRetryRunner{outputs: map[string]any{"values": []any{1}}, err: errors.New("attempt failure")}
 	registry := newTestRegistry(t, map[string]step.Builder{
 		"conditional": func(map[string]any) (step.Runner, error) { return runner, nil },
@@ -145,6 +149,7 @@ func TestRetryWhenEvaluationFailureIsTerminal(t *testing.T) {
 }
 
 func TestRetryWhenValidationRejectsInvalidOrNonBooleanExpression(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		when workflow.Condition
@@ -175,6 +180,7 @@ func TestRetryWhenValidationRejectsInvalidOrNonBooleanExpression(t *testing.T) {
 }
 
 func TestRetryWhenShadowsOuterCatchError(t *testing.T) {
+	t.Parallel()
 	inner := &conditionalRetryRunner{err: errors.New("inner failure")}
 	registry := newTestRegistry(t, map[string]step.Builder{
 		"outer_fail": func(map[string]any) (step.Runner, error) {
@@ -245,6 +251,7 @@ func (runner *canceledThenSuccessRunner) Run(_ context.Context, _ step.Request) 
 }
 
 func TestRunRetriesRunnerCancellationWhileWorkflowActive(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, nil)
 	runner := &canceledThenSuccessRunner{}
 	if err := registry.Register("local_cancel", func(map[string]any) (step.Runner, error) { return runner, nil }); err != nil {
@@ -290,6 +297,7 @@ func TestRunStopsAtMaxElapsedTime(t *testing.T) {
 }
 
 func TestRunDoesNotRetryParentCancellation(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, nil)
 	var requests []step.Request
 	if err := registry.Register("retry", func(map[string]any) (step.Runner, error) {
@@ -318,6 +326,7 @@ func (err retryHTTPError) HTTPStatusCode() int           { return err.status }
 func (err retryHTTPError) HTTPRetryAfter() time.Duration { return err.retryAfter }
 
 func TestHTTPRetryEligibility(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		policy workflow.AttemptControl
@@ -343,6 +352,7 @@ func TestHTTPRetryEligibility(t *testing.T) {
 }
 
 func TestRetryWhenOverridesHTTPFailureEligibility(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		method      string
@@ -390,6 +400,7 @@ type retryTransportError struct{ retryHTTPError }
 func (retryTransportError) RetryConditionOutputs() map[string]any { return map[string]any{"status": 0} }
 
 func TestRetryConditionOutputsPrefersReportedOutputs(t *testing.T) {
+	t.Parallel()
 	failure := retryTransportError{retryHTTPError{method: "GET"}}
 	if got := retryConditionOutputs(failure, nil)["status"]; got != 0 {
 		t.Fatalf("status = %#v, want 0", got)
@@ -404,6 +415,7 @@ func TestRetryConditionOutputsPrefersReportedOutputs(t *testing.T) {
 }
 
 func TestRetryWhenReportsTransportFailureAsZeroStatus(t *testing.T) {
+	t.Parallel()
 	runner := &conditionalRetryRunner{err: retryTransportError{retryHTTPError{method: "GET"}}}
 	registry := newTestRegistry(t, map[string]step.Builder{
 		"http": func(map[string]any) (step.Runner, error) { return runner, nil },
@@ -422,6 +434,7 @@ func TestRetryWhenReportsTransportFailureAsZeroStatus(t *testing.T) {
 }
 
 func TestRetryAfterExtendsBackoffWithinMaxDelay(t *testing.T) {
+	t.Parallel()
 	policy := workflow.ResolvedAttempt{
 		InitialDelay: time.Second, BackoffMultiplier: 1, MaxDelay: 5 * time.Second,
 	}

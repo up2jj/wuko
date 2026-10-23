@@ -9,6 +9,7 @@ import (
 )
 
 func TestWorkflowCommandsSuggestMisspelledNames(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	path := filepath.Join(root, ".wuko", "workflows", "deploy.yaml")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -29,6 +30,7 @@ func TestWorkflowCommandsSuggestMisspelledNames(t *testing.T) {
 }
 
 func TestWorkflowCommandsSuggestFileFlagForLocalPaths(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	path := filepath.Join(root, "workflow.yaml")
 	// The hint should not parse or execute the file before the user supplies --file.

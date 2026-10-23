@@ -129,6 +129,7 @@ func (runner runWorkflowCountingRunner) Run(context.Context, step.Request) (step
 }
 
 func TestRunWorkflowValidatesOneCallShapeOnce(t *testing.T) {
+	t.Parallel()
 	root, workflowDir := runWorkflowFixture(t)
 	writeWorkflowData(t, filepath.Join(workflowDir, "child.yaml"), `version: 1
 name: child
@@ -173,6 +174,7 @@ steps:
 }
 
 func TestRunWorkflowCommandReturnsTargetOutputsWithDependencies(t *testing.T) {
+	t.Parallel()
 	root, workflowDir := runWorkflowFixture(t)
 	writeWorkflowData(t, filepath.Join(workflowDir, "base.yaml"), `version: 1
 name: base
@@ -236,6 +238,7 @@ steps:
 }
 
 func TestRunWorkflowCommandFailureUsesStepPrefixAndTryCatchRecord(t *testing.T) {
+	t.Parallel()
 	root, workflowDir := runWorkflowFixture(t)
 	writeWorkflowData(t, filepath.Join(workflowDir, "child.yaml"), `version: 1
 name: child
@@ -268,6 +271,7 @@ steps:
 }
 
 func TestRunWorkflowCommandRejectsInvocationCycle(t *testing.T) {
+	t.Parallel()
 	root, workflowDir := runWorkflowFixture(t)
 	writeWorkflowData(t, filepath.Join(workflowDir, "a.yaml"), `version: 1
 name: a
@@ -288,6 +292,7 @@ steps:
 }
 
 func TestRunWorkflowCommandValidatesStaticReference(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		child  string
@@ -316,6 +321,7 @@ func TestRunWorkflowCommandValidatesStaticReference(t *testing.T) {
 }
 
 func TestRunWorkflowCommandDryRunDoesNotExecuteChild(t *testing.T) {
+	t.Parallel()
 	root, workflowDir := runWorkflowFixture(t)
 	writeWorkflowData(t, filepath.Join(workflowDir, "child.yaml"), `version: 1
 name: child
@@ -344,6 +350,7 @@ steps:
 }
 
 func TestRunWorkflowCommandRejectsStdinParent(t *testing.T) {
+	t.Parallel()
 	root, workflowDir := runWorkflowFixture(t)
 	writeWorkflowData(t, filepath.Join(workflowDir, "child.yaml"), "version: 1\nname: child\nsteps:\n  - return: {outputs: {}}\n")
 	data := "version: 1\nname: parent\nsteps:\n  - {id: child, type: run_workflow, with: {workflow: child}}\n"
@@ -357,6 +364,7 @@ func TestRunWorkflowCommandRejectsStdinParent(t *testing.T) {
 }
 
 func TestRunWorkflowCommandDoesNotInheritParentWorkflowEnvironment(t *testing.T) {
+	t.Parallel()
 	root, workflowDir := runWorkflowFixture(t)
 	writeWorkflowData(t, filepath.Join(workflowDir, "child.yaml"), `version: 1
 name: child
@@ -387,6 +395,7 @@ steps:
 }
 
 func TestRunWorkflowInsideLocalActionDoesNotInheritScopedEnvironment(t *testing.T) {
+	t.Parallel()
 	root, workflowDir := runWorkflowFixture(t)
 	writeWorkflowData(t, filepath.Join(workflowDir, "child.yaml"), `version: 1
 name: child
@@ -429,6 +438,7 @@ steps:
 }
 
 func TestRunWorkflowForeachBoundsActiveChildren(t *testing.T) {
+	t.Parallel()
 	root, workflowDir := runWorkflowFixture(t)
 	writeWorkflowData(t, filepath.Join(workflowDir, "child.yaml"), `version: 1
 name: child
@@ -472,6 +482,7 @@ steps:
 }
 
 func TestRunWorkflowCompletesChildCleanupBeforeReturning(t *testing.T) {
+	t.Parallel()
 	root, workflowDir := runWorkflowFixture(t)
 	writeWorkflowData(t, filepath.Join(workflowDir, "child.yaml"), `version: 1
 name: child

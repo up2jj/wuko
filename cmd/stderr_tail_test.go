@@ -9,6 +9,7 @@ import (
 )
 
 func TestStderrTailLines(t *testing.T) {
+	t.Parallel()
 	var many strings.Builder
 	for line := range 15 {
 		fmt.Fprintf(&many, "line %d\n", line)
@@ -41,6 +42,7 @@ func TestStderrTailLines(t *testing.T) {
 }
 
 func TestStderrTailBoundsMemoryAndLines(t *testing.T) {
+	t.Parallel()
 	tail := &stderrTail{}
 	for range 1000 {
 		_, _ = tail.Write([]byte(strings.Repeat("x", 100) + "\n"))
@@ -63,6 +65,7 @@ func TestStderrTailBoundsMemoryAndLines(t *testing.T) {
 }
 
 func TestStderrTailConcurrentWrites(t *testing.T) {
+	t.Parallel()
 	tail := &stderrTail{}
 	var group sync.WaitGroup
 	for range 8 {

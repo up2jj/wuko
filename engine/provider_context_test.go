@@ -44,6 +44,7 @@ func testProviderSet(t *testing.T) provider.Set {
 }
 
 func TestRegisteredProviderReachesEveryEvaluationSurface(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, map[string]step.Builder{"capture": func(raw map[string]any) (step.Runner, error) {
 		return countingRunner{value: raw["value"]}, nil
 	}})
@@ -100,6 +101,7 @@ func TestRegisteredProviderReachesEveryEvaluationSurface(t *testing.T) {
 }
 
 func TestProviderValuesAreIsolatedAcrossConcurrentAndNestedExecution(t *testing.T) {
+	t.Parallel()
 	var mutex sync.Mutex
 	seen := make([]string, 0, 3)
 	registry := newTestRegistry(t, map[string]step.Builder{

@@ -12,6 +12,7 @@ import (
 )
 
 func TestAgentListDiscoversAvailableAgents(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	var output bytes.Buffer
 	command := newRootCmd(dependencies{
@@ -38,6 +39,7 @@ func TestAgentListDiscoversAvailableAgents(t *testing.T) {
 }
 
 func TestAgentInstallCopiesEmbeddedSkills(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	var output bytes.Buffer
 	command := newRootCmd(dependencies{
@@ -77,6 +79,7 @@ func TestAgentInstallCopiesEmbeddedSkills(t *testing.T) {
 }
 
 func TestAgentInstallRejectsUnavailableAgent(t *testing.T) {
+	t.Parallel()
 	command := newRootCmd(dependencies{
 		stdin: bytes.NewReader(nil), stdout: &bytes.Buffer{}, stderr: &bytes.Buffer{},
 		cwd:           func() (string, error) { return t.TempDir(), nil },

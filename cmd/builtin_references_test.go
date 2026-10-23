@@ -12,6 +12,7 @@ import (
 // Steps report the state their configuration reads through step.Registration.References; a
 // reference to an undeclared variable must fail validation before anything runs.
 func TestBuiltinStepReferencesAreValidated(t *testing.T) {
+	t.Parallel()
 	registry := step.NewRegistry()
 	if err := registerBuiltinSteps(registry); err != nil {
 		t.Fatal(err)

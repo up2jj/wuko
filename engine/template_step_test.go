@@ -14,6 +14,7 @@ import (
 )
 
 func TestTemplateStepRendersRawSourceAfterResolvingData(t *testing.T) {
+	t.Parallel()
 	registry := step.NewRegistry()
 	if err := templatestep.Register(registry); err != nil {
 		t.Fatal(err)
@@ -41,6 +42,7 @@ func TestTemplateStepRendersRawSourceAfterResolvingData(t *testing.T) {
 }
 
 func TestTemplateStepSelectsPackagedFileWithRenderedPath(t *testing.T) {
+	t.Parallel()
 	registry := step.NewRegistry()
 	if err := templatestep.Register(registry); err != nil {
 		t.Fatal(err)
@@ -71,6 +73,7 @@ func TestTemplateStepSelectsPackagedFileWithRenderedPath(t *testing.T) {
 }
 
 func TestTemplateStepAcceptsTemplatedExpressionBinding(t *testing.T) {
+	t.Parallel()
 	registry := step.NewRegistry()
 	if err := templatestep.Register(registry); err != nil {
 		t.Fatal(err)
@@ -100,6 +103,7 @@ func TestTemplateStepAcceptsTemplatedExpressionBinding(t *testing.T) {
 }
 
 func TestTemplateStepOutputContractFollowsMode(t *testing.T) {
+	t.Parallel()
 	registry := step.NewRegistry()
 	if err := templatestep.Register(registry); err != nil {
 		t.Fatal(err)
@@ -151,6 +155,7 @@ func TestTemplateStepOutputContractFollowsMode(t *testing.T) {
 }
 
 func TestTemplateStepReferenceValidation(t *testing.T) {
+	t.Parallel()
 	registry := step.NewRegistry()
 	if err := templatestep.Register(registry); err != nil {
 		t.Fatal(err)

@@ -8,6 +8,7 @@ import (
 )
 
 func TestLoadManifest(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, ".wuko"), 0o755); err != nil {
 		t.Fatal(err)
@@ -26,6 +27,7 @@ func TestLoadManifest(t *testing.T) {
 }
 
 func TestLoadManifestRejectsUnknownAndUnsupportedFields(t *testing.T) {
+	t.Parallel()
 	for name, data := range map[string]string{
 		"unknown field":    "version: 1\nhooks:\n  pre-commit:\n    - workflow: check\n      vars: {}\n",
 		"unsupported hook": "version: 1\nhooks:\n  pre-receive:\n    - workflow: check\n",
@@ -47,6 +49,7 @@ func TestLoadManifestRejectsUnknownAndUnsupportedFields(t *testing.T) {
 }
 
 func TestContextParsesPrePush(t *testing.T) {
+	t.Parallel()
 	repository := Repository{Root: "/repo", GitDir: "/repo/.git", CommonDir: "/repo/.git"}
 	input := "refs/heads/main aaaa refs/heads/main bbbb\n"
 	value, err := Context(repository, "pre-push", []string{"origin", "ssh://example/repo"}, input)
@@ -62,6 +65,7 @@ func TestContextParsesPrePush(t *testing.T) {
 }
 
 func TestContextRejectsMalformedHookProtocol(t *testing.T) {
+	t.Parallel()
 	_, err := Context(Repository{Root: "/repo"}, "pre-push", []string{"origin", "url"}, "too few\n")
 	if err == nil || !strings.Contains(err.Error(), "expected 4") {
 		t.Fatalf("error = %v", err)
@@ -69,6 +73,7 @@ func TestContextRejectsMalformedHookProtocol(t *testing.T) {
 }
 
 func TestContextParsesSupportedHookPayloads(t *testing.T) {
+	t.Parallel()
 	repository := Repository{Root: "/repo", GitDir: "/repo/.git", CommonDir: "/repo/.git"}
 	tests := []struct {
 		name, stdin string
@@ -113,6 +118,7 @@ func TestContextParsesSupportedHookPayloads(t *testing.T) {
 }
 
 func TestLoadManifestRejectsRemoteWorkflowLocator(t *testing.T) {
+	t.Parallel()
 	for name, locator := range map[string]string{
 		"github locator": "github:attacker/repo",
 		"https locator":  "https://example.test/wuko.yaml",

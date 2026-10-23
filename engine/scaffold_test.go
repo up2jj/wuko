@@ -14,6 +14,7 @@ import (
 )
 
 func TestScaffoldUsesWorkflowTemplatesAndPackageDirectory(t *testing.T) {
+	t.Parallel()
 	workflowDir := t.TempDir()
 	templateDir := filepath.Join(workflowDir, "templates", "service")
 	if err := os.MkdirAll(templateDir, 0o755); err != nil {
@@ -49,6 +50,7 @@ func TestScaffoldUsesWorkflowTemplatesAndPackageDirectory(t *testing.T) {
 }
 
 func TestScaffoldUsesMaterializedActionArchive(t *testing.T) {
+	t.Parallel()
 	action := &workflow.Action{
 		Version: 1, Name: "generator",
 		Inputs:    map[string]workflow.ActionInput{"name": {Type: "string", Required: true}},
@@ -92,6 +94,7 @@ func TestScaffoldUsesMaterializedActionArchive(t *testing.T) {
 }
 
 func TestScaffoldRefusesRemoteManifestActionUsingCallerPackage(t *testing.T) {
+	t.Parallel()
 	callerDir := t.TempDir()
 	templateDir := filepath.Join(callerDir, "templates", "service")
 	if err := os.MkdirAll(templateDir, 0o755); err != nil {

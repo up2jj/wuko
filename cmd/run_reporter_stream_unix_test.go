@@ -14,6 +14,7 @@ import (
 )
 
 func TestRunCommandKeepsInteractiveInputWhileStreamingReport(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	workflowPath := filepath.Join(root, "interactive.yaml")
 	writeWorkflowData(t, workflowPath, `version: 1

@@ -38,6 +38,7 @@ func (transport *scriptedTransport) RoundTrip(request *http.Request) (*http.Resp
 // A failure that says nothing about the plugin itself must not be remembered: the next load,
 // such as a retry or the cancellation-free cleanup scope, has to try again.
 func TestTransientPluginLoadFailuresAreNotCached(t *testing.T) {
+	t.Parallel()
 	executable, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)

@@ -10,6 +10,7 @@ import (
 )
 
 func TestNewWorktreeValidatesOperationSpecificConfiguration(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		raw  map[string]any
@@ -34,6 +35,7 @@ func TestNewWorktreeValidatesOperationSpecificConfiguration(t *testing.T) {
 }
 
 func TestParseWorktreePorcelain(t *testing.T) {
+	t.Parallel()
 	items, err := parseWorktreePorcelain("worktree /repo\x00HEAD 1234567890abcdef\x00branch refs/heads/main\x00\x00worktree /repo.topic\x00HEAD fedcba\x00detached\x00locked busy\x00\x00")
 	if err != nil {
 		t.Fatal(err)
@@ -44,6 +46,7 @@ func TestParseWorktreePorcelain(t *testing.T) {
 }
 
 func TestChangeSummaryHandlesRenameDestinationRecords(t *testing.T) {
+	t.Parallel()
 	summary := changeSummary("R  old.txt\x00new.txt\x00 D deleted.txt\x00?? new.txt\x00UU conflict.txt\x00")
 	want := map[string]int{"total": 4, "renamed": 1, "deleted": 1, "untracked": 1, "conflicted": 1, "staged": 2, "modified": 2}
 	for field, value := range want {
@@ -54,6 +57,7 @@ func TestChangeSummaryHandlesRenameDestinationRecords(t *testing.T) {
 }
 
 func TestWorktreeEnsureListMergeAndSafeRemove(t *testing.T) {
+	t.Parallel()
 	dir := initGitRepository(t)
 	base := strings.TrimSpace(runGitTest(t, dir, "branch", "--show-current"))
 	runner, err := NewWorktree(map[string]any{"operation": "ensure", "branch": "feature/worktree", "base": base, "create": true})
@@ -155,6 +159,7 @@ func newTestWorktreeRemoval(t *testing.T, path string) step.Runner {
 }
 
 func TestSquashCreatesOneCommitAndRecoveryRef(t *testing.T) {
+	t.Parallel()
 	dir := initGitRepository(t)
 	baseBranch := strings.TrimSpace(runGitTest(t, dir, "branch", "--show-current"))
 	base := strings.TrimSpace(runGitTest(t, dir, "rev-parse", "HEAD"))
@@ -192,6 +197,7 @@ func TestSquashCreatesOneCommitAndRecoveryRef(t *testing.T) {
 }
 
 func TestRebaseReplaysOntoTargetAndLeavesConflictPolicyToGit(t *testing.T) {
+	t.Parallel()
 	dir := initGitRepository(t)
 	baseBranch := strings.TrimSpace(runGitTest(t, dir, "branch", "--show-current"))
 	worktree := filepath.Join(t.TempDir(), "topic")
@@ -225,6 +231,7 @@ func TestRebaseReplaysOntoTargetAndLeavesConflictPolicyToGit(t *testing.T) {
 }
 
 func TestNoFFMergeUsesAndCleansTemporaryTargetWorktree(t *testing.T) {
+	t.Parallel()
 	dir := initGitRepository(t)
 	runGitTest(t, dir, "branch", "release")
 	if err := os.WriteFile(filepath.Join(dir, "feature.txt"), []byte("feature\n"), 0o644); err != nil {
@@ -257,6 +264,7 @@ func TestNoFFMergeUsesAndCleansTemporaryTargetWorktree(t *testing.T) {
 }
 
 func TestLifecycleRunnersAreHostLocal(t *testing.T) {
+	t.Parallel()
 	for name, constructor := range map[string]func(map[string]any) (step.Runner, error){
 		"worktree": func(raw map[string]any) (step.Runner, error) { return NewWorktree(raw) },
 		"squash":   func(raw map[string]any) (step.Runner, error) { return NewSquash(raw) },
@@ -283,6 +291,7 @@ func TestLifecycleRunnersAreHostLocal(t *testing.T) {
 }
 
 func TestMatchingRemoteBranchesRequiresAnExactBranchSegment(t *testing.T) {
+	t.Parallel()
 	dir := initGitRepository(t)
 	head := strings.TrimSpace(runGitTest(t, dir, "rev-parse", "HEAD"))
 	runGitTest(t, dir, "update-ref", "refs/remotes/origin/feature/example", head)
@@ -301,6 +310,7 @@ func TestMatchingRemoteBranchesRequiresAnExactBranchSegment(t *testing.T) {
 }
 
 func TestSafeRemovalIgnoresATagThatShadowsTheBranchName(t *testing.T) {
+	t.Parallel()
 	dir := initGitRepository(t)
 	base := strings.TrimSpace(runGitTest(t, dir, "branch", "--show-current"))
 	path := filepath.Join(t.TempDir(), "topic")
@@ -328,6 +338,7 @@ func TestSafeRemovalIgnoresATagThatShadowsTheBranchName(t *testing.T) {
 }
 
 func TestMergeResolvesTheDefaultSourceInTheCallingWorktree(t *testing.T) {
+	t.Parallel()
 	dir := initGitRepository(t)
 	runGitTest(t, dir, "branch", "release")
 	path := filepath.Join(t.TempDir(), "detached")
@@ -356,6 +367,7 @@ func TestMergeResolvesTheDefaultSourceInTheCallingWorktree(t *testing.T) {
 }
 
 func TestSquashLeavesTheBranchUntouchedWhenThereIsNothingToSquash(t *testing.T) {
+	t.Parallel()
 	dir := initGitRepository(t)
 	base := strings.TrimSpace(runGitTest(t, dir, "branch", "--show-current"))
 	runGitTest(t, dir, "switch", "--quiet", "-c", "topic")
@@ -382,6 +394,7 @@ func TestSquashLeavesTheBranchUntouchedWhenThereIsNothingToSquash(t *testing.T) 
 // git worktree add accepts options among its arguments, so a base such as --force would be
 // taken as a flag and the branch silently created from HEAD.
 func TestWorktreeEnsureRejectsOptionLikeBase(t *testing.T) {
+	t.Parallel()
 	dir := initGitRepository(t)
 	runner, err := NewWorktree(map[string]any{"operation": "ensure", "branch": "feature/option", "base": "--force", "create": true})
 	if err != nil {

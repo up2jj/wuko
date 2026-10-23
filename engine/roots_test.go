@@ -12,6 +12,7 @@ import (
 // steps actually build at run time. These tests keep the lists from drifting apart: a root
 // added at run time but not here would be rejected by validation as unknown.
 func TestValidationRootsCoverRuntimeTemplateData(t *testing.T) {
+	t.Parallel()
 	definition := testDefinition(t, "roots")
 	data := templateData(definition, t.TempDir(), &State{})
 	for _, name := range slices.Sorted(maps.Keys(data)) {
@@ -22,6 +23,7 @@ func TestValidationRootsCoverRuntimeTemplateData(t *testing.T) {
 }
 
 func TestValidationRootsCoverStepExpressionEnvironment(t *testing.T) {
+	t.Parallel()
 	// observe is contributed by the background control of the same name, and secret is a
 	// function rather than data; validation learns both elsewhere.
 	contributedElsewhere := map[string]struct{}{"observe": {}, "secret": {}}

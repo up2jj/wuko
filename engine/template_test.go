@@ -7,6 +7,7 @@ import (
 )
 
 func TestBoundTemplateRendererBuildsDataOnFirstRender(t *testing.T) {
+	t.Parallel()
 	renderer, err := workflow.NewRenderer(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -37,6 +38,7 @@ func TestBoundTemplateRendererBuildsDataOnFirstRender(t *testing.T) {
 }
 
 func TestBoundTemplateRendererSnapshotFreezesDataAndOverlaysRequestRoots(t *testing.T) {
+	t.Parallel()
 	renderer, err := workflow.NewRenderer(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -58,6 +60,7 @@ func TestBoundTemplateRendererSnapshotFreezesDataAndOverlaysRequestRoots(t *test
 }
 
 func TestDashboardStepDefersLiveTemplatesAndCallbacks(t *testing.T) {
+	t.Parallel()
 	renderer, err := workflow.NewRenderer(nil)
 	if err != nil {
 		t.Fatal(err)

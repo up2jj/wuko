@@ -26,6 +26,7 @@ func (executor *recordingExecutor) Run(_ context.Context, options process.Option
 }
 
 func TestNewValidatesConfiguration(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		builder step.Builder
@@ -60,6 +61,7 @@ func TestNewValidatesConfiguration(t *testing.T) {
 }
 
 func TestSuccessfulAssertionsReturnEmptyResults(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		builder step.Builder
@@ -94,6 +96,7 @@ func TestSuccessfulAssertionsReturnEmptyResults(t *testing.T) {
 }
 
 func TestGitCommandsUseExecutorEnvironmentAndArguments(t *testing.T) {
+	t.Parallel()
 	executor := &recordingExecutor{}
 	runner, err := NewBranch(map[string]any{"operation": "assert", "branch": "main", "exists": true})
 	if err != nil {
@@ -121,6 +124,7 @@ func TestGitCommandsUseExecutorEnvironmentAndArguments(t *testing.T) {
 }
 
 func TestBranchAssertionsClassifyMissingReferences(t *testing.T) {
+	t.Parallel()
 	for _, tt := range []struct {
 		name       string
 		existsCode int
@@ -157,6 +161,7 @@ func TestBranchAssertionsClassifyMissingReferences(t *testing.T) {
 }
 
 func TestRemoteBranchAssertionsMatchAnyOrNamedRemote(t *testing.T) {
+	t.Parallel()
 	for _, tt := range []struct {
 		name       string
 		remote     string
@@ -195,6 +200,7 @@ func TestRemoteBranchAssertionsMatchAnyOrNamedRemote(t *testing.T) {
 }
 
 func TestBranchNameAndCurrentBranchAssertions(t *testing.T) {
+	t.Parallel()
 	valid, err := NewBranchName(map[string]any{"name": "feature/release"})
 	if err != nil {
 		t.Fatal(err)
@@ -228,6 +234,7 @@ func TestBranchNameAndCurrentBranchAssertions(t *testing.T) {
 }
 
 func TestGitAssertionsPropagateCancellationAndCommandFailures(t *testing.T) {
+	t.Parallel()
 	runner, err := NewClean(map[string]any{})
 	if err != nil {
 		t.Fatal(err)
@@ -252,6 +259,7 @@ func TestGitAssertionsPropagateCancellationAndCommandFailures(t *testing.T) {
 }
 
 func TestGitAssertionsAgainstRepositories(t *testing.T) {
+	t.Parallel()
 	dir := initGitRepository(t)
 
 	clean, err := NewClean(map[string]any{})
@@ -313,6 +321,7 @@ func runGitTest(t *testing.T, dir string, args ...string) string {
 }
 
 func TestRemoteBranchExistsDoesNotMatchRemoteHead(t *testing.T) {
+	t.Parallel()
 	if remoteBranchExists("refs/remotes/HEAD\n", "", "HEAD") {
 		t.Fatal("remote HEAD matched as a branch without a remote component")
 	}

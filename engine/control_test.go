@@ -14,6 +14,7 @@ import (
 )
 
 func TestRunForeachAggregatesOrderedIsolatedResults(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, map[string]step.Builder{"capture": func(raw map[string]any) (step.Runner, error) {
 		value := raw["value"]
 		return runnerFunc(func(_ context.Context, _ step.Request) (step.Result, error) {
@@ -56,6 +57,7 @@ func TestRunForeachAggregatesOrderedIsolatedResults(t *testing.T) {
 }
 
 func TestRunBatchUsesDynamicSizeAndCollectsOrderedBindings(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, map[string]step.Builder{"capture_batch": func(raw map[string]any) (step.Runner, error) {
 		value := raw["value"]
 		return runnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
@@ -93,6 +95,7 @@ func TestRunBatchUsesDynamicSizeAndCollectsOrderedBindings(t *testing.T) {
 }
 
 func TestRunBatchValidatesDynamicSizeResult(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, map[string]step.Builder{"noop": func(map[string]any) (step.Runner, error) {
 		return runnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
 	}})
@@ -133,6 +136,7 @@ func TestRunBatchValidatesDynamicSizeResult(t *testing.T) {
 }
 
 func TestValidateBatchRejectsInvalidSizeExpression(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, map[string]step.Builder{"noop": func(map[string]any) (step.Runner, error) {
 		return runnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
 	}})
@@ -146,6 +150,7 @@ func TestValidateBatchRejectsInvalidSizeExpression(t *testing.T) {
 }
 
 func TestRunMatrixUsesDeterministicBindings(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, map[string]step.Builder{"binding": func(map[string]any) (step.Runner, error) {
 		return runnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
 			return step.Result{Outputs: map[string]any{"matrix": request.Bindings["matrix"]}}, nil
@@ -179,6 +184,7 @@ func TestRunMatrixUsesDeterministicBindings(t *testing.T) {
 }
 
 func TestRunControlFailureDoesNotCommitAggregate(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, map[string]step.Builder{"fail": func(map[string]any) (step.Runner, error) {
 		return runnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
 			if request.Bindings["foreach"].(map[string]any)["item"] == "bad" {
@@ -213,6 +219,7 @@ func TestRunControlFailureDoesNotCommitAggregate(t *testing.T) {
 }
 
 func TestRunControlRejectsExpansionAboveWorkflowLimit(t *testing.T) {
+	t.Parallel()
 	runs := 0
 	registry := newTestRegistry(t, map[string]step.Builder{"count": func(map[string]any) (step.Runner, error) {
 		return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
@@ -235,6 +242,7 @@ func TestRunControlRejectsExpansionAboveWorkflowLimit(t *testing.T) {
 }
 
 func TestForeachPassesBindingToCompositeActionInput(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, map[string]step.Builder{"echo": func(raw map[string]any) (step.Runner, error) {
 		return runnerFunc(func(_ context.Context, _ step.Request) (step.Result, error) {
 			return step.Result{Outputs: map[string]any{"value": raw["value"]}}, nil
@@ -262,6 +270,7 @@ func TestForeachPassesBindingToCompositeActionInput(t *testing.T) {
 }
 
 func TestBatchPassesBindingToCompositeActionInput(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, map[string]step.Builder{"echo": func(raw map[string]any) (step.Runner, error) {
 		return runnerFunc(func(_ context.Context, _ step.Request) (step.Result, error) {
 			return step.Result{Outputs: map[string]any{"value": raw["value"]}}, nil
@@ -289,6 +298,7 @@ func TestBatchPassesBindingToCompositeActionInput(t *testing.T) {
 }
 
 func TestControlInteractivePolicyAndNestedConcurrent(t *testing.T) {
+	t.Parallel()
 	seen := make(map[string]bool)
 	var mu sync.Mutex
 	registry := newTestRegistry(t, map[string]step.Builder{"observe": func(raw map[string]any) (step.Runner, error) {
@@ -331,6 +341,7 @@ func TestControlInteractivePolicyAndNestedConcurrent(t *testing.T) {
 }
 
 func TestRunControlWithoutCollectExposesCountOnly(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, map[string]step.Builder{"value": func(map[string]any) (step.Runner, error) {
 		return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
 			return step.Result{Outputs: map[string]any{"hidden": true}}, nil
@@ -351,6 +362,7 @@ func TestRunControlWithoutCollectExposesCountOnly(t *testing.T) {
 }
 
 func TestRunControlCollectsEmptyResults(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, map[string]step.Builder{"noop": func(map[string]any) (step.Runner, error) {
 		return runnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
 	}})
@@ -369,6 +381,7 @@ func TestRunControlCollectsEmptyResults(t *testing.T) {
 }
 
 func TestRunControlCollectPreservesNestedTypedValues(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, map[string]step.Builder{"noop": func(map[string]any) (step.Runner, error) {
 		return runnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
 	}})
@@ -388,6 +401,7 @@ func TestRunControlCollectPreservesNestedTypedValues(t *testing.T) {
 }
 
 func TestValidateControlRejectsInvalidCollectExpression(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, map[string]step.Builder{"noop": func(map[string]any) (step.Runner, error) {
 		return runnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
 	}})
@@ -401,6 +415,7 @@ func TestValidateControlRejectsInvalidCollectExpression(t *testing.T) {
 }
 
 func TestRunControlCollectFailureIsAtomic(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, map[string]step.Builder{
 		"value": func(map[string]any) (step.Runner, error) {
 			return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
@@ -451,6 +466,7 @@ func TestRunControlCollectFailureIsAtomic(t *testing.T) {
 }
 
 func TestAllStepsSkippedTreatsABranchThatRecordedNothingAsSkipped(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		stats RunStats
@@ -474,6 +490,7 @@ func TestAllStepsSkippedTreatsABranchThatRecordedNothingAsSkipped(t *testing.T) 
 }
 
 func TestCatchPhaseThatRecordedNoStepsIsSkipped(t *testing.T) {
+	t.Parallel()
 	if status := catchPhaseStatus(nil, RunStats{}); status != StatusSkipped {
 		t.Fatalf("catchPhaseStatus = %q, want %q", status, StatusSkipped)
 	}

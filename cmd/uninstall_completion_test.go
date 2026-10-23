@@ -16,6 +16,7 @@ import (
 )
 
 func TestUninstallWorkflowCompletionUsesSelectedStorageScope(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	project, home := filepath.Join(root, "project"), filepath.Join(root, "home")
 	local, global := filepath.Join(project, ".wuko", "workflows"), filepath.Join(home, ".wuko", "workflows")
@@ -57,6 +58,7 @@ func TestUninstallWorkflowCompletionUsesSelectedStorageScope(t *testing.T) {
 }
 
 func TestUninstallPluginCompletionUsesValidatedInstallationsInSelectedScope(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	project, home := filepath.Join(root, "project"), filepath.Join(root, "home")
 	local, global := filepath.Join(project, ".wuko", "plugins"), filepath.Join(home, ".wuko", "plugins")
@@ -94,6 +96,7 @@ func TestUninstallPluginCompletionUsesValidatedInstallationsInSelectedScope(t *t
 }
 
 func TestUninstallCompletionHandlesMissingAndInvalidDirectories(t *testing.T) {
+	t.Parallel()
 	for _, command := range [][]string{{"uninstall"}, {"plugin", "uninstall"}} {
 		t.Run(strings.Join(command, " "), func(t *testing.T) {
 			root := t.TempDir()

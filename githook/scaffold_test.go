@@ -8,6 +8,7 @@ import (
 )
 
 func TestScaffoldCreatesStarterManifestAndWorkflows(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	paths, err := Scaffold(Repository{Root: root})
 	if err != nil {
@@ -49,6 +50,7 @@ func TestScaffoldCreatesStarterManifestAndWorkflows(t *testing.T) {
 }
 
 func TestScaffoldRefusesCollisionBeforeCreatingFiles(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	workflowDir := filepath.Join(root, ".wuko", "workflows")
 	if err := os.MkdirAll(workflowDir, 0o755); err != nil {

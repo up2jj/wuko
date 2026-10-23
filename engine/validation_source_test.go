@@ -13,6 +13,7 @@ import (
 )
 
 func TestReferenceIssueCarriesYAMLPathSpanExcerptAndReferenceTarget(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "workflow.yaml")
 	data := `version: 1
 name: source

@@ -57,6 +57,7 @@ func writeLifecycleSource(t *testing.T, directory, name, install, uninstall stri
 }
 
 func TestInstallWorkflowUsesLocalDirectoryByDefaultAndGlobalWithFlag(t *testing.T) {
+	t.Parallel()
 	root, home := t.TempDir(), t.TempDir()
 	registry := lifecycleTestRegistry(t)
 	localSource := writeLifecycleSource(t, root, "local", "pwd > install-dir", "")
@@ -97,6 +98,7 @@ func TestInstallWorkflowUsesLocalDirectoryByDefaultAndGlobalWithFlag(t *testing.
 }
 
 func TestUninstallWorkflowRequiresConfirmationAndRunsHookAfterApproval(t *testing.T) {
+	t.Parallel()
 	root, home := t.TempDir(), t.TempDir()
 	directory := filepath.Join(root, ".wuko", "workflows")
 	if err := os.MkdirAll(directory, 0o755); err != nil {
@@ -146,6 +148,7 @@ func TestUninstallWorkflowRequiresConfirmationAndRunsHookAfterApproval(t *testin
 }
 
 func TestUninstallGlobalFlagAndYesBypassConfirmation(t *testing.T) {
+	t.Parallel()
 	root, home := t.TempDir(), t.TempDir()
 	directory := filepath.Join(home, ".wuko", "workflows")
 	if err := os.MkdirAll(directory, 0o755); err != nil {
@@ -178,6 +181,7 @@ func TestUninstallGlobalFlagAndYesBypassConfirmation(t *testing.T) {
 }
 
 func TestUninstallNonInteractiveWithoutYesFailsBeforeHook(t *testing.T) {
+	t.Parallel()
 	root, home := t.TempDir(), t.TempDir()
 	directory := filepath.Join(root, ".wuko", "workflows")
 	if err := os.MkdirAll(directory, 0o755); err != nil {
@@ -207,6 +211,7 @@ func TestUninstallNonInteractiveWithoutYesFailsBeforeHook(t *testing.T) {
 }
 
 func TestInstallFailedHookPreservesExistingWorkflow(t *testing.T) {
+	t.Parallel()
 	root, home := t.TempDir(), t.TempDir()
 	directory := filepath.Join(root, ".wuko", "workflows")
 	if err := os.MkdirAll(directory, 0o755); err != nil {
@@ -233,6 +238,7 @@ func TestInstallFailedHookPreservesExistingWorkflow(t *testing.T) {
 }
 
 func TestInstallRejectsLocalCompanionFiles(t *testing.T) {
+	t.Parallel()
 	root, home := t.TempDir(), t.TempDir()
 	source := writeLifecycleSource(t, root, "standalone", "./install.sh", "")
 	if err := os.WriteFile(filepath.Join(root, "install.sh"), []byte("echo setup\n"), 0o755); err != nil {
@@ -248,6 +254,7 @@ func TestInstallRejectsLocalCompanionFiles(t *testing.T) {
 }
 
 func TestUninstallGlobalDoesNotRemoveShadowingLocalWorkflow(t *testing.T) {
+	t.Parallel()
 	root, home := t.TempDir(), t.TempDir()
 	localDir := filepath.Join(root, ".wuko", "workflows")
 	globalDir := filepath.Join(home, ".wuko", "workflows")
@@ -280,6 +287,7 @@ func TestUninstallGlobalDoesNotRemoveShadowingLocalWorkflow(t *testing.T) {
 }
 
 func TestUninstallInstalledPackageRunsHookAndRemovesSidecars(t *testing.T) {
+	t.Parallel()
 	root, home := t.TempDir(), t.TempDir()
 	packageDir := filepath.Join(root, ".wuko", "workflows", "marketplace", "release")
 	if err := os.MkdirAll(packageDir, 0o755); err != nil {
@@ -329,6 +337,7 @@ uninstall:
 }
 
 func TestInstalledWorkflowElevationFollowsRecordedProvenance(t *testing.T) {
+	t.Parallel()
 	directory := t.TempDir()
 	write := func(name, contents string) {
 		if err := os.WriteFile(workflowInstallMarkerPath(directory, name), []byte(contents), 0o644); err != nil {

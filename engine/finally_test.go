@@ -30,6 +30,7 @@ func registerFinallyTestRunner(t *testing.T, registry *step.Registry, name strin
 }
 
 func TestFinallyRunsAfterSuccessWithCommittedState(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, nil)
 	registerFinallyTestRunner(t, registry, "main", func(context.Context, step.Request) (step.Result, error) {
 		return step.Result{
@@ -76,6 +77,7 @@ func TestFinallyRunsAfterSuccessWithCommittedState(t *testing.T) {
 }
 
 func TestFinallyContinuesAndAccumulatesStructuredErrors(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, nil)
 	mainFailure := errors.New("main broke")
 	cleanupFailure := errors.New("cleanup broke")
@@ -124,6 +126,7 @@ func TestFinallyContinuesAndAccumulatesStructuredErrors(t *testing.T) {
 }
 
 func TestFinallyUsesFreshContextAfterCancellation(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, nil)
 	cleanupFailure := errors.New("cleanup after cancellation failed")
 	registerFinallyTestRunner(t, registry, "main", func(context.Context, step.Request) (step.Result, error) {
@@ -162,6 +165,7 @@ func TestFinallyUsesFreshContextAfterCancellation(t *testing.T) {
 }
 
 func TestCompositeActionFinallyRunsPerAttemptAndFeedsOutputs(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, nil)
 	mainRuns, cleanupRuns := 0, 0
 	registerFinallyTestRunner(t, registry, "action_main", func(context.Context, step.Request) (step.Result, error) {
@@ -195,6 +199,7 @@ func TestCompositeActionFinallyRunsPerAttemptAndFeedsOutputs(t *testing.T) {
 }
 
 func TestFinallyRejectsControlBeforeContextValidation(t *testing.T) {
+	t.Parallel()
 	definition := testDefinition(t, "control-cleanup", workflow.Step{ID: "main", Type: "main"})
 	definition.Vars = map[string]any{"items": []any{"resource"}}
 	definition.Finally = []workflow.Step{{ID: "cleanup", Foreach: &workflow.ForeachGroup{
@@ -208,6 +213,7 @@ func TestFinallyRejectsControlBeforeContextValidation(t *testing.T) {
 }
 
 func TestFinallyDryRunShowsWorkflowAndActionSections(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, nil)
 	registerFinallyTestRunner(t, registry, "noop", func(context.Context, step.Request) (step.Result, error) {
 		return step.Result{}, nil
@@ -228,6 +234,7 @@ func TestFinallyDryRunShowsWorkflowAndActionSections(t *testing.T) {
 }
 
 func TestDeferDryRunShowsAttachedSection(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, nil)
 	registerFinallyTestRunner(t, registry, "noop", func(context.Context, step.Request) (step.Result, error) {
 		return step.Result{}, nil

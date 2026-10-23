@@ -8,6 +8,7 @@ import (
 )
 
 func TestPluginOutputSchemaDeclarationIsRecursiveAndOptional(t *testing.T) {
+	t.Parallel()
 	var initialized initializeResult
 	data := []byte(`{"protocol":"2","namespace":"acme","steps":[
 		{"type":"acme.typed","outputs":{"fields":{"status":{},"metadata":{"fields":{"request_id":{}}},"items":{"items":{}}}}},
@@ -32,6 +33,7 @@ func TestPluginOutputSchemaDeclarationIsRecursiveAndOptional(t *testing.T) {
 }
 
 func TestPluginOutputSchemaOpenWithoutFieldsIsOpenObject(t *testing.T) {
+	t.Parallel()
 	var declaration outputSchemaDeclaration
 	if err := json.Unmarshal([]byte(`{"open":true}`), &declaration); err != nil {
 		t.Fatal(err)
@@ -42,6 +44,7 @@ func TestPluginOutputSchemaOpenWithoutFieldsIsOpenObject(t *testing.T) {
 }
 
 func TestValidateInitializeDeclarationsRejectsUnreachableTypesAndAmbiguousSchemas(t *testing.T) {
+	t.Parallel()
 	for _, typeName := range []string{"acme.", "acme.one.two", "other.one"} {
 		err := validateInitializeDeclarations("acme", ProtocolV2, initializeResult{Steps: []stepDeclaration{{Type: typeName}}})
 		if err == nil {

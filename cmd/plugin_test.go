@@ -95,6 +95,7 @@ func runCommandPluginHelper() {
 }
 
 func TestGoPluginScaffoldBuilds(t *testing.T) {
+	t.Parallel()
 	directory := filepath.Join(t.TempDir(), "wuko-plugin-acme")
 	if err := writeGoPluginScaffold(directory, "acme"); err != nil {
 		t.Fatal(err)
@@ -121,6 +122,7 @@ func useLocalWukoModule(t *testing.T, directory string) {
 }
 
 func TestGoPluginScaffoldIsFormatted(t *testing.T) {
+	t.Parallel()
 	directory := filepath.Join(t.TempDir(), "wuko-plugin-acme")
 	if err := writeGoPluginScaffold(directory, "acme"); err != nil {
 		t.Fatal(err)
@@ -148,6 +150,7 @@ func TestGoPluginScaffoldIsFormatted(t *testing.T) {
 }
 
 func TestGoPluginScaffoldUsesNewestProtocolEverywhere(t *testing.T) {
+	t.Parallel()
 	directory := filepath.Join(t.TempDir(), "wuko-plugin-acme")
 	if err := writeGoPluginScaffold(directory, "acme"); err != nil {
 		t.Fatal(err)
@@ -176,6 +179,7 @@ func TestGoPluginScaffoldUsesNewestProtocolEverywhere(t *testing.T) {
 }
 
 func TestGoPluginScaffoldPinsSDKAndOmitsTransport(t *testing.T) {
+	t.Parallel()
 	directory := filepath.Join(t.TempDir(), "wuko-plugin-acme")
 	if err := writeGoPluginScaffold(directory, "acme"); err != nil {
 		t.Fatal(err)
@@ -206,6 +210,7 @@ func TestGoPluginScaffoldPinsSDKAndOmitsTransport(t *testing.T) {
 }
 
 func TestPluginScaffoldTemplates(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		files     []string
@@ -251,6 +256,7 @@ func TestPluginScaffoldTemplates(t *testing.T) {
 }
 
 func TestGenericPluginScaffoldReleaseEntrypointIsExecutable(t *testing.T) {
+	t.Parallel()
 	directory := filepath.Join(t.TempDir(), "plugin")
 	if err := writePluginScaffold(directory, "acme", "generic"); err != nil {
 		t.Fatal(err)
@@ -265,6 +271,7 @@ func TestGenericPluginScaffoldReleaseEntrypointIsExecutable(t *testing.T) {
 }
 
 func TestPluginScaffoldRejectsUnknownTemplate(t *testing.T) {
+	t.Parallel()
 	err := writePluginScaffold(filepath.Join(t.TempDir(), "plugin"), "acme", "unknown")
 	if err == nil || !strings.Contains(err.Error(), "available templates") {
 		t.Fatalf("error = %v", err)
@@ -272,6 +279,7 @@ func TestPluginScaffoldRejectsUnknownTemplate(t *testing.T) {
 }
 
 func TestResolveScaffoldSDKVersion(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name, buildVersion, cliVersion, want string
 	}{
@@ -294,6 +302,7 @@ func TestResolveScaffoldSDKVersion(t *testing.T) {
 }
 
 func TestGoPluginScaffoldCancelsExecutorProcessGroup(t *testing.T) {
+	t.Parallel()
 	directory := filepath.Join(t.TempDir(), "wuko-plugin-acme")
 	if err := writeGoPluginScaffold(directory, "acme"); err != nil {
 		t.Fatal(err)
@@ -424,6 +433,7 @@ func assertScaffoldDeclarations(t *testing.T, value any) {
 }
 
 func TestPluginInitLivesUnderMarketplace(t *testing.T) {
+	t.Parallel()
 	root, home := t.TempDir(), t.TempDir()
 	destination := filepath.Join(root, "wuko-plugin-acme")
 	var output bytes.Buffer
@@ -456,6 +466,7 @@ func TestPluginInitLivesUnderMarketplace(t *testing.T) {
 }
 
 func TestPluginInitListsTemplates(t *testing.T) {
+	t.Parallel()
 	root, home := t.TempDir(), t.TempDir()
 	var output bytes.Buffer
 	command := marketplaceTestCommand(root, home, nil)
@@ -470,6 +481,7 @@ func TestPluginInitListsTemplates(t *testing.T) {
 }
 
 func TestMarketplacePluginSelectionFiltersPlatformsAndRejectsExplicitMismatch(t *testing.T) {
+	t.Parallel()
 	plugins := []workflow.MarketplacePluginPackage{
 		{Namespace: "compatible", PluginVersion: "1", Path: "plugins/compatible/plugin.json", Platforms: []workflow.MarketplacePlatform{{OS: runtime.GOOS, Arch: runtime.GOARCH}}},
 		{Namespace: "incompatible", PluginVersion: "1", Path: "plugins/incompatible/plugin.json", Platforms: []workflow.MarketplacePlatform{{OS: "plan9", Arch: "amd64"}}},
@@ -502,6 +514,7 @@ func TestMarketplacePluginSelectionFiltersPlatformsAndRejectsExplicitMismatch(t 
 }
 
 func TestPluginInstallFromMarketplaceVerifiesPinnedManifest(t *testing.T) {
+	t.Parallel()
 	executable, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -561,6 +574,7 @@ func TestPluginInstallFromMarketplaceVerifiesPinnedManifest(t *testing.T) {
 }
 
 func TestGoPluginScaffoldBuildsCompleteRelease(t *testing.T) {
+	t.Parallel()
 	directory := filepath.Join(t.TempDir(), "wuko-plugin-acme")
 	if err := writeGoPluginScaffold(directory, "acme"); err != nil {
 		t.Fatal(err)

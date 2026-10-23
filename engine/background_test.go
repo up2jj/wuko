@@ -11,6 +11,7 @@ import (
 )
 
 func TestBackgroundSupervisorJoinsInRegistrationOrder(t *testing.T) {
+	t.Parallel()
 	supervisor := newBackgroundSupervisor(t.Context())
 	first := errors.New("first failed")
 	second := errors.New("second failed")
@@ -42,6 +43,7 @@ func TestBackgroundSupervisorJoinsInRegistrationOrder(t *testing.T) {
 }
 
 func TestBackgroundSupervisorCancellationIsIdempotent(t *testing.T) {
+	t.Parallel()
 	supervisor := newBackgroundSupervisor(t.Context())
 	started := make(chan struct{})
 	if err := supervisor.start("worker", "test", func(ctx context.Context) error {
@@ -64,6 +66,7 @@ func TestBackgroundSupervisorCancellationIsIdempotent(t *testing.T) {
 }
 
 func TestBackgroundSupervisorConcurrentRegistration(t *testing.T) {
+	t.Parallel()
 	supervisor := newBackgroundSupervisor(t.Context())
 	var workers sync.WaitGroup
 	for index := range 32 {
@@ -82,6 +85,7 @@ func TestBackgroundSupervisorConcurrentRegistration(t *testing.T) {
 }
 
 func TestBackgroundSupervisorRegisterSealRace(t *testing.T) {
+	t.Parallel()
 	supervisor := newBackgroundSupervisor(t.Context())
 	start := make(chan struct{})
 	results := make(chan error, 64)
@@ -111,6 +115,7 @@ func TestBackgroundSupervisorRegisterSealRace(t *testing.T) {
 }
 
 func TestBackgroundSupervisorFirstFailureCancelsSiblings(t *testing.T) {
+	t.Parallel()
 	supervisor := newBackgroundSupervisor(t.Context())
 	fatal := errors.New("observer failed")
 	release := make(chan struct{})
@@ -144,6 +149,7 @@ func TestBackgroundSupervisorFirstFailureCancelsSiblings(t *testing.T) {
 }
 
 func TestBackgroundSupervisorExternalCancellation(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(t.Context())
 	supervisor := newBackgroundSupervisor(ctx)
 	if err := supervisor.start("worker", "test", func(ctx context.Context) error {
@@ -163,6 +169,7 @@ func TestBackgroundSupervisorExternalCancellation(t *testing.T) {
 }
 
 func TestBackgroundSupervisorCountsOnlyRunningJobs(t *testing.T) {
+	t.Parallel()
 	supervisor := newBackgroundSupervisor(t.Context())
 	release := make(chan struct{})
 	if err := supervisor.start("short", "test", func(context.Context) error { return nil }); err != nil {
@@ -194,6 +201,7 @@ func TestBackgroundSupervisorCountsOnlyRunningJobs(t *testing.T) {
 // A panicking job must fail the run rather than end the process. Jobs run in their own
 // goroutine, so an escaping panic would kill wuko before the failure was ever recorded.
 func TestBackgroundSupervisorContainsPanickingJob(t *testing.T) {
+	t.Parallel()
 	supervisor := newBackgroundSupervisor(t.Context())
 	if err := supervisor.start("boom", "observe", func(context.Context) error {
 		panic("job exploded")
@@ -218,6 +226,7 @@ func TestBackgroundSupervisorContainsPanickingJob(t *testing.T) {
 
 // Fail-fast has to see a panic like any other failure: the scope ends and siblings are stopped.
 func TestBackgroundSupervisorPanicStopsSiblingJobs(t *testing.T) {
+	t.Parallel()
 	supervisor := newBackgroundSupervisor(t.Context())
 	stopped := make(chan struct{})
 	if err := supervisor.start("worker", "test", func(ctx context.Context) error {

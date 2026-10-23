@@ -30,6 +30,7 @@ func referenceTestRegistry(t *testing.T, runs *int) *step.Registry {
 }
 
 func TestReferenceValidationUsesProviderSchemas(t *testing.T) {
+	t.Parallel()
 	registry := referenceTestRegistry(t, nil)
 	schema := provider.Object(map[string]provider.Schema{
 		"region":  provider.Scalar(),
@@ -75,6 +76,7 @@ func TestReferenceValidationUsesProviderSchemas(t *testing.T) {
 }
 
 func TestReferenceValidationUsesRegisteredStepOutputSchemas(t *testing.T) {
+	t.Parallel()
 	registry := step.NewRegistry()
 	if err := registry.RegisterDefinition("http_test", step.Registration{
 		Builder: func(map[string]any) (step.Runner, error) {
@@ -106,6 +108,7 @@ func TestReferenceValidationUsesRegisteredStepOutputSchemas(t *testing.T) {
 }
 
 func TestTransformReferenceValidationAndOutputContract(t *testing.T) {
+	t.Parallel()
 	registry := referenceTestRegistry(t, nil)
 	if err := transformstep.Register(registry); err != nil {
 		t.Fatal(err)
@@ -161,6 +164,7 @@ func TestTransformReferenceValidationAndOutputContract(t *testing.T) {
 }
 
 func TestReferenceValidationDerivesCompositeActionOutputSchema(t *testing.T) {
+	t.Parallel()
 	registry := referenceTestRegistry(t, nil)
 	action := testAction(t, "typed")
 	action.Outputs = map[string]workflow.ActionOutput{"status": {Value: "true"}}
@@ -176,6 +180,7 @@ func TestReferenceValidationDerivesCompositeActionOutputSchema(t *testing.T) {
 }
 
 func TestProviderNamesCannotCollideWithRuntimeRoots(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name   string
 		root   string
@@ -213,6 +218,7 @@ func (providerCollisionControl) Launch(context.Context, BackgroundControlRequest
 }
 
 func TestReferenceValidationFailsBeforeAnyStepRuns(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name  string
 		steps []workflow.Step
@@ -249,6 +255,7 @@ func TestReferenceValidationFailsBeforeAnyStepRuns(t *testing.T) {
 }
 
 func TestReferenceValidationChecksConstantKeysAndAllowsDynamicKeys(t *testing.T) {
+	t.Parallel()
 	registry := referenceTestRegistry(t, nil)
 	for _, test := range []struct {
 		name   string
@@ -313,6 +320,7 @@ func TestReferenceValidationChecksConstantKeysAndAllowsDynamicKeys(t *testing.T)
 }
 
 func TestReferenceValidationTracksStepVisibility(t *testing.T) {
+	t.Parallel()
 	registry := referenceTestRegistry(t, nil)
 	if err := set.Register(registry); err != nil {
 		t.Fatal(err)
@@ -425,6 +433,7 @@ func TestReferenceValidationTracksStepVisibility(t *testing.T) {
 }
 
 func TestReferenceValidationTracksCleanupLifecycleAndActions(t *testing.T) {
+	t.Parallel()
 	registry := referenceTestRegistry(t, nil)
 
 	t.Run("defer sees completed sequence", func(t *testing.T) {
@@ -466,6 +475,7 @@ func TestReferenceValidationTracksCleanupLifecycleAndActions(t *testing.T) {
 }
 
 func TestReferenceValidationChecksNamedTemplatesGloballyAndAtUsePoint(t *testing.T) {
+	t.Parallel()
 	registry := referenceTestRegistry(t, nil)
 
 	t.Run("unused template", func(t *testing.T) {
@@ -491,6 +501,7 @@ func TestReferenceValidationChecksNamedTemplatesGloballyAndAtUsePoint(t *testing
 }
 
 func TestReferenceValidationLeavesSkippedEarlierStepHandlingAtRuntime(t *testing.T) {
+	t.Parallel()
 	var runs int
 	definition := testDefinition(t, "skipped",
 		workflow.Step{ID: "optional", Type: "capture", If: "false", With: map[string]any{"value": "optional"}},
@@ -510,6 +521,7 @@ func TestReferenceValidationLeavesSkippedEarlierStepHandlingAtRuntime(t *testing
 }
 
 func TestReferenceValidationSeesVariablesWrittenBySteps(t *testing.T) {
+	t.Parallel()
 	registry := step.NewRegistry()
 	if err := registry.Register("capture", func(raw map[string]any) (step.Runner, error) {
 		return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
@@ -616,6 +628,7 @@ func TestReferenceValidationSeesVariablesWrittenBySteps(t *testing.T) {
 }
 
 func TestReferenceValidationDefersTemplatedLookupsToRuntime(t *testing.T) {
+	t.Parallel()
 	registry := step.NewRegistry()
 	if err := decode.Register(registry); err != nil {
 		t.Fatal(err)
@@ -630,6 +643,7 @@ func TestReferenceValidationDefersTemplatedLookupsToRuntime(t *testing.T) {
 }
 
 func TestReferenceValidationEndsTheFinallyBindingWithTheDeferredSteps(t *testing.T) {
+	t.Parallel()
 	registry := referenceTestRegistry(t, nil)
 	definition := testDefinition(t, "defer-scope", workflow.Step{
 		ID: "main", Type: "capture", With: map[string]any{"value": "main"},
@@ -643,6 +657,7 @@ func TestReferenceValidationEndsTheFinallyBindingWithTheDeferredSteps(t *testing
 }
 
 func TestReferenceValidationAcceptsIndexedMarkdownEditMatches(t *testing.T) {
+	t.Parallel()
 	builtins := step.NewRegistry()
 	if err := markdownedit.Register(builtins); err != nil {
 		t.Fatal(err)

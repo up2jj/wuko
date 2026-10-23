@@ -8,6 +8,7 @@ import (
 )
 
 func TestInvocationEnvironmentPolicyDefaultsToAutomatic(t *testing.T) {
+	t.Parallel()
 	command := newRootCmd(dependencies{stdin: nil, stdout: io.Discard, stderr: io.Discard, getenv: func(string) string { return "" }})
 	policy, err := invocationEnvironmentPolicy(command, dependencies{getenv: func(string) string { return "" }})
 	if err != nil {
@@ -19,6 +20,7 @@ func TestInvocationEnvironmentPolicyDefaultsToAutomatic(t *testing.T) {
 }
 
 func TestInvocationEnvironmentPolicyReadsEnvironment(t *testing.T) {
+	t.Parallel()
 	deps := dependencies{getenv: func(name string) string {
 		if name == "WUKO_ENV_LOADERS" {
 			return "mise,direnv"
@@ -36,6 +38,7 @@ func TestInvocationEnvironmentPolicyReadsEnvironment(t *testing.T) {
 }
 
 func TestEnvironmentLoaderFlagOverridesEnvironment(t *testing.T) {
+	t.Parallel()
 	deps := dependencies{getenv: func(string) string { return "asdf,direnv" }}
 	command := newRootCmd(dependencies{stdin: nil, stdout: io.Discard, stderr: io.Discard, getenv: deps.getenv})
 	if err := command.PersistentFlags().Set("env-loader", "mise"); err != nil {
@@ -54,6 +57,7 @@ func TestEnvironmentLoaderFlagOverridesEnvironment(t *testing.T) {
 }
 
 func TestEnvironmentLoaderFlagRejectsUnsafeOrder(t *testing.T) {
+	t.Parallel()
 	command := newRootCmd(dependencies{stdin: nil, stdout: io.Discard, stderr: io.Discard})
 	for _, name := range []string{"direnv", "mise"} {
 		if err := command.PersistentFlags().Set("env-loader", name); err != nil {
@@ -66,6 +70,7 @@ func TestEnvironmentLoaderFlagRejectsUnsafeOrder(t *testing.T) {
 }
 
 func TestEnvironmentValuesClonesProvenance(t *testing.T) {
+	t.Parallel()
 	result := envload.InvocationEnvironment{Values: map[string]string{"PATH": "/bin"}, Loaders: []string{"mise"}}
 	_, loaders := environmentValues(result)
 	loaders[0] = "changed"
@@ -75,6 +80,7 @@ func TestEnvironmentValuesClonesProvenance(t *testing.T) {
 }
 
 func TestEnvironmentLoaderFlagAcceptsCommaSeparatedValues(t *testing.T) {
+	t.Parallel()
 	deps := dependencies{getenv: func(string) string { return "" }}
 	command := newRootCmd(dependencies{stdin: nil, stdout: io.Discard, stderr: io.Discard, getenv: deps.getenv})
 	if err := command.PersistentFlags().Set("env-loader", "mise,direnv"); err != nil {

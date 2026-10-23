@@ -27,6 +27,7 @@ func (provider fakeProvider) Load(_ context.Context, environment map[string]stri
 }
 
 func TestRegistryRegisterValidation(t *testing.T) {
+	t.Parallel()
 	for _, name := range []string{"", "1cloud", "cloud-name", "cloud.name"} {
 		t.Run(name, func(t *testing.T) {
 			var registry Registry
@@ -48,6 +49,7 @@ func TestRegistryRegisterValidation(t *testing.T) {
 }
 
 func TestRegistryLoadRetainsSchemasAndActiveValuesInOrder(t *testing.T) {
+	t.Parallel()
 	order := make([]string, 0, 3)
 	var registry Registry
 	for _, item := range []fakeProvider{
@@ -78,6 +80,7 @@ func TestRegistryLoadRetainsSchemasAndActiveValuesInOrder(t *testing.T) {
 }
 
 func TestRegistryLoadIsolatesInputsAndOutputs(t *testing.T) {
+	t.Parallel()
 	environment := map[string]string{"TOKEN": "original"}
 	value := map[string]any{
 		"nested": map[string]any{"value": "original"},
@@ -119,6 +122,7 @@ func TestRegistryLoadIsolatesInputsAndOutputs(t *testing.T) {
 }
 
 func TestRegistryLoadFailure(t *testing.T) {
+	t.Parallel()
 	sentinel := errors.New("unavailable")
 	var registry Registry
 	if err := registry.Register(fakeProvider{name: "cloud", err: sentinel}); err != nil {
@@ -131,6 +135,7 @@ func TestRegistryLoadFailure(t *testing.T) {
 }
 
 func TestSetValidateNames(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		set  Set

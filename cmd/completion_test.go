@@ -12,6 +12,7 @@ import (
 )
 
 func TestWorkflowFileCompletionUsesSelectedFile(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	data := `version: 1
 name: draft
@@ -48,6 +49,7 @@ targets:
 }
 
 func TestWorkflowCompletionStopsAfterTargetAndDoesNotReadStdin(t *testing.T) {
+	t.Parallel()
 	for _, args := range [][]string{
 		{"run", "--file", "-", ""},
 		{"run", "--file", "missing.yaml", "staging", ""},
@@ -73,6 +75,7 @@ func TestWorkflowCompletionStopsAfterTargetAndDoesNotReadStdin(t *testing.T) {
 }
 
 func TestWorkflowFileCompletionHonorsInvocationPolicyAndErrors(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	for filename, data := range map[string]string{
 		"dependency.yaml": "invokable: false\ntargets: {staging: {description: Stage}}\n",
@@ -101,6 +104,7 @@ func TestWorkflowFileCompletionHonorsInvocationPolicyAndErrors(t *testing.T) {
 }
 
 func TestWorkflowFlagCompletionFiltersFileExtensions(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		command, flag string
 		extensions    []string
@@ -124,6 +128,7 @@ func TestWorkflowFlagCompletionFiltersFileExtensions(t *testing.T) {
 }
 
 func TestValidateFlagCompletionSuggestsSupportedValues(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		flag string
 		want string
@@ -151,6 +156,7 @@ func executeCompletion(t *testing.T, root string, args []string) string {
 }
 
 func TestNamedWorkflowCompletionIgnoresBrokenDraftsAndUnpreparedSteps(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	dir := filepath.Join(root, ".wuko", "workflows")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -200,6 +206,7 @@ targets:
 }
 
 func TestUICompletionFiltersEffectiveBrowserForms(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	dir := filepath.Join(root, ".wuko", "workflows")
 	if err := os.MkdirAll(dir, 0o755); err != nil {

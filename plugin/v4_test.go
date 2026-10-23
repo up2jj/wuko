@@ -52,6 +52,7 @@ func attachSDK(t *testing.T, plugin *sdk.Plugin) *Manager {
 }
 
 func TestAttachedPluginNeedsNoWorkflowDeclaration(t *testing.T) {
+	t.Parallel()
 	plugin, err := sdk.New("acme")
 	if err != nil {
 		t.Fatal(err)
@@ -75,6 +76,7 @@ func TestAttachedPluginNeedsNoWorkflowDeclaration(t *testing.T) {
 }
 
 func TestSDKAnswersV3UnlessItUsesV4Capabilities(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name       string
 		filesystem bool
@@ -118,6 +120,7 @@ func TestSDKAnswersV3UnlessItUsesV4Capabilities(t *testing.T) {
 }
 
 func TestV4DeclarationsRequireProtocolV4(t *testing.T) {
+	t.Parallel()
 	declarations := []initializeResult{
 		{Steps: []stepDeclaration{{Type: "acme.run", Executor: true}}},
 		{Steps: []stepDeclaration{{Type: "acme.run", HostCallbacks: []string{hostTerminalAcquire}}}},
@@ -136,6 +139,7 @@ func TestV4DeclarationsRequireProtocolV4(t *testing.T) {
 }
 
 func TestRemoteErrorCodesMatchStandardErrors(t *testing.T) {
+	t.Parallel()
 	plugin, err := sdk.New("acme")
 	if err != nil {
 		t.Fatal(err)
@@ -200,6 +204,7 @@ func openTestExecutor(t *testing.T, handler sdk.ExecutorHandler[map[string]any])
 }
 
 func TestPluginExecutorFileSystem(t *testing.T) {
+	t.Parallel()
 	provider, session := openTestExecutor(t, sdk.ExecutorHandler[map[string]any]{FileSystem: true, Open: func(context.Context, sdk.ExecutorRequest[map[string]any]) (sdk.ExecutorSession, error) {
 		return localSession{}, nil
 	}})
@@ -239,6 +244,7 @@ func TestPluginExecutorFileSystem(t *testing.T) {
 }
 
 func TestPluginExecutorWithoutFileSystemExposesNone(t *testing.T) {
+	t.Parallel()
 	provider, session := openTestExecutor(t, sdk.ExecutorHandler[map[string]any]{Open: func(context.Context, sdk.ExecutorRequest[map[string]any]) (sdk.ExecutorSession, error) {
 		return localSession{}, nil
 	}})
@@ -277,6 +283,7 @@ func catCommand(_ context.Context, command sdk.Command) (sdk.CommandResult, erro
 }
 
 func TestPluginExecutorStdin(t *testing.T) {
+	t.Parallel()
 	large := strings.Repeat("0123456789abcdef", 16<<10)
 	for _, test := range []struct {
 		name     string
@@ -299,6 +306,7 @@ func TestPluginExecutorStdin(t *testing.T) {
 }
 
 func TestPluginExecutorStdinThatOutlivesTheCommand(t *testing.T) {
+	t.Parallel()
 	_, session := openTestExecutor(t, scriptExecutor(sdk.ExecutorHandler[map[string]any]{Stdin: true}, func(_ context.Context, command sdk.Command) (sdk.CommandResult, error) {
 		if !command.StdinOutlivesProcess {
 			return sdk.CommandResult{}, errors.New("the command was not told its stdin outlives it")
@@ -327,6 +335,7 @@ func TestPluginExecutorStdinThatOutlivesTheCommand(t *testing.T) {
 }
 
 func TestPluginExecutorRejectsUndeclaredStreams(t *testing.T) {
+	t.Parallel()
 	_, session := openTestExecutor(t, scriptExecutor(sdk.ExecutorHandler[map[string]any]{}, catCommand))
 	for name, options := range map[string]process.Options{
 		"stdin outliving the command": {Command: "cat", Stdin: strings.NewReader("x"), StdinOutlivesProcess: true},
@@ -339,6 +348,7 @@ func TestPluginExecutorRejectsUndeclaredStreams(t *testing.T) {
 }
 
 func TestPluginExecutorTTYRunsInteractions(t *testing.T) {
+	t.Parallel()
 	_, session := openTestExecutor(t, scriptExecutor(sdk.ExecutorHandler[map[string]any]{TTY: true}, func(_ context.Context, command sdk.Command) (sdk.CommandResult, error) {
 		if command.TTY == nil || command.Resize == nil {
 			return sdk.CommandResult{}, errors.New("command is not a TTY run")
@@ -373,6 +383,7 @@ func TestPluginExecutorTTYRunsInteractions(t *testing.T) {
 }
 
 func TestPluginExecutorTTYCancellationStopsTheCommand(t *testing.T) {
+	t.Parallel()
 	stopped := make(chan struct{})
 	_, session := openTestExecutor(t, scriptExecutor(sdk.ExecutorHandler[map[string]any]{TTY: true}, func(ctx context.Context, command sdk.Command) (sdk.CommandResult, error) {
 		fmt.Fprint(command.Stdout, "waiting:")
@@ -428,6 +439,7 @@ func terminalStep(t *testing.T, release bool) *Manager {
 }
 
 func TestPluginStepBorrowsAndRestoresTheTerminal(t *testing.T) {
+	t.Parallel()
 	for _, release := range []bool{true, false} {
 		t.Run(fmt.Sprintf("released by plugin %v", release), func(t *testing.T) {
 			manager := terminalStep(t, release)
@@ -474,6 +486,7 @@ func TestPluginStepBorrowsAndRestoresTheTerminal(t *testing.T) {
 }
 
 func TestPluginStepTerminalIsUnavailableWhenNotInteractive(t *testing.T) {
+	t.Parallel()
 	manager := terminalStep(t, true)
 	runner, err := manager.ResolveStep(t.Context(), "acme.attach", nil)
 	if err != nil {
@@ -494,6 +507,7 @@ type taskSession struct {
 func (s *taskSession) task(name string) string { return s.name + ":" + name }
 
 func TestPluginStepRunsInItsOwnPluginsExecutor(t *testing.T) {
+	t.Parallel()
 	plugin, err := sdk.New("acme")
 	if err != nil {
 		t.Fatal(err)
@@ -566,6 +580,7 @@ func TestPluginStepRunsInItsOwnPluginsExecutor(t *testing.T) {
 }
 
 func TestPluginExecutorOpenStreamsOutputAndSeesWorkflowDir(t *testing.T) {
+	t.Parallel()
 	plugin, err := sdk.New("acme")
 	if err != nil {
 		t.Fatal(err)
@@ -598,6 +613,7 @@ type stoppingSession struct{ localSession }
 func (stoppingSession) CancelStopsProcess() bool { return true }
 
 func TestPluginExecutorSessionRefinesItsCancelPolicy(t *testing.T) {
+	t.Parallel()
 	_, declared := openTestExecutor(t, sdk.ExecutorHandler[map[string]any]{Open: func(context.Context, sdk.ExecutorRequest[map[string]any]) (sdk.ExecutorSession, error) {
 		return localSession{}, nil
 	}})
@@ -610,6 +626,7 @@ func TestPluginExecutorSessionRefinesItsCancelPolicy(t *testing.T) {
 }
 
 func TestFailedPluginStepKeepsItsOutputs(t *testing.T) {
+	t.Parallel()
 	plugin, err := sdk.New("acme")
 	if err != nil {
 		t.Fatal(err)

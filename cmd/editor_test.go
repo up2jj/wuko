@@ -46,6 +46,7 @@ func TestEditorCommandRejectsMalformedQuoting(t *testing.T) {
 }
 
 func TestOpenWorkflowEditorPreservesQuotedPathAndArguments(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("fake editor requires a POSIX shell")
 	}

@@ -11,6 +11,7 @@ import (
 )
 
 func TestCollectorSortsDeduplicatesAndUnwraps(t *testing.T) {
+	t.Parallel()
 	firstCause := errors.New("cause")
 	first := validation.Issue{Code: validation.CodeInvalidValue, Message: "later", Cause: firstCause}.
 		WithSpan(validation.Span{Source: "workflow.yaml", Line: 4, Column: 2})
@@ -35,6 +36,7 @@ func TestCollectorSortsDeduplicatesAndUnwraps(t *testing.T) {
 }
 
 func TestSuggestion(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		value      string
 		candidates []string
@@ -54,6 +56,7 @@ func TestSuggestion(t *testing.T) {
 }
 
 func TestSourceIndexAttachesSpanAndRedactsExcerpt(t *testing.T) {
+	t.Parallel()
 	data := []byte("name: sample\nsteps:\n  - id: fetch\n    token: super-secret\n")
 	index, err := validation.NewSourceIndex("workflow.yaml", data)
 	if err != nil {
@@ -69,6 +72,7 @@ func TestSourceIndexAttachesSpanAndRedactsExcerpt(t *testing.T) {
 }
 
 func TestSafeProjectionExcludesExcerptAndCause(t *testing.T) {
+	t.Parallel()
 	issue := validation.Issue{
 		Code: validation.CodeInvalidValue, Message: "safe", Hint: "hint",
 		SourceLine: "token: secret", Cause: errors.New("raw secret"),
@@ -92,6 +96,7 @@ func TestSafeProjectionExcludesExcerptAndCause(t *testing.T) {
 }
 
 func TestConstructorsOwnWording(t *testing.T) {
+	t.Parallel()
 	issue := validation.UnknownStepOutput("steps[0].with.url", "fetch", "sttaus", []string{"body", "status"})
 	if issue.Code != validation.CodeUnknownStepOutput {
 		t.Fatalf("code = %q", issue.Code)
@@ -105,6 +110,7 @@ func TestConstructorsOwnWording(t *testing.T) {
 }
 
 func TestDuplicateDeclarationCarriesRelatedSpan(t *testing.T) {
+	t.Parallel()
 	previous := validation.Span{Source: "workflow.yaml", Line: 3, Column: 9}
 	issue := validation.DuplicateDeclaration("steps[2].id", "step id", "build", previous)
 	if issue.Code != validation.CodeDuplicateDeclaration || len(issue.Related) != 1 || issue.Related[0].Span != previous {
@@ -113,6 +119,7 @@ func TestDuplicateDeclarationCarriesRelatedSpan(t *testing.T) {
 }
 
 func TestSourceExcerptRedactsTopLevelAndFlowKeys(t *testing.T) {
+	t.Parallel()
 	lines := []string{"token: abc123", "password: abc123", "api_key: abc123", "with: {command: x, token: abc123}", "type: tui_password"}
 	index := validation.NewLazySourceIndex("wuko.yaml", []byte(strings.Join(lines, "\n")+"\n"))
 	for number := 1; number < len(lines); number++ {
@@ -126,6 +133,7 @@ func TestSourceExcerptRedactsTopLevelAndFlowKeys(t *testing.T) {
 }
 
 func TestSourceExcerptRedactsValuesContinuedBelowSensitiveKeys(t *testing.T) {
+	t.Parallel()
 	lines := []string{
 		"steps:",
 		"  - id: deploy",

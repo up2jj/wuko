@@ -9,6 +9,7 @@ import (
 )
 
 func TestConventionalCommitRendersConfigurationAndDeclaresVariable(t *testing.T) {
+	t.Parallel()
 	definition := testDefinition(t, "commit", workflow.Step{
 		ID: "create", Type: "git_conventional_commit", With: map[string]any{
 			"operation": "create", "type": "{{ .vars.type }}", "scope": "workflow",

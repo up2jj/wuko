@@ -38,6 +38,7 @@ func (executor *scriptedGitExecutor) Run(_ context.Context, options process.Opti
 }
 
 func TestNewCommitValidatesConfiguration(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		raw  map[string]any
@@ -79,6 +80,7 @@ func TestNewCommitValidatesConfiguration(t *testing.T) {
 }
 
 func TestCommitUsesExecutorWithStructuredConfiguration(t *testing.T) {
+	t.Parallel()
 	diff := &process.ExitError{Command: "git", Code: 1}
 	executor := &scriptedGitExecutor{results: []scriptedGitResult{
 		{},
@@ -143,6 +145,7 @@ func TestCommitUsesExecutorWithStructuredConfiguration(t *testing.T) {
 }
 
 func TestCommitEmptyPolicies(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		onEmpty     string
@@ -205,6 +208,7 @@ func TestCommitEmptyPolicies(t *testing.T) {
 }
 
 func TestCommitCreatesStructuredCommitAndStagesWholeIndex(t *testing.T) {
+	t.Parallel()
 	dir := initGitRepository(t)
 	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("changed\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -255,6 +259,7 @@ func TestCommitCreatesStructuredCommitAndStagesWholeIndex(t *testing.T) {
 }
 
 func TestCommitSkipsIdempotentlyAndCanCreateEmptyCommit(t *testing.T) {
+	t.Parallel()
 	dir := initGitRepository(t)
 	before := strings.TrimSpace(runGitTest(t, dir, "rev-parse", "HEAD"))
 	skip, err := NewCommit(map[string]any{"message": "no changes"})
@@ -291,6 +296,7 @@ func TestCommitSkipsIdempotentlyAndCanCreateEmptyCommit(t *testing.T) {
 }
 
 func TestCommitStagesTrackedDeletion(t *testing.T) {
+	t.Parallel()
 	dir := initGitRepository(t)
 	if err := os.Remove(filepath.Join(dir, "README.md")); err != nil {
 		t.Fatal(err)
@@ -308,6 +314,7 @@ func TestCommitStagesTrackedDeletion(t *testing.T) {
 }
 
 func TestCommitIgnoresPathsThatMatchNothing(t *testing.T) {
+	t.Parallel()
 	dir := initGitRepository(t)
 	before := strings.TrimSpace(runGitTest(t, dir, "rev-parse", "HEAD"))
 	skip, err := NewCommit(map[string]any{"message": "no output", "paths": []any{"dist", "generated/*.go"}})
@@ -351,6 +358,7 @@ func TestCommitIgnoresPathsThatMatchNothing(t *testing.T) {
 }
 
 func TestCommitReportsMissingGitIdentity(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	runGitTest(t, dir, "init", "--quiet")
 	runGitTest(t, dir, "config", "user.useConfigOnly", "true")
@@ -370,6 +378,7 @@ func TestCommitReportsMissingGitIdentity(t *testing.T) {
 }
 
 func TestCommitVerifyControlsHooks(t *testing.T) {
+	t.Parallel()
 	dir := initGitRepository(t)
 	hook := filepath.Join(dir, ".git", "hooks", "pre-commit")
 	if err := os.WriteFile(hook, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
@@ -395,6 +404,7 @@ func TestCommitVerifyControlsHooks(t *testing.T) {
 }
 
 func TestCommitPropagatesCancellationAndGitFailures(t *testing.T) {
+	t.Parallel()
 	runner, err := NewCommit(map[string]any{"message": "subject"})
 	if err != nil {
 		t.Fatal(err)
@@ -413,6 +423,7 @@ func TestCommitPropagatesCancellationAndGitFailures(t *testing.T) {
 }
 
 func TestCommitDocumentationExamples(t *testing.T) {
+	t.Parallel()
 	data, err := os.ReadFile("../../docs/steps-system.md")
 	if err != nil {
 		t.Fatal(err)

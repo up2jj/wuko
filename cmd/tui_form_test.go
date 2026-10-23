@@ -37,6 +37,7 @@ func formStep(fields ...map[string]any) workflow.Step {
 }
 
 func TestTUIFormPublishesDirectOutputsWithoutVariables(t *testing.T) {
+	t.Parallel()
 	definition := formDefinition(t,
 		formStep(
 			map[string]any{"id": "name", "type": "text", "label": "Name", "value": map[string]any{"expr": "vars.person"}},
@@ -58,6 +59,7 @@ func TestTUIFormPublishesDirectOutputsWithoutVariables(t *testing.T) {
 }
 
 func TestTUIFormReferencesAreValidated(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name           string
 		field          map[string]any
@@ -86,6 +88,7 @@ func TestTUIFormReferencesAreValidated(t *testing.T) {
 }
 
 func TestTUIFormUsesDynamicChoicesAndTemplatedDefault(t *testing.T) {
+	t.Parallel()
 	definition := formDefinition(t,
 		workflow.Step{ID: "fetch", Type: "set", With: map[string]any{"variable": "available", "value": []any{"west", "east"}}},
 		formStep(map[string]any{"id": "region", "type": "select", "label": "Region", "from": "steps.fetch.value", "value": map[string]any{"expr": "vars.region"}}),
@@ -109,6 +112,7 @@ func TestTUIFormUsesDynamicChoicesAndTemplatedDefault(t *testing.T) {
 }
 
 func TestTUIFormConcurrentExecutionRequiresValues(t *testing.T) {
+	t.Parallel()
 	for _, supplied := range []bool{true, false} {
 		t.Run(map[bool]string{true: "supplied", false: "missing"}[supplied], func(t *testing.T) {
 			field := map[string]any{"id": "name", "type": "text", "label": "Name", "default": "ignored"}
@@ -129,6 +133,7 @@ func TestTUIFormConcurrentExecutionRequiresValues(t *testing.T) {
 }
 
 func TestTUIFormCancellationDoesNotPublishOutputs(t *testing.T) {
+	t.Parallel()
 	definition := formDefinition(t, formStep(map[string]any{"id": "name", "type": "text", "label": "Name", "default": "partial"}))
 	state, err := engine.New(formRegistry(t)).Run(t.Context(), definition, engine.Options{Interactive: true, Stdin: strings.NewReader("\x03"), Stdout: io.Discard})
 	if err == nil {
@@ -142,6 +147,7 @@ func TestTUIFormCancellationDoesNotPublishOutputs(t *testing.T) {
 }
 
 func TestTUIFormRedactsPasswordBindingsInDiagnostics(t *testing.T) {
+	t.Parallel()
 	definition := formDefinition(t, formStep(map[string]any{"id": "credential", "type": "password", "label": "Credential", "value": "private-input", "default": "private-default"}))
 	var diagnostics bytes.Buffer
 	_, err := engine.New(formRegistry(t)).Run(t.Context(), definition, engine.Options{Diagnostics: func(event diagnostic.Event) {
@@ -158,6 +164,7 @@ func TestTUIFormRedactsPasswordBindingsInDiagnostics(t *testing.T) {
 }
 
 func TestTUIFormCLIReadsTypedInputs(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	file := filepath.Join(root, "form.yaml")
 	source := `version: 1
@@ -192,6 +199,7 @@ steps:
 }
 
 func TestTUIFormCustomExpressionReferencesAreValidated(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct{ expr, want string }{
 		{"len(value) >= 3", ""},
 		{"value == vars.missing", `variable "missing" is not declared`},
@@ -211,6 +219,7 @@ func TestTUIFormCustomExpressionReferencesAreValidated(t *testing.T) {
 }
 
 func TestTUIFormLuaValidationSourceIsLiteral(t *testing.T) {
+	t.Parallel()
 	field := map[string]any{"id": "name", "type": "text", "label": "Name", "value": "Ada", "validation": map[string]any{
 		"lua": `function(value) return value ~= "{{ .vars.missing }}" end`,
 	}}
@@ -225,6 +234,7 @@ func TestTUIFormLuaValidationSourceIsLiteral(t *testing.T) {
 }
 
 func TestTUIFormLuaValidatorRunsInInteractiveProgram(t *testing.T) {
+	t.Parallel()
 	field := map[string]any{"id": "name", "type": "text", "label": "Name", "default": "Ada", "validation": map[string]any{
 		"lua": `function(value) return value == "Ada" end`, "message": "Use Ada",
 	}}
@@ -239,6 +249,7 @@ func TestTUIFormLuaValidatorRunsInInteractiveProgram(t *testing.T) {
 }
 
 func TestTUIFormCrossFieldValidationUsesCurrentPasswordEdits(t *testing.T) {
+	t.Parallel()
 	for _, kind := range []string{"expr", "lua"} {
 		t.Run(kind, func(t *testing.T) {
 			rules := map[string]any{"expr": "value == fields.password", "message": "Passwords must match"}
@@ -264,6 +275,7 @@ func TestTUIFormCrossFieldValidationUsesCurrentPasswordEdits(t *testing.T) {
 }
 
 func TestTUIFormCrossFieldReferencesRejectUnknownIDs(t *testing.T) {
+	t.Parallel()
 	definition := formDefinition(t, formStep(map[string]any{
 		"id": "name", "type": "text", "label": "Name", "value": "Ada",
 		"validation": map[string]any{"expr": "value == fields.missing"},

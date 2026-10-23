@@ -19,6 +19,7 @@ import (
 )
 
 func TestJSONRequestAndResponse(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
 		if request.Method != nethttp.MethodPost || request.URL.Query().Get("channel") != "stable" {
 			t.Errorf("request = %s %s", request.Method, request.URL.String())
@@ -59,6 +60,7 @@ func TestJSONRequestAndResponse(t *testing.T) {
 }
 
 func TestStatusAndResponseErrors(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, _ *nethttp.Request) {
 		writer.WriteHeader(nethttp.StatusTeapot)
 		fmt.Fprint(writer, "no")
@@ -89,6 +91,7 @@ func TestStatusAndResponseErrors(t *testing.T) {
 }
 
 func TestResponseLimitAndCancellation(t *testing.T) {
+	t.Parallel()
 	large := httptest.NewServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, _ *nethttp.Request) {
 		writer.Header().Set("Content-Length", fmt.Sprint(maxResponseSize+1))
 		writer.WriteHeader(nethttp.StatusOK)
@@ -124,6 +127,7 @@ func TestResponseLimitAndCancellation(t *testing.T) {
 }
 
 func TestRedirectPolicyRejectsCredentialBoundaryChanges(t *testing.T) {
+	t.Parallel()
 	client := newClient(nil, nil)
 	tests := []struct {
 		name    string
@@ -156,6 +160,7 @@ func TestRedirectPolicyRejectsCredentialBoundaryChanges(t *testing.T) {
 }
 
 func TestRejectsInvalidConfiguration(t *testing.T) {
+	t.Parallel()
 	tests := []map[string]any{
 		{},
 		{"url": "ftp://example.com"},
@@ -173,6 +178,7 @@ func TestRejectsInvalidConfiguration(t *testing.T) {
 }
 
 func TestDecodeJSONPreservesNumbers(t *testing.T) {
+	t.Parallel()
 	value, err := decodeJSON([]byte(`{"count":9007199254740993}`))
 	if err != nil {
 		t.Fatal(err)
@@ -183,6 +189,7 @@ func TestDecodeJSONPreservesNumbers(t *testing.T) {
 }
 
 func TestRetryAfterParsing(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
 	tests := []struct {
 		name  string
@@ -205,6 +212,7 @@ func TestRetryAfterParsing(t *testing.T) {
 }
 
 func TestConditionalHeadersAndRevalidatedResult(t *testing.T) {
+	t.Parallel()
 	modified := "Thu, 20 Aug 2026 10:00:00 GMT"
 	previous := &step.Result{Outputs: map[string]any{
 		"status": 503,
@@ -249,6 +257,7 @@ func TestConditionalHeadersAndRevalidatedResult(t *testing.T) {
 }
 
 func TestRetryAttemptsShareOneConnection(t *testing.T) {
+	t.Parallel()
 	var connections atomic.Int64
 	server := httptest.NewUnstartedServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
 		writer.WriteHeader(nethttp.StatusInternalServerError)
@@ -283,6 +292,7 @@ func TestRetryAttemptsShareOneConnection(t *testing.T) {
 }
 
 func TestChunkedResponseReadsWithoutADeclaredLength(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, _ *nethttp.Request) {
 		// Flushing a partial body sends it chunked, so the response carries no length
 		// for the reader to size itself from.
@@ -313,6 +323,7 @@ func TestChunkedResponseReadsWithoutADeclaredLength(t *testing.T) {
 }
 
 func TestTransportErrorsRedactQueryValues(t *testing.T) {
+	t.Parallel()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)

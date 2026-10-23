@@ -19,6 +19,7 @@ import (
 )
 
 func TestNewDiffValidatesConfiguration(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name    string
 		builder step.Builder
@@ -66,6 +67,7 @@ func TestNewDiffValidatesConfiguration(t *testing.T) {
 }
 
 func TestGitDiffReadsStructuredCommitStagedAndUnstagedChanges(t *testing.T) {
+	t.Parallel()
 	dir := initGitRepository(t)
 	base := strings.TrimSpace(runGitTest(t, dir, "rev-parse", "HEAD"))
 	writeHistoryFile(t, dir, "old name.txt", "one\ntwo\n")
@@ -125,6 +127,7 @@ func TestGitDiffReadsStructuredCommitStagedAndUnstagedChanges(t *testing.T) {
 }
 
 func TestGitDiffUsesFirstParentAndHandlesRootAndDivergentTrees(t *testing.T) {
+	t.Parallel()
 	dir := initGitRepository(t)
 	root := strings.TrimSpace(runGitTest(t, dir, "rev-list", "--max-parents=0", "HEAD"))
 	rootDiff := runDiff(t, dir, map[string]any{"through": root})
@@ -157,6 +160,7 @@ func TestGitDiffUsesFirstParentAndHandlesRootAndDivergentTrees(t *testing.T) {
 }
 
 func TestGitDiffDetectsCopiesModesAndUnusualPaths(t *testing.T) {
+	t.Parallel()
 	dir := initGitRepository(t)
 	writeHistoryFile(t, dir, "source.txt", "copy me\n")
 	runGitTest(t, dir, "add", "source.txt")
@@ -178,6 +182,7 @@ func TestGitDiffDetectsCopiesModesAndUnusualPaths(t *testing.T) {
 }
 
 func TestGitDiffHandlesUnbornStagedRepository(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	runGitTest(t, dir, "init", "--quiet")
 	writeHistoryFile(t, dir, "first.txt", "first\n")
@@ -189,6 +194,7 @@ func TestGitDiffHandlesUnbornStagedRepository(t *testing.T) {
 }
 
 func TestGitDiffReportsUnmergedPathOnce(t *testing.T) {
+	t.Parallel()
 	dir := initGitRepository(t)
 	main := strings.TrimSpace(runGitTest(t, dir, "branch", "--show-current"))
 	runGitTest(t, dir, "checkout", "-qb", "conflict")
@@ -214,6 +220,7 @@ func TestGitDiffReportsUnmergedPathOnce(t *testing.T) {
 }
 
 func TestGitDiffDisablesRenameDetectionExplicitly(t *testing.T) {
+	t.Parallel()
 	dir := initGitRepository(t)
 	writeHistoryFile(t, dir, "old.txt", "one\ntwo\nthree\nfour\nfive\n")
 	runGitTest(t, dir, "add", "old.txt")
@@ -237,6 +244,7 @@ func TestGitDiffDisablesRenameDetectionExplicitly(t *testing.T) {
 }
 
 func TestGitDiffCheckIgnoresRenamedContentAndMergeCommits(t *testing.T) {
+	t.Parallel()
 	dir := initGitRepository(t)
 	base := strings.TrimSpace(runGitTest(t, dir, "rev-parse", "HEAD"))
 	writeHistoryFile(t, dir, "legacy.txt", "legacy \n")
@@ -277,6 +285,7 @@ func TestGitDiffCheckIgnoresRenamedContentAndMergeCommits(t *testing.T) {
 }
 
 func TestGitDiffCheckDetectsWhitespace(t *testing.T) {
+	t.Parallel()
 	dir := initGitRepository(t)
 	writeHistoryFile(t, dir, "bad.txt", "trailing \n")
 	runGitTest(t, dir, "add", "bad.txt")
@@ -295,6 +304,7 @@ func TestGitDiffCheckDetectsWhitespace(t *testing.T) {
 }
 
 func TestGitDiffCheckPushedUsesHookContextAndChecksEveryCommit(t *testing.T) {
+	t.Parallel()
 	dir := initGitRepository(t)
 	base := strings.TrimSpace(runGitTest(t, dir, "rev-parse", "HEAD"))
 	writeHistoryFile(t, dir, "temporary.txt", "bad \n")
@@ -326,6 +336,7 @@ func TestGitDiffCheckPushedUsesHookContextAndChecksEveryCommit(t *testing.T) {
 }
 
 func TestGitDiffCheckPushedAcceptsExplicitUpdatesExpression(t *testing.T) {
+	t.Parallel()
 	runner, err := NewDiffCheck(map[string]any{
 		"source": "pushed", "updates": map[string]any{"expr": "vars.updates"},
 	})
@@ -359,6 +370,7 @@ func (executor *recordingGitExecutor) Run(ctx context.Context, options process.O
 }
 
 func TestGitDiffCheckPushedRunsOneCommandPerCommit(t *testing.T) {
+	t.Parallel()
 	dir := initGitRepository(t)
 	base := strings.TrimSpace(runGitTest(t, dir, "rev-parse", "HEAD"))
 	for _, content := range []string{"one\n", "two\n", "three\n"} {
@@ -399,6 +411,7 @@ func TestGitDiffCheckPushedRunsOneCommandPerCommit(t *testing.T) {
 }
 
 func TestGitDiffCheckPushedHandlesNewBranch(t *testing.T) {
+	t.Parallel()
 	dir := initGitRepository(t)
 	base := strings.TrimSpace(runGitTest(t, dir, "rev-parse", "HEAD"))
 	runGitTest(t, dir, "update-ref", "refs/remotes/origin/main", base)
@@ -420,6 +433,7 @@ func TestGitDiffCheckPushedHandlesNewBranch(t *testing.T) {
 }
 
 func TestGitDiffRejectsMalformedAndTruncatedOutput(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name    string
 		results []scriptedGitResult
@@ -442,6 +456,7 @@ func TestGitDiffRejectsMalformedAndTruncatedOutput(t *testing.T) {
 }
 
 func TestGitDiffCancellationAndRegistration(t *testing.T) {
+	t.Parallel()
 	registry := step.NewRegistry()
 	if err := Register(registry); err != nil {
 		t.Fatal(err)
@@ -468,6 +483,7 @@ func TestGitDiffCancellationAndRegistration(t *testing.T) {
 }
 
 func TestGitDiffDocumentationExamples(t *testing.T) {
+	t.Parallel()
 	paths := []string{"../../docs/steps-system.md", "../../docs/git-changes.md"}
 	built := 0
 	for _, path := range paths {

@@ -21,6 +21,7 @@ import (
 )
 
 func TestFinishReportersOnceFinalizesOnlyFirstOutcome(t *testing.T) {
+	t.Parallel()
 	var outcomes []reporterpkg.Outcome
 	reporters := &runReporters{group: reporterpkg.Group{reporterpkg.Funcs{
 		FinishFunc: func(context.Context, reporterpkg.Outcome) error {
@@ -41,6 +42,7 @@ func TestFinishReportersOnceFinalizesOnlyFirstOutcome(t *testing.T) {
 }
 
 func TestRunReportersCompleteBuildsSafeOutcome(t *testing.T) {
+	t.Parallel()
 	var got reporterpkg.Outcome
 	contextDetached := false
 	reporters := &runReporters{group: reporterpkg.Group{reporterpkg.Funcs{
@@ -89,6 +91,7 @@ func TestRunReportersCompleteBuildsSafeOutcome(t *testing.T) {
 }
 
 func TestRunReportersCompleteFallsBackToTerminalEventWithoutState(t *testing.T) {
+	t.Parallel()
 	var got reporterpkg.Outcome
 	reporters := &runReporters{group: reporterpkg.Group{reporterpkg.Funcs{
 		FinishFunc: func(_ context.Context, outcome reporterpkg.Outcome) error {
@@ -113,6 +116,7 @@ func TestRunReportersCompleteFallsBackToTerminalEventWithoutState(t *testing.T) 
 }
 
 func TestRunReportersCompleteIgnoresTerminalEventFromAnotherWorkflow(t *testing.T) {
+	t.Parallel()
 	var got reporterpkg.Outcome
 	reporters := &runReporters{group: reporterpkg.Group{reporterpkg.Funcs{
 		FinishFunc: func(_ context.Context, outcome reporterpkg.Outcome) error {
@@ -138,6 +142,7 @@ func TestRunReportersCompleteIgnoresTerminalEventFromAnotherWorkflow(t *testing.
 }
 
 func TestRunReportersCompleteIgnoresStaleSuccessBeforeLaterFailure(t *testing.T) {
+	t.Parallel()
 	var got reporterpkg.Outcome
 	reporters := &runReporters{group: reporterpkg.Group{reporterpkg.Funcs{
 		FinishFunc: func(_ context.Context, outcome reporterpkg.Outcome) error {
@@ -162,6 +167,7 @@ func TestRunReportersCompleteIgnoresStaleSuccessBeforeLaterFailure(t *testing.T)
 }
 
 func TestRunReportersCompleteFallsBackToStateForDryRun(t *testing.T) {
+	t.Parallel()
 	var got reporterpkg.Outcome
 	reporters := &runReporters{group: reporterpkg.Group{reporterpkg.Funcs{
 		FinishFunc: func(_ context.Context, outcome reporterpkg.Outcome) error {
@@ -185,6 +191,7 @@ func TestRunReportersCompleteFallsBackToStateForDryRun(t *testing.T) {
 }
 
 func TestRunReportersSequenceSpansRunsAndStreams(t *testing.T) {
+	t.Parallel()
 	var progress []engine.ProgressEvent
 	var diagnostics []diagnostic.Event
 	reporters := &runReporters{group: reporterpkg.Group{reporterpkg.Funcs{
@@ -232,6 +239,7 @@ func (correlationTestRunner) Run(context.Context, step.Request) (step.Result, er
 }
 
 func TestBrowserReporterProjectsCorrelation(t *testing.T) {
+	t.Parallel()
 	var got webui.Progress
 	reporter := browserReporter{stage: "workflow", emit: func(event webui.Progress) { got = event }}
 	reporter.Progress(engine.ProgressEvent{
@@ -245,6 +253,7 @@ func TestBrowserReporterProjectsCorrelation(t *testing.T) {
 }
 
 func TestOutcomeStatus(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		err  error
@@ -269,6 +278,7 @@ func fmtWrap(err error) error {
 }
 
 func TestNewRunReportersDefaultsToPlainAndComposesExplicitReporters(t *testing.T) {
+	t.Parallel()
 	command := &cobra.Command{}
 	command.SetOut(new(bytes.Buffer))
 	command.SetErr(new(bytes.Buffer))
@@ -316,6 +326,7 @@ func TestNewRunReportersDefaultsToPlainAndComposesExplicitReporters(t *testing.T
 }
 
 func TestNewRunReportersRejectsUnknownReporter(t *testing.T) {
+	t.Parallel()
 	command := &cobra.Command{}
 	command.SetErr(new(bytes.Buffer))
 	debug := false
@@ -326,6 +337,7 @@ func TestNewRunReportersRejectsUnknownReporter(t *testing.T) {
 }
 
 func TestRunReporterNamesFollowCatalogOrder(t *testing.T) {
+	t.Parallel()
 	if got := strings.Join(runReporterNames(), ","); got != "plain,github,multiplexer" {
 		t.Fatalf("reporter names = %q, want plain,github,multiplexer", got)
 	}

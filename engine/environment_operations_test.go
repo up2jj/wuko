@@ -150,6 +150,7 @@ func TestEnvironmentOperationsReachChildProcessesAndRestore(t *testing.T) {
 }
 
 func TestEnvironmentOperationsRestoreAcrossExitPaths(t *testing.T) {
+	t.Parallel()
 	for _, exit := range []string{"success", "failure", "cancel", "return"} {
 		t.Run(exit, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())

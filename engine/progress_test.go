@@ -16,6 +16,7 @@ import (
 )
 
 func TestSynchronizeWriterPreservesTerminalFileCapability(t *testing.T) {
+	t.Parallel()
 	reader, writer, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
@@ -36,6 +37,7 @@ func TestSynchronizeWriterPreservesTerminalFileCapability(t *testing.T) {
 }
 
 func TestSynchronizeWriterKeepsGenericWriterGeneric(t *testing.T) {
+	t.Parallel()
 	wrapped := synchronizeWriter(&sync.Mutex{}, &strings.Builder{})
 	if _, ok := wrapped.(terminalFile); ok {
 		t.Fatalf("generic synchronized writer type %T unexpectedly has terminal capability", wrapped)
@@ -43,6 +45,7 @@ func TestSynchronizeWriterKeepsGenericWriterGeneric(t *testing.T) {
 }
 
 func TestRunReportsProgressAndCollectsStats(t *testing.T) {
+	t.Parallel()
 	var requests []step.Request
 	registry := newTestRegistry(t, map[string]step.Builder{"retry": func(map[string]any) (step.Runner, error) {
 		return retryTestRunner{failures: 1, requests: &requests}, nil
@@ -103,6 +106,7 @@ func (alwaysFailRunner) Run(context.Context, step.Request) (step.Result, error) 
 }
 
 func TestRunReportsTerminalFailure(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, map[string]step.Builder{"fail": func(map[string]any) (step.Runner, error) { return alwaysFailRunner{}, nil }})
 	location := diagnostic.Location{Source: "/project/workflow.yaml", Line: 5, Column: 3}
 	definition := testDefinition(t, "failure", workflow.Step{ID: "break", Type: "fail", Location: location})
@@ -121,6 +125,7 @@ func TestRunReportsTerminalFailure(t *testing.T) {
 }
 
 func TestRunReportsDiagnosticFailurePhaseAndLocation(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, map[string]step.Builder{"fail": func(map[string]any) (step.Runner, error) { return alwaysFailRunner{}, nil }})
 	location := diagnostic.Location{Source: "/project/workflow.yaml", Line: 8, Column: 5}
 	definition := testDefinition(t, "failure", workflow.Step{ID: "break", Type: "fail", With: map[string]any{"token": "secret", "message": "visible"}, Location: location})

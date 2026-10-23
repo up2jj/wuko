@@ -3,6 +3,7 @@ package provider
 import "testing"
 
 func TestGitProviderDeclaresInactiveHookSchema(t *testing.T) {
+	t.Parallel()
 	item := NewGit()
 	value, active, err := item.Load(t.Context(), nil)
 	if err != nil {

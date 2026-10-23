@@ -14,6 +14,7 @@ import (
 )
 
 func TestWorktreeRunsMultipleCommitsPublishesAndCleansUp(t *testing.T) {
+	t.Parallel()
 	root, base := initWorktreeRepository(t)
 	var observedDir string
 	registry := newTestRegistry(t, map[string]step.Builder{
@@ -76,6 +77,7 @@ func TestWorktreeRunsMultipleCommitsPublishesAndCleansUp(t *testing.T) {
 }
 
 func TestWorktreePublishingFailsWithoutNewCommit(t *testing.T) {
+	t.Parallel()
 	root, _ := initWorktreeRepository(t)
 	registry := newTestRegistry(t, map[string]step.Builder{
 		"noop": func(map[string]any) (step.Runner, error) {
@@ -98,6 +100,7 @@ func TestWorktreePublishingFailsWithoutNewCommit(t *testing.T) {
 }
 
 func TestNestedWorktreeDefersRunOnceBeforeRemoval(t *testing.T) {
+	t.Parallel()
 	root, _ := initWorktreeRepository(t)
 	var cleanupRuns int
 	registry := newTestRegistry(t, map[string]step.Builder{
@@ -166,6 +169,7 @@ func testGitOutput(dir string, args ...string) string {
 }
 
 func TestWorktreeStopsItsServicesBeforeRemovingTheWorktree(t *testing.T) {
+	t.Parallel()
 	root, _ := initWorktreeRepository(t)
 	stopped := make(chan struct{})
 	var stoppedBeforeNextStep bool

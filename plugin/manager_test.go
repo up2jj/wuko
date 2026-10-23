@@ -91,6 +91,7 @@ func runProtocolHelper() {
 }
 
 func TestLoadActionIsValidatedCachedAndDoesNotStartLifecycle(t *testing.T) {
+	t.Parallel()
 	executable, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -123,6 +124,7 @@ func TestLoadActionIsValidatedCachedAndDoesNotStartLifecycle(t *testing.T) {
 }
 
 func TestActionDeclarationsRequireProtocolV3(t *testing.T) {
+	t.Parallel()
 	for _, protocol := range []string{ProtocolV1, ProtocolV2} {
 		if err := validateInitializeDeclarations("acme", protocol, initializeResult{Actions: []string{"build"}}); err == nil {
 			t.Fatalf("%s accepted an action declaration", protocol)
@@ -134,6 +136,7 @@ func TestActionDeclarationsRequireProtocolV3(t *testing.T) {
 }
 
 func TestLaunchIsolatesPluginFromTerminalProcessGroup(t *testing.T) {
+	t.Parallel()
 	executable, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -158,6 +161,7 @@ func TestLaunchIsolatesPluginFromTerminalProcessGroup(t *testing.T) {
 }
 
 func TestWorkflowPluginHelpersStartAndCall(t *testing.T) {
+	t.Parallel()
 	executable, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -195,6 +199,7 @@ func TestWorkflowPluginHelpersStartAndCall(t *testing.T) {
 }
 
 func TestPluginHelperDeclarations(t *testing.T) {
+	t.Parallel()
 	if got := exposedHelperName("acme-tools", "slug"); got != "acme_tools_slug" {
 		t.Fatalf("exposed helper name = %q", got)
 	}
@@ -217,6 +222,7 @@ func TestPluginHelperDeclarations(t *testing.T) {
 }
 
 func TestPluginDeclarationConflictsReportIdentityWithoutConfigurationValues(t *testing.T) {
+	t.Parallel()
 	manager := NewManager(Config{CacheDir: testCache(t)})
 	digestA := strings.Repeat("a", 64)
 	digestB := strings.Repeat("b", 64)
@@ -241,6 +247,7 @@ func TestPluginDeclarationConflictsReportIdentityWithoutConfigurationValues(t *t
 }
 
 func TestExecutorRunResultUsesLanguageNeutralFieldNames(t *testing.T) {
+	t.Parallel()
 	var wire executorRunResult
 	if err := json.Unmarshal([]byte(`{"stdout":"out","stderr":"err","exit_code":7,"stdout_truncated":true,"stderr_truncated":true}`), &wire); err != nil {
 		t.Fatal(err)
@@ -252,6 +259,7 @@ func TestExecutorRunResultUsesLanguageNeutralFieldNames(t *testing.T) {
 }
 
 func TestDecodeFramePreservesDynamicJSONNumbers(t *testing.T) {
+	t.Parallel()
 	const raw = "9007199254740993"
 	want := json.Number(raw)
 	var params struct {
@@ -296,6 +304,7 @@ func (transport memoryTransport) RoundTrip(request *http.Request) (*http.Respons
 }
 
 func TestWorkflowPluginStartAndStopOnce(t *testing.T) {
+	t.Parallel()
 	executable, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -339,6 +348,7 @@ func TestWorkflowPluginStartAndStopOnce(t *testing.T) {
 }
 
 func TestUndeclaredPluginCannotUseAmbientExecutable(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, ".wuko", "plugins", "acme"), 0700); err != nil {
 		t.Fatal(err)
@@ -356,6 +366,7 @@ func TestUndeclaredPluginCannotUseAmbientExecutable(t *testing.T) {
 // destination - resets the manager between runs so each run declares its own plugin sources,
 // brackets plugin lifecycles, and releases the installation it extracted.
 func TestManagerResetReleasesRunScopedState(t *testing.T) {
+	t.Parallel()
 	executable, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -467,6 +478,7 @@ func pluginFixture(t *testing.T, namespace string) (manifest, archive []byte) {
 // only clears once both manifest fetches are in flight, so a lock held across the load
 // fails this rather than merely making it slow.
 func TestConcurrentLoadsOfDistinctPluginsDoNotSerialize(t *testing.T) {
+	t.Parallel()
 	namespaces := []string{"acme", "beta"}
 	bodies := map[string][]byte{}
 	sources := map[string]workflow.ResolvedPluginSource{}
@@ -499,6 +511,7 @@ func TestConcurrentLoadsOfDistinctPluginsDoNotSerialize(t *testing.T) {
 // Callers that race for the same namespace share one load instead of each launching the
 // plugin: a second process would leave the first one running and unowned.
 func TestConcurrentLoadsOfOnePluginLaunchItOnce(t *testing.T) {
+	t.Parallel()
 	manifest, archive := pluginFixture(t, "acme")
 	transport := newBarrierTransport(1, map[string][]byte{"/acme.json": manifest, "/acme.tar.gz": archive})
 	manager := NewManager(Config{CacheDir: testCache(t), HTTPClient: &http.Client{Transport: transport}, Stderr: io.Discard})

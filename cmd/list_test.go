@@ -13,6 +13,7 @@ import (
 )
 
 func TestListCommandPreservesTextOutput(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	workflowDir := filepath.Join(root, ".wuko", "workflows")
 	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
@@ -34,6 +35,7 @@ func TestListCommandPreservesTextOutput(t *testing.T) {
 }
 
 func TestListCommandWritesVersionedJSON(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	workflowDir := filepath.Join(root, ".wuko", "workflows")
 	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
@@ -106,6 +108,7 @@ targets:
 }
 
 func TestListCommandWritesEmptyJSONArray(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	var output bytes.Buffer
 	command := newRootCmd(listTestDependencies(root, &output))
@@ -119,6 +122,7 @@ func TestListCommandWritesEmptyJSONArray(t *testing.T) {
 }
 
 func TestListCommandAllIncludesShadowedTargets(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	home := filepath.Join(root, "home")
 	project := filepath.Join(home, "project")
@@ -188,6 +192,7 @@ func TestListCommandAllIncludesShadowedTargets(t *testing.T) {
 }
 
 func TestListCommandRejectsInvalidFormatBeforeDiscovery(t *testing.T) {
+	t.Parallel()
 	discovered := false
 	var output bytes.Buffer
 	command := newRootCmd(dependencies{

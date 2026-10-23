@@ -13,6 +13,7 @@ import (
 )
 
 func TestTextVariablesExplainJSONQuotingWithoutExposingValues(t *testing.T) {
+	t.Parallel()
 	for _, stepType := range []string{"tui_input", "tui_password"} {
 		for _, value := range []string{"98473625", "true", "null", `["private-token"]`, `"123"`} {
 			t.Run(stepType+"/"+value, func(t *testing.T) {

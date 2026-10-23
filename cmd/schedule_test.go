@@ -16,6 +16,7 @@ func scheduledDefinition(cron string) *workflow.Definition {
 }
 
 func TestScheduledRunnerRepeatsAfterAttemptFailure(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	now := time.Date(2026, time.August, 21, 10, 0, 0, 500_000_000, time.UTC)
@@ -53,6 +54,7 @@ func TestScheduledRunnerRepeatsAfterAttemptFailure(t *testing.T) {
 }
 
 func TestScheduledRunnerRetriesAfterReloadFailure(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	now := time.Date(2026, time.August, 21, 10, 0, 1, 500_000_000, time.UTC)
@@ -89,6 +91,7 @@ func TestScheduledRunnerRetriesAfterReloadFailure(t *testing.T) {
 }
 
 func TestScheduledRunnerAdoptsChangedScheduleAndSkipsOldOccurrence(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	now := time.Date(2026, time.August, 21, 10, 0, 0, 500_000_000, time.UTC)
@@ -124,6 +127,7 @@ func TestScheduledRunnerAdoptsChangedScheduleAndSkipsOldOccurrence(t *testing.T)
 }
 
 func TestScheduledRunnerSkipsOccurrencesMissedDuringAttempt(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	now := time.Date(2026, time.August, 21, 10, 0, 0, 0, time.UTC)
@@ -155,6 +159,7 @@ func TestScheduledRunnerSkipsOccurrencesMissedDuringAttempt(t *testing.T) {
 }
 
 func TestScheduledRunnerKeepsLastScheduleWhenCronIsRemoved(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	now := time.Date(2026, time.August, 21, 10, 0, 1, 500_000_000, time.UTC)
@@ -187,6 +192,7 @@ func TestScheduledRunnerKeepsLastScheduleWhenCronIsRemoved(t *testing.T) {
 }
 
 func TestScheduledRunnerCancellationWhileWaitingIsClean(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(t.Context())
 	now := time.Date(2026, time.August, 21, 10, 0, 1, 500_000_000, time.UTC)
 	cleanups := 0
@@ -207,6 +213,7 @@ func TestScheduledRunnerCancellationWhileWaitingIsClean(t *testing.T) {
 }
 
 func TestScheduledRunnerCanStopAfterOccurrence(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, time.August, 21, 10, 0, 0, 500_000_000, time.UTC)
 	for _, test := range []struct {
 		name   string

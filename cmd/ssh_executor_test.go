@@ -9,6 +9,7 @@ import (
 )
 
 func TestBuiltinSSHExecutorDryRunDoesNotConnect(t *testing.T) {
+	t.Parallel()
 	file := filepath.Join(t.TempDir(), "remote.yaml")
 	if err := os.WriteFile(file, []byte(`version: 1
 name: remote-dry-run

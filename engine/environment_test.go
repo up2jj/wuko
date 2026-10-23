@@ -51,6 +51,7 @@ func environmentRegistry(t *testing.T) *step.Registry {
 }
 
 func TestEnvironmentBlockScopesRequestValidation(t *testing.T) {
+	t.Parallel()
 	definition := &workflow.Definition{Version: 1, Name: "validation", Steps: []workflow.Step{{
 		Env: workflow.ScopedEnvironmentValues(workflow.Environment{"MODE": "scoped"}), Steps: []workflow.Step{{
 			ID: "inside", Type: "capture_env", With: map[string]any{"name": "MODE", "expected": "scoped"},
@@ -64,6 +65,7 @@ func TestEnvironmentBlockScopesRequestValidation(t *testing.T) {
 }
 
 func TestEnvironmentBlockRestoresEnvironmentBeforeFinallyAfterFailure(t *testing.T) {
+	t.Parallel()
 	registry := environmentRegistry(t)
 	var finallyMode string
 	if err := registry.Register("capture_finally_env", func(map[string]any) (step.Runner, error) {
@@ -96,6 +98,7 @@ func envCapture(id, name string) workflow.Step {
 }
 
 func TestEnvironmentBlockScopesNestsAndRestoresEnvironment(t *testing.T) {
+	t.Parallel()
 	definition := &workflow.Definition{
 		Version: 1, Name: "scoped", Env: workflow.Environment{"MODE": "workflow"},
 		Steps: []workflow.Step{
@@ -134,6 +137,7 @@ func TestEnvironmentBlockScopesNestsAndRestoresEnvironment(t *testing.T) {
 }
 
 func TestEnvironmentBlockPreservesEnvironmentForDeferredSteps(t *testing.T) {
+	t.Parallel()
 	owner := envCapture("owner", "MODE")
 	owner.Defer = []workflow.Step{envCapture("cleanup", "MODE")}
 	definition := &workflow.Definition{
@@ -157,6 +161,7 @@ func TestEnvironmentBlockPreservesEnvironmentForDeferredSteps(t *testing.T) {
 }
 
 func TestEnvironmentBlockIsolatedAcrossConcurrentBranches(t *testing.T) {
+	t.Parallel()
 	definition := &workflow.Definition{Version: 1, Name: "parallel", Steps: []workflow.Step{{
 		Concurrent: &workflow.ConcurrentGroup{MaxConcurrency: 2, FailFast: true, Steps: []workflow.Step{
 			{Env: workflow.ScopedEnvironmentValues(workflow.Environment{"MODE": "one"}), Steps: []workflow.Step{envCapture("one", "MODE")}},
@@ -177,6 +182,7 @@ func TestEnvironmentBlockIsolatedAcrossConcurrentBranches(t *testing.T) {
 }
 
 func TestEnvironmentBlockPropagatesIntoFanoutControls(t *testing.T) {
+	t.Parallel()
 	definition := &workflow.Definition{Version: 1, Name: "fanout", Steps: []workflow.Step{{
 		Env: workflow.ScopedEnvironmentValues(workflow.Environment{"MODE": "scoped"}), Steps: []workflow.Step{
 			{ID: "each", Foreach: &workflow.ForeachGroup{
@@ -204,6 +210,7 @@ func TestEnvironmentBlockPropagatesIntoFanoutControls(t *testing.T) {
 }
 
 func TestEnvironmentBlockPropagatesIntoCompositeAction(t *testing.T) {
+	t.Parallel()
 	action := &workflow.Action{
 		Version: 1, Name: "capture", Outputs: map[string]workflow.ActionOutput{"value": {Value: "steps.inside.value"}},
 		Steps: []workflow.Step{envCapture("inside", "MODE")},
@@ -225,6 +232,7 @@ func TestEnvironmentBlockPropagatesIntoCompositeAction(t *testing.T) {
 }
 
 func TestEnvironmentBlockReportsRenderedVariable(t *testing.T) {
+	t.Parallel()
 	definition := &workflow.Definition{Version: 1, Name: "invalid", Steps: []workflow.Step{{
 		Env: workflow.ScopedEnvironmentValues(workflow.Environment{"BROKEN": `{{ template "missing" . }}`}), Steps: []workflow.Step{envCapture("inside", "BROKEN")},
 	}}}
@@ -235,6 +243,7 @@ func TestEnvironmentBlockReportsRenderedVariable(t *testing.T) {
 }
 
 func TestEnvironmentBlockDryRunListsNamesWithoutValues(t *testing.T) {
+	t.Parallel()
 	definition := testDefinition(t, "dry", workflow.Step{
 		Env: workflow.ScopedEnvironmentValues(workflow.Environment{"TOKEN": "secret", "GOOS": "linux"}), Steps: []workflow.Step{envCapture("run", "GOOS")},
 	})

@@ -12,6 +12,7 @@ import (
 )
 
 func TestBackgroundSupervisorSealsOnlyAutoStopServices(t *testing.T) {
+	t.Parallel()
 	supervisor := newBackgroundSupervisor(t.Context())
 	autoStopped := make(chan struct{})
 	keeperStopped := make(chan struct{})
@@ -52,6 +53,7 @@ func TestBackgroundSupervisorSealsOnlyAutoStopServices(t *testing.T) {
 }
 
 func TestBackgroundSupervisorDeferredFailuresDoNotCancelIndependentWork(t *testing.T) {
+	t.Parallel()
 	supervisor := newBackgroundSupervisor(t.Context())
 	failure := errors.New("deferred failure")
 	failed := make(chan struct{})
@@ -89,6 +91,7 @@ func TestBackgroundSupervisorDeferredFailuresDoNotCancelIndependentWork(t *testi
 }
 
 func TestBackgroundSupervisorConcurrentMixedPolicyStress(t *testing.T) {
+	t.Parallel()
 	const rounds = 50
 	const jobs = 48
 	for round := range rounds {
@@ -132,6 +135,7 @@ func TestBackgroundSupervisorConcurrentMixedPolicyStress(t *testing.T) {
 }
 
 func TestBackgroundSupervisorLifecycleShutdownDoesNotEndTheScope(t *testing.T) {
+	t.Parallel()
 	supervisor := newBackgroundSupervisor(t.Context())
 	if err := supervisor.StartService("service", "process", step.ServiceOptions{ExitOnEnd: true}, func(ctx context.Context) error {
 		<-ctx.Done()
@@ -150,6 +154,7 @@ func TestBackgroundSupervisorLifecycleShutdownDoesNotEndTheScope(t *testing.T) {
 }
 
 func TestBackgroundSupervisorIgnoresServicesThatNeverStarted(t *testing.T) {
+	t.Parallel()
 	supervisor := newBackgroundSupervisor(t.Context())
 	options := step.ServiceOptions{FailFast: true, ExitOnEnd: true}
 	if err := supervisor.StartService("service", "process", options, func(context.Context) error {
@@ -169,6 +174,7 @@ func TestBackgroundSupervisorIgnoresServicesThatNeverStarted(t *testing.T) {
 }
 
 func TestJoinBackgroundErrorPrefersOriginatingFailure(t *testing.T) {
+	t.Parallel()
 	failure := errors.New("service failed")
 	foreground := errors.New("step failed")
 	tests := []struct {

@@ -27,6 +27,7 @@ import (
 )
 
 func TestMarketplaceInitAndIncrementalBuild(t *testing.T) {
+	t.Parallel()
 	root, home := t.TempDir(), t.TempDir()
 	workflowRoot := filepath.Join(root, ".wuko", "workflows")
 	writeMarketplacePackage(t, filepath.Join(workflowRoot, "release"), "release", "Release", `{"target":"staging"}`, "")
@@ -158,6 +159,7 @@ func TestMarketplaceInitAndIncrementalBuild(t *testing.T) {
 }
 
 func TestMarketplacePluginAddBuildAndCheck(t *testing.T) {
+	t.Parallel()
 	root, home := t.TempDir(), t.TempDir()
 	source := filepath.Join(t.TempDir(), "plugin")
 	writeMarketplacePluginRelease(t, source, "acme", "1.0.0")
@@ -234,6 +236,7 @@ func TestMarketplacePluginAddBuildAndCheck(t *testing.T) {
 }
 
 func TestMarketplaceWorkflowAddRemoveAndBuild(t *testing.T) {
+	t.Parallel()
 	root, home := t.TempDir(), t.TempDir()
 	source := filepath.Join(t.TempDir(), "source")
 	writeMarketplacePackage(t, source, "release", "Release safely", `{"target":"staging"}`, "")
@@ -283,6 +286,7 @@ func TestMarketplaceWorkflowAddRemoveAndBuild(t *testing.T) {
 }
 
 func TestMarketplaceWorkflowRemoveAllowsInvalidManagedSource(t *testing.T) {
+	t.Parallel()
 	root, home := t.TempDir(), t.TempDir()
 	target := filepath.Join(root, ".wuko", "workflows", "broken")
 	if err := os.MkdirAll(target, 0o755); err != nil {
@@ -302,6 +306,7 @@ func TestMarketplaceWorkflowRemoveAllowsInvalidManagedSource(t *testing.T) {
 }
 
 func TestMarketplaceWorkflowRemoveMatchesDeclaredNameNotDirectory(t *testing.T) {
+	t.Parallel()
 	root, home := t.TempDir(), t.TempDir()
 	workflows := filepath.Join(root, ".wuko", "workflows")
 	misleading := filepath.Join(workflows, "release")
@@ -323,6 +328,7 @@ func TestMarketplaceWorkflowRemoveMatchesDeclaredNameNotDirectory(t *testing.T) 
 }
 
 func TestMarketplacePluginReleaseUpsertsBuildsAndRemoves(t *testing.T) {
+	t.Parallel()
 	root, home := t.TempDir(), t.TempDir()
 	v1 := filepath.Join(t.TempDir(), "v1")
 	v2 := filepath.Join(t.TempDir(), "v2")
@@ -404,6 +410,7 @@ func TestMarketplacePluginReleaseUpsertsBuildsAndRemoves(t *testing.T) {
 }
 
 func TestMarketplacePluginReleaseRollsBackWhenBuildFails(t *testing.T) {
+	t.Parallel()
 	root, home := t.TempDir(), t.TempDir()
 	v1 := filepath.Join(t.TempDir(), "v1")
 	v2 := filepath.Join(t.TempDir(), "v2")
@@ -437,6 +444,7 @@ func TestMarketplacePluginReleaseRollsBackWhenBuildFails(t *testing.T) {
 }
 
 func TestMarketplacePluginReleaseRequiresDescriptionForFirstRelease(t *testing.T) {
+	t.Parallel()
 	root, home := t.TempDir(), t.TempDir()
 	source := filepath.Join(t.TempDir(), "plugin")
 	writeMarketplacePluginRelease(t, source, "acme", "1.0.0")
@@ -452,6 +460,7 @@ func TestMarketplacePluginReleaseRequiresDescriptionForFirstRelease(t *testing.T
 }
 
 func TestMarketplacePluginReleaseRequiresWorkflowUnlessBuildIsSkipped(t *testing.T) {
+	t.Parallel()
 	root, home := t.TempDir(), t.TempDir()
 	source := filepath.Join(t.TempDir(), "plugin")
 	writeMarketplacePluginRelease(t, source, "acme", "1.0.0")
@@ -471,6 +480,7 @@ func TestMarketplacePluginReleaseRequiresWorkflowUnlessBuildIsSkipped(t *testing
 }
 
 func TestMarketplacePluginReleaseValidatesWorkflowBundleAndVersion(t *testing.T) {
+	t.Parallel()
 	base := t.TempDir()
 	root, home := filepath.Join(base, "marketplace"), t.TempDir()
 	source := filepath.Join(base, "plugin")
@@ -530,6 +540,7 @@ steps:
 }
 
 func TestMarketplacePluginReleaseReportsFailedBuildStepStderr(t *testing.T) {
+	t.Parallel()
 	root, home := t.TempDir(), t.TempDir()
 	source := filepath.Join(t.TempDir(), "plugin")
 	writeMarketplacePluginRelease(t, source, "acme", "1.0.0")
@@ -568,6 +579,7 @@ steps:
 }
 
 func TestMarketplacePluginUpdateRequiresMatchingNamespaceAndPreservesImport(t *testing.T) {
+	t.Parallel()
 	root, home := t.TempDir(), t.TempDir()
 	acme := filepath.Join(t.TempDir(), "acme")
 	other := filepath.Join(t.TempDir(), "other")
@@ -594,6 +606,7 @@ func TestMarketplacePluginUpdateRequiresMatchingNamespaceAndPreservesImport(t *t
 }
 
 func TestMarketplacePluginImportRejectsCorruptionAndDuplicatesTransactionally(t *testing.T) {
+	t.Parallel()
 	root, home := t.TempDir(), t.TempDir()
 	source := filepath.Join(t.TempDir(), "plugin")
 	writeMarketplacePluginRelease(t, source, "acme", "1.0.0")
@@ -650,6 +663,7 @@ func TestMarketplacePluginImportRejectsCorruptionAndDuplicatesTransactionally(t 
 }
 
 func TestMarketplaceBuildRemovesOnlyUnmodifiedStalePluginArtifacts(t *testing.T) {
+	t.Parallel()
 	root, home := t.TempDir(), t.TempDir()
 	source := filepath.Join(t.TempDir(), "plugin")
 	writeMarketplacePluginRelease(t, source, "acme", "1.0.0")
@@ -711,6 +725,7 @@ func TestMarketplaceBuildRemovesOnlyUnmodifiedStalePluginArtifacts(t *testing.T)
 }
 
 func TestMarketplaceInstallExplicitPackagePreservesSidecarsAndRunsHook(t *testing.T) {
+	t.Parallel()
 	root, home := t.TempDir(), t.TempDir()
 	sourceDir := filepath.Join(t.TempDir(), "release")
 	writeMarketplacePackage(t, sourceDir, "release", "Release", `{"target":"staging"}`, `
@@ -810,6 +825,7 @@ install:
 }
 
 func TestMarketplaceInstallRejectsDigestMismatchBeforeWriting(t *testing.T) {
+	t.Parallel()
 	root, home := t.TempDir(), t.TempDir()
 	item := workflow.MarketplacePackage{
 		Name: "release", PackageVersion: "1.0.0", Source: ".wuko/workflows/release", Path: "packages/release.tar.gz", Format: "tar.gz", Entry: "wuko.yaml",
@@ -846,6 +862,7 @@ func TestMarketplaceInstallRejectsDigestMismatchBeforeWriting(t *testing.T) {
 }
 
 func TestMarketplaceInstallRequiresPackagesInNonInteractiveMode(t *testing.T) {
+	t.Parallel()
 	root, home := t.TempDir(), t.TempDir()
 	item := workflow.MarketplacePackage{
 		Name: "release", PackageVersion: "1.0.0", Source: ".wuko/workflows/release", Path: "packages/release.tar.gz", Format: "tar.gz", Entry: "wuko.yaml",
@@ -878,6 +895,7 @@ func TestMarketplaceInstallRequiresPackagesInNonInteractiveMode(t *testing.T) {
 }
 
 func TestMarketplaceBuildRejectsMissingManifestAndSymlink(t *testing.T) {
+	t.Parallel()
 	t.Run("missing root manifest", func(t *testing.T) {
 		root, home := t.TempDir(), t.TempDir()
 		directory := filepath.Join(root, ".wuko", "workflows", "broken")
@@ -910,6 +928,7 @@ func TestMarketplaceBuildRejectsMissingManifestAndSymlink(t *testing.T) {
 }
 
 func TestMarketplaceBuildPublicationFailureRestoresPublishedFiles(t *testing.T) {
+	t.Parallel()
 	root, home := t.TempDir(), t.TempDir()
 	packageDir := filepath.Join(root, ".wuko", "workflows", "release")
 	writeMarketplacePackage(t, packageDir, "release", "Release", `{"target":"staging"}`, "")

@@ -10,6 +10,7 @@ import (
 )
 
 func TestSemVerTemplatesAndCommitsTypedResults(t *testing.T) {
+	t.Parallel()
 	definition := testDefinition(t, "release", workflow.Step{ID: "supported", Type: "semver", With: map[string]any{
 		"operation": "{{ .vars.operation }}", "version": "{{ .vars.version }}",
 		"constraint": "{{ .vars.constraint }}", "variable": "is_supported",

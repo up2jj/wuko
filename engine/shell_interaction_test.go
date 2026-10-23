@@ -15,6 +15,7 @@ import (
 )
 
 func TestShellInteractionSendRendersRuntimeStateAndRedactsSensitiveValue(t *testing.T) {
+	t.Parallel()
 	registry := step.NewRegistry()
 	if err := registry.Register("seed", func(map[string]any) (step.Runner, error) { return interactionSeedRunner{}, nil }); err != nil {
 		t.Fatal(err)

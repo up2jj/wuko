@@ -21,6 +21,7 @@ func (executor *requireToolExecutor) Run(_ context.Context, options process.Opti
 }
 
 func TestRequireToolRendersConfigurationAndCommitsOutputs(t *testing.T) {
+	t.Parallel()
 	definition := testDefinition(t, "tools", workflow.Step{ID: "go", Type: "require_tool", With: map[string]any{
 		"tool": "{{ .vars.tool }}", "version_args": []any{"{{ .vars.version_arg }}"},
 		"constraint": "{{ .vars.constraint }}",
@@ -56,6 +57,7 @@ func (unavailableRequireToolExecutor) Run(_ context.Context, _ process.Options) 
 }
 
 func TestOptionalRequireToolCommitsOutputsForLaterConditions(t *testing.T) {
+	t.Parallel()
 	definition := testDefinition(t, "optional-tools",
 		workflow.Step{ID: "lsof", Type: "require_tool", With: map[string]any{
 			"tool": "lsof", "constraint": ">= 4.0.0", "required": false,
@@ -84,6 +86,7 @@ func TestOptionalRequireToolCommitsOutputsForLaterConditions(t *testing.T) {
 }
 
 func TestRequireToolValidationAndDryRunDoNotExecuteProbe(t *testing.T) {
+	t.Parallel()
 	definition := testDefinition(t, "tools", workflow.Step{ID: "go", Type: "require_tool", With: map[string]any{
 		"tool": "go", "constraint": ">= 1.25.0",
 	}})

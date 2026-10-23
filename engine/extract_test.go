@@ -20,6 +20,7 @@ func (r extractFixtureRunner) Run(context.Context, step.Request) (step.Result, e
 }
 
 func TestExtractRendersConfigurationAndCommitsTypedResults(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, map[string]step.Builder{
 		"extract_fixture": func(raw map[string]any) (step.Runner, error) {
 			return extractFixtureRunner{outputs: raw}, nil
@@ -57,6 +58,7 @@ func TestExtractRendersConfigurationAndCommitsTypedResults(t *testing.T) {
 }
 
 func TestExtractStaticConfigurationFailsValidation(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, nil)
 	if err := extractstep.Register(registry); err != nil {
 		t.Fatal(err)
@@ -72,6 +74,7 @@ func TestExtractStaticConfigurationFailsValidation(t *testing.T) {
 }
 
 func TestExtractFieldsReadProducerStdoutAndCommitMarkerOutputs(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, map[string]step.Builder{
 		"extract_fixture": func(raw map[string]any) (step.Runner, error) {
 			return extractFixtureRunner{outputs: raw}, nil

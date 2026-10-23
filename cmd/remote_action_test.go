@@ -25,6 +25,7 @@ func (function commandRoundTripFunc) RoundTrip(request *http.Request) (*http.Res
 }
 
 func TestRunRemoteActionUsesCLIValuesDuringLoading(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	workflowDir := filepath.Join(root, ".wuko", "workflows")
 	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
@@ -83,6 +84,7 @@ steps:
 }
 
 func TestRunRemoteWorkflowFromHTTPS(t *testing.T) {
+	t.Parallel()
 	workflowData := `version: 1
 name: remote-workflow
 steps:
@@ -230,6 +232,7 @@ func TestRunPickGitHubListsCanonicalCommandsNonInteractively(t *testing.T) {
 }
 
 func TestRemoteWorkflowValueStoreScopes(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		scope     string
@@ -280,6 +283,7 @@ steps:
 }
 
 func TestValidateRemoteActionAcceptsVarFileAndEnvFlags(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	dir := filepath.Join(root, ".wuko", "workflows")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -324,6 +328,7 @@ steps:
 }
 
 func TestValidateCommandBasedActionSource(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	dir := filepath.Join(root, ".wuko", "workflows")
 	if err := os.MkdirAll(dir, 0o755); err != nil {

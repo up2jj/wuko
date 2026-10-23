@@ -13,6 +13,7 @@ import (
 )
 
 func TestHTTPSPluginSourceUsesQueryEphemerally(t *testing.T) {
+	t.Parallel()
 	script := []byte("#!/bin/sh\nread line\nprintf '{\"id\":\"1\",\"result\":{\"protocol\":\"" + Protocol + "\",\"namespace\":\"acme\",\"steps\":[],\"executors\":[],\"helpers\":[]}}\\n'\nread line\nprintf '{\"id\":\"2\",\"result\":{}}\\n'\n")
 	archive := makeArchive(t, "wuko-plugin-acme", 0o755, script)
 	manifestData, err := json.Marshal(Manifest{
@@ -59,6 +60,7 @@ func TestHTTPSPluginSourceUsesQueryEphemerally(t *testing.T) {
 }
 
 func TestHTTPSPluginDownloadErrorsRedactQuery(t *testing.T) {
+	t.Parallel()
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		return httpResponse(request, http.StatusForbidden, []byte("denied")), nil
 	})}

@@ -10,6 +10,7 @@ import (
 )
 
 func TestValidateCollectsIndependentTopLevelStepFailures(t *testing.T) {
+	t.Parallel()
 	registry := step.NewRegistry()
 	if err := registry.RegisterDefinition("broken", step.Registration{
 		Builder: func(raw map[string]any) (step.Runner, error) { return nil, fmt.Errorf("%v is invalid", raw["value"]) },
@@ -32,6 +33,7 @@ func TestValidateCollectsIndependentTopLevelStepFailures(t *testing.T) {
 }
 
 func TestValidateGatesStepPreparationAfterStructuralFailure(t *testing.T) {
+	t.Parallel()
 	builds := 0
 	registry := step.NewRegistry()
 	if err := registry.Register("capture", func(map[string]any) (step.Runner, error) { builds++; return nil, nil }); err != nil {

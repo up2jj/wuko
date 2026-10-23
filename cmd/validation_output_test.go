@@ -14,6 +14,7 @@ import (
 )
 
 func TestValidateReportsEmptyDiscovery(t *testing.T) {
+	t.Parallel()
 	for _, format := range []string{"text", "json"} {
 		t.Run(format, func(t *testing.T) {
 			var output bytes.Buffer
@@ -40,6 +41,7 @@ func TestValidateReportsEmptyDiscovery(t *testing.T) {
 }
 
 func TestValidateEmptyDiscoveryStillChecksGitHooks(t *testing.T) {
+	t.Parallel()
 	root := initGitHookRepository(t)
 	writeGitHookManifest(t, root, "pre-commit:\n    - workflow: missing")
 	var output bytes.Buffer
@@ -54,6 +56,7 @@ func TestValidateEmptyDiscoveryStillChecksGitHooks(t *testing.T) {
 }
 
 func TestValidateJSONCollectsIndependentWorkflows(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	directory := filepath.Join(root, ".wuko", "workflows")
 	if err := os.MkdirAll(directory, 0o755); err != nil {
@@ -89,6 +92,7 @@ func TestValidateJSONCollectsIndependentWorkflows(t *testing.T) {
 }
 
 func TestValidateJSONKeepsWorkflowIssuesWhenGitHookBindingFails(t *testing.T) {
+	t.Parallel()
 	root := initGitHookRepository(t)
 	directory := filepath.Join(root, ".wuko", "workflows")
 	if err := os.MkdirAll(directory, 0o755); err != nil {

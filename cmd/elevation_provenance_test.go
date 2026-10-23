@@ -26,6 +26,7 @@ func (executor *recordingElevatedExecutor) Run(context.Context, process.Options)
 // A workflow installed from a remote locator or a marketplace is not local code, so running it
 // by name, or calling it through run_workflow, must not grant it sudo.
 func TestInstalledWorkflowElevationFollowsProvenanceAtRunTime(t *testing.T) {
+	t.Parallel()
 	const elevated = "version: 1\nname: %s\nsteps:\n  - id: root\n    type: shell\n    with: {command: id, elevated: true}\n"
 	const caller = "version: 1\nname: caller\nsteps:\n  - id: call\n    type: run_workflow\n    with: {workflow: %s}\n"
 	tests := []struct {

@@ -14,6 +14,7 @@ import (
 )
 
 func TestImportedVariablesAreVisibleToLaterSteps(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "variables.json"), []byte(`{"target":"linux"}`), 0o644); err != nil {
 		t.Fatal(err)

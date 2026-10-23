@@ -11,6 +11,7 @@ import (
 )
 
 func TestInstallRefusesConflictAndChainRestoresIt(t *testing.T) {
+	t.Parallel()
 	repository := testRepository(t)
 	hookPath, err := repository.HookPath(context.Background(), "pre-commit")
 	if err != nil {
@@ -61,6 +62,7 @@ func TestInstallRefusesConflictAndChainRestoresIt(t *testing.T) {
 }
 
 func TestUninstallRefusesModifiedDispatcher(t *testing.T) {
+	t.Parallel()
 	repository := testRepository(t)
 	manifest := Manifest{Version: 1, Hooks: map[string][]Binding{"pre-commit": {{Workflow: "check"}}}}
 	executable := filepath.Join(repository.Root, "wuko")
@@ -83,6 +85,7 @@ func TestUninstallRefusesModifiedDispatcher(t *testing.T) {
 }
 
 func TestHookPathRejectsSharedCoreHooksPath(t *testing.T) {
+	t.Parallel()
 	repository := testRepository(t)
 	shared := t.TempDir()
 	command := exec.Command("git", "-C", repository.Root, "config", "core.hooksPath", shared)
@@ -95,6 +98,7 @@ func TestHookPathRejectsSharedCoreHooksPath(t *testing.T) {
 }
 
 func TestHookPathAllowsRepositoryLocalCoreHooksPath(t *testing.T) {
+	t.Parallel()
 	repository := testRepository(t)
 	command := exec.Command("git", "-C", repository.Root, "config", "core.hooksPath", ".githooks")
 	if output, err := command.CombinedOutput(); err != nil {
@@ -111,6 +115,7 @@ func TestHookPathAllowsRepositoryLocalCoreHooksPath(t *testing.T) {
 }
 
 func TestLinkedWorktreesShareCommonHookPath(t *testing.T) {
+	t.Parallel()
 	primary := testRepository(t)
 	for _, arguments := range [][]string{
 		{"config", "user.name", "Wuko Test"},
@@ -145,6 +150,7 @@ func TestLinkedWorktreesShareCommonHookPath(t *testing.T) {
 }
 
 func TestDiscoverRejectsBareRepository(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	command := exec.Command("git", "init", "--bare", "-q", root)
 	if output, err := command.CombinedOutput(); err != nil {
@@ -156,6 +162,7 @@ func TestDiscoverRejectsBareRepository(t *testing.T) {
 }
 
 func TestDiscoverResolvesGitDirectoriesFromSubdirectory(t *testing.T) {
+	t.Parallel()
 	repository := testRepository(t)
 	subdirectory := filepath.Join(repository.Root, "nested", "deeper")
 	if err := os.MkdirAll(subdirectory, 0o755); err != nil {
@@ -171,6 +178,7 @@ func TestDiscoverResolvesGitDirectoriesFromSubdirectory(t *testing.T) {
 }
 
 func TestInstalledDispatcherForwardsArgumentsAndStdin(t *testing.T) {
+	t.Parallel()
 	repository := testRepository(t)
 	argumentsPath := filepath.Join(repository.Root, "arguments")
 	stdinPath := filepath.Join(repository.Root, "stdin")
@@ -209,6 +217,7 @@ func TestInstalledDispatcherForwardsArgumentsAndStdin(t *testing.T) {
 }
 
 func TestUninstallRepeatedNameKeepsPreservedHook(t *testing.T) {
+	t.Parallel()
 	repository := testRepository(t)
 	hookPath, err := repository.HookPath(context.Background(), "pre-commit")
 	if err != nil {
@@ -246,6 +255,7 @@ func TestUninstallRepeatedNameKeepsPreservedHook(t *testing.T) {
 }
 
 func TestUninstallRemovesStateForMissingDispatcher(t *testing.T) {
+	t.Parallel()
 	repository := testRepository(t)
 	manifest := Manifest{Version: 1, Hooks: map[string][]Binding{"pre-commit": {{Workflow: "check"}}, "pre-push": {{Workflow: "check"}}}}
 	executable := filepath.Join(repository.Root, "wuko")

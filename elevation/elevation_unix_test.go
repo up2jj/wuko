@@ -30,6 +30,7 @@ func (executor *recordingExecutor) Run(_ context.Context, options process.Option
 }
 
 func TestTargetEnvironmentUsesCleanRootBaseline(t *testing.T) {
+	t.Parallel()
 	host := map[string]string{"TERM": "xterm-256color", "LANG": "pl_PL.UTF-8", "SECRET": "host-secret"}
 	environment := targetEnvironment(map[string]string{"TOKEN": "explicit", "PATH": "/custom/bin"}, func(key string) string { return host[key] })
 	if environment["USER"] != "root" || environment["LOGNAME"] != "root" || environment["TOKEN"] != "explicit" || environment["PATH"] != "/custom/bin" {
@@ -44,6 +45,7 @@ func TestTargetEnvironmentUsesCleanRootBaseline(t *testing.T) {
 }
 
 func TestRootExecutionResolvesCommandAndUsesSanitizedEnvironment(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	command := filepath.Join(dir, "tool")
 	if err := os.WriteFile(command, []byte("#!/bin/sh\n"), 0o700); err != nil {
@@ -72,6 +74,7 @@ func TestRootExecutionResolvesCommandAndUsesSanitizedEnvironment(t *testing.T) {
 }
 
 func TestExecutionHonorsCanceledContextBeforeAuthentication(t *testing.T) {
+	t.Parallel()
 	executor := NewExecutor()
 	executor.geteuid = func() int { return 0 }
 	ctx, cancel := context.WithCancel(t.Context())
@@ -83,6 +86,7 @@ func TestExecutionHonorsCanceledContextBeforeAuthentication(t *testing.T) {
 }
 
 func TestAuthorizePromptsOnlyAfterNonInteractiveValidationFails(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	sudo := filepath.Join(dir, "sudo")
 	script := "#!/bin/sh\nif [ \"$1\" = -n ]; then exit 1; fi\nexit 0\n"
@@ -102,6 +106,7 @@ func TestAuthorizePromptsOnlyAfterNonInteractiveValidationFails(t *testing.T) {
 }
 
 func TestAuthorizeRejectsMissingCredentialsWithoutInteraction(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	sudo := filepath.Join(dir, "sudo")
 	if err := os.WriteFile(sudo, []byte("#!/bin/sh\nexit 1\n"), 0o700); err != nil {
@@ -117,6 +122,7 @@ func TestAuthorizeRejectsMissingCredentialsWithoutInteraction(t *testing.T) {
 }
 
 func TestTransportRequestIsStrictAndOwnedByCaller(t *testing.T) {
+	t.Parallel()
 	command := filepath.Join(t.TempDir(), "tool")
 	if err := os.WriteFile(command, []byte("#!/bin/sh\n"), 0o700); err != nil {
 		t.Fatal(err)
@@ -181,6 +187,7 @@ func secretPlan(t *testing.T) *ptyinteract.Plan {
 }
 
 func TestResolveExecutableIgnoresRelativePathEntries(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "build"), []byte("#!/bin/sh\n"), 0o700); err != nil {
 		t.Fatal(err)
@@ -198,6 +205,7 @@ func TestResolveExecutableIgnoresRelativePathEntries(t *testing.T) {
 }
 
 func TestHandleHelperIgnoresNormalInvocation(t *testing.T) {
+	t.Parallel()
 	if _, handled := HandleHelper([]string{"wuko", "run", "workflow"}); handled {
 		t.Fatal("ordinary invocation was treated as helper mode")
 	}

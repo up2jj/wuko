@@ -58,6 +58,7 @@ func (provider concurrentProcessProvider) Open(context.Context, executor.Request
 }
 
 func TestExecutorSerialReplicaStartupKeepsPoolAliveAndJoinsBeforeFinally(t *testing.T) {
+	t.Parallel()
 	const replicas = 32
 	steps := step.NewRegistry()
 	if err := processstep.Register(steps); err != nil {

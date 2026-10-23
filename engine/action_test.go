@@ -24,6 +24,7 @@ type actionRetryRunner struct {
 }
 
 func TestLocalActionUsesCompositeInputOutputExecutionModel(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	actionDir := filepath.Join(dir, "actions", "echo")
 	if err := os.MkdirAll(actionDir, 0o755); err != nil {
@@ -73,6 +74,7 @@ steps:
 }
 
 func TestLocalActionResolvesCompanionLuaModulesFromActionRoot(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	actionDir := filepath.Join(dir, "action")
 	if err := os.MkdirAll(filepath.Join(actionDir, "scripts"), 0o755); err != nil {
@@ -132,6 +134,7 @@ func (runner actionRetryRunner) Run(_ context.Context, request step.Request) (st
 }
 
 func TestCompositeActionRetryKeepsInnerOperationIDsStable(t *testing.T) {
+	t.Parallel()
 	var failures int
 	var recordKeys []string
 	registry := newTestRegistry(t, map[string]step.Builder{"action_retry": func(raw map[string]any) (step.Runner, error) {
@@ -178,6 +181,7 @@ func (runner actionCaptureRunner) Run(_ context.Context, request step.Request) (
 }
 
 func TestCompositeActionRunsSequentiallyWithTypedInputsAndDeclaredOutputs(t *testing.T) {
+	t.Parallel()
 	var order []string
 	var innerRequest step.Request
 	registry := newTestRegistry(t, map[string]step.Builder{"action_capture": func(raw map[string]any) (step.Runner, error) {
@@ -225,6 +229,7 @@ func TestCompositeActionRunsSequentiallyWithTypedInputsAndDeclaredOutputs(t *tes
 }
 
 func TestCompositeActionKeepsCallerAndActionTemplatesIsolated(t *testing.T) {
+	t.Parallel()
 	var order []string
 	registry := newTestRegistry(t, map[string]step.Builder{"action_capture": func(raw map[string]any) (step.Runner, error) {
 		return actionCaptureRunner{value: raw["value"], order: &order}, nil
@@ -255,6 +260,7 @@ func TestCompositeActionKeepsCallerAndActionTemplatesIsolated(t *testing.T) {
 }
 
 func TestCompositeActionRejectsInputContractViolations(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, nil)
 	action := &workflow.Action{Version: 1, Name: "action", Inputs: map[string]workflow.ActionInput{"name": {Type: "string", Required: true}}, Steps: []workflow.Step{{ID: "run", Type: "capture", With: map[string]any{}}}}
 	definition := testDefinition(t, "caller", workflow.Step{ID: "remote", Uses: workflow.ActionSource{URL: "https://example.test"}, Action: action, With: map[string]any{"unknown": true}})
@@ -265,6 +271,7 @@ func TestCompositeActionRejectsInputContractViolations(t *testing.T) {
 }
 
 func TestCompositeActionValidateRejectsStaticInputTypeMismatch(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, nil)
 	action := &workflow.Action{Version: 1, Name: "action", Inputs: map[string]workflow.ActionInput{"name": {Type: "string", Required: true}}, Steps: []workflow.Step{{ID: "run", Type: "capture", With: map[string]any{}}}}
 	definition := testDefinition(t, "caller", workflow.Step{ID: "remote", Uses: workflow.ActionSource{URL: "https://example.test"}, Action: action, With: map[string]any{"name": true}})
@@ -275,6 +282,7 @@ func TestCompositeActionValidateRejectsStaticInputTypeMismatch(t *testing.T) {
 }
 
 func TestCompositeActionDryRunPrintsNestedPlan(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, map[string]step.Builder{"capture": func(map[string]any) (step.Runner, error) { return countingRunner{}, nil }})
 	action := testAction(t, "action", workflow.Step{ID: "inside", Type: "capture"})
 	definition := testDefinition(t, "caller", workflow.Step{ID: "remote", Uses: workflow.ActionSource{URL: "https://example.test/action"}, Action: action, With: map[string]any{}})
@@ -288,6 +296,7 @@ func TestCompositeActionDryRunPrintsNestedPlan(t *testing.T) {
 }
 
 func TestPackagedActionResolvesRelativeLuaModulesFromActionRoot(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, nil)
 	if err := luastep.Register(registry); err != nil {
 		t.Fatal(err)

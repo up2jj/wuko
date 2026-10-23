@@ -20,6 +20,7 @@ type captureRunner struct {
 }
 
 func TestRunSkipsGuardedStepAndDependent(t *testing.T) {
+	t.Parallel()
 	var runs int
 	registry := newTestRegistry(t, map[string]step.Builder{"capture": func(raw map[string]any) (step.Runner, error) {
 		return countingRunner{value: raw["value"], runs: &runs}, nil
@@ -55,6 +56,7 @@ func TestRunSkipsGuardedStepAndDependent(t *testing.T) {
 }
 
 func TestRunConditionUsesRuntimeState(t *testing.T) {
+	t.Parallel()
 	var runs int
 	registry := newTestRegistry(t, map[string]step.Builder{"capture": func(raw map[string]any) (step.Runner, error) {
 		return countingRunner{value: raw["value"], runs: &runs}, nil
@@ -86,6 +88,7 @@ func TestRunConditionUsesRuntimeState(t *testing.T) {
 }
 
 func TestConditionUsesSecretHelper(t *testing.T) {
+	t.Parallel()
 	engine := New(step.NewRegistry())
 	program, err := engine.compileCondition(`secret("bw://password/Registry") == "resolved"`)
 	if err != nil {
@@ -108,6 +111,7 @@ func TestConditionUsesSecretHelper(t *testing.T) {
 }
 
 func TestValidateRejectsInvalidOrNonBooleanCondition(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, map[string]step.Builder{"capture": func(raw map[string]any) (step.Runner, error) {
 		return countingRunner{}, nil
 	}})
@@ -123,6 +127,7 @@ func TestValidateRejectsInvalidOrNonBooleanCondition(t *testing.T) {
 }
 
 func TestValidateRejectsInvalidLifecycleStepConfig(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, map[string]step.Builder{"tui_review": lifecycleReviewBuilder})
 	tests := []struct {
 		name string
@@ -153,6 +158,7 @@ func TestValidateRejectsInvalidLifecycleStepConfig(t *testing.T) {
 }
 
 func TestValidateAcceptsIndependentLifecycleStepIDs(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, map[string]step.Builder{"tui_review": lifecycleReviewBuilder})
 	reviewStep := workflow.Step{
 		ID: "review", Type: "tui_review",
@@ -175,6 +181,7 @@ func lifecycleReviewBuilder(raw map[string]any) (step.Runner, error) {
 }
 
 func TestValidateUsesWorkflowStructuralValidation(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		step workflow.Step
@@ -200,6 +207,7 @@ func TestValidateUsesWorkflowStructuralValidation(t *testing.T) {
 }
 
 func TestStructuralValidationPrecedesStepConstruction(t *testing.T) {
+	t.Parallel()
 	built := false
 	registry := newTestRegistry(t, map[string]step.Builder{"capture": func(map[string]any) (step.Runner, error) {
 		built = true
@@ -216,6 +224,7 @@ func TestStructuralValidationPrecedesStepConstruction(t *testing.T) {
 }
 
 func TestRunRejectsNonBooleanConditionAtRuntime(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, map[string]step.Builder{"capture": func(raw map[string]any) (step.Runner, error) {
 		return countingRunner{}, nil
 	}})
@@ -231,6 +240,7 @@ func TestRunRejectsNonBooleanConditionAtRuntime(t *testing.T) {
 }
 
 func TestDryRunPrintsButDoesNotEvaluateCondition(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, map[string]step.Builder{"capture": func(raw map[string]any) (step.Runner, error) {
 		return countingRunner{}, nil
 	}})
@@ -251,6 +261,7 @@ func TestDryRunPrintsButDoesNotEvaluateCondition(t *testing.T) {
 }
 
 func TestDryRunPrintsUnexpandedControls(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, map[string]step.Builder{"capture": func(map[string]any) (step.Runner, error) { return countingRunner{}, nil }})
 	definition := testDefinition(t, "fanout-dry-run", workflow.Step{ID: "loop", Foreach: &workflow.ForeachGroup{
 		Items: "vars.missing", Collect: "steps.run.value", MaxConcurrency: 1, FailFast: true,
@@ -267,6 +278,7 @@ func TestDryRunPrintsUnexpandedControls(t *testing.T) {
 }
 
 func TestCancelOnDryRunShowsMonitorsAndBody(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, map[string]step.Builder{
 		"monitor": func(map[string]any) (step.Runner, error) { return countingRunner{}, nil },
 		"body":    func(map[string]any) (step.Runner, error) { return countingRunner{}, nil },
@@ -290,6 +302,7 @@ func TestCancelOnDryRunShowsMonitorsAndBody(t *testing.T) {
 }
 
 func TestDryRunPrintsUnexpandedBatch(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, map[string]step.Builder{"capture": func(map[string]any) (step.Runner, error) { return countingRunner{}, nil }})
 	definition := testDefinition(t, "batch-dry-run", workflow.Step{ID: "groups", Batch: &workflow.BatchGroup{
 		Items: "vars.missing", Size: workflow.BatchSize{Expression: "vars.batch_size"}, Collect: "steps.run.value", MaxConcurrency: 2, FailFast: false,
@@ -326,6 +339,7 @@ func (r captureRunner) Run(_ context.Context, request step.Request) (step.Result
 }
 
 func TestRunRendersStateAndEnvironment(t *testing.T) {
+	t.Parallel()
 	var seen step.Request
 	registry := newTestRegistry(t, map[string]step.Builder{"capture": func(raw map[string]any) (step.Runner, error) {
 		return captureRunner{value: raw["value"], seen: &seen}, nil
@@ -357,6 +371,7 @@ func TestRunRendersStateAndEnvironment(t *testing.T) {
 }
 
 func TestRunRendersNamedTemplatesWithRuntimeState(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, map[string]step.Builder{"capture": func(raw map[string]any) (step.Runner, error) {
 		return countingRunner{value: raw["value"]}, nil
 	}})

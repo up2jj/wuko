@@ -16,6 +16,7 @@ import (
 )
 
 func TestRunCommandReadsWorkflowFromStdinNonInteractively(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, "fragments"), 0o755); err != nil {
 		t.Fatal(err)
@@ -58,6 +59,7 @@ targets:
 }
 
 func TestRunCommandDryRunNamesStdinWorkflow(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	registry := step.NewRegistry()
 	if err := shell.Register(registry); err != nil {
@@ -80,6 +82,7 @@ func TestRunCommandDryRunNamesStdinWorkflow(t *testing.T) {
 }
 
 func TestRunCommandRejectsElevationFromStdin(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	registry := step.NewRegistry()
 	if err := shell.Register(registry); err != nil {
@@ -99,6 +102,7 @@ func TestRunCommandRejectsElevationFromStdin(t *testing.T) {
 }
 
 func TestRunCommandReportsInvalidStdinWorkflow(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	command := newRootCmd(dependencies{
 		stdin: strings.NewReader("version: ["), stdout: io.Discard, stderr: io.Discard,
@@ -141,6 +145,7 @@ func TestRunCommandTreatsDotSlashDashAsFile(t *testing.T) {
 }
 
 func TestScheduledStdinWorkflowReusesSnapshot(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	data := `version: 1
 name: scheduled-stdin

@@ -14,6 +14,7 @@ import (
 )
 
 func TestReturnFinishesWorkflowWithTypedOutputsAndSkippedSteps(t *testing.T) {
+	t.Parallel()
 	var runs int
 	registry := newTestRegistry(t, map[string]step.Builder{"capture_return": func(raw map[string]any) (step.Runner, error) {
 		return countingRunner{value: raw["value"], runs: &runs}, nil
@@ -47,6 +48,7 @@ func TestReturnFinishesWorkflowWithTypedOutputsAndSkippedSteps(t *testing.T) {
 }
 
 func TestReturnConditionFalseContinues(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, nil)
 	var runs int
 	if err := registry.Register("capture_return", func(raw map[string]any) (step.Runner, error) {
@@ -70,6 +72,7 @@ func TestReturnConditionFalseContinues(t *testing.T) {
 }
 
 func TestReturnDestinationObserverFiresOnceAfterSuccessfulReturn(t *testing.T) {
+	t.Parallel()
 	definition := testDefinition(t, "picker-return", workflow.Step{
 		Return: &workflow.ReturnControl{To: workflow.ReturnDestinationPicker, Outputs: map[string]string{"result": `"done"`}},
 	})
@@ -86,6 +89,7 @@ func TestReturnDestinationObserverFiresOnceAfterSuccessfulReturn(t *testing.T) {
 }
 
 func TestReturnObserverReportsDestinationlessReturn(t *testing.T) {
+	t.Parallel()
 	definition := testDefinition(t, "destinationless", workflow.Step{
 		Return: &workflow.ReturnControl{Outputs: map[string]string{}},
 	})
@@ -102,6 +106,7 @@ func TestReturnObserverReportsDestinationlessReturn(t *testing.T) {
 }
 
 func TestReturnObserverIgnoresInvalidReturn(t *testing.T) {
+	t.Parallel()
 	definition := testDefinition(t, "invalid", workflow.Step{
 		Return: &workflow.ReturnControl{To: "command", Outputs: map[string]string{}},
 	})
@@ -116,6 +121,7 @@ func TestReturnObserverIgnoresInvalidReturn(t *testing.T) {
 }
 
 func TestReturnObserverWaitsForOutputContract(t *testing.T) {
+	t.Parallel()
 	definition := testDefinition(t, "invalid-output", workflow.Step{
 		Return: &workflow.ReturnControl{To: workflow.ReturnDestinationPicker, Outputs: map[string]string{"ready": `"yes"`}},
 	})
@@ -131,6 +137,7 @@ func TestReturnObserverWaitsForOutputContract(t *testing.T) {
 }
 
 func TestReturnSkipsLaterFanoutWithoutExpansion(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, nil)
 	if err := registry.Register("capture_return", func(map[string]any) (step.Runner, error) { return countingRunner{}, nil }); err != nil {
 		t.Fatal(err)
@@ -154,6 +161,7 @@ func TestReturnSkipsLaterFanoutWithoutExpansion(t *testing.T) {
 }
 
 func TestReturnPropagatesThroughSequentialBlocksAndRunsFinally(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, nil)
 	cleanupRan := false
 	if err := registry.Register("return_cleanup", func(map[string]any) (step.Runner, error) {
@@ -188,6 +196,7 @@ func TestReturnPropagatesThroughSequentialBlocksAndRunsFinally(t *testing.T) {
 }
 
 func TestReturnExpressionFailureFailsWorkflowAtomically(t *testing.T) {
+	t.Parallel()
 	definition := testDefinition(t, "broken", workflow.Step{
 		Return: &workflow.ReturnControl{To: workflow.ReturnDestinationPicker, Outputs: map[string]string{"good": "true", "missing": "steps.unknown.value"}},
 	})
@@ -203,6 +212,7 @@ func TestReturnExpressionFailureFailsWorkflowAtomically(t *testing.T) {
 }
 
 func TestCanceledContextPreventsReturn(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	definition := testDefinition(t, "canceled-return", workflow.Step{
@@ -220,6 +230,7 @@ func TestCanceledContextPreventsReturn(t *testing.T) {
 }
 
 func TestCompositeActionReturnSuppliesDeclaredOutputsWithoutRetry(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, nil)
 	var runs int
 	if err := registry.Register("capture_return", func(raw map[string]any) (step.Runner, error) {
@@ -255,6 +266,7 @@ func TestCompositeActionReturnSuppliesDeclaredOutputsWithoutRetry(t *testing.T) 
 }
 
 func TestValidateRejectsReturnInProgrammaticParallelControls(t *testing.T) {
+	t.Parallel()
 	returnStep := workflow.Step{Return: &workflow.ReturnControl{Outputs: map[string]string{}}}
 	tests := []struct {
 		name string
@@ -276,6 +288,7 @@ func TestValidateRejectsReturnInProgrammaticParallelControls(t *testing.T) {
 }
 
 func TestReturnDoesNotMaskFinallyFailure(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, nil)
 	cleanupErr := errors.New("cleanup failed")
 	if err := registry.Register("return_cleanup_fail", func(map[string]any) (step.Runner, error) {
@@ -301,6 +314,7 @@ func TestReturnDoesNotMaskFinallyFailure(t *testing.T) {
 }
 
 func TestDryRunDisplaysReturnControl(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, nil)
 	if err := registry.Register("capture_return", func(map[string]any) (step.Runner, error) { return countingRunner{}, nil }); err != nil {
 		t.Fatal(err)
@@ -326,6 +340,7 @@ func TestDryRunDisplaysReturnControl(t *testing.T) {
 }
 
 func TestDryRunDisplaysReturnDestination(t *testing.T) {
+	t.Parallel()
 	definition := testDefinition(t, "dry-picker-return", workflow.Step{
 		Return: &workflow.ReturnControl{To: workflow.ReturnDestinationPicker, Outputs: map[string]string{}},
 	})

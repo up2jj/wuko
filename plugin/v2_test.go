@@ -24,6 +24,7 @@ import (
 )
 
 func TestV2StepContextAndServiceSnapshot(t *testing.T) {
+	t.Parallel()
 	current := "before"
 	renderer := &snapshotTestRenderer{current: &current}
 	request := step.Request{
@@ -52,6 +53,7 @@ func TestV2StepContextAndServiceSnapshot(t *testing.T) {
 }
 
 func TestV2HostTemplateSecretAndHelperCallbacks(t *testing.T) {
+	t.Parallel()
 	current := "snapshot"
 	runner := &pluginStep{declaration: stepDeclaration{Type: "http.mock_server", HostCallbacks: []string{
 		"host.template.validate", "host.template.render", "host.function.call",
@@ -82,6 +84,7 @@ func TestV2HostTemplateSecretAndHelperCallbacks(t *testing.T) {
 }
 
 func TestBarePluginIsAcceptedOnTheProtocolItAnswersWith(t *testing.T) {
+	t.Parallel()
 	executable, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -115,6 +118,7 @@ func TestBarePluginIsAcceptedOnTheProtocolItAnswersWith(t *testing.T) {
 }
 
 func TestBidirectionalCallbacksAreScopedAndDoNotBlockReader(t *testing.T) {
+	t.Parallel()
 	client, scanner, encoder := newPipeClient(t)
 	pluginDone := make(chan error, 1)
 	go func() {
@@ -184,6 +188,7 @@ func TestBidirectionalCallbacksAreScopedAndDoNotBlockReader(t *testing.T) {
 }
 
 func TestCanceledV2CallDrainsVerificationError(t *testing.T) {
+	t.Parallel()
 	client, scanner, encoder := newPipeClient(t)
 	received := make(chan struct{})
 	go func() {
@@ -210,6 +215,7 @@ func TestCanceledV2CallDrainsVerificationError(t *testing.T) {
 }
 
 func TestCanceledCallStopsStreamingIntoCallerWriters(t *testing.T) {
+	t.Parallel()
 	for attempt := 0; attempt < 10; attempt++ {
 		client, scanner, encoder := newPipeClient(t)
 		go func() {
@@ -254,6 +260,7 @@ func (w *releasableWriter) Write(data []byte) (int, error) {
 }
 
 func TestV2RejectsMalformedReverseCallAndOversizedRequest(t *testing.T) {
+	t.Parallel()
 	t.Run("malformed reverse call", func(t *testing.T) {
 		client, scanner, encoder := newPipeClient(t)
 		go func() {
@@ -284,6 +291,7 @@ func TestV2RejectsMalformedReverseCallAndOversizedRequest(t *testing.T) {
 }
 
 func TestV2ServiceReadinessAndPostReadyFailure(t *testing.T) {
+	t.Parallel()
 	client, scanner, encoder := newPipeClient(t)
 	go func() {
 		for scanner.Scan() {
@@ -332,6 +340,7 @@ func TestV2ServiceReadinessAndPostReadyFailure(t *testing.T) {
 }
 
 func TestV2ServiceFailureBeforeReadyAbortsOwningStep(t *testing.T) {
+	t.Parallel()
 	client, scanner, encoder := newPipeClient(t)
 	go func() {
 		for scanner.Scan() {
@@ -392,6 +401,7 @@ func newPipeClient(t *testing.T) (*client, *bufio.Scanner, *json.Encoder) {
 }
 
 func TestMalformedStreamDataFailsProtocol(t *testing.T) {
+	t.Parallel()
 	client, scanner, encoder := newPipeClient(t)
 	go func() {
 		if !scanner.Scan() {
@@ -409,6 +419,7 @@ func TestMalformedStreamDataFailsProtocol(t *testing.T) {
 }
 
 func TestStreamWriterFailureCancelsRequest(t *testing.T) {
+	t.Parallel()
 	client, scanner, encoder := newPipeClient(t)
 	canceled := make(chan struct{})
 	go func() {
@@ -478,6 +489,7 @@ func (renderer *snapshotTestRenderer) WithoutSecrets() step.DataTemplateRenderer
 }
 
 func TestTemplateRenderCallbackCannotReachSecretsOnItsOwn(t *testing.T) {
+	t.Parallel()
 	session := secret.NewSession(t.Context(), secret.Options{Runner: stubSecretRunner{}, BaseEnv: map[string]string{}})
 	renderer, err := workflow.NewRendererWithSecrets(nil, session)
 	if err != nil {
@@ -502,6 +514,7 @@ func TestTemplateRenderCallbackCannotReachSecretsOnItsOwn(t *testing.T) {
 }
 
 func TestHostCallbacksAreRefusedBeyondTheConcurrencyLimit(t *testing.T) {
+	t.Parallel()
 	const overflow = 8
 	const total = maxConcurrentHostCalls + overflow
 	client, scanner, encoder := newPipeClient(t)
@@ -583,6 +596,7 @@ func TestHostCallbacksAreRefusedBeyondTheConcurrencyLimit(t *testing.T) {
 }
 
 func TestCanceledStartIsRetriedButAFailedStartIsNot(t *testing.T) {
+	t.Parallel()
 	client, scanner, encoder := newPipeClient(t)
 	answer := make(chan responseFrame, 4)
 	go func() {
@@ -676,6 +690,7 @@ func (r *workflowTestRenderer) overlay(extra map[string]any) map[string]any {
 }
 
 func TestPanickingHostCallbackAnswersWithAnError(t *testing.T) {
+	t.Parallel()
 	client, scanner, encoder := newPipeClient(t)
 	host := func(context.Context, string, json.RawMessage) (any, error) {
 		panic("handler exploded")
@@ -718,6 +733,7 @@ func TestPanickingHostCallbackAnswersWithAnError(t *testing.T) {
 }
 
 func TestCallReturnsWhenPluginStopsReadingInput(t *testing.T) {
+	t.Parallel()
 	client, _, _ := newPipeClient(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
 	defer cancel()

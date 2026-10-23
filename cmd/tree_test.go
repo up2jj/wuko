@@ -16,6 +16,7 @@ import (
 )
 
 func TestTreeCommandDisplaysWorkflowAndRemoteActionSteps(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	workflowDir := filepath.Join(root, ".wuko", "workflows")
 	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
@@ -84,6 +85,7 @@ steps:
 }
 
 func TestTreeCommandSupportsFileAndRemoteWorkflowSelectors(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name string
 		args func(string) []string
@@ -121,6 +123,7 @@ func TestTreeCommandSupportsFileAndRemoteWorkflowSelectors(t *testing.T) {
 }
 
 func TestWriteDependencyPlanTreeShowsFullChainAndSharedDependencies(t *testing.T) {
+	t.Parallel()
 	prepare := &workflow.DependencyNode{Definition: &workflow.Definition{
 		Name:  "prepare",
 		Steps: []workflow.Step{{ID: "workspace", Type: "shell"}},
@@ -165,6 +168,7 @@ func TestWriteDependencyPlanTreeShowsFullChainAndSharedDependencies(t *testing.T
 }
 
 func TestTreeCommandRejectsMissingOrConflictingWorkflowSelector(t *testing.T) {
+	t.Parallel()
 	for _, args := range [][]string{{"tree"}, {"tree", "name", "--file", "workflow.yaml"}} {
 		command := newRootCmd(dependencies{
 			stdin: bytes.NewReader(nil), stdout: io.Discard, stderr: io.Discard,
@@ -181,6 +185,7 @@ func TestTreeCommandRejectsMissingOrConflictingWorkflowSelector(t *testing.T) {
 }
 
 func TestWorkflowTreeDisplaysExecutionPolicy(t *testing.T) {
+	t.Parallel()
 	timeout := workflow.Duration(2 * time.Minute)
 	definition := &workflow.Definition{Name: "release", Steps: []workflow.Step{{
 		ID: "publish",
@@ -220,6 +225,7 @@ func TestWorkflowTreeDisplaysOnceBlock(t *testing.T) {
 }
 
 func TestWriteWorkflowTreeShowsFinallySections(t *testing.T) {
+	t.Parallel()
 	action := &workflow.Action{
 		Version: 1, Name: "action",
 		Steps:   []workflow.Step{{ID: "inside", Type: "shell"}},
@@ -241,6 +247,7 @@ func TestWriteWorkflowTreeShowsFinallySections(t *testing.T) {
 }
 
 func TestWriteWorkflowTreeShowsAttachedDefer(t *testing.T) {
+	t.Parallel()
 	definition := &workflow.Definition{Version: 1, Name: "tree", Steps: []workflow.Step{{
 		ID: "create", Type: "shell", Defer: []workflow.Step{{ID: "remove", Type: "shell"}},
 	}}}
@@ -255,6 +262,7 @@ func TestWriteWorkflowTreeShowsAttachedDefer(t *testing.T) {
 }
 
 func TestWorkflowTreeDisplaysCancelOnParticipants(t *testing.T) {
+	t.Parallel()
 	definition := &workflow.Definition{Version: 1, Name: "deploy", Steps: []workflow.Step{{
 		ID: "deployment_watch", CancelOn: &workflow.CancelOnGroup{
 			Monitors: []workflow.Step{
@@ -276,6 +284,7 @@ func TestWorkflowTreeDisplaysCancelOnParticipants(t *testing.T) {
 }
 
 func TestWorkflowTreeDisplaysConcurrentGroup(t *testing.T) {
+	t.Parallel()
 	timeout := workflow.Duration(5 * time.Minute)
 	definition := &workflow.Definition{Name: "checks", Steps: []workflow.Step{{Concurrent: &workflow.ConcurrentGroup{
 		MaxConcurrency: 2, Timeout: &timeout, FailFast: false,
@@ -296,6 +305,7 @@ func TestWorkflowTreeDisplaysConcurrentGroup(t *testing.T) {
 }
 
 func TestWorkflowTreeDisplaysConditionalBlock(t *testing.T) {
+	t.Parallel()
 	definition := &workflow.Definition{Name: "conditional", Steps: []workflow.Step{
 		{If: "vars.deploy", Steps: []workflow.Step{
 			{ID: "build", Type: "shell"},
@@ -319,6 +329,7 @@ func TestWorkflowTreeDisplaysConditionalBlock(t *testing.T) {
 }
 
 func TestWorkflowTreeDisplaysWorkingDirectoryBlock(t *testing.T) {
+	t.Parallel()
 	definition := &workflow.Definition{Name: "scoped", Steps: []workflow.Step{
 		{WorkingDirectory: "./backend", Steps: []workflow.Step{
 			{ID: "build", Type: "shell"},
@@ -343,6 +354,7 @@ func TestWorkflowTreeDisplaysWorkingDirectoryBlock(t *testing.T) {
 }
 
 func TestWorkflowTreeDisplaysEnvironmentBlockNames(t *testing.T) {
+	t.Parallel()
 	definition := &workflow.Definition{Name: "scoped", Steps: []workflow.Step{
 		{Env: workflow.ScopedEnvironmentValues(workflow.Environment{"TOKEN": "secret", "GOOS": "linux"}), Steps: []workflow.Step{{ID: "build", Type: "shell"}}},
 	}}
@@ -360,6 +372,7 @@ func TestWorkflowTreeDisplaysEnvironmentBlockNames(t *testing.T) {
 }
 
 func TestWorkflowTreeDisplaysOrderedEnvironmentOperations(t *testing.T) {
+	t.Parallel()
 	var definition workflow.Definition
 	if err := yaml.Unmarshal([]byte(`version: 1
 name: scoped
@@ -384,6 +397,7 @@ steps:
 }
 
 func TestWorkflowTreeDisplaysFanoutControls(t *testing.T) {
+	t.Parallel()
 	definition := &workflow.Definition{Name: "fanout", Steps: []workflow.Step{
 		{ID: "uploads", Batch: &workflow.BatchGroup{
 			Items: "vars.files", Size: workflow.BatchSize{Expression: "vars.batch_size"}, Collect: "steps.upload.stdout", MaxConcurrency: 4, FailFast: true,
@@ -418,6 +432,7 @@ func TestWorkflowTreeDisplaysFanoutControls(t *testing.T) {
 }
 
 func TestWorkflowTreeDisplaysReturnControl(t *testing.T) {
+	t.Parallel()
 	definition := &workflow.Definition{Name: "cached", Steps: []workflow.Step{
 		{Return: &workflow.ReturnControl{Outputs: map[string]string{"cached": "true", "artifact": "steps.build.path"}}, If: "vars.cached"},
 		{ID: "build", Type: "shell"},
@@ -436,6 +451,7 @@ func TestWorkflowTreeDisplaysReturnControl(t *testing.T) {
 }
 
 func TestWorkflowTreeDisplaysReturnDestination(t *testing.T) {
+	t.Parallel()
 	definition := &workflow.Definition{Name: "picker", Steps: []workflow.Step{
 		{Return: &workflow.ReturnControl{To: workflow.ReturnDestinationPicker, Outputs: map[string]string{}}},
 	}}

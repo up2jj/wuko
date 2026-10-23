@@ -10,6 +10,7 @@ import (
 )
 
 func TestDockerExecutorAppliesContainerResources(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		resources map[string]any
@@ -65,6 +66,7 @@ func TestDockerExecutorAppliesContainerResources(t *testing.T) {
 }
 
 func TestDockerExecutorLeavesResourcesUnsetByDefault(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name string
 		raw  map[string]any
@@ -95,6 +97,7 @@ func TestDockerExecutorLeavesResourcesUnsetByDefault(t *testing.T) {
 }
 
 func TestDockerExecutorResourceValidation(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		resources map[string]any
@@ -125,6 +128,7 @@ func TestDockerExecutorResourceValidation(t *testing.T) {
 }
 
 func TestDockerExecutorResourceSchemaAndTemplates(t *testing.T) {
+	t.Parallel()
 	_, err := NewExecutor(map[string]any{
 		"image": "alpine",
 		"resources": map[string]any{
@@ -144,6 +148,7 @@ func TestDockerExecutorResourceSchemaAndTemplates(t *testing.T) {
 }
 
 func TestDockerExecutorRejectsUnrenderedResourcesBeforeCreate(t *testing.T) {
+	t.Parallel()
 	client := &fakeClient{}
 	session := &dockerExecutorSession{
 		config: ExecutorConfig{

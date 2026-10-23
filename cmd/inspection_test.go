@@ -15,6 +15,7 @@ import (
 )
 
 func TestInspectionCommandsLoadFilesAndStdinWithoutExecuting(t *testing.T) {
+	t.Parallel()
 	for _, name := range []string{"validate", "tree"} {
 		for _, filename := range []string{"draft.yaml", "-", "./-"} {
 			t.Run(name+"/"+filename, func(t *testing.T) {
@@ -72,6 +73,7 @@ targets:
 }
 
 func TestValidateFileJSONReportsLogicalSources(t *testing.T) {
+	t.Parallel()
 	for _, filename := range []string{"draft.yaml", "-"} {
 		for _, valid := range []bool{true, false} {
 			label := "invalid"
@@ -117,6 +119,7 @@ func TestValidateFileJSONReportsLogicalSources(t *testing.T) {
 }
 
 func TestInspectionStdinValidatesNamedDependencies(t *testing.T) {
+	t.Parallel()
 	for _, name := range []string{"validate", "tree"} {
 		t.Run(name, func(t *testing.T) {
 			root := t.TempDir()
@@ -143,6 +146,7 @@ func TestInspectionStdinValidatesNamedDependencies(t *testing.T) {
 }
 
 func TestInspectionCommandsReportInputAndTargetErrors(t *testing.T) {
+	t.Parallel()
 	for _, name := range []string{"validate", "tree"} {
 		for _, test := range []struct {
 			name, input, want string

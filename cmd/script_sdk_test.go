@@ -19,6 +19,7 @@ import (
 )
 
 func TestScriptSDKCommandPreservesFlagLikeValues(t *testing.T) {
+	t.Parallel()
 	b, err := scriptsdk.Open(t.Context(), step.Request{}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -44,6 +45,7 @@ func TestScriptSDKCommandPreservesFlagLikeValues(t *testing.T) {
 }
 
 func TestBashSDKInjectedFunctionsWithoutExternalTools(t *testing.T) {
+	t.Parallel()
 	bash, err := exec.LookPath("bash")
 	if err != nil {
 		t.Skip("Bash is unavailable")
@@ -134,6 +136,7 @@ if wuko_output_json bad 'not-json' >unexpected.out 2>expected.err; then exit 91;
 }
 
 func TestBashSDKFallsBackWhenNetworkRedirectionsAreUnavailable(t *testing.T) {
+	t.Parallel()
 	bash, err := exec.LookPath("bash")
 	if err != nil {
 		t.Skip("Bash is unavailable")
@@ -201,6 +204,7 @@ func (bashWorkflowHost) RunWorkflow(_ context.Context, call engine.WorkflowInvoc
 }
 
 func TestBashSDKEngineCalls(t *testing.T) {
+	t.Parallel()
 	bash, err := exec.LookPath("bash")
 	if err != nil {
 		t.Skip("Bash is unavailable")
@@ -240,6 +244,7 @@ wuko_set_var published done
 }
 
 func TestBashSDKRetryDiscardsFailedWrites(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("Bash is unavailable")
 	}

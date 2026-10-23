@@ -13,6 +13,7 @@ import (
 )
 
 func TestGroupPreservesOrderAndJoinsFinishErrors(t *testing.T) {
+	t.Parallel()
 	var events []string
 	firstErr := errors.New("first failed")
 	secondErr := errors.New("second failed")
@@ -35,6 +36,7 @@ func TestGroupPreservesOrderAndJoinsFinishErrors(t *testing.T) {
 }
 
 func TestGroupZeroValueIsNoOp(t *testing.T) {
+	t.Parallel()
 	var reporters Group
 	reporters.Progress(engine.ProgressEvent{})
 	reporters.Diagnostic(diagnostic.Event{})
@@ -44,6 +46,7 @@ func TestGroupZeroValueIsNoOp(t *testing.T) {
 }
 
 func TestFuncsCallsOnlyConfiguredCallbacks(t *testing.T) {
+	t.Parallel()
 	progressCalled := false
 	finishCalled := false
 	reporter := Funcs{
@@ -71,6 +74,7 @@ func TestFuncsCallsOnlyConfiguredCallbacks(t *testing.T) {
 }
 
 func TestFuncsZeroValueIsNoOp(t *testing.T) {
+	t.Parallel()
 	var reporter Funcs
 	reporter.Progress(engine.ProgressEvent{})
 	reporter.Diagnostic(diagnostic.Event{})
@@ -80,6 +84,7 @@ func TestFuncsZeroValueIsNoOp(t *testing.T) {
 }
 
 func TestSessionStampsMixedEventsAndOutcome(t *testing.T) {
+	t.Parallel()
 	invocationID := correlation.InvocationID("external")
 	var progress engine.ProgressEvent
 	var diagnosticEvent diagnostic.Event
@@ -110,6 +115,7 @@ func TestSessionStampsMixedEventsAndOutcome(t *testing.T) {
 }
 
 func TestSessionZeroValueAndConcurrentDelivery(t *testing.T) {
+	t.Parallel()
 	const total = 32
 	sequences := make([]correlation.Sequence, 0, total)
 	var sequencesMu sync.Mutex
@@ -139,6 +145,7 @@ func TestSessionZeroValueAndConcurrentDelivery(t *testing.T) {
 }
 
 func TestSessionWithSharesStampingAndPreservesFanoutOrder(t *testing.T) {
+	t.Parallel()
 	var events []string
 	base := Funcs{ProgressFunc: func(event engine.ProgressEvent) {
 		events = append(events, "base:"+string(rune('0'+event.Sequence)))
@@ -155,6 +162,7 @@ func TestSessionWithSharesStampingAndPreservesFanoutOrder(t *testing.T) {
 }
 
 func TestSessionReporterCanReadInvocationID(t *testing.T) {
+	t.Parallel()
 	var session *Session
 	session = NewSession("invocation", Funcs{ProgressFunc: func(engine.ProgressEvent) {
 		if got := session.InvocationID(); got != "invocation" {

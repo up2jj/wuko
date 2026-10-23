@@ -85,6 +85,7 @@ func mustWrite(t *testing.T, path string, data []byte) {
 }
 
 func TestLocalPinsReuseOfflineAndUpdateExplicitly(t *testing.T) {
+	t.Parallel()
 	manifest, archive := releaseBytes(t, "acme", "1.0.0")
 	transport := transportFor(manifest, archive)
 	cache, dir := t.TempDir(), t.TempDir()
@@ -136,6 +137,7 @@ func TestLocalPinsReuseOfflineAndUpdateExplicitly(t *testing.T) {
 }
 
 func TestReadOnlyAndFrozenRequirePinsWithoutMutation(t *testing.T) {
+	t.Parallel()
 	for _, policy := range []workflow.PluginLockPolicy{{ReadOnly: true}, {Frozen: true}} {
 		t.Run(map[bool]string{true: "frozen", false: "read-only"}[policy.Frozen], func(t *testing.T) {
 			manifest, archive := releaseBytes(t, "acme", "1")
@@ -180,6 +182,7 @@ func managerCacheRoot(t *testing.T, m *Manager) string {
 }
 
 func TestRemoteRefreshesManifestAndNeverTouchesLock(t *testing.T) {
+	t.Parallel()
 	manifest, archive := releaseBytes(t, "acme", "1")
 	transport := transportFor(manifest, archive)
 	cache, dir := t.TempDir(), t.TempDir()
@@ -227,6 +230,7 @@ func TestRemoteRefreshesManifestAndNeverTouchesLock(t *testing.T) {
 }
 
 func TestCacheRepairsDamageWithoutChangingPin(t *testing.T) {
+	t.Parallel()
 	for _, file := range []string{"plugin.json", "artifact.tar.gz"} {
 		t.Run(file, func(t *testing.T) {
 			manifest, archive := releaseBytes(t, "acme", "1")
@@ -273,6 +277,7 @@ func TestCacheRepairsDamageWithoutChangingPin(t *testing.T) {
 }
 
 func TestLockedResolutionDoesNotHashArchive(t *testing.T) {
+	t.Parallel()
 	manifest, archive := releaseBytes(t, "acme", "1")
 	transport := transportFor(manifest, archive)
 	cache, dir := t.TempDir(), t.TempDir()
@@ -299,6 +304,7 @@ func TestLockedResolutionDoesNotHashArchive(t *testing.T) {
 }
 
 func TestLockedResolutionFetchesMissingRelease(t *testing.T) {
+	t.Parallel()
 	manifest, archive := releaseBytes(t, "acme", "1")
 	transport := transportFor(manifest, archive)
 	cache, dir := t.TempDir(), t.TempDir()
@@ -327,6 +333,7 @@ func TestLockedResolutionFetchesMissingRelease(t *testing.T) {
 }
 
 func TestMalformedLocksFailBeforeNetwork(t *testing.T) {
+	t.Parallel()
 	good := "namespace: acme\n    source: https://plugins.test/plugin.json\n    sha256: " + strings.Repeat("a", 64)
 	cases := []string{"", "version: 2\nplugins: []\n", "version: 1\nextra: true\n", "version: 1\nplugins:\n  - namespace: acme\n    source: https://plugins.test/plugin.json\n    sha256: nope\n", "version: 1\nplugins:\n  - " + good + "\n  - " + good + "\n", "version: 1\nplugins: []\n---\nversion: 1\n"}
 	for _, body := range cases {
@@ -346,6 +353,7 @@ func TestMalformedLocksFailBeforeNetwork(t *testing.T) {
 }
 
 func TestConcurrentCachePopulationDownloadsArchiveOnce(t *testing.T) {
+	t.Parallel()
 	manifest, archive := releaseBytes(t, "acme", "1")
 	transport := transportFor(manifest, archive)
 	cache := t.TempDir()
@@ -373,6 +381,7 @@ func TestConcurrentCachePopulationDownloadsArchiveOnce(t *testing.T) {
 }
 
 func TestConcurrentLockUpdatesPreserveBothReleases(t *testing.T) {
+	t.Parallel()
 	manifest, archive := releaseBytes(t, "acme", "1")
 	transport := transportFor(manifest, archive)
 	// Distinct source identities can share manifest content.
@@ -401,6 +410,7 @@ func TestConcurrentLockUpdatesPreserveBothReleases(t *testing.T) {
 }
 
 func TestCachePopulationCancellationLeavesNoRelease(t *testing.T) {
+	t.Parallel()
 	manifest, archive := releaseBytes(t, "acme", "1")
 	manager := resolutionManager(t, t.TempDir(), transportFor(manifest, archive))
 	directory, _ := manager.store.directory(digest(manifest))
@@ -423,6 +433,7 @@ func TestCachePopulationCancellationLeavesNoRelease(t *testing.T) {
 }
 
 func TestLocalBundlesResolveRelativeToWorkflowAndRejectRemoteEscape(t *testing.T) {
+	t.Parallel()
 	manifest, archive := releaseBytes(t, "acme", "1")
 	dir := t.TempDir()
 	bundle := filepath.Join(dir, "plugins", "acme")
@@ -451,6 +462,7 @@ func TestLocalBundlesResolveRelativeToWorkflowAndRejectRemoteEscape(t *testing.T
 }
 
 func TestLockWorkflowsSharesReleasesAndMigratesWithoutStartingPlugins(t *testing.T) {
+	t.Parallel()
 	manifest, archive := releaseBytes(t, "acme", "1") // Executable exits 97 if accidentally launched.
 	transport := transportFor(manifest, archive)
 	manager := resolutionManager(t, t.TempDir(), transport)
@@ -480,6 +492,7 @@ func TestLockWorkflowsSharesReleasesAndMigratesWithoutStartingPlugins(t *testing
 }
 
 func TestFailedBatchDoesNotPublishPartialLock(t *testing.T) {
+	t.Parallel()
 	manifest, archive := releaseBytes(t, "acme", "1")
 	manager := resolutionManager(t, t.TempDir(), transportFor(manifest, archive))
 	dir := t.TempDir()
@@ -495,6 +508,7 @@ func TestFailedBatchDoesNotPublishPartialLock(t *testing.T) {
 }
 
 func TestRetainedInstallationCanSeedCacheOffline(t *testing.T) {
+	t.Parallel()
 	manifest, archive := releaseBytes(t, "acme", "1")
 	transport := transportFor(nil, nil)
 	manager := resolutionManager(t, t.TempDir(), transport)
@@ -521,6 +535,7 @@ func TestRetainedInstallationCanSeedCacheOffline(t *testing.T) {
 }
 
 func TestLockSubprocessHelper(t *testing.T) {
+	t.Parallel()
 	path := os.Getenv("WUKO_LOCK_TEST_WORKFLOW")
 	if path == "" {
 		return
@@ -533,6 +548,7 @@ func TestLockSubprocessHelper(t *testing.T) {
 }
 
 func TestIndependentProcessesMergeSharedLock(t *testing.T) {
+	t.Parallel()
 	manifest, archive := releaseBytes(t, "acme", "1")
 	dir, cache := t.TempDir(), t.TempDir()
 	executable, err := os.Executable()
@@ -580,6 +596,7 @@ func TestIndependentProcessesMergeSharedLock(t *testing.T) {
 }
 
 func TestLockWorkflowDependencyGetsItsOwnDirectoryLock(t *testing.T) {
+	t.Parallel()
 	manifest, archive := releaseBytes(t, "acme", "1")
 	dir := t.TempDir()
 	workflows := filepath.Join(dir, ".wuko", "workflows")
@@ -602,6 +619,7 @@ func TestLockWorkflowDependencyGetsItsOwnDirectoryLock(t *testing.T) {
 }
 
 func TestFailedMigrationKeepsInlinePinAndExistingLock(t *testing.T) {
+	t.Parallel()
 	manifest, archive := releaseBytes(t, "acme", "1")
 	manager := resolutionManager(t, t.TempDir(), transportFor(manifest, archive))
 	dir := t.TempDir()
@@ -620,6 +638,7 @@ func TestFailedMigrationKeepsInlinePinAndExistingLock(t *testing.T) {
 }
 
 func TestUnsafeCachedArchiveCannotEstablishPin(t *testing.T) {
+	t.Parallel()
 	manifest, _ := releaseBytes(t, "acme", "unsafe")
 	var object Manifest
 	if err := json.Unmarshal(manifest, &object); err != nil {
@@ -646,6 +665,7 @@ func TestUnsafeCachedArchiveCannotEstablishPin(t *testing.T) {
 }
 
 func TestLoadedNamespaceStillRequiresCurrentWorkflowDeclaration(t *testing.T) {
+	t.Parallel()
 	manifest, archive := pluginFixture(t, "acme")
 	// This helper fixture uses the namespace-specific artifact path.
 	transport := transportFor(manifest, archive)
@@ -669,6 +689,7 @@ func TestLoadedNamespaceStillRequiresCurrentWorkflowDeclaration(t *testing.T) {
 }
 
 func TestPackagedLocalPluginIdentitySurvivesRemoteCopy(t *testing.T) {
+	t.Parallel()
 	manifest, archive := releaseBytes(t, "acme", "1")
 	manager := resolutionManager(t, t.TempDir(), transportFor(nil, nil))
 	var previous workflow.ResolvedPluginSource
@@ -696,6 +717,7 @@ func TestPackagedLocalPluginIdentitySurvivesRemoteCopy(t *testing.T) {
 }
 
 func TestLockedResolutionDoesNotTakeDirectoryLock(t *testing.T) {
+	t.Parallel()
 	manifest, archive := releaseBytes(t, "acme", "1.0.0")
 	cache, dir := t.TempDir(), t.TempDir()
 	manager := resolutionManager(t, cache, transportFor(manifest, archive))
@@ -739,6 +761,7 @@ func (s *stallingTransport) RoundTrip(req *http.Request) (*http.Response, error)
 }
 
 func TestFreshResolutionDoesNotSerializeUnrelatedSources(t *testing.T) {
+	t.Parallel()
 	acmeManifest, acmeArchive := releaseBytes(t, "acme", "1")
 	slowManifest, slowArchive := releaseBytes(t, "slow", "1")
 	transport := transportFor(acmeManifest, acmeArchive)
@@ -774,6 +797,7 @@ func TestFreshResolutionDoesNotSerializeUnrelatedSources(t *testing.T) {
 }
 
 func TestFreshResolutionRetriesAfterFailure(t *testing.T) {
+	t.Parallel()
 	manifest, archive := releaseBytes(t, "acme", "1")
 	transport := &releaseTransport{bodies: map[string][]byte{}, counts: make(map[string]int)}
 	manager := resolutionManager(t, t.TempDir(), transport)
@@ -791,6 +815,7 @@ func TestFreshResolutionRetriesAfterFailure(t *testing.T) {
 }
 
 func TestFreshResolutionWaiterHonorsCancellation(t *testing.T) {
+	t.Parallel()
 	manifest, archive := releaseBytes(t, "acme", "1")
 	stalling := &stallingTransport{inner: transportFor(manifest, archive), path: "/plugin.json", entered: make(chan struct{}, 1), release: make(chan struct{})}
 	cache := t.TempDir()

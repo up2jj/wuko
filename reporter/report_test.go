@@ -16,6 +16,7 @@ import (
 )
 
 func TestNewExecutionReportProjectsSafeSuccess(t *testing.T) {
+	t.Parallel()
 	outcome := Outcome{
 		InvocationID: "invocation", RunID: "run", WorkflowName: "check",
 		Status: engine.StatusSucceeded, Duration: 42381 * time.Millisecond,
@@ -37,6 +38,7 @@ func TestNewExecutionReportProjectsSafeSuccess(t *testing.T) {
 }
 
 func TestNewExecutionReportFailureOmitsUnavailableAndSensitiveData(t *testing.T) {
+	t.Parallel()
 	outcome := Outcome{
 		InvocationID: "invocation", Status: engine.StatusTimedOut, Duration: 3 * time.Second,
 		Stats: engine.RunStats{Total: 3, Failed: 1, TimedOut: 1, Steps: []engine.StepStats{
@@ -61,6 +63,7 @@ func TestNewExecutionReportFailureOmitsUnavailableAndSensitiveData(t *testing.T)
 }
 
 func TestNewExecutionReportIncludesSafeValidationIssues(t *testing.T) {
+	t.Parallel()
 	issue := validation.Issue{Code: validation.CodeUnknownStepOutput, Message: "safe message", SourceLine: "token: secret", Cause: errors.New("raw secret")}
 	data, err := json.Marshal(NewExecutionReport(Outcome{Status: engine.StatusFailed, Err: issue}))
 	if err != nil {
@@ -76,6 +79,7 @@ func TestNewExecutionReportIncludesSafeValidationIssues(t *testing.T) {
 }
 
 func TestNewExecutionReportDoesNotSubstituteALaterFailedStepID(t *testing.T) {
+	t.Parallel()
 	report := NewExecutionReport(Outcome{Status: engine.StatusFailed, Err: errors.New("failed"), Stats: engine.RunStats{
 		Steps: []engine.StepStats{
 			{Status: engine.StatusFailed},
@@ -88,6 +92,7 @@ func TestNewExecutionReportDoesNotSubstituteALaterFailedStepID(t *testing.T) {
 }
 
 func TestNewExecutionReportDryRunOmitsPlaceholderOutputs(t *testing.T) {
+	t.Parallel()
 	report := NewExecutionReport(Outcome{
 		InvocationID: "invocation", Status: engine.StatusSucceeded, DryRun: true,
 		Outputs: map[string]any{"placeholder": ""},
@@ -98,6 +103,7 @@ func TestNewExecutionReportDryRunOmitsPlaceholderOutputs(t *testing.T) {
 }
 
 func TestNewExecutionReportSuccessIncludesEmptyOutputsObject(t *testing.T) {
+	t.Parallel()
 	report := NewExecutionReport(Outcome{Status: engine.StatusSucceeded})
 	if report.Outputs == nil || len(*report.Outputs) != 0 {
 		t.Fatalf("outputs = %#v, want present empty object", report.Outputs)
@@ -112,6 +118,7 @@ func TestNewExecutionReportSuccessIncludesEmptyOutputsObject(t *testing.T) {
 }
 
 func TestNewExecutionReportInfersStatusForExternalCallers(t *testing.T) {
+	t.Parallel()
 	if got := NewExecutionReport(Outcome{}).Status; got != engine.StatusSucceeded {
 		t.Fatalf("empty outcome status = %q, want succeeded", got)
 	}
@@ -121,6 +128,7 @@ func TestNewExecutionReportInfersStatusForExternalCallers(t *testing.T) {
 }
 
 func TestNewExecutionReportPreservesUnsuccessfulStatuses(t *testing.T) {
+	t.Parallel()
 	for _, status := range []engine.ExecutionStatus{engine.StatusFailed, engine.StatusTimedOut, engine.StatusCanceled} {
 		t.Run(string(status), func(t *testing.T) {
 			report := NewExecutionReport(Outcome{Status: status, Outputs: map[string]any{"partial": true}})
@@ -132,6 +140,7 @@ func TestNewExecutionReportPreservesUnsuccessfulStatuses(t *testing.T) {
 }
 
 func TestJSONWriterWritesOneCompactReport(t *testing.T) {
+	t.Parallel()
 	var output bytes.Buffer
 	reporter, err := NewJSONWriter(&output)
 	if err != nil {
@@ -156,6 +165,7 @@ func TestJSONWriterWritesOneCompactReport(t *testing.T) {
 }
 
 func TestNewJSONWriterRequiresWriter(t *testing.T) {
+	t.Parallel()
 	_, err := NewJSONWriter(nil)
 	if err == nil || !strings.Contains(err.Error(), "writer is required") {
 		t.Fatalf("NewJSONWriter() error = %v, want required writer", err)
@@ -163,6 +173,7 @@ func TestNewJSONWriterRequiresWriter(t *testing.T) {
 }
 
 func TestJSONWriterReportsEncodingAndWriteFailures(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		writer  io.Writer
@@ -187,6 +198,7 @@ func TestJSONWriterReportsEncodingAndWriteFailures(t *testing.T) {
 }
 
 func TestJSONFileAtomicallyOverwritesWithPrivatePrettyReport(t *testing.T) {
+	t.Parallel()
 	directory := t.TempDir()
 	path := filepath.Join(directory, "report.json")
 	if err := os.WriteFile(path, []byte("old"), 0o644); err != nil {
@@ -217,6 +229,7 @@ func TestJSONFileAtomicallyOverwritesWithPrivatePrettyReport(t *testing.T) {
 }
 
 func TestNewJSONFileRequiresExistingDirectory(t *testing.T) {
+	t.Parallel()
 	_, err := NewJSONFile(filepath.Join(t.TempDir(), "missing", "report.json"))
 	if err == nil || !strings.Contains(err.Error(), "inspecting execution report directory") {
 		t.Fatalf("NewJSONFile() error = %v, want missing directory", err)
@@ -224,6 +237,7 @@ func TestNewJSONFileRequiresExistingDirectory(t *testing.T) {
 }
 
 func TestJSONFilePreservesExistingDestinationWhenEncodingFails(t *testing.T) {
+	t.Parallel()
 	directory := t.TempDir()
 	path := filepath.Join(directory, "report.json")
 	if err := os.WriteFile(path, []byte("old"), 0o600); err != nil {
@@ -250,6 +264,7 @@ func TestJSONFilePreservesExistingDestinationWhenEncodingFails(t *testing.T) {
 }
 
 func TestJSONFileCleansTemporaryFileWhenRenameFails(t *testing.T) {
+	t.Parallel()
 	directory := t.TempDir()
 	path := filepath.Join(directory, "report.json")
 	if err := os.Mkdir(path, 0o700); err != nil {

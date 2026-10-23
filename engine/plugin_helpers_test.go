@@ -22,6 +22,7 @@ func (fakePluginHelpers) LoadHelpers(context.Context, map[string]workflow.Resolv
 }
 
 func TestCompositeActionInheritsPluginHelpersAtRuntime(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "actions", "echo"), 0o755); err != nil {
 		t.Fatal(err)

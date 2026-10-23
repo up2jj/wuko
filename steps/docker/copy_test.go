@@ -19,6 +19,7 @@ import (
 )
 
 func TestCopyToContainerMatchesDockerCopySemantics(t *testing.T) {
+	t.Parallel()
 	runDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(runDir, "artifact.txt"), []byte("artifact"), 0o640); err != nil {
 		t.Fatal(err)
@@ -164,6 +165,7 @@ func TestCopyToContainerMatchesDockerCopySemantics(t *testing.T) {
 }
 
 func TestCopyFromContainerMatchesDockerCopySemantics(t *testing.T) {
+	t.Parallel()
 	t.Run("renames file into relative host target", func(t *testing.T) {
 		runDir := t.TempDir()
 		if err := os.Mkdir(filepath.Join(runDir, "out"), 0o755); err != nil {

@@ -19,6 +19,7 @@ func conditionalTestRegistry(t *testing.T, runs *int) *step.Registry {
 }
 
 func TestConditionalBlockRunsSequentiallyAfterOneConditionEvaluation(t *testing.T) {
+	t.Parallel()
 	var runs int
 	registry := conditionalTestRegistry(t, &runs)
 	definition := testDefinition(
@@ -41,6 +42,7 @@ func TestConditionalBlockRunsSequentiallyAfterOneConditionEvaluation(t *testing.
 }
 
 func TestConditionalBlockFalseRecordsLeafAndControlSkips(t *testing.T) {
+	t.Parallel()
 	var runs int
 	registry := conditionalTestRegistry(t, &runs)
 	definition := testDefinition(
@@ -89,6 +91,7 @@ func TestConditionalBlockFalseRecordsLeafAndControlSkips(t *testing.T) {
 }
 
 func TestConditionalBlockStopsAfterChildFailure(t *testing.T) {
+	t.Parallel()
 	var runs int
 	registry := conditionalTestRegistry(t, &runs)
 	if err := registry.Register("fail", func(map[string]any) (step.Runner, error) { return alwaysFailRunner{}, nil }); err != nil {
@@ -111,6 +114,7 @@ func TestConditionalBlockStopsAfterChildFailure(t *testing.T) {
 }
 
 func TestConditionalBlockInsideForeachCollectsTransparentOutputs(t *testing.T) {
+	t.Parallel()
 	var runs int
 	registry := conditionalTestRegistry(t, &runs)
 	definition := testDefinition(t, "foreach-conditional", workflow.Step{ID: "loop", Foreach: &workflow.ForeachGroup{
@@ -131,6 +135,7 @@ func TestConditionalBlockInsideForeachCollectsTransparentOutputs(t *testing.T) {
 }
 
 func TestConditionalBlocksRunInCompositeActionsAndFinally(t *testing.T) {
+	t.Parallel()
 	var runs int
 	registry := conditionalTestRegistry(t, &runs)
 	action := testAction(t, "composite", workflow.Step{If: "true", Steps: []workflow.Step{
@@ -151,6 +156,7 @@ func TestConditionalBlocksRunInCompositeActionsAndFinally(t *testing.T) {
 }
 
 func TestConditionalBlockDryRunDisplaysNestedPlan(t *testing.T) {
+	t.Parallel()
 	var runs int
 	registry := conditionalTestRegistry(t, &runs)
 	definition := testDefinition(
@@ -172,6 +178,7 @@ func TestConditionalBlockDryRunDisplaysNestedPlan(t *testing.T) {
 }
 
 func TestConditionalBlockValidationDiagnosticUsesWrapperLocation(t *testing.T) {
+	t.Parallel()
 	var runs int
 	registry := conditionalTestRegistry(t, &runs)
 	wrapperLocation := diagnostic.Location{Source: "workflow.yaml", Line: 7, Column: 3}

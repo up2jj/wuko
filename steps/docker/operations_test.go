@@ -31,6 +31,7 @@ import (
 )
 
 func TestOperationValidation(t *testing.T) {
+	t.Parallel()
 	validDigest := "sha256:" + strings.Repeat("a", 64)
 	tests := []struct {
 		name    string
@@ -88,6 +89,7 @@ func TestOperationValidation(t *testing.T) {
 }
 
 func TestHealthWaitReturnsHealthySnapshot(t *testing.T) {
+	t.Parallel()
 	started := time.Date(2026, time.August, 23, 8, 0, 0, 123, time.UTC)
 	finished := started.Add(250 * time.Millisecond)
 	inspected := containerInspection(container.Healthy, true)
@@ -118,6 +120,7 @@ func TestHealthWaitReturnsHealthySnapshot(t *testing.T) {
 }
 
 func TestHealthWaitPollsStartingContainerWithoutSleeping(t *testing.T) {
+	t.Parallel()
 	apiClient := &operationClient{fakeClient: &fakeClient{}, containerInspects: []client.ContainerInspectResult{
 		containerInspection(container.Starting, true), containerInspection(container.Healthy, true),
 	}}
@@ -144,6 +147,7 @@ func TestHealthWaitPollsStartingContainerWithoutSleeping(t *testing.T) {
 }
 
 func TestHealthWaitFailureReturnsStructuredDiagnostics(t *testing.T) {
+	t.Parallel()
 	inspected := containerInspection(container.Unhealthy, true)
 	inspected.Container.State.Health.FailingStreak = 3
 	inspected.Container.State.Health.Log = []*container.HealthcheckResult{{
@@ -171,6 +175,7 @@ func TestHealthWaitFailureReturnsStructuredDiagnostics(t *testing.T) {
 }
 
 func TestHealthWaitRejectsTerminalContainerStates(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		inspect    client.ContainerInspectResult
@@ -204,6 +209,7 @@ func TestHealthWaitRejectsTerminalContainerStates(t *testing.T) {
 }
 
 func TestHealthWaitCancellationReturnsLatestSnapshot(t *testing.T) {
+	t.Parallel()
 	apiClient := &operationClient{fakeClient: &fakeClient{}, containerInspects: []client.ContainerInspectResult{containerInspection(container.Starting, true)}}
 	ctx, cancel := context.WithCancel(t.Context())
 	runner := &Runner{
@@ -225,6 +231,7 @@ func TestHealthWaitCancellationReturnsLatestSnapshot(t *testing.T) {
 }
 
 func TestHealthWaitTimeoutReturnsLatestSnapshot(t *testing.T) {
+	t.Parallel()
 	apiClient := &operationClient{fakeClient: &fakeClient{}, containerInspects: []client.ContainerInspectResult{containerInspection(container.Starting, true)}}
 	runner := &Runner{
 		config:    Config{Operation: operationHealthWait, Container: "api"},
@@ -244,6 +251,7 @@ func TestHealthWaitTimeoutReturnsLatestSnapshot(t *testing.T) {
 }
 
 func TestPullStreamsProgressAndReturnsInspection(t *testing.T) {
+	t.Parallel()
 	stream := &fakePullResponse{messages: []jsonstream.Message{{ID: "layer", Status: "Downloaded"}}}
 	inspected := imageInspection()
 	client := &operationClient{fakeClient: &fakeClient{}, inspect: inspected, pull: stream}
@@ -276,6 +284,7 @@ func TestPullStreamsProgressAndReturnsInspection(t *testing.T) {
 }
 
 func TestPullReturnsProgressError(t *testing.T) {
+	t.Parallel()
 	stream := &fakePullResponse{messages: []jsonstream.Message{{Error: &jsonstream.Error{Message: "registry rejected request"}}}}
 	client := &operationClient{fakeClient: &fakeClient{}, pull: stream}
 	runner := &Runner{
@@ -288,6 +297,7 @@ func TestPullReturnsProgressError(t *testing.T) {
 }
 
 func TestPushTagAndLogin(t *testing.T) {
+	t.Parallel()
 	raw := json.RawMessage(`{"Digest":"sha256:` + strings.Repeat("b", 64) + `"}`)
 	client := &operationClient{
 		fakeClient: &fakeClient{},
@@ -323,6 +333,7 @@ func TestPushTagAndLogin(t *testing.T) {
 }
 
 func TestPushUsesInspectedDescriptorWhenStreamOmitsDigest(t *testing.T) {
+	t.Parallel()
 	inspected := imageInspection()
 	client := &operationClient{
 		fakeClient: &fakeClient{},
@@ -344,6 +355,7 @@ func TestPushUsesInspectedDescriptorWhenStreamOmitsDigest(t *testing.T) {
 }
 
 func TestInspectAndVerifyDigest(t *testing.T) {
+	t.Parallel()
 	inspected := imageInspection()
 	client := &operationClient{fakeClient: &fakeClient{}, inspect: inspected}
 	inspect := &Runner{config: Config{Operation: operationInspect, Image: "example/app:1"}, newClient: func() (dockerClient, error) { return client, nil }}
@@ -383,6 +395,7 @@ func TestInspectAndVerifyDigest(t *testing.T) {
 }
 
 func TestManagedResourcesCreateAndCleanup(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		raw        map[string]any
@@ -434,6 +447,7 @@ func TestManagedResourcesCreateAndCleanup(t *testing.T) {
 }
 
 func TestManagedResourceCleanupCanBeDisabled(t *testing.T) {
+	t.Parallel()
 	built, err := New(map[string]any{"operation": "volume_create", "name": "persistent", "cleanup": false})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -461,6 +475,7 @@ func TestManagedResourceCleanupCanBeDisabled(t *testing.T) {
 }
 
 func TestManagedResourcesRejectCollisionsAndIgnoreMissingCleanup(t *testing.T) {
+	t.Parallel()
 	built, err := New(map[string]any{"operation": "network_create", "name": "existing"})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -488,6 +503,7 @@ func TestManagedResourcesRejectCollisionsAndIgnoreMissingCleanup(t *testing.T) {
 }
 
 func TestManagedResourceCloseErrorStillRegistersUsableResult(t *testing.T) {
+	t.Parallel()
 	built, err := New(map[string]any{"operation": "network_create", "name": "managed"})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -509,6 +525,7 @@ func TestManagedResourceCloseErrorStillRegistersUsableResult(t *testing.T) {
 }
 
 func TestManagedCreationCleansUpAfterCancellation(t *testing.T) {
+	t.Parallel()
 	built, err := New(map[string]any{"operation": "volume_create", "name": "transient"})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -530,6 +547,7 @@ func TestManagedCreationCleansUpAfterCancellation(t *testing.T) {
 }
 
 func TestVolumeCreationAndCleanupRejectChangedOwnership(t *testing.T) {
+	t.Parallel()
 	built, err := New(map[string]any{"operation": "volume_create", "name": "shared"})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -567,6 +585,7 @@ func TestVolumeCreationAndCleanupRejectChangedOwnership(t *testing.T) {
 }
 
 func TestVolumeMountDoesNotResolveSourceAsHostPath(t *testing.T) {
+	t.Parallel()
 	runner := &Runner{config: Config{Image: "alpine", Mounts: []Mount{{Type: "volume", Source: "workflow-data", Target: "/data"}}}}
 	_, host, err := runner.containerConfig(step.Request{RunDir: t.TempDir()}, "host", false)
 	if err != nil {
@@ -578,6 +597,7 @@ func TestVolumeMountDoesNotResolveSourceAsHostPath(t *testing.T) {
 }
 
 func TestBuildxBuildArgumentsAndMetadata(t *testing.T) {
+	t.Parallel()
 	runDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(runDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -634,6 +654,7 @@ func TestBuildxBuildArgumentsAndMetadata(t *testing.T) {
 }
 
 func TestBuildxAvailabilityAndCancellation(t *testing.T) {
+	t.Parallel()
 	runner := &Runner{
 		config: Config{Operation: operationBuild, Tags: []string{"app:test"}, Output: "load"},
 		runCommand: func(context.Context, string, []string, io.Writer, io.Writer) error {

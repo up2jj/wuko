@@ -18,6 +18,7 @@ import (
 )
 
 func TestRunCommandComposesPlainAndGitHubReporters(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	workflowPath := filepath.Join(root, "check.yaml")
 	writeWorkflowData(t, workflowPath, `version: 1
@@ -89,6 +90,7 @@ steps:
 }
 
 func TestRunCommandDefaultReporterDoesNotReadGitHubFiles(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	workflowPath := filepath.Join(root, "check.yaml")
 	writeWorkflowData(t, workflowPath, "version: 1\nname: check\nsteps:\n  - return: {outputs: {ok: 'true'}}\n")
@@ -105,6 +107,7 @@ func TestRunCommandDefaultReporterDoesNotReadGitHubFiles(t *testing.T) {
 }
 
 func TestRunCommandGitHubReporterRequiresEnvironmentFiles(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	workflowPath := filepath.Join(root, "check.yaml")
 	writeWorkflowData(t, workflowPath, "version: 1\nname: check\nsteps:\n  - return: {outputs: {ok: 'true'}}\n")
@@ -122,6 +125,7 @@ func TestRunCommandGitHubReporterRequiresEnvironmentFiles(t *testing.T) {
 }
 
 func TestRunCommandWritesRelativeExecutionReportOnSuccess(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	workflowPath := filepath.Join(root, "check.yaml")
 	writeWorkflowData(t, workflowPath, `version: 1
@@ -158,6 +162,7 @@ steps:
 }
 
 func TestRunCommandStreamsExecutionReportAndRoutesWorkflowOutputToStderr(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	workflowPath := filepath.Join(root, "check.yaml")
 	writeWorkflowData(t, workflowPath, `version: 1
@@ -197,6 +202,7 @@ steps:
 }
 
 func TestRunCommandStreamsReportsForFailurePreflightAndDryRun(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	registry := step.NewRegistry()
 	if err := shell.Register(registry); err != nil {
@@ -261,6 +267,7 @@ func TestRunCommandStreamsReportsForFailurePreflightAndDryRun(t *testing.T) {
 }
 
 func TestRunCommandReportsStreamWriteFailure(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	workflowPath := filepath.Join(root, "check.yaml")
 	writeWorkflowData(t, workflowPath, "version: 1\nname: check\nsteps:\n  - return: {outputs: {}}\n")
@@ -277,6 +284,7 @@ func TestRunCommandReportsStreamWriteFailure(t *testing.T) {
 }
 
 func TestRunCommandWritesExecutionReportBeforeEngineStarts(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	workflowPath := filepath.Join(root, "check.yaml")
 	writeWorkflowData(t, workflowPath, "version: 1\nname: check\nsteps: []\n")
@@ -298,6 +306,7 @@ func TestRunCommandWritesExecutionReportBeforeEngineStarts(t *testing.T) {
 }
 
 func TestRunCommandReportsFirstFailedStep(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	workflowPath := filepath.Join(root, "check.yaml")
 	writeWorkflowData(t, workflowPath, `version: 1
@@ -328,6 +337,7 @@ steps:
 }
 
 func TestRunCommandJoinsWorkflowAndReportDeliveryFailures(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	workflowPath := filepath.Join(root, "check.yaml")
 	writeWorkflowData(t, workflowPath, `version: 1
@@ -358,6 +368,7 @@ steps:
 }
 
 func TestRunCommandDiscardsEarlierAttemptStateWhenSchedulingFails(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	workflowPath := filepath.Join(root, "check.yaml")
 	writeWorkflowData(t, workflowPath, `version: 1
@@ -468,6 +479,7 @@ func sequenceClock(instants ...time.Time) func() time.Time {
 }
 
 func TestRunCommandStreamsReportForSetupFailures(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	workflowPath := filepath.Join(root, "check.yaml")
 	writeWorkflowData(t, workflowPath, "version: 1\nname: check\nsteps:\n  - return: {outputs: {}}\n")
@@ -502,6 +514,7 @@ func TestRunCommandStreamsReportForSetupFailures(t *testing.T) {
 }
 
 func TestRunCommandRejectsPickWithStreamedReport(t *testing.T) {
+	t.Parallel()
 	var stdout bytes.Buffer
 	root := t.TempDir()
 	command := newRootCmd(dependencies{

@@ -15,6 +15,7 @@ import (
 )
 
 func TestNewRevisionValidatesConfiguration(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name string
 		raw  map[string]any
@@ -39,6 +40,7 @@ func TestNewRevisionValidatesConfiguration(t *testing.T) {
 }
 
 func TestRegisterIncludesHistorySteps(t *testing.T) {
+	t.Parallel()
 	registry := step.NewRegistry()
 	if err := Register(registry); err != nil {
 		t.Fatal(err)
@@ -55,6 +57,7 @@ func TestRegisterIncludesHistorySteps(t *testing.T) {
 }
 
 func TestNewMergeBaseValidatesConfiguration(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name string
 		raw  map[string]any
@@ -85,6 +88,7 @@ func TestNewMergeBaseValidatesConfiguration(t *testing.T) {
 }
 
 func TestNewLogValidatesConfiguration(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name string
 		raw  map[string]any
@@ -126,6 +130,7 @@ func TestNewLogValidatesConfiguration(t *testing.T) {
 }
 
 func TestRevisionAndLogAgainstRepository(t *testing.T) {
+	t.Parallel()
 	dir := initGitRepository(t)
 	initial := strings.TrimSpace(runGitTest(t, dir, "rev-parse", "HEAD"))
 	mainBranch := strings.TrimSpace(runGitTest(t, dir, "branch", "--show-current"))
@@ -192,6 +197,7 @@ func TestRevisionAndLogAgainstRepository(t *testing.T) {
 }
 
 func TestMergeBaseAgainstDivergedRepository(t *testing.T) {
+	t.Parallel()
 	dir := initGitRepository(t)
 	base := strings.TrimSpace(runGitTest(t, dir, "rev-parse", "HEAD"))
 	mainBranch := strings.TrimSpace(runGitTest(t, dir, "branch", "--show-current"))
@@ -224,6 +230,7 @@ func TestMergeBaseAgainstDivergedRepository(t *testing.T) {
 }
 
 func TestMergeBaseRejectsUnresolvedMissingAndAmbiguousHistory(t *testing.T) {
+	t.Parallel()
 	runner, err := NewMergeBase(map[string]any{"from": "{{ .vars.base }}"})
 	if err != nil {
 		t.Fatal(err)
@@ -268,6 +275,7 @@ func TestMergeBaseRejectsUnresolvedMissingAndAmbiguousHistory(t *testing.T) {
 }
 
 func TestRevisionReadsAnnotatedTagAndMessageFields(t *testing.T) {
+	t.Parallel()
 	dir := initGitRepository(t)
 	writeHistoryFile(t, dir, ".mailmap", "Canonical Author <canonical@example.com> Wuko Test <wuko@example.test>\n")
 	runGitTest(t, dir, "add", ".mailmap")
@@ -292,6 +300,7 @@ func TestRevisionReadsAnnotatedTagAndMessageFields(t *testing.T) {
 }
 
 func TestHistoryHandlesUnbornRepository(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	runGitTest(t, dir, "init", "--quiet")
 	outputs := runRevision(t, dir, map[string]any{})
@@ -312,6 +321,7 @@ func TestHistoryHandlesUnbornRepository(t *testing.T) {
 }
 
 func TestHistoryRejectsUnresolvedTemplatesAndDivergentBoundary(t *testing.T) {
+	t.Parallel()
 	revision, err := NewRevision(map[string]any{"revision": "{{ .vars.ref }}"})
 	if err != nil {
 		t.Fatal(err)
@@ -342,6 +352,7 @@ func TestHistoryRejectsUnresolvedTemplatesAndDivergentBoundary(t *testing.T) {
 }
 
 func TestHistoryTruncationKeepsExitError(t *testing.T) {
+	t.Parallel()
 	executor := &scriptedGitExecutor{results: []scriptedGitResult{
 		{result: process.Result{StdoutTruncated: true}, err: &process.ExitError{Command: "git", Code: 1}},
 	}}
@@ -358,6 +369,7 @@ func TestHistoryTruncationKeepsExitError(t *testing.T) {
 }
 
 func TestHistoryUsesCaptureOnlyExecutorAndRejectsTruncation(t *testing.T) {
+	t.Parallel()
 	executor := &scriptedGitExecutor{results: []scriptedGitResult{
 		{result: process.Result{Stdout: "commit-id\n"}},
 		{result: process.Result{StdoutTruncated: true}},
@@ -425,6 +437,7 @@ func TestHistoryUsesCaptureOnlyExecutorAndRejectsTruncation(t *testing.T) {
 }
 
 func TestHistoryCancellation(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	for _, test := range []struct {
@@ -442,6 +455,7 @@ func TestHistoryCancellation(t *testing.T) {
 }
 
 func TestHistoryDocumentationExamples(t *testing.T) {
+	t.Parallel()
 	data, err := os.ReadFile("../../docs/steps-system.md")
 	if err != nil {
 		t.Fatal(err)

@@ -118,6 +118,7 @@ func archiveNames(t *testing.T, options client.CopyToContainerOptions) []string 
 }
 
 func TestDockerFileSystemTranslatesHostPathsIntoTheContainer(t *testing.T) {
+	t.Parallel()
 	client := newFilesystemClient()
 	session := filesystemSession(client, "/host/run", pathMapping{source: "/host/run", target: "/workspace"})
 	client.content["/workspace/config.yaml"] = []byte("version: 1\n")
@@ -132,6 +133,7 @@ func TestDockerFileSystemTranslatesHostPathsIntoTheContainer(t *testing.T) {
 }
 
 func TestDockerFileSystemRejectsRunDirectoryPathsThatAreNotMounted(t *testing.T) {
+	t.Parallel()
 	session := filesystemSession(newFilesystemClient(), "/host/run")
 	session.config.Workspace = &WorkspaceConfig{Enabled: false}
 	_, err := session.ReadFile(t.Context(), "/host/run/config.yaml", 0)
@@ -141,6 +143,7 @@ func TestDockerFileSystemRejectsRunDirectoryPathsThatAreNotMounted(t *testing.T)
 }
 
 func TestDockerFileSystemReportsMissingPathsAsNotExist(t *testing.T) {
+	t.Parallel()
 	session := filesystemSession(newFilesystemClient(), "/host/run", pathMapping{source: "/host/run", target: "/workspace"})
 	if _, err := session.Stat(t.Context(), "/host/run/absent"); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("Stat() error = %v, want fs.ErrNotExist", err)
@@ -151,6 +154,7 @@ func TestDockerFileSystemReportsMissingPathsAsNotExist(t *testing.T) {
 }
 
 func TestDockerFileSystemStatReportsContainerMetadata(t *testing.T) {
+	t.Parallel()
 	client := newFilesystemClient()
 	modified := time.Date(2026, time.March, 2, 10, 30, 0, 0, time.UTC)
 	client.stat["/workspace/config.yaml"] = container.PathStat{Size: 11, Mode: 0o640, Mtime: modified}
@@ -166,6 +170,7 @@ func TestDockerFileSystemStatReportsContainerMetadata(t *testing.T) {
 }
 
 func TestDockerFileSystemWritesAtomicallyAsTheExecutorUser(t *testing.T) {
+	t.Parallel()
 	client := newFilesystemClient()
 	session := filesystemSession(client, "/host/run", pathMapping{source: "/host/run", target: "/workspace"})
 	session.config.User = "1000:1000"
@@ -192,6 +197,7 @@ func TestDockerFileSystemWritesAtomicallyAsTheExecutorUser(t *testing.T) {
 }
 
 func TestDockerFileSystemNoReplaceReportsConcurrentDestination(t *testing.T) {
+	t.Parallel()
 	client := newFilesystemClient()
 	client.exitCode = fileExistsExitCode
 	session := filesystemSession(client, "/host/run", pathMapping{source: "/host/run", target: "/workspace"})
@@ -205,6 +211,7 @@ func TestDockerFileSystemNoReplaceReportsConcurrentDestination(t *testing.T) {
 }
 
 func TestDockerFileSystemBoundsReads(t *testing.T) {
+	t.Parallel()
 	client := newFilesystemClient()
 	client.content["/workspace/config.yaml"] = []byte("123456789")
 	session := filesystemSession(client, "/host/run", pathMapping{source: "/host/run", target: "/workspace"})
@@ -218,6 +225,7 @@ func TestDockerFileSystemBoundsReads(t *testing.T) {
 }
 
 func TestDockerFileSystemMkdirAllCreatesOnlyMissingComponents(t *testing.T) {
+	t.Parallel()
 	client := newFilesystemClient()
 	client.stat["/workspace"] = container.PathStat{Mode: os.ModeDir | 0o755}
 	session := filesystemSession(client, "/host/run", pathMapping{source: "/host/run", target: "/workspace"})
@@ -241,6 +249,7 @@ func TestDockerFileSystemMkdirAllCreatesOnlyMissingComponents(t *testing.T) {
 }
 
 func TestDockerFileSystemMkdirAllAcceptsAnExistingDirectory(t *testing.T) {
+	t.Parallel()
 	client := newFilesystemClient()
 	client.stat["/workspace/build"] = container.PathStat{Mode: os.ModeDir | 0o755}
 	session := filesystemSession(client, "/host/run", pathMapping{source: "/host/run", target: "/workspace"})
@@ -254,6 +263,7 @@ func TestDockerFileSystemMkdirAllAcceptsAnExistingDirectory(t *testing.T) {
 }
 
 func TestDockerFileSystemMkdirAllRejectsAFileInThePath(t *testing.T) {
+	t.Parallel()
 	client := newFilesystemClient()
 	client.stat["/workspace/build"] = container.PathStat{Mode: 0o644}
 	session := filesystemSession(client, "/host/run", pathMapping{source: "/host/run", target: "/workspace"})
@@ -265,6 +275,7 @@ func TestDockerFileSystemMkdirAllRejectsAFileInThePath(t *testing.T) {
 }
 
 func TestDockerFileSystemRefusesAClosedSession(t *testing.T) {
+	t.Parallel()
 	session := filesystemSession(newFilesystemClient(), "/host/run", pathMapping{source: "/host/run", target: "/workspace"})
 	session.closed = true
 	if _, err := session.Stat(t.Context(), "/host/run/config.yaml"); err == nil || !strings.Contains(err.Error(), "session is closed") {

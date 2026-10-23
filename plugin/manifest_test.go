@@ -12,6 +12,7 @@ import (
 )
 
 func TestParseManifestSelectsCurrentArtifact(t *testing.T) {
+	t.Parallel()
 	artifactDigest := strings.Repeat("a", 64)
 	data, err := json.Marshal(Manifest{Version: 1, Namespace: "acme", PluginVersion: "1.0.0", Protocol: Protocol, Artifacts: []Artifact{{OS: runtime.GOOS, Arch: runtime.GOARCH, Path: "dist/plugin.tar.gz", Format: "tar.gz", Entry: "wuko-plugin-acme", SHA256: artifactDigest}}})
 	if err != nil {
@@ -31,6 +32,7 @@ func TestParseManifestSelectsCurrentArtifact(t *testing.T) {
 }
 
 func TestParseManifestAcceptsBothRuntimeProtocols(t *testing.T) {
+	t.Parallel()
 	artifact := Artifact{OS: runtime.GOOS, Arch: runtime.GOARCH, Path: "plugin.tar.gz", Format: "tar.gz", Entry: "wuko-plugin-acme", SHA256: strings.Repeat("a", 64)}
 	for _, protocol := range []string{ProtocolV1, ProtocolV2, ProtocolV3} {
 		t.Run(protocol, func(t *testing.T) {
@@ -50,6 +52,7 @@ func TestParseManifestAcceptsBothRuntimeProtocols(t *testing.T) {
 }
 
 func TestParseManifestRejectsDuplicatePlatform(t *testing.T) {
+	t.Parallel()
 	artifact := Artifact{OS: "linux", Arch: "arm64", Path: "plugin.tar.gz", Format: "tar.gz", Entry: "wuko-plugin-acme", SHA256: strings.Repeat("a", 64)}
 	data, _ := json.Marshal(Manifest{Version: 1, Namespace: "acme", PluginVersion: "1", Protocol: Protocol, Artifacts: []Artifact{artifact, artifact}})
 	if _, err := ParseManifest(data); err == nil {
@@ -58,6 +61,7 @@ func TestParseManifestRejectsDuplicatePlatform(t *testing.T) {
 }
 
 func TestExtractRejectsTraversalAndAcceptsExecutable(t *testing.T) {
+	t.Parallel()
 	archive := makeArchive(t, "wuko-plugin-acme", 0755, []byte("binary"))
 	release := Release{Artifact: Artifact{Entry: "wuko-plugin-acme"}, ArtifactData: archive}
 	entry, err := Extract(release, t.TempDir())
@@ -94,6 +98,7 @@ func makeArchive(t *testing.T, name string, mode int64, data []byte) []byte {
 }
 
 func TestParseManifestRejectsPaddedPluginVersionAndEmptyArtifacts(t *testing.T) {
+	t.Parallel()
 	// A padded version parses but fails marketplace manifest validation, which would let
 	// `wuko marketplace build` publish a manifest.json it can no longer read back.
 	padded := []byte(`{"version":1,"namespace":"acme","plugin_version":" 1.0.0 ","protocol":"wuko.plugin/v1","artifacts":[{"os":"linux","arch":"amd64","path":"a.tar.gz","format":"tar.gz","entry":"wuko-plugin-acme","sha256":"` + strings.Repeat("a", 64) + `"}]}`)

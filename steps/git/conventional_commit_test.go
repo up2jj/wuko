@@ -13,6 +13,7 @@ import (
 )
 
 func TestNewConventionalCommitValidatesConfiguration(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		raw  map[string]any
@@ -43,6 +44,7 @@ func TestNewConventionalCommitValidatesConfiguration(t *testing.T) {
 }
 
 func TestConventionalCommitCreateReturnsStructuredOutputAndVariable(t *testing.T) {
+	t.Parallel()
 	runner, err := NewConventionalCommit(map[string]any{
 		"operation": "create", "type": "feat", "scope": "workflow", "subject": "add commit support",
 		"breaking": true, "body": "A body.", "task": "WUKO-142", "variable": "commit_message",
@@ -67,6 +69,7 @@ func TestConventionalCommitCreateReturnsStructuredOutputAndVariable(t *testing.T
 }
 
 func TestConventionalCommitCreateOptionallyValidatesTask(t *testing.T) {
+	t.Parallel()
 	valid, err := NewConventionalCommit(map[string]any{
 		"operation": "create", "type": "fix", "subject": "correct sessions", "task": "WUKO-12", "task_regex": `WUKO-[0-9]+`,
 	})
@@ -85,6 +88,7 @@ func TestConventionalCommitCreateOptionallyValidatesTask(t *testing.T) {
 }
 
 func TestConventionalCommitValidateReturnsStructuredOutput(t *testing.T) {
+	t.Parallel()
 	message := "fix(auth): correct sessions WUKO-12\n\nClear cached credentials."
 	runner, err := NewConventionalCommit(map[string]any{
 		"operation": "validate", "message": message, "strict": true, "types": []any{"fix"},
@@ -104,6 +108,7 @@ func TestConventionalCommitValidateReturnsStructuredOutput(t *testing.T) {
 }
 
 func TestConventionalCommitDefersTemplatedValues(t *testing.T) {
+	t.Parallel()
 	runner, err := NewConventionalCommit(map[string]any{
 		"operation": "create", "type": "{{ .vars.type }}", "subject": "{{ .vars.subject }}",
 	})
@@ -116,6 +121,7 @@ func TestConventionalCommitDefersTemplatedValues(t *testing.T) {
 }
 
 func TestConventionalCommitPropagatesCancellation(t *testing.T) {
+	t.Parallel()
 	runner, err := NewConventionalCommit(map[string]any{"operation": "create", "type": "feat", "subject": "message"})
 	if err != nil {
 		t.Fatal(err)
@@ -128,6 +134,7 @@ func TestConventionalCommitPropagatesCancellation(t *testing.T) {
 }
 
 func TestConventionalCommitDocumentationExamples(t *testing.T) {
+	t.Parallel()
 	data, err := os.ReadFile("../../docs/steps-system.md")
 	if err != nil {
 		t.Fatal(err)
@@ -158,6 +165,7 @@ func TestConventionalCommitDocumentationExamples(t *testing.T) {
 }
 
 func TestConventionalCommitAllowsBracesInFreeText(t *testing.T) {
+	t.Parallel()
 	message := "fix(tmpl): escape {{ .Values.name }} in the chart"
 	runner, err := NewConventionalCommit(map[string]any{"operation": "validate", "message": message})
 	if err != nil {

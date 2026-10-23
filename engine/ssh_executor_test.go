@@ -18,6 +18,7 @@ import (
 )
 
 func TestSSHRestrictionsApplyInsideControlsAndCleanup(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, nil)
 	if err := shell.Register(registry); err != nil {
 		t.Fatal(err)
@@ -93,6 +94,7 @@ func (p directoryProvider) Open(context.Context, executor.Request) (executor.Ses
 func (directoryProvider) SupportsFileSystem() bool { return true }
 
 func TestExecutorWorkingDirectoryUsesTargetAndRestoresLocalExecution(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	remoteOnly := filepath.Join(root, "exists-only-on-target")
 	session := &directoryExecutor{directory: remoteOnly}

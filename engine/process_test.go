@@ -34,6 +34,7 @@ func (runner fileExistsRunner) Run(context.Context, step.Request) (step.Result, 
 }
 
 func TestProcessIsActiveForFollowingStepsAndStopsBeforeFinally(t *testing.T) {
+	t.Parallel()
 	directory := t.TempDir()
 	started := filepath.Join(directory, "started")
 	stopped := filepath.Join(directory, "stopped")
@@ -65,6 +66,7 @@ func TestProcessIsActiveForFollowingStepsAndStopsBeforeFinally(t *testing.T) {
 }
 
 func TestProcessStartupFailureIsCaughtWithoutCancelingTheRun(t *testing.T) {
+	t.Parallel()
 	directory := t.TempDir()
 	rescued := filepath.Join(directory, "rescued")
 	registry := step.NewRegistry()
@@ -105,6 +107,7 @@ func TestProcessStartupFailureIsCaughtWithoutCancelingTheRun(t *testing.T) {
 }
 
 func TestProcessArgvExpressionReferencesAreCheckedBeforeTheRunStarts(t *testing.T) {
+	t.Parallel()
 	directory := t.TempDir()
 	registry := step.NewRegistry()
 	if err := processstep.Register(registry); err != nil {
@@ -120,6 +123,7 @@ func TestProcessArgvExpressionReferencesAreCheckedBeforeTheRunStarts(t *testing.
 }
 
 func TestProcessCallExpressionReferencesAreCheckedBeforeTheRunStarts(t *testing.T) {
+	t.Parallel()
 	directory := t.TempDir()
 	registry := step.NewRegistry()
 	if err := processstep.Register(registry); err != nil {

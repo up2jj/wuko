@@ -27,6 +27,7 @@ import (
 // Picker state lives in the global values root beside workflow-managed stores, so a
 // workflow must not be able to read or rewrite it by name.
 func TestPickerStoreNameIsReservedFromWorkflows(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	if _, err := keyvalue.OpenWorkflowScoped(dir, dir, keyvalue.Global, workflowPickerStoreName); err == nil {
 		t.Fatalf("a workflow can open the picker store %q", workflowPickerStoreName)
@@ -34,6 +35,7 @@ func TestPickerStoreNameIsReservedFromWorkflows(t *testing.T) {
 }
 
 func TestWorkflowPickerStatePersistsAndPrunesUnavailable(t *testing.T) {
+	t.Parallel()
 	configDir := t.TempDir()
 	available := filepath.Join(t.TempDir(), "available.yaml")
 	missing := filepath.Join(t.TempDir(), "missing.yaml")
@@ -72,6 +74,7 @@ func TestWorkflowPickerStatePersistsAndPrunesUnavailable(t *testing.T) {
 }
 
 func TestWorkflowPickerSortsPinnedAndRecentSources(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	sources := []workflow.Source{
 		{Name: "alpha", Path: filepath.Join(root, "alpha.yaml")},
@@ -94,6 +97,7 @@ func TestWorkflowPickerSortsPinnedAndRecentSources(t *testing.T) {
 }
 
 func TestWorkflowPickerPreservesOtherProjectHistory(t *testing.T) {
+	t.Parallel()
 	for _, invokable := range []bool{false, true} {
 		t.Run(fmt.Sprintf("invokable=%t", invokable), func(t *testing.T) {
 			other := writePickerWorkflow(t, t.TempDir(), "version: 1\nname: other\nsteps:\n  - return: {outputs: {}}\n")
@@ -129,6 +133,7 @@ func TestWorkflowPickerPreservesOtherProjectHistory(t *testing.T) {
 }
 
 func TestWorkflowPickerInspectionsIsolatePlugins(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name   string
 		intent tui.SelectionIntent
@@ -194,6 +199,7 @@ func TestWorkflowPickerInspectionsIsolatePlugins(t *testing.T) {
 }
 
 func TestWorkflowPickerStateCapsRecentHistory(t *testing.T) {
+	t.Parallel()
 	state := workflowPickerState{}
 	paths := make([]string, workflowPickerRecentMax+5)
 	for index := range paths {
@@ -209,6 +215,7 @@ func TestWorkflowPickerStateCapsRecentHistory(t *testing.T) {
 }
 
 func TestWorkflowPickerOptionShowsPlainTextPin(t *testing.T) {
+	t.Parallel()
 	option := workflowPickerOptionWithState(workflow.Source{
 		Name: "build", Scope: "local", Description: "Build", Path: "/project/build.yaml",
 	}, true, false)
@@ -221,6 +228,7 @@ func TestWorkflowPickerOptionShowsPlainTextPin(t *testing.T) {
 }
 
 func TestWorkflowPickerOptionShowsPackageVersion(t *testing.T) {
+	t.Parallel()
 	option := workflowPickerOption(workflow.Source{
 		Name: "release", Scope: "local", Description: "Publish", PackageVersion: "1.4.0",
 		Path: "/project/release.yaml",
@@ -231,6 +239,7 @@ func TestWorkflowPickerOptionShowsPackageVersion(t *testing.T) {
 }
 
 func TestWorkflowPickerOptionCarriesMarketplaceURL(t *testing.T) {
+	t.Parallel()
 	option := workflowPickerOption(workflow.Source{
 		Name: "release", Path: "/project/release/wuko.yaml", MarketplaceURL: "https://example.test/marketplace/",
 	})
@@ -240,6 +249,7 @@ func TestWorkflowPickerOptionCarriesMarketplaceURL(t *testing.T) {
 }
 
 func TestWorkflowPickerActionsAreContextualAndOrdered(t *testing.T) {
+	t.Parallel()
 	source := workflow.Source{Name: "release", HasForm: false, MarketplaceURL: "https://example.test/marketplace/"}
 	actions := workflowPickerActions(source, true, workflowPickerSortRecent)
 	want := []struct {
@@ -282,6 +292,7 @@ func TestWorkflowPickerActionsAreContextualAndOrdered(t *testing.T) {
 }
 
 func TestWorkflowPickerStateRejectsMalformedState(t *testing.T) {
+	t.Parallel()
 	configDir := t.TempDir()
 	path := filepath.Join(configDir, "wuko", "values", "picker.json")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -296,6 +307,7 @@ func TestWorkflowPickerStateRejectsMalformedState(t *testing.T) {
 }
 
 func TestWorkflowPickerInspectionReturnsToFilterWithoutMarkingRecent(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	workflowDir := filepath.Join(root, ".wuko", "workflows")
 	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
@@ -346,6 +358,7 @@ func TestWorkflowPickerInspectionReturnsToFilterWithoutMarkingRecent(t *testing.
 }
 
 func TestWorkflowPickerReturnDestinationReopensAfterRun(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	path := writePickerWorkflow(t, root, `version: 1
 name: return-to-picker
@@ -375,6 +388,7 @@ steps:
 }
 
 func TestWorkflowPickerOrdinaryReturnStillExits(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writePickerWorkflow(t, root, "version: 1\nname: ordinary\nsteps:\n  - return: {outputs: {}}\n")
 	selections := 0
@@ -393,6 +407,7 @@ func TestWorkflowPickerOrdinaryReturnStillExits(t *testing.T) {
 }
 
 func TestWorkflowPickerReturnDestinationHonorsFailureBoundary(t *testing.T) {
+	t.Parallel()
 	failure := errors.New("picker test failed")
 	for _, test := range []struct {
 		name       string
@@ -439,6 +454,7 @@ func TestWorkflowPickerReturnDestinationHonorsFailureBoundary(t *testing.T) {
 }
 
 func TestWorkflowPickerReturnDestinationRefreshesDiscovery(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name       string
 		mutate     func(string) error
@@ -493,6 +509,7 @@ func TestWorkflowPickerReturnDestinationRefreshesDiscovery(t *testing.T) {
 }
 
 func TestWorkflowPickerDependencyReturnDestinationStaysLocal(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	workflowDir := filepath.Join(root, ".wuko", "workflows")
 	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
@@ -516,6 +533,7 @@ func TestWorkflowPickerDependencyReturnDestinationStaysLocal(t *testing.T) {
 }
 
 func TestWorkflowPickerReturnDestinationCancellationExits(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writePickerWorkflow(t, root, "version: 1\nname: canceled\nsteps:\n  - return: {to: picker, outputs: {}}\nfinally:\n  - {id: cancel, type: picker_cancel}\n")
 	ctx, cancel := context.WithCancel(t.Context())
@@ -538,6 +556,7 @@ func TestWorkflowPickerReturnDestinationCancellationExits(t *testing.T) {
 }
 
 func TestWorkflowPickerScheduledReturnDestinationStopsAfterOccurrence(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writePickerWorkflow(t, root, "version: 1\nname: scheduled-return\ncron: '* * * * * *'\ntimezone: UTC\nsteps:\n  - return: {to: picker, outputs: {}}\n")
 	selections := 0
@@ -566,6 +585,7 @@ func TestWorkflowPickerScheduledReturnDestinationStopsAfterOccurrence(t *testing
 // A failed occurrence keeps its schedule under the picker exactly as it does under a direct
 // scheduled run: only the return destination ends the loop and reopens the picker.
 func TestWorkflowPickerScheduledFailureKeepsSchedule(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writePickerWorkflow(t, root, "version: 1\nname: scheduled-flaky\ncron: '* * * * * *'\ntimezone: UTC\nsteps:\n  - {id: flaky, type: picker_test}\n  - return: {to: picker, outputs: {}}\n")
 	registry := step.NewRegistry()
@@ -608,6 +628,7 @@ func TestWorkflowPickerScheduledFailureKeepsSchedule(t *testing.T) {
 }
 
 func TestWorkflowPickerReturnDestinationReopensAfterFormRun(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	path := writePickerWorkflow(t, root, `version: 1
 name: form-return
@@ -653,6 +674,7 @@ steps:
 }
 
 func TestDirectWorkflowCommandsIgnoreReturnDestination(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	path := writePickerWorkflow(t, root, `version: 1
 name: direct-return
@@ -693,6 +715,7 @@ steps:
 }
 
 func TestWorkflowPickerInspectionsUseExactShadowedPathAndTarget(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	home := filepath.Join(root, "home")
 	configDir := filepath.Join(root, "config")
@@ -742,6 +765,7 @@ targets:
 }
 
 func TestWorkflowPickerRefreshesAfterEditorAndKeepsSnapshotOnFailure(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name        string
 		intent      tui.SelectionIntent
@@ -796,6 +820,7 @@ func TestWorkflowPickerRefreshesAfterEditorAndKeepsSnapshotOnFailure(t *testing.
 }
 
 func TestOpenWorkflowEditorUsesVisual(t *testing.T) {
+	t.Parallel()
 	var output bytes.Buffer
 	editor := openWorkflowEditor(func(name string) string {
 		if name == "VISUAL" {

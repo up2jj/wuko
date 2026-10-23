@@ -31,6 +31,7 @@ func (host *nestedWorkflowHost) RunWorkflow(ctx context.Context, invocation Work
 }
 
 func TestRunWorkflowProgressIsCorrelatedToInvokingStep(t *testing.T) {
+	t.Parallel()
 	directory := t.TempDir()
 	childPath := filepath.Join(directory, "child.yaml")
 	parentPath := filepath.Join(directory, "parent.yaml")

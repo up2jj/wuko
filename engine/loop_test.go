@@ -10,6 +10,7 @@ import (
 )
 
 func TestLoopRepeatsUntilExpressionMatches(t *testing.T) {
+	t.Parallel()
 	var polls int
 	registry := newTestRegistry(t, map[string]step.Builder{
 		"poll": func(map[string]any) (step.Runner, error) {
@@ -48,6 +49,7 @@ func TestLoopRepeatsUntilExpressionMatches(t *testing.T) {
 }
 
 func TestLoopFailsAtMaximumIterations(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, map[string]step.Builder{
 		"poll": func(map[string]any) (step.Runner, error) {
 			return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
@@ -70,6 +72,7 @@ func TestLoopFailsAtMaximumIterations(t *testing.T) {
 }
 
 func TestLoopFinishedEventCountsOnlySucceededIterations(t *testing.T) {
+	t.Parallel()
 	runs := 0
 	registry := newTestRegistry(t, map[string]step.Builder{
 		"poll": func(map[string]any) (step.Runner, error) {

@@ -37,6 +37,7 @@ func (ticker *fakeReporterTicker) C() <-chan time.Time { return ticker.ticks }
 func (ticker *fakeReporterTicker) Stop()               { ticker.once.Do(func() { close(ticker.stopped) }) }
 
 func TestMultiplexerReporterAnimatesProgressAndLeavesFinalStatus(t *testing.T) {
+	t.Parallel()
 	sink := &fakeTitleSink{wrote: make(chan string, 8)}
 	ticker := &fakeReporterTicker{ticks: make(chan time.Time, 1), stopped: make(chan struct{})}
 	reporter := newMultiplexerProgressReporterWithSink(sink, func(time.Duration) reporterTicker { return ticker })
@@ -70,6 +71,7 @@ func TestMultiplexerReporterAnimatesProgressAndLeavesFinalStatus(t *testing.T) {
 }
 
 func TestMultiplexerReporterFormatsRetryPollAndDryRun(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		event engine.ProgressEvent
 		want  string
@@ -107,6 +109,7 @@ func TestMultiplexerReporterFormatsRetryPollAndDryRun(t *testing.T) {
 }
 
 func TestSanitizeMultiplexerTitleRemovesControlsAndLimitsRunes(t *testing.T) {
+	t.Parallel()
 	value := sanitizeMultiplexerTitle("  bad\x1b\n" + strings.Repeat("界", 100))
 	if strings.ContainsAny(value, "\x1b\n") {
 		t.Fatalf("title contains controls: %q", value)

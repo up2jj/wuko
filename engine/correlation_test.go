@@ -12,6 +12,7 @@ import (
 )
 
 func TestRunCorrelationPropagatesThroughRetriesAndStats(t *testing.T) {
+	t.Parallel()
 	invocationID := correlation.InvocationID("invocation")
 	var attempts int
 	registry := newTestRegistry(t, map[string]step.Builder{"flaky": func(map[string]any) (step.Runner, error) {
@@ -57,6 +58,7 @@ func TestRunCorrelationPropagatesThroughRetriesAndStats(t *testing.T) {
 }
 
 func TestCompositeRunCorrelationIncludesCallingStep(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, map[string]step.Builder{"ok": func(map[string]any) (step.Runner, error) {
 		return runnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
 	}})
@@ -93,6 +95,7 @@ func TestCompositeRunCorrelationIncludesCallingStep(t *testing.T) {
 }
 
 func TestLoopOccurrencesReceiveDistinctStepRunIDs(t *testing.T) {
+	t.Parallel()
 	var polls int
 	registry := newTestRegistry(t, map[string]step.Builder{"poll": func(map[string]any) (step.Runner, error) {
 		return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
@@ -118,6 +121,7 @@ func TestLoopOccurrencesReceiveDistinctStepRunIDs(t *testing.T) {
 }
 
 func TestMatrixAndSkippedOccurrencesReceiveStepRunIDs(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, map[string]step.Builder{"ok": func(map[string]any) (step.Runner, error) {
 		return runnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
 	}})
@@ -150,6 +154,7 @@ func TestMatrixAndSkippedOccurrencesReceiveStepRunIDs(t *testing.T) {
 }
 
 func TestRunCorrelationExistsForDryRunAndValidationFailure(t *testing.T) {
+	t.Parallel()
 	dryDefinition := testDefinition(t, "dry", workflow.Step{ID: "run", Type: "missing", With: map[string]any{}})
 	var failed diagnostic.Event
 	_, err := New(newTestRegistry(t, nil)).Run(t.Context(), dryDefinition, Options{InvocationID: "invocation", Diagnostics: func(event diagnostic.Event) {

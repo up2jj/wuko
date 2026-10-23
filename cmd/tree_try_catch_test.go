@@ -8,6 +8,7 @@ import (
 )
 
 func TestTreeShowsTryAndCatchPhases(t *testing.T) {
+	t.Parallel()
 	definition := &workflow.Definition{Version: 1, Name: "recovery", Steps: []workflow.Step{{
 		ID:    "deployment",
 		Try:   &workflow.TryBlock{Steps: []workflow.Step{{ID: "deploy", Type: "shell"}}},

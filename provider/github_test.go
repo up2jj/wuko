@@ -37,6 +37,7 @@ func loadGitHub(t *testing.T, environment map[string]string) (map[string]any, bo
 }
 
 func TestGitHubSchemaKeepsCuratedFieldsClosedAndPayloadOpen(t *testing.T) {
+	t.Parallel()
 	schema := NewGitHub().Schema()
 	for _, field := range []string{"repository", "actor", "event", "pull_request", "sha", "ref", "run", "server_url", "api_url", "payload"} {
 		if _, exists := schema.Fields[field]; !exists {
@@ -52,6 +53,7 @@ func TestGitHubSchemaKeepsCuratedFieldsClosedAndPayloadOpen(t *testing.T) {
 }
 
 func TestGitHubInactiveDoesNotInspectEvent(t *testing.T) {
+	t.Parallel()
 	for _, marker := range []string{"", "false", "TRUE", "1", " true"} {
 		t.Run(marker, func(t *testing.T) {
 			value, active, err := loadGitHub(t, map[string]string{
@@ -66,6 +68,7 @@ func TestGitHubInactiveDoesNotInspectEvent(t *testing.T) {
 }
 
 func TestGitHubPushContextAndNativeNumbers(t *testing.T) {
+	t.Parallel()
 	environment := githubTestEnvironment(t, `{"action":null,"small":12,"large":18446744073709551615,"fraction":1.25,"nested":[3]}`)
 	value, active, err := loadGitHub(t, environment)
 	if err != nil {
@@ -103,6 +106,7 @@ func TestGitHubPushContextAndNativeNumbers(t *testing.T) {
 }
 
 func TestGitHubPullRequestAndEnterpriseURLs(t *testing.T) {
+	t.Parallel()
 	environment := githubTestEnvironment(t, `{
   "action":"synchronize",
   "pull_request":{"number":123,"head":{"sha":"head-sha","ref":"feature/foo"},"base":{"sha":"base-sha","ref":"main"}}
@@ -131,6 +135,7 @@ func TestGitHubPullRequestAndEnterpriseURLs(t *testing.T) {
 }
 
 func TestGitHubAcceptsEmptyPayload(t *testing.T) {
+	t.Parallel()
 	value, active, err := loadGitHub(t, githubTestEnvironment(t, `{}`))
 	if err != nil || !active {
 		t.Fatalf("Load active=%v error=%v", active, err)
@@ -144,6 +149,7 @@ func TestGitHubAcceptsEmptyPayload(t *testing.T) {
 }
 
 func TestGitHubOmitsNullPullRequest(t *testing.T) {
+	t.Parallel()
 	value, active, err := loadGitHub(t, githubTestEnvironment(t, `{"pull_request":null}`))
 	if err != nil || !active {
 		t.Fatalf("Load active=%v error=%v", active, err)
@@ -154,6 +160,7 @@ func TestGitHubOmitsNullPullRequest(t *testing.T) {
 }
 
 func TestGitHubRequiresRunnerMetadata(t *testing.T) {
+	t.Parallel()
 	for _, name := range []string{
 		"GITHUB_REPOSITORY", "GITHUB_ACTOR", "GITHUB_EVENT_NAME", "GITHUB_EVENT_PATH",
 		"GITHUB_SHA", "GITHUB_RUN_ID", "GITHUB_RUN_NUMBER", "GITHUB_RUN_ATTEMPT",
@@ -171,6 +178,7 @@ func TestGitHubRequiresRunnerMetadata(t *testing.T) {
 }
 
 func TestGitHubRejectsInvalidMetadataAndEvents(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		mutate func(*testing.T, map[string]string)

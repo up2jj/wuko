@@ -16,6 +16,7 @@ import (
 )
 
 func TestResourceWorkerArgumentsPreserveValuesAndInheritedFlags(t *testing.T) {
+	t.Parallel()
 	root := newRootCmd(dependencies{})
 	var got []string
 	command, _, err := root.Find([]string{"run"})
@@ -77,6 +78,7 @@ func TestResourceRunPreservesHostEnvironmentAndCLIStreams(t *testing.T) {
 }
 
 func TestRunResourceFlagsRejectInvalidValuesBeforeExecution(t *testing.T) {
+	t.Parallel()
 	for _, flags := range [][]string{{"--cpus=0"}, {"--cpus=NaN"}, {"--cpus="}, {"--memory=512MB"}, {"--memory="}} {
 		t.Run(strings.Join(flags, " "), func(t *testing.T) {
 			var output bytes.Buffer
@@ -90,6 +92,7 @@ func TestRunResourceFlagsRejectInvalidValuesBeforeExecution(t *testing.T) {
 }
 
 func TestResourceDryRunRequiresNoSupervisor(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "workflow.yaml")
 	if err := os.WriteFile(path, []byte(`version: 1

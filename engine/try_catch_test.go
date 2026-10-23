@@ -15,6 +15,7 @@ import (
 )
 
 func TestTryCatchSuccessSkipsCatchAndPublishesNamedOutcome(t *testing.T) {
+	t.Parallel()
 	var catchRuns int
 	registry := newTestRegistry(t, map[string]step.Builder{
 		"write": func(raw map[string]any) (step.Runner, error) {
@@ -58,6 +59,7 @@ func TestTryCatchSuccessSkipsCatchAndPublishesNamedOutcome(t *testing.T) {
 }
 
 func TestTryCatchRecoversAndExposesStructuredError(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, map[string]step.Builder{
 		"fail": func(map[string]any) (step.Runner, error) {
 			return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
@@ -103,6 +105,7 @@ func TestTryCatchRecoversAndExposesStructuredError(t *testing.T) {
 }
 
 func TestTryCatchCatchIsBestEffortButPublishesNothingOnFailure(t *testing.T) {
+	t.Parallel()
 	var mu sync.Mutex
 	var ran []string
 	var publishedStep bool
@@ -150,6 +153,7 @@ func TestTryCatchCatchIsBestEffortButPublishesNothingOnFailure(t *testing.T) {
 }
 
 func TestTryCatchRecoversChildTimeout(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, map[string]step.Builder{
 		"block": func(map[string]any) (step.Runner, error) {
 			return runnerFunc(func(ctx context.Context, _ step.Request) (step.Result, error) {
@@ -183,6 +187,7 @@ func TestTryCatchRecoversChildTimeout(t *testing.T) {
 }
 
 func TestTryCatchRunsLocalDeferAfterRecoveryBeforePublishing(t *testing.T) {
+	t.Parallel()
 	var cleanupSawError bool
 	var cleanupFinally map[string]any
 	registry := newTestRegistry(t, map[string]step.Builder{
@@ -227,6 +232,7 @@ func TestTryCatchRunsLocalDeferAfterRecoveryBeforePublishing(t *testing.T) {
 }
 
 func TestTryCatchCancellationBypassesCatchAndRunsLocalDefer(t *testing.T) {
+	t.Parallel()
 	started := make(chan struct{})
 	cleaned := make(chan struct{})
 	var catchRuns int
@@ -284,6 +290,7 @@ func TestTryCatchCancellationBypassesCatchAndRunsLocalDefer(t *testing.T) {
 }
 
 func TestTryCatchDryRunShowsBothPhases(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, map[string]step.Builder{
 		"run": func(map[string]any) (step.Runner, error) { return countingRunner{}, nil },
 	})
@@ -308,6 +315,7 @@ func tryCatchStep(primary, rescue []workflow.Step) workflow.Step {
 }
 
 func TestTryCatchSkippedCatchDoesNotRecover(t *testing.T) {
+	t.Parallel()
 	var catchRuns int
 	registry := newTestRegistry(t, map[string]step.Builder{
 		"fail": func(map[string]any) (step.Runner, error) {
@@ -336,6 +344,7 @@ func TestTryCatchSkippedCatchDoesNotRecover(t *testing.T) {
 }
 
 func TestTryCatchExecutedCatchStepIsNotReportedSkipped(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, map[string]step.Builder{
 		"fail": func(map[string]any) (step.Runner, error) {
 			return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
@@ -366,6 +375,7 @@ func TestTryCatchExecutedCatchStepIsNotReportedSkipped(t *testing.T) {
 }
 
 func TestTryCatchValidateRejectsInvalidCondition(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, map[string]step.Builder{
 		"noop": func(map[string]any) (step.Runner, error) {
 			return runnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil

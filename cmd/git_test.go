@@ -21,6 +21,7 @@ import (
 )
 
 func TestGitHookRunExposesStructuredContext(t *testing.T) {
+	t.Parallel()
 	root := initGitHookRepository(t)
 	writeGitHookWorkflow(t, root, "inspect", `printf '%s|%s|%s' "$1" "$2" "$3"`, []string{
 		"{{ .git.hook.name }}", "{{ index .git.hook.args 0 }}", "{{ (index .git.hook.payload.updates 0).local_ref }}",
@@ -42,6 +43,7 @@ func TestGitHookRunExposesStructuredContext(t *testing.T) {
 }
 
 func TestGitHookRunStopsAfterFirstWorkflowFailure(t *testing.T) {
+	t.Parallel()
 	root := initGitHookRepository(t)
 	writeGitHookWorkflow(t, root, "fail", "exit 7", nil)
 	marker := filepath.Join(root, "second-ran")
@@ -58,6 +60,7 @@ func TestGitHookRunStopsAfterFirstWorkflowFailure(t *testing.T) {
 }
 
 func TestGitHookRunUsesConciseFailureReporter(t *testing.T) {
+	t.Parallel()
 	root := initGitHookRepository(t)
 	writeGitHookWorkflow(t, root, "check", `printf 'step detail\n' >&2; exit 7`, nil)
 	writeGitHookManifest(t, root, "pre-commit:\n    - workflow: check")
@@ -82,6 +85,7 @@ func TestGitHookRunUsesConciseFailureReporter(t *testing.T) {
 }
 
 func TestGitHookReporterShowsOnlyFinalRetryFailure(t *testing.T) {
+	t.Parallel()
 	var stderr bytes.Buffer
 	debug := false
 	command := &cobra.Command{}
@@ -109,6 +113,7 @@ func TestGitHookReporterShowsOnlyFinalRetryFailure(t *testing.T) {
 }
 
 func TestGitHookRunSelectsConfiguredTarget(t *testing.T) {
+	t.Parallel()
 	root := initGitHookRepository(t)
 	directory := filepath.Join(root, ".wuko", "workflows")
 	if err := os.MkdirAll(directory, 0o755); err != nil {
@@ -140,6 +145,7 @@ targets:
 }
 
 func TestGitHookRunRejectsRecursion(t *testing.T) {
+	t.Parallel()
 	root := initGitHookRepository(t)
 	writeGitHookManifest(t, root, "pre-commit:\n    - workflow: check")
 	command := newRootCmd(gitHookTestDependencies(t, root, io.Discard, io.Discard, func(name string) string {
@@ -156,6 +162,7 @@ func TestGitHookRunRejectsRecursion(t *testing.T) {
 }
 
 func TestGitHookInstallAndStatus(t *testing.T) {
+	t.Parallel()
 	root := initGitHookRepository(t)
 	writeGitHookWorkflow(t, root, "check", "true", nil)
 	writeGitHookManifest(t, root, "pre-commit:\n    - workflow: check")
@@ -182,6 +189,7 @@ func TestGitHookInstallAndStatus(t *testing.T) {
 }
 
 func TestGitHookInitCreatesValidStarterConfiguration(t *testing.T) {
+	t.Parallel()
 	root := initGitHookRepository(t)
 	var output bytes.Buffer
 	deps := gitHookTestDependencies(t, root, &output, io.Discard, func(string) string { return "" })
@@ -253,6 +261,7 @@ func TestGitHookInitCreatesValidStarterConfiguration(t *testing.T) {
 }
 
 func TestGitHookInitRefusesExistingFilesWithoutMutation(t *testing.T) {
+	t.Parallel()
 	root := initGitHookRepository(t)
 	manifestPath := filepath.Join(root, ".wuko", "git-hooks.yaml")
 	if err := os.MkdirAll(filepath.Dir(manifestPath), 0o755); err != nil {
@@ -279,6 +288,7 @@ func TestGitHookInitRefusesExistingFilesWithoutMutation(t *testing.T) {
 // Git ignores a hook file without the execute bit, so chaining one must not turn it into a
 // failure that blocks every push.
 func TestGitHookRunSkipsNonExecutablePreservedHook(t *testing.T) {
+	t.Parallel()
 	root := initGitHookRepository(t)
 	writeGitHookWorkflow(t, root, "check", "true", nil)
 	writeGitHookManifest(t, root, "pre-push:\n    - workflow: check")
@@ -313,6 +323,7 @@ func TestGitHookRunSkipsNonExecutablePreservedHook(t *testing.T) {
 }
 
 func TestGitHookRunExecutesPreservedHookBeforeLoadingManifest(t *testing.T) {
+	t.Parallel()
 	root := initGitHookRepository(t)
 	writeGitHookWorkflow(t, root, "check", "true", nil)
 	writeGitHookManifest(t, root, "pre-push:\n    - workflow: check")
@@ -359,6 +370,7 @@ func TestGitHookRunExecutesPreservedHookBeforeLoadingManifest(t *testing.T) {
 }
 
 func TestValidateRecognizesGitContextAndManifest(t *testing.T) {
+	t.Parallel()
 	root := initGitHookRepository(t)
 	writeGitHookWorkflow(t, root, "check", `printf '%s' "$1"`, []string{"{{ .git.hook.name }}"})
 	writeGitHookManifest(t, root, "pre-commit:\n    - workflow: check")
@@ -374,6 +386,7 @@ func TestValidateRecognizesGitContextAndManifest(t *testing.T) {
 }
 
 func TestGitHookRunToleratesMissingManifest(t *testing.T) {
+	t.Parallel()
 	root := initGitHookRepository(t)
 	command := newRootCmd(gitHookTestDependencies(t, root, io.Discard, io.Discard, func(string) string { return "" }))
 	command.SetArgs([]string{"git", "hook", "run", "pre-commit"})

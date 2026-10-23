@@ -12,6 +12,7 @@ import (
 )
 
 func TestKeyValueOutputIsAvailableToSubsequentSteps(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, map[string]step.Builder{"capture": func(raw map[string]any) (step.Runner, error) {
 		return countingRunner{value: raw["value"]}, nil
 	}})
@@ -35,6 +36,7 @@ func TestKeyValueOutputIsAvailableToSubsequentSteps(t *testing.T) {
 }
 
 func TestKeyValueTemplatesAndNumericConditions(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, map[string]step.Builder{"capture": func(raw map[string]any) (step.Runner, error) {
 		return countingRunner{value: raw["value"]}, nil
 	}})
@@ -65,6 +67,7 @@ func TestKeyValueTemplatesAndNumericConditions(t *testing.T) {
 }
 
 func TestRemoteActionIsDeniedTheCallerLocalStore(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, nil)
 	if err := keyvaluestep.Register(registry); err != nil {
 		t.Fatal(err)
@@ -107,6 +110,7 @@ func TestRemoteActionIsDeniedTheCallerLocalStore(t *testing.T) {
 }
 
 func TestCompositeActionInheritsCallerValueRoots(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, nil)
 	if err := keyvaluestep.Register(registry); err != nil {
 		t.Fatal(err)
@@ -141,6 +145,7 @@ func TestCompositeActionInheritsCallerValueRoots(t *testing.T) {
 }
 
 func TestKeyValueExprPersistsTypesAcrossRuns(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, nil)
 	if err := keyvaluestep.Register(registry); err != nil {
 		t.Fatal(err)
@@ -171,6 +176,7 @@ func TestKeyValueExprPersistsTypesAcrossRuns(t *testing.T) {
 }
 
 func TestKeyValueUpdateSurvivesConcurrentIncrements(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, nil)
 	if err := keyvaluestep.Register(registry); err != nil {
 		t.Fatal(err)
@@ -199,6 +205,7 @@ func TestKeyValueUpdateSurvivesConcurrentIncrements(t *testing.T) {
 }
 
 func TestKeyValueVariableIsAvailableToLaterExpressions(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, map[string]step.Builder{"capture": func(raw map[string]any) (step.Runner, error) {
 		return countingRunner{value: raw["value"]}, nil
 	}})

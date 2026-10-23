@@ -33,6 +33,7 @@ func elevationTestEngine(t *testing.T, executor process.Executor) *Engine {
 }
 
 func TestEngineRunsElevatedShellOnlyForAllowedLocalProvenance(t *testing.T) {
+	t.Parallel()
 	executor := &elevatedRecordingExecutor{}
 	workflowDefinition := testDefinition(t, "local", workflow.Step{ID: "root", Type: "shell", With: map[string]any{"command": "id", "elevated": true}})
 	engine := elevationTestEngine(t, executor)
@@ -52,6 +53,7 @@ func TestEngineRunsElevatedShellOnlyForAllowedLocalProvenance(t *testing.T) {
 }
 
 func TestEngineRestrictsElevationAcrossActionProvenance(t *testing.T) {
+	t.Parallel()
 	executor := &elevatedRecordingExecutor{}
 	action := testAction(t, "action", workflow.Step{ID: "root", Type: "shell", With: map[string]any{"command": "id", "elevated": true}})
 	engine := elevationTestEngine(t, executor)

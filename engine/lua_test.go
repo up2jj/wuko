@@ -10,6 +10,7 @@ import (
 )
 
 func TestLuaConsumesTypedStepOutputThroughArgumentExpression(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, map[string]step.Builder{
 		"inventory": func(map[string]any) (step.Runner, error) {
 			return runnerFunc(func(context.Context, step.Request) (step.Result, error) {

@@ -14,6 +14,7 @@ import (
 )
 
 func TestInstallIsTransactionalAndWritesMarker(t *testing.T) {
+	t.Parallel()
 	source := t.TempDir()
 	executable, err := os.Executable()
 	if err != nil {
@@ -83,6 +84,7 @@ func TestInstallIsTransactionalAndWritesMarker(t *testing.T) {
 }
 
 func TestInstallReleasesRollsBackEveryCommittedPlugin(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	for _, namespace := range []string{"acme", "beta"} {
 		directory := filepath.Join(root, namespace)
@@ -116,6 +118,7 @@ func TestInstallReleasesRollsBackEveryCommittedPlugin(t *testing.T) {
 }
 
 func TestInstallReleasesSurfacesBackupCleanupFailure(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	target := filepath.Join(root, "acme")
 	if err := os.MkdirAll(target, 0o700); err != nil {
@@ -153,6 +156,7 @@ func testInstallRelease(t *testing.T, namespace string) Release {
 }
 
 func TestLegacyInstallationMarkerDefaultsToV1(t *testing.T) {
+	t.Parallel()
 	directory := t.TempDir()
 	executable := filepath.Join(directory, "wuko-plugin-acme")
 	if err := os.WriteFile(executable, []byte("binary"), 0o700); err != nil {
@@ -191,6 +195,7 @@ func TestLegacyInstallationMarkerDefaultsToV1(t *testing.T) {
 }
 
 func TestInstallPinnedRejectsMarketplaceManifestMismatch(t *testing.T) {
+	t.Parallel()
 	source := t.TempDir()
 	archive := makeArchive(t, "wuko-plugin-acme", 0o755, []byte("binary"))
 	if err := os.WriteFile(filepath.Join(source, "plugin.tar.gz"), archive, 0o600); err != nil {

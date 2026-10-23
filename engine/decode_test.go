@@ -16,6 +16,7 @@ import (
 )
 
 func TestDecodeShellOutputFeedsJSONPath(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, nil)
 	for _, register := range []func(*step.Registry) error{shell.Register, decodestep.Register, jsonpathstep.Register} {
 		if err := register(registry); err != nil {
@@ -45,6 +46,7 @@ func TestDecodeShellOutputFeedsJSONPath(t *testing.T) {
 }
 
 func TestDecodePathUsesWorkingDirectoryScope(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	project := filepath.Join(root, "project")
 	if err := os.Mkdir(project, 0o755); err != nil {

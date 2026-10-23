@@ -10,6 +10,7 @@ import (
 )
 
 func TestPanickingStepFailsStepAndRunsFinally(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		step workflow.Step

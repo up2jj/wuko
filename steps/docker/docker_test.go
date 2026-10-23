@@ -28,6 +28,7 @@ import (
 )
 
 func TestValidateConfig(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		config  Config
@@ -131,6 +132,7 @@ func TestRunCapturesOutputAndBuildsContainerConfig(t *testing.T) {
 }
 
 func TestRunReturnsContainerExitCode(t *testing.T) {
+	t.Parallel()
 	client := &fakeClient{output: multiplexedOutput("", "failed\n"), exitCode: 17}
 	runner := &Runner{
 		config:    Config{Image: "alpine", Command: "false"},
@@ -154,6 +156,7 @@ func TestRunReturnsContainerExitCode(t *testing.T) {
 }
 
 func TestRunStopsAndRemovesOnCancellation(t *testing.T) {
+	t.Parallel()
 	client := &fakeClient{output: multiplexedOutput("", ""), waitBlocks: true}
 	runner := &Runner{
 		config:    Config{Image: "alpine", Command: "sleep"},
@@ -172,6 +175,7 @@ func TestRunStopsAndRemovesOnCancellation(t *testing.T) {
 }
 
 func TestRunJoinsCleanupErrorWithStepError(t *testing.T) {
+	t.Parallel()
 	cleanupErr := errors.New("remove failed")
 	client := &fakeClient{output: multiplexedOutput("", ""), exitCode: 7, removeErr: cleanupErr}
 	runner := &Runner{
@@ -186,6 +190,7 @@ func TestRunJoinsCleanupErrorWithStepError(t *testing.T) {
 }
 
 func TestWaitForOutputStopsOnCancellation(t *testing.T) {
+	t.Parallel()
 	reader, writer := net.Pipe()
 	defer writer.Close()
 	attached := client.ContainerAttachResult{HijackedResponse: client.HijackedResponse{
@@ -226,6 +231,7 @@ func TestRecoverOrphansOnlyRemovesDeadOwners(t *testing.T) {
 }
 
 func TestInputSelectionAndCancellation(t *testing.T) {
+	t.Parallel()
 	t.Run("non-interactive stdin is not forwarded", func(t *testing.T) {
 		runner := &Runner{config: Config{Image: "alpine"}}
 		input, err := runner.input(step.Request{Stdin: strings.NewReader("shared input")})
@@ -297,6 +303,7 @@ func TestInputSelectionAndCancellation(t *testing.T) {
 // Inline stdin is finite even under a TTY: without StdinOnce, closing the attach stream would
 // never deliver EOF to the container, and a command such as cat would wait forever.
 func TestContainerConfigClosesInlineStdinUnderTTY(t *testing.T) {
+	t.Parallel()
 	input := "hi"
 	runner := &Runner{config: Config{Image: "alpine", Command: "cat", TTY: true, Stdin: &input}}
 	config, _, err := runner.containerConfig(step.Request{}, "client", true)
@@ -309,6 +316,7 @@ func TestContainerConfigClosesInlineStdinUnderTTY(t *testing.T) {
 }
 
 func TestEnsureImageInspectsRequestedPlatform(t *testing.T) {
+	t.Parallel()
 	pull := &fakePullResponse{}
 	client := &fakeClient{imageInspectErr: errdefs.ErrNotFound, pullResponse: pull}
 	platform := &v1.Platform{OS: "linux", Architecture: "arm64", Variant: "v8"}

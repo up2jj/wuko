@@ -17,6 +17,7 @@ import (
 )
 
 func TestRunCommandExecutesDependencyChainAndExportsRootOutputs(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	dir := filepath.Join(root, ".wuko", "workflows")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -81,6 +82,7 @@ func (executionProvider dependencyExecutionProvider) Load(context.Context, map[s
 }
 
 func TestRunCommandPropagatesRegisteredProviderIntoDependencies(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	dir := filepath.Join(root, ".wuko", "workflows")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -137,6 +139,7 @@ steps:
 }
 
 func TestRunCommandOrdersAndDeduplicatesDiamondDependencies(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	dir := filepath.Join(root, ".wuko", "workflows")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -176,6 +179,7 @@ func TestRunCommandOrdersAndDeduplicatesDiamondDependencies(t *testing.T) {
 }
 
 func TestReleaseDependencyPlanRemovesRetainedGraph(t *testing.T) {
+	t.Parallel()
 	definition := &workflow.Definition{Name: "scheduled"}
 	plans := map[*workflow.Definition]*workflow.DependencyPlan{
 		definition: {Root: &workflow.DependencyNode{Definition: definition}},
@@ -212,6 +216,7 @@ func (runner dependencyRecordRunner) Run(_ context.Context, request step.Request
 }
 
 func TestDocumentedDependencyExamplesValidateTreeAndDryRun(t *testing.T) {
+	t.Parallel()
 	exampleRoot, err := filepath.Abs(filepath.Join("..", "examples", "dependencies"))
 	if err != nil {
 		t.Fatal(err)

@@ -40,6 +40,7 @@ func (executor *recordingExecutor) Run(_ context.Context, options process.Option
 }
 
 func TestExecutorScopeReceivesEnvironmentBlock(t *testing.T) {
+	t.Parallel()
 	scoped := &recordingExecutor{}
 	definition := testDefinition(t, "env-executor", workflow.Step{
 		Env: workflow.ScopedEnvironmentValues(workflow.Environment{"MODE": "scoped"}), Steps: []workflow.Step{{
@@ -58,6 +59,7 @@ func TestExecutorScopeReceivesEnvironmentBlock(t *testing.T) {
 }
 
 func TestExecutorScopesPreserveEnvironmentRemovals(t *testing.T) {
+	t.Parallel()
 	for _, inside := range []bool{false, true} {
 		t.Run(fmt.Sprintf("environment-inside-executor=%v", inside), func(t *testing.T) {
 			scoped := &recordingExecutor{}
@@ -89,6 +91,7 @@ func TestExecutorScopesPreserveEnvironmentRemovals(t *testing.T) {
 }
 
 func TestExecutorScopePreservesRunMetadata(t *testing.T) {
+	t.Parallel()
 	scoped := &recordingExecutor{}
 	definition := testDefinition(t, "loader-executor", workflow.Step{
 		Executor: &workflow.ExecutorScope{Type: "recording", With: map[string]any{}},
@@ -147,6 +150,7 @@ func executorTestEngine(t *testing.T, session *recordingExecutor) *Engine {
 }
 
 func TestExecutorScopeSupportsRequireTool(t *testing.T) {
+	t.Parallel()
 	scoped := &recordingExecutor{}
 	definition := testDefinition(t, "tools", workflow.Step{
 		Executor: &workflow.ExecutorScope{Type: "recording", With: map[string]any{}},
@@ -169,6 +173,7 @@ func TestExecutorScopeSupportsRequireTool(t *testing.T) {
 }
 
 func TestExecutorScopeCommitsAllowedShellExitForLaterCondition(t *testing.T) {
+	t.Parallel()
 	for _, allowed := range []any{[]any{0, 7}, "any"} {
 		t.Run(fmt.Sprintf("%v", allowed), func(t *testing.T) {
 			scoped := &recordingExecutor{fail: "probe"}
@@ -198,6 +203,7 @@ func TestExecutorScopeCommitsAllowedShellExitForLaterCondition(t *testing.T) {
 }
 
 func TestExecutorScopeDoesNotRetryAllowedShellExit(t *testing.T) {
+	t.Parallel()
 	scoped := &recordingExecutor{fail: "probe"}
 	definition := testDefinition(t, "probe-retry", workflow.Step{
 		Executor: &workflow.ExecutorScope{Type: "recording", With: map[string]any{}},
@@ -220,6 +226,7 @@ func TestExecutorScopeDoesNotRetryAllowedShellExit(t *testing.T) {
 }
 
 func TestExecutorScopeSupportsGitAssertions(t *testing.T) {
+	t.Parallel()
 	scoped := &recordingExecutor{}
 	definition := testDefinition(t, "git", workflow.Step{
 		Executor: &workflow.ExecutorScope{Type: "recording", With: map[string]any{}},
@@ -238,6 +245,7 @@ func TestExecutorScopeSupportsGitAssertions(t *testing.T) {
 }
 
 func TestExecutorScopeSupportsGitCommit(t *testing.T) {
+	t.Parallel()
 	scoped := &recordingExecutor{}
 	definition := testDefinition(t, "git-commit", workflow.Step{
 		Executor: &workflow.ExecutorScope{Type: "recording", With: map[string]any{}},
@@ -261,6 +269,7 @@ func TestExecutorScopeSupportsGitCommit(t *testing.T) {
 }
 
 func TestExecutorScopeRestoresParentAndSharesOutputs(t *testing.T) {
+	t.Parallel()
 	scoped := &recordingExecutor{}
 	local := &recordingExecutor{}
 	definition := testDefinition(t, "mixed",
@@ -285,6 +294,7 @@ func TestExecutorScopeRestoresParentAndSharesOutputs(t *testing.T) {
 }
 
 func TestExecutorScopeWorkingDirectoryWithoutFileSystemUsesHost(t *testing.T) {
+	t.Parallel()
 	scoped := &recordingExecutor{}
 	runDir := t.TempDir()
 	if err := os.Mkdir(filepath.Join(runDir, "nested"), 0o755); err != nil {
@@ -305,6 +315,7 @@ func TestExecutorScopeWorkingDirectoryWithoutFileSystemUsesHost(t *testing.T) {
 }
 
 func TestExecutorScopeRunsFinallyAfterFailure(t *testing.T) {
+	t.Parallel()
 	scoped := &recordingExecutor{fail: "fail"}
 	definition := testDefinition(t, "cleanup",
 		workflow.Step{Executor: &workflow.ExecutorScope{Type: "recording", With: map[string]any{}},
@@ -324,6 +335,7 @@ func TestExecutorScopeRunsFinallyAfterFailure(t *testing.T) {
 }
 
 func TestExecutorScopeRunsDeferBeforeFinallyAndClose(t *testing.T) {
+	t.Parallel()
 	scoped := &recordingExecutor{}
 	definition := testDefinition(t, "defer-cleanup",
 		workflow.Step{
@@ -344,6 +356,7 @@ func TestExecutorScopeRunsDeferBeforeFinallyAndClose(t *testing.T) {
 }
 
 func TestExecutorScopeRejectsNonAwareRunner(t *testing.T) {
+	t.Parallel()
 	steps := newTestRegistry(t, map[string]step.Builder{"host_only": func(map[string]any) (step.Runner, error) {
 		return countingRunner{}, nil
 	}})
@@ -372,6 +385,7 @@ func (executorFileSystemRunner) ExecutorAware()      {}
 func (executorFileSystemRunner) ExecutorFileSystem() {}
 
 func TestExecutorScopeValidatesFileSystemCapability(t *testing.T) {
+	t.Parallel()
 	steps := newTestRegistry(t, map[string]step.Builder{"filesystem": func(map[string]any) (step.Runner, error) {
 		return executorFileSystemRunner{}, nil
 	}})
@@ -409,6 +423,7 @@ func TestExecutorScopeValidatesFileSystemCapability(t *testing.T) {
 // are checked for executor support one by one. The old wait pseudo-step was rejected outright
 // because its polling executor was engine-native, so polling inside an executor is new.
 func TestExecutorScopeAllowsAttempt(t *testing.T) {
+	t.Parallel()
 	definition := testDefinition(t, "attempt-in-executor", workflow.Step{
 		Executor: &workflow.ExecutorScope{Type: "recording", With: map[string]any{}},
 		Steps: []workflow.Step{{

@@ -19,6 +19,7 @@ import (
 )
 
 func TestURLEncodedForm(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
 		if request.Header.Get("Content-Type") != "application/x-www-form-urlencoded" {
 			t.Errorf("Content-Type = %q", request.Header.Get("Content-Type"))
@@ -47,6 +48,7 @@ func TestURLEncodedForm(t *testing.T) {
 }
 
 func TestMultipartFormAndFiles(t *testing.T) {
+	t.Parallel()
 	workflowDir := t.TempDir()
 	textPath := filepath.Join(workflowDir, "release notes.txt")
 	if err := os.WriteFile(textPath, []byte("release notes"), 0o600); err != nil {
@@ -110,6 +112,7 @@ func TestMultipartFormAndFiles(t *testing.T) {
 }
 
 func TestLargeMultipartUploadHasLengthAndStreams(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "large.bin")
 	const fileSize = int64(12 << 20)
@@ -156,6 +159,7 @@ func TestLargeMultipartUploadHasLengthAndStreams(t *testing.T) {
 }
 
 func TestMultipartBodyReplaysForRedirect(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "payload.txt")
 	if err := os.WriteFile(path, []byte("replayed"), 0o600); err != nil {
@@ -204,6 +208,7 @@ func TestMultipartBodyReplaysForRedirect(t *testing.T) {
 }
 
 func TestMultipartBodyCancellation(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "payload.bin")
 	if err := os.WriteFile(path, bytes.Repeat([]byte("x"), 1<<20), 0o600); err != nil {
@@ -227,6 +232,7 @@ func TestMultipartBodyCancellation(t *testing.T) {
 }
 
 func TestMultipartOpenDoesNotRetainAllUploadFiles(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	files := make([]FileConfig, 32)
 	for i := range files {
@@ -264,6 +270,7 @@ func TestMultipartOpenDoesNotRetainAllUploadFiles(t *testing.T) {
 }
 
 func TestRejectsInvalidFormAndFileConfiguration(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		raw  map[string]any
@@ -291,6 +298,7 @@ func TestRejectsInvalidFormAndFileConfiguration(t *testing.T) {
 }
 
 func TestRejectsInvalidUploadPaths(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	tests := []struct {
 		name string

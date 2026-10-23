@@ -54,6 +54,7 @@ func workingDirectoryRegistry(t *testing.T) *step.Registry {
 }
 
 func TestWorkingDirectoryScopesAndRestoresRunDirectory(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	project := filepath.Join(root, "project")
 	nested := filepath.Join(project, "nested")
@@ -89,6 +90,7 @@ func TestWorkingDirectoryScopesAndRestoresRunDirectory(t *testing.T) {
 }
 
 func TestWorkingDirectoryValidatorReceivesScopedRunDirectory(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	project := filepath.Join(root, "project")
 	if err := os.Mkdir(project, 0o755); err != nil {
@@ -114,6 +116,7 @@ func TestWorkingDirectoryValidatorReceivesScopedRunDirectory(t *testing.T) {
 }
 
 func TestWorkingDirectoryDefersValidationUntilRuntimeDirectoryIsKnown(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	project := filepath.Join(root, "project")
 	if err := os.Mkdir(project, 0o755); err != nil {
@@ -145,6 +148,7 @@ func TestWorkingDirectoryDefersValidationUntilRuntimeDirectoryIsKnown(t *testing
 }
 
 func TestWorkingDirectoryRejectsMissingAndNonDirectoryPaths(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	file := filepath.Join(root, "file.txt")
 	if err := os.WriteFile(file, []byte("content"), 0o600); err != nil {
@@ -171,6 +175,7 @@ func TestWorkingDirectoryRejectsMissingAndNonDirectoryPaths(t *testing.T) {
 }
 
 func TestWorkingDirectoryIsAtomicConcurrentBranch(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	backend := filepath.Join(root, "backend")
 	frontend := filepath.Join(root, "frontend")
@@ -204,6 +209,7 @@ func TestWorkingDirectoryIsAtomicConcurrentBranch(t *testing.T) {
 }
 
 func TestWorkingDirectoryConcurrentBranchesDetectVariableConflicts(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	definition := &workflow.Definition{Version: 1, Name: "conflict", Dir: root, Steps: []workflow.Step{{
 		Concurrent: &workflow.ConcurrentGroup{MaxConcurrency: 2, FailFast: true, Steps: []workflow.Step{
@@ -218,6 +224,7 @@ func TestWorkingDirectoryConcurrentBranchesDetectVariableConflicts(t *testing.T)
 }
 
 func TestWorkingDirectoryComposesWithForeachAndCompositeActions(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	service := filepath.Join(root, "services", "api")
 	if err := os.MkdirAll(service, 0o755); err != nil {
@@ -250,6 +257,7 @@ func TestWorkingDirectoryComposesWithForeachAndCompositeActions(t *testing.T) {
 }
 
 func TestWorkingDirectoryDryRunDisplaysNestedPlan(t *testing.T) {
+	t.Parallel()
 	definition := testDefinition(t, "dry", workflow.Step{
 		WorkingDirectory: "{{ .vars.dir }}", Steps: []workflow.Step{{ID: "run", Type: "capture_dir", With: map[string]any{}}},
 	})

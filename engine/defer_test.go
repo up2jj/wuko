@@ -12,6 +12,7 @@ import (
 )
 
 func TestAttachedDeferUnwindsGroupsBeforeFinally(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, nil)
 	var events []string
 	register := func(kind string, run func(step.Request) error) {
@@ -54,6 +55,7 @@ func TestAttachedDeferUnwindsGroupsBeforeFinally(t *testing.T) {
 }
 
 func TestAttachedDeferRegistersOnlyAfterSuccessAndContinuesErrors(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, nil)
 	mainFailure := errors.New("create failed")
 	cleanupFailure := errors.New("cleanup failed")
@@ -97,6 +99,7 @@ func TestAttachedDeferRegistersOnlyAfterSuccessAndContinuesErrors(t *testing.T) 
 }
 
 func TestAttachedDeferCapturesWorkingDirectory(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, nil)
 	dir := t.TempDir()
 	var cleanupDir string
@@ -119,6 +122,7 @@ func TestAttachedDeferCapturesWorkingDirectory(t *testing.T) {
 }
 
 func TestCompositeActionDeferRunsPerAttempt(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, nil)
 	mainRuns, cleanupRuns := 0, 0
 	registerFinallyTestRunner(t, registry, "action_main", func(context.Context, step.Request) (step.Result, error) {
@@ -150,6 +154,7 @@ func TestCompositeActionDeferRunsPerAttempt(t *testing.T) {
 }
 
 func TestAttachedDeferProgressCountsUnregisteredCleanup(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, nil)
 	registerFinallyTestRunner(t, registry, "ok", func(context.Context, step.Request) (step.Result, error) {
 		return step.Result{}, nil

@@ -13,6 +13,7 @@ import (
 )
 
 func TestDynamicMultiplePreSupplied(t *testing.T) {
+	t.Parallel()
 	runner, err := New(map[string]any{
 		"variable": "projects", "message": "Projects", "multiple": true,
 		"from": "steps.fetch.projects", "label_field": "name", "value_field": "id",
@@ -41,6 +42,7 @@ func TestDynamicMultiplePreSupplied(t *testing.T) {
 }
 
 func TestDynamicObjectSelectionPreservesClonedItem(t *testing.T) {
+	t.Parallel()
 	source := map[string]any{
 		"label": "API", "value": "default/api", "namespace": "default",
 		"commands": map[string]any{"shell": "/bin/bash"},
@@ -73,6 +75,7 @@ func TestDynamicObjectSelectionPreservesClonedItem(t *testing.T) {
 }
 
 func TestDynamicMixedSelectionAlignsItemsWithValues(t *testing.T) {
+	t.Parallel()
 	runner, err := New(map[string]any{
 		"variable": "services", "message": "Services", "multiple": true,
 		"from": "steps.fetch.services",
@@ -97,6 +100,7 @@ func TestDynamicMixedSelectionAlignsItemsWithValues(t *testing.T) {
 }
 
 func TestOptionalChoiceCanSelectNothing(t *testing.T) {
+	t.Parallel()
 	runner, err := New(map[string]any{
 		"variable": "item", "message": "Item", "required": false,
 		"from": "steps.fetch.items",
@@ -140,6 +144,7 @@ func TestOptionalChoiceCanSelectNothing(t *testing.T) {
 }
 
 func TestChoiceAutoSelectsSingleEnabledStaticChoice(t *testing.T) {
+	t.Parallel()
 	runner, err := New(map[string]any{
 		"variable": "mode", "message": "Mode", "auto_select_single": true,
 		"choices": []any{
@@ -169,6 +174,7 @@ func TestChoiceAutoSelectsSingleEnabledStaticChoice(t *testing.T) {
 }
 
 func TestChoiceAutoSelectsSingleEnabledDynamicObject(t *testing.T) {
+	t.Parallel()
 	runner, err := New(map[string]any{
 		"variable": "mode", "message": "Mode", "auto_select_single": true,
 		"from": "steps.resolve.modes", "disabled_field": "disabled", "reason_field": "reason",
@@ -196,6 +202,7 @@ func TestChoiceAutoSelectsSingleEnabledDynamicObject(t *testing.T) {
 }
 
 func TestChoiceAutoSelectSinglePreservesNonInteractiveBehavior(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		required bool
@@ -231,6 +238,7 @@ func TestChoiceAutoSelectSinglePreservesNonInteractiveBehavior(t *testing.T) {
 }
 
 func TestChoiceAutoSelectSinglePreservesZeroChoiceSemantics(t *testing.T) {
+	t.Parallel()
 	optional, err := New(map[string]any{
 		"variable": "mode", "message": "Mode", "required": false, "auto_select_single": true,
 		"from": "steps.resolve.modes",
@@ -276,6 +284,7 @@ func TestChoiceAutoSelectSinglePreservesZeroChoiceSemantics(t *testing.T) {
 }
 
 func TestChoiceAutoSelectSinglePromptsForMultipleEnabledChoices(t *testing.T) {
+	t.Parallel()
 	runner, err := New(map[string]any{
 		"variable": "mode", "message": "Mode", "auto_select_single": true,
 		"choices": []any{
@@ -295,6 +304,7 @@ func TestChoiceAutoSelectSinglePromptsForMultipleEnabledChoices(t *testing.T) {
 }
 
 func TestChoiceAutoSelectSinglePreservesPreSuppliedValidation(t *testing.T) {
+	t.Parallel()
 	runner, err := New(map[string]any{
 		"variable": "mode", "message": "Mode", "auto_select_single": true,
 		"choices": []any{
@@ -332,6 +342,7 @@ func TestChoiceAutoSelectSinglePreservesPreSuppliedValidation(t *testing.T) {
 }
 
 func TestSoleEnabledIndex(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		options []resolvedChoice
@@ -355,6 +366,7 @@ func TestSoleEnabledIndex(t *testing.T) {
 }
 
 func TestOptionalObjectChoicesExposeEmptyItemOutputs(t *testing.T) {
+	t.Parallel()
 	source := []any{map[string]any{"label": "One", "value": "one"}}
 	tests := []struct {
 		name     string
@@ -393,6 +405,7 @@ func TestOptionalObjectChoicesExposeEmptyItemOutputs(t *testing.T) {
 }
 
 func TestSingleNullChoiceIsDistinguishedFromNoSelection(t *testing.T) {
+	t.Parallel()
 	runner, err := New(map[string]any{
 		"variable": "item", "message": "Item", "required": false,
 		"choices": []any{map[string]any{"label": "Null", "value": nil}},
@@ -410,6 +423,7 @@ func TestSingleNullChoiceIsDistinguishedFromNoSelection(t *testing.T) {
 }
 
 func TestDynamicChoiceDescriptions(t *testing.T) {
+	t.Parallel()
 	runnerValue, err := New(map[string]any{
 		"variable": "item", "message": "Item", "from": "steps.fetch.items",
 		"label_field": "name", "value_field": "id", "description_field": "summary",
@@ -430,6 +444,7 @@ func TestDynamicChoiceDescriptions(t *testing.T) {
 }
 
 func TestChoiceRejectsDuplicateValues(t *testing.T) {
+	t.Parallel()
 	runner, err := New(map[string]any{
 		"variable": "item", "message": "Item",
 		"choices": []any{map[string]any{"label": "A", "value": "same"}, map[string]any{"label": "B", "value": "same"}},
@@ -443,6 +458,7 @@ func TestChoiceRejectsDuplicateValues(t *testing.T) {
 }
 
 func TestDynamicChoiceRejectsDuplicateMappedValues(t *testing.T) {
+	t.Parallel()
 	runner, err := New(map[string]any{
 		"variable": "item", "message": "Item", "from": "steps.fetch.items",
 		"label_field": "name", "value_field": "id",
@@ -463,6 +479,7 @@ func TestDynamicChoiceRejectsDuplicateMappedValues(t *testing.T) {
 }
 
 func TestDynamicChoiceMetadata(t *testing.T) {
+	t.Parallel()
 	runnerValue, err := New(map[string]any{
 		"variable": "item", "message": "Item", "from": "steps.fetch.items",
 		"label_field": "name", "value_field": "id", "disabled_field": "state.disabled",
@@ -485,6 +502,7 @@ func TestDynamicChoiceMetadata(t *testing.T) {
 }
 
 func TestStaticChoiceMarkersAreDisplayOnly(t *testing.T) {
+	t.Parallel()
 	runnerValue, err := New(map[string]any{
 		"variable": "items", "message": "Items", "multiple": true,
 		"choices": []any{
@@ -529,6 +547,7 @@ func TestStaticChoiceMarkersAreDisplayOnly(t *testing.T) {
 }
 
 func TestDynamicChoiceMarkersBypassMappingsAndExpressions(t *testing.T) {
+	t.Parallel()
 	runnerValue, err := New(map[string]any{
 		"variable": "item", "message": "Item", "from": "steps.fetch.items",
 		"label_expr": `item.name`, "value_expr": `item.id`,
@@ -566,6 +585,7 @@ func TestDynamicChoiceMarkersBypassMappingsAndExpressions(t *testing.T) {
 }
 
 func TestDynamicChoiceMarkerKeysWithAdditionalFieldsRemainChoices(t *testing.T) {
+	t.Parallel()
 	runnerValue, err := New(map[string]any{
 		"variable": "item", "message": "Item", "from": "vars.items",
 		"label_field": "name", "value_field": "id",
@@ -586,6 +606,7 @@ func TestDynamicChoiceMarkerKeysWithAdditionalFieldsRemainChoices(t *testing.T) 
 }
 
 func TestDynamicChoiceExpressionsUseOrderedEnvironment(t *testing.T) {
+	t.Parallel()
 	source := map[string]any{"name": "dev", "label": "Development", "context": "dev-cluster"}
 	runnerValue, err := New(map[string]any{
 		"variable": "environment", "message": "Environment", "from": "steps.fetch.items",
@@ -639,6 +660,7 @@ func TestDynamicChoiceExpressionsUseOrderedEnvironment(t *testing.T) {
 }
 
 func TestDynamicChoiceExpressionsSupportScalarItems(t *testing.T) {
+	t.Parallel()
 	runnerValue, err := New(map[string]any{
 		"variable": "number", "message": "Number", "from": "vars.numbers",
 		"label_expr": `"item-" + string(item)`, "value_expr": `item * 10`,
@@ -663,6 +685,7 @@ func TestDynamicChoiceExpressionsSupportScalarItems(t *testing.T) {
 }
 
 func TestDynamicChoiceSkipsReasonExpressionForEnabledItem(t *testing.T) {
+	t.Parallel()
 	runnerValue, err := New(map[string]any{
 		"variable": "item", "message": "Item", "from": "vars.items",
 		"disabled_expr": `false`, "reason_expr": `item.missing.value`,
@@ -680,6 +703,7 @@ func TestDynamicChoiceSkipsReasonExpressionForEnabledItem(t *testing.T) {
 }
 
 func TestDynamicChoiceExpressionConfigurationValidation(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		raw  map[string]any
@@ -707,6 +731,7 @@ func TestDynamicChoiceExpressionConfigurationValidation(t *testing.T) {
 }
 
 func TestDynamicChoiceExpressionResultValidation(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		raw  map[string]any
@@ -750,6 +775,7 @@ func TestDynamicChoiceExpressionResultValidation(t *testing.T) {
 }
 
 func TestDynamicChoiceRejectsDuplicateComputedValues(t *testing.T) {
+	t.Parallel()
 	runner, err := New(map[string]any{
 		"variable": "item", "message": "Item", "from": "vars.items",
 		"label_field": "name", "value_expr": `"same"`,
@@ -769,6 +795,7 @@ func TestDynamicChoiceRejectsDuplicateComputedValues(t *testing.T) {
 }
 
 func TestDynamicChoiceMetadataValidation(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		raw  map[string]any
@@ -823,6 +850,7 @@ func TestDynamicChoiceMetadataValidation(t *testing.T) {
 }
 
 func TestChoiceConfigurationValidation(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		raw  map[string]any
@@ -858,6 +886,7 @@ func TestChoiceConfigurationValidation(t *testing.T) {
 }
 
 func TestChoiceMarkerConfigurationValidation(t *testing.T) {
+	t.Parallel()
 	choice := func(label string) map[string]any {
 		return map[string]any{"label": label, "value": strings.ToLower(label)}
 	}
@@ -888,6 +917,7 @@ func TestChoiceMarkerConfigurationValidation(t *testing.T) {
 }
 
 func TestDynamicChoiceMarkerPlacementIsValidatedAtRuntime(t *testing.T) {
+	t.Parallel()
 	runnerValue, err := New(map[string]any{
 		"variable": "item", "message": "Item", "from": "vars.items",
 	})
@@ -903,6 +933,7 @@ func TestDynamicChoiceMarkerPlacementIsValidatedAtRuntime(t *testing.T) {
 }
 
 func TestChoiceOptionValidation(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		raw  map[string]any
@@ -953,6 +984,7 @@ func TestChoiceOptionValidation(t *testing.T) {
 }
 
 func TestChoiceRejectsDisabledPreSuppliedValue(t *testing.T) {
+	t.Parallel()
 	runner, err := New(map[string]any{
 		"variable": "item", "message": "Item",
 		"choices": []any{
@@ -970,6 +1002,7 @@ func TestChoiceRejectsDisabledPreSuppliedValue(t *testing.T) {
 }
 
 func TestChoiceBoundsApplyAfterDeduplication(t *testing.T) {
+	t.Parallel()
 	runner, err := New(map[string]any{
 		"variable": "items", "message": "Items", "multiple": true, "min_selected": 2, "max_selected": 2,
 		"choices": []any{
@@ -992,6 +1025,7 @@ func TestChoiceBoundsApplyAfterDeduplication(t *testing.T) {
 }
 
 func TestChoiceDefaultsAreInteractiveOnly(t *testing.T) {
+	t.Parallel()
 	runner, err := New(map[string]any{
 		"variable": "items", "message": "Items", "multiple": true, "required": false,
 		"choices": []any{map[string]any{"label": "A", "value": "a", "default": true}},
@@ -1009,6 +1043,7 @@ func TestChoiceDefaultsAreInteractiveOnly(t *testing.T) {
 }
 
 func TestChoiceSelectAllIsInteractiveOnly(t *testing.T) {
+	t.Parallel()
 	runner, err := New(map[string]any{
 		"variable": "items", "message": "Items", "multiple": true, "required": false, "select_all": true,
 		"choices": []any{
@@ -1038,6 +1073,7 @@ func TestChoiceSelectAllIsInteractiveOnly(t *testing.T) {
 }
 
 func TestChoiceSelectAllRequiresMultiple(t *testing.T) {
+	t.Parallel()
 	_, err := New(map[string]any{
 		"variable": "item", "message": "Item", "select_all": true,
 		"choices": []any{map[string]any{"label": "A", "value": "a"}},
@@ -1048,6 +1084,7 @@ func TestChoiceSelectAllRequiresMultiple(t *testing.T) {
 }
 
 func TestChoiceFilterOnTypeRequiresSingleSelection(t *testing.T) {
+	t.Parallel()
 	_, err := New(map[string]any{
 		"variable": "items", "message": "Items", "multiple": true, "filter_on_type": true,
 		"choices": []any{map[string]any{"label": "A", "value": "a"}},
@@ -1058,6 +1095,7 @@ func TestChoiceFilterOnTypeRequiresSingleSelection(t *testing.T) {
 }
 
 func TestChoiceFilterOnTypeConfiguration(t *testing.T) {
+	t.Parallel()
 	runner, err := New(map[string]any{
 		"variable": "item", "message": "Item", "filter_on_type": true,
 		"choices": []any{map[string]any{"label": "A", "value": "a"}},
@@ -1071,6 +1109,7 @@ func TestChoiceFilterOnTypeConfiguration(t *testing.T) {
 }
 
 func TestChoiceSelectAllRejectsSmallMaximum(t *testing.T) {
+	t.Parallel()
 	runner, err := New(map[string]any{
 		"variable": "items", "message": "Items", "multiple": true, "select_all": true, "max_selected": 1,
 		"choices": []any{
@@ -1088,6 +1127,7 @@ func TestChoiceSelectAllRejectsSmallMaximum(t *testing.T) {
 }
 
 func TestChoiceExplicitBoundsSupersedeRequired(t *testing.T) {
+	t.Parallel()
 	runner, err := New(map[string]any{
 		"variable": "items", "message": "Items", "multiple": true, "max_selected": 0,
 		"choices": []any{map[string]any{"label": "A", "value": "a"}},

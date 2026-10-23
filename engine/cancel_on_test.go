@@ -14,6 +14,7 @@ import (
 )
 
 func TestCancelOnMonitorWinsAndRecordsPartialBodyState(t *testing.T) {
+	t.Parallel()
 	// This case is the one where the monitor wins while deploy is running, so deploy is
 	// canceled rather than skipped. Waiting on prepare would not establish that: an
 	// unstarted body step is documented to record as skipped, and the monitor could win
@@ -103,6 +104,7 @@ func TestCancelOnMonitorWinsAndRecordsPartialBodyState(t *testing.T) {
 }
 
 func TestCancelOnBodyWinsAndCanceledMonitorHasNullError(t *testing.T) {
+	t.Parallel()
 	monitorStarted := make(chan struct{})
 	registry := newTestRegistry(t, map[string]step.Builder{
 		"body": func(map[string]any) (step.Runner, error) {
@@ -140,6 +142,7 @@ func TestCancelOnBodyWinsAndCanceledMonitorHasNullError(t *testing.T) {
 }
 
 func TestCancelOnMonitorWinsAfterSkippedBody(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, map[string]step.Builder{
 		"done": func(map[string]any) (step.Runner, error) {
 			return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
@@ -171,6 +174,7 @@ func TestCancelOnMonitorWinsAfterSkippedBody(t *testing.T) {
 }
 
 func TestCancelOnSkippedBodyEndsTheRace(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, map[string]step.Builder{
 		"block": func(map[string]any) (step.Runner, error) {
 			return runnerFunc(func(ctx context.Context, _ step.Request) (step.Result, error) {
@@ -221,6 +225,7 @@ func TestCancelOnSkippedBodyEndsTheRace(t *testing.T) {
 }
 
 func TestCancelOnSkippedByConditionCommitsNothing(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, map[string]step.Builder{
 		"never": func(map[string]any) (step.Runner, error) {
 			return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
@@ -255,6 +260,7 @@ func TestCancelOnSkippedByConditionCommitsNothing(t *testing.T) {
 }
 
 func TestCancelOnMultipleMonitorsAndAnonymousMonitorChildren(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, map[string]step.Builder{
 		"done": func(map[string]any) (step.Runner, error) {
 			return runnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
@@ -300,6 +306,7 @@ func TestCancelOnMultipleMonitorsAndAnonymousMonitorChildren(t *testing.T) {
 }
 
 func TestCancelOnWinnerStatuses(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		err    error
@@ -326,6 +333,7 @@ func TestCancelOnWinnerStatuses(t *testing.T) {
 }
 
 func TestCancelOnCapturesMonitorFailure(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, map[string]step.Builder{
 		"fail": func(map[string]any) (step.Runner, error) {
 			return runnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, errors.New("offline") }), nil
@@ -352,6 +360,7 @@ func TestCancelOnCapturesMonitorFailure(t *testing.T) {
 }
 
 func TestCancelOnCollectsRecordedOutcome(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, map[string]step.Builder{
 		"done": func(map[string]any) (step.Runner, error) {
 			return runnerFunc(func(context.Context, step.Request) (step.Result, error) {
@@ -377,6 +386,7 @@ func TestCancelOnCollectsRecordedOutcome(t *testing.T) {
 }
 
 func TestCancelOnCollectionFailureFailsParent(t *testing.T) {
+	t.Parallel()
 	var runs int
 	registry := newTestRegistry(t, map[string]step.Builder{
 		"done": func(map[string]any) (step.Runner, error) {
@@ -417,6 +427,7 @@ func cancelOnDefinition(t *testing.T, monitors, body []workflow.Step, collect st
 }
 
 func TestCancelOnValidateRejectsInvalidCondition(t *testing.T) {
+	t.Parallel()
 	registry := newTestRegistry(t, map[string]step.Builder{
 		"noop": func(map[string]any) (step.Runner, error) {
 			return runnerFunc(func(context.Context, step.Request) (step.Result, error) { return step.Result{}, nil }), nil
@@ -443,6 +454,7 @@ func (isCanceledError) Error() string { return "canceled by its own Is method" }
 func (isCanceledError) Is(target error) bool { return target == context.Canceled }
 
 func TestCancellationOnlyMatchesStatusFromError(t *testing.T) {
+	t.Parallel()
 	failure := errors.New("boom")
 	tests := []struct {
 		name string
@@ -477,6 +489,7 @@ func TestCancellationOnlyMatchesStatusFromError(t *testing.T) {
 // A panicking runner fails its own step like any other error, so the race records it as the
 // winning failed outcome instead of crashing or escalating past the cancel_on step.
 func TestCancelOnRecordsPanickingParticipantAsFailedOutcome(t *testing.T) {
+	t.Parallel()
 	monitorStarted := make(chan struct{})
 	monitorCanceled := make(chan struct{})
 	registry := newTestRegistry(t, map[string]step.Builder{

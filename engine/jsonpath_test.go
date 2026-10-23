@@ -11,6 +11,7 @@ import (
 )
 
 func TestJSONPathTemplatesAndCommitsTypedResults(t *testing.T) {
+	t.Parallel()
 	definition := testDefinition(t, "selection", workflow.Step{ID: "active", Type: "jsonpath", With: map[string]any{
 		"from": "{{ .vars.source }}", "query": "$.{{ .vars.collection }}[?@.active == true].id",
 		"result": "{{ .vars.mode }}", "variable": "active_ids",

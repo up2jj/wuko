@@ -13,6 +13,7 @@ import (
 )
 
 func TestChangedStepGuardsDownstreamWorkAndRendersValues(t *testing.T) {
+	t.Parallel()
 	registry, runs := changedRegistry(t)
 	root := t.TempDir()
 	localDir := filepath.Join(root, ".wuko", "values")
@@ -53,6 +54,7 @@ func TestChangedStepGuardsDownstreamWorkAndRendersValues(t *testing.T) {
 }
 
 func TestChangedStepSupportsTemplatedForeachKeys(t *testing.T) {
+	t.Parallel()
 	registry, runs := changedRegistry(t)
 	root := t.TempDir()
 	definition := &workflow.Definition{
@@ -91,6 +93,7 @@ func TestChangedStepSupportsTemplatedForeachKeys(t *testing.T) {
 }
 
 func TestChangedStepSupportsCompositeActionInputsInKey(t *testing.T) {
+	t.Parallel()
 	registry, runs := changedRegistry(t)
 	root := t.TempDir()
 	action := &workflow.Action{
@@ -123,6 +126,7 @@ func TestChangedStepSupportsCompositeActionInputsInKey(t *testing.T) {
 }
 
 func TestChangedValidationAndDryRunDoNotCreateSnapshot(t *testing.T) {
+	t.Parallel()
 	registry, _ := changedRegistry(t)
 	root := t.TempDir()
 	localDir := filepath.Join(root, ".wuko", "values")

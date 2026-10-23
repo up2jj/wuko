@@ -11,6 +11,7 @@ import (
 )
 
 func TestEveryBuiltinStepIsDocumented(t *testing.T) {
+	t.Parallel()
 	paths, err := filepath.Glob(filepath.Join("..", "docs", "*.md"))
 	if err != nil {
 		t.Fatal(err)

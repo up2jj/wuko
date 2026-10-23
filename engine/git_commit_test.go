@@ -18,6 +18,7 @@ import (
 )
 
 func TestGitCommitRendersConfigurationAndCommitsOutputs(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	runEngineGit(t, dir, "init", "--quiet")
 	if err := os.WriteFile(filepath.Join(dir, "change.txt"), []byte("content\n"), 0o644); err != nil {
@@ -72,6 +73,7 @@ func (executor *countingGitExecutor) Run(context.Context, process.Options) (proc
 }
 
 func TestGitCommitValidationAndDryRunDoNotExecuteGit(t *testing.T) {
+	t.Parallel()
 	definition := testDefinition(t, "commit", workflow.Step{ID: "commit", Type: "git_commit", With: map[string]any{
 		"message": "{{ .vars.message }}", "paths": []any{"{{ .vars.path }}"},
 		"author": map[string]any{"name": "{{ .vars.name }}", "email": "{{ .vars.email }}"},

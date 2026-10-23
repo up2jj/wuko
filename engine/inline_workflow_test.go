@@ -16,6 +16,7 @@ func (runner inlineEchoRunner) Run(context.Context, step.Request) (step.Result, 
 }
 
 func TestInlineWorkflowInheritsSnapshotAndAddsBindings(t *testing.T) {
+	t.Parallel()
 	registry := step.NewRegistry()
 	if err := registry.RegisterDefinition("inline_echo", step.Registration{
 		Builder: func(raw map[string]any) (step.Runner, error) {
@@ -59,6 +60,7 @@ func TestInlineWorkflowInheritsSnapshotAndAddsBindings(t *testing.T) {
 }
 
 func TestInlineWorkflowValidationAcceptsParentStepsAndVariablesBeforeRun(t *testing.T) {
+	t.Parallel()
 	registry := step.NewRegistry()
 	if err := registry.RegisterDefinition("inline_echo", step.Registration{
 		Builder: func(raw map[string]any) (step.Runner, error) { return inlineEchoRunner{}, nil },
@@ -87,6 +89,7 @@ func TestInlineWorkflowValidationAcceptsParentStepsAndVariablesBeforeRun(t *test
 }
 
 func TestInlineWorkflowRejectsStepIDsThatShadowParentSteps(t *testing.T) {
+	t.Parallel()
 	registry := step.NewRegistry()
 	if err := registry.RegisterDefinition("inline_echo", step.Registration{
 		Builder: func(raw map[string]any) (step.Runner, error) { return inlineEchoRunner{}, nil },

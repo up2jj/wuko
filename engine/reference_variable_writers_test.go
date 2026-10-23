@@ -24,6 +24,7 @@ import (
 // to prevent. Pin every name to a real registration. The tui_* prompts are
 // checked by name only: their packages import tui, which imports engine.
 func TestVariableWriterTablesNameRegisteredSteps(t *testing.T) {
+	t.Parallel()
 	registry := step.NewRegistry()
 	for _, register := range []func(*step.Registry) error{
 		set.Register, transform.Register, jsonpath.Register, semver.Register, gitstep.Register, keyvaluestep.Register, timestep.Register,

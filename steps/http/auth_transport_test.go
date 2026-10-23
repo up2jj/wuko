@@ -18,6 +18,7 @@ import (
 )
 
 func TestAuthenticationHelpers(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		auth map[string]any
@@ -47,6 +48,7 @@ func TestAuthenticationHelpers(t *testing.T) {
 }
 
 func TestConfiguredProxyOverridesDefaultSelection(t *testing.T) {
+	t.Parallel()
 	proxySaw := make(chan *http.Request, 1)
 	proxy := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		proxySaw <- request.Clone(request.Context())
@@ -79,6 +81,7 @@ func TestConfiguredProxyOverridesDefaultSelection(t *testing.T) {
 }
 
 func TestTransportRetainsEnvironmentProxyFallback(t *testing.T) {
+	t.Parallel()
 	built, err := New(map[string]any{"url": "https://example.com"})
 	if err != nil {
 		t.Fatal(err)
@@ -94,6 +97,7 @@ func TestTransportRetainsEnvironmentProxyFallback(t *testing.T) {
 }
 
 func TestClientCertificateLoadsRelativeToWorkflow(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewUnstartedServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if len(request.TLS.PeerCertificates) == 0 {
 			t.Error("client certificate was not presented")
@@ -140,6 +144,7 @@ func TestClientCertificateLoadsRelativeToWorkflow(t *testing.T) {
 }
 
 func TestClientCertificateRejectsInvalidPair(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "client.pem"), []byte("not a certificate"), 0o600); err != nil {
 		t.Fatal(err)
@@ -183,6 +188,7 @@ func writeTLSKeyPair(t *testing.T, certificate tls.Certificate, certPath, keyPat
 }
 
 func TestAuthenticationTransportValidation(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		raw  map[string]any
@@ -212,6 +218,7 @@ func TestAuthenticationTransportValidation(t *testing.T) {
 }
 
 func TestClientCertificateIsLoadedOncePerRunner(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.WriteHeader(http.StatusNoContent)
 	}))

@@ -7,6 +7,7 @@ import (
 )
 
 func TestEveryBuiltinStepRegistersAnOutputSchema(t *testing.T) {
+	t.Parallel()
 	registry := step.NewRegistry()
 	if err := registerBuiltinSteps(registry); err != nil {
 		t.Fatal(err)

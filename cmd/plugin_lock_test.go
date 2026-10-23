@@ -62,6 +62,7 @@ func executePluginCommand(t *testing.T, deps dependencies, args ...string) error
 }
 
 func TestPluginLockCommandAndFrozenExecution(t *testing.T) {
+	t.Parallel()
 	dir, cache := t.TempDir(), t.TempDir()
 	workflows := filepath.Join(dir, ".wuko", "workflows")
 	commandPluginBundle(t, filepath.Join(workflows, "bundle"))
@@ -104,6 +105,7 @@ func TestPluginLockCommandAndFrozenExecution(t *testing.T) {
 }
 
 func TestPluginLocalRunAndStdinCreatePins(t *testing.T) {
+	t.Parallel()
 	for _, stdin := range []bool{false, true} {
 		t.Run(fmt.Sprint(stdin), func(t *testing.T) {
 			dir, cache := t.TempDir(), t.TempDir()
@@ -132,6 +134,7 @@ func TestPluginLocalRunAndStdinCreatePins(t *testing.T) {
 }
 
 func TestRemoteRunLeavesExistingLocalLockUntouched(t *testing.T) {
+	t.Parallel()
 	dir, cache := t.TempDir(), t.TempDir()
 	manifest, archive := commandPluginBundle(t, "")
 	path := filepath.Join(dir, "wuko.lock")
@@ -179,6 +182,7 @@ func TestRemoteRunLeavesExistingLocalLockUntouched(t *testing.T) {
 }
 
 func TestInlinePluginSHARequiresExplicitMigration(t *testing.T) {
+	t.Parallel()
 	dir, cache := t.TempDir(), t.TempDir()
 	manifest, _ := commandPluginBundle(t, filepath.Join(dir, "bundle"))
 	pin := sha256.Sum256(manifest)
@@ -200,6 +204,7 @@ func TestInlinePluginSHARequiresExplicitMigration(t *testing.T) {
 }
 
 func TestFrozenPolicyReachesDependencyWorkflow(t *testing.T) {
+	t.Parallel()
 	dir, cache := t.TempDir(), t.TempDir()
 	workflows := filepath.Join(dir, ".wuko", "workflows")
 	commandPluginBundle(t, filepath.Join(workflows, "bundle"))
@@ -236,6 +241,7 @@ func TestFrozenPolicyReachesDependencyWorkflow(t *testing.T) {
 }
 
 func TestCompositeActionInheritsResolvedPluginPins(t *testing.T) {
+	t.Parallel()
 	dir, cache := t.TempDir(), t.TempDir()
 	commandPluginBundle(t, filepath.Join(dir, "bundle"))
 	action := []byte("version: 1\nname: nested\nsteps:\n  - id: upper\n    type: acme.uppercase\n    with:\n      value: hello\n")
@@ -253,6 +259,7 @@ func TestCompositeActionInheritsResolvedPluginPins(t *testing.T) {
 }
 
 func TestMaterializedRemoteKeepsRemotePluginPolicy(t *testing.T) {
+	t.Parallel()
 	dir, cache, snapshot := t.TempDir(), t.TempDir(), t.TempDir()
 	manifest, archive := commandPluginBundle(t, "")
 	path := filepath.Join(snapshot, "wuko.yaml")
@@ -289,6 +296,7 @@ func TestMaterializedRemoteKeepsRemotePluginPolicy(t *testing.T) {
 }
 
 func TestRemoteInvocationDoesNotMutateDependencyLock(t *testing.T) {
+	t.Parallel()
 	dir, cache := t.TempDir(), t.TempDir()
 	workflows := filepath.Join(dir, ".wuko", "workflows")
 	if err := os.MkdirAll(workflows, 0700); err != nil {
@@ -323,6 +331,7 @@ func TestRemoteInvocationDoesNotMutateDependencyLock(t *testing.T) {
 }
 
 func TestMarketplaceBuildRequiresCommittedPluginPins(t *testing.T) {
+	t.Parallel()
 	dir, cache := t.TempDir(), t.TempDir()
 	commandPluginBundle(t, filepath.Join(dir, "bundle"))
 	packageDir := filepath.Join(dir, ".wuko", "workflows", "demo")

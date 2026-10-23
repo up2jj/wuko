@@ -17,6 +17,7 @@ import (
 )
 
 func TestLargeResponseStreamsToDownload(t *testing.T) {
+	t.Parallel()
 	const downloadSize = int64(12 << 20)
 	chunk := make([]byte, 64<<10)
 	chunk[0] = 'w'
@@ -79,6 +80,7 @@ func TestLargeResponseStreamsToDownload(t *testing.T) {
 }
 
 func TestDownloadOverwritePolicy(t *testing.T) {
+	t.Parallel()
 	var requests atomic.Int32
 	server := httptest.NewServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, _ *nethttp.Request) {
 		requests.Add(1)
@@ -125,6 +127,7 @@ func TestDownloadOverwritePolicy(t *testing.T) {
 }
 
 func TestFailedResponseDoesNotInstallDownload(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, _ *nethttp.Request) {
 		writer.WriteHeader(nethttp.StatusServiceUnavailable)
 		fmt.Fprint(writer, "retry later")
@@ -149,6 +152,7 @@ func TestFailedResponseDoesNotInstallDownload(t *testing.T) {
 }
 
 func TestPartialDownloadIsRemoved(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	target, err := prepareDownload(t.Context(), dir, DownloadConfig{Path: "artifact.bin"})
 	if err != nil {
@@ -168,6 +172,7 @@ func TestPartialDownloadIsRemoved(t *testing.T) {
 }
 
 func TestCanceledDownloadIsRemoved(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	target, err := prepareDownload(t.Context(), dir, DownloadConfig{Path: "artifact.bin"})
 	if err != nil {
@@ -185,6 +190,7 @@ func TestCanceledDownloadIsRemoved(t *testing.T) {
 }
 
 func TestRejectsInvalidDownloadConfiguration(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		raw  map[string]any
@@ -222,6 +228,7 @@ func assertNoDownloadTemporaryFiles(t *testing.T, dir string) {
 }
 
 func TestDirectorySyncToleratesOnlyUnsupportedFilesystems(t *testing.T) {
+	t.Parallel()
 	if err := syncDirectory(t.TempDir()); err != nil {
 		t.Fatalf("syncing a directory: %v", err)
 	}

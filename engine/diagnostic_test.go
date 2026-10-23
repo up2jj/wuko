@@ -20,6 +20,7 @@ func (err attributedTestError) DiagnosticAttributes() []diagnostic.Attribute {
 }
 
 func TestTraceStepIncludesWrappedErrorAttributes(t *testing.T) {
+	t.Parallel()
 	base := attributedTestError{attributes: []diagnostic.Attribute{diagnostic.Attr("health_status", "unhealthy")}}
 	wrapped := fmt.Errorf("step failed: %w", base)
 	var event diagnostic.Event
@@ -31,6 +32,7 @@ func TestTraceStepIncludesWrappedErrorAttributes(t *testing.T) {
 }
 
 func TestReturnDiagnosticIncludesDestination(t *testing.T) {
+	t.Parallel()
 	definition := testDefinition(t, "picker-return", workflow.Step{
 		Return: &workflow.ReturnControl{To: workflow.ReturnDestinationPicker, Outputs: map[string]string{}},
 	})
