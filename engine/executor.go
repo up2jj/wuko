@@ -103,7 +103,7 @@ func (e *Engine) executeExecutorBlock(ctx context.Context, definition *workflow.
 	if serviceScope.endedScope() && cancellationOnly(mainErr) {
 		mainErr = nil
 	}
-	mainErr = errors.Join(mainErr, serviceErr)
+	mainErr = joinBackgroundError(mainErr, serviceErr)
 	returning := state.returning
 	state.returning = false
 	cleanupErrors := e.executeCleanupScope(context.WithoutCancel(ctx), definition, childOptions.defers, block.Finally, childOptions, state, stats, mainErr, stats.Steps[statsStart:], firstIndex+leafStepCount(block.Steps), total)

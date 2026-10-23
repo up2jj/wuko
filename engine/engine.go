@@ -302,13 +302,7 @@ func (e *Engine) run(ctx context.Context, definition *workflow.Definition, optio
 		if options.runtime.background.endedScope() && cancellationOnly(mainErr) {
 			mainErr = nil
 		}
-		if cancellationOnly(mainErr) && nonCancellationError(backgroundErr) != nil {
-			// A background failure canceled the foreground; report the originating
-			// failure instead of presenting the resulting cancellation as primary.
-			mainErr = backgroundErr
-		} else {
-			mainErr = errors.Join(mainErr, backgroundErr)
-		}
+		mainErr = joinBackgroundError(mainErr, backgroundErr)
 	}
 	cleanupCtx := context.WithoutCancel(ctx)
 	cleanupErrors := e.executeCleanupScope(cleanupCtx, definition, options.defers, definition.Finally, options, state, &stats, mainErr, stats.Steps, mainTotal+1, total)

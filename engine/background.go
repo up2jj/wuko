@@ -208,3 +208,14 @@ func (launcher reportingServiceLauncher) StartService(id, kind string, serviceOp
 		return err
 	})
 }
+
+// joinBackgroundError combines a scope's foreground error with its joined background error.
+// A fail-fast service failure cancels the foreground, so when the foreground only reports
+// that cancellation the originating failure becomes the primary error; otherwise the scope
+// would be classified as canceled and escape try/catch.
+func joinBackgroundError(mainErr, backgroundErr error) error {
+	if cancellationOnly(mainErr) && nonCancellationError(backgroundErr) != nil {
+		return backgroundErr
+	}
+	return errors.Join(mainErr, backgroundErr)
+}

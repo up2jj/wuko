@@ -167,3 +167,36 @@ func TestBackgroundSupervisorIgnoresServicesThatNeverStarted(t *testing.T) {
 		t.Fatalf("aborted service canceled its scope: %v", err)
 	}
 }
+
+func TestJoinBackgroundErrorPrefersOriginatingFailure(t *testing.T) {
+	failure := errors.New("service failed")
+	foreground := errors.New("step failed")
+	tests := []struct {
+		name       string
+		main       error
+		background error
+		want       []error
+		wantStatus ExecutionStatus
+	}{
+		{name: "cancellation caused by service", main: context.Canceled, background: failure, want: []error{failure}, wantStatus: StatusFailed},
+		{name: "independent foreground failure", main: foreground, background: failure, want: []error{foreground, failure}, wantStatus: StatusFailed},
+		{name: "cancellation without service failure", main: context.Canceled, background: nil, want: []error{context.Canceled}, wantStatus: StatusCanceled},
+		{name: "success", main: nil, background: nil, wantStatus: StatusSucceeded},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := joinBackgroundError(tt.main, tt.background)
+			for _, want := range tt.want {
+				if !errors.Is(got, want) {
+					t.Fatalf("error = %v, want %v", got, want)
+				}
+			}
+			if tt.want == nil && got != nil {
+				t.Fatalf("error = %v, want nil", got)
+			}
+			if status := statusFromError(got); status != tt.wantStatus {
+				t.Fatalf("status = %v, want %v", status, tt.wantStatus)
+			}
+		})
+	}
+}
