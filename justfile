@@ -60,8 +60,9 @@ hooks:
     prek install --hook-type pre-commit --hook-type pre-push
 
 # Run wuko in the current directory, e.g. `just run --help`.
+[positional-arguments]
 run *args:
-    go run . {{ args }}
+    go run . "$@"
 
 # Render the checked-in VHS demos. Requires vhs, ttyd, and ffmpeg.
 screenshots: build

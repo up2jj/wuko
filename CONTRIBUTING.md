@@ -16,6 +16,9 @@ just fmt          # gofmt -w .
 just run --help
 ```
 
+`just run` preserves quoted arguments, for example
+`just run run check --var 'message=hello world'`.
+
 Run `just hooks` once to install the [prek](https://github.com/j178/prek) pre-commit and pre-push
 hooks, and `prek run --all-files` before broad changes. `just snapshot` builds local release
 archives into `dist/`; do not commit them.
