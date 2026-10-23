@@ -960,8 +960,9 @@ installed tool of the wrong version is available.
 
 Every successful step exposes `available`, `path`, `version`, and `constraint_matched`. An
 unavailable or failed optional probe returns `false`, `""`, `""`, and `false`, respectively. A
-successful probe sets `available: true`, resolves `path` through `PATH` on the local host (or keeps
-the configured tool name inside an executor), and returns a normalized `version` when detected.
+successful probe sets `available: true`, resolves `path` through the workflow's effective local
+`PATH` (or keeps the configured tool name inside an executor), and returns a normalized `version`
+when detected.
 `constraint_matched` is true for an available tool with no constraint or a matching version, and
 false otherwise. Cancellation and configuration errors still fail even when `required` is false.
 

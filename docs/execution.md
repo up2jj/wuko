@@ -1708,6 +1708,11 @@ direnv runs afterward. A native mise file wins over `.tool-versions` in the same
 search climbs from the invocation directory and stops at your home directory, so configuration in
 a shared parent such as `/Users` or `/` never selects a manager.
 
+Direct local commands, including TTY runs and `require_tool` probes, use the effective `PATH`
+after environment loaders and overrides. Relative search entries resolve from the command's
+working directory. An explicitly empty `PATH` disables name lookup; explicit executable paths
+still work. Hosts embedding the local executor without a `PATH` retain host command lookup.
+
 Steer the chain explicitly with repeatable `--env-loader` flags:
 
 ```sh

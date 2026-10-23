@@ -142,9 +142,7 @@ func (LocalExecutor) Run(ctx context.Context, options Options) (Result, error) {
 	if options.TTY {
 		return runTTY(ctx, options, credential)
 	}
-	command := exec.Command(options.Command, options.Args...)
-	command.Dir = options.Dir
-	command.Env = environment(options.Env)
+	command := localCommand(options)
 	command.Stdin = options.Stdin
 	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true, Credential: credential}
 	command.WaitDelay = terminationGracePeriod + time.Second

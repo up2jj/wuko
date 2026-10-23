@@ -5,11 +5,13 @@ import (
 	"errors"
 	"io"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/up2jj/wuko/internal/steptest"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/process/processtest"
 	"github.com/up2jj/wuko/step"
@@ -241,5 +243,21 @@ func TestLocalRunReturnsResolvedPathWithoutProbeOutput(t *testing.T) {
 	}
 	if result.Outputs["available"] != true || !strings.HasSuffix(result.Outputs["path"].(string), want) || result.Outputs["version"] != "1.2.3" || result.Outputs["constraint_matched"] != true {
 		t.Fatalf("outputs = %#v, want path ending in %q", result.Outputs, want)
+	}
+}
+
+func TestLocalRunReportsWorkflowPATHExecutable(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	path := filepath.Join(root, "bin", "wuko-test-version-tool")
+	testfs.MkdirAll(t, filepath.Dir(path), 0o755)
+	testfs.WriteFile(t, path, []byte("#!/bin/sh\nprintf 1.2.3"), 0o755)
+	runner := steptest.Build(t, New, map[string]any{"tool": filepath.Base(path), "constraint": "= 1.2.3"})
+	result, err := runner.Run(t.Context(), step.Request{RunDir: root, Env: map[string]string{"PATH": "bin"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Outputs["path"] != path || result.Outputs["version"] != "1.2.3" || result.Outputs["constraint_matched"] != true {
+		t.Fatalf("outputs = %#v, want version 1.2.3 at %s", result.Outputs, path)
 	}
 }

@@ -97,9 +97,7 @@ func runTTY(ctx context.Context, options Options, credential *syscall.Credential
 	} else if terminal, size, err = ttyTerminal(options); err != nil {
 		return Result{}, err
 	}
-	command := exec.Command(options.Command, options.Args...)
-	command.Dir = options.Dir
-	command.Env = environment(options.Env)
+	command := localCommand(options)
 	command.WaitDelay = terminationGracePeriod + time.Second
 	attrs := &syscall.SysProcAttr{Setsid: true, Setctty: true, Credential: credential}
 	ptmx, err := pty.StartWithAttrs(command, &pty.Winsize{Rows: size.Rows, Cols: size.Cols}, attrs)

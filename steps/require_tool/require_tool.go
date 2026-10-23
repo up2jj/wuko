@@ -6,8 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"os/exec"
-	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -100,7 +98,7 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 	}
 
 	outputs["available"] = true
-	outputs["path"] = r.executablePath(local)
+	outputs["path"] = r.executablePath(local, request.RunDir, environment)
 	version, versionErr := findVersion(result.Stdout, result.Stderr)
 	if versionErr == nil {
 		outputs["version"] = version.String()
@@ -140,19 +138,15 @@ func (r *Runner) validateResolvedConfig() error {
 	return nil
 }
 
-func (r *Runner) executablePath(local bool) string {
+func (r *Runner) executablePath(local bool, runDir string, environment map[string]string) string {
 	if !local {
 		return r.config.Tool
 	}
-	path, err := exec.LookPath(r.config.Tool)
+	path, err := process.ResolveExecutable(r.config.Tool, runDir, environment)
 	if err != nil {
 		return r.config.Tool
 	}
-	absolute, err := filepath.Abs(path)
-	if err != nil {
-		return path
-	}
-	return absolute
+	return path
 }
 
 // findVersion scans captured probe output for the first parseable semantic version.
