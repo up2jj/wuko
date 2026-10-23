@@ -8,7 +8,7 @@ import (
 func structureOperation(ctx context.Context, request *evaluation, list []any, operation operation) (any, error) {
 	switch operation.name {
 	case "clone":
-		return append([]any(nil), list...), nil
+		return cloneList(list), nil
 	case "compact":
 		result := make([]any, 0, len(list))
 		for _, item := range list {
@@ -41,7 +41,7 @@ func structureOperation(ctx context.Context, request *evaluation, list []any, op
 		if err != nil {
 			return nil, err
 		}
-		result := append([]any(nil), list...)
+		result := cloneList(list)
 		for index, item := range result {
 			if remaining == 0 {
 				break
@@ -105,7 +105,7 @@ func structureOperation(ctx context.Context, request *evaluation, list []any, op
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", field, err)
 		}
-		result := append([]any(nil), list...)
+		result := cloneList(list)
 		if len(part) == 0 {
 			return result, nil
 		}
@@ -151,7 +151,7 @@ func structureOperation(ctx context.Context, request *evaluation, list []any, op
 		if err != nil {
 			return nil, err
 		}
-		result := append([]any(nil), list...)
+		result := cloneList(list)
 		if matches {
 			if suffix {
 				result = result[:len(result)-len(part)]
@@ -204,7 +204,7 @@ func trimCutset(list, cutset []any, name string) ([]any, error) {
 			end--
 		}
 	}
-	return append([]any(nil), list[start:end]...), nil
+	return cloneList(list[start:end]), nil
 }
 
 func listPrefixSuffix(list, part []any, suffix bool) (bool, error) {
@@ -226,7 +226,7 @@ func listPrefixSuffix(list, part []any, suffix bool) (bool, error) {
 
 func cutList(list, separator []any) (map[string]any, error) {
 	if len(separator) == 0 {
-		return map[string]any{"before": []any{}, "after": append([]any(nil), list...), "found": true}, nil
+		return map[string]any{"before": []any{}, "after": cloneList(list), "found": true}, nil
 	}
 	// Each element is marshalled once. Comparing values directly inside the scan
 	// re-marshalled both sides at every offset, which is quadratic in the inputs.
@@ -248,11 +248,17 @@ func cutList(list, separator []any) (map[string]any, error) {
 		}
 		if matches {
 			return map[string]any{
-				"before": append([]any(nil), list[:start]...),
-				"after":  append([]any(nil), list[start+len(separator):]...),
+				"before": cloneList(list[:start]),
+				"after":  cloneList(list[start+len(separator):]),
 				"found":  true,
 			}, nil
 		}
 	}
-	return map[string]any{"before": append([]any(nil), list...), "after": []any{}, "found": false}, nil
+	return map[string]any{"before": cloneList(list), "after": []any{}, "found": false}, nil
+}
+
+// cloneList copies items into a new list that is never nil, so an empty result reaches the
+// workflow as [] rather than null, like every other operation's empty list.
+func cloneList(items []any) []any {
+	return append(make([]any, 0, len(items)), items...)
 }

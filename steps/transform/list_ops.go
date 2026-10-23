@@ -352,7 +352,7 @@ func segmentationOperation(ctx context.Context, request *evaluation, list []any,
 		result := make([]any, 0, capacity)
 		for start := 0; start < len(list); start += size {
 			end := min(start+size, len(list))
-			result = append(result, append([]any(nil), list[start:end]...))
+			result = append(result, cloneList(list[start:end]))
 		}
 		return result, nil
 	}
@@ -377,7 +377,7 @@ func segmentationOperation(ctx context.Context, request *evaluation, list []any,
 	}
 	result := make([]any, 0)
 	for start := 0; start+size <= len(list); start += stepSize {
-		result = append(result, append([]any(nil), list[start:start+size]...))
+		result = append(result, cloneList(list[start:start+size]))
 	}
 	return result, nil
 }
@@ -387,7 +387,7 @@ func appendLists(request *evaluation, first []any, operation operation, unique b
 	if err != nil {
 		return nil, err
 	}
-	result := append([]any(nil), first...)
+	result := cloneList(first)
 	for _, items := range others {
 		result = append(result, items...)
 	}
@@ -460,7 +460,7 @@ func selectionOperation(ctx context.Context, request *evaluation, list []any, op
 				end, start = start, 0
 			}
 		}
-		return append([]any(nil), list[start:end]...), nil
+		return cloneList(list[start:end]), nil
 	case "take_filter":
 		countValue, err := resolveNamedOperand(request, operation, "count")
 		if err != nil {
@@ -511,7 +511,7 @@ func selectionOperation(ctx context.Context, request *evaluation, list []any, op
 		if length <= len(list)-offset {
 			end = offset + length
 		}
-		return append([]any(nil), list[offset:end]...), nil
+		return cloneList(list[offset:end]), nil
 	case "slice":
 		startValue, err := resolveNamedOperand(request, operation, "start")
 		if err != nil {
@@ -533,7 +533,7 @@ func selectionOperation(ctx context.Context, request *evaluation, list []any, op
 		if start >= end {
 			return []any{}, nil
 		}
-		return append([]any(nil), list[start:end]...), nil
+		return cloneList(list[start:end]), nil
 	case "drop_by_index":
 		value, err := resolveNamedOperand(request, operation, "value")
 		if err != nil {
@@ -569,12 +569,12 @@ func selectionOperation(ctx context.Context, request *evaluation, list []any, op
 		return nil, fmt.Errorf("%s must be a non-negative integer", operation.name)
 	}
 	if operation.name == "take" {
-		return append([]any(nil), list[:min(count, len(list))]...), nil
+		return cloneList(list[:min(count, len(list))]), nil
 	}
 	if operation.name == "drop" {
-		return append([]any(nil), list[min(count, len(list)):]...), nil
+		return cloneList(list[min(count, len(list)):]), nil
 	}
-	return append([]any(nil), list[:max(0, len(list)-count)]...), nil
+	return cloneList(list[:max(0, len(list)-count)]), nil
 }
 
 func integerList(value any, label string) ([]int, error) {
@@ -595,7 +595,7 @@ func integerList(value any, label string) ([]int, error) {
 func orderingOperation(ctx context.Context, request *evaluation, list []any, operation operation) (any, error) {
 	switch operation.name {
 	case "sort", "sort_by":
-		result := append([]any(nil), list...)
+		result := cloneList(list)
 		keys := result
 		if operation.name == "sort_by" {
 			keys = make([]any, len(result))

@@ -49,6 +49,15 @@ func TestOperationsProduceExpectedValues(t *testing.T) {
 
 		{name: "drop_while stops at first mismatch", operation: map[string]any{"drop_while": "item < 3"}, source: []any{1, 2, 3, 1, 4}, want: []any{3, 1, 4}},
 
+		// Operations that copy a range of the list must still return [] rather than null
+		// when the range is empty.
+		{name: "drop past the end is empty", operation: map[string]any{"drop": 10}, source: []any{1, 2}, want: []any{}},
+		{name: "drop_while dropping everything is empty", operation: map[string]any{"drop_while": "true"}, source: []any{1, 2}, want: []any{}},
+		{name: "take zero is empty", operation: map[string]any{"take": 0}, source: []any{1, 2}, want: []any{}},
+		{name: "drop_right everything is empty", operation: map[string]any{"drop_right": 5}, source: []any{1, 2}, want: []any{}},
+		{name: "take_while matching nothing is empty", operation: map[string]any{"take_while": "false"}, source: []any{1, 2}, want: []any{}},
+		{name: "clone of empty list", operation: "clone", source: []any{}, want: []any{}},
+
 		{name: "every_by all match", operation: map[string]any{"every_by": "item > 0"}, source: []any{1, 2, 3}, want: true},
 		{name: "every_by one mismatch", operation: map[string]any{"every_by": "item > 1"}, source: []any{1, 2, 3}, want: false},
 		{name: "every_by is vacuously true on empty list", operation: map[string]any{"every_by": "false"}, source: []any{}, want: true},
