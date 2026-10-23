@@ -22,6 +22,7 @@ Prompt for input or show rich terminal views. See also [browser forms](forms.md)
 | `tui_input` | Collect editable text or typed JSON/lists | [Interactive steps](steps-interactive.md#tui_input) |
 | `tui_password` | Collect masked text | [Interactive steps](steps-interactive.md#tui_password) |
 | `tui_choice` | Select bounded static/dynamic values with defaults or select-all | [Interactive steps](steps-interactive.md#tui_choice) |
+| `tui_date` | Choose a bounded date with a calendar or relative day shortcut | [Interactive steps](steps-interactive.md#tui_date) |
 | `tui_path` | Select one or many files/directories | [Interactive steps](steps-interactive.md#tui_path) |
 | `tui_review` | Review plain text or a colored unified diff | [Interactive steps](steps-interactive.md#tui_review) |
 | `tui_table` | Browse object-backed data in a paginated table | [Interactive steps](steps-interactive.md#tui_table) |

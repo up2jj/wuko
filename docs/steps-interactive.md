@@ -20,6 +20,7 @@ does not force a string. Prefer environment-backed secrets for password values.
 - [`tui_input`](#tui_input)
 - [`tui_password`](#tui_password)
 - [`tui_choice`](#tui_choice)
+- [`tui_date`](#tui_date)
 - [`tui_path`](#tui_path)
 - [`tui_review`](#tui_review)
 - [`tui_table`](#tui_table)
@@ -87,9 +88,9 @@ never writes workflow variables or implicitly reads variables whose names match 
 ```
 
 Use Tab and Shift+Tab to move, Enter to advance or activate Submit, and Ctrl+S to submit from
-any field. Enter inserts a newline in textarea and opens Browse for a path. Space toggles
+any field. Enter inserts a newline in textarea, opens Browse for a path, and opens the calendar for a date. Space toggles
 checkboxes; arrow keys navigate enabled choices, skipping disabled options. Home and End move to
-the first and last enabled choices. Ctrl+X clears a select, multiselect, or path. The path browser
+the first and last enabled choices. Ctrl+X clears a select, multiselect, path, or date. The path browser
 uses the existing path shortcuts; Escape returns without changing the selection. Ctrl+C cancels
 the entire form. Validation runs on leaving a field and on submission, focuses the first invalid
 field, and retains edits. Values become outputs together only after successful submission.
@@ -101,9 +102,10 @@ field, and retains edits. Values become outputs together only after successful s
 | `select` | Selected scalar value, or null | Exactly one of `choices` or `from` |
 | `multiselect` | List of scalar values in selection order | `min_selected`, `max_selected`; required adds a minimum of one |
 | `number` | Integer or floating-point number, or null | `validation.min`, `max`, `integer`, `message`; finite numbers only |
+| `date` | Formatted date string, or `""` | Same `format`, inclusive `min`/`max`, and relative day shortcuts as `tui_date` |
 | `path` | Root-relative string, or list with `multiple: true` | Same `root`, `kind`, `patterns`, `show_hidden`, and containment rules as `tui_path` |
 
-`required` defaults to false. Unfilled optional text and single path fields produce `""`, checkbox
+`required` defaults to false. Unfilled optional text, date, and single path fields produce `""`, checkbox
 produces false, multiple selections produce `[]`, and number/select produce null. Text length
 counts Unicode characters. Numeric input accepts decimal or exponent notation and preserves exact
 whole numbers within the workflow's integer range. Password fields mask both focused and blurred
@@ -506,6 +508,110 @@ must be unique, including mapped values from dynamic objects, so this match is u
 only initialize an interactive picker; they never supply a missing value in a non-interactive run.
 Without explicit bounds, optional empty choice sets and empty selections succeed with empty lists,
 and an optional missing non-interactive value resolves directly to no selection.
+
+## `tui_date`
+
+Choose one calendar date using a Monday-first month grid or typed input. The step requires
+`variable` and `message`. `required` defaults to true; optional empty dates publish `""`.
+The result is available as `.steps.<id>.value` and the configured variable.
+
+```yaml
+- id: release
+  type: tui_date
+  with:
+    variable: release_date
+    message: Choose the release date
+    value: "+2d"
+    min: "+0d"
+    max: "+30d"
+```
+
+![Date picker](assets/tui-date.png)
+
+`value` prefills the interactive picker. Without a prefill, it highlights today, clamped to
+`min`/`max`; Enter accepts that date. A configured prefill outside the bounds remains editable
+and reports an error. Bounds are inclusive and compared as dates; `min` cannot exceed `max`.
+
+`format` is a Go date layout, defaulting to `2006-01-02` (`YYYY-MM-DD`). It must preserve a full
+date with a four-digit year and contain no time or timezone components. Examples include
+`02.01.2006` (`DD.MM.YYYY`) and `January 2, 2006`. Use the same format for literal values,
+bounds, supplied variables, and output. Dates must be within years 0001 through 9999.
+Quote YAML dates so they remain strings.
+
+```yaml
+- id: deadline
+  type: tui_date
+  with:
+    variable: deadline
+    message: Choose a deadline
+    format: "02.01.2006"
+    value: "23.10.2026"
+    min: "01.10.2026"
+    max: "31.12.2026"
+    required: false
+```
+
+Relative shortcuts accept a sign, a whole number, and `d`: `+2d` is two calendar days from today,
+`-7d` is seven days ago, and `+0d` is today. They work in `value`, supplied variables, typed entry,
+and either bound, regardless of `format`. Today is captured once when the step starts in the
+workflow's `timezone`, falling back to the machine's local timezone. Shortcuts always refer to
+that captured date, rather than the current calendar cursor. Day arithmetic handles month/year
+boundaries, leap days, and daylight-saving changes. Output is always an absolute formatted date.
+
+A supplied variable skips the picker and receives the same validation:
+
+```sh
+wuko run --file examples/tui-date.yaml --var 'release_date="+2d"'
+```
+
+Non-interactive or concurrent runs require a supplied variable, even when `required: false`;
+`value` is only interactive prefill. The example above also includes a form, whose fields need
+explicit `value` bindings for a completely unattended run.
+
+Use arrows to move by one day or week, Page Up/Down to move by a month, and Shift+Page Up/Down
+to move by a year. Moving to a shorter month clamps to its last day. Tab switches between the
+calendar and typing; printable keys in calendar mode start a fresh typed date. A valid typed
+value updates the calendar and shows a resolved-date preview, including for shortcuts.
+Enter confirms, Ctrl+X clears, and Ctrl+C cancels without publishing. Small terminals show
+compact typed entry. The picker follows the existing dark/light themes and `NO_COLOR`.
+
+![Relative date entry](assets/tui-date-shortcut.png)
+
+Use `type: date` inside `tui_form` with the same `format`, `min`, and `max` options:
+
+```yaml
+- id: schedule
+  type: tui_form
+  with:
+    title: Release schedule
+    fields:
+      - id: release_date
+        type: date
+        label: Release date
+        default: "+2d"
+        min: "+0d"
+        max: "+30d"
+        required: true
+      - id: follow_up
+        type: date
+        label: Follow-up date
+        format: "02.01.2006"
+        value: {expr: vars.follow_up}
+```
+
+Enter opens the calendar; Escape closes it without changing the field. Opening an empty field
+does not assign today until you confirm. Ctrl+X clears the field. Form `required` defaults to
+false, and unattended runs still need explicit field `value` bindings. All date fields share
+one reference date captured at form start. Date rules run before `validation.expr` or
+`validation.lua`; predicates receive the normalized formatted string. Unparseable date drafts
+appear as nil to other validators, while empty optional dates appear as `""`. The form publishes
+all outputs together after successful validation, for example `.steps.schedule.release_date`.
+For chronological comparisons between fields, use ISO format or parse custom-format values
+with `parseTime` first.
+
+![Date fields in a form](assets/tui-date-form.png)
+
+See [the runnable example](../examples/tui-date.yaml) and [the recording](assets/tui-date.gif).
 
 ## `tui_path`
 

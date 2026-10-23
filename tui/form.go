@@ -33,6 +33,7 @@ type FormField struct {
 	Value                        any
 	Options                      []Option
 	Path                         *PathPickerConfig
+	Date                         *DatePickerConfig
 	Normalize                    func(any) (any, error)
 	Validate                     func(any, map[string]any) (any, error)
 }
@@ -59,6 +60,7 @@ type formModel struct {
 	focus           int
 	width, height   int
 	picker          *pathPickerModel
+	datePicker      *datePickerModel
 	done, cancelled bool
 	result          map[string]any
 }
@@ -165,6 +167,9 @@ func (m formModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	if m.picker != nil {
 		return m.updatePicker(message)
 	}
+	if m.datePicker != nil {
+		return m.updateDatePicker(message)
+	}
 	if key, ok := message.(tea.KeyPressMsg); ok {
 		switch key.String() {
 		case "tab", "shift+tab":
@@ -188,6 +193,8 @@ func (m formModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			case "textarea": // Enter belongs to the text area.
 			case "path":
 				return m.openPicker()
+			case "date":
+				return m.openDatePicker()
 			default:
 				m.validateField(m.focus)
 				command := m.setFocus(m.focus + 1)
@@ -252,7 +259,7 @@ func (m formModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			widget.err = ""
 			return m, nil
-		case "path":
+		case "path", "date":
 			if key.String() == "ctrl+x" {
 				widget.value = ""
 				if widget.field.Path != nil && widget.field.Path.Multiple {
@@ -398,6 +405,43 @@ func (m formModel) submit() (tea.Model, tea.Cmd) {
 	return m, tea.Quit
 }
 
+func (m formModel) openDatePicker() (tea.Model, tea.Cmd) {
+	widget := &m.widgets[m.focus]
+	if widget.field.Date == nil {
+		widget.err = "date picker is unavailable"
+		return m, nil
+	}
+	config := *widget.field.Date
+	config.Value, _ = widget.value.(string)
+	picker, err := newDatePickerModel(config)
+	if err != nil {
+		widget.err = err.Error()
+		return m, nil
+	}
+	updated, _ := picker.Update(tea.WindowSizeMsg{Width: m.width, Height: m.height})
+	picker = updated.(datePickerModel)
+	m.datePicker = &picker
+	return m, picker.Init()
+}
+
+func (m formModel) updateDatePicker(message tea.Msg) (tea.Model, tea.Cmd) {
+	if key, ok := message.(tea.KeyPressMsg); ok && key.String() == "esc" {
+		m.datePicker = nil
+		return m, m.setFocus(m.focus)
+	}
+	updated, command := m.datePicker.Update(message)
+	picker := updated.(datePickerModel)
+	if picker.done {
+		m.widgets[m.focus].value = picker.result
+		m.datePicker = nil
+		m.validateField(m.focus)
+		// The child confirms one field; it must not quit the entire form.
+		return m, m.setFocus(m.focus)
+	}
+	m.datePicker = &picker
+	return m, command
+}
+
 func (m formModel) openPicker() (tea.Model, tea.Cmd) {
 	widget := &m.widgets[m.focus]
 	if widget.field.Path == nil {
@@ -480,6 +524,9 @@ func (m formModel) View() tea.View {
 	if m.picker != nil {
 		return m.picker.View()
 	}
+	if m.datePicker != nil {
+		return m.datePicker.View()
+	}
 	header := m.styles.heading(m.config.Title, m.width, m.height)
 	if m.config.Description != "" {
 		header += ansi.Hardwrap(m.styles.description.Render(m.config.Description), m.width, true) + "\n"
@@ -489,6 +536,8 @@ func (m formModel) View() tea.View {
 		switch m.widgets[m.focus].field.Type {
 		case "textarea":
 			help = "enter newline • " + help
+		case "date":
+			help = "enter calendar • ctrl+x clear • " + help
 		case "path":
 			help = "enter browse • ctrl+x clear • " + help
 		case "checkbox", "multiselect":
@@ -595,6 +644,12 @@ func (m formModel) widgetView(widget formWidget, focused bool) string {
 		if end < len(widget.field.Options) {
 			b.WriteString(fmt.Sprintf("\n  … %d more", len(widget.field.Options)-end))
 		}
+	case "date":
+		value, _ := widget.value.(string)
+		if value == "" {
+			value = "(none)"
+		}
+		b.WriteString("  " + value + " [Choose date]")
 	case "path":
 		value := fmt.Sprint(widget.value)
 		if value == "" || value == "[]" {

@@ -18,6 +18,7 @@ import (
 	wukoexpr "github.com/up2jj/wuko/expression"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/steps/choice"
+	datestep "github.com/up2jj/wuko/steps/date"
 	luastep "github.com/up2jj/wuko/steps/lua"
 	pathstep "github.com/up2jj/wuko/steps/path"
 	"github.com/up2jj/wuko/tui"
@@ -54,6 +55,9 @@ type Field struct {
 	Patterns         []string              `yaml:"patterns,omitempty"`
 	ShowHidden       bool                  `yaml:"show_hidden,omitempty"`
 	Multiple         bool                  `yaml:"multiple,omitempty"`
+	Format           string                `yaml:"format,omitempty"`
+	Min              string                `yaml:"min,omitempty"`
+	Max              string                `yaml:"max,omitempty"`
 }
 
 // Validation combines built-in constraints with one optional boolean predicate.
@@ -83,11 +87,13 @@ type compiledField struct {
 	luaPredicate    *luastep.Predicate
 	choices         *choice.Runner
 	path            *pathstep.Runner
+	date            *datestep.Runner
 }
 
 type Runner struct {
 	config Config
 	fields []compiledField
+	now    func() time.Time
 	// read is injectable in package tests; production always uses one Bubble Tea program.
 	read func(context.Context, step.Request, tui.FormConfig) (map[string]any, error)
 }
@@ -157,7 +163,7 @@ func New(raw map[string]any) (step.Runner, error) {
 	if !ok {
 		return nil, fmt.Errorf("fields must be a list")
 	}
-	runner := &Runner{config: config, read: func(ctx context.Context, request step.Request, config tui.FormConfig) (map[string]any, error) {
+	runner := &Runner{config: config, now: time.Now, read: func(ctx context.Context, request step.Request, config tui.FormConfig) (map[string]any, error) {
 		return tui.Form(ctx, request.Stdin, request.Stdout, config)
 	}}
 	fieldShape := make(types.Map, len(config.Fields))
@@ -239,6 +245,19 @@ func compileField(field Field, raw map[string]any, fieldShape types.Map) (compil
 			return result, err
 		}
 		result.choices = built.(*choice.Runner)
+	case "date":
+		allow("format", "min", "max")
+		dateRaw := map[string]any{"variable": field.ID, "message": field.Label, "required": field.Required}
+		for _, key := range []string{"format", "min", "max"} {
+			if value, ok := raw[key]; ok {
+				dateRaw[key] = value
+			}
+		}
+		built, err := datestep.New(dateRaw)
+		if err != nil {
+			return result, err
+		}
+		result.date = built.(*datestep.Runner)
 	case "path":
 		allow("root", "kind", "patterns", "show_hidden", "multiple")
 		built, err := pathstep.New(pathRaw(field, raw))
@@ -372,8 +391,19 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 		}
 	}
 	config := tui.FormConfig{Title: r.config.Title, Description: r.config.Description}
+	// Date fields share one reference instant and one timezone lookup.
+	reference, location := r.now(), time.Local
 	for _, field := range r.fields {
-		resolved, err := field.resolve(ctx, request)
+		if field.date != nil {
+			var err error
+			if location, err = datestep.Location(request.WorkflowTimezone); err != nil {
+				return step.Result{}, err
+			}
+			break
+		}
+	}
+	for _, field := range r.fields {
+		resolved, err := field.resolve(ctx, request, reference, location)
 		if err != nil {
 			return step.Result{}, fmt.Errorf("field %q: %w", field.config.ID, err)
 		}
@@ -412,7 +442,7 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 	return step.Result{Outputs: outputs}, nil
 }
 
-func (field compiledField) resolve(ctx context.Context, request step.Request) (tui.FormField, error) {
+func (field compiledField) resolve(ctx context.Context, request step.Request, reference time.Time, location *time.Location) (tui.FormField, error) {
 	f := field.config
 	result := tui.FormField{ID: f.ID, Type: f.Type, Label: f.Label, Description: f.Description, Required: f.Required}
 	selected := field.value
@@ -436,7 +466,7 @@ func (field compiledField) resolve(ctx context.Context, request step.Request) (t
 			} else {
 				value = ""
 			}
-		case "text", "textarea", "password":
+		case "text", "textarea", "password", "date":
 			value = ""
 		}
 	}
@@ -445,6 +475,15 @@ func (field compiledField) resolve(ctx context.Context, request step.Request) (t
 	switch f.Type {
 	case "select", "multiselect":
 		result.Options, err = field.choices.ResolveOptions(request)
+	case "date":
+		var config tui.DatePickerConfig
+		config, builtIn, err = field.date.PreparePicker(reference, location)
+		result.Date = &config
+		if err == nil {
+			if normalized, validateErr := datestep.Normalize(value, config.Format, config.Today); validateErr == nil {
+				result.Value = normalized
+			}
+		}
 	case "path":
 		var config tui.PathPickerConfig
 		config, builtIn, err = field.path.PreparePicker(request.RunDir)
@@ -457,6 +496,9 @@ func (field compiledField) resolve(ctx context.Context, request step.Request) (t
 		builtIn = func(value any) (any, error) { return field.validate(value, result.Options) }
 	}
 	result.Normalize = func(value any) (any, error) {
+		if f.Type == "date" {
+			return datestep.Normalize(value, result.Date.Format, result.Date.Today)
+		}
 		if f.Type == "number" {
 			if value == nil || value == "" {
 				return nil, nil
@@ -545,7 +587,7 @@ func validateInitialType(field Field, value any) error {
 	}
 	valid := false
 	switch field.Type {
-	case "text", "textarea", "password":
+	case "text", "textarea", "password", "date":
 		_, valid = value.(string)
 	case "checkbox":
 		_, valid = value.(bool)

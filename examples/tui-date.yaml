@@ -1,0 +1,43 @@
+version: 1
+name: release-schedule
+description: Choose a release date with calendar navigation or relative day shortcuts
+timezone: Europe/Warsaw
+
+steps:
+  - id: release
+    type: tui_date
+    with:
+      variable: release_date
+      message: Choose the release date
+      value: "+2d"
+      min: "+0d"
+      max: "+30d"
+
+  - id: schedule
+    type: tui_form
+    with:
+      title: Release schedule
+      fields:
+        - id: name
+          type: text
+          label: Release name
+          default: next-release
+          required: true
+        - id: release_date
+          type: date
+          label: Release date
+          value: {expr: vars.release_date}
+          min: "+0d"
+          max: "+30d"
+          required: true
+        - id: follow_up
+          type: date
+          label: Follow-up date (optional)
+          format: "02.01.2006"
+          default: "+7d"
+
+  - return:
+      outputs:
+        name: steps.schedule.name
+        release_date: steps.schedule.release_date
+        follow_up: steps.schedule.follow_up

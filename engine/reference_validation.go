@@ -221,7 +221,7 @@ func schemaForDependencies(values map[string]map[string]any) *referenceSchema {
 var (
 	varWriters = map[string]struct{}{
 		"set": {}, "transform": {}, "jsonpath": {}, "semver": {}, "git_conventional_commit": {}, "key_value": {}, "tui_choice": {}, "tui_confirm": {},
-		"tui_input": {}, "tui_password": {}, "tui_path": {}, "tui_review": {}, "time": {},
+		"tui_input": {}, "tui_password": {}, "tui_date": {}, "tui_path": {}, "tui_review": {}, "time": {},
 	}
 	dynamicVarWriters = map[string]struct{}{"lua": {}, "import_vars": {}}
 )

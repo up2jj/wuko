@@ -46,7 +46,7 @@ func TestVariableWriterTablesNameRegisteredSteps(t *testing.T) {
 			t.Fatalf("step type %q is not registered by any variable-writing step", name)
 		}
 	}
-	for _, name := range []string{"tui_choice", "tui_confirm", "tui_input", "tui_password", "tui_path", "tui_review"} {
+	for _, name := range []string{"tui_choice", "tui_confirm", "tui_input", "tui_password", "tui_date", "tui_path", "tui_review"} {
 		if _, listed := varWriters[name]; !listed {
 			t.Fatalf("prompt step %q no longer declares the variable it assigns", name)
 		}
