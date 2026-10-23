@@ -1254,11 +1254,11 @@ func TestDependencyOnlyWorkflowVisibilityAndCompletion(t *testing.T) {
 		}
 	}
 
-	direct, directive := workflowCompletion(deps, true)(nil, nil, "")
+	direct, directive := workflowCompletion(deps, workflowCompletionOptions{invokableOnly: true})(nil, nil, "")
 	if directive == 0 || strings.Contains(strings.Join(direct, "\n"), "build\t") || !strings.Contains(strings.Join(direct, "\n"), "release\t") {
 		t.Fatalf("direct completion = %#v, directive = %v", direct, directive)
 	}
-	inspection, _ := workflowCompletion(deps, false)(nil, nil, "")
+	inspection, _ := workflowCompletion(deps, workflowCompletionOptions{})(nil, nil, "")
 	if !strings.Contains(strings.Join(inspection, "\n"), "build\t") {
 		t.Fatalf("inspection completion = %#v", inspection)
 	}

@@ -48,7 +48,7 @@ func newUICmd(deps dependencies) *cobra.Command {
 	addReporterFlag(command, &config.reporters)
 	command.Flags().StringVar(&config.workflowFile, "file", "", "run a workflow form from a file path")
 	command.Flags().BoolVar(&config.noOpen, "no-open", false, "print the local URL without opening a browser")
-	command.ValidArgsFunction = workflowCompletion(deps, true)
+	command.ValidArgsFunction = workflowCompletion(deps, workflowCompletionOptions{invokableOnly: true, formOnly: true})
 	return command
 }
 

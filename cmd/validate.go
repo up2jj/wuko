@@ -74,7 +74,7 @@ func newValidateCmd(deps dependencies) *cobra.Command {
 	_ = command.RegisterFlagCompletionFunc("reporter", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 		return []string{"plain", "github"}, cobra.ShellCompDirectiveNoFileComp
 	})
-	command.ValidArgsFunction = workflowCompletion(deps, false)
+	command.ValidArgsFunction = workflowCompletion(deps, workflowCompletionOptions{})
 	return command
 }
 

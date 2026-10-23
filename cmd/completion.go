@@ -48,7 +48,12 @@ func registerWorkflowFileCompletions(command *cobra.Command) {
 
 // Completion reads only metadata: it must not consume stdin, resolve actions,
 // initialize plugins, or depend on unrelated discovered workflows being valid.
-func workflowFileTargetCompletion(deps dependencies, filename string, invokableOnly bool) ([]string, cobra.ShellCompDirective) {
+type workflowCompletionOptions struct {
+	invokableOnly bool
+	formOnly      bool
+}
+
+func workflowFileTargetCompletion(deps dependencies, filename string, options workflowCompletionOptions) ([]string, cobra.ShellCompDirective) {
 	if !filepath.IsAbs(filename) {
 		cwd, err := deps.cwd()
 		if err != nil {
@@ -61,20 +66,26 @@ func workflowFileTargetCompletion(deps dependencies, filename string, invokableO
 		return nil, cobra.ShellCompDirectiveError
 	}
 	var metadata struct {
-		Description string `yaml:"description"`
-		Invokable   *bool  `yaml:"invokable"`
+		Description string    `yaml:"description"`
+		Invokable   *bool     `yaml:"invokable"`
+		Form        yaml.Node `yaml:"form"`
 		Targets     map[string]struct {
-			Description string `yaml:"description"`
+			Description string    `yaml:"description"`
+			Form        yaml.Node `yaml:"form"`
 		} `yaml:"targets"`
 	}
 	if err := yaml.Unmarshal(data, &metadata); err != nil {
 		return nil, cobra.ShellCompDirectiveError
 	}
-	if invokableOnly && metadata.Invokable != nil && !*metadata.Invokable {
+	if options.invokableOnly && metadata.Invokable != nil && !*metadata.Invokable {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
 	values := make([]string, 0, len(metadata.Targets))
+	sharedForm := (&workflow.Definition{Form: metadata.Form}).HasForm()
 	for name, target := range metadata.Targets {
+		if options.formOnly && !sharedForm && !(workflow.TargetDefinition{Form: target.Form}).HasForm() {
+			continue
+		}
 		description := target.Description
 		if description == "" {
 			description = metadata.Description
@@ -85,7 +96,7 @@ func workflowFileTargetCompletion(deps dependencies, filename string, invokableO
 	return values, cobra.ShellCompDirectiveNoFileComp
 }
 
-func workflowCompletion(deps dependencies, invokableOnly bool) cobra.CompletionFunc {
+func workflowCompletion(deps dependencies, options workflowCompletionOptions) cobra.CompletionFunc {
 	return func(command *cobra.Command, args []string, _ string) ([]string, cobra.ShellCompDirective) {
 		if command != nil {
 			filename, _ := command.Flags().GetString("file")
@@ -93,7 +104,7 @@ func workflowCompletion(deps dependencies, invokableOnly bool) cobra.CompletionF
 				if filename == "-" || len(args) > 0 {
 					return nil, cobra.ShellCompDirectiveNoFileComp
 				}
-				return workflowFileTargetCompletion(deps, filename, invokableOnly)
+				return workflowFileTargetCompletion(deps, filename, options)
 			}
 			pick, _ := command.Flags().GetBool("pick")
 			if pick {
@@ -118,7 +129,7 @@ func workflowCompletion(deps dependencies, invokableOnly bool) cobra.CompletionF
 				if source.Name != args[0] || source.Target == "" {
 					continue
 				}
-				if invokableOnly && !source.Invokable {
+				if (options.invokableOnly && !source.Invokable) || (options.formOnly && !source.HasForm) {
 					continue
 				}
 				if _, exists := seen[source.Target]; exists {
@@ -132,7 +143,7 @@ func workflowCompletion(deps dependencies, invokableOnly bool) cobra.CompletionF
 		values := make([]string, 0, len(sources))
 		seen := make(map[string]struct{})
 		for _, source := range sources {
-			if invokableOnly && !source.Invokable {
+			if (options.invokableOnly && !source.Invokable) || (options.formOnly && !source.HasForm) {
 				continue
 			}
 			if _, exists := seen[source.Name]; exists {

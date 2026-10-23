@@ -16,6 +16,7 @@ func TestWorkflowFileCompletionUsesSelectedFile(t *testing.T) {
 	data := `version: 1
 name: draft
 description: Deploy
+form: {title: Deploy}
 plugins:
   unavailable: {command: /does/not/exist}
 targets:
@@ -159,6 +160,7 @@ func TestNamedWorkflowCompletionIgnoresBrokenDraftsAndUnpreparedSteps(t *testing
 		"broken": "version: [",
 		"deploy": `name: deploy
 description: Deploy
+form: {title: Deploy}
 plugins:
   unavailable: {command: /does/not/exist}
 targets:
@@ -194,5 +196,49 @@ targets:
 	command.SetArgs([]string{"validate"})
 	if err := command.ExecuteContext(t.Context()); err == nil {
 		t.Fatal("validation must still reject malformed workflows")
+	}
+}
+
+func TestUICompletionFiltersEffectiveBrowserForms(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, ".wuko", "workflows")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, data := range map[string]string{
+		"plain":      "description: Plain\nform: null\n",
+		"browser":    "description: Browser\nform: {}\nplugins: {missing: {command: /does/not/exist}}\n",
+		"dependency": "invokable: false\nform: {}\ntargets: {web: {form: {}}}\n",
+		"shared":     "description: Shared\nform: {}\ntargets:\n  inherited: {}\n  fallback: {form: null}\n  override: {form: {title: Override}}\n",
+		"mixed":      "description: Mixed\ntargets:\n  cli: {form: null}\n  web: {description: Web, form: {}}\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name+".yaml"), []byte(data), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, test := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"ui", ""}, "browser\tBrowser\nmixed\tWeb\nshared\tShared\n:4\n"},
+		{[]string{"ui", "mixed", ""}, "web\tWeb\n:4\n"},
+		{[]string{"ui", "shared", ""}, "fallback\tShared\ninherited\tShared\noverride\tShared\n:4\n"},
+		{[]string{"ui", "dependency", ""}, ":4\n"},
+		{[]string{"run", "mixed", ""}, "cli\tMixed\nweb\tWeb\n:4\n"},
+		{[]string{"tree", "dependency", ""}, "web\n:4\n"},
+	} {
+		t.Run(strings.Join(test.args, " "), func(t *testing.T) {
+			if got := executeCompletion(t, root, test.args); got != test.want {
+				t.Fatalf("completion = %q, want %q", got, test.want)
+			}
+		})
+	}
+	for _, name := range []string{"mixed", "shared", "dependency"} {
+		// File completion must apply the same form inheritance and invocation policy.
+		args := []string{"ui", "--file", filepath.Join(dir, name+".yaml"), ""}
+		want := executeCompletion(t, root, []string{"ui", name, ""})
+		if got := executeCompletion(t, root, args); got != want {
+			t.Fatalf("file completion for %s = %q, want %q", name, got, want)
+		}
 	}
 }

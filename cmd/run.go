@@ -51,7 +51,7 @@ func newRunCmd(deps dependencies) *cobra.Command {
 	command.Flags().BoolVar(&config.pick, "pick", false, "select a workflow from a GitHub repository or tree")
 	command.Flags().StringVar(&config.cpus, "cpus", "", "limit aggregate local workflow CPU use in cores (for example 1.5)")
 	command.Flags().StringVar(&config.memory, "memory", "", "limit aggregate local workflow memory (for example 512MiB)")
-	command.ValidArgsFunction = workflowCompletion(deps, true)
+	command.ValidArgsFunction = workflowCompletion(deps, workflowCompletionOptions{invokableOnly: true})
 	return command
 }
 

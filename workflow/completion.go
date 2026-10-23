@@ -38,11 +38,13 @@ func DiscoverForCompletion(cwd, homeDir, configDir string) ([]Source, error) {
 				return nil, fmt.Errorf("reading workflow metadata %s: %w", file.path, err)
 			}
 			var metadata struct {
-				Name        string `yaml:"name"`
-				Description string `yaml:"description"`
-				Invokable   *bool  `yaml:"invokable"`
+				Name        string    `yaml:"name"`
+				Description string    `yaml:"description"`
+				Invokable   *bool     `yaml:"invokable"`
+				Form        yaml.Node `yaml:"form"`
 				Targets     map[string]struct {
-					Description string `yaml:"description"`
+					Description string    `yaml:"description"`
+					Form        yaml.Node `yaml:"form"`
 				} `yaml:"targets"`
 			}
 			if err := yaml.Unmarshal(data, &metadata); err != nil {
@@ -59,6 +61,7 @@ func DiscoverForCompletion(cwd, homeDir, configDir string) ([]Source, error) {
 				Name: name, Path: file.path, Scope: location.scope, Effective: true,
 				PackageDir: file.packageDir, MarketplaceURL: file.marketplaceURL,
 				Description: metadata.Description, Invokable: metadata.Invokable == nil || *metadata.Invokable,
+				HasForm: (&Definition{Form: metadata.Form}).HasForm(),
 			}
 			if len(metadata.Targets) == 0 {
 				sources = append(sources, source)
@@ -67,6 +70,7 @@ func DiscoverForCompletion(cwd, homeDir, configDir string) ([]Source, error) {
 				selected := source
 				selected.Target = name
 				selected.Description = firstNonEmpty(target.Description, metadata.Description)
+				selected.HasForm = source.HasForm || (TargetDefinition{Form: target.Form}).HasForm()
 				sources = append(sources, selected)
 			}
 		}

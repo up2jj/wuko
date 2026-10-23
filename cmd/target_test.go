@@ -146,7 +146,7 @@ targets:
 		t.Fatalf("ui target = %#v", uiTarget)
 	}
 
-	completion, directive := workflowCompletion(deps, true)(nil, []string{"deploy"}, "")
+	completion, directive := workflowCompletion(deps, workflowCompletionOptions{invokableOnly: true})(nil, []string{"deploy"}, "")
 	if directive == 0 || !strings.Contains(strings.Join(completion, "\n"), "production\t") || !strings.Contains(strings.Join(completion, "\n"), "staging\t") {
 		t.Fatalf("completion = %#v, directive = %v", completion, directive)
 	}
