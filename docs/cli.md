@@ -177,7 +177,8 @@ wuko completion zsh > "${fpath[1]}/_wuko"
 wuko completion --help
 ```
 
-Completion suggests discovered workflow names and their targets. With `--file`, it suggests
+Completion reads workflow metadata without preparing workflows or starting plugins. Malformed
+YAML drafts are skipped so other workflow names and targets remain available. With `--file`, it suggests
 targets from that file, for example after `wuko run --file ./deploy.yaml `, without preparing the
 workflow or starting plugins. Stdin (`--file -`) and remote workflows do not offer target
 completion. `--file` filters filenames to YAML; `--var-file` filters to JSON and TOML.

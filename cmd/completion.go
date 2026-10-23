@@ -107,7 +107,7 @@ func workflowCompletion(deps dependencies, invokableOnly bool) cobra.CompletionF
 		if err != nil {
 			return nil, cobra.ShellCompDirectiveError
 		}
-		sources, err := workflow.Discover(cwd, home, config)
+		sources, err := workflow.DiscoverForCompletion(cwd, home, config)
 		if err != nil {
 			return nil, cobra.ShellCompDirectiveError
 		}

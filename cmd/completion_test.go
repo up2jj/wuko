@@ -132,3 +132,51 @@ func executeCompletion(t *testing.T, root string, args []string) string {
 	}
 	return output.String()
 }
+
+func TestNamedWorkflowCompletionIgnoresBrokenDraftsAndUnpreparedSteps(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, ".wuko", "workflows")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, data := range map[string]string{
+		"broken": "version: [",
+		"deploy": `name: deploy
+description: Deploy
+plugins:
+  unavailable: {command: /does/not/exist}
+targets:
+  staging:
+    description: Stage release
+    steps: [{uses: ./missing-action}]
+  production:
+    steps: [{type: nonexistent_step}]
+`,
+		"dependency": "invokable: false\ndescription: Internal\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name+".yaml"), []byte(data), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range []string{"run", "ui", "tree", "validate"} {
+		t.Run(name, func(t *testing.T) {
+			want := "deploy\tDeploy\n:4\n"
+			if name == "tree" || name == "validate" {
+				want = "dependency\tInternal\n" + want
+			}
+			if got := executeCompletion(t, root, []string{name, ""}); got != want {
+				t.Fatalf("names = %q, want %q", got, want)
+			}
+			want = "production\tDeploy\nstaging\tStage release\n:4\n"
+			if got := executeCompletion(t, root, []string{name, "deploy", ""}); got != want {
+				t.Fatalf("targets = %q, want %q", got, want)
+			}
+		})
+	}
+	var output bytes.Buffer
+	command := newRootCmd(listTestDependencies(root, &output))
+	command.SetArgs([]string{"validate"})
+	if err := command.ExecuteContext(t.Context()); err == nil {
+		t.Fatal("validation must still reject malformed workflows")
+	}
+}

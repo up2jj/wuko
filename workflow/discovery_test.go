@@ -141,6 +141,7 @@ func TestDiscoverHomeWorkflowsKeepGlobalScope(t *testing.T) {
 			{name: "effective", run: Discover},
 			{name: "all", run: DiscoverAll, all: true},
 			{name: "validation", run: DiscoverForValidation},
+			{name: "completion", run: DiscoverForCompletion},
 		} {
 			t.Run(location.name+"/"+discovery.name, func(t *testing.T) {
 				t.Parallel()
