@@ -8,8 +8,6 @@ import (
 	"math"
 	"reflect"
 	"slices"
-	"strconv"
-	"strings"
 
 	"github.com/expr-lang/expr"
 	"github.com/expr-lang/expr/vm"
@@ -329,88 +327,4 @@ func zeroValue(value any) bool {
 	}
 	number, ok, _ := numberValue(value)
 	return ok && number == 0
-}
-
-func normalizeResult(value any) (any, error) {
-	if err := validateStringMapKeys(reflect.ValueOf(value)); err != nil {
-		return nil, err
-	}
-	data, err := json.Marshal(value)
-	if err != nil {
-		return nil, fmt.Errorf("result is not JSON-compatible: %w", err)
-	}
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.UseNumber()
-	var normalized any
-	if err := decoder.Decode(&normalized); err != nil {
-		return nil, fmt.Errorf("normalizing result: %w", err)
-	}
-	return normalizeNumbers(normalized)
-}
-
-func validateStringMapKeys(value reflect.Value) error {
-	if !value.IsValid() {
-		return nil
-	}
-	for value.Kind() == reflect.Interface || value.Kind() == reflect.Pointer {
-		if value.IsNil() {
-			return nil
-		}
-		value = value.Elem()
-	}
-	switch value.Kind() {
-	case reflect.Map:
-		if value.Type().Key().Kind() != reflect.String {
-			return fmt.Errorf("result contains object with non-string keys of type %s", value.Type().Key())
-		}
-		iterator := value.MapRange()
-		for iterator.Next() {
-			if err := validateStringMapKeys(iterator.Value()); err != nil {
-				return err
-			}
-		}
-	case reflect.Slice, reflect.Array:
-		for index := range value.Len() {
-			if err := validateStringMapKeys(value.Index(index)); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-func normalizeNumbers(value any) (any, error) {
-	switch value := value.(type) {
-	case json.Number:
-		text := value.String()
-		if strings.ContainsAny(text, ".eE") {
-			number, err := strconv.ParseFloat(text, 64)
-			if err != nil || math.IsNaN(number) || math.IsInf(number, 0) {
-				return nil, fmt.Errorf("invalid JSON number %q", text)
-			}
-			return number, nil
-		}
-		integer, err := strconv.ParseInt(text, 10, 64)
-		if err != nil || int64(int(integer)) != integer {
-			return nil, fmt.Errorf("integer %q is out of range", text)
-		}
-		return int(integer), nil
-	case []any:
-		for index := range value {
-			normalized, err := normalizeNumbers(value[index])
-			if err != nil {
-				return nil, err
-			}
-			value[index] = normalized
-		}
-	case map[string]any:
-		for key, child := range value {
-			normalized, err := normalizeNumbers(child)
-			if err != nil {
-				return nil, err
-			}
-			value[key] = normalized
-		}
-	}
-	return value, nil
 }

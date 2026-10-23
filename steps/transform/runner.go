@@ -30,7 +30,7 @@ func (runner *Runner) Run(ctx context.Context, request step.Request) (step.Resul
 			return step.Result{}, fmt.Errorf("operation %d (%s): %w", index+1, operation.name, err)
 		}
 	}
-	// normalizeResult round-trips through JSON, so current already shares nothing with
+	// normalizeResult builds new lists and objects, so current already shares nothing with
 	// workflow state, and the engine clones outputs and variables again on commit.
 	// Cloning here would deep-copy the whole result two more times.
 	current, err = normalizeResult(current)

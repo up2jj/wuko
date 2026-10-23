@@ -62,3 +62,23 @@ func BenchmarkPipelineFilterCount(b *testing.B) {
 		"count",
 	})
 }
+
+func BenchmarkNormalizeResult(b *testing.B) {
+	items := benchmarkItems(100_000)
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, err := normalizeResult(items); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkNormalizeResultViaJSON(b *testing.B) {
+	items := benchmarkItems(100_000)
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, err := referenceNormalize(items); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
