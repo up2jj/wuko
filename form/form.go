@@ -426,7 +426,8 @@ func requiredError(field ResolvedField) error {
 
 func validateValue(field ResolvedField, value any) error {
 	text, ok := value.(string)
-	if !ok {
+	// An optional field left empty is not checked against its rules, as in interactive forms.
+	if !ok || text == "" && !field.Required {
 		return nil
 	}
 	if field.MinLength != nil && len([]rune(text)) < *field.MinLength {

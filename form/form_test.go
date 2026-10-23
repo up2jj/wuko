@@ -3,6 +3,7 @@ package form
 import (
 	"net/url"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -138,4 +139,23 @@ func decodeFormNode(t *testing.T, body string) *yaml.Node {
 		t.Fatal(err)
 	}
 	return document.Content[0]
+}
+
+func TestSubmitAcceptsEmptyOptionalTextWithRules(t *testing.T) {
+	t.Parallel()
+	minimum := 3
+	fields := []ResolvedField{
+		{Field: Field{Variable: "tag", Type: TypeString, MinLength: &minimum, pattern: regexp.MustCompile(`^v\d+$`)}},
+		{Field: Field{Variable: "name", Type: TypeString, Required: true, MinLength: &minimum}},
+	}
+	values, fieldErrors := Submit(fields, url.Values{"field_0": {""}, "field_1": {""}})
+	if fieldErrors["tag"] != "" || values["tag"] != "" {
+		t.Fatalf("optional field: values = %#v, errors = %#v", values, fieldErrors)
+	}
+	if fieldErrors["name"] == "" {
+		t.Fatalf("required field accepted an empty value: %#v", values)
+	}
+	if _, fieldErrors = Submit(fields, url.Values{"field_0": {"x"}, "field_1": {"abc"}}); fieldErrors["tag"] == "" {
+		t.Fatal("a non-empty optional value skipped its rules")
+	}
 }
