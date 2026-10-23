@@ -15,19 +15,9 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/process"
+	"github.com/up2jj/wuko/process/processtest"
 	"github.com/up2jj/wuko/ptyinteract"
 )
-
-type recordingExecutor struct {
-	options process.Options
-	result  process.Result
-	err     error
-}
-
-func (executor *recordingExecutor) Run(_ context.Context, options process.Options) (process.Result, error) {
-	executor.options = options
-	return executor.result, executor.err
-}
 
 func TestTargetEnvironmentUsesCleanRootBaseline(t *testing.T) {
 	t.Parallel()
@@ -51,7 +41,7 @@ func TestRootExecutionResolvesCommandAndUsesSanitizedEnvironment(t *testing.T) {
 	if err := os.WriteFile(command, []byte("#!/bin/sh\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	recorder := &recordingExecutor{}
+	recorder := &processtest.Executor{}
 	executor := NewExecutor()
 	executor.geteuid = func() int { return 0 }
 	executor.local = recorder
@@ -65,11 +55,11 @@ func TestRootExecutionResolvesCommandAndUsesSanitizedEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if recorder.options.Command != command || recorder.options.Dir != dir {
-		t.Fatalf("command = %q, dir = %q", recorder.options.Command, recorder.options.Dir)
+	if recorder.Last().Command != command || recorder.Last().Dir != dir {
+		t.Fatalf("command = %q, dir = %q", recorder.Last().Command, recorder.Last().Dir)
 	}
-	if recorder.options.Env["VALUE"] != "step" || recorder.options.Env["USER"] != "root" || recorder.options.Env["TERM"] != "xterm" {
-		t.Fatalf("environment = %#v", recorder.options.Env)
+	if recorder.Last().Env["VALUE"] != "step" || recorder.Last().Env["USER"] != "root" || recorder.Last().Env["TERM"] != "xterm" {
+		t.Fatalf("environment = %#v", recorder.Last().Env)
 	}
 }
 

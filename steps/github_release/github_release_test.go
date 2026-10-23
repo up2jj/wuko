@@ -8,27 +8,9 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/process"
+	"github.com/up2jj/wuko/process/processtest"
 	"github.com/up2jj/wuko/step"
 )
-
-type recordedCall struct {
-	result process.Result
-	err    error
-}
-
-type recordingExecutor struct {
-	calls []process.Options
-	steps []recordedCall
-}
-
-func (executor *recordingExecutor) Run(_ context.Context, options process.Options) (process.Result, error) {
-	executor.calls = append(executor.calls, options)
-	if len(executor.calls) > len(executor.steps) {
-		return process.Result{}, errors.New("unexpected command")
-	}
-	call := executor.steps[len(executor.calls)-1]
-	return call.result, call.err
-}
 
 func TestNewValidatesConfiguration(t *testing.T) {
 	for _, tt := range []struct {
@@ -53,10 +35,10 @@ func TestNewValidatesConfiguration(t *testing.T) {
 }
 
 func TestRunReportsCurrentRepositoryAndUsesDefaultBranch(t *testing.T) {
-	executor := &recordingExecutor{steps: []recordedCall{
-		{result: process.Result{Stdout: `{"default_branch":"main"}`}},
-		{result: process.Result{Stdout: `{"tag_name":"v1.2.3","html_url":"https://github.com/acme/wuko/releases/tag/v1.2.3","published_at":"2026-08-20T10:00:00Z"}`}},
-		{result: process.Result{Stdout: `{"html_url":"https://github.com/acme/wuko/compare/v1.2.3...main","ahead_by":0,"behind_by":2,"total_commits":0}`}},
+	executor := &processtest.Executor{Strict: true, Replies: []processtest.Reply{
+		{Result: process.Result{Stdout: `{"default_branch":"main"}`}},
+		{Result: process.Result{Stdout: `{"tag_name":"v1.2.3","html_url":"https://github.com/acme/wuko/releases/tag/v1.2.3","published_at":"2026-08-20T10:00:00Z"}`}},
+		{Result: process.Result{Stdout: `{"html_url":"https://github.com/acme/wuko/compare/v1.2.3...main","ahead_by":0,"behind_by":2,"total_commits":0}`}},
 	}}
 	runner, err := New(map[string]any{"operation": operationCheckDrift, "repository": "acme/wuko"})
 	if err != nil {
@@ -69,8 +51,8 @@ func TestRunReportsCurrentRepositoryAndUsesDefaultBranch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(executor.calls) != 3 {
-		t.Fatalf("calls = %d, want 3", len(executor.calls))
+	if len(executor.Calls()) != 3 {
+		t.Fatalf("calls = %d, want 3", len(executor.Calls()))
 	}
 	wantArgs := [][]string{
 		{"api", "repos/acme/wuko"},
@@ -78,12 +60,12 @@ func TestRunReportsCurrentRepositoryAndUsesDefaultBranch(t *testing.T) {
 		{"api", "repos/acme/wuko/compare/v1.2.3...main"},
 	}
 	for index, want := range wantArgs {
-		if executor.calls[index].Command != "gh" || !slices.Equal(executor.calls[index].Args, want) || executor.calls[index].Dir != "/workspace" {
-			t.Fatalf("call %d = %#v, want args %#v", index, executor.calls[index], want)
+		if executor.Calls()[index].Command != "gh" || !slices.Equal(executor.Calls()[index].Args, want) || executor.Calls()[index].Dir != "/workspace" {
+			t.Fatalf("call %d = %#v, want args %#v", index, executor.Calls()[index], want)
 		}
 	}
-	if executor.calls[0].Env[step.AttemptEnv] != "2" || executor.calls[0].Env[step.MaxAttemptsEnv] != "3" || executor.calls[0].Env[step.OperationIDEnv] != "release-check" {
-		t.Fatalf("environment = %#v", executor.calls[0].Env)
+	if executor.Calls()[0].Env[step.AttemptEnv] != "2" || executor.Calls()[0].Env[step.MaxAttemptsEnv] != "3" || executor.Calls()[0].Env[step.OperationIDEnv] != "release-check" {
+		t.Fatalf("environment = %#v", executor.Calls()[0].Env)
 	}
 	want := map[string]any{
 		"repository":    "acme/wuko",
@@ -107,10 +89,10 @@ func TestRunReportsCurrentRepositoryAndUsesDefaultBranch(t *testing.T) {
 }
 
 func TestRunReportsChangedRepository(t *testing.T) {
-	executor := &recordingExecutor{steps: []recordedCall{
-		{result: process.Result{Stdout: `{"default_branch":"trunk"}`}},
-		{result: process.Result{Stdout: `{"tag_name":"v2.0.0"}`}},
-		{result: process.Result{Stdout: `{"ahead_by":4,"behind_by":0,"total_commits":4}`}},
+	executor := &processtest.Executor{Strict: true, Replies: []processtest.Reply{
+		{Result: process.Result{Stdout: `{"default_branch":"trunk"}`}},
+		{Result: process.Result{Stdout: `{"tag_name":"v2.0.0"}`}},
+		{Result: process.Result{Stdout: `{"ahead_by":4,"behind_by":0,"total_commits":4}`}},
 	}}
 	runner, err := New(map[string]any{"operation": operationCheckDrift, "repository": "acme/project"})
 	if err != nil {
@@ -126,9 +108,9 @@ func TestRunReportsChangedRepository(t *testing.T) {
 }
 
 func TestRunReportsRepositoryWithoutStableRelease(t *testing.T) {
-	executor := &recordingExecutor{steps: []recordedCall{
-		{result: process.Result{Stdout: `{"default_branch":"main"}`}},
-		{result: process.Result{Stderr: "gh: Not Found (HTTP 404)"}, err: &process.ExitError{Command: "gh", Code: 1}},
+	executor := &processtest.Executor{Strict: true, Replies: []processtest.Reply{
+		{Result: process.Result{Stdout: `{"default_branch":"main"}`}},
+		{Result: process.Result{Stderr: "gh: Not Found (HTTP 404)"}, Err: &process.ExitError{Command: "gh", Code: 1}},
 	}}
 	runner, err := New(map[string]any{"operation": operationCheckDrift, "repository": "acme/project"})
 	if err != nil {
@@ -138,8 +120,8 @@ func TestRunReportsRepositoryWithoutStableRelease(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(executor.calls) != 2 {
-		t.Fatalf("calls = %d, want 2", len(executor.calls))
+	if len(executor.Calls()) != 2 {
+		t.Fatalf("calls = %d, want 2", len(executor.Calls()))
 	}
 	want := noReleaseOutputs("acme/project", "main")
 	for key, value := range want {
@@ -152,42 +134,42 @@ func TestRunReportsRepositoryWithoutStableRelease(t *testing.T) {
 func TestRunReportsMalformedResponsesAndCommandFailures(t *testing.T) {
 	tests := []struct {
 		name  string
-		steps []recordedCall
+		steps []processtest.Reply
 		want  string
 	}{
 		{
 			name:  "malformed repository JSON",
-			steps: []recordedCall{{result: process.Result{Stdout: "not json"}}},
+			steps: []processtest.Reply{{Result: process.Result{Stdout: "not json"}}},
 			want:  "decoding GitHub repository",
 		},
 		{
 			name:  "repository command failure",
-			steps: []recordedCall{{result: process.Result{Stderr: "not logged in"}, err: &process.ExitError{Command: "gh", Code: 4}}},
+			steps: []processtest.Reply{{Result: process.Result{Stderr: "not logged in"}, Err: &process.ExitError{Command: "gh", Code: 4}}},
 			want:  "reading GitHub repository: not logged in",
 		},
 		{
 			name:  "missing gh",
-			steps: []recordedCall{{err: errors.New(`starting gh: executable file not found in $PATH`)}},
+			steps: []processtest.Reply{{Err: errors.New(`starting gh: executable file not found in $PATH`)}},
 			want:  "reading GitHub repository: gh api repos/acme/project: starting gh",
 		},
 		{
 			name:  "malformed release JSON",
-			steps: []recordedCall{{result: process.Result{Stdout: `{"default_branch":"main"}`}}, {result: process.Result{Stdout: "not json"}}},
+			steps: []processtest.Reply{{Result: process.Result{Stdout: `{"default_branch":"main"}`}}, {Result: process.Result{Stdout: "not json"}}},
 			want:  "decoding latest GitHub release",
 		},
 		{
 			name:  "release command failure",
-			steps: []recordedCall{{result: process.Result{Stdout: `{"default_branch":"main"}`}}, {result: process.Result{Stderr: "permission denied"}, err: &process.ExitError{Command: "gh", Code: 4}}},
+			steps: []processtest.Reply{{Result: process.Result{Stdout: `{"default_branch":"main"}`}}, {Result: process.Result{Stderr: "permission denied"}, Err: &process.ExitError{Command: "gh", Code: 4}}},
 			want:  "reading latest GitHub release: permission denied",
 		},
 		{
 			name:  "malformed comparison JSON",
-			steps: []recordedCall{{result: process.Result{Stdout: `{"default_branch":"main"}`}}, {result: process.Result{Stdout: `{"tag_name":"v1.0.0"}`}}, {result: process.Result{Stdout: "not json"}}},
+			steps: []processtest.Reply{{Result: process.Result{Stdout: `{"default_branch":"main"}`}}, {Result: process.Result{Stdout: `{"tag_name":"v1.0.0"}`}}, {Result: process.Result{Stdout: "not json"}}},
 			want:  "decoding GitHub comparison",
 		},
 		{
 			name:  "comparison command failure",
-			steps: []recordedCall{{result: process.Result{Stdout: `{"default_branch":"main"}`}}, {result: process.Result{Stdout: `{"tag_name":"v1.0.0"}`}}, {result: process.Result{Stderr: "comparison failed"}, err: &process.ExitError{Command: "gh", Code: 1}}},
+			steps: []processtest.Reply{{Result: process.Result{Stdout: `{"default_branch":"main"}`}}, {Result: process.Result{Stdout: `{"tag_name":"v1.0.0"}`}}, {Result: process.Result{Stderr: "comparison failed"}, Err: &process.ExitError{Command: "gh", Code: 1}}},
 			want:  "comparing GitHub release: comparison failed",
 		},
 	}
@@ -197,7 +179,7 @@ func TestRunReportsMalformedResponsesAndCommandFailures(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			executor := &recordingExecutor{steps: tt.steps}
+			executor := &processtest.Executor{Strict: true, Replies: tt.steps}
 			result, err := runner.Run(t.Context(), step.Request{Executor: executor})
 			if err == nil || !strings.Contains(err.Error(), tt.want) || result.Outputs != nil {
 				t.Fatalf("result = %#v, error = %v, want %q", result, err, tt.want)
@@ -207,7 +189,7 @@ func TestRunReportsMalformedResponsesAndCommandFailures(t *testing.T) {
 }
 
 func TestRunPreservesCancellation(t *testing.T) {
-	executor := &recordingExecutor{steps: []recordedCall{{err: context.Canceled}}}
+	executor := &processtest.Executor{Strict: true, Replies: []processtest.Reply{{Err: context.Canceled}}}
 	runner, err := New(map[string]any{"operation": operationCheckDrift, "repository": "acme/project"})
 	if err != nil {
 		t.Fatal(err)

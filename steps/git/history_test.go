@@ -11,6 +11,7 @@ import (
 
 	"github.com/up2jj/wuko/internal/gittest"
 	"github.com/up2jj/wuko/process"
+	"github.com/up2jj/wuko/process/processtest"
 	"github.com/up2jj/wuko/step"
 	"go.yaml.in/yaml/v3"
 )
@@ -240,8 +241,8 @@ func TestMergeBaseRejectsUnresolvedMissingAndAmbiguousHistory(t *testing.T) {
 		t.Fatalf("unresolved error = %v", err)
 	}
 
-	missing := &scriptedGitExecutor{results: []scriptedGitResult{
-		{err: &process.ExitError{Command: "git", Code: 1}},
+	missing := &processtest.Executor{Replies: []processtest.Reply{
+		{Err: &process.ExitError{Command: "git", Code: 1}},
 	}}
 	runner, err = NewMergeBase(map[string]any{"from": "missing"})
 	if err != nil {
@@ -251,10 +252,10 @@ func TestMergeBaseRejectsUnresolvedMissingAndAmbiguousHistory(t *testing.T) {
 		t.Fatalf("missing revision error = %v", err)
 	}
 
-	noBase := &scriptedGitExecutor{results: []scriptedGitResult{
-		{result: process.Result{Stdout: "from-id\n"}},
-		{result: process.Result{Stdout: "through-id\n"}},
-		{err: &process.ExitError{Command: "git", Code: 1}},
+	noBase := &processtest.Executor{Replies: []processtest.Reply{
+		{Result: process.Result{Stdout: "from-id\n"}},
+		{Result: process.Result{Stdout: "through-id\n"}},
+		{Err: &process.ExitError{Command: "git", Code: 1}},
 	}}
 	runner, err = NewMergeBase(map[string]any{"from": "main", "through": "feature"})
 	if err != nil {
@@ -264,10 +265,10 @@ func TestMergeBaseRejectsUnresolvedMissingAndAmbiguousHistory(t *testing.T) {
 		t.Fatalf("no common ancestor error = %v", err)
 	}
 
-	multiple := &scriptedGitExecutor{results: []scriptedGitResult{
-		{result: process.Result{Stdout: "from-id\n"}},
-		{result: process.Result{Stdout: "through-id\n"}},
-		{result: process.Result{Stdout: "base-one\nbase-two\n"}},
+	multiple := &processtest.Executor{Replies: []processtest.Reply{
+		{Result: process.Result{Stdout: "from-id\n"}},
+		{Result: process.Result{Stdout: "through-id\n"}},
+		{Result: process.Result{Stdout: "base-one\nbase-two\n"}},
 	}}
 	if _, err := runner.Run(t.Context(), step.Request{Executor: multiple}); err == nil ||
 		!strings.Contains(err.Error(), "multiple merge bases") || !strings.Contains(err.Error(), "base-one, base-two") {
@@ -338,10 +339,10 @@ func TestHistoryRejectsUnresolvedTemplatesAndDivergentBoundary(t *testing.T) {
 		t.Fatalf("log error = %v", err)
 	}
 
-	executor := &scriptedGitExecutor{results: []scriptedGitResult{
-		{result: process.Result{Stdout: "through-id\n"}},
-		{result: process.Result{Stdout: "after-id\n"}},
-		{err: &process.ExitError{Command: "git", Code: 1}},
+	executor := &processtest.Executor{Replies: []processtest.Reply{
+		{Result: process.Result{Stdout: "through-id\n"}},
+		{Result: process.Result{Stdout: "after-id\n"}},
+		{Err: &process.ExitError{Command: "git", Code: 1}},
 	}}
 	log, err = NewLog(map[string]any{"after": "release", "through": "main"})
 	if err != nil {
@@ -354,8 +355,8 @@ func TestHistoryRejectsUnresolvedTemplatesAndDivergentBoundary(t *testing.T) {
 
 func TestHistoryTruncationKeepsExitError(t *testing.T) {
 	t.Parallel()
-	executor := &scriptedGitExecutor{results: []scriptedGitResult{
-		{result: process.Result{StdoutTruncated: true}, err: &process.ExitError{Command: "git", Code: 1}},
+	executor := &processtest.Executor{Replies: []processtest.Reply{
+		{Result: process.Result{StdoutTruncated: true}, Err: &process.ExitError{Command: "git", Code: 1}},
 	}}
 	_, err := runGitCapture(t.Context(), step.Request{Executor: executor}, "rev-parse", "--verify", "HEAD")
 	var exitErr *process.ExitError
@@ -371,9 +372,9 @@ func TestHistoryTruncationKeepsExitError(t *testing.T) {
 
 func TestHistoryUsesCaptureOnlyExecutorAndRejectsTruncation(t *testing.T) {
 	t.Parallel()
-	executor := &scriptedGitExecutor{results: []scriptedGitResult{
-		{result: process.Result{Stdout: "commit-id\n"}},
-		{result: process.Result{StdoutTruncated: true}},
+	executor := &processtest.Executor{Replies: []processtest.Reply{
+		{Result: process.Result{Stdout: "commit-id\n"}},
+		{Result: process.Result{StdoutTruncated: true}},
 	}}
 	runner, err := NewRevision(map[string]any{})
 	if err != nil {
@@ -383,7 +384,7 @@ func TestHistoryUsesCaptureOnlyExecutorAndRejectsTruncation(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "output exceeded 16 MiB") {
 		t.Fatalf("truncation error = %v", err)
 	}
-	for _, call := range executor.calls {
+	for _, call := range executor.Calls() {
 		if call.StdoutPolicy != process.OutputCapture || call.StderrPolicy != process.OutputCapture || call.CaptureLimit != historyCaptureLimit {
 			t.Fatalf("process options = %#v", call)
 		}
@@ -394,11 +395,11 @@ func TestHistoryUsesCaptureOnlyExecutorAndRejectsTruncation(t *testing.T) {
 	if _, ok := runner.(step.ExecutorAware); !ok {
 		t.Fatal("git_revision is not executor-aware")
 	}
-	mergeExecutor := &scriptedGitExecutor{results: []scriptedGitResult{
-		{result: process.Result{Stdout: "from-id\n"}},
-		{result: process.Result{Stdout: "through-id\n"}},
-		{result: process.Result{Stdout: "base-id\n"}},
-		{result: process.Result{Stdout: "base\n"}},
+	mergeExecutor := &processtest.Executor{Replies: []processtest.Reply{
+		{Result: process.Result{Stdout: "from-id\n"}},
+		{Result: process.Result{Stdout: "through-id\n"}},
+		{Result: process.Result{Stdout: "base-id\n"}},
+		{Result: process.Result{Stdout: "base\n"}},
 	}}
 	mergeBase, err := NewMergeBase(map[string]any{"from": "main", "through": "feature"})
 	if err != nil {
@@ -414,10 +415,10 @@ func TestHistoryUsesCaptureOnlyExecutorAndRejectsTruncation(t *testing.T) {
 	if result.Outputs["from"] != "from-id" || result.Outputs["through"] != "through-id" || result.Outputs["sha"] != "base-id" || result.Outputs["short_sha"] != "base" {
 		t.Fatalf("merge-base outputs = %#v", result.Outputs)
 	}
-	if !slices.Equal(mergeExecutor.calls[2].Args, []string{"merge-base", "--all", "from-id", "through-id"}) {
-		t.Fatalf("merge-base args = %#v", mergeExecutor.calls[2].Args)
+	if !slices.Equal(mergeExecutor.Calls()[2].Args, []string{"merge-base", "--all", "from-id", "through-id"}) {
+		t.Fatalf("merge-base args = %#v", mergeExecutor.Calls()[2].Args)
 	}
-	for _, call := range mergeExecutor.calls {
+	for _, call := range mergeExecutor.Calls() {
 		if call.Command != "git" || call.Dir != "/workspace" || call.StdoutPolicy != process.OutputCapture || call.StderrPolicy != process.OutputCapture || call.CaptureLimit != historyCaptureLimit {
 			t.Fatalf("merge-base process options = %#v", call)
 		}

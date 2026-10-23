@@ -11,19 +11,9 @@ import (
 
 	"github.com/up2jj/wuko/internal/gittest"
 	"github.com/up2jj/wuko/process"
+	"github.com/up2jj/wuko/process/processtest"
 	"github.com/up2jj/wuko/step"
 )
-
-type recordingExecutor struct {
-	options process.Options
-	result  process.Result
-	err     error
-}
-
-func (executor *recordingExecutor) Run(_ context.Context, options process.Options) (process.Result, error) {
-	executor.options = options
-	return executor.result, executor.err
-}
 
 func TestNewValidatesConfiguration(t *testing.T) {
 	t.Parallel()
@@ -80,7 +70,7 @@ func TestSuccessfulAssertionsReturnEmptyResults(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			executor := &recordingExecutor{result: tt.result}
+			executor := &processtest.Executor{Reply: processtest.Reply{Result: tt.result}}
 			result, err := runner.Run(t.Context(), step.Request{Executor: executor, RunDir: "/repo"})
 			if err != nil {
 				t.Fatal(err)
@@ -88,8 +78,8 @@ func TestSuccessfulAssertionsReturnEmptyResults(t *testing.T) {
 			if result.Outputs != nil || result.Variables != nil {
 				t.Fatalf("result = %#v, want empty result", result)
 			}
-			if executor.options.Command != "git" || executor.options.Dir != "/repo" {
-				t.Fatalf("process options = %#v", executor.options)
+			if executor.Last().Command != "git" || executor.Last().Dir != "/repo" {
+				t.Fatalf("process options = %#v", executor.Last())
 			}
 		})
 	}
@@ -97,7 +87,7 @@ func TestSuccessfulAssertionsReturnEmptyResults(t *testing.T) {
 
 func TestGitCommandsUseExecutorEnvironmentAndArguments(t *testing.T) {
 	t.Parallel()
-	executor := &recordingExecutor{}
+	executor := &processtest.Executor{}
 	runner, err := NewBranch(map[string]any{"operation": "assert", "branch": "main", "exists": true})
 	if err != nil {
 		t.Fatal(err)
@@ -109,11 +99,11 @@ func TestGitCommandsUseExecutorEnvironmentAndArguments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(executor.options.Args, []string{"show-ref", "--verify", "--quiet", "refs/heads/main"}) {
-		t.Fatalf("args = %#v", executor.options.Args)
+	if !slices.Equal(executor.Last().Args, []string{"show-ref", "--verify", "--quiet", "refs/heads/main"}) {
+		t.Fatalf("args = %#v", executor.Last().Args)
 	}
-	if executor.options.Env["MODE"] != "test" || executor.options.Env[step.AttemptEnv] != "2" || executor.options.Env[step.OperationIDEnv] != "git-branch" {
-		t.Fatalf("environment = %#v", executor.options.Env)
+	if executor.Last().Env["MODE"] != "test" || executor.Last().Env[step.AttemptEnv] != "2" || executor.Last().Env[step.OperationIDEnv] != "git-branch" {
+		t.Fatalf("environment = %#v", executor.Last().Env)
 	}
 	if _, ok := runner.(step.ExecutorAware); !ok {
 		t.Fatalf("runner does not implement step.ExecutorAware")
@@ -142,9 +132,9 @@ func TestBranchAssertionsClassifyMissingReferences(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			executor := &recordingExecutor{err: &process.ExitError{Command: "git", Code: tt.existsCode}}
+			executor := &processtest.Executor{Reply: processtest.Reply{Err: &process.ExitError{Command: "git", Code: tt.existsCode}}}
 			if tt.existsCode == 0 {
-				executor.err = nil
+				executor.Reply.Err = nil
 			}
 			_, err = runner.Run(t.Context(), step.Request{Executor: executor})
 			if tt.wantError == "" {
@@ -185,7 +175,7 @@ func TestRemoteBranchAssertionsMatchAnyOrNamedRemote(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, err = runner.Run(t.Context(), step.Request{Executor: &recordingExecutor{result: process.Result{Stdout: tt.remoteRefs}}})
+			_, err = runner.Run(t.Context(), step.Request{Executor: &processtest.Executor{Reply: processtest.Reply{Result: process.Result{Stdout: tt.remoteRefs}}}})
 			if tt.wantError == "" {
 				if err != nil {
 					t.Fatalf("Run() error = %v", err)
@@ -205,7 +195,7 @@ func TestBranchNameAndCurrentBranchAssertions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := valid.Run(t.Context(), step.Request{Executor: &recordingExecutor{}}); err != nil {
+	if _, err := valid.Run(t.Context(), step.Request{Executor: &processtest.Executor{}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -213,7 +203,7 @@ func TestBranchNameAndCurrentBranchAssertions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	executor := &recordingExecutor{err: &process.ExitError{Command: "git", Code: 1}}
+	executor := &processtest.Executor{Reply: processtest.Reply{Err: &process.ExitError{Command: "git", Code: 1}}}
 	if _, err := invalid.Run(t.Context(), step.Request{Executor: executor}); err == nil || !strings.Contains(err.Error(), "not a valid Git branch name") {
 		t.Fatalf("invalid branch error = %v", err)
 	}
@@ -222,13 +212,13 @@ func TestBranchNameAndCurrentBranchAssertions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := onBranch.Run(t.Context(), step.Request{Executor: &recordingExecutor{result: process.Result{Stdout: "main\n"}}}); err != nil {
+	if _, err := onBranch.Run(t.Context(), step.Request{Executor: &processtest.Executor{Reply: processtest.Reply{Result: process.Result{Stdout: "main\n"}}}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := onBranch.Run(t.Context(), step.Request{Executor: &recordingExecutor{result: process.Result{Stdout: "develop\n"}}}); err == nil || !strings.Contains(err.Error(), "want \"main\"") {
+	if _, err := onBranch.Run(t.Context(), step.Request{Executor: &processtest.Executor{Reply: processtest.Reply{Result: process.Result{Stdout: "develop\n"}}}}); err == nil || !strings.Contains(err.Error(), "want \"main\"") {
 		t.Fatalf("different branch error = %v", err)
 	}
-	if _, err := onBranch.Run(t.Context(), step.Request{Executor: &recordingExecutor{}}); err == nil || !strings.Contains(err.Error(), "detached HEAD") {
+	if _, err := onBranch.Run(t.Context(), step.Request{Executor: &processtest.Executor{}}); err == nil || !strings.Contains(err.Error(), "detached HEAD") {
 		t.Fatalf("detached branch error = %v", err)
 	}
 }
@@ -249,10 +239,10 @@ func TestGitAssertionsPropagateCancellationAndCommandFailures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = runner.Run(t.Context(), step.Request{Executor: &recordingExecutor{
-		result: process.Result{Stderr: "not a repository\n"},
-		err:    errors.New("git failed"),
-	}})
+	_, err = runner.Run(t.Context(), step.Request{Executor: &processtest.Executor{Reply: processtest.Reply{
+		Result: process.Result{Stderr: "not a repository\n"},
+		Err:    errors.New("git failed"),
+	}}})
 	if err == nil || !strings.Contains(err.Error(), "checking Git working tree: not a repository") {
 		t.Fatalf("command failure = %v", err)
 	}

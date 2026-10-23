@@ -15,6 +15,7 @@ import (
 	"github.com/up2jj/wuko/internal/gittest"
 	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/process"
+	"github.com/up2jj/wuko/process/processtest"
 	"github.com/up2jj/wuko/provider"
 	"github.com/up2jj/wuko/step"
 	"go.yaml.in/yaml/v3"
@@ -438,18 +439,18 @@ func TestGitDiffRejectsMalformedAndTruncatedOutput(t *testing.T) {
 	t.Parallel()
 	for _, test := range []struct {
 		name    string
-		results []scriptedGitResult
+		results []processtest.Reply
 		want    string
 	}{
-		{"malformed raw", []scriptedGitResult{{result: process.Result{Stdout: "id\n"}}, {result: process.Result{Stdout: "id parent\n"}}, {result: process.Result{Stdout: "bad\x00"}}}, "malformed header"},
-		{"truncated raw", []scriptedGitResult{{result: process.Result{Stdout: "id\n"}}, {result: process.Result{Stdout: "id parent\n"}}, {result: process.Result{StdoutTruncated: true}, err: &process.ExitError{Command: "git", Code: 1}}}, "output exceeded 16 MiB"},
+		{"malformed raw", []processtest.Reply{{Result: process.Result{Stdout: "id\n"}}, {Result: process.Result{Stdout: "id parent\n"}}, {Result: process.Result{Stdout: "bad\x00"}}}, "malformed header"},
+		{"truncated raw", []processtest.Reply{{Result: process.Result{Stdout: "id\n"}}, {Result: process.Result{Stdout: "id parent\n"}}, {Result: process.Result{StdoutTruncated: true}, Err: &process.ExitError{Command: "git", Code: 1}}}, "output exceeded 16 MiB"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			runner, err := NewDiff(map[string]any{})
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, err = runner.Run(t.Context(), step.Request{Executor: &scriptedGitExecutor{results: test.results}})
+			_, err = runner.Run(t.Context(), step.Request{Executor: &processtest.Executor{Replies: test.results}})
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("error = %v, want %q", err, test.want)
 			}

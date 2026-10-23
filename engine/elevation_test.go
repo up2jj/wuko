@@ -1,28 +1,17 @@
 package engine
 
 import (
-	"context"
 	"io"
 	"strings"
 	"testing"
 
 	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/process"
+	"github.com/up2jj/wuko/process/processtest"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/steps/shell"
 	"github.com/up2jj/wuko/workflow"
 )
-
-type elevatedRecordingExecutor struct {
-	runs    int
-	options process.Options
-}
-
-func (executor *elevatedRecordingExecutor) Run(_ context.Context, options process.Options) (process.Result, error) {
-	executor.runs++
-	executor.options = options
-	return process.Result{Stdout: "root"}, nil
-}
 
 func elevationTestEngine(t *testing.T, executor process.Executor) *Engine {
 	t.Helper()
@@ -35,15 +24,15 @@ func elevationTestEngine(t *testing.T, executor process.Executor) *Engine {
 
 func TestEngineRunsElevatedShellOnlyForAllowedLocalProvenance(t *testing.T) {
 	t.Parallel()
-	executor := &elevatedRecordingExecutor{}
+	executor := &processtest.Executor{Reply: processtest.Reply{Result: process.Result{Stdout: "root"}}}
 	workflowDefinition := steptest.Definition(t, "local", workflow.Step{ID: "root", Type: "shell", With: map[string]any{"command": "id", "elevated": true}})
 	engine := elevationTestEngine(t, executor)
 	options := Options{RunDir: t.TempDir(), ElevationAllowed: true, Stdout: io.Discard, Stderr: io.Discard}
 	if _, err := engine.Run(t.Context(), workflowDefinition, options); err != nil {
 		t.Fatal(err)
 	}
-	if executor.runs != 1 || executor.options.Command != "id" {
-		t.Fatalf("runs = %d, options = %#v", executor.runs, executor.options)
+	if len(executor.Calls()) != 1 || executor.Last().Command != "id" {
+		t.Fatalf("runs = %d, options = %#v", len(executor.Calls()), executor.Last())
 	}
 
 	options.ElevationAllowed = false
@@ -55,7 +44,7 @@ func TestEngineRunsElevatedShellOnlyForAllowedLocalProvenance(t *testing.T) {
 
 func TestEngineRestrictsElevationAcrossActionProvenance(t *testing.T) {
 	t.Parallel()
-	executor := &elevatedRecordingExecutor{}
+	executor := &processtest.Executor{Reply: processtest.Reply{Result: process.Result{Stdout: "root"}}}
 	action := testAction(t, "action", workflow.Step{ID: "root", Type: "shell", With: map[string]any{"command": "id", "elevated": true}})
 	engine := elevationTestEngine(t, executor)
 	options := Options{RunDir: t.TempDir(), ElevationAllowed: true, Stdout: io.Discard, Stderr: io.Discard}

@@ -12,39 +12,15 @@ import (
 	enginepkg "github.com/up2jj/wuko/engine"
 	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/process"
+	"github.com/up2jj/wuko/process/processtest"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
 )
-
-type recordedCall struct {
-	result process.Result
-	err    error
-}
-
-type recordingExecutor struct {
-	calls []process.Options
-	steps []recordedCall
-}
 
 type executorFunc func(context.Context, process.Options) (process.Result, error)
 
 func (run executorFunc) Run(ctx context.Context, options process.Options) (process.Result, error) {
 	return run(ctx, options)
-}
-
-func (executor *recordingExecutor) Run(_ context.Context, options process.Options) (process.Result, error) {
-	executor.calls = append(executor.calls, options)
-	if len(executor.calls) > len(executor.steps) {
-		return process.Result{}, errors.New("unexpected command")
-	}
-	call := executor.steps[len(executor.calls)-1]
-	if options.StdoutPolicy.Streams() && options.Stdout != nil {
-		_, _ = io.WriteString(options.Stdout, call.result.Stdout)
-	}
-	if options.StderrPolicy.Streams() && options.Stderr != nil {
-		_, _ = io.WriteString(options.Stderr, call.result.Stderr)
-	}
-	return call.result, call.err
 }
 
 func TestNewValidatesConfiguration(t *testing.T) {
@@ -159,19 +135,19 @@ func TestEngineRendersJobAndStepSelectorsFromRuntimeContext(t *testing.T) {
 }
 
 func TestRunDiscoversLatestWorkflowRunAndWatchesIt(t *testing.T) {
-	executor := &recordingExecutor{steps: []recordedCall{
-		{result: process.Result{Stdout: `[{"databaseId":42,"status":"in_progress","workflowName":"ci"}]`}},
-		{result: process.Result{Stdout: "watch progress\n"}},
-		{result: process.Result{Stdout: `{"databaseId":42,"workflowName":"ci","workflowDatabaseId":7,"number":18,"status":"completed","conclusion":"success","event":"push","headSha":"abc","headBranch":"master","url":"https://github.com/acme/wuko/actions/runs/42","attempt":1}`}},
+	executor := &processtest.Executor{Strict: true, Replies: []processtest.Reply{
+		{Result: process.Result{Stdout: `[{"databaseId":42,"status":"in_progress","workflowName":"ci"}]`}},
+		{Result: process.Result{Stdout: "watch progress\n"}},
+		{Result: process.Result{Stdout: `{"databaseId":42,"workflowName":"ci","workflowDatabaseId":7,"number":18,"status":"completed","conclusion":"success","event":"push","headSha":"abc","headBranch":"master","url":"https://github.com/acme/wuko/actions/runs/42","attempt":1}`}},
 	}}
 	runnerValue := steptest.Build(t, New, map[string]any{"operation": "watch", "workflow": "ci"})
 	result, err := runnerValue.Run(t.Context(), step.Request{Executor: executor, RunDir: "/workspace", Env: map[string]string{"GITHUB_REPOSITORY": "acme/wuko"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertArgs(t, executor.calls[0], "run", "list", "--workflow", "ci", "--limit", "1", "--json", runJSONFields, "--repo", "acme/wuko")
-	assertArgs(t, executor.calls[1], "run", "watch", "42", "--compact", "--repo", "acme/wuko")
-	assertArgs(t, executor.calls[2], "run", "view", "42", "--json", runJSONFields, "--repo", "acme/wuko")
+	assertArgs(t, executor.Calls()[0], "run", "list", "--workflow", "ci", "--limit", "1", "--json", runJSONFields, "--repo", "acme/wuko")
+	assertArgs(t, executor.Calls()[1], "run", "watch", "42", "--compact", "--repo", "acme/wuko")
+	assertArgs(t, executor.Calls()[2], "run", "view", "42", "--json", runJSONFields, "--repo", "acme/wuko")
 	if result.Outputs["run_id"] != int64(42) || result.Outputs["success"] != true || result.Outputs["repository"] != "acme/wuko" {
 		t.Fatalf("outputs = %#v", result.Outputs)
 	}
@@ -200,18 +176,18 @@ func TestResolveRepositoryUsesConfiguredEnvironmentAndLocalContexts(t *testing.T
 
 func TestRunListsThenWatchesExactCommit(t *testing.T) {
 	headSHA := strings.Repeat("a", 40)
-	executor := &recordingExecutor{steps: []recordedCall{
-		{result: process.Result{Stdout: `[{"databaseId":42,"headSha":"` + headSHA + `"}]`}},
+	executor := &processtest.Executor{Strict: true, Replies: []processtest.Reply{
+		{Result: process.Result{Stdout: `[{"databaseId":42,"headSha":"` + headSHA + `"}]`}},
 		{},
-		{result: process.Result{Stdout: `{"databaseId":42,"status":"completed","conclusion":"success"}`}},
+		{Result: process.Result{Stdout: `{"databaseId":42,"status":"completed","conclusion":"success"}`}},
 	}}
 	runnerValue := steptest.Build(t, New, map[string]any{"operation": "watch", "workflow": "ci.yml", "head_sha": headSHA})
 	result, err := runnerValue.Run(t.Context(), step.Request{Executor: executor})
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertArgs(t, executor.calls[0], "run", "list", "--workflow", "ci.yml", "--commit", headSHA, "--limit", "20", "--json", runJSONFields)
-	assertArgs(t, executor.calls[1], "run", "watch", "42", "--compact")
+	assertArgs(t, executor.Calls()[0], "run", "list", "--workflow", "ci.yml", "--commit", headSHA, "--limit", "20", "--json", runJSONFields)
+	assertArgs(t, executor.Calls()[1], "run", "watch", "42", "--compact")
 	if result.Outputs["head_sha"] != headSHA {
 		t.Fatalf("head_sha = %#v", result.Outputs["head_sha"])
 	}
@@ -219,44 +195,44 @@ func TestRunListsThenWatchesExactCommit(t *testing.T) {
 
 func TestRunResolvesPullRequestBeforeWatching(t *testing.T) {
 	headSHA := strings.Repeat("c", 40)
-	executor := &recordingExecutor{steps: []recordedCall{
-		{result: process.Result{Stdout: `{"headRefOid":"` + headSHA + `"}`}},
-		{result: process.Result{Stdout: `[{"databaseId":99,"headSha":"` + headSHA + `"}]`}},
+	executor := &processtest.Executor{Strict: true, Replies: []processtest.Reply{
+		{Result: process.Result{Stdout: `{"headRefOid":"` + headSHA + `"}`}},
+		{Result: process.Result{Stdout: `[{"databaseId":99,"headSha":"` + headSHA + `"}]`}},
 		{},
-		{result: process.Result{Stdout: `{"databaseId":99,"status":"completed","conclusion":"failure","headSha":"` + headSHA + `"}`}},
+		{Result: process.Result{Stdout: `{"databaseId":99,"status":"completed","conclusion":"failure","headSha":"` + headSHA + `"}`}},
 	}}
 	runnerValue := steptest.Build(t, New, map[string]any{"operation": "watch", "workflow": "ci.yml", "pull_request": "12"})
 	result, err := runnerValue.Run(t.Context(), step.Request{Executor: executor})
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertArgs(t, executor.calls[0], "pr", "view", "12", "--json", "headRefOid")
-	assertArgs(t, executor.calls[1], "run", "list", "--workflow", "ci.yml", "--commit", headSHA, "--limit", "20", "--json", runJSONFields)
+	assertArgs(t, executor.Calls()[0], "pr", "view", "12", "--json", "headRefOid")
+	assertArgs(t, executor.Calls()[1], "run", "list", "--workflow", "ci.yml", "--commit", headSHA, "--limit", "20", "--json", runJSONFields)
 	if result.Outputs["terminal"] != true || result.Outputs["success"] != false || result.Outputs["conclusion"] != "failure" {
 		t.Fatalf("outputs = %#v", result.Outputs)
 	}
 }
 
 func TestRunFailsWhenLatestDiscoveredRunAlreadyCompleted(t *testing.T) {
-	executor := &recordingExecutor{steps: []recordedCall{
-		{result: process.Result{Stdout: `[{"databaseId":41,"status":"completed","conclusion":"success"}]`}},
+	executor := &processtest.Executor{Strict: true, Replies: []processtest.Reply{
+		{Result: process.Result{Stdout: `[{"databaseId":41,"status":"completed","conclusion":"success"}]`}},
 	}}
 	runnerValue := steptest.Build(t, New, map[string]any{"operation": "watch", "workflow": "ci"})
 	result, err := runnerValue.Run(t.Context(), step.Request{Executor: executor})
 	if err == nil || !strings.Contains(err.Error(), "run 41") || !strings.Contains(err.Error(), "has already completed") || result.Outputs != nil {
 		t.Fatalf("result = %#v, error = %v", result, err)
 	}
-	if len(executor.calls) != 1 {
-		t.Fatalf("calls = %#v", executor.calls)
+	if len(executor.Calls()) != 1 {
+		t.Fatalf("calls = %#v", executor.Calls())
 	}
 }
 
 func TestRunWatchesCompletedRunSelectedByCommit(t *testing.T) {
 	headSHA := strings.Repeat("b", 40)
-	executor := &recordingExecutor{steps: []recordedCall{
-		{result: process.Result{Stdout: `[{"databaseId":42,"status":"completed","headSha":"` + headSHA + `"}]`}},
+	executor := &processtest.Executor{Strict: true, Replies: []processtest.Reply{
+		{Result: process.Result{Stdout: `[{"databaseId":42,"status":"completed","headSha":"` + headSHA + `"}]`}},
 		{},
-		{result: process.Result{Stdout: `{"databaseId":42,"status":"completed","conclusion":"success"}`}},
+		{Result: process.Result{Stdout: `{"databaseId":42,"status":"completed","conclusion":"success"}`}},
 	}}
 	runnerValue := steptest.Build(t, New, map[string]any{"operation": "watch", "workflow": "ci", "head_sha": headSHA})
 	result, err := runnerValue.Run(t.Context(), step.Request{Executor: executor})
@@ -269,7 +245,7 @@ func TestRunWatchesCompletedRunSelectedByCommit(t *testing.T) {
 }
 
 func TestRunFailsWhenDiscoveryFindsNoRun(t *testing.T) {
-	executor := &recordingExecutor{steps: []recordedCall{{result: process.Result{Stdout: "[]\n"}}}}
+	executor := &processtest.Executor{Strict: true, Replies: []processtest.Reply{{Result: process.Result{Stdout: "[]\n"}}}}
 	runnerValue := steptest.Build(t, New, map[string]any{"operation": "watch", "workflow": "ci"})
 	result, err := runnerValue.Run(t.Context(), step.Request{Executor: executor})
 	if err == nil || !strings.Contains(err.Error(), `no GitHub Actions run found for workflow "ci"`) || result.Outputs != nil {
@@ -279,17 +255,17 @@ func TestRunFailsWhenDiscoveryFindsNoRun(t *testing.T) {
 
 func TestRunWatchesKnownRunWithIntervalAndStreamsProgress(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	executor := &recordingExecutor{steps: []recordedCall{
-		{result: process.Result{Stdout: "progress\n", Stderr: "warning\n"}},
-		{result: process.Result{Stdout: `{"databaseId":77,"status":"completed","conclusion":"failure","workflowName":"CI"}`}},
+	executor := &processtest.Executor{Strict: true, Replies: []processtest.Reply{
+		{Result: process.Result{Stdout: "progress\n", Stderr: "warning\n"}},
+		{Result: process.Result{Stdout: `{"databaseId":77,"status":"completed","conclusion":"failure","workflowName":"CI"}`}},
 	}}
 	runnerValue := steptest.Build(t, New, map[string]any{"operation": "watch", "run_id": "77", "interval": 5})
 	result, err := runnerValue.Run(t.Context(), step.Request{Executor: executor, Stdout: &stdout, Stderr: &stderr})
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertArgs(t, executor.calls[0], "run", "watch", "77", "--compact", "--interval", "5")
-	watch := executor.calls[0]
+	assertArgs(t, executor.Calls()[0], "run", "watch", "77", "--compact", "--interval", "5")
+	watch := executor.Calls()[0]
 	if watch.StdoutPolicy != process.OutputTee || watch.StderrPolicy != process.OutputTee || watch.CaptureLimit != watchCaptureLimit {
 		t.Fatalf("watch output options = %#v", watch)
 	}
@@ -305,23 +281,23 @@ func TestRunWatchesKnownRunWithIntervalAndStreamsProgress(t *testing.T) {
 }
 
 func TestRunFailsWhenWatchCommandFails(t *testing.T) {
-	executor := &recordingExecutor{steps: []recordedCall{{
-		result: process.Result{Stderr: "authentication required\n"}, err: errors.New("exit status 1"),
+	executor := &processtest.Executor{Strict: true, Replies: []processtest.Reply{{
+		Result: process.Result{Stderr: "authentication required\n"}, Err: errors.New("exit status 1"),
 	}}}
 	runnerValue := steptest.Build(t, New, map[string]any{"operation": "watch", "run_id": "77"})
 	result, err := runnerValue.Run(t.Context(), step.Request{Executor: executor})
 	if err == nil || !strings.Contains(err.Error(), "watching GitHub Actions run") || !strings.Contains(err.Error(), "authentication required") || result.Outputs != nil {
 		t.Fatalf("result = %#v, error = %v", result, err)
 	}
-	if len(executor.calls) != 1 {
-		t.Fatalf("calls = %#v", executor.calls)
+	if len(executor.Calls()) != 1 {
+		t.Fatalf("calls = %#v", executor.Calls())
 	}
 }
 
 func TestRunReturnsCompleteJobLog(t *testing.T) {
 	view := `{"databaseId":77,"status":"completed","conclusion":"success","jobs":[{"databaseId":101,"name":"action (ubuntu-latest)","status":"completed","conclusion":"success"}]}`
 	rawLog := "\ufeff2026-09-05T18:18:46.6404147Z job log\n"
-	executor := &recordingExecutor{steps: []recordedCall{{}, {result: process.Result{Stdout: view}}, {result: process.Result{Stdout: rawLog}}}}
+	executor := &processtest.Executor{Strict: true, Replies: []processtest.Reply{{}, {Result: process.Result{Stdout: view}}, {Result: process.Result{Stdout: rawLog}}}}
 	runnerValue := steptest.Build(t, New, map[string]any{
 		"operation": "watch", "repository": "up2jj/wuko", "run_id": "77", "job": "action (ubuntu-latest)",
 	})
@@ -329,16 +305,16 @@ func TestRunReturnsCompleteJobLog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertArgs(t, executor.calls[1], "run", "view", "77", "--json", runJSONFields+",jobs", "--repo", "up2jj/wuko")
-	assertArgs(t, executor.calls[2], "api", "--allow-escape-sequences", "repos/{owner}/{repo}/actions/jobs/101/logs")
-	if executor.calls[2].Env["GH_REPO"] != "up2jj/wuko" || executor.calls[2].Env["GH_TOKEN"] != "token" {
-		t.Fatalf("api environment = %#v", executor.calls[2].Env)
+	assertArgs(t, executor.Calls()[1], "run", "view", "77", "--json", runJSONFields+",jobs", "--repo", "up2jj/wuko")
+	assertArgs(t, executor.Calls()[2], "api", "--allow-escape-sequences", "repos/{owner}/{repo}/actions/jobs/101/logs")
+	if executor.Calls()[2].Env["GH_REPO"] != "up2jj/wuko" || executor.Calls()[2].Env["GH_TOKEN"] != "token" {
+		t.Fatalf("api environment = %#v", executor.Calls()[2].Env)
 	}
 	if result.Outputs["log"] != rawLog || result.Outputs["log_scope"] != "job" || result.Outputs["job_id"] != int64(101) || result.Outputs["job"] != "action (ubuntu-latest)" {
 		t.Fatalf("outputs = %#v", result.Outputs)
 	}
-	if executor.calls[2].CaptureLimit != logCaptureLimit {
-		t.Fatalf("job log capture limit = %d, want %d", executor.calls[2].CaptureLimit, int64(logCaptureLimit))
+	if executor.Calls()[2].CaptureLimit != logCaptureLimit {
+		t.Fatalf("job log capture limit = %d, want %d", executor.Calls()[2].CaptureLimit, int64(logCaptureLimit))
 	}
 	if result.Outputs["log_truncated"] != false {
 		t.Fatalf("outputs = %#v", result.Outputs)
@@ -351,9 +327,9 @@ func TestRunReturnsCompleteJobLog(t *testing.T) {
 func TestRunReportsTruncatedJobLog(t *testing.T) {
 	view := `{"databaseId":77,"status":"completed","conclusion":"success","jobs":[{"databaseId":101,"name":"test"}]}`
 	rawLog := "\ufeff2026-09-05T18:18:46.6404147Z job log"
-	executor := &recordingExecutor{steps: []recordedCall{
-		{}, {result: process.Result{Stdout: view}},
-		{result: process.Result{Stdout: rawLog, StdoutTruncated: true}},
+	executor := &processtest.Executor{Strict: true, Replies: []processtest.Reply{
+		{}, {Result: process.Result{Stdout: view}},
+		{Result: process.Result{Stdout: rawLog, StdoutTruncated: true}},
 	}}
 	runnerValue := steptest.Build(t, New, map[string]any{"operation": "watch", "run_id": "77", "job": "test"})
 	result, err := runnerValue.Run(t.Context(), step.Request{Executor: executor})
@@ -367,9 +343,9 @@ func TestRunReportsTruncatedJobLog(t *testing.T) {
 
 func TestRunReportsTruncationWhenStepScopingFails(t *testing.T) {
 	view := `{"databaseId":77,"status":"completed","conclusion":"success","jobs":[{"databaseId":101,"name":"test","steps":[{"name":"build","startedAt":"2026-09-05T18:18:50Z","completedAt":"2026-09-05T18:18:52Z"}]}]}`
-	executor := &recordingExecutor{steps: []recordedCall{
-		{}, {result: process.Result{Stdout: view}},
-		{result: process.Result{Stdout: "2026-09-05T18:18:40.000Z earlier\n", StdoutTruncated: true}},
+	executor := &processtest.Executor{Strict: true, Replies: []processtest.Reply{
+		{}, {Result: process.Result{Stdout: view}},
+		{Result: process.Result{Stdout: "2026-09-05T18:18:40.000Z earlier\n", StdoutTruncated: true}},
 	}}
 	runnerValue := steptest.Build(t, New, map[string]any{"operation": "watch", "run_id": "77", "job": "test", "step": "build"})
 	result, err := runnerValue.Run(t.Context(), step.Request{Executor: executor})
@@ -380,10 +356,10 @@ func TestRunReportsTruncationWhenStepScopingFails(t *testing.T) {
 
 func TestRunFailsWhenJobLogIsUnavailable(t *testing.T) {
 	view := `{"databaseId":77,"status":"completed","conclusion":"success","jobs":[{"databaseId":101,"name":"test"}]}`
-	executor := &recordingExecutor{steps: []recordedCall{
+	executor := &processtest.Executor{Strict: true, Replies: []processtest.Reply{
 		{},
-		{result: process.Result{Stdout: view}},
-		{result: process.Result{Stderr: "log has expired\n"}, err: errors.New("exit status 1")},
+		{Result: process.Result{Stdout: view}},
+		{Result: process.Result{Stderr: "log has expired\n"}, Err: errors.New("exit status 1")},
 	}}
 	runnerValue := steptest.Build(t, New, map[string]any{"operation": "watch", "run_id": "77", "job": "test"})
 	result, err := runnerValue.Run(t.Context(), step.Request{Executor: executor})
@@ -404,7 +380,7 @@ func TestRunReturnsTimestampScopedStepLog(t *testing.T) {
 		"2026-09-05T18:18:51.0000000Z build\n" +
 		"continued output\n" +
 		"2026-09-05T18:18:59.9999999Z shared completion bucket\n"
-	executor := &recordingExecutor{steps: []recordedCall{{}, {result: process.Result{Stdout: view}}, {result: process.Result{Stdout: rawLog}}}}
+	executor := &processtest.Executor{Strict: true, Replies: []processtest.Reply{{}, {Result: process.Result{Stdout: view}}, {Result: process.Result{Stdout: rawLog}}}}
 	runnerValue := steptest.Build(t, New, map[string]any{
 		"operation": "watch", "run_id": "77", "job": "action (ubuntu-latest)", "step": "build action test binary",
 	})

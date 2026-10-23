@@ -3,7 +3,6 @@ package git
 import (
 	"context"
 	"errors"
-	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -13,30 +12,10 @@ import (
 
 	"github.com/up2jj/wuko/internal/gittest"
 	"github.com/up2jj/wuko/process"
+	"github.com/up2jj/wuko/process/processtest"
 	"github.com/up2jj/wuko/step"
 	"go.yaml.in/yaml/v3"
 )
-
-type scriptedGitResult struct {
-	result process.Result
-	err    error
-}
-
-type scriptedGitExecutor struct {
-	calls   []process.Options
-	results []scriptedGitResult
-}
-
-func (executor *scriptedGitExecutor) Run(_ context.Context, options process.Options) (process.Result, error) {
-	options.Args = slices.Clone(options.Args)
-	options.Env = maps.Clone(options.Env)
-	executor.calls = append(executor.calls, options)
-	index := len(executor.calls) - 1
-	if index >= len(executor.results) {
-		return process.Result{}, nil
-	}
-	return executor.results[index].result, executor.results[index].err
-}
 
 func TestNewCommitValidatesConfiguration(t *testing.T) {
 	t.Parallel()
@@ -83,11 +62,11 @@ func TestNewCommitValidatesConfiguration(t *testing.T) {
 func TestCommitUsesExecutorWithStructuredConfiguration(t *testing.T) {
 	t.Parallel()
 	diff := &process.ExitError{Command: "git", Code: 1}
-	executor := &scriptedGitExecutor{results: []scriptedGitResult{
+	executor := &processtest.Executor{Replies: []processtest.Reply{
 		{},
-		{err: diff},
+		{Err: diff},
 		{},
-		{result: process.Result{Stdout: "abc123\n"}},
+		{Result: process.Result{Stdout: "abc123\n"}},
 	}}
 	runner, err := NewCommit(map[string]any{
 		"message": "feat: add commit", "body": "Body text.", "paths": []any{"src", "-literal"},
@@ -110,8 +89,8 @@ func TestCommitUsesExecutorWithStructuredConfiguration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(executor.calls) != 4 {
-		t.Fatalf("calls = %#v", executor.calls)
+	if len(executor.Calls()) != 4 {
+		t.Fatalf("calls = %#v", executor.Calls())
 	}
 	wantArgs := [][]string{
 		{"add", "-A", "--", "src", "-literal"},
@@ -120,21 +99,21 @@ func TestCommitUsesExecutorWithStructuredConfiguration(t *testing.T) {
 		{"rev-parse", "--verify", "--quiet", "HEAD^{commit}"},
 	}
 	for index, want := range wantArgs {
-		if executor.calls[index].Command != "git" || executor.calls[index].Dir != "/repo" || !slices.Equal(executor.calls[index].Args, want) {
-			t.Errorf("call %d = %#v, want args %#v", index, executor.calls[index], want)
+		if executor.Calls()[index].Command != "git" || executor.Calls()[index].Dir != "/repo" || !slices.Equal(executor.Calls()[index].Args, want) {
+			t.Errorf("call %d = %#v, want args %#v", index, executor.Calls()[index], want)
 		}
-		if executor.calls[index].Env["MODE"] != "test" || executor.calls[index].Env[step.AttemptEnv] != "2" || executor.calls[index].Env[step.OperationIDEnv] != "commit-op" {
-			t.Errorf("call %d environment = %#v", index, executor.calls[index].Env)
+		if executor.Calls()[index].Env["MODE"] != "test" || executor.Calls()[index].Env[step.AttemptEnv] != "2" || executor.Calls()[index].Env[step.OperationIDEnv] != "commit-op" {
+			t.Errorf("call %d environment = %#v", index, executor.Calls()[index].Env)
 		}
 	}
-	commitEnv := executor.calls[2].Env
+	commitEnv := executor.Calls()[2].Env
 	if commitEnv["GIT_AUTHOR_NAME"] != "Author" || commitEnv["GIT_AUTHOR_EMAIL"] != "author@example.com" ||
 		commitEnv["GIT_COMMITTER_NAME"] != "Committer" || commitEnv["GIT_COMMITTER_EMAIL"] != "committer@example.com" {
 		t.Fatalf("commit environment = %#v", commitEnv)
 	}
 	for _, index := range []int{0, 1, 3} {
-		if executor.calls[index].Env["GIT_AUTHOR_NAME"] != "Old" {
-			t.Fatalf("identity leaked to call %d: %#v", index, executor.calls[index].Env)
+		if executor.Calls()[index].Env["GIT_AUTHOR_NAME"] != "Old" {
+			t.Fatalf("identity leaked to call %d: %#v", index, executor.Calls()[index].Env)
 		}
 	}
 	if result.Outputs["created"] != true || result.Outputs["commit"] != "abc123" {
@@ -150,26 +129,26 @@ func TestCommitEmptyPolicies(t *testing.T) {
 	tests := []struct {
 		name        string
 		onEmpty     string
-		results     []scriptedGitResult
+		results     []processtest.Reply
 		wantArgs    [][]string
 		wantCreated bool
 		wantCommit  string
 		wantError   string
 	}{
 		{
-			name: "default skip", results: []scriptedGitResult{{}, {result: process.Result{Stdout: "current\n"}}},
+			name: "default skip", results: []processtest.Reply{{}, {Result: process.Result{Stdout: "current\n"}}},
 			wantArgs: [][]string{{"diff", "--cached", "--quiet", "--exit-code", "--"}, {"rev-parse", "--verify", "--quiet", "HEAD^{commit}"}}, wantCommit: "current",
 		},
 		{
-			name: "skip unborn", results: []scriptedGitResult{{}, {err: &process.ExitError{Command: "git", Code: 1}}},
+			name: "skip unborn", results: []processtest.Reply{{}, {Err: &process.ExitError{Command: "git", Code: 1}}},
 			wantArgs: [][]string{{"diff", "--cached", "--quiet", "--exit-code", "--"}, {"rev-parse", "--verify", "--quiet", "HEAD^{commit}"}},
 		},
 		{
-			name: "fail", onEmpty: "fail", results: []scriptedGitResult{{}},
+			name: "fail", onEmpty: "fail", results: []processtest.Reply{{}},
 			wantArgs: [][]string{{"diff", "--cached", "--quiet", "--exit-code", "--"}}, wantError: "nothing to commit",
 		},
 		{
-			name: "commit", onEmpty: "commit", results: []scriptedGitResult{{}, {}, {result: process.Result{Stdout: "empty\n"}}},
+			name: "commit", onEmpty: "commit", results: []processtest.Reply{{}, {}, {Result: process.Result{Stdout: "empty\n"}}},
 			wantArgs:    [][]string{{"diff", "--cached", "--quiet", "--exit-code", "--"}, {"commit", "--allow-empty", "-m", "subject"}, {"rev-parse", "--verify", "--quiet", "HEAD^{commit}"}},
 			wantCreated: true, wantCommit: "empty",
 		},
@@ -184,7 +163,7 @@ func TestCommitEmptyPolicies(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			executor := &scriptedGitExecutor{results: tt.results}
+			executor := &processtest.Executor{Replies: tt.results}
 			result, err := runner.Run(t.Context(), step.Request{Executor: executor})
 			if tt.wantError != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.wantError) {
@@ -193,12 +172,12 @@ func TestCommitEmptyPolicies(t *testing.T) {
 			} else if err != nil {
 				t.Fatal(err)
 			}
-			if len(executor.calls) != len(tt.wantArgs) {
-				t.Fatalf("calls = %#v, want %#v", executor.calls, tt.wantArgs)
+			if len(executor.Calls()) != len(tt.wantArgs) {
+				t.Fatalf("calls = %#v, want %#v", executor.Calls(), tt.wantArgs)
 			}
 			for index, want := range tt.wantArgs {
-				if !slices.Equal(executor.calls[index].Args, want) {
-					t.Errorf("call %d args = %#v, want %#v", index, executor.calls[index].Args, want)
+				if !slices.Equal(executor.Calls()[index].Args, want) {
+					t.Errorf("call %d args = %#v, want %#v", index, executor.Calls()[index].Args, want)
 				}
 			}
 			if tt.wantError == "" && (result.Outputs["created"] != tt.wantCreated || result.Outputs["commit"] != tt.wantCommit) {
@@ -415,8 +394,8 @@ func TestCommitPropagatesCancellationAndGitFailures(t *testing.T) {
 	if _, err := runner.Run(ctx, step.Request{}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancellation error = %v", err)
 	}
-	executor := &scriptedGitExecutor{results: []scriptedGitResult{{
-		result: process.Result{Stderr: "fatal: not a repository\n"}, err: &process.ExitError{Command: "git", Code: 128},
+	executor := &processtest.Executor{Replies: []processtest.Reply{{
+		Result: process.Result{Stderr: "fatal: not a repository\n"}, Err: &process.ExitError{Command: "git", Code: 128},
 	}}}
 	if _, err := runner.Run(t.Context(), step.Request{Executor: executor}); err == nil || !strings.Contains(err.Error(), "inspecting staged Git changes: fatal: not a repository") {
 		t.Fatalf("Git failure = %v", err)

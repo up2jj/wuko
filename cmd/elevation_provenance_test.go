@@ -2,26 +2,18 @@ package cmd
 
 import (
 	"bytes"
-	"context"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/up2jj/wuko/process"
+	"github.com/up2jj/wuko/process/processtest"
 	"github.com/up2jj/wuko/step"
 	runworkflowstep "github.com/up2jj/wuko/steps/runworkflow"
 	"github.com/up2jj/wuko/steps/shell"
 	"github.com/up2jj/wuko/workflow"
 )
-
-type recordingElevatedExecutor struct{ runs int }
-
-func (executor *recordingElevatedExecutor) Run(context.Context, process.Options) (process.Result, error) {
-	executor.runs++
-	return process.Result{}, nil
-}
 
 // A workflow installed from a remote locator or a marketplace is not local code, so running it
 // by name, or calling it through run_workflow, must not grant it sudo.
@@ -73,7 +65,7 @@ func TestInstalledWorkflowElevationFollowsProvenanceAtRunTime(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			executor := &recordingElevatedExecutor{}
+			executor := &processtest.Executor{}
 			command := newRootCmd(dependencies{
 				stdin: bytes.NewReader(nil), stdout: io.Discard, stderr: io.Discard,
 				cwd: func() (string, error) { return root, nil }, homeDir: func() (string, error) { return t.TempDir(), nil },
@@ -83,13 +75,13 @@ func TestInstalledWorkflowElevationFollowsProvenanceAtRunTime(t *testing.T) {
 			command.SetArgs([]string{"run", name, "--once"})
 			err := command.ExecuteContext(t.Context())
 			if test.wantRun {
-				if err != nil || executor.runs != 1 {
-					t.Fatalf("error = %v, elevated runs = %d, want one elevated run", err, executor.runs)
+				if err != nil || len(executor.Calls()) != 1 {
+					t.Fatalf("error = %v, elevated runs = %d, want one elevated run", err, len(executor.Calls()))
 				}
 				return
 			}
-			if err == nil || !strings.Contains(err.Error(), "trusted local") || executor.runs != 0 {
-				t.Fatalf("error = %v, elevated runs = %d, want elevation refused", err, executor.runs)
+			if err == nil || !strings.Contains(err.Error(), "trusted local") || len(executor.Calls()) != 0 {
+				t.Fatalf("error = %v, elevated runs = %d, want elevation refused", err, len(executor.Calls()))
 			}
 		})
 	}

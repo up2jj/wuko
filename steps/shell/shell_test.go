@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/process"
+	"github.com/up2jj/wuko/process/processtest"
 	"github.com/up2jj/wuko/ptyinteract"
 	"github.com/up2jj/wuko/step"
 )
@@ -59,8 +60,8 @@ func TestElevatedShellValidation(t *testing.T) {
 		request step.Request
 		want    string
 	}{
-		{name: "remote", request: step.Request{ElevatedExecutor: &recordingExecutor{}}, want: "trusted local"},
-		{name: "executor scope", request: step.Request{ElevationAllowed: true, InsideExecutor: true, ElevatedExecutor: &recordingExecutor{}}, want: "executor blocks"},
+		{name: "remote", request: step.Request{ElevatedExecutor: &processtest.Executor{}}, want: "trusted local"},
+		{name: "executor scope", request: step.Request{ElevationAllowed: true, InsideExecutor: true, ElevatedExecutor: &processtest.Executor{}}, want: "executor blocks"},
 		{name: "host unavailable", request: step.Request{ElevationAllowed: true}, want: "unavailable"},
 	}
 	for _, test := range tests {
@@ -74,8 +75,8 @@ func TestElevatedShellValidation(t *testing.T) {
 }
 
 func TestElevatedShellUsesDedicatedExecutorAndExplicitEnvironment(t *testing.T) {
-	local := &recordingExecutor{}
-	elevated := &recordingExecutor{result: process.Result{Stdout: "root"}}
+	local := &processtest.Executor{}
+	elevated := &processtest.Executor{Reply: processtest.Reply{Result: process.Result{Stdout: "root"}}}
 	runner, err := New(map[string]any{"command": "id", "elevated": true, "env": map[string]any{"EXPLICIT": "yes"}})
 	if err != nil {
 		t.Fatal(err)
@@ -88,17 +89,17 @@ func TestElevatedShellUsesDedicatedExecutorAndExplicitEnvironment(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if local.options.Command != "" || elevated.options.Command != "id" {
-		t.Fatalf("local = %#v, elevated = %#v", local.options, elevated.options)
+	if local.Last().Command != "" || elevated.Last().Command != "id" {
+		t.Fatalf("local = %#v, elevated = %#v", local.Last(), elevated.Last())
 	}
-	if elevated.options.Env["EXPLICIT"] != "yes" || elevated.options.Env[step.AttemptEnv] != "2" {
-		t.Fatalf("environment = %#v", elevated.options.Env)
+	if elevated.Last().Env["EXPLICIT"] != "yes" || elevated.Last().Env[step.AttemptEnv] != "2" {
+		t.Fatalf("environment = %#v", elevated.Last().Env)
 	}
-	if _, exists := elevated.options.Env["WORKFLOW_ONLY"]; exists {
-		t.Fatalf("workflow environment leaked into %#v", elevated.options.Env)
+	if _, exists := elevated.Last().Env["WORKFLOW_ONLY"]; exists {
+		t.Fatalf("workflow environment leaked into %#v", elevated.Last().Env)
 	}
-	if !elevated.options.Interactive || elevated.options.PromptStdin != os.Stdin {
-		t.Fatalf("authorization context = %#v", elevated.options)
+	if !elevated.Last().Interactive || elevated.Last().PromptStdin != os.Stdin {
+		t.Fatalf("authorization context = %#v", elevated.Last())
 	}
 }
 
@@ -107,7 +108,7 @@ func TestElevatedInfrastructureErrorCannotBeAllowed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	executor := &recordingExecutor{result: process.Result{ExitCode: 1}, err: errors.New("sudo transport failed")}
+	executor := &processtest.Executor{Reply: processtest.Reply{Result: process.Result{ExitCode: 1}, Err: errors.New("sudo transport failed")}}
 	_, err = runner.Run(t.Context(), step.Request{
 		RunDir: t.TempDir(), Env: map[string]string{}, ElevatedExecutor: executor, ElevationAllowed: true,
 		Stdout: io.Discard, Stderr: io.Discard,
@@ -161,7 +162,7 @@ func TestNewValidatesArgvConfiguration(t *testing.T) {
 }
 
 func TestShellEvaluatesTypedArgvWithoutParsing(t *testing.T) {
-	executor := &recordingExecutor{}
+	executor := &processtest.Executor{}
 	runner, err := New(map[string]any{"argv": map[string]any{"expr": "steps.resolve.argv"}})
 	if err != nil {
 		t.Fatal(err)
@@ -178,14 +179,14 @@ func TestShellEvaluatesTypedArgvWithoutParsing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := append([]string{executor.options.Command}, executor.options.Args...)
+	got := append([]string{executor.Last().Command}, executor.Last().Args...)
 	if !slices.Equal(got, want) {
 		t.Fatalf("argv = %#v, want %#v", got, want)
 	}
 }
 
 func TestShellArgvExpressionUsesRuntimeRoots(t *testing.T) {
-	executor := &recordingExecutor{}
+	executor := &processtest.Executor{}
 	runner, err := New(map[string]any{"argv": map[string]any{
 		"expr": "list(inputs.command, vars.arg, env.MODE, dependencies.build.artifact, batch.name, foreach.item, matrix.os, finally.status, workflow.name, workflow.dir, run.dir)",
 	}})
@@ -206,7 +207,7 @@ func TestShellArgvExpressionUsesRuntimeRoots(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{"tool", "value", "test", "app", "batch", "item", "linux", "succeeded", "release", "/workflow", "/run"}
-	got := append([]string{executor.options.Command}, executor.options.Args...)
+	got := append([]string{executor.Last().Command}, executor.Last().Args...)
 	if !slices.Equal(got, want) {
 		t.Fatalf("argv = %#v, want %#v", got, want)
 	}
@@ -245,7 +246,7 @@ func TestShellRejectsInvalidArgvResults(t *testing.T) {
 			}
 			_, err = runner.Run(t.Context(), step.Request{
 				RunDir: t.TempDir(), Env: map[string]string{}, Steps: map[string]any{"resolve": map[string]any{"argv": test.value}},
-				Stdout: io.Discard, Stderr: io.Discard, Executor: &recordingExecutor{},
+				Stdout: io.Discard, Stderr: io.Discard, Executor: &processtest.Executor{},
 			})
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("Run() error = %v, want %q", err, test.want)
@@ -443,7 +444,7 @@ func TestShellValidatesDynamicInteractionResults(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, err = runner.Run(t.Context(), step.Request{RunDir: t.TempDir(), Env: map[string]string{}, Executor: &recordingExecutor{}})
+			_, err = runner.Run(t.Context(), step.Request{RunDir: t.TempDir(), Env: map[string]string{}, Executor: &processtest.Executor{}})
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("Run() error = %v, want %q", err, test.want)
 			}
@@ -464,7 +465,7 @@ func TestShellEmptyInteractionsHonorInteract(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			executor := &recordingExecutor{}
+			executor := &processtest.Executor{}
 			runner, err := New(map[string]any{
 				"command": "sh", "tty": true, "interactions": test.interactions, "interact": test.interact,
 			})
@@ -480,21 +481,21 @@ func TestShellEmptyInteractionsHonorInteract(t *testing.T) {
 			if _, err := runner.Run(t.Context(), request); err != nil {
 				t.Fatal(err)
 			}
-			if executor.options.Interactions == nil || executor.options.Interactions.Len() != 0 || executor.options.Interact != test.interact {
-				t.Fatalf("process options = %#v", executor.options)
+			if executor.Last().Interactions == nil || executor.Last().Interactions.Len() != 0 || executor.Last().Interact != test.interact {
+				t.Fatalf("process options = %#v", executor.Last())
 			}
-			if test.interact && executor.options.Stdin != terminalInput {
-				t.Fatalf("handoff stdin = %#v, want terminal input", executor.options.Stdin)
+			if test.interact && executor.Last().Stdin != terminalInput {
+				t.Fatalf("handoff stdin = %#v, want terminal input", executor.Last().Stdin)
 			}
-			if !test.interact && executor.options.Stdin != nil {
-				t.Fatalf("headless stdin = %#v, want nil", executor.options.Stdin)
+			if !test.interact && executor.Last().Stdin != nil {
+				t.Fatalf("headless stdin = %#v, want nil", executor.Last().Stdin)
 			}
 		})
 	}
 }
 
 func TestShellHeadlessInteractionsDelegateWithoutTerminalInput(t *testing.T) {
-	executor := &recordingExecutor{}
+	executor := &processtest.Executor{}
 	runner, err := New(map[string]any{
 		"command": "sh", "tty": true,
 		"interactions": []any{map[string]any{"send": "first", "newline": true}, map[string]any{"expect": "ready", "send": "second"}},
@@ -505,8 +506,8 @@ func TestShellHeadlessInteractionsDelegateWithoutTerminalInput(t *testing.T) {
 	if _, err := runner.Run(t.Context(), step.Request{RunDir: t.TempDir(), Env: map[string]string{}, Executor: executor}); err != nil {
 		t.Fatal(err)
 	}
-	if !executor.options.TTY || executor.options.Interactions == nil || executor.options.Interactions.Len() != 2 || executor.options.Interact || executor.options.Stdin != nil {
-		t.Fatalf("process options = %#v", executor.options)
+	if !executor.Last().TTY || executor.Last().Interactions == nil || executor.Last().Interactions.Len() != 2 || executor.Last().Interact || executor.Last().Stdin != nil {
+		t.Fatalf("process options = %#v", executor.Last())
 	}
 }
 
@@ -521,15 +522,15 @@ func TestShellInteractionHandoffRequiresInteractiveTerminal(t *testing.T) {
 		t.Fatalf("Run() error = %v", err)
 	}
 
-	executor := &recordingExecutor{}
+	executor := &processtest.Executor{}
 	terminalInput := strings.NewReader("terminal")
 	if _, err := runner.Run(t.Context(), step.Request{
 		RunDir: t.TempDir(), Env: map[string]string{}, Interactive: true, Stdin: terminalInput, Executor: executor,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if !executor.options.Interact || executor.options.Stdin != terminalInput {
-		t.Fatalf("process options = %#v", executor.options)
+	if !executor.Last().Interact || executor.Last().Stdin != terminalInput {
+		t.Fatalf("process options = %#v", executor.Last())
 	}
 }
 
@@ -658,7 +659,7 @@ func TestShellAppliesAllowedExitCodes(t *testing.T) {
 			}
 			result, err := runner.Run(t.Context(), step.Request{
 				RunDir: t.TempDir(), Env: map[string]string{}, Stdout: io.Discard, Stderr: io.Discard,
-				Executor: &recordingExecutor{result: test.result, err: test.runErr},
+				Executor: &processtest.Executor{Reply: processtest.Reply{Result: test.result, Err: test.runErr}},
 			})
 			if (err != nil) != test.wantErr {
 				t.Fatalf("Run() error = %v, wantErr %t", err, test.wantErr)
@@ -684,7 +685,7 @@ func TestNewAcceptsTemplatedOutputConfiguration(t *testing.T) {
 }
 
 func TestShellPassesOutputConfigurationToExecutor(t *testing.T) {
-	executor := &recordingExecutor{result: process.Result{Stdout: "1234", StdoutTruncated: true}}
+	executor := &processtest.Executor{Reply: processtest.Reply{Result: process.Result{Stdout: "1234", StdoutTruncated: true}}}
 	runner, err := New(map[string]any{
 		"command": "generate", "stdout": "capture", "capture_limit": "4B",
 	})
@@ -697,8 +698,8 @@ func TestShellPassesOutputConfigurationToExecutor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if executor.options.StdoutPolicy != process.OutputCapture || executor.options.StderrPolicy != process.OutputTee || executor.options.CaptureLimit != 4 {
-		t.Fatalf("process options = %#v", executor.options)
+	if executor.Last().StdoutPolicy != process.OutputCapture || executor.Last().StderrPolicy != process.OutputTee || executor.Last().CaptureLimit != 4 {
+		t.Fatalf("process options = %#v", executor.Last())
 	}
 	if result.Outputs["stdout"] != "1234" || result.Outputs["stdout_truncated"] != true || result.Outputs["stderr_truncated"] != false {
 		t.Fatalf("outputs = %#v", result.Outputs)
@@ -717,7 +718,7 @@ func TestShellTTYRequiresInteractiveRequest(t *testing.T) {
 }
 
 func TestShellTTYSuppliesTerminalAndBoundedCapture(t *testing.T) {
-	executor := &recordingExecutor{result: process.Result{Stdout: "transcript", StdoutTruncated: true}}
+	executor := &processtest.Executor{Reply: processtest.Reply{Result: process.Result{Stdout: "transcript", StdoutTruncated: true}}}
 	terminalInput := strings.NewReader("terminal")
 	runner, err := New(map[string]any{
 		"command": "sh", "tty": true,
@@ -733,12 +734,12 @@ func TestShellTTYSuppliesTerminalAndBoundedCapture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !executor.options.TTY || executor.options.Stdin != terminalInput || executor.options.CaptureLimit != ttyCaptureLimit {
-		t.Fatalf("process options = %#v", executor.options)
+	if !executor.Last().TTY || executor.Last().Stdin != terminalInput || executor.Last().CaptureLimit != ttyCaptureLimit {
+		t.Fatalf("process options = %#v", executor.Last())
 	}
 	wantTerminal := process.TerminalAppearance{Background: "#1e1e2e", Foreground: "#ffffff", Title: "Console"}
-	if executor.options.Terminal == nil || *executor.options.Terminal != wantTerminal {
-		t.Fatalf("terminal appearance = %#v, want %#v", executor.options.Terminal, wantTerminal)
+	if executor.Last().Terminal == nil || *executor.Last().Terminal != wantTerminal {
+		t.Fatalf("terminal appearance = %#v, want %#v", executor.Last().Terminal, wantTerminal)
 	}
 	if result.Outputs["stdout"] != "transcript" || result.Outputs["stderr"] != "" || result.Outputs["stdout_truncated"] != true || result.Outputs["stderr_truncated"] != false {
 		t.Fatalf("outputs = %#v", result.Outputs)
@@ -788,12 +789,6 @@ func TestShellRunsAsConfiguredUser(t *testing.T) {
 	}
 }
 
-type recordingExecutor struct {
-	options process.Options
-	result  process.Result
-	err     error
-}
-
 type interactionWrite struct {
 	value     string
 	sensitive bool
@@ -822,9 +817,4 @@ func (sink interactionPlanSink) Write(data []byte) (int, error) {
 func (sink interactionPlanSink) WriteSensitive(data []byte) error {
 	sink.executor.writes = append(sink.executor.writes, interactionWrite{value: string(data), sensitive: true})
 	return nil
-}
-
-func (executor *recordingExecutor) Run(_ context.Context, options process.Options) (process.Result, error) {
-	executor.options = options
-	return executor.result, executor.err
 }

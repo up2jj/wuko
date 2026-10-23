@@ -1,7 +1,6 @@
 package engine_test
 
 import (
-	"context"
 	"io"
 	"os"
 	"path/filepath"
@@ -11,7 +10,7 @@ import (
 	"github.com/up2jj/wuko/engine"
 	"github.com/up2jj/wuko/internal/gittest"
 	"github.com/up2jj/wuko/internal/steptest"
-	"github.com/up2jj/wuko/process"
+	"github.com/up2jj/wuko/process/processtest"
 	"github.com/up2jj/wuko/step"
 	assertstep "github.com/up2jj/wuko/steps/assert"
 	gitstep "github.com/up2jj/wuko/steps/git"
@@ -65,13 +64,6 @@ func TestGitCommitRendersConfigurationAndCommitsOutputs(t *testing.T) {
 	}
 }
 
-type countingGitExecutor struct{ calls int }
-
-func (executor *countingGitExecutor) Run(context.Context, process.Options) (process.Result, error) {
-	executor.calls++
-	return process.Result{}, nil
-}
-
 func TestGitCommitValidationAndDryRunDoNotExecuteGit(t *testing.T) {
 	t.Parallel()
 	definition := steptest.Definition(t, "commit", workflow.Step{ID: "commit", Type: "git_commit", With: map[string]any{
@@ -83,13 +75,13 @@ func TestGitCommitValidationAndDryRunDoNotExecuteGit(t *testing.T) {
 	if err := gitstep.Register(registry); err != nil {
 		t.Fatal(err)
 	}
-	executor := &countingGitExecutor{}
+	executor := &processtest.Executor{}
 	workflowEngine := engine.New(registry)
 	options := engine.Options{RunDir: t.TempDir(), Executor: executor, DryRun: true, Stdout: io.Discard, Stderr: io.Discard}
 	if _, err := workflowEngine.Run(t.Context(), definition, options); err != nil {
 		t.Fatal(err)
 	}
-	if executor.calls != 0 {
-		t.Fatalf("dry run executed %d Git commands", executor.calls)
+	if len(executor.Calls()) != 0 {
+		t.Fatalf("dry run executed %d Git commands", len(executor.Calls()))
 	}
 }

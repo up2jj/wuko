@@ -10,19 +10,9 @@ import (
 	"testing"
 
 	"github.com/up2jj/wuko/process"
+	"github.com/up2jj/wuko/process/processtest"
 	"github.com/up2jj/wuko/step"
 )
-
-type recordingExecutor struct {
-	options process.Options
-	result  process.Result
-	err     error
-}
-
-func (executor *recordingExecutor) Run(_ context.Context, options process.Options) (process.Result, error) {
-	executor.options = options
-	return executor.result, executor.err
-}
 
 func TestNewValidatesConfiguration(t *testing.T) {
 	tests := []struct {
@@ -55,7 +45,7 @@ func TestDefaultAndExplicitEmptyVersionArguments(t *testing.T) {
 		{"explicit empty", map[string]any{"tool": "go", "version_args": []any{}}, []string{}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			executor := &recordingExecutor{}
+			executor := &processtest.Executor{}
 			runner, err := New(tt.raw)
 			if err != nil {
 				t.Fatal(err)
@@ -63,8 +53,8 @@ func TestDefaultAndExplicitEmptyVersionArguments(t *testing.T) {
 			if _, err := runner.Run(t.Context(), step.Request{Executor: executor}); err != nil {
 				t.Fatal(err)
 			}
-			if !slices.Equal(executor.options.Args, tt.want) {
-				t.Fatalf("args = %#v, want %#v", executor.options.Args, tt.want)
+			if !slices.Equal(executor.Last().Args, tt.want) {
+				t.Fatalf("args = %#v, want %#v", executor.Last().Args, tt.want)
 			}
 		})
 	}
@@ -93,7 +83,7 @@ func TestRequiredDefaultsToTrue(t *testing.T) {
 }
 
 func TestRunUsesExecutorEnvironmentAndReturnsName(t *testing.T) {
-	executor := &recordingExecutor{}
+	executor := &processtest.Executor{}
 	runner, err := New(map[string]any{"tool": "go", "version_args": []any{"version"}})
 	if err != nil {
 		t.Fatal(err)
@@ -105,14 +95,14 @@ func TestRunUsesExecutorEnvironmentAndReturnsName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if executor.options.Command != "go" || !slices.Equal(executor.options.Args, []string{"version"}) || executor.options.Dir != "/workspace" {
-		t.Fatalf("options = %#v", executor.options)
+	if executor.Last().Command != "go" || !slices.Equal(executor.Last().Args, []string{"version"}) || executor.Last().Dir != "/workspace" {
+		t.Fatalf("options = %#v", executor.Last())
 	}
-	if executor.options.Env["CHANNEL"] != "stable" || executor.options.Env[step.AttemptEnv] != "2" || executor.options.Env[step.OperationIDEnv] != "probe-go" {
-		t.Fatalf("environment = %#v", executor.options.Env)
+	if executor.Last().Env["CHANNEL"] != "stable" || executor.Last().Env[step.AttemptEnv] != "2" || executor.Last().Env[step.OperationIDEnv] != "probe-go" {
+		t.Fatalf("environment = %#v", executor.Last().Env)
 	}
-	if executor.options.Stdout != nil || executor.options.Stderr != nil || executor.options.CaptureLimit != captureLimit {
-		t.Fatalf("capture options = %#v", executor.options)
+	if executor.Last().Stdout != nil || executor.Last().Stderr != nil || executor.Last().CaptureLimit != captureLimit {
+		t.Fatalf("capture options = %#v", executor.Last())
 	}
 	if result.Outputs["available"] != true || result.Outputs["path"] != "go" || result.Outputs["version"] != "" || result.Outputs["constraint_matched"] != true {
 		t.Fatalf("outputs = %#v", result.Outputs)
@@ -120,7 +110,7 @@ func TestRunUsesExecutorEnvironmentAndReturnsName(t *testing.T) {
 }
 
 func TestRunReturnsBestEffortVersionWithoutConstraint(t *testing.T) {
-	executor := &recordingExecutor{result: process.Result{Stdout: "tool v1.2.3\n"}}
+	executor := &processtest.Executor{Reply: processtest.Reply{Result: process.Result{Stdout: "tool v1.2.3\n"}}}
 	runner, err := New(map[string]any{"tool": "tool"})
 	if err != nil {
 		t.Fatal(err)
@@ -149,7 +139,7 @@ func TestRunExtractsAndConstrainsVersions(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			executor := &recordingExecutor{result: process.Result{Stdout: tt.stdout, Stderr: tt.stderr}}
+			executor := &processtest.Executor{Reply: processtest.Reply{Result: process.Result{Stdout: tt.stdout, Stderr: tt.stderr}}}
 			runner, err := New(map[string]any{"tool": "tool", "constraint": tt.constraint})
 			if err != nil {
 				t.Fatal(err)
@@ -175,7 +165,7 @@ func TestRunRejectsMissingOrUnsupportedVersion(t *testing.T) {
 		{"mismatch", "tool 1.9.0", "does not satisfy constraint"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			executor := &recordingExecutor{result: process.Result{Stdout: tt.output}}
+			executor := &processtest.Executor{Reply: processtest.Reply{Result: process.Result{Stdout: tt.output}}}
 			runner, err := New(map[string]any{"tool": "tool", "constraint": ">= 2.0.0"})
 			if err != nil {
 				t.Fatal(err)
@@ -189,10 +179,10 @@ func TestRunRejectsMissingOrUnsupportedVersion(t *testing.T) {
 }
 
 func TestRunReportsUnavailableToolWithoutOutputs(t *testing.T) {
-	executor := &recordingExecutor{
-		result: process.Result{Stderr: "not found\n", ExitCode: 127},
-		err:    &process.ExitError{Command: "missing", Code: 127},
-	}
+	executor := &processtest.Executor{Reply: processtest.Reply{
+		Result: process.Result{Stderr: "not found\n", ExitCode: 127},
+		Err:    &process.ExitError{Command: "missing", Code: 127},
+	}}
 	runner, err := New(map[string]any{"tool": "missing"})
 	if err != nil {
 		t.Fatal(err)
@@ -222,7 +212,7 @@ func TestOptionalRunReturnsCheckOutcomes(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			executor := &recordingExecutor{result: tt.result, err: tt.err}
+			executor := &processtest.Executor{Reply: processtest.Reply{Result: tt.result, Err: tt.err}}
 			runner, err := New(map[string]any{"tool": "tool", "constraint": ">= 2.0.0", "required": false})
 			if err != nil {
 				t.Fatal(err)
@@ -246,7 +236,7 @@ func TestOptionalRunReturnsCheckOutcomes(t *testing.T) {
 }
 
 func TestRunPreservesCancellation(t *testing.T) {
-	executor := &recordingExecutor{err: context.Canceled}
+	executor := &processtest.Executor{Reply: processtest.Reply{Err: context.Canceled}}
 	runner, err := New(map[string]any{"tool": "tool", "required": false})
 	if err != nil {
 		t.Fatal(err)
