@@ -6,7 +6,6 @@ import (
 
 	"github.com/expr-lang/expr"
 	"github.com/up2jj/wuko/step"
-	"github.com/up2jj/wuko/workflow"
 )
 
 func (runner *Runner) Run(ctx context.Context, request step.Request) (step.Result, error) {
@@ -45,13 +44,16 @@ func (runner *Runner) Run(ctx context.Context, request step.Request) (step.Resul
 	return result, nil
 }
 
+// resolveSource returns the source without copying it. The engine already gives each step
+// request its own copy of workflow state, and no operation writes into a value it consumes:
+// every operation builds new lists and objects, and normalizeResult copies the final result.
 func (runner *Runner) resolveSource(request *evaluation) (any, error) {
 	if runner.config.From.path != "" {
 		value, err := step.Lookup(request.request, runner.config.From.path)
 		if err != nil {
 			return nil, fmt.Errorf("resolving from: %w", err)
 		}
-		return workflow.Clone(value), nil
+		return value, nil
 	}
 	if runner.sourceProgram == nil {
 		return nil, fmt.Errorf("from.expr contains an unresolved template")
@@ -60,7 +62,7 @@ func (runner *Runner) resolveSource(request *evaluation) (any, error) {
 	if err != nil {
 		return nil, fmt.Errorf("evaluating from.expr: %w", err)
 	}
-	return workflow.Clone(value), nil
+	return value, nil
 }
 
 func runOperation(ctx context.Context, request *evaluation, current any, operation operation) (any, error) {
