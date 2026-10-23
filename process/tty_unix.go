@@ -228,6 +228,11 @@ func driveTTY(ctx context.Context, session TTYSession, terminal *os.File, option
 			writer = &interactionOutputWriter{writer: writer, output: interactionOutput, done: interactionDone}
 		}
 		_, copyErr := io.Copy(writer, session)
+		if copyErr != nil {
+			// A failed writer must not stop reading the PTY, or the child blocks once the
+			// terminal buffer fills. A read error ends this second copy immediately.
+			_, _ = io.Copy(io.Discard, session)
+		}
 		if interactionOutput != nil {
 			interactionOutput.Close()
 		}

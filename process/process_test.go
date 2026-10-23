@@ -799,3 +799,33 @@ func waitForProcessGroupExit(processID int, timeout time.Duration) bool {
 		}
 	}
 }
+
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("stream closed") }
+
+func TestRunKeepsDrainingOutputAfterWriterFails(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	// Far more than a pipe buffer holds, so the child blocks unless the pipe is still read.
+	_, err := Run(ctx, Options{
+		Command: "/bin/sh", Args: []string{"-c", "head -c 1048576 /dev/zero"},
+		Stdout: failingWriter{}, StdoutPolicy: OutputInherit,
+	})
+	if ctx.Err() != nil {
+		t.Fatalf("command did not finish after its output writer failed: %v", err)
+	}
+}
+
+func TestRunTTYKeepsDrainingOutputAfterWriterFails(t *testing.T) {
+	terminal, _ := testTerminal(t, 24, 80)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	_, _ = Run(ctx, Options{
+		Command: "sh", Args: []string{"-c", "awk 'BEGIN { for (i = 0; i < 65536; i++) print \"0123456789abcdef\" }'"},
+		Env: testEnvironment(), Stdin: terminal, Stdout: failingWriter{}, StdoutPolicy: OutputInherit, TTY: true,
+	})
+	if ctx.Err() != nil {
+		t.Fatal("TTY command did not finish after its output writer failed")
+	}
+}

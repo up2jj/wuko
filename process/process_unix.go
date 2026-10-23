@@ -519,7 +519,11 @@ func pipeOutput(target *io.Writer, writer io.Writer) (*outputPipe, error) {
 	pipe := &outputPipe{reader: reader, writer: pipeWriter, done: make(chan struct{})}
 	go func() {
 		defer close(pipe.done)
-		_, _ = io.Copy(writer, reader)
+		if _, err := io.Copy(writer, reader); err != nil {
+			// Keep reading after the writer fails; a child whose pipe fills up would block
+			// in write and never exit.
+			_, _ = io.Copy(io.Discard, reader)
+		}
 	}()
 	*target = pipeWriter
 	return pipe, nil
