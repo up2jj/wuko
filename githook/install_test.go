@@ -2,7 +2,6 @@ package githook
 
 import (
 	"bytes"
-	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,7 +14,7 @@ import (
 func TestInstallRefusesConflictAndChainRestoresIt(t *testing.T) {
 	t.Parallel()
 	repository := testRepository(t)
-	hookPath, err := repository.HookPath(context.Background(), "pre-commit")
+	hookPath, err := repository.HookPath(t.Context(), "pre-commit")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,10 +30,10 @@ func TestInstallRefusesConflictAndChainRestoresIt(t *testing.T) {
 	if err := os.WriteFile(executable, []byte("binary"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Install(context.Background(), repository, executable, manifest, false); err == nil {
+	if _, err := Install(t.Context(), repository, executable, manifest, false); err == nil {
 		t.Fatal("Install() unexpectedly replaced existing hook")
 	}
-	if _, err := Install(context.Background(), repository, executable, manifest, true); err != nil {
+	if _, err := Install(t.Context(), repository, executable, manifest, true); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(hookPath)
@@ -44,14 +43,14 @@ func TestInstallRefusesConflictAndChainRestoresIt(t *testing.T) {
 	if !strings.Contains(string(data), dispatcherMarker) {
 		t.Fatalf("dispatcher = %q", data)
 	}
-	statuses, err := Inspect(context.Background(), repository, manifest)
+	statuses, err := Inspect(t.Context(), repository, manifest)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(statuses) != 1 || statuses[0].State != "installed" || !statuses[0].Chained {
 		t.Fatalf("statuses = %#v", statuses)
 	}
-	if _, err := Uninstall(context.Background(), repository, nil); err != nil {
+	if _, err := Uninstall(t.Context(), repository, nil); err != nil {
 		t.Fatal(err)
 	}
 	restored, err := os.ReadFile(hookPath)
@@ -71,17 +70,17 @@ func TestUninstallRefusesModifiedDispatcher(t *testing.T) {
 	if err := os.WriteFile(executable, []byte("binary"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Install(context.Background(), repository, executable, manifest, false); err != nil {
+	if _, err := Install(t.Context(), repository, executable, manifest, false); err != nil {
 		t.Fatal(err)
 	}
-	hookPath, err := repository.HookPath(context.Background(), "pre-commit")
+	hookPath, err := repository.HookPath(t.Context(), "pre-commit")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(hookPath, []byte("changed"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Uninstall(context.Background(), repository, nil); err == nil {
+	if _, err := Uninstall(t.Context(), repository, nil); err == nil {
 		t.Fatal("Uninstall() unexpectedly removed modified hook")
 	}
 }
@@ -91,7 +90,7 @@ func TestHookPathRejectsSharedCoreHooksPath(t *testing.T) {
 	repository := testRepository(t)
 	shared := t.TempDir()
 	gittest.Run(t, repository.Root, "config", "core.hooksPath", shared)
-	if _, err := repository.HookPath(context.Background(), "pre-commit"); err == nil || !strings.Contains(err.Error(), "shared outside") {
+	if _, err := repository.HookPath(t.Context(), "pre-commit"); err == nil || !strings.Contains(err.Error(), "shared outside") {
 		t.Fatalf("error = %v", err)
 	}
 }
@@ -100,7 +99,7 @@ func TestHookPathAllowsRepositoryLocalCoreHooksPath(t *testing.T) {
 	t.Parallel()
 	repository := testRepository(t)
 	gittest.Run(t, repository.Root, "config", "core.hooksPath", ".githooks")
-	path, err := repository.HookPath(context.Background(), "pre-commit")
+	path, err := repository.HookPath(t.Context(), "pre-commit")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,15 +115,15 @@ func TestLinkedWorktreesShareCommonHookPath(t *testing.T) {
 	gittest.Run(t, primary.Root, "commit", "--allow-empty", "--no-verify", "-m", "initial")
 	linkedRoot := filepath.Join(t.TempDir(), "linked")
 	gittest.Run(t, primary.Root, "worktree", "add", "-q", "-b", "linked-test", linkedRoot)
-	linked, err := Discover(context.Background(), linkedRoot)
+	linked, err := Discover(t.Context(), linkedRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
-	primaryHook, err := primary.HookPath(context.Background(), "pre-commit")
+	primaryHook, err := primary.HookPath(t.Context(), "pre-commit")
 	if err != nil {
 		t.Fatal(err)
 	}
-	linkedHook, err := linked.HookPath(context.Background(), "pre-commit")
+	linkedHook, err := linked.HookPath(t.Context(), "pre-commit")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +136,7 @@ func TestDiscoverRejectsBareRepository(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	gittest.Run(t, root, "init", "--bare", "-q")
-	if _, err := Discover(context.Background(), root); err == nil || !strings.Contains(err.Error(), "bare Git repositories") {
+	if _, err := Discover(t.Context(), root); err == nil || !strings.Contains(err.Error(), "bare Git repositories") {
 		t.Fatalf("error = %v", err)
 	}
 }
@@ -149,7 +148,7 @@ func TestDiscoverResolvesGitDirectoriesFromSubdirectory(t *testing.T) {
 	if err := os.MkdirAll(subdirectory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	discovered, err := Discover(context.Background(), subdirectory)
+	discovered, err := Discover(t.Context(), subdirectory)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,10 +168,10 @@ func TestInstalledDispatcherForwardsArgumentsAndStdin(t *testing.T) {
 		t.Fatal(err)
 	}
 	manifest := Manifest{Version: 1, Hooks: map[string][]Binding{"pre-push": {{Workflow: "check"}}}}
-	if _, err := Install(context.Background(), repository, executable, manifest, false); err != nil {
+	if _, err := Install(t.Context(), repository, executable, manifest, false); err != nil {
 		t.Fatal(err)
 	}
-	hookPath, err := repository.HookPath(context.Background(), "pre-push")
+	hookPath, err := repository.HookPath(t.Context(), "pre-push")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +199,7 @@ func TestInstalledDispatcherForwardsArgumentsAndStdin(t *testing.T) {
 func TestUninstallRepeatedNameKeepsPreservedHook(t *testing.T) {
 	t.Parallel()
 	repository := testRepository(t)
-	hookPath, err := repository.HookPath(context.Background(), "pre-commit")
+	hookPath, err := repository.HookPath(t.Context(), "pre-commit")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,10 +215,10 @@ func TestUninstallRepeatedNameKeepsPreservedHook(t *testing.T) {
 	if err := os.WriteFile(executable, []byte("binary"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Install(context.Background(), repository, executable, manifest, true); err != nil {
+	if _, err := Install(t.Context(), repository, executable, manifest, true); err != nil {
 		t.Fatal(err)
 	}
-	statuses, err := Uninstall(context.Background(), repository, []string{"pre-commit", "pre-commit"})
+	statuses, err := Uninstall(t.Context(), repository, []string{"pre-commit", "pre-commit"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,17 +242,17 @@ func TestUninstallRemovesStateForMissingDispatcher(t *testing.T) {
 	if err := os.WriteFile(executable, []byte("binary"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Install(context.Background(), repository, executable, manifest, false); err != nil {
+	if _, err := Install(t.Context(), repository, executable, manifest, false); err != nil {
 		t.Fatal(err)
 	}
-	hookPath, err := repository.HookPath(context.Background(), "pre-commit")
+	hookPath, err := repository.HookPath(t.Context(), "pre-commit")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Remove(hookPath); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Uninstall(context.Background(), repository, nil); err != nil {
+	if _, err := Uninstall(t.Context(), repository, nil); err != nil {
 		t.Fatalf("Uninstall() refused to clean up a missing dispatcher: %v", err)
 	}
 	state, err := loadState(repository)

@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -21,7 +22,7 @@ import (
 	"github.com/moby/moby/api/types/jsonstream"
 	"github.com/moby/moby/client"
 	"github.com/muesli/cancelreader"
-	"github.com/opencontainers/image-spec/specs-go/v1"
+	v1 "github.com/opencontainers/image-spec/specs-go/v1"
 
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/step"
@@ -120,7 +121,7 @@ func TestRunCapturesOutputAndBuildsContainerConfig(t *testing.T) {
 	if created.Image != "alpine:3.22" || created.WorkingDir != "/workspace" || created.User != "" {
 		t.Fatalf("container config = %#v", created)
 	}
-	if got, want := created.Cmd, []string{"sh", "-c", "echo out; echo err >&2"}; !equalStrings(got, want) {
+	if got, want := created.Cmd, []string{"sh", "-c", "echo out; echo err >&2"}; !slices.Equal(got, want) {
 		t.Fatalf("command = %#v, want %#v", got, want)
 	}
 	if got := client.created.HostConfig.Mounts[0].Source; got != filepath.Join(runDir, "src") {
@@ -592,16 +593,4 @@ func multiplexedOutput(stdout, stderr string) []byte {
 		writeFrame(2, stderr)
 	}
 	return output.Bytes()
-}
-
-func equalStrings(left, right []string) bool {
-	if len(left) != len(right) {
-		return false
-	}
-	for i := range left {
-		if left[i] != right[i] {
-			return false
-		}
-	}
-	return true
 }

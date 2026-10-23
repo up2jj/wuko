@@ -82,13 +82,13 @@ func TestChainPassesProgressiveEnvironmentAndProvenance(t *testing.T) {
 		if request.Env["BASE"] != "yes" || len(request.Applied) != 0 {
 			t.Fatalf("first request = %#v", request)
 		}
-		return Result{Changes: Changes{"VALUE": stringPointer("one"), "REMOVE": nil}, Applied: true}
+		return Result{Changes: Changes{"VALUE": new("one"), "REMOVE": nil}, Applied: true}
 	}}
 	second := fakeLoader{name: "second", load: func(request Request) Result {
 		if request.Env["VALUE"] != "one" || request.Env["REMOVE"] != "" || !reflect.DeepEqual(request.Applied, []string{"first"}) {
 			t.Fatalf("second request = %#v", request)
 		}
-		return Result{Changes: Changes{"VALUE": stringPointer("two")}, Applied: true}
+		return Result{Changes: Changes{"VALUE": new("two")}, Applied: true}
 	}}
 	base := map[string]string{"BASE": "yes", "REMOVE": "me"}
 	result, err := (Chain{first, second}).Load(t.Context(), Request{Dir: t.TempDir(), Env: base})
@@ -328,7 +328,7 @@ func TestResolverAutomaticSelectionAndProgressiveLookup(t *testing.T) {
 		t.Fatal(err)
 	}
 	asdf := fakeLoader{name: LoaderASDF, probe: func(Request) Probe { return Probe{Available: true} }, load: func(Request) Result {
-		return Result{Changes: Changes{"PATH": stringPointer("/asdf/shims:/bin")}, Applied: true}
+		return Result{Changes: Changes{"PATH": new("/asdf/shims:/bin")}, Applied: true}
 	}}
 	direnv := fakeLoader{name: LoaderDirenv, probe: func(request Request) Probe {
 		return Probe{Available: strings.HasPrefix(request.Env["PATH"], "/asdf/shims")}

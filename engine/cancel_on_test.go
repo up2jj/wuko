@@ -200,7 +200,7 @@ func TestCancelOnSkippedBodyEndsTheRace(t *testing.T) {
 	}
 	done := make(chan run, 1)
 	go func() {
-		state, err := New(registry).Run(context.Background(), definition, Options{})
+		state, err := New(registry).Run(t.Context(), definition, Options{})
 		done <- run{state: state, err: err}
 	}()
 

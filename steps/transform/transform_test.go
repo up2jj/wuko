@@ -3,6 +3,7 @@ package transform
 import (
 	"context"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/up2jj/wuko/internal/steptest"
@@ -250,7 +251,7 @@ func TestRejectsOperationAfterTerminalResult(t *testing.T) {
 		"from":       "vars.values",
 		"operations": []any{"sum", map[string]any{"map": "item * 2"}},
 	})
-	if err == nil || !contains(err.Error(), "follows terminal operation") {
+	if err == nil || !strings.Contains(err.Error(), "follows terminal operation") {
 		t.Fatalf("error = %v", err)
 	}
 }
@@ -305,7 +306,7 @@ func TestAggregationSemantics(t *testing.T) {
 	}
 
 	runner := steptest.BuildAs[*Runner](t, New, map[string]any{"from": "vars.values", "operations": []any{"sum"}})
-	if _, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{"values": []any{1, 2.5}}}); err == nil || !contains(err.Error(), "mixes integer and floating-point") {
+	if _, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{"values": []any{1, 2.5}}}); err == nil || !strings.Contains(err.Error(), "mixes integer and floating-point") {
 		t.Fatalf("mixed numeric error = %v", err)
 	}
 }
@@ -413,7 +414,7 @@ func TestTupleOperations(t *testing.T) {
 	t.Run("unzip validation", func(t *testing.T) {
 		runner := steptest.BuildAs[*Runner](t, New, map[string]any{"from": "vars.rows", "operations": []any{"unzip"}})
 		_, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{"rows": []any{[]any{1, 2}, []any{3}}}})
-		if err == nil || !contains(err.Error(), "tuple width") {
+		if err == nil || !strings.Contains(err.Error(), "tuple width") {
 			t.Fatalf("error = %v", err)
 		}
 	})
@@ -465,7 +466,7 @@ func TestSourceExpressionAndRuntimeKindValidation(t *testing.T) {
 	}
 
 	wrongKind := steptest.BuildAs[*Runner](t, New, map[string]any{"from": "vars.value", "operations": []any{"unique"}})
-	if _, err := wrongKind.Run(t.Context(), step.Request{Vars: map[string]any{"value": "scalar"}}); err == nil || !contains(err.Error(), "cannot consume scalar") {
+	if _, err := wrongKind.Run(t.Context(), step.Request{Vars: map[string]any{"value": "scalar"}}); err == nil || !strings.Contains(err.Error(), "cannot consume scalar") {
 		t.Fatalf("error = %v", err)
 	}
 }
@@ -497,7 +498,7 @@ func TestConfigurationAndCancellationErrors(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if _, err := New(test.raw); err == nil || !contains(err.Error(), test.want) {
+			if _, err := New(test.raw); err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("error = %v, want %q", err, test.want)
 			}
 		})
@@ -588,13 +589,4 @@ func TestCallbackLocalsDoNotLeakBetweenOperations(t *testing.T) {
 	if !reflect.DeepEqual(result.Outputs["value"], map[string]any{"eu": nil}) {
 		t.Fatalf("value = %#v, want the list local to be unbound", result.Outputs["value"])
 	}
-}
-
-func contains(value, substring string) bool {
-	for index := 0; index+len(substring) <= len(value); index++ {
-		if value[index:index+len(substring)] == substring {
-			return true
-		}
-	}
-	return false
 }

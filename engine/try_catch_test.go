@@ -268,7 +268,7 @@ func TestTryCatchCancellationBypassesCatchAndRunsLocalDefer(t *testing.T) {
 		},
 		[]workflow.Step{{ID: "rollback", Type: "catch", With: map[string]any{}}},
 	)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() {
 		_, err := New(registry).Run(ctx, steptest.Definition(t, "canceled", control), Options{})

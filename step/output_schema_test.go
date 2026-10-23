@@ -41,7 +41,7 @@ func TestRegistryOutputSchemas(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			schema, err := registry.OutputSchema(context.Background(), test.name)
+			schema, err := registry.OutputSchema(t.Context(), test.name)
 			if err != nil {
 				t.Fatal(err)
 			}

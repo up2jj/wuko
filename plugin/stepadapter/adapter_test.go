@@ -585,7 +585,7 @@ func TestWithoutSecretsFailsClosedWhenHostRenderingReachesSecrets(t *testing.T) 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			host := &renderHost{}
-			request := stepRequest(context.Background(), testStepContext("render"), host, test.secretsReachable, nil, nil, nil)
+			request := stepRequest(t.Context(), testStepContext("render"), host, test.secretsReachable, nil, nil, nil)
 			renderer := request.TemplateRenderer.(step.DataTemplateRenderer).WithoutSecrets()
 			if err := renderer.ValidateContent("{{ .vars.name }}"); err != nil {
 				t.Fatalf("ValidateContent() error = %v", err)

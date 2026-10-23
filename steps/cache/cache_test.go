@@ -384,7 +384,7 @@ func TestCleanupStagedPreservesRollbackBackup(t *testing.T) {
 }
 
 func TestCancellation(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	runner, err := New(cacheConfig("save"))
 	if err != nil {

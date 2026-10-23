@@ -61,7 +61,7 @@ func TestRegistryLoadRetainsSchemasAndActiveValuesInOrder(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	set, err := registry.Load(context.Background(), map[string]string{"TOKEN": "original"})
+	set, err := registry.Load(t.Context(), map[string]string{"TOKEN": "original"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +94,7 @@ func TestRegistryLoadIsolatesInputsAndOutputs(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	set, err := registry.Load(context.Background(), environment)
+	set, err := registry.Load(t.Context(), environment)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +128,7 @@ func TestRegistryLoadFailure(t *testing.T) {
 	if err := registry.Register(fakeProvider{name: "cloud", err: sentinel}); err != nil {
 		t.Fatal(err)
 	}
-	_, err := registry.Load(context.Background(), nil)
+	_, err := registry.Load(t.Context(), nil)
 	if !errors.Is(err, sentinel) || !strings.Contains(err.Error(), `loading provider "cloud"`) {
 		t.Fatalf("Load error = %v", err)
 	}

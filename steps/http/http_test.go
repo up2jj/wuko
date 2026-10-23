@@ -118,7 +118,7 @@ func TestResponseLimitAndCancellation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	_, err = runner.Run(ctx, step.Request{})
 	if err == nil || !errors.Is(err, context.Canceled) {

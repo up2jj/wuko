@@ -1,6 +1,7 @@
 package edit
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -185,7 +186,7 @@ func TestFileMissingIgnoreDoesNotRewrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytesEqual(data, input) || !before.ModTime().Equal(after.ModTime()) || result.Outputs["changed"] != false {
+	if !bytes.Equal(data, input) || !before.ModTime().Equal(after.ModTime()) || result.Outputs["changed"] != false {
 		t.Fatalf("ignored edit changed file or outputs: %#v", result.Outputs)
 	}
 }
@@ -209,7 +210,7 @@ func TestAllFileEditIsAtomicWhenReplacementFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytesEqual(data, input) {
+	if !bytes.Equal(data, input) {
 		t.Fatalf("file changed after replacement failure: %q", data)
 	}
 }
@@ -260,8 +261,6 @@ func TestNewRejectsInvalidConfiguration(t *testing.T) {
 	}
 }
 
-func bytesEqual(left, right []byte) bool { return string(left) == string(right) }
-
 func TestFileSourceRejectsSymlink(t *testing.T) {
 	t.Parallel()
 	directory := t.TempDir()
@@ -285,7 +284,7 @@ func TestFileSourceRejectsSymlink(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytesEqual(data, input) {
+	if !bytes.Equal(data, input) {
 		t.Fatalf("symlink target changed: %q", data)
 	}
 	info, err := os.Lstat(filepath.Join(directory, "link.json"))
@@ -328,7 +327,7 @@ func TestJSONNumbersCompareByValue(t *testing.T) {
 	if result.Outputs["changed"] != false || result.Outputs["changed_count"] != 0 {
 		t.Fatalf("outputs = %#v, want unchanged", result.Outputs)
 	}
-	if !bytesEqual(data, input) || !before.ModTime().Equal(after.ModTime()) {
+	if !bytes.Equal(data, input) || !before.ModTime().Equal(after.ModTime()) {
 		t.Fatalf("unchanged edit rewrote the file: %q", data)
 	}
 }

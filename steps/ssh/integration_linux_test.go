@@ -46,7 +46,7 @@ func TestSSHIntegration(t *testing.T) {
 		}
 		s := opened.(*session)
 		t.Cleanup(func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 			defer cancel()
 			if err := s.Close(ctx); err != nil && !strings.Contains(err.Error(), "termination could not be confirmed") {
 				t.Error(err)

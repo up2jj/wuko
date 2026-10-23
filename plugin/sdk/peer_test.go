@@ -78,7 +78,7 @@ func TestReplyCodesCancellationErrors(t *testing.T) {
 // return - and let Serve's caller exit the process - while that reply is still being written.
 // A cancel arriving in that window is exactly when it is most tempting to.
 func TestShutdownReplyOutlivesRootCancellation(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	reader, writer := io.Pipe()
 	defer writer.Close()

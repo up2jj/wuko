@@ -2,7 +2,6 @@ package plugin
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -29,7 +28,7 @@ func TestInstallIsTransactionalAndWritesMarker(t *testing.T) {
 		t.Fatal(err)
 	}
 	root := t.TempDir()
-	marker, err := Install(context.Background(), source, root, false, nil, io.Discard)
+	marker, err := Install(t.Context(), source, root, false, nil, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +71,7 @@ func TestInstallIsTransactionalAndWritesMarker(t *testing.T) {
 	if err := os.WriteFile(installedExecutable, originalExecutable, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Install(context.Background(), source, root, false, nil, io.Discard); err == nil {
+	if _, err := Install(t.Context(), source, root, false, nil, io.Discard); err == nil {
 		t.Fatal("expected existing installation error")
 	}
 	if err := os.WriteFile(filepath.Join(directory, MarkerName), []byte("{}"), 0600); err != nil {

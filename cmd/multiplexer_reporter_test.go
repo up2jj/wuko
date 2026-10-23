@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"strings"
 	"sync"
 	"testing"
@@ -100,7 +99,7 @@ func TestMultiplexerReporterFormatsRetryPollAndDryRun(t *testing.T) {
 	reporter := newMultiplexerProgressReporterWithSink(sink, func(time.Duration) reporterTicker {
 		return &fakeReporterTicker{ticks: make(chan time.Time), stopped: make(chan struct{})}
 	})
-	if err := reporter.Finish(context.Background(), reporterpkg.Outcome{WorkflowName: "release", Status: engine.StatusSucceeded, DryRun: true}); err != nil {
+	if err := reporter.Finish(t.Context(), reporterpkg.Outcome{WorkflowName: "release", Status: engine.StatusSucceeded, DryRun: true}); err != nil {
 		t.Fatal(err)
 	}
 	if title := <-sink.wrote; title != "◇ release · dry run" {

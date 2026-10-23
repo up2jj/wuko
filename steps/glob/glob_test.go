@@ -136,7 +136,7 @@ func TestGlobRejectsInvalidRootAndHonorsCancellation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	if _, err := runner.Run(ctx, step.Request{RunDir: runDir}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancellation error = %v", err)

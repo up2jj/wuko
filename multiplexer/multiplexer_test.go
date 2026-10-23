@@ -401,7 +401,7 @@ func TestAutoDetectedPaneControlCommands(t *testing.T) {
 		{
 			name:        "herdr resizes with native fraction",
 			environment: map[string]string{"HERDR_PANE_ID": "1-1"},
-			request:     Request{Operation: OperationResize, Direction: "left", Amount: floatPointer(0.2)},
+			request:     Request{Operation: OperationResize, Direction: "left", Amount: new(0.2)},
 			wantCalls:   []commandCall{{command: "herdr", args: []string{"pane", "resize", "--direction", "left", "--pane", "1-1", "--amount", "0.2"}}},
 			wantChanged: true,
 		},
@@ -557,7 +557,7 @@ func TestResizeValidatesAmountAfterProviderDetection(t *testing.T) {
 	}
 }
 
-func floatPointer(value float64) *float64 { return &value }
+func new(value float64) *float64 { return &value }
 
 func TestScrollbackReadSkipsScreenPadding(t *testing.T) {
 	executor := &fakeExecutor{results: []process.Result{{Stdout: "a\nb\nc\n\n\n\n\n"}}}

@@ -1,7 +1,6 @@
 package provider
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -33,7 +32,7 @@ func githubTestEnvironment(t *testing.T, payload string) map[string]string {
 
 func loadGitHub(t *testing.T, environment map[string]string) (map[string]any, bool, error) {
 	t.Helper()
-	return NewGitHub().Load(context.Background(), environment)
+	return NewGitHub().Load(t.Context(), environment)
 }
 
 func TestGitHubSchemaKeepsCuratedFieldsClosedAndPayloadOpen(t *testing.T) {

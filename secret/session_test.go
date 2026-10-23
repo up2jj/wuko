@@ -140,7 +140,7 @@ func TestEnsureAuthSkipsNativeLoginWhenHeadless(t *testing.T) {
 	}}
 	session := NewSession(t.Context(), Options{Runner: runner, BaseEnv: map[string]string{}, Interactive: false})
 	err := session.EnsureAuth(Config{EnsureAuth: []AuthConfig{{Provider: "op", Login: LoginConfig{Native: true}}}})
-	if err == nil || !contains(err.Error(), "interactive terminal") {
+	if err == nil || !strings.Contains(err.Error(), "interactive terminal") {
 		t.Fatalf("error = %v", err)
 	}
 }
@@ -219,15 +219,6 @@ func TestRedactErrorRedactsStructuredValidationIssues(t *testing.T) {
 	if len(validation.Issues(redacted)) != 2 || !errors.Is(redacted, sentinel) {
 		t.Fatalf("redacted error lost issues or unwrapping: %v", redacted)
 	}
-}
-
-func contains(value, substring string) bool {
-	for i := 0; i+len(substring) <= len(value); i++ {
-		if value[i:i+len(substring)] == substring {
-			return true
-		}
-	}
-	return false
 }
 
 func TestFallbackScriptArgumentsStartAtOne(t *testing.T) {

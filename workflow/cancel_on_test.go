@@ -54,7 +54,7 @@ func TestCancelOnStructureValidation(t *testing.T) {
 		{name: "no monitors", step: Step{ID: "watch", CancelOn: &CancelOnGroup{Steps: []Step{step("body")}}}, want: "at least one monitor"},
 		{name: "duplicate monitor", step: Step{ID: "watch", CancelOn: &CancelOnGroup{Monitors: []Step{step("monitor"), step("monitor")}, Steps: []Step{step("body")}}}, want: "duplicate"},
 		{name: "return", step: Step{ID: "watch", CancelOn: &CancelOnGroup{Monitors: []Step{step("monitor")}, Steps: []Step{{Return: &ReturnControl{Outputs: map[string]string{}}}}}}, want: "return is not supported"},
-		{name: "require", step: Step{ID: "watch", CancelOn: &CancelOnGroup{Monitors: []Step{step("monitor")}, Steps: []Step{{Require: stringPointer("steps.yaml")}}}}, want: "require is not supported"},
+		{name: "require", step: Step{ID: "watch", CancelOn: &CancelOnGroup{Monitors: []Step{step("monitor")}, Steps: []Step{{Require: new("steps.yaml")}}}}, want: "require is not supported"},
 		{name: "defer", step: Step{ID: "watch", CancelOn: &CancelOnGroup{Monitors: []Step{step("monitor")}, Steps: []Step{{ID: "body", Type: "shell", Defer: []Step{step("cleanup")}}}}}, want: "defer is not supported"},
 		{name: "nested", step: Step{ID: "watch", CancelOn: &CancelOnGroup{Monitors: []Step{step("monitor")}, Steps: []Step{{ID: "nested", CancelOn: &CancelOnGroup{Monitors: []Step{step("inner_monitor")}, Steps: []Step{step("inner_body")}}}}}}, want: "nested cancel_on"},
 		{name: "observe monitor", step: Step{ID: "watch", CancelOn: &CancelOnGroup{Monitors: []Step{observeStep("watcher")}, Steps: []Step{step("body")}}}, want: "observe is not supported inside cancel_on"},
@@ -79,8 +79,6 @@ func TestCancelOnStructureValidation(t *testing.T) {
 		})
 	}
 }
-
-func stringPointer(value string) *string { return &value }
 
 func observeStep(id string) Step {
 	return Step{ID: id, Observe: &ObserveGroup{
