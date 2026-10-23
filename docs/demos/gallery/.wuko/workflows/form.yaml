@@ -1,0 +1,59 @@
+version: 1
+name: form
+description: Collect deployment settings in one validated form
+
+steps:
+  - id: settings
+    type: tui_form
+    with:
+      title: Deploy a service
+      description: Every field is checked before the workflow continues
+      fields:
+        - id: service
+          type: text
+          label: Service name
+          required: true
+          validation:
+            pattern: '^[a-z][a-z0-9-]+$'
+            message: Use lowercase letters, numbers, and hyphens
+        - id: environment
+          type: select
+          label: Environment
+          default: staging
+          required: true
+          choices:
+            - {label: Staging, value: staging}
+            - {label: Production, value: production}
+        - id: regions
+          type: multiselect
+          label: Regions
+          default: [west]
+          required: true
+          choices:
+            - {label: West, value: west}
+            - {label: East, value: east}
+        - id: replicas
+          type: number
+          label: Replicas
+          default: 1
+          validation:
+            min: 1
+            max: 20
+            integer: true
+            expr: fields.environment != "production" || value >= 2
+            message: Production needs at least two replicas
+        - id: notify
+          type: checkbox
+          label: Notify the team
+          default: true
+
+  - id: deploy
+    type: shell
+    with:
+      command: printf
+      args:
+        - 'Deploying %s to %s (%s) with %s replicas\n'
+        - '{{ .steps.settings.service }}'
+        - '{{ .steps.settings.environment }}'
+        - '{{ .steps.settings.regions | join ", " }}'
+        - '{{ .steps.settings.replicas }}'

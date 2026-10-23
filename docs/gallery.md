@@ -10,6 +10,7 @@ workflow in [`docs/demos`](demos). Expand a demo to see its complete YAML, copy 
 - [Workflow picker](#workflow-picker)
 - [Guided release](#guided-release)
 - [Validated prompts](#validated-prompts)
+- [Validated form](#validated-form)
 - [Pick files](#pick-files)
 - [Browse data as a table](#browse-data-as-a-table)
 - [Live dashboard](#live-dashboard)
@@ -152,6 +153,81 @@ steps:
 </details>
 
 Learn more: [Interactive steps](steps-interactive.md).
+
+## Validated form
+
+`tui_form` collects every field on one screen. Errors appear as you move between fields, a rule can depend on another field, and each value becomes a typed step output.
+
+![Validated form](assets/gallery/form.gif)
+
+<details>
+<summary>Workflow: <code>docs/demos/gallery/.wuko/workflows/form.yaml</code></summary>
+
+```yaml
+version: 1
+name: form
+description: Collect deployment settings in one validated form
+
+steps:
+  - id: settings
+    type: tui_form
+    with:
+      title: Deploy a service
+      description: Every field is checked before the workflow continues
+      fields:
+        - id: service
+          type: text
+          label: Service name
+          required: true
+          validation:
+            pattern: '^[a-z][a-z0-9-]+$'
+            message: Use lowercase letters, numbers, and hyphens
+        - id: environment
+          type: select
+          label: Environment
+          default: staging
+          required: true
+          choices:
+            - {label: Staging, value: staging}
+            - {label: Production, value: production}
+        - id: regions
+          type: multiselect
+          label: Regions
+          default: [west]
+          required: true
+          choices:
+            - {label: West, value: west}
+            - {label: East, value: east}
+        - id: replicas
+          type: number
+          label: Replicas
+          default: 1
+          validation:
+            min: 1
+            max: 20
+            integer: true
+            expr: fields.environment != "production" || value >= 2
+            message: Production needs at least two replicas
+        - id: notify
+          type: checkbox
+          label: Notify the team
+          default: true
+
+  - id: deploy
+    type: shell
+    with:
+      command: printf
+      args:
+        - 'Deploying %s to %s (%s) with %s replicas\n'
+        - '{{ .steps.settings.service }}'
+        - '{{ .steps.settings.environment }}'
+        - '{{ .steps.settings.regions | join ", " }}'
+        - '{{ .steps.settings.replicas }}'
+```
+
+</details>
+
+Learn more: [`tui_form`](steps-interactive.md#tui_form).
 
 ## Pick files
 
