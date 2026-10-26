@@ -1,6 +1,5 @@
-// Package gittest creates and drives throwaway Git repositories for tests. It relies on the
-// committer identity and defaults internal/testhome installs, so a package using it calls
-// testhome.Run from its TestMain.
+// Package gittest creates and drives throwaway Git repositories for tests. A package using it
+// calls testhome.Run from its TestMain to isolate the home directory and global Git defaults.
 package gittest
 
 import (
@@ -12,11 +11,15 @@ import (
 	"testing"
 )
 
-// Init creates an empty repository in a new temporary directory and returns its root.
+// Init creates an empty repository with a test identity in a new temporary directory and
+// returns its root. The local identity also works for commands with an explicit environment
+// that cannot read testhome's global Git configuration.
 func Init(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
 	Run(t, root, "init", "--quiet")
+	Run(t, root, "config", "--local", "user.name", "Wuko Test")
+	Run(t, root, "config", "--local", "user.email", "wuko@example.test")
 	return root
 }
 
