@@ -20,8 +20,8 @@ Create clear, strict, reviewable Wuko workflows and verify them before execution
 
 Read only the references relevant to the requested workflow:
 
-- For prompts, variables, decoding, JSONPath, extraction, structured edits, Git, time, and expression helpers, read [data and transforms](references/data-and-transforms.md).
-- For HTTP and plugin steps, retries, files, managed resources, persistence, caches, shell, Lua, Docker, and agents, read [resources and execution](references/resources-and-execution.md).
+- For prompts, variables, template rendering, decoding, JSONPath, extraction, structured and Markdown edits, Git, time, and expression helpers, read [data and transforms](references/data-and-transforms.md).
+- For HTTP and plugin steps, lockfiles, retries, files, managed resources, persistence, caches, shell SDKs, Lua, Docker, local resource limits, and agents, read [resources and execution](references/resources-and-execution.md).
 - For invocation, templates, dependencies, returns, schedules, scopes, concurrency, fan-out, cleanup, and composite actions, read [control flow and lifecycle](references/control-flow-and-lifecycle.md).
 
 ## Verification

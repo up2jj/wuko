@@ -22,14 +22,19 @@ Find the smallest evidence-backed cause of a Wuko workflow failure before changi
      skipped-step references, caller/action scope confusion, string versus typed values, or
      non-boolean expressions.
    - Environment and directories: `--env`, `--var`, `--env-loader`, `WUKO_ENV_LOADERS`, mise,
-     asdf, direnv, `.run.environment_loaders`, workflow directory, run directory, and relative files.
+     asdf, direnv, `.run.environment_loaders`, effective `PATH`, workflow directory, run directory,
+     and relative files.
    - Runtime step behavior: shell exit status, Lua errors, HTTP responses, filesystem effects, Docker setup, or agent exit codes.
-   - Plugin loading and execution: namespace discovery precedence, authoritative declarations,
-     source or manifest-digest conflicts, differing `with` configuration, installation markers,
-     artifact verification, v1/v2 negotiation, initialization, start, step execution, and cleanup.
-   - Plugin v2 services and callbacks: failures before the `ready` event, background failures after
+   - Plugin loading and execution: required namespace declarations, directory-local `wuko.lock`
+     pins, source or manifest-digest conflicts, differing `with` configuration, verified cache and
+     installation bytes, v1–v4 negotiation, initialization, start, step execution, and cleanup.
+   - Plugin services and callbacks: failures before the `ready` event, background failures after
      readiness, service cancellation and shutdown verification, undeclared callback capabilities,
      invalid or completed parent requests, callback limits, and protocol reader or write ordering.
+   - Plugin v4 execution: declared filesystem, stdin, and TTY capabilities, terminal borrowing,
+     steps inside the same plugin's executor, path mapping, and failed-step `error.outputs`.
+   - Script SDK: local-only `sdk: node|bash`, runtime availability, injection environment, typed
+     `sdk_args`, frozen attempt snapshots, awaited host calls, and staged outputs under `data`.
    - JSONPath selection: query syntax after template rendering, missing `vars` or `steps` source paths, `all` list semantics, and `one` cardinality failures.
    - Semantic versions: strict version syntax, normalized `v` prefixes, precedence versus build
      metadata, prerelease constraint matching, and increment-part behavior.
@@ -48,6 +53,16 @@ Find the smallest evidence-backed cause of a Wuko workflow failure before changi
 ## Useful checks
 
 - Use `wuko validate NAME` to isolate loading and validation errors.
+- If listing succeeds but a named run, validation, or tree command fails, inspect discovery
+  warnings on stderr. Listing and the bare picker skip invalid definitions; named commands keep
+  strict discovery. A broken effective source still shadows lower-precedence namesakes. Use
+  `--file PATH [TARGET]` to isolate the intended file without changing its selector to another source.
+- For missing commands, inspect the effective `PATH` after loaders and environment overrides.
+  Direct local commands, TTY runs, and `require_tool` use that path; relative entries resolve from
+  the command's working directory. An explicitly empty `PATH` disables name lookup, while an
+  explicit executable path still works. Do not assume the invoking shell's lookup is authoritative.
+- For text inputs rejected as numbers or booleans, preserve JSON quotes in `--var`, such as
+  `--var 'code="123"'`; shell quoting alone around `code=123` does not change its parsed type.
 - For file-backed templates, confirm the declared path is static and relative to the owning
   workflow or action. Local actions read companions from their manifest directory. Direct remote
   YAML and standalone fetched action manifests cannot carry companion template files.
@@ -56,13 +71,15 @@ Find the smallest evidence-backed cause of a Wuko workflow failure before changi
   one root action manifest, local archives are unsupported, and local references reject `sha256`.
 - Distinguish parse-time template errors from runtime data errors. Validation can prove syntax and
   named references; `.steps` values exist only when an earlier sequential producer has succeeded.
-- Resolve a plugin namespace in order: the workflow's authoritative declaration, the nearest
-  project installation, home installation, config installation, then `PATH`. An invalid
-  higher-precedence candidate blocks fallback. Compare declaration conflicts by source, manifest
-  digest, and `with` identity without printing configuration values.
+- Require a workflow declaration for every plugin namespace. Local workflows use `wuko.lock` in
+  their own directory, never a parent lockfile; validation, tree, and dry-run require existing
+  pins. Check canonical source and manifest digest, then verified cache or installation bytes.
+  Installed binaries and `PATH` do not implicitly select workflow plugins. Remote invocations
+  fetch manifests and ignore local locks. Compare `with` identity without printing its values,
+  and do not refresh a pin merely to silence a mismatch.
 - Check the release manifest and installation marker before blaming negotiation. A pinned protocol
-  must match the plugin response; a marker without `protocol` means v1, while a bare development or
-  `PATH` executable may negotiate from v2 to v1 in a fresh process.
+  must match the plugin response; a legacy marker without `protocol` means v1. Unpinned development
+  handshakes offer v4, v3, v2, then v1, retrying a failed handshake in a fresh process.
 - Separate plugin lifecycle phases. Initialization advertises capabilities; start applies plugin
   configuration; a v2 service failure before `ready` fails its owning step, while a failure after
   `ready` is a background-service outcome governed by its service policy. Cancellation is followed
@@ -72,7 +89,12 @@ Find the smallest evidence-backed cause of a Wuko workflow failure before changi
   calls are outstanding. A callback-limit refusal is retryable only after an earlier call finishes.
 - For cleanup failures, inspect `finally.status` separately from the progressively accumulated
   `finally.errors`. Failed main and cleanup steps do not commit outputs; match stable status and
-  step metadata rather than error-message text. Consult `docs/finally.md` when available.
+  step metadata rather than error-message text. A v4 plugin failure may retain diagnostics under
+  `error.outputs` without committing them to ordinary workflow state. Consult `docs/finally.md`
+  when available.
+- For an absent final report, check exit status and stderr before assuming a workflow never ran.
+  Cancellation exits with status 130; a `--memory` termination can prevent cleanup and report
+  emission. Local `--cpus` and `--memory` budgets cover the whole invocation, not each branch.
 - If a template failure is difficult to trace, inline one-use aliases and reduce nested template
   calls before adding helpers. Do not use templating to conceal ordering, condition, or typed-data
   problems; use workflow `if` and action-input `expr` where those semantics belong.

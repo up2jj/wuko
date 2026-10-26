@@ -22,6 +22,12 @@ preparation. Otherwise:
    `request_user_input` picker or Claude's `AskUserQuestion`. Otherwise show the same candidates as
    a numbered chat list. A workflow choice selects what to inspect; it does not authorize a run.
 
+Keep listing stdout separate from stderr: invalid drafts are skipped with warnings, while stdout
+remains one JSON document. A broken effective definition still shadows its namesakes; use
+`wuko list --all --format json` to inspect them and never silently promote `effective: false`
+entries. Named run and inspection commands retain strict discovery, so an unrelated invalid file
+may still block preparation; preserve the selected source with `--file PATH` when needed.
+
 ## Prepare the run
 
 1. Record the working directory and exact selector. If a name is shadowed or the user identified a
@@ -36,7 +42,9 @@ preparation. Otherwise:
    local workflow directory's `wuko.lock` when available. Undeclared plugins are rejected. Remote
    invocations fetch current manifests and never touch local lockfiles. State whether the identity
    is locked and digest-verified. List plugin `with` keys without rendering or
-   displaying their values, because configuration may contain credentials.
+   displaying their values, because configuration may contain credentials. Local validation,
+   tree inspection, and dry-run require existing pins; use `wuko plugin lock FILE` to establish
+   missing pins after source trust is settled. Preserve existing pins unless an update is requested.
 4. Treat a remote workflow, action, command-based action source, or plugin executable as trusted
    code. Before the first command that can download or start one, show its declared locator,
    pinning status, and executable trust implications, then require explicit confirmation.
@@ -44,7 +52,8 @@ preparation. Otherwise:
    or start a plugin. `validate`, `tree`, and dry-run can execute command resolvers while loading.
 5. Gather required non-secret `--var` and `--var-file` inputs and list environment names without
    exposing their values. Preserve workflow prompts when an interactive terminal is available;
-   otherwise arrange their values explicitly before previewing.
+   otherwise arrange their values explicitly before previewing. `--var` parses valid JSON, so
+   preserve JSON quotes for text such as `--var 'code="123"'` or `--var 'label="true"'`.
 
 Never ask the user to paste a secret into chat or put a secret in `--env`, `--var`, command
 arguments, URLs, prompts, or logs. Ask the user to export a missing secret in their own environment,
@@ -73,6 +82,11 @@ then check only whether its name is present. Do not display secret-bearing varia
    report while leaving stdin and stderr attached to the terminal: Wuko reserves stdout for JSON
    and renders prompts, workflow output, progress, and diagnostics on stderr in this mode.
 
+Preserve requested `--cpus` and `--memory` limits through preview and execution. They share one
+budget across the local invocation, including child workflows and plugins; remote and container
+work need their own limits. macOS enforcement is approximate. A memory-limit termination can
+prevent both cleanup and the final report, so missing JSON alone does not prove no effects ran.
+
 Do not automatically rerun a failed, canceled, or interrupted workflow. Wuko retries have
 at-least-once effects, and completed external effects are not rolled back when a later step fails.
 
@@ -82,6 +96,8 @@ Parse stdout as one JSON document and require execution-report `schema_version: 
 `outputs` only when `status` is `succeeded` and `dry_run` is false; a successful workflow with no
 declared values returns an empty object. On failure, preserve the exact selector and command, exit
 status, `failed_step`, `validation_issues`, and relevant redacted stderr. State that partial effects
-may remain, but do not edit the workflow, retry it, or expand into detailed diagnosis unless the
-user requests that work. Use `$wuko-workflow-debugger` for a subsequent diagnosis and
+may remain; exit status 130 means cancellation. If stdout is incomplete or absent, report that
+the execution report is unavailable rather than inferring success. Do not edit the workflow,
+retry it, or expand into detailed diagnosis unless the user requests that work. Use
+`$wuko-workflow-debugger` for a subsequent diagnosis and
 `$wuko-workflow-author` for requested workflow changes.
