@@ -18,7 +18,8 @@ var ErrMemoryLimit = errors.New("workflow memory limit exceeded")
 type identity struct {
 	pid     int
 	seconds int64
-	micros  int64
+	//lint:ignore U1000 Used by Darwin process identity checks; unused on Linux.
+	micros int64
 }
 
 type processInfo struct {
