@@ -5,7 +5,7 @@ Thanks for helping improve Wuko. This page covers the development loop; see
 
 ## Setup
 
-Wuko needs Go 1.26 or newer and [`just`](https://github.com/casey/just).
+Wuko needs Go 1.26.10 or newer and [`just`](https://github.com/casey/just).
 
 ```sh
 just build        # build ./wuko

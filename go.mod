@@ -1,6 +1,6 @@
 module github.com/up2jj/wuko
 
-go 1.26.8
+go 1.26.10
 
 require (
 	charm.land/bubbles/v2 v2.2.1
