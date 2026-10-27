@@ -6,7 +6,50 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 )
+
+func TestSelectionPickersUseExplicitRunAndCancelKeys(t *testing.T) {
+	t.Parallel()
+	options := []Option{{Label: "build", Default: true}}
+	for name, newModel := range map[string]func() tea.Model{
+		"workflow":    func() tea.Model { return newSelectionModel("Workflows", options) },
+		"marketplace": func() tea.Model { return newMultiSelectionModel("Marketplace", options) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			model := newModel()
+			for _, key := range []tea.KeyPressMsg{{Code: 'v'}, {Code: 'q'}, {Code: tea.KeyEscape}} {
+				updated, command := model.Update(key)
+				model = updated
+				if command != nil || model.View().Content == "" {
+					t.Fatalf("%s unexpectedly exited the picker", key.String())
+				}
+			}
+			for _, expanded := range []bool{false, true} {
+				if expanded {
+					model, _ = model.Update(tea.KeyPressMsg{Code: '?'})
+				}
+				view := ansi.Strip(model.View().Content)
+				if strings.Contains(view, "v select") || strings.Contains(view, "q quit") {
+					t.Fatalf("expanded=%t: inherited quit help remains: %s", expanded, view)
+				}
+				if !strings.Contains(view, "ctrl+c cancel") {
+					t.Fatalf("expanded=%t: cancellation help is missing: %s", expanded, view)
+				}
+			}
+			for _, key := range []tea.KeyPressMsg{{Code: tea.KeyEnter}, {Code: 'c', Mod: tea.ModCtrl}} {
+				updated, command := newModel().Update(key)
+				if command == nil || updated.View().Content != "" {
+					t.Fatalf("%s did not finish the picker", key.String())
+				}
+				if _, quit := command().(tea.QuitMsg); !quit {
+					t.Fatalf("%s did not quit the picker", key.String())
+				}
+			}
+		})
+	}
+}
 
 func TestMultiSelectionModelTogglesAndConfirmsInManifestOrder(t *testing.T) {
 	model := newMultiSelectionModel("Marketplace", []Option{{Label: "A"}, {Label: "B"}, {Label: "C"}})

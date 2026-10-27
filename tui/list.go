@@ -194,6 +194,7 @@ func newSelectionModelWithConfig(config SelectionPickerConfig) selectionModel {
 	}
 	delegate := newSelectionDelegate(appearance.styles)
 	workflowList := list.New(items, delegate, 80, 20)
+	workflowList.DisableQuitKeybindings()
 	workflowList.SetShowHelp(false)
 	appearance.styles.styleSelectionList(&workflowList)
 	workflowList.Title = config.Title
@@ -421,6 +422,7 @@ func newMultiSelectionModel(title string, options []Option) multiSelectionModel 
 	}
 	delegate := newSelectionDelegate(appearance.styles)
 	workflowList := list.New(items, delegate, 80, 20)
+	workflowList.DisableQuitKeybindings()
 	workflowList.SetShowHelp(false)
 	appearance.styles.styleSelectionList(&workflowList)
 	workflowList.Title = multiSelectionTitle(title, selected)
