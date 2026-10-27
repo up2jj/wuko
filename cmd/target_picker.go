@@ -121,6 +121,8 @@ func (navigation *workflowPickerNavigation) selectWorkflow(command *cobra.Comman
 				config.Options[index].Label = group.targets[index].Target
 			}
 		} else {
+			config.Title = "Wuko " + version
+			config.AnimateLogo = true
 			config.Options = make([]tui.Option, 0, len(groups))
 			for _, group := range groups {
 				pinned := state.isPinned(group.path)

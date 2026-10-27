@@ -54,6 +54,8 @@ type SelectionPickerConfig struct {
 	Options       []Option
 	InitialFilter string
 	Notice        string
+	// AnimateLogo adds a pulsing W when the terminal confirms Kitty graphics support.
+	AnimateLogo bool
 	// AllowBack makes Escape return SelectionBack from an unfiltered list.
 	AllowBack bool
 	// EnterIntent overrides Enter's action without changing action-palette intents.
@@ -173,6 +175,7 @@ func (delegate selectionDelegate) Render(writer io.Writer, model list.Model, ind
 
 type selectionModel struct {
 	appearance
+	logo         pickerLogo
 	list         list.Model
 	selected     Option
 	intent       SelectionIntent
@@ -255,7 +258,7 @@ func newSelectionModelWithConfig(config SelectionPickerConfig) selectionModel {
 		return append(bindings, togglePin, toggleSort, back, cancel)
 	}
 	layoutSelectionList(&workflowList, appearance.styles, 80, 20)
-	return selectionModel{appearance: appearance, list: workflowList, width: 80, height: 20, allowBack: config.AllowBack, enterIntent: config.EnterIntent}
+	return selectionModel{appearance: appearance, logo: pickerLogo{enabled: config.AnimateLogo && !appearance.plain}, list: workflowList, width: 80, height: 20, allowBack: config.AllowBack, enterIntent: config.EnterIntent}
 }
 
 func selectDefaultListOption(workflowList *list.Model) {
@@ -268,9 +271,17 @@ func selectDefaultListOption(workflowList *list.Model) {
 	}
 }
 
-func (m selectionModel) Init() tea.Cmd { return tea.RequestBackgroundColor }
+func (m selectionModel) Init() tea.Cmd {
+	return tea.Batch(tea.RequestBackgroundColor, m.logo.query())
+}
 
 func (m selectionModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
+	if m.done || m.cancelled {
+		return m, nil
+	}
+	if handled, command := m.logo.update(message); handled {
+		return m, command
+	}
 	if m.appearance.update(message) {
 		layoutSelectionList(&m.list, m.styles, m.width, m.height)
 		return m, nil
@@ -392,7 +403,11 @@ func (m selectionModel) View() tea.View {
 	if m.actionMode {
 		return screenView(m.actionMenuView(), m.width)
 	}
-	return screenView(m.list.View()+"\n"+selectionListFooter(m.list, m.styles, m.width, m.height), m.width)
+	workflowList := m.list
+	if m.logo.enabled && m.logo.supported && spacious(m.width, m.height) {
+		workflowList.Title = m.logo.title(m.styles.message.Render(workflowList.Title), m.dark)
+	}
+	return screenView(workflowList.View()+"\n"+selectionListFooter(m.list, m.styles, m.width, m.height), m.width)
 }
 
 func firstEnabledAction(actions []SelectionAction) int {

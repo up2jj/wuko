@@ -169,6 +169,12 @@ remembering the last selected target for that session. GitHub workflow pickers u
 Non-interactive picker output still emits one row per target. Shell completion offers target names
 after the workflow name.
 
+On terminals that confirm Kitty graphics protocol support, the main workflow picker adds a
+gently pulsing text `W` before `Wuko` and the build version (for example, `W  Wuko v1.2.3`).
+Source builds show `dev` as the version. The animation is hidden in small terminals and disabled
+when `NO_COLOR` is set. Terminals without graphics support show `Wuko` and the version without
+the animated `W`; Kitty keyboard protocol support alone does not enable the animation.
+
 ## State and execution order
 
 Top-level steps run in declaration order. After a step succeeds, Wuko commits its outputs beneath

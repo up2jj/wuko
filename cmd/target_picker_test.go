@@ -66,16 +66,22 @@ func TestWorkflowTargetPickerForwardsRequestedActions(t *testing.T) {
 			deps := pickerDependencies(t.TempDir(), step.NewRegistry(), func(_ context.Context, _ io.Reader, _ io.Writer, config tui.SelectionPickerConfig) (tui.Selection, error) {
 				calls++
 				if calls == 1 {
-					if len(config.Options) != 1 || config.Options[0].Label != "deploy" || config.AllowBack {
+					if want := "Wuko " + version; config.Title != want {
+						t.Fatalf("workflow title = %q, want %q", config.Title, want)
+					}
+					if len(config.Options) != 1 || config.Options[0].Label != "deploy" || config.AllowBack || !config.AnimateLogo {
 						t.Fatalf("workflow config = %#v", config)
 					}
 					return tui.Selection{Option: config.Options[0], Intent: intent, Filter: "deploy"}, nil
 				}
 				wantIntent := intent
+				if config.Title != "Targets for deploy" {
+					t.Fatalf("target title = %q", config.Title)
+				}
 				if intent == tui.SelectionTargets {
 					wantIntent = tui.SelectionPrimary
 				}
-				if len(config.Options) != 1 || config.Options[0].Label != "only" || config.InitialFilter != "" || !config.AllowBack || config.EnterIntent != wantIntent {
+				if len(config.Options) != 1 || config.Options[0].Label != "only" || config.InitialFilter != "" || !config.AllowBack || config.EnterIntent != wantIntent || config.AnimateLogo {
 					t.Fatalf("target config = %#v", config)
 				}
 				return tui.Selection{Option: config.Options[0], Intent: config.EnterIntent}, nil
