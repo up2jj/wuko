@@ -94,7 +94,8 @@ func TestManagedTempInsideActionLivesUntilRootCleanup(t *testing.T) {
 }
 
 func TestManagedTempValidationAndDryRunCreateNothing(t *testing.T) {
-	t.Parallel()
+	// Keep the snapshots independent of temporary resources created by other tests.
+	t.Setenv("TMPDIR", t.TempDir())
 	registry := steptest.Registry(t, nil)
 	if err := tempstep.Register(registry); err != nil {
 		t.Fatal(err)
