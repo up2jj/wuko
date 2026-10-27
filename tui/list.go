@@ -30,6 +30,7 @@ const (
 	SelectionDryRun
 	SelectionTargets
 	SelectionBack
+	SelectionToggleScope
 )
 
 // SelectionAction describes one action available for a picker option.
@@ -58,6 +59,8 @@ type SelectionPickerConfig struct {
 	AnimateLogo bool
 	// AllowBack makes Escape return SelectionBack from an unfiltered list.
 	AllowBack bool
+	// AllowScopeToggle enables the list-wide . shortcut, including on empty lists.
+	AllowScopeToggle bool
 	// EnterIntent overrides Enter's action without changing action-palette intents.
 	EnterIntent SelectionIntent
 }
@@ -175,21 +178,22 @@ func (delegate selectionDelegate) Render(writer io.Writer, model list.Model, ind
 
 type selectionModel struct {
 	appearance
-	logo         pickerLogo
-	list         list.Model
-	selected     Option
-	intent       SelectionIntent
-	filter       string
-	actionMode   bool
-	actionOption Option
-	actionCursor int
-	actionError  string
-	width        int
-	height       int
-	done         bool
-	cancelled    bool
-	allowBack    bool
-	enterIntent  SelectionIntent
+	logo             pickerLogo
+	list             list.Model
+	selected         Option
+	intent           SelectionIntent
+	filter           string
+	actionMode       bool
+	actionOption     Option
+	actionCursor     int
+	actionError      string
+	width            int
+	height           int
+	done             bool
+	cancelled        bool
+	allowBack        bool
+	allowScopeToggle bool
+	enterIntent      SelectionIntent
 }
 
 func newSelectionModel(title string, options []Option) selectionModel {
@@ -209,6 +213,11 @@ func newSelectionModelWithConfig(config SelectionPickerConfig) selectionModel {
 	workflowList.SetShowHelp(false)
 	appearance.styles.styleSelectionList(&workflowList)
 	workflowList.Title = config.Title
+	if config.AllowScopeToggle {
+		workflowList.SetStatusBarItemName("workflow", "workflows in this scope")
+		// The list body already explains an empty scope; its status bar repeats it.
+		workflowList.SetShowStatusBar(len(options) > 0)
+	}
 	if config.Notice != "" {
 		workflowList.NewStatusMessage(config.Notice)
 	}
@@ -243,9 +252,11 @@ func newSelectionModelWithConfig(config SelectionPickerConfig) selectionModel {
 	openEditor := key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit"))
 	togglePin := key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "pin"))
 	toggleSort := key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "sort"))
+	toggleScope := key.NewBinding(key.WithKeys("."), key.WithHelp(".", "scope"))
+	toggleScope.SetEnabled(config.AllowScopeToggle)
 	cancel := key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "cancel"))
 	workflowList.AdditionalShortHelpKeys = func() []key.Binding {
-		return []key.Binding{run, targets, actions, back, cancel}
+		return []key.Binding{run, targets, actions, toggleScope, back, cancel}
 	}
 	workflowList.AdditionalFullHelpKeys = func() []key.Binding {
 		bindings := []key.Binding{run, targets, actions, openUI, printCommand}
@@ -255,10 +266,10 @@ func newSelectionModelWithConfig(config SelectionPickerConfig) selectionModel {
 		if slices.ContainsFunc(options, func(option Option) bool { return selectionActionEnabled(option, SelectionEditor) }) {
 			bindings = append(bindings, openEditor)
 		}
-		return append(bindings, togglePin, toggleSort, back, cancel)
+		return append(bindings, togglePin, toggleSort, toggleScope, back, cancel)
 	}
 	layoutSelectionList(&workflowList, appearance.styles, 80, 20)
-	return selectionModel{appearance: appearance, logo: pickerLogo{enabled: config.AnimateLogo && !appearance.plain}, list: workflowList, width: 80, height: 20, allowBack: config.AllowBack, enterIntent: config.EnterIntent}
+	return selectionModel{appearance: appearance, logo: pickerLogo{enabled: config.AnimateLogo && !appearance.plain}, list: workflowList, width: 80, height: 20, allowBack: config.AllowBack, allowScopeToggle: config.AllowScopeToggle, enterIntent: config.EnterIntent}
 }
 
 func selectDefaultListOption(workflowList *list.Model) {
@@ -304,6 +315,15 @@ func (m selectionModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		switch key.String() {
+		case ".":
+			if m.allowScopeToggle && !m.list.SettingFilter() {
+				if item, ok := m.list.SelectedItem().(listOption); ok {
+					m.selected = item.Option
+				}
+				m.filter = m.list.FilterValue()
+				m.intent, m.done = SelectionToggleScope, true
+				return m, tea.Quit
+			}
 		case "a":
 			if !m.list.SettingFilter() {
 				item, ok := m.list.SelectedItem().(listOption)

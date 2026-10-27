@@ -151,8 +151,12 @@ affects display order, not which definition wins.
   relative resources, and disables interactive input. Diagnostics use the logical source `stdin`;
   use `--file ./-` for a literal filename. Named prerequisites still use effective discovery.
 - Bare `wuko` uses browsing discovery. In an interactive terminal it shows valid effective and shadowed
-  directly invokable sources in the picker, with one row per workflow source. Workflows declaring
-  targets show their target names and count; Enter or `t` opens an alphabetical target picker.
+  directly invokable sources in the picker, with one row per workflow source. Press `.` to filter
+  by scope: it cycles All → Local → Global → All, with the active scope shown in the title.
+  Every launch starts on All; the choice lasts for the session,
+  including refreshes and returns from workflows. Empty scopes remain open so `.` can change scope.
+  The shortcut is available on the workflow list; while editing a search, `.` types a literal period.
+  Workflows declaring targets show their target names and count; Enter or `t` opens an alphabetical target picker.
   Target rows show each target's description and direct prerequisites, including when there is
   only one target. Enter runs the exact selected target and `a` opens a contextual action palette.
   Its actions run or open the selected target, validate it, render its tree, perform a dry run,

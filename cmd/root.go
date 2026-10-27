@@ -435,7 +435,7 @@ func runWorkflowPicker(command *cobra.Command, deps dependencies) error {
 	}
 
 	sortMode := pickerState.sortMode()
-	navigation := workflowPickerNavigation{}
+	navigation := workflowPickerNavigation{allowScopeToggle: true}
 	notice := discoveryWarningNotice(warnings)
 	addNotice := func(message string) {
 		if notice == "" {

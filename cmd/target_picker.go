@@ -69,14 +69,36 @@ type targetPickerPosition struct {
 	filter string
 }
 
+type workflowPickerScope uint8
+
+const (
+	workflowPickerScopeAll workflowPickerScope = iota
+	workflowPickerScopeLocal
+	workflowPickerScopeGlobal
+	workflowPickerScopeCount
+)
+
+func (scope workflowPickerScope) String() string {
+	switch scope {
+	case workflowPickerScopeLocal:
+		return "local"
+	case workflowPickerScopeGlobal:
+		return "global"
+	default:
+		return "all"
+	}
+}
+
 // Navigation belongs to one interactive invocation; persistent history remains
 // keyed by workflow source rather than by target.
 type workflowPickerNavigation struct {
-	selected string
-	filter   string
-	active   string
-	pending  tui.SelectionIntent
-	targets  map[string]targetPickerPosition
+	selected         string
+	filter           string
+	active           string
+	pending          tui.SelectionIntent
+	targets          map[string]targetPickerPosition
+	allowScopeToggle bool
+	scope            workflowPickerScope
 }
 
 func (navigation *workflowPickerNavigation) reconcile(groups []workflowPickerGroup, indexes map[string]int) {
@@ -123,8 +145,21 @@ func (navigation *workflowPickerNavigation) selectWorkflow(command *cobra.Comman
 		} else {
 			config.Title = "Wuko " + version
 			config.AnimateLogo = true
-			config.Options = make([]tui.Option, 0, len(groups))
-			for _, group := range groups {
+			visibleGroups := groups
+			if navigation.allowScopeToggle {
+				config.AllowScopeToggle = true
+				config.Title += " (scope: " + navigation.scope.String() + ")"
+				if navigation.scope != workflowPickerScopeAll {
+					// Every source in a group shares one path, and so one scope. A hidden
+					// selection stays in navigation so cycling back can restore it.
+					scope := navigation.scope.String()
+					visibleGroups = slices.DeleteFunc(slices.Clone(groups), func(group workflowPickerGroup) bool {
+						return group.source.Scope != scope
+					})
+				}
+			}
+			config.Options = make([]tui.Option, 0, len(visibleGroups))
+			for _, group := range visibleGroups {
 				pinned := state.isPinned(group.path)
 				option := workflowPickerOptionWithState(group.source, pinned, group.path == navigation.selected)
 				option.Actions = workflowPickerActions(group.source, pinned, mode)
@@ -139,6 +174,14 @@ func (navigation *workflowPickerNavigation) selectWorkflow(command *cobra.Comman
 			return tui.Selection{}, err
 		}
 		notice = ""
+		if selection.Intent == tui.SelectionToggleScope && config.AllowScopeToggle {
+			if source, ok := selection.Option.Value.(workflow.Source); ok {
+				navigation.selected = workflowPickerSourcePath(source)
+			}
+			navigation.filter = selection.Filter
+			navigation.scope = (navigation.scope + 1) % workflowPickerScopeCount
+			continue
+		}
 		if selection.Intent == tui.SelectionBack && navigation.active != "" {
 			if source, ok := selection.Option.Value.(workflow.Source); ok {
 				navigation.targets[navigation.active] = targetPickerPosition{target: source.Target, filter: selection.Filter}
