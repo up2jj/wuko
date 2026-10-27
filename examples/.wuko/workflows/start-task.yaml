@@ -47,9 +47,9 @@ steps:
       args: ["{{ .steps.fetch.task.branch }}"]
 
   - id: agent_preview
-    type: agent
+    type: shell
     with:
       command: sh
       args: [-c, cat]
-      prompt: |
+      stdin: |
         Work on {{ .steps.fetch.task.id }} for project {{ .vars.project_id }}.

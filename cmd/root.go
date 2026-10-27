@@ -30,7 +30,6 @@ import (
 	"github.com/up2jj/wuko/provider"
 	workflowschedule "github.com/up2jj/wuko/schedule"
 	"github.com/up2jj/wuko/step"
-	agentstep "github.com/up2jj/wuko/steps/agent"
 	assertstep "github.com/up2jj/wuko/steps/assert"
 	cachestep "github.com/up2jj/wuko/steps/cache"
 	changedstep "github.com/up2jj/wuko/steps/changed"
@@ -240,7 +239,7 @@ func registerBuiltinSteps(registry *step.Registry) error {
 	for _, register := range []func(*step.Registry) error{
 		formstep.Register, inputstep.Register, passwordstep.Register, choice.Register, datestep.Register, pathstep.Register, review.Register, tablestep.Register, dashboardstep.Register,
 		confirm.Register, assertstep.Register, setstep.Register, transformstep.Register, templatestep.Register, importvarsstep.Register, decodestep.Register, jsonpathstep.Register, editstep.Register, markdowneditstep.Register, extractstep.Register, semverstep.Register, httpstep.Register, tcpprobestep.Register, filestep.Register, scaffoldstep.Register, tempstep.Register, globstep.Register, watchstep.Register, cachestep.Register, changedstep.Register, requiretoolstep.Register,
-		dockerstep.Register, gitstep.Register, githubprstep.Register, githubactionsstep.Register, githubreleasestep.Register, keyvaluestep.Register, luastep.Register, logwaitstep.Register, multiplexerstep.Register, timestep.Register, shell.Register, processstep.Register, agentstep.Register, devenvstep.RegisterTask,
+		dockerstep.Register, gitstep.Register, githubprstep.Register, githubactionsstep.Register, githubreleasestep.Register, keyvaluestep.Register, luastep.Register, logwaitstep.Register, multiplexerstep.Register, timestep.Register, shell.Register, processstep.Register, devenvstep.RegisterTask,
 		runworkflowstep.Register,
 	} {
 		if err := register(registry); err != nil {

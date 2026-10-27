@@ -67,7 +67,7 @@ cannot safely terminate an individual goroutine, so a runner that ignores cancel
 its step or group deadline. A later `SIGINT` or `SIGTERM` still starts the process-wide 10-second
 shutdown budget.
 
-On supported Unix platforms, shell and agent commands run in their own process group. When their
+On supported Unix platforms, shell commands run in their own process group. When their
 context is canceled, Wuko sends `SIGTERM` to the complete process group, waits up to two seconds,
 and sends `SIGKILL` if any process remains. A descendant that deliberately starts a new session or
 process group is outside the original process group and cannot be terminated by this mechanism.

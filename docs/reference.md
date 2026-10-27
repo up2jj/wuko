@@ -127,7 +127,6 @@ Run commands, services, scripts, and coding agents.
 | `shell` | Run argv commands, inline shell, or scripted PTY interactions | [Automation steps](steps-automation.md#shell) |
 | `process` | Run a readiness-gated, lifecycle-managed service | [Automation steps](steps-automation.md#process) |
 | `process_call` | Send a correlated JSONL request to one process or a process pool | [Automation steps](steps-automation.md#calling-a-process) |
-| `agent` | Start an external coding agent with a prompt | [Automation steps](steps-automation.md#agent) |
 | `lua` | Run typed in-process automation | [Automation steps](steps-automation.md#lua) |
 
 ## Workflow controls

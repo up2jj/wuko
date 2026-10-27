@@ -24,7 +24,7 @@ Find the smallest evidence-backed cause of a Wuko workflow failure before changi
    - Environment and directories: `--env`, `--var`, `--env-loader`, `WUKO_ENV_LOADERS`, mise,
      asdf, direnv, `.run.environment_loaders`, effective `PATH`, workflow directory, run directory,
      and relative files.
-   - Runtime step behavior: shell exit status, Lua errors, HTTP responses, filesystem effects, Docker setup, or agent exit codes.
+   - Runtime step behavior: shell exit status, Lua errors, HTTP responses, filesystem effects, Docker setup, or coding-agent CLI exit codes.
    - Plugin loading and execution: required namespace declarations, directory-local `wuko.lock`
      pins, source or manifest-digest conflicts, differing `with` configuration, verified cache and
      installation bytes, v1–v4 negotiation, initialization, start, step execution, and cleanup.

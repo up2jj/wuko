@@ -35,4 +35,4 @@ History follows Conventional Commits such as `feat(docker): add ...`, `fix: ...`
 
 ## Security & Configuration
 
-Treat workflows as trusted local code: shell, HTTP, Docker, Lua, and agent steps can access developer resources. Never commit credentials or private keys; the hooks include secret detection. Preserve diagnostic redaction when adding logs, and pin remote workflow/action references when reproducibility matters.
+Treat workflows as trusted local code: shell, HTTP, Docker, and Lua steps can access developer resources. Never commit credentials or private keys; the hooks include secret detection. Preserve diagnostic redaction when adding logs, and pin remote workflow/action references when reproducibility matters.

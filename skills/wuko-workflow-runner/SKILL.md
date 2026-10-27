@@ -34,7 +34,7 @@ may still block preparation; preserve the selected source with `--file PATH` whe
    particular file, preserve that choice with `--file` rather than substituting another definition.
 2. For a local workflow, inspect its YAML, recursively required files, referenced templates,
    visible action sources, `plugins` declarations, and namespaced step, executor, and helper uses
-   before invoking Wuko. Identify shell, Lua, Docker, HTTP, file, agent, plugin service, persistent
+   before invoking Wuko. Identify shell, Lua, Docker, HTTP, file, plugin service, persistent
    key-value, retry, polling, and concurrent effects. Do not edit the workflow while preparing to
    run it. If it declares `invokable: false`, do not try another selector: it may run only as
    another workflow's `depends_on` prerequisite.

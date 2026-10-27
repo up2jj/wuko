@@ -9,7 +9,6 @@ Wrap a step in an `attempt` control when an operation can hang or fail transient
 
 - [`process`](#process)
 - [`shell`](#shell)
-- [`agent`](#agent)
 - [`lua`](#lua)
 
 ## `process`
@@ -985,43 +984,46 @@ sequence again with fresh state. Step cancellation and outer deadlines take prec
 | `interact: true` has no interactive terminal | Fail before starting the command. |
 | Executor cannot create a PTY | Reject TTY execution in that executor. |
 
-## `agent`
+### Calling coding agents
 
-Start an external agent process and send its prompt on standard input.
+Use `shell` to start an external coding-agent CLI and send its prompt through `stdin`.
 
 Launch Codex:
 
 ```yaml
 - id: codex
-  type: agent
+  type: shell
   with:
     command: codex
     args: [exec, -]
-    prompt: "Implement task {{ .vars.task_id }} using {{ .vars.brief }}"
+    stdin: |
+      Implement task {{ .vars.task_id }} using {{ .vars.brief }}
 ```
 
 Choose between installed agents with conditions:
 
 ```yaml
 - id: claude
-  type: agent
+  type: shell
   if: vars.agent == "claude"
   with:
     command: claude
     args: [-p]
-    prompt: "Review {{ .steps.brief.value }}"
+    stdin: |
+      Review {{ .steps.brief.value }}
 
 - id: codex
-  type: agent
+  type: shell
   if: vars.agent == "codex"
   with:
     command: codex
     args: [exec, -]
-    prompt: "Review {{ .steps.brief.value }}"
+    stdin: |
+      Review {{ .steps.brief.value }}
 ```
 
-The selected CLI must already be installed and authenticated. Like `shell`, the step streams and
-captures `stdout`, `stderr`, and `exit_code`. See
+The selected CLI must already be installed and authenticated. The shell step streams and captures
+`stdout`, `stderr`, and `exit_code`. See
 [`examples/.wuko/workflows/start-task.yaml`](../examples/.wuko/workflows/start-task.yaml) for a complete
 task-to-agent flow.
 

@@ -187,7 +187,7 @@ finally:
 | [Data](docs/steps-data.md) | `set`, `template`, `transform`, `decode`, `jsonpath`, `edit`, `markdown_edit`, [`extract`](docs/extract.md), `semver`, `time`, `assert`, `import_vars`, `key_value`, `changed` |
 | [Git and GitHub](docs/steps-system.md#git_revision) | `git_diff`, `git_log`, `git_commit`, `git_conventional_commit`, [worktrees](docs/worktrees.md), squash, rebase, merge, branch checks, `github_pr`, `github_release`, `github_actions` |
 | [Files and system](docs/steps-system.md) | `file`, `glob`, `scaffold`, `watch`, `log_wait`, `temp`, `cache`, `require_tool`, `tcp_probe`, `multiplexer` |
-| [Network, processes, and automation](docs/steps-automation.md) | `http`, [`docker`](docs/docker-operations.md), `shell` (including scripted PTY sessions and the [Node and Bash SDKs](docs/script-sdk.md)), `process`, `process_call`, `lua`, `agent` |
+| [Network, processes, and automation](docs/steps-automation.md) | `http`, [`docker`](docs/docker-operations.md), `shell` (including scripted PTY sessions and the [Node and Bash SDKs](docs/script-sdk.md)), `process`, `process_call`, `lua` |
 | [Controls](docs/workflow-control.md) | `if`, `attempt`, `concurrent`, `foreach`, `batch`, `matrix`, `loop`, `try`/`catch`, `cancel_on`, `observe`, `return`, `defer`, `finally`, `cron`, [`executor`](docs/executors.md) |
 | [Composition](docs/execution.md#choosing-a-composition-mechanism) | `depends_on`, `run_workflow`, `targets`, `require`, `uses` composite actions, `once` |
 
@@ -199,8 +199,8 @@ The [reference](docs/reference.md) describes every step and control, with links 
   `uses: up2jj/wuko@v0.20.0`. [GitHub Actions guide →](docs/github-actions.md)
 - **Git hooks.** Bind workflows to `pre-commit`, `commit-msg`, or `pre-push` with
   `wuko git hook init`. [Git hooks →](docs/git-hooks.md)
-- **Coding agents.** Hand tasks to Claude or Codex with `agent` steps, and install Wuko's authoring
-  skills with `wuko agent install`. [Automation steps →](docs/steps-automation.md#agent)
+- **Coding agents.** Hand tasks to Claude or Codex with `shell` steps and `stdin`, and install Wuko's authoring
+  skills with `wuko agent install`. [Automation steps →](docs/steps-automation.md#calling-coding-agents)
 - **Remote workflows and marketplaces.** Run workflows from GitHub, reuse actions from private
   repositories, and install packages with `wuko install`.
   [Discovery →](docs/workflow-discovery.md) · [Marketplaces →](docs/execution.md#workflow-marketplaces)
@@ -227,7 +227,7 @@ The [reference](docs/reference.md) describes every step and control, with links 
 
 ## Trust model
 
-Workflows, composite actions, and plugins are trusted code: shell, Lua, Docker, agent, and HTTP
+Workflows, composite actions, and plugins are trusted code: shell, Lua, Docker, and HTTP
 steps can reach anything Wuko can. Review publishers and pin remote sources. Read the
 [trust model](docs/security.md) before running workflows from someone else.
 

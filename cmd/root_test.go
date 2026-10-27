@@ -292,10 +292,10 @@ steps:
 	}
 }
 
-func TestRootCommandDoesNotRegisterExtractedHTTPServices(t *testing.T) {
+func TestRootCommandRejectsRemovedStepTypes(t *testing.T) {
 	root := t.TempDir()
 	t.Chdir(root)
-	for _, stepType := range []string{"forward_proxy", "mock_server"} {
+	for _, stepType := range []string{"forward_proxy", "mock_server", "agent"} {
 		t.Run(stepType, func(t *testing.T) {
 			path := filepath.Join(root, stepType+".yaml")
 			data := fmt.Sprintf("version: 1\nname: extracted\nsteps:\n  - id: service\n    type: %s\n    with: {}\n", stepType)

@@ -13,7 +13,7 @@ you run as trusted code.
 
 ## What workflows can do
 
-- Lua, shell, agent, Docker, and command-based action sources can access local resources with the
+- Lua, shell, Docker, and command-based action sources can access local resources with the
   permissions granted to Wuko.
 - Local file workflows and local path actions may explicitly run `shell` and `process` steps as root
   with `with.elevated: true`. This is arbitrary sudo execution, not a restricted helper. Remote,
