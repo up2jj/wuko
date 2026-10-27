@@ -151,14 +151,19 @@ affects display order, not which definition wins.
   relative resources, and disables interactive input. Diagnostics use the logical source `stdin`;
   use `--file ./-` for a literal filename. Named prerequisites still use effective discovery.
 - Bare `wuko` uses browsing discovery. In an interactive terminal it shows valid effective and shadowed
-  directly invokable sources in the picker, including one row per target and each workflow's direct
-  prerequisites. Enter runs the exact selected source and `a` opens a contextual action palette.
+  directly invokable sources in the picker, with one row per workflow source. Workflows declaring
+  targets show their target names and count; Enter or `t` opens an alphabetical target picker.
+  Target rows show each target's description and direct prerequisites, including when there is
+  only one target. Enter runs the exact selected target and `a` opens a contextual action palette.
   Its actions run or open the selected target, validate it, render its tree, perform a dry run,
   print its reproducible command, edit or pin it, change sorting, and open or reinstall its
   marketplace package when available. Form actions are disabled when the selected target has no
-  form. Validation, tree, and dry-run results use the exact selected path and target—including a
+  form. Target-specific actions on a workflow row first open target selection and carry the
+  requested action through. Validation, tree, and dry-run results use the exact selected path and target—including a
   shadowed source—and open in a scrollable viewer before returning to the same selection and
-  filter. Plugins used by an inspection are stopped before returning to the picker. The existing
+  filter in the target picker. Escape dismisses an action palette or clears filtering first;
+  from an unfiltered target list it returns to workflows, preserving the workflow filter and
+  selection. Ctrl+C exits either list. Plugins used by an inspection are stopped before returning to the picker. The existing
   `u`, `e`, `p`, `s`, `m`, `r`, and Shift+Enter shortcuts respect the selected workflow's available
   actions; remote workflows cannot be edited. Editing always triggers rediscovery; a successful
   reinstall does the same. Invalid definitions are skipped on refresh as well, so valid workflows
@@ -166,7 +171,9 @@ affects display order, not which definition wins.
   the last valid picker snapshot available and displays a warning. If only invalid workflows
   remain, the picker exits with guidance to run `wuko validate`.
   A root workflow can use `return: {to: picker, outputs: {}}` to finish normally, run cleanup, and
-  rediscover workflows before reopening the same filter and selection. Prerequisite returns do not
+  rediscover workflows before reopening the workflow list with the same filter and selection.
+  The last selected target is remembered during the session; deleted targets are discarded on
+  refresh. Browsing targets does not update recent history. Prerequisite returns do not
   navigate. A failure before that return exits normally with an error; cleanup or reporting errors
   after it reopens the picker with an error notice. Cancellation still exits. Scheduled picker runs
   stop scheduling after the first occurrence that triggers the destination; a failed occurrence
@@ -209,7 +216,8 @@ affects display order, not which definition wins.
   A manifest inside another workflow's directory, such as a `testdata/` fixture, belongs to that
   package and is not listed; only the selected root's own manifest does not hide nested ones. A
   manifest that fails validation is listed as not invokable instead of failing discovery.
-  Interactive terminals open the picker with remote-only actions; non-interactive invocations print
+  Interactive terminals open the picker with remote-only actions and the same workflow-to-target
+  navigation as local workflows; non-interactive invocations print
   canonical `wuko run github:...` commands. The snapshot is removed when the command exits.
 
 ## JSON list format

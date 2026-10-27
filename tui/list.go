@@ -13,7 +13,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// SelectionIntent describes whether a list selection requested its primary or alternate action.
+// SelectionIntent identifies the action requested from a picker.
 type SelectionIntent uint8
 
 const (
@@ -28,6 +28,8 @@ const (
 	SelectionValidate
 	SelectionTree
 	SelectionDryRun
+	SelectionTargets
+	SelectionBack
 )
 
 // SelectionAction describes one action available for a picker option.
@@ -52,6 +54,10 @@ type SelectionPickerConfig struct {
 	Options       []Option
 	InitialFilter string
 	Notice        string
+	// AllowBack makes Escape return SelectionBack from an unfiltered list.
+	AllowBack bool
+	// EnterIntent overrides Enter's action without changing action-palette intents.
+	EnterIntent SelectionIntent
 }
 
 type listOption struct {
@@ -179,6 +185,8 @@ type selectionModel struct {
 	height       int
 	done         bool
 	cancelled    bool
+	allowBack    bool
+	enterIntent  SelectionIntent
 }
 
 func newSelectionModel(title string, options []Option) selectionModel {
@@ -205,7 +213,25 @@ func newSelectionModelWithConfig(config SelectionPickerConfig) selectionModel {
 		workflowList.SetFilterText(config.InitialFilter)
 	}
 	selectDefaultListOption(&workflowList)
-	run := key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "run"))
+	enterLabel := "run"
+	if config.EnterIntent != SelectionPrimary {
+	label:
+		for _, option := range options {
+			for _, action := range option.Actions {
+				if action.Intent == config.EnterIntent && !action.Disabled {
+					enterLabel = strings.ToLower(action.Label)
+					break label
+				}
+			}
+		}
+	}
+	run := key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", enterLabel))
+	targets := key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "targets"))
+	back := key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back"))
+	back.SetEnabled(config.AllowBack)
+	targets.SetEnabled(slices.ContainsFunc(options, func(option Option) bool {
+		return selectionHasAction(option, SelectionTargets)
+	}))
 	actions := key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "actions"))
 	printCommand := key.NewBinding(key.WithKeys("shift+enter"), key.WithHelp("shift+enter", "print command"))
 	openUI := key.NewBinding(key.WithKeys("u"), key.WithHelp("u", "open UI"))
@@ -216,20 +242,20 @@ func newSelectionModelWithConfig(config SelectionPickerConfig) selectionModel {
 	toggleSort := key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "sort"))
 	cancel := key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "cancel"))
 	workflowList.AdditionalShortHelpKeys = func() []key.Binding {
-		return []key.Binding{run, actions, cancel}
+		return []key.Binding{run, targets, actions, back, cancel}
 	}
 	workflowList.AdditionalFullHelpKeys = func() []key.Binding {
-		bindings := []key.Binding{run, actions, openUI, printCommand}
+		bindings := []key.Binding{run, targets, actions, openUI, printCommand}
 		if slices.ContainsFunc(options, func(option Option) bool { return option.URL != "" }) {
 			bindings = append(bindings, openMarketplace, reinstall)
 		}
 		if slices.ContainsFunc(options, func(option Option) bool { return selectionActionEnabled(option, SelectionEditor) }) {
 			bindings = append(bindings, openEditor)
 		}
-		return append(bindings, togglePin, toggleSort, cancel)
+		return append(bindings, togglePin, toggleSort, back, cancel)
 	}
 	layoutSelectionList(&workflowList, appearance.styles, 80, 20)
-	return selectionModel{appearance: appearance, list: workflowList, width: 80, height: 20}
+	return selectionModel{appearance: appearance, list: workflowList, width: 80, height: 20, allowBack: config.AllowBack, enterIntent: config.EnterIntent}
 }
 
 func selectDefaultListOption(workflowList *list.Model) {
@@ -278,7 +304,7 @@ func (m selectionModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 			}
-		case "enter", "shift+enter", "u", "m", "r", "e", "p", "s":
+		case "enter", "shift+enter", "u", "m", "r", "e", "p", "s", "t":
 			if !m.list.SettingFilter() {
 				item, ok := m.list.SelectedItem().(listOption)
 				if ok {
@@ -288,7 +314,7 @@ func (m selectionModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 					if key.String() == "r" && item.Option.URL == "" {
 						return m, nil
 					}
-					intent := SelectionPrimary
+					intent := m.enterIntent
 					if key.String() == "shift+enter" {
 						intent = SelectionAlternate
 					} else if key.String() == "u" {
@@ -303,8 +329,24 @@ func (m selectionModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 						intent = SelectionTogglePin
 					} else if key.String() == "s" {
 						intent = SelectionToggleSort
+					} else if key.String() == "t" {
+						// Options without actions accept every intent, but not this one.
+						if !selectionHasAction(item.Option, SelectionTargets) {
+							return m, nil
+						}
+						intent = SelectionTargets
 					}
-					if !selectionActionEnabled(item.Option, intent) {
+					if intent != SelectionTargets && !selectionActionEnabled(item.Option, intent) {
+						// An inherited Enter action can be unavailable on some
+						// options; explain why instead of ignoring the key.
+						if key.String() == "enter" {
+							if index := slices.IndexFunc(item.Actions, func(action SelectionAction) bool { return action.Intent == intent }); index >= 0 {
+								m.actionMode = true
+								m.actionOption = item.Option
+								m.actionCursor = index
+								m.actionError = item.Actions[index].DisabledReason
+							}
+						}
 						return m, nil
 					}
 					m.selected = item.Option
@@ -316,6 +358,13 @@ func (m selectionModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "esc":
 			if m.list.FilterState() == list.Unfiltered {
+				if m.allowBack {
+					if item, ok := m.list.SelectedItem().(listOption); ok {
+						m.selected = item.Option
+					}
+					m.intent, m.done = SelectionBack, true
+					return m, tea.Quit
+				}
 				return m, nil
 			}
 		}
@@ -327,7 +376,11 @@ func (m selectionModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func selectionActionEnabled(option Option, intent SelectionIntent) bool {
-	return len(option.Actions) == 0 || slices.ContainsFunc(option.Actions, func(action SelectionAction) bool {
+	return len(option.Actions) == 0 || selectionHasAction(option, intent)
+}
+
+func selectionHasAction(option Option, intent SelectionIntent) bool {
+	return slices.ContainsFunc(option.Actions, func(action SelectionAction) bool {
 		return action.Intent == intent && !action.Disabled
 	})
 }

@@ -200,7 +200,7 @@ func (loader *Loader) discoverGitHubSnapshot(root, scope string, locator GitHubW
 			}
 			sources = append(sources, Source{
 				Name: definition.Name, Target: target, Path: manifest, Locator: canonical, Scope: "remote", Effective: true,
-				PackageVersion: selected.PackageVersion, Description: selected.Description, Invokable: selected.IsInvokable(),
+				PackageVersion: selected.PackageVersion, Description: selected.Description, WorkflowDescription: definition.Description, Invokable: selected.IsInvokable(),
 				DependsOn: maps.Clone(selected.DependsOn), HasForm: selected.HasForm(),
 			})
 		}

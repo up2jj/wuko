@@ -46,8 +46,9 @@ recordings stay understandable and reproducible.
 Each tape fixes the shell, `Hack Nerd Font Mono` font, terminal dimensions, theme, padding, frame
 rate, letter spacing, cursor behavior, typing speed, and playback speed. Install that font as well
 if you want matching local renders. Interactive tapes use `Wait` for visible prompts before sending
-keys. The picker tape sets temporary `HOME` and `XDG_CONFIG_HOME` directories so persisted picker
-state never affects a recording.
+keys. The picker tapes set temporary `HOME` and `XDG_CONFIG_HOME` directories so persisted picker
+state never affects a recording. `just screenshot target-picker` records workflow-to-target
+navigation and the return to workflows using Escape.
 
 ## Terminal appearance
 

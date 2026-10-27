@@ -48,7 +48,9 @@ Local YAML paths use `--file`, for example `wuko run --file ./workflow.yaml`. If
 matches an existing YAML file but no named workflow, the error points to `--file`. The same
 guidance applies to `tree`, `validate`, and `ui`.
 
-In the picker, Enter runs the selected workflow and `a` opens its action palette: open a browser
+In the picker, workflows with targets appear once; Enter or `t` opens their target picker,
+where Enter runs the selected target and Escape returns to workflows. Workflows without targets
+run directly with Enter. Press `a` to open the action palette: open a browser
 form, validate, show the tree, dry-run, print a reproducible command, edit, pin, change sorting, or
 manage marketplace installs. See [Workflow discovery](workflow-discovery.md) for search order,
 shadowing, and picker behavior.

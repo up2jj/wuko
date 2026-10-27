@@ -25,11 +25,13 @@ type Source struct {
 	MarketplaceURL string
 	PackageVersion string
 	Description    string
-	Invokable      bool
-	DependsOn      map[string]string
-	HasForm        bool
-	Scope          string
-	Effective      bool
+	// WorkflowDescription is the top-level description, before a target overrides it.
+	WorkflowDescription string
+	Invokable           bool
+	DependsOn           map[string]string
+	HasForm             bool
+	Scope               string
+	Effective           bool
 }
 
 // Discover finds effective workflows in project, home, and platform configuration directories.
@@ -86,7 +88,7 @@ func DiscoverForValidation(cwd, homeDir, configDir string) ([]Source, error) {
 					return nil, fmt.Errorf("selecting workflow %q target %q: %w", name, target, selectErr)
 				}
 				sources = append(sources, Source{Name: name, Target: target, Path: file.path, PackageDir: file.packageDir, MarketplaceURL: file.marketplaceURL,
-					PackageVersion: selected.PackageVersion, Description: selected.Description, Invokable: selected.IsInvokable(), DependsOn: maps.Clone(selected.DependsOn), HasForm: selected.HasForm(), Scope: location.scope})
+					PackageVersion: selected.PackageVersion, Description: selected.Description, WorkflowDescription: definition.Description, Invokable: selected.IsInvokable(), DependsOn: maps.Clone(selected.DependsOn), HasForm: selected.HasForm(), Scope: location.scope})
 			}
 		}
 	}
@@ -262,7 +264,7 @@ func discoverDirectoryWithWarnings(directory, scope string, invalid func(Source,
 				Name: name, Target: targetName, Path: file.path, PackageDir: file.packageDir,
 				MarketplaceURL: file.marketplaceURL,
 				PackageVersion: selected.PackageVersion,
-				Description:    selected.Description, Invokable: selected.IsInvokable(),
+				Description:    selected.Description, WorkflowDescription: definition.Description, Invokable: selected.IsInvokable(),
 				DependsOn: maps.Clone(selected.DependsOn), HasForm: selected.HasForm(), Scope: scope,
 			})
 		}

@@ -77,7 +77,8 @@ func runGitHubWorkflowPicker(command *cobra.Command, deps dependencies, args []s
 		fmt.Fprintf(command.ErrOrStderr(), "Warning: cannot load workflow picker state: %v\n", stateErr)
 	}
 	sortMode := state.sortMode()
-	selected, filter, notice := "", "", ""
+	navigation := workflowPickerNavigation{}
+	notice := ""
 	resumeAfterReturn := func(observer *returnDestinationObserver, runErr error) bool {
 		if !observer.requested(workflow.ReturnDestinationPicker) || errors.Is(runErr, context.Canceled) || command.Context().Err() != nil {
 			return false
@@ -91,25 +92,22 @@ func runGitHubWorkflowPicker(command *cobra.Command, deps dependencies, args []s
 			}
 			notice += "plugin teardown failed: " + resetErr.Error()
 		}
+		navigation.active = ""
 		return true
 	}
 	for {
-		ordered := sortWorkflowSources(sources, state, sortMode)
-		selection, err := deps.selectWorkflow(command.Context(), command.InOrStdin(), command.OutOrStdout(), tui.SelectionPickerConfig{
-			Title: "GitHub workflows (sort: " + sortMode.String() + ")", Options: workflowPickerOptions(ordered, state, selected, sortMode), InitialFilter: filter, Notice: notice,
-		})
+		selection, err := navigation.selectWorkflow(command, deps, sources, state, sortMode, "GitHub workflows (sort: "+sortMode.String()+")", notice)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
 				return nil
 			}
 			return err
 		}
-		filter, notice = selection.Filter, ""
+		notice = ""
 		source, ok := selection.Option.Value.(workflow.Source)
 		if !ok {
 			return fmt.Errorf("workflow selection did not contain a workflow")
 		}
-		selected = workflowPickerSelectionKey(source)
 		switch selection.Intent {
 		case tui.SelectionPrimary:
 			observer := &returnDestinationObserver{}

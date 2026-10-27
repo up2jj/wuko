@@ -101,3 +101,56 @@ steps:
 		t.Fatalf("recent = %#v, want successful form run %q", state.Recent, locator)
 	}
 }
+
+func TestGitHubWorkflowPickerSelectsTargets(t *testing.T) {
+	for _, intent := range []tui.SelectionIntent{tui.SelectionPrimary, tui.SelectionAlternate} {
+		t.Run(workflowTargetActionName(intent), func(t *testing.T) {
+			calls := 0
+			var locator string
+			var output bytes.Buffer
+			deps := githubPickerDependencies(t, t.TempDir(), targetPickerWorkflow, func(_ context.Context, _ io.Reader, _ io.Writer, config tui.SelectionPickerConfig) (tui.Selection, error) {
+				calls++
+				switch calls {
+				case 1:
+					if len(config.Options) != 1 || config.Options[0].Label != "deploy" {
+						t.Fatalf("GitHub workflow config = %#v", config)
+					}
+					return tui.Selection{Option: config.Options[0], Intent: intent, Filter: "dep"}, nil
+				case 2:
+					if !config.AllowBack || len(config.Options) != 2 || config.Options[1].Label != "staging" {
+						t.Fatalf("GitHub target config = %#v", config)
+					}
+					source := config.Options[1].Value.(workflow.Source)
+					locator = source.Locator
+					for _, action := range config.Options[1].Actions {
+						if action.Intent == tui.SelectionEditor {
+							t.Fatal("remote target offers editing")
+						}
+					}
+					return tui.Selection{Option: config.Options[1], Intent: config.EnterIntent}, nil
+				case 3:
+					if config.AllowBack || config.InitialFilter != "dep" || !config.Options[0].Default {
+						t.Fatalf("GitHub return config = %#v", config)
+					}
+					return tui.Selection{}, context.Canceled
+				default:
+					t.Fatal("unexpected GitHub picker call")
+					return tui.Selection{}, context.Canceled
+				}
+			})
+			deps.stdout = &output
+			command := newRootCmd(deps)
+			command.SetArgs([]string{"run", "--pick", "github:acme/automation@main"})
+			if err := command.ExecuteContext(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if intent == tui.SelectionAlternate {
+				if calls != 2 || output.String() != "wuko run "+shellQuote(locator)+" staging\n" {
+					t.Fatalf("calls = %d, command = %q", calls, output.String())
+				}
+			} else if calls != 3 {
+				t.Fatalf("calls = %d, want root, targets, root", calls)
+			}
+		})
+	}
+}

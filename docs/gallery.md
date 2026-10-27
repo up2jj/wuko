@@ -25,9 +25,11 @@ workflow in [`docs/demos`](demos). Expand a demo to see its complete YAML, copy 
 
 ## Workflow picker
 
-Run bare `wuko` to search every discovered workflow. Enter runs the selection; `a` opens an action palette to validate, show the tree, dry-run, edit, or pin it.
+Run bare `wuko` to search every discovered workflow. Enter runs the selection; `a` opens an action palette to validate, show the tree, dry-run, edit, or pin it. Workflows declaring targets appear once; Enter or `t` opens their target picker, and Escape returns to workflows.
 
 ![Workflow picker](assets/workflow-picker.gif)
+
+![Workflow target picker](assets/target-picker.gif)
 
 Learn more: [Workflow discovery](workflow-discovery.md).
 

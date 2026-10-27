@@ -70,7 +70,7 @@ func discoverForCompletion(locations []discoveryLocation) ([]Source, error) {
 			source := Source{
 				Name: name, Path: file.path, Scope: location.scope, Effective: true,
 				PackageDir: file.packageDir, MarketplaceURL: file.marketplaceURL,
-				Description: metadata.Description, Invokable: metadata.Invokable == nil || *metadata.Invokable,
+				Description: metadata.Description, WorkflowDescription: metadata.Description, Invokable: metadata.Invokable == nil || *metadata.Invokable,
 				HasForm: (&Definition{Form: metadata.Form}).HasForm(),
 			}
 			if len(metadata.Targets) == 0 {

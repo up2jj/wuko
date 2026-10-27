@@ -157,11 +157,17 @@ Each target can declare its own `cron` and `timezone`. The selected target's sch
 used by `wuko run`; target schedules are not combined. Lifecycle hooks remain shared at the
 workflow level, including when a targeted workflow is installed or uninstalled.
 
-The bare picker shows one row for a legacy workflow and one row per declared target. Target rows
-show the workflow and target name together. Enter runs the selected row, `u` opens its form, and
-Shift+Enter prints the exact command, such as `wuko run deploy production`. Non-interactive picker
-output also emits one row per target. Shell completion offers target names after the workflow
-name.
+The interactive picker shows one row per workflow source, with target names and a count for
+workflows declaring targets. Enter or `t` opens a separate, searchable target picker, including
+when only one target exists. Targets appear alphabetically with their descriptions, forms, and
+dependencies. Enter runs a target, `u` opens its form, and Shift+Enter prints the exact command,
+such as `wuko run deploy production`. These actions on a workflow row first ask for the target.
+Escape closes an action palette or clears a search filter first; from an unfiltered target list,
+it returns to the workflow list with its previous filter and selection. Ctrl+C exits either picker.
+Inspection results return to the target list; `return: {to: picker}` returns to the workflow list,
+remembering the last selected target for that session. GitHub workflow pickers use the same flow.
+Non-interactive picker output still emits one row per target. Shell completion offers target names
+after the workflow name.
 
 ## State and execution order
 

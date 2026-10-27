@@ -1,0 +1,13 @@
+version: 1
+name: targets-demo
+description: Select a deployment target
+
+targets:
+  production:
+    description: Deploy the approved release to customers
+    steps:
+      - return: {to: picker, outputs: {}}
+  staging:
+    description: Verify the release in the shared environment
+    steps:
+      - return: {to: picker, outputs: {}}

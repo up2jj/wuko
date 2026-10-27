@@ -435,8 +435,7 @@ func runWorkflowPicker(command *cobra.Command, deps dependencies) error {
 	}
 
 	sortMode := pickerState.sortMode()
-	selectedPath := ""
-	filter := ""
+	navigation := workflowPickerNavigation{}
 	notice := discoveryWarningNotice(warnings)
 	addNotice := func(message string) {
 		if notice == "" {
@@ -474,11 +473,6 @@ func runWorkflowPicker(command *cobra.Command, deps dependencies) error {
 			}
 			return true
 		}
-		if !slices.ContainsFunc(sources, func(source workflow.Source) bool {
-			return workflowPickerSelectionKey(source) == selectedPath
-		}) {
-			selectedPath = ""
-		}
 		return false
 	}
 	resumeAfterReturn := func(source workflow.Source, observer *returnDestinationObserver, runErr error) (bool, error) {
@@ -499,28 +493,23 @@ func runWorkflowPicker(command *cobra.Command, deps dependencies) error {
 		if resetErr := resetWorkflowPickerPlugins(command.Context(), deps, runErr); resetErr != nil {
 			addNotice("plugin teardown failed: " + resetErr.Error())
 		}
+		navigation.active = ""
 		return !refresh(), nil
 	}
 	for {
-		sortedSources := sortWorkflowSources(sources, pickerState, sortMode)
-		options := workflowPickerOptions(sortedSources, pickerState, selectedPath, sortMode)
 		title := fmt.Sprintf("Workflows (sort: %s)", sortMode)
-		selection, err := deps.selectWorkflow(command.Context(), command.InOrStdin(), command.OutOrStdout(), tui.SelectionPickerConfig{
-			Title: title, Options: options, InitialFilter: filter, Notice: notice,
-		})
+		selection, err := navigation.selectWorkflow(command, deps, sources, pickerState, sortMode, title, notice)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
 				return nil
 			}
 			return err
 		}
-		filter = selection.Filter
 		notice = ""
 		source, ok := selection.Option.Value.(workflow.Source)
 		if !ok {
 			return fmt.Errorf("workflow selection did not contain a workflow")
 		}
-		selectedPath = workflowPickerSelectionKey(source)
 		diagnostic.Emit(reporter, diagnostic.Event{Phase: diagnostic.PhaseSelection, Status: diagnostic.StatusSucceeded, Location: diagnostic.Location{Source: source.Path}, Message: workflowDisplayName(source)})
 		switch selection.Intent {
 		case tui.SelectionPrimary:
