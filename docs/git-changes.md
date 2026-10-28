@@ -24,6 +24,7 @@ conditions, assertions, fan-out controls, and reporting steps.
 | What tracked work have I not staged? | `git_diff` with `source: unstaged` |
 | What differs from the main branch or a release? | `git_diff` with `source: commit` |
 | Does every outgoing commit pass Git checks? | `git_diff_check` with `source: pushed` |
+| Which files should a commit or push check inspect? | [`git_files`](steps-system.md#git_files) |
 | Where did two branches diverge? | [`git_merge_base`](steps-system.md#git_merge_base) |
 | Which commits produced the change? | [`git_log`](steps-system.md#git_log) |
 | What metadata belongs to one commit? | [`git_revision`](steps-system.md#git_revision) |

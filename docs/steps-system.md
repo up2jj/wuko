@@ -13,6 +13,7 @@ operations. Relative runtime paths normally resolve from the directory where Wuk
 - [`git_log`](#git_log)
 - [`git_diff`](#git_diff)
 - [`git_diff_check`](#git_diff_check)
+- [`git_files`](#git_files)
 - [`git_conventional_commit`](#git_conventional_commit)
 - [`git_commit`](#git_commit)
 - [`git_clean`](#git_clean)
@@ -436,6 +437,53 @@ Outside a hook, provide the same four-field update records with an expression:
 
 Each item must contain non-empty `local_ref`, `local_oid`, `remote_ref`, and `remote_oid` strings.
 An all-zero local object denotes deletion regardless of the repository's object format.
+
+## `git_files`
+
+Select the files a check should inspect, the way a pre-commit framework does: what is staged, what
+a push sends, or everything tracked. Paths are relative to the run directory, so they can be passed
+straight to later steps.
+
+```yaml
+- id: files
+  type: git_files
+  with:
+    source: staged
+    exclude: ['^dist/', '^vendor/']
+
+- id: gofmt
+  if: len(filter(steps.files.text, {# endsWith ".go"})) > 0
+  type: shell
+  with:
+    argv: {expr: 'concat(["gofmt", "-l", "--"], filter(steps.files.text, {# endsWith ".go"}))'}
+```
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `source` | yes | `staged`, `unstaged`, `pushed`, or `all` tracked files |
+| `paths` | no | Non-empty Git pathspec list that limits the selection |
+| `exclude` | no | Go RE2 patterns; a path matching any of them is left out of every output |
+| `updates` | no | `{expr: ...}` returning push update records; only with `pushed` |
+
+`pushed` lists the paths changed by the commits the push sends: for an existing ref, the commits
+not reachable from the remote object; for a new ref, the commits no remote-tracking ref already
+has. Like [`git_diff_check`](#git_diff_check), it skips merge commits and deleted refs, reads the
+updates from an active `pre-push` hook, and accepts the same `updates` expression outside one.
+
+| Output | Meaning |
+| --- | --- |
+| `source` | The selected source |
+| `files` | Sorted paths whose latest change keeps them and that are regular files in the working tree |
+| `text` | The `files` whose first 8000 bytes contain no NUL byte and are valid UTF-8 |
+| `binary` | The remaining `files` |
+| `added` | The `files` the change adds; always empty for `unstaged` and `all` |
+| `deleted` | Paths whose latest change deletes them |
+| `count` | Number of `files` |
+
+Renames count as a deletion plus an addition. Symbolic links, directories, submodules, and paths
+missing from the working tree never appear in `files`. A path that one pushed ref deletes stays
+selected when another ref in the same push still has it. Inside an executor scope, files are read
+through the executor's filesystem.
 
 ## `git_conventional_commit`
 

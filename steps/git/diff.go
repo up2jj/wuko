@@ -138,18 +138,27 @@ func NewDiffCheck(raw map[string]any) (step.Runner, error) {
 	if config.Source != diffSourcePushed && config.Updates != nil {
 		return nil, fmt.Errorf("updates is only supported with source pushed")
 	}
-	var program *vm.Program
-	if config.Updates != nil {
-		if strings.TrimSpace(config.Updates.Expr) == "" {
-			return nil, fmt.Errorf("updates expr must be a non-empty string")
-		}
-		compiled, err := wukoexpr.Compile(config.Updates.Expr, expr.Env(step.ExpressionEnvironmentShape(nil)), expr.AllowUndefinedVariables())
-		if err != nil {
-			return nil, fmt.Errorf("compiling updates expr: %w", err)
-		}
-		program = compiled
+	program, err := compileUpdates(config.Updates)
+	if err != nil {
+		return nil, err
 	}
 	return &diffCheckRunner{config: config, hasFrom: hasFrom, updatesProgram: program}, nil
+}
+
+// compileUpdates compiles an optional pushed-updates expression; nil means the updates come
+// from the active pre-push hook.
+func compileUpdates(updates *updatesExpression) (*vm.Program, error) {
+	if updates == nil {
+		return nil, nil
+	}
+	if strings.TrimSpace(updates.Expr) == "" {
+		return nil, fmt.Errorf("updates expr must be a non-empty string")
+	}
+	program, err := wukoexpr.Compile(updates.Expr, expr.Env(step.ExpressionEnvironmentShape(nil)), expr.AllowUndefinedVariables())
+	if err != nil {
+		return nil, fmt.Errorf("compiling updates expr: %w", err)
+	}
+	return program, nil
 }
 
 func validateDiffConfig(source, from, through string, paths []string, hasFrom, inspection bool) error {
@@ -181,6 +190,11 @@ func validateDiffConfig(source, from, through string, paths []string, hasFrom, i
 			return fmt.Errorf("%s must not contain NUL", value.name)
 		}
 	}
+	return validatePathspecs(paths)
+}
+
+// validatePathspecs accepts an omitted list or a non-empty list of usable pathspecs.
+func validatePathspecs(paths []string) error {
 	if paths == nil {
 		return nil
 	}
@@ -564,7 +578,7 @@ func checkDiff(ctx context.Context, request step.Request, comparison diffCompari
 }
 
 func (runner *diffCheckRunner) checkPushed(ctx context.Context, request step.Request) error {
-	updates, err := runner.resolveUpdates(request)
+	updates, err := resolvePushUpdates(runner.updatesProgram, request)
 	if err != nil {
 		return err
 	}
@@ -602,10 +616,10 @@ func (runner *diffCheckRunner) checkPushed(ctx context.Context, request step.Req
 	return nil
 }
 
-func (runner *diffCheckRunner) resolveUpdates(request step.Request) ([]pushUpdate, error) {
+func resolvePushUpdates(program *vm.Program, request step.Request) ([]pushUpdate, error) {
 	var value any
-	if runner.updatesProgram != nil {
-		resolved, err := expr.Run(runner.updatesProgram, request.ExpressionEnvironment(nil))
+	if program != nil {
+		resolved, err := expr.Run(program, request.ExpressionEnvironment(nil))
 		if err != nil {
 			return nil, fmt.Errorf("evaluating updates expr: %w", err)
 		}

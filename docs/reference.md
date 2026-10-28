@@ -70,6 +70,7 @@ Inspect history and changes, enforce policy, and manage branches and worktrees. 
 | `git_log` | Read bounded, structured Git history for automation | [System steps](steps-system.md#git_log) |
 | `git_diff` | Inspect committed, staged, or unstaged changes as structured data | [System steps](steps-system.md#git_diff) |
 | `git_diff_check` | Reject Git whitespace errors and conflict markers, including pushed commits | [System steps](steps-system.md#git_diff_check) |
+| `git_files` | Select staged, pushed, or tracked files for checks, classified as text or binary | [System steps](steps-system.md#git_files) |
 | `git_worktree` | List, ensure, and safely remove persistent branch worktrees | [Persistent Git worktrees](worktrees.md#git_worktree) |
 | `git_squash` | Squash branch work into one explicitly messaged commit | [Persistent Git worktrees](worktrees.md#git_squash) |
 | `git_rebase` | Rebase the current worktree branch onto a target | [Persistent Git worktrees](worktrees.md#git_rebase) |
