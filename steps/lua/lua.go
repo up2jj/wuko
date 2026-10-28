@@ -258,6 +258,7 @@ func (r *runtime) module(state *glua.LState) (*glua.LTable, error) {
 	jsonModule := state.NewTable()
 	state.SetFuncs(jsonModule, map[string]glua.LGFunction{"encode": r.jsonEncode, "decode": r.jsonDecode})
 	module.RawSetString("json", jsonModule)
+	dataFormatModules(state, module)
 	helpers := state.NewTable()
 	functions := helperFunctions()
 	for name, call := range r.request.Helpers {

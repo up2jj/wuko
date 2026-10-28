@@ -1150,7 +1150,28 @@ The result contains `stdout`, `stderr`, `exit_code`, `error`, `stdout_truncated`
 `stderr_truncated`. The policies and per-stream truncation behavior match `shell`; omitted policies
 default independently to `tee`.
 
-The trusted `wuko` API exposes `args`, variables, outputs, environment, JSON, shared helpers,
+`wuko.yaml` and `wuko.toml` decode and encode the other configuration formats the same way
+`wuko.json` does:
+
+```lua
+local config = wuko.yaml.decode(wuko.fs.read("config.yaml"))
+local ok, err = pcall(wuko.toml.decode, wuko.fs.read("Cargo.toml"))
+if not ok then error("Cargo.toml: " .. err) end
+wuko.fs.write("config.toml", wuko.toml.encode({name = config.name, port = config.port}))
+```
+
+`decode` accepts exactly one document and raises an error that starts with its line and column.
+YAML follows the [`decode` step's `validate_only` rules](steps-data.md#decode): input must be
+UTF-8, tags outside the YAML core schema are rejected, and an empty document decodes to nil.
+Numbers become Lua numbers, so integers beyond 2^53 lose precision; infinity stays infinity.
+Dates and times become strings: TOML values keep their written form, and YAML timestamps are
+written as a date alone at midnight UTC and as RFC 3339 otherwise. YAML `!!binary` becomes the
+decoded bytes, mapping keys keep their scalar type (`1: one` is reached as `doc[1]`), and null
+list items leave holes so the other items keep their positions. `encode` writes whole numbers as
+integers; `wuko.yaml.encode` matches `wuko.helpers.to_yaml`, and `wuko.toml.encode` needs a table
+with string keys.
+
+The trusted `wuko` API exposes `args`, variables, outputs, environment, JSON, YAML, TOML, shared helpers,
 key-value stores, HTTP, filesystem operations, and direct command execution. It also exposes
 snapshot tables for `wuko.inputs`, `wuko.steps`, `wuko.dependencies`, `wuko.workflow`, and
 `wuko.run`. Changing these Lua tables does not change workflow state. Outputs may be nil, booleans,

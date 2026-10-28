@@ -11,20 +11,16 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"unicode/utf8"
 
-	toml "github.com/pelletier/go-toml/v2"
+	"github.com/up2jj/wuko/internal/dataformat"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
-	"go.yaml.in/yaml/v3"
 )
 
 const defaultMaxBytes = "1MiB"
-
-var yamlLinePattern = regexp.MustCompile(`(?:^|\s)line ([0-9]+)(?::|\s|$)`)
 
 type Config struct {
 	Format       string `yaml:"format"`
@@ -203,13 +199,14 @@ func (r *Runner) decode(text string) (any, error) {
 	if r.config.ValidateOnly {
 		switch r.config.Format {
 		case "yaml":
-			return decodeYAMLDocument(text, true)
+			_, err := dataformat.DecodeYAML(text, true)
+			return nil, err
 		case "json":
 			// RawMessage checks syntax without building the value tree.
 			return nil, decodeJSONValue(text, new(json.RawMessage))
 		case "toml":
-			var value map[string]any
-			return nil, tomlLocationError(toml.Unmarshal([]byte(text), &value))
+			_, err := dataformat.DecodeTOML(text)
+			return nil, err
 		}
 	}
 	switch r.config.Format {
@@ -253,76 +250,19 @@ func decodeJSONValue(text string, value any) error {
 }
 
 func decodeYAML(text string) (any, error) {
-	return decodeYAMLDocument(text, false)
-}
-
-func decodeYAMLDocument(text string, validateOnly bool) (any, error) {
-	if validateOnly && !utf8.ValidString(text) {
-		return nil, fmt.Errorf("YAML must be UTF-8")
-	}
-	decoder := yaml.NewDecoder(strings.NewReader(text))
-	var document yaml.Node
-	if err := decoder.Decode(&document); err != nil {
-		if validateOnly && err == io.EOF {
-			return nil, nil
-		}
-		return nil, yamlLocationError(text, err)
-	}
-	var extra yaml.Node
-	if err := decoder.Decode(&extra); err != io.EOF {
-		if err == nil {
-			line, column := 1, 1
-			if len(extra.Content) > 0 {
-				line, column = extra.Content[0].Line, extra.Content[0].Column
-			}
-			return nil, fmt.Errorf("line %d, column %d: multiple YAML documents are not supported", line, column)
-		}
-		return nil, yamlLocationError(text, err)
-	}
-	var value any
-	if validateOnly {
-		if err := validateYAMLTags(&document); err != nil {
-			return nil, err
-		}
-	}
-	if err := document.Decode(&value); err != nil {
-		return nil, yamlLocationError(text, err)
-	}
-	if validateOnly {
-		return nil, nil
+	value, err := dataformat.DecodeYAML(text, false)
+	if err != nil {
+		return nil, err
 	}
 	return normalize(value)
-}
-
-func validateYAMLTags(node *yaml.Node) error {
-	switch node.Tag {
-	case "", "!!map", "!!seq", "!!str", "!!bool", "!!int", "!!float", "!!null", "!!timestamp", "!!binary", "!!set", "!!omap", "!!pairs", "!!merge":
-	default:
-		return fmt.Errorf("line %d: unsupported YAML tag %q", node.Line, node.Tag)
-	}
-	for _, child := range node.Content {
-		if err := validateYAMLTags(child); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func decodeTOML(text string) (any, error) {
-	value := make(map[string]any)
-	if err := toml.Unmarshal([]byte(text), &value); err != nil {
-		return nil, tomlLocationError(err)
+	value, err := dataformat.DecodeTOML(text)
+	if err != nil {
+		return nil, err
 	}
 	return normalize(value)
-}
-
-func tomlLocationError(err error) error {
-	var decodeErr *toml.DecodeError
-	if errors.As(err, &decodeErr) {
-		line, column := decodeErr.Position()
-		return fmt.Errorf("line %d, column %d: %w", line, column, err)
-	}
-	return err
 }
 
 func decodeLines(input string, trim, omitEmpty bool) []any {
@@ -510,15 +450,6 @@ func jsonLocationError(text string, err error) error {
 	return fmt.Errorf("line %d, column %d: %w", line, column, err)
 }
 
-func yamlLocationError(text string, err error) error {
-	line := 1
-	if match := yamlLinePattern.FindStringSubmatch(err.Error()); len(match) == 2 {
-		line, _ = strconv.Atoi(match[1])
-	}
-	column := lineEndColumn(text, line)
-	return fmt.Errorf("line %d, column %d: %w", line, column, err)
-}
-
 func lineColumn(text string, offset int64) (int, int) {
 	if offset < 1 {
 		offset = 1
@@ -531,20 +462,6 @@ func lineColumn(text string, offset int64) (int, int) {
 	start := strings.LastIndexByte(prefix, '\n') + 1
 	column := utf8.RuneCountInString(prefix[start:]) + 1
 	return line, column
-}
-
-func lineEndColumn(text string, line int) int {
-	if line < 1 {
-		return 1
-	}
-	lines := strings.Split(text, "\n")
-	if line > len(lines) {
-		line = len(lines)
-	}
-	if line == 0 {
-		return 1
-	}
-	return utf8.RuneCountInString(strings.TrimSuffix(lines[line-1], "\r")) + 1
 }
 
 func nextNonSpace(text string, offset int64) int64 {

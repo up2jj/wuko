@@ -430,8 +430,8 @@ name: first
 name: second
 ```
 
-Lua does not expose `h.parse_json` or `h.parse_yaml`. Its existing `wuko.json.decode(value)` API
-remains available for JSON input.
+Lua does not expose `h.parse_json` or `h.parse_yaml`. It decodes with
+[`wuko.json`, `wuko.yaml`, and `wuko.toml`](steps-automation.md#lua) instead.
 
 `nindent` is useful when embedding generated configuration:
 

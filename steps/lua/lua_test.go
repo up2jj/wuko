@@ -438,6 +438,105 @@ func TestLuaRegexHelpersRejectInvalidPatterns(t *testing.T) {
 	}
 }
 
+func TestLuaYAMLDecodeConvertsCoreSchemaValues(t *testing.T) {
+	t.Parallel()
+	runner := steptest.Build(t, New, map[string]any{"source": `
+local doc = wuko.yaml.decode(wuko.var("text"))
+wuko.output("results", {
+  name = doc.name, count = doc.count, ratio = doc.ratio, enabled = doc.enabled,
+  infinite = doc[1] == 1/0, flag = doc[true],
+  date = doc.date, stamp = doc.stamp, binary = doc.binary,
+  merged = {doc.merged.a, doc.merged.c},
+  holes = {doc.list[1], doc.list[2] == nil, doc.list[3]},
+  empty = wuko.yaml.decode("") == nil,
+})
+`})
+	text := "name: wuko\ncount: 3\nratio: 0.5\nenabled: true\n1: .inf\ntrue: yes-key\n" +
+		"date: 2024-01-02\nstamp: 2024-01-02T03:04:05Z\nbinary: !!binary aGk=\n" +
+		"base: &base {a: 1}\nmerged: {<<: *base, c: 2}\nlist: [first, ~, third]\n"
+	result, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{"text": text}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{"results": map[string]any{
+		"name": "wuko", "count": float64(3), "ratio": 0.5, "enabled": true, "infinite": true, "flag": "yes-key",
+		"date": "2024-01-02", "stamp": "2024-01-02T03:04:05Z", "binary": "hi",
+		"merged": []any{float64(1), float64(2)}, "holes": []any{"first", true, "third"}, "empty": true,
+	}}
+	if diff := cmp.Diff(want, result.Outputs); diff != "" {
+		t.Fatalf("YAML decode mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestLuaTOMLDecodeConvertsDatesAndTables(t *testing.T) {
+	t.Parallel()
+	runner := steptest.Build(t, New, map[string]any{"source": `
+local doc = wuko.toml.decode(wuko.var("text"))
+wuko.output("results", {
+  title = doc.title, port = doc.server.port, hosts = doc.server.hosts, infinite = doc.limit == 1/0,
+  date = doc.date, local_time = doc.local_time, local_date_time = doc.local_date_time, offset = doc.offset,
+})
+`})
+	text := "title = 'wuko'\nlimit = inf\ndate = 2024-01-02\nlocal_time = 03:04:05\n" +
+		"local_date_time = 2024-01-02T03:04:05\noffset = 2024-01-02T03:04:05+02:00\n" +
+		"[server]\nport = 8080\nhosts = ['a', 'b']\n"
+	result, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{"text": text}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{"results": map[string]any{
+		"title": "wuko", "port": float64(8080), "hosts": []any{"a", "b"}, "infinite": true,
+		"date": "2024-01-02", "local_time": "03:04:05", "local_date_time": "2024-01-02T03:04:05",
+		"offset": "2024-01-02T03:04:05+02:00",
+	}}
+	if diff := cmp.Diff(want, result.Outputs); diff != "" {
+		t.Fatalf("TOML decode mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestLuaYAMLAndTOMLDecodeReportLocatedErrors(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct{ name, source, want string }{
+		{"bad YAML", `wuko.yaml.decode("a: 1\nb: [\n")`, "decoding YAML: line 2, column 5"},
+		{"duplicate YAML key", `wuko.yaml.decode("a: 1\na: 2\n")`, "already defined"},
+		{"multiple YAML documents", `wuko.yaml.decode("a: 1\n---\nb: 2\n")`, "multiple YAML documents"},
+		{"custom YAML tag", `wuko.yaml.decode("a: !custom value\n")`, `unsupported YAML tag "!custom"`},
+		{"invalid UTF-8 YAML", `wuko.yaml.decode("a: " .. string.char(255))`, "YAML must be UTF-8"},
+		{"bad TOML", `wuko.toml.decode("a = 1\nb = [\n")`, "decoding TOML: line 2, column 6"},
+		{"duplicate TOML key", `wuko.toml.decode("a = 1\na = 2\n")`, "decoding TOML: line 2"},
+		{"TOML encode list", `wuko.toml.encode({1, 2})`, "a document must be a table"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := steptest.Build(t, New, map[string]any{"source": test.source}).Run(t.Context(), step.Request{})
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestLuaYAMLAndTOMLEncodeRoundTrip(t *testing.T) {
+	t.Parallel()
+	runner := steptest.Build(t, New, map[string]any{"source": `
+local value = {name = "wuko", port = 8080, ratio = 0.5, tags = {"a", "b"}}
+local yaml_text = wuko.yaml.encode(value)
+local toml_text = wuko.toml.encode(value)
+local from_yaml, from_toml = wuko.yaml.decode(yaml_text), wuko.toml.decode(toml_text)
+wuko.output("yaml", yaml_text)
+wuko.output("toml_integer", toml_text:find("port = 8080\n", 1, true) ~= nil)
+wuko.output("same", from_yaml.port == from_toml.port and from_yaml.tags[2] == from_toml.tags[2] and from_toml.ratio == 0.5)
+`})
+	result, err := runner.Run(t.Context(), step.Request{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{"yaml": "name: wuko\nport: 8080\nratio: 0.5\ntags:\n    - a\n    - b\n", "toml_integer": true, "same": true}
+	if diff := cmp.Diff(want, result.Outputs); diff != "" {
+		t.Fatalf("encode mismatch (-want +got):\n%s", diff)
+	}
+}
+
 func TestLuaTimeHelpersAndWorkflowTimezone(t *testing.T) {
 	t.Parallel()
 	runner := steptest.Build(t, New, map[string]any{"source": `
