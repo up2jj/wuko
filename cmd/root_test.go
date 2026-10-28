@@ -95,6 +95,52 @@ func TestExecuteWithSignalsForcesExpiredGracePeriod(t *testing.T) {
 	})
 }
 
+// Forced shutdown kills tracked process groups; see the note above.
+func TestExecuteWithSignalsForcedShutdownWaitsForHolds(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		signals int
+		restore time.Duration
+		want    time.Duration
+	}{
+		{name: "released", signals: 2, restore: time.Second, want: time.Second},
+		{name: "third signal", signals: 3, restore: time.Hour, want: 0},
+		{name: "hold period", signals: 2, restore: time.Hour, want: shutdownHoldPeriod},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				signals := make(chan os.Signal, 3)
+				started := make(chan struct{})
+				finished := make(chan struct{})
+				go func() {
+					<-started
+					for range test.signals {
+						signals <- syscall.SIGINT
+					}
+				}()
+
+				begin := time.Now()
+				err := executeWithSignals(signals, time.Minute, func(ctx context.Context) error {
+					defer close(finished)
+					release := holdShutdown(ctx)
+					defer release()
+					close(started)
+					<-ctx.Done()
+					time.Sleep(test.restore)
+					return ctx.Err()
+				})
+				if !errors.Is(err, ErrForcedShutdown) {
+					t.Fatalf("executeWithSignals() error = %v, want ErrForcedShutdown", err)
+				}
+				if got := time.Since(begin); got != test.want {
+					t.Fatalf("forced shutdown returned after %s, want %s", got, test.want)
+				}
+				<-finished
+			})
+		})
+	}
+}
+
 func TestRunCommandInMemory(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()

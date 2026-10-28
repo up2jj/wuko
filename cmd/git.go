@@ -160,7 +160,7 @@ func newGitHookRunCmd(deps dependencies) *cobra.Command {
 	return &cobra.Command{
 		Use: "run HOOK [GIT_ARGS...]", Short: "Run workflows configured for one Git hook", Args: cobra.MinimumNArgs(1),
 		ValidArgsFunction: gitHookCompletion,
-		RunE: func(command *cobra.Command, args []string) error {
+		RunE: func(command *cobra.Command, args []string) (runErr error) {
 			name := args[0]
 			if !githook.Supported(name) {
 				return fmt.Errorf("unsupported client-side Git hook %q", name)
@@ -187,6 +187,20 @@ func newGitHookRunCmd(deps dependencies) *cobra.Command {
 				if err := child.Run(); err != nil {
 					return fmt.Errorf("preserved Git hook %s failed: %w", name, err)
 				}
+			}
+			if name == "pre-commit" && githook.StagedManifestDeclares(command.Context(), repository, name) {
+				// A forced shutdown must not exit while unstaged changes are hidden.
+				release := holdShutdown(command.Context())
+				defer release()
+				guard, err := githook.IsolateStaged(command.Context(), repository)
+				if err != nil {
+					return fmt.Errorf("pre-commit: %w", err)
+				}
+				defer func() {
+					if err := guard.Cleanup(command.Context()); err != nil {
+						runErr = errors.Join(runErr, fmt.Errorf("pre-commit: %w", err))
+					}
+				}()
 			}
 			manifest, err := githook.LoadManifest(repository.Root)
 			if err != nil {

@@ -9,6 +9,7 @@ hook is always explicit because both Git hooks and Wuko workflows run as trusted
 - [Configure and install](#configure-and-install)
 - [Existing hooks and uninstall](#existing-hooks-and-uninstall)
 - [Workflow context](#workflow-context)
+- [Staged isolation](#staged-isolation)
 - [Supported hooks](#supported-hooks)
 
 ## Configure and install
@@ -145,6 +146,51 @@ hook, configured workflow, failed step, source location, final error, and retry 
 Intermediate retry and polling progress, spinners, timing summaries, and success banners are
 suppressed. Pass the global `--debug` flag when full loading, validation, and execution diagnostics
 are needed.
+
+## Staged isolation
+
+`pre-commit` automatically hides unstaged tracked changes before loading `.wuko/git-hooks.yaml`
+and its workflows. Checks run in the original working directory against the indexed file versions;
+tracked hook configuration also uses its staged version. No additional workflow step or manifest
+option is required. Isolation is skipped when the staged (or, if untracked, the worktree)
+manifest declares no `pre-commit` workflows. A chained hook runs first, with its original view of the worktree.
+
+Wuko saves a binary-capable recovery patch under the current worktree's Git directory, then
+restores only affected paths from the index. It does not create a checkout or copy the whole
+repository. Untracked files and submodule working directories remain visible and unchanged.
+Edits to assume-unchanged entries, and to skip-worktree entries present in the worktree, are hidden
+too, using a private copy of the index; the index flags themselves are never changed.
+Paths obstructed by directories or parent symlinks are refused rather than replacing untracked
+content.
+An unmerged index or intent-to-add entries (`git add -N`) are refused before anything is hidden;
+resolve conflicts and stage or remove intent-to-add entries before retrying. Other hooks, including
+`pre-push`, retain their normal working-directory behavior.
+
+Restoration runs after every configured workflow and its cleanup have finished, including after
+loading errors, failed checks, timeouts, or normal cancellation. Hook edits to tracked files reject
+the commit even when their commands exited successfully. Nonconflicting formatter changes remain
+available for review and staging. If restoring the saved patch conflicts with hook edits, Wuko
+first saves every hook edit to `<git-dir>/wuko/hook-edits.patch`, then restores the original staged
+baseline on the saved patch's paths and reapplies the user's changes. The error names that file; it is
+relative to the staged versions, so review it or apply it after stashing the unstaged changes. Checks must not stage changes themselves; an index change also
+rejects the commit.
+
+Only one Wuko isolation session may run in a worktree at a time; an overlapping pre-commit waits
+for the running one to finish. Linked worktrees use separate guards. A forced shutdown (a second
+interrupt or an expired grace period) still waits up to 45 seconds for restoration; a third
+interrupt exits immediately and leaves the recovery files described below. Recovery files have restrictive permissions and patch contents are not printed in errors.
+If restoration fails, or Wuko is forcibly terminated before cleanup, recovery files remain under
+`<git-dir>/wuko/staged/`, and subsequent pre-commit runs refuse to overwrite them. The directory
+contains `unstaged.patch` and the original indexed tree ID in `tree`. Preserve those files while
+recovering the unstaged edits. For a worktree still at the saved baseline, apply the patch from its
+repository root:
+
+```sh
+git apply --binary --whitespace=nowarn /absolute/path/to/git-dir/wuko/staged/unstaged.patch
+```
+
+If that fails, reconcile conflicting edits using the saved tree and patch. Remove the recovery
+directory only after confirming the unstaged changes have been recovered.
 
 ## Supported hooks
 

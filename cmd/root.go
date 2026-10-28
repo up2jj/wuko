@@ -14,6 +14,7 @@ import (
 	"os/signal"
 	"slices"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -89,6 +90,10 @@ var (
 )
 
 const shutdownGracePeriod = 10 * time.Second
+
+// shutdownHoldPeriod bounds how long a forced shutdown waits for held work, such as restoring
+// unstaged changes hidden for pre-commit, whose own cleanup is limited to 30 seconds.
+const shutdownHoldPeriod = 45 * time.Second
 
 // ErrForcedShutdown means graceful cancellation exceeded its budget or a second signal requested
 // immediate termination.
@@ -171,7 +176,8 @@ func Execute() error {
 }
 
 func executeWithSignals(signals <-chan os.Signal, gracePeriod time.Duration, execute func(context.Context) error) error {
-	ctx, cancel := context.WithCancel(context.Background())
+	holds := &shutdownHolds{}
+	ctx, cancel := context.WithCancel(context.WithValue(context.Background(), shutdownHoldsKey{}, holds))
 	defer cancel()
 	done := make(chan error, 1)
 	go func() { done <- execute(ctx) }()
@@ -185,16 +191,71 @@ func executeWithSignals(signals <-chan os.Signal, gracePeriod time.Duration, exe
 
 	timer := time.NewTimer(gracePeriod)
 	defer timer.Stop()
+	var forced error
 	select {
 	case err := <-done:
 		return err
 	case received := <-signals:
-		process.KillTrackedGroups()
-		return fmt.Errorf("%w after receiving %s during graceful shutdown", ErrForcedShutdown, received)
+		forced = fmt.Errorf("%w after receiving %s during graceful shutdown", ErrForcedShutdown, received)
 	case <-timer.C:
-		process.KillTrackedGroups()
-		return fmt.Errorf("%w after graceful shutdown exceeded %s", ErrForcedShutdown, gracePeriod)
+		forced = fmt.Errorf("%w after graceful shutdown exceeded %s", ErrForcedShutdown, gracePeriod)
 	}
+	process.KillTrackedGroups()
+	// Exiting now could leave the worktree half restored. Killed processes let held work
+	// finish promptly; a further signal or the hold period still forces the exit.
+	hold := time.NewTimer(shutdownHoldPeriod)
+	defer hold.Stop()
+	select {
+	case <-holds.released():
+	case <-signals:
+	case <-hold.C:
+	}
+	return forced
+}
+
+type shutdownHoldsKey struct{}
+
+// shutdownHolds counts work that a forced shutdown must wait for.
+type shutdownHolds struct {
+	mu     sync.Mutex
+	active int
+	idle   chan struct{}
+}
+
+// holdShutdown delays a forced shutdown until the returned release runs. Contexts not created
+// by executeWithSignals have no holds, and their release does nothing.
+func holdShutdown(ctx context.Context) func() {
+	holds, ok := ctx.Value(shutdownHoldsKey{}).(*shutdownHolds)
+	if !ok {
+		return func() {}
+	}
+	holds.mu.Lock()
+	defer holds.mu.Unlock()
+	if holds.active == 0 {
+		holds.idle = make(chan struct{})
+	}
+	holds.active++
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			holds.mu.Lock()
+			defer holds.mu.Unlock()
+			if holds.active--; holds.active == 0 {
+				close(holds.idle)
+			}
+		})
+	}
+}
+
+func (holds *shutdownHolds) released() <-chan struct{} {
+	holds.mu.Lock()
+	defer holds.mu.Unlock()
+	if holds.active == 0 {
+		idle := make(chan struct{})
+		close(idle)
+		return idle
+	}
+	return holds.idle
 }
 
 func NewRootCmd() *cobra.Command {
