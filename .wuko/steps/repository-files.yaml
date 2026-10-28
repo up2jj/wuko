@@ -1,78 +1,23 @@
 steps:
-  - id: staged_changes
-    type: git_diff
-    with: {source: staged, renames: false}
-
-  # NUL-delimited Git paths preserve whitespace and newlines in filenames.
-  - id: git_files
+  # Each target selects its files with git_files as `files` before requiring this file.
+  - id: repository
     type: lua
     with:
       args:
         source: "{{ .vars.source }}"
-        updates: "{{ .vars.push_updates }}"
-        staged: {expr: steps.staged_changes.files}
+        files: {expr: steps.files.files}
+        deleted: {expr: steps.files.deleted}
       source: |
         local function git(args)
           table.insert(args, 1, "--literal-pathspecs")
           local result = wuko.exec.run({command="git", args=args, stdout="capture", stderr="capture", capture_limit="16MiB"})
-          assert(not result.error and result.exit_code == 0 and not result.stdout_truncated, "Git file discovery failed")
+          assert(not result.error and result.exit_code == 0 and not result.stdout_truncated, "Git repository inspection failed")
           return result.stdout
         end
-        local function paths(raw)
-          local result = {}
-          for path in raw:gmatch("(.-)%z") do result[#result+1] = path end
-          return result
+        local index, indexed = {}, {}
+        for path in git({"ls-files", "-z"}):gmatch("(.-)%z") do
+          if not indexed[path] then indexed[path] = true; index[#index+1] = path end
         end
-        -- Stage entries carry the index mode, which identifies symlinks that a stat follows.
-        local index, modes, added, candidates = {}, {}, {}, {}
-        for mode, path in git({"ls-files", "--stage", "-z"}):gmatch("(%d+) %x+ %d\t(.-)%z") do
-          if not modes[path] then index[#index+1] = path end
-          modes[path] = mode
-        end
-        -- Changed paths include deletions, which can break the package that lost a file.
-        local changed = {}
-        for _, file in ipairs(wuko.args.staged) do
-          changed[#changed+1] = file.path
-          if file.status == "added" then added[#added+1] = file.path end
-          if file.status ~= "deleted" then candidates[#candidates+1] = file.path end
-        end
-        if wuko.args.source == "all" then candidates, changed = index, index
-        elseif wuko.args.source == "pushed" then
-          candidates, changed = {}, {}
-          for _, update in ipairs(wuko.json.decode(wuko.args.updates)) do
-            local tip, base = update.local_oid, update.remote_oid
-            assert(tip and base and not tip:match("^%-") and not base:match("^%-"), "Invalid push update")
-            if not tip:match("^0+$") then
-              if base:match("^0+$") then
-                local first = git({"rev-list", "--reverse", "--topo-order", tip, "--not", "--remotes"}):match("%S+")
-                if first then
-                  base = git({"rev-list", "--parents", "-n", "1", first}):match("^%S+%s+(%S+)")
-                  if not base then base = git({"hash-object", "-t", "tree", "--stdin"}):match("%S+") end
-                else base = nil end
-              end
-              if base then
-                for _, path in ipairs(paths(git({"diff", "--name-only", "--no-renames", "--diff-filter=ACDMRT", "-z", base, tip, "--"}))) do
-                  candidates[#candidates+1] = path
-                  changed[#changed+1] = path
-                end
-              end
-            end
-          end
-        else assert(wuko.args.source == "staged", "Unknown file source") end
-        -- Keep regular files that exist in the working tree; symlinks and directories are skipped.
-        local function regular(path)
-          if modes[path] == "120000" then return false end
-          local ok, info = pcall(wuko.fs.stat, path)
-          return ok and info.mode:sub(1, 1) == "-"
-        end
-        local unique, filtered = {}, {}
-        for _, path in ipairs(candidates) do
-          if not unique[path] and not path:match("^dist/") and not path:match("^completions/") then
-            unique[path] = true
-            if regular(path) then filtered[#filtered+1] = path end
-          end
-        end
-        table.sort(filtered)
         -- Vet only the packages whose Go files changed, following the directories ./... skips.
         -- A module change can affect every package, so it vets them all.
         local vet, seen, modules = {}, {}, {}
@@ -93,11 +38,15 @@ steps:
           end
           return false
         end
+        local changed = {}
+        for _, list in ipairs({wuko.args.files, wuko.args.deleted}) do
+          for _, path in ipairs(list) do changed[#changed+1] = path end
+        end
         for _, path in ipairs(changed) do
           if path == "go.mod" or path == "go.sum" or wuko.args.source == "all" then vet = {"./..."}; break end
           local dir = path:match("^(.*)/[^/]+$") or "."
           local skipped = ("/"..dir):match("/[._][^/]*") and dir ~= "." or ("/"..dir.."/"):match("/testdata/")
-          if path:match("%.go$") and not seen[dir] and not skipped and not path:match("^dist/") then
+          if path:match("%.go$") and not seen[dir] and not skipped then
             seen[dir] = true
             if not nested(dir) and has_go(dir) then vet[#vet+1] = dir == "." and "." or "./"..dir end
           end
@@ -106,36 +55,23 @@ steps:
         local directory = git({"rev-parse", "--absolute-git-dir"}):gsub("\n$", "")
         local function state(name) return exists(directory.."/"..name) end
         wuko.output("merge", state("MERGE_MSG") and (state("MERGE_HEAD") or state("rebase-apply") or state("rebase-merge")))
-        wuko.output("files", filtered)
-        wuko.output("vet", vet)
         wuko.output("index", index)
-        wuko.output("added", added)
+        wuko.output("vet", vet)
 
   - id: selected
     type: lua
     with:
       args:
-        files: {expr: steps.git_files.files}
-        added: {expr: steps.git_files.added}
-        vet: {expr: steps.git_files.vet}
+        files: {expr: steps.files.files}
+        text: {expr: steps.files.text}
+        added: {expr: steps.files.added}
+        vet: {expr: steps.repository.vet}
       source: |
-        local result = {files={}, text={}, yaml={}, toml={}, go={}, added={}, lfs={}, vet=wuko.args.vet, tidy=false, lint=false}
-        local added = {}
-        for _, path in ipairs(wuko.args.added) do added[path] = true end
-        local text = {go=true, mod=true, sum=true, yaml=true, yml=true, toml=true, json=true, md=true, txt=true, sh=true, lua=true, js=true, ts=true, css=true, html=true, svg=true, xml=true, tmpl=true, tape=true}
-        local binary = {png=true, jpg=true, jpeg=true, gif=true, webp=true, ico=true, pdf=true, zip=true, gz=true, bz2=true, xz=true, woff=true, woff2=true, ttf=true, mp3=true, mp4=true, wasm=true}
+        local result = {files=wuko.args.files, text=wuko.args.text, yaml={}, toml={}, go={}, added=wuko.args.added, lfs={}, vet=wuko.args.vet, tidy=false, lint=false}
         for _, path in ipairs(wuko.args.files) do
           local extension = wuko.helpers.lower(path:match("%.([^./]+)$") or "")
-          local is_text = text[extension] or false
-          if not is_text and not binary[extension] then
-            local data = wuko.fs.read(path)
-            is_text = not data:find(string.char(0), 1, true) and wuko.helpers.is_utf8(data)
-          end
-          result.files[#result.files+1] = path
-          if is_text then result.text[#result.text+1] = path end
           local format = ({yml="yaml", yaml="yaml", toml="toml", go="go"})[extension]
           if format then result[format][#result[format]+1] = path end
-          if added[path] then result.added[#result.added+1] = path end
           result.tidy = result.tidy or path == "go.mod" or path == "go.sum"
           result.lint = result.lint or extension == "go" or path == "go.mod" or path == "go.sum" or path == "staticcheck.conf" or path == "scripts/lint.sh" or path == "justfile" or path == ".github/workflows/ci.yml" or path:match("^%.wuko/") ~= nil
         end

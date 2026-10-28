@@ -3,7 +3,6 @@ package cmd
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -44,12 +43,9 @@ func TestRepositoryHookWorkflowPreservesChecksAndContinuesAfterFailure(t *testin
 			reporter := &gitHookReporter{workflowName: definition.Name, output: &output}
 			_, err := repositoryCheckEngine(t).Run(t.Context(), definition, engine.Options{
 				RunDir: root, Executor: executor, Stdout: io.Discard, Stderr: io.Discard, Progress: reporter.Progress,
-				Providers: provider.Set{
-					Schemas: map[string]provider.Schema{"git": provider.NewGit().Schema()},
-					Values: map[string]map[string]any{"git": {"hook": map[string]any{"payload": map[string]any{
-						"updates": []any{map[string]any{"local_oid": head, "remote_oid": base}},
-					}}}},
-				},
+				Providers: prePushProviders([]any{map[string]any{
+					"local_ref": "refs/heads/main", "local_oid": head, "remote_ref": "refs/heads/main", "remote_oid": base,
+				}}),
 			})
 			if err == nil {
 				t.Fatal("failed policy check did not reject the workflow")
@@ -71,7 +67,8 @@ func TestRepositoryHookWorkflowPreservesChecksAndContinuesAfterFailure(t *testin
 					want := "Passed"
 					if check == "trailing_whitespace" {
 						want = "Failed"
-					} else if check == "check_merge_conflict" || target != "push" && (check == "staticcheck" || check == "go_test") {
+					} else if check == "check_merge_conflict" || target != "push" && (check == "staticcheck" || check == "go_test") ||
+						target == "all" && check == "check_added_large_files" { // all tracked files have no additions
 						want = "Skipped"
 					}
 					if !strings.HasSuffix(line, want) {
@@ -345,7 +342,7 @@ func TestRepositoryPushSelectionHandlesNewExistingDeletedAndRepeatedRefs(t *test
 	root := gittest.InitWithCommit(t)
 	base := gittest.Output(t, root, "rev-parse", "HEAD")
 	zero := strings.Repeat("0", len(base))
-	selected := runRepositorySelection(t, root, "pushed", []any{map[string]any{"local_oid": base, "remote_oid": zero}})
+	selected := runRepositorySelection(t, root, "pushed", []any{pushUpdate(base, zero)})
 	if diff := cmp.Diff([]any{"README.md"}, selected["files"]); diff != "" {
 		t.Fatalf("first push mismatch (-want +got):\n%s", diff)
 	}
@@ -356,15 +353,19 @@ func TestRepositoryPushSelectionHandlesNewExistingDeletedAndRepeatedRefs(t *test
 	head := gittest.Output(t, root, "rev-parse", "HEAD")
 	for _, remote := range []string{base, zero} {
 		updates := []any{
-			map[string]any{"local_oid": head, "remote_oid": remote}, map[string]any{"local_oid": head, "remote_oid": remote},
-			map[string]any{"local_oid": zero, "remote_oid": base},
+			pushUpdate(head, remote), pushUpdate(head, remote),
+			pushUpdate(zero, base),
 		}
 		selected := runRepositorySelection(t, root, "pushed", updates)
 		if diff := cmp.Diff([]any{"new.go"}, selected["files"]); diff != "" {
 			t.Fatalf("push mismatch (-want +got):\n%s", diff)
 		}
+		// The large-file policy checks what the push adds.
+		if diff := cmp.Diff([]any{"new.go"}, selected["added"]); diff != "" {
+			t.Fatalf("pushed additions mismatch (-want +got):\n%s", diff)
+		}
 	}
-	selected = runRepositorySelection(t, root, "pushed", []any{map[string]any{"local_oid": base, "remote_oid": zero}})
+	selected = runRepositorySelection(t, root, "pushed", []any{pushUpdate(base, zero)})
 	if got := selected["files"]; len(got.(map[string]any)) != 0 {
 		t.Fatalf("already remote branch files = %v", got)
 	}
@@ -382,20 +383,31 @@ func TestRepositoryAllSelectionOnlyIncludesTrackedFiles(t *testing.T) {
 
 func runRepositorySelection(t *testing.T, root, source string, updates []any) map[string]any {
 	t.Helper()
-	definition := loadRepositoryChecks(t, "commit")
+	target := map[string]string{"staged": "commit", "pushed": "push", "all": "all"}[source]
+	definition := loadRepositoryChecks(t, target)
 	definition.Steps = definition.Steps[:len(definition.Steps)-1]
-	encoded, err := json.Marshal(updates)
-	if err != nil {
-		t.Fatal(err)
-	}
 	state, err := repositoryCheckEngine(t).Run(t.Context(), definition, engine.Options{
-		RunDir: root, Vars: map[string]any{"source": source, "push_updates": string(encoded)},
-		Stdout: io.Discard, Stderr: io.Discard, Progress: func(engine.ProgressEvent) {},
+		RunDir: root, Stdout: io.Discard, Stderr: io.Discard, Progress: func(engine.ProgressEvent) {},
+		Providers: prePushProviders(updates),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return state.Steps["selected"].(map[string]any)
+}
+
+func pushUpdate(local, remote string) map[string]any {
+	return map[string]any{"local_ref": "refs/heads/main", "local_oid": local, "remote_ref": "refs/heads/main", "remote_oid": remote}
+}
+
+// prePushProviders supplies the Git context a pre-push hook run receives.
+func prePushProviders(updates []any) provider.Set {
+	return provider.Set{
+		Schemas: map[string]provider.Schema{"git": provider.NewGit().Schema()},
+		Values: map[string]map[string]any{"git": {"hook": map[string]any{
+			"name": "pre-push", "payload": map[string]any{"updates": updates},
+		}}},
+	}
 }
 
 func loadRepositoryChecks(t *testing.T, target string) *workflow.Definition {

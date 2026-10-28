@@ -4,24 +4,28 @@ description: Repository file policies and Go checks
 vars:
   source: staged
   stage: commit
-  push_updates: "[]"
 targets:
   commit:
     description: Check staged files before committing
     steps:
+      - id: files
+        type: git_files
+        with: {source: staged, exclude: ['^dist/', '^completions/']}
       - require: ../steps/repository-checks.yaml
   push:
     description: Check outgoing files, lint, and run race tests
     vars: {source: pushed, stage: push}
     steps:
-      - id: push_context
-        type: set
-        with:
-          variable: push_updates
-          value: "{{ toJSON .git.hook.payload.updates }}"
+      # Outside a pre-push hook, pushed selection needs explicit updates and fails.
+      - id: files
+        type: git_files
+        with: {source: pushed, exclude: ['^dist/', '^completions/']}
       - require: ../steps/repository-checks.yaml
   all:
     description: Run the commit checks on all tracked files
     vars: {source: all}
     steps:
+      - id: files
+        type: git_files
+        with: {source: all, exclude: ['^dist/', '^completions/']}
       - require: ../steps/repository-checks.yaml

@@ -35,17 +35,19 @@ If this checkout still has prek hooks, remove them once with
 
 The versioned bindings are in `.wuko/git-hooks.yaml`; check ordering and conditions are in
 `.wuko/steps/repository-checks.yaml`. They preserve the previous file checks, Go
-formatting, vet, tidy, and push-only Staticcheck and race tests. File policies compose native
-`git_diff`, `file`, `decode`, `foreach`, `assert`, and `shell` steps through the local
-`.wuko/actions/file-check/action.yaml` action; `batch` groups Go formatting calls. Inline `lua` steps handle
-NUL-delimited Git paths, case comparisons, and byte-preserving whitespace/newline fixes.
-Independent checks continue after a failure, and formatters reject
-the operation after making fixes so they can be reviewed and staged. Pre-commit isolates staged
-tracked content before loading the workflows; see [staged isolation](docs/git-hooks.md#staged-isolation).
-Push checks select files from Git's outgoing ref updates. As before, the large-file policy checks
-only staged additions, allows up to 500 KiB, and exempts Git LFS files. Generated `dist/` and
-`completions/` files are excluded. Staticcheck's configuration filter also covers the replacement
-Wuko configuration.
+formatting, vet, tidy, and push-only Staticcheck and race tests. Each target selects its files with
+the native `git_files` step, which excludes generated `dist/` and `completions/` files and
+classifies the rest as text or binary. File policies run through the local
+`.wuko/actions/file-check/action.yaml` action, using `decode` for YAML and TOML and one Lua pass
+for content checks; `batch` groups Go formatting calls. Inline `lua` steps handle case comparisons,
+`go vet` package scoping, and byte-preserving whitespace/newline fixes. The fixers and gofmt run in
+order, then the remaining checks run concurrently; every check still runs and reports after a
+failure, and formatters reject the operation after making fixes so they can be reviewed and staged.
+Pre-commit isolates staged tracked content before loading the workflows; see
+[staged isolation](docs/git-hooks.md#staged-isolation).
+Push checks select files from Git's outgoing ref updates. The large-file policy checks the files a
+commit or push adds, allows up to 500 KiB, and exempts Git LFS files. Staticcheck's configuration
+filter also covers the replacement Wuko configuration.
 CI runs the same all-files workflow, followed by Staticcheck and the full race test suite.
 
 `just snapshot` builds local release archives into `dist/`; do not commit them.

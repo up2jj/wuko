@@ -92,7 +92,7 @@ steps:
         - id: check_merge_conflict
           after: [gofmt]
           uses: ../actions/file-check
-          if: steps.git_files.merge && len(steps.selected.text) > 0
+          if: steps.repository.merge && len(steps.selected.text) > 0
           with:
             check: merge
             files: {expr: steps.selected.text}
@@ -112,8 +112,8 @@ steps:
           if: len(steps.selected.files) > 0
           with:
             args:
-              index: {expr: steps.git_files.index}
-              added: {expr: steps.git_files.added}
+              index: {expr: steps.repository.index}
+              added: {expr: steps.selected.added}
               selected: {expr: steps.selected.files}
             source: |
               local groups, relevant = {}, {}
