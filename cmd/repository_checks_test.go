@@ -87,6 +87,9 @@ func TestRepositoryHookWorkflowPreservesChecksAndContinuesAfterFailure(t *testin
 			if target == "push" {
 				want = append(want, "sh scripts/lint.sh", "go test -race ./...")
 			}
+			// The tool checks run concurrently, so their call order is not fixed.
+			slices.Sort(want)
+			slices.Sort(got)
 			if diff := cmp.Diff(want, got); diff != "" {
 				t.Fatalf("checks mismatch (-want +got):\n%s\nrun error: %v", diff, err)
 			}
@@ -425,7 +428,12 @@ func runRepositoryPolicy(t *testing.T, root, id string) (string, error) {
 	if index < 0 {
 		t.Fatalf("missing repository check %s", id)
 	}
-	definition.Steps[len(definition.Steps)-1] = group.Steps[index]
+	// Condition-skipped siblings satisfy the check's after edges without running.
+	for i := range group.Steps {
+		if i != index {
+			group.Steps[i].If = "false"
+		}
+	}
 	var output bytes.Buffer
 	_, err := repositoryCheckEngine(t).Run(t.Context(), definition, engine.Options{RunDir: root, Stdout: &output, Stderr: &output, Progress: func(engine.ProgressEvent) {}})
 	return output.String(), err

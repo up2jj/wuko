@@ -1,9 +1,10 @@
 steps:
   - require: repository-files.yaml
 
-  # Independent checks continue after failures; serial execution keeps fixers ordered.
+  # Fixers rewrite files, so they run one after another and every other check starts after
+  # them. `after` only orders: a failed fixer still lets every later check run and report.
   - concurrent:
-      max_concurrency: 1
+      max_concurrency: 4
       fail_fast: false
       steps:
         - id: trailing_whitespace
@@ -41,6 +42,7 @@ steps:
               assert(#changed == 0, "Fixed trailing whitespace; review and stage: " .. table.concat(changed, ", "))
 
         - id: end_of_file_fixer
+          after: [trailing_whitespace]
           type: lua
           if: len(steps.selected.text) > 0
           with:
@@ -63,7 +65,16 @@ steps:
               end
               assert(#changed == 0, "Fixed end-of-file newline; review and stage: " .. table.concat(changed, ", "))
 
+        - id: gofmt
+          after: [end_of_file_fixer]
+          uses: ../actions/file-check
+          if: len(steps.selected.go) > 0
+          with:
+            check: gofmt
+            files: {expr: steps.selected.go}
+
         - id: check_yaml
+          after: [gofmt]
           uses: ../actions/file-check
           if: len(steps.selected.yaml) > 0
           with:
@@ -71,6 +82,7 @@ steps:
             files: {expr: steps.selected.yaml}
 
         - id: check_toml
+          after: [gofmt]
           uses: ../actions/file-check
           if: len(steps.selected.toml) > 0
           with:
@@ -78,6 +90,7 @@ steps:
             files: {expr: steps.selected.toml}
 
         - id: check_merge_conflict
+          after: [gofmt]
           uses: ../actions/file-check
           if: steps.git_files.merge && len(steps.selected.text) > 0
           with:
@@ -85,6 +98,7 @@ steps:
             files: {expr: steps.selected.text}
 
         - id: check_added_large_files
+          after: [gofmt]
           uses: ../actions/file-check
           if: len(steps.selected.added) > 0
           with:
@@ -93,6 +107,7 @@ steps:
             lfs: {expr: steps.selected.lfs}
 
         - id: check_case_conflict
+          after: [gofmt]
           type: lua
           if: len(steps.selected.files) > 0
           with:
@@ -126,36 +141,34 @@ steps:
               assert(#conflicts == 0, "Case-insensitivity conflict: " .. table.concat(conflicts, ", "))
 
         - id: detect_private_key
+          after: [gofmt]
           uses: ../actions/file-check
           if: len(steps.selected.text) > 0
           with:
             check: private_key
             files: {expr: steps.selected.text}
 
-        - id: gofmt
-          uses: ../actions/file-check
-          if: len(steps.selected.go) > 0
-          with:
-            check: gofmt
-            files: {expr: steps.selected.go}
-
         - id: go_vet
+          after: [gofmt]
           type: shell
           if: len(steps.selected.vet) > 0
           with:
             argv: {expr: 'concat(["go", "vet"], steps.selected.vet)'}
 
         - id: go_mod_tidy
+          after: [gofmt]
           type: shell
           if: steps.selected.tidy
           with: {command: go, args: [mod, tidy, -diff]}
 
         - id: staticcheck
+          after: [gofmt]
           type: shell
           if: vars.stage == "push" && steps.selected.lint
           with: {command: sh, args: [scripts/lint.sh]}
 
         - id: go_test
+          after: [gofmt]
           type: shell
           if: vars.stage == "push" && len(steps.selected.go) > 0
           with: {command: go, args: [test, -race, ./...]}
