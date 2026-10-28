@@ -1,0 +1,8 @@
+version: 1
+hooks:
+  pre-commit:
+    - workflow: repository-checks
+      target: commit
+  pre-push:
+    - workflow: repository-checks
+      target: push

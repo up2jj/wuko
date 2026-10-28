@@ -27,12 +27,13 @@ const defaultMaxBytes = "1MiB"
 var yamlLinePattern = regexp.MustCompile(`(?:^|\s)line ([0-9]+)(?::|\s|$)`)
 
 type Config struct {
-	Format    string `yaml:"format"`
-	From      string `yaml:"from,omitempty"`
-	Path      string `yaml:"path,omitempty"`
-	MaxBytes  string `yaml:"max_bytes,omitempty"`
-	Trim      bool   `yaml:"trim,omitempty"`
-	OmitEmpty bool   `yaml:"omit_empty,omitempty"`
+	Format       string `yaml:"format"`
+	From         string `yaml:"from,omitempty"`
+	Path         string `yaml:"path,omitempty"`
+	MaxBytes     string `yaml:"max_bytes,omitempty"`
+	Trim         bool   `yaml:"trim,omitempty"`
+	OmitEmpty    bool   `yaml:"omit_empty,omitempty"`
+	ValidateOnly bool   `yaml:"validate_only,omitempty"`
 }
 
 type Runner struct {
@@ -126,6 +127,9 @@ func (r *Runner) validate(resolved bool) error {
 			return fmt.Errorf("trim and omit_empty are only supported with lines")
 		}
 	case "lines":
+		if r.config.ValidateOnly {
+			return fmt.Errorf("validate_only requires json, yaml, or toml")
+		}
 	default:
 		return fmt.Errorf("format must be json, yaml, toml, or lines")
 	}
@@ -196,6 +200,18 @@ func (r *Runner) readInput(ctx context.Context, request step.Request) (string, s
 }
 
 func (r *Runner) decode(text string) (any, error) {
+	if r.config.ValidateOnly {
+		switch r.config.Format {
+		case "yaml":
+			return decodeYAMLDocument(text, true)
+		case "json":
+			// RawMessage checks syntax without building the value tree.
+			return nil, decodeJSONValue(text, new(json.RawMessage))
+		case "toml":
+			var value map[string]any
+			return nil, tomlLocationError(toml.Unmarshal([]byte(text), &value))
+		}
+	}
 	switch r.config.Format {
 	case "json":
 		return decodeJSON(text)
@@ -211,28 +227,45 @@ func (r *Runner) decode(text string) (any, error) {
 }
 
 func decodeJSON(text string) (any, error) {
-	decoder := json.NewDecoder(strings.NewReader(text))
-	decoder.UseNumber()
 	var value any
-	if err := decoder.Decode(&value); err != nil {
-		return nil, jsonLocationError(text, err)
-	}
-	extraOffset := nextNonSpace(text, decoder.InputOffset())
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		if err == nil {
-			line, column := lineColumn(text, extraOffset)
-			return nil, fmt.Errorf("line %d, column %d: multiple JSON values are not supported", line, column)
-		}
-		return nil, jsonLocationError(text, err)
+	if err := decodeJSONValue(text, &value); err != nil {
+		return nil, err
 	}
 	return value, nil
 }
 
+func decodeJSONValue(text string, value any) error {
+	decoder := json.NewDecoder(strings.NewReader(text))
+	decoder.UseNumber()
+	if err := decoder.Decode(value); err != nil {
+		return jsonLocationError(text, err)
+	}
+	extraOffset := nextNonSpace(text, decoder.InputOffset())
+	var extra json.RawMessage
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err == nil {
+			line, column := lineColumn(text, extraOffset)
+			return fmt.Errorf("line %d, column %d: multiple JSON values are not supported", line, column)
+		}
+		return jsonLocationError(text, err)
+	}
+	return nil
+}
+
 func decodeYAML(text string) (any, error) {
+	return decodeYAMLDocument(text, false)
+}
+
+func decodeYAMLDocument(text string, validateOnly bool) (any, error) {
+	if validateOnly && !utf8.ValidString(text) {
+		return nil, fmt.Errorf("YAML must be UTF-8")
+	}
 	decoder := yaml.NewDecoder(strings.NewReader(text))
 	var document yaml.Node
 	if err := decoder.Decode(&document); err != nil {
+		if validateOnly && err == io.EOF {
+			return nil, nil
+		}
 		return nil, yamlLocationError(text, err)
 	}
 	var extra yaml.Node
@@ -247,23 +280,49 @@ func decodeYAML(text string) (any, error) {
 		return nil, yamlLocationError(text, err)
 	}
 	var value any
+	if validateOnly {
+		if err := validateYAMLTags(&document); err != nil {
+			return nil, err
+		}
+	}
 	if err := document.Decode(&value); err != nil {
 		return nil, yamlLocationError(text, err)
 	}
+	if validateOnly {
+		return nil, nil
+	}
 	return normalize(value)
+}
+
+func validateYAMLTags(node *yaml.Node) error {
+	switch node.Tag {
+	case "", "!!map", "!!seq", "!!str", "!!bool", "!!int", "!!float", "!!null", "!!timestamp", "!!binary", "!!set", "!!omap", "!!pairs", "!!merge":
+	default:
+		return fmt.Errorf("line %d: unsupported YAML tag %q", node.Line, node.Tag)
+	}
+	for _, child := range node.Content {
+		if err := validateYAMLTags(child); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func decodeTOML(text string) (any, error) {
 	value := make(map[string]any)
 	if err := toml.Unmarshal([]byte(text), &value); err != nil {
-		var decodeErr *toml.DecodeError
-		if errors.As(err, &decodeErr) {
-			line, column := decodeErr.Position()
-			return nil, fmt.Errorf("line %d, column %d: %w", line, column, err)
-		}
-		return nil, err
+		return nil, tomlLocationError(err)
 	}
 	return normalize(value)
+}
+
+func tomlLocationError(err error) error {
+	var decodeErr *toml.DecodeError
+	if errors.As(err, &decodeErr) {
+		line, column := decodeErr.Position()
+		return fmt.Errorf("line %d, column %d: %w", line, column, err)
+	}
+	return err
 }
 
 func decodeLines(input string, trim, omitEmpty bool) []any {

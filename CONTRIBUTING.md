@@ -27,9 +27,28 @@ to see the pinned release. The version is pinned in `scripts/lint.sh`, which is
 shared by `just lint`, CI, and the pre-push hook; no separate linter installation
 is needed. The first run downloads the tool with Go.
 
-Run `just hooks` once to install the [prek](https://github.com/j178/prek) pre-commit and pre-push
-hooks, and `prek run --all-files` before broad changes. `just snapshot` builds local release
-archives into `dist/`; do not commit them.
+Run `just hooks` once to build `./wuko` and install its pre-commit and pre-push workflows. The
+dispatcher records that persistent binary, so keep it in place and rebuild it after changing Wuko.
+Run `just hooks-check` before broad changes to apply the commit checks to every tracked file.
+If this checkout still has prek hooks, remove them once with
+`prek uninstall --hook-type pre-commit --hook-type pre-push` before installing Wuko's hooks.
+
+The versioned bindings are in `.wuko/git-hooks.yaml`; check ordering and conditions are in
+`.wuko/steps/repository-checks.yaml`. They preserve the previous file checks, Go
+formatting, vet, tidy, and push-only Staticcheck and race tests. File policies compose native
+`git_diff`, `file`, `decode`, `foreach`, `assert`, and `shell` steps through the local
+`.wuko/actions/file-check/action.yaml` action; `batch` groups Go formatting calls. Inline `lua` steps handle
+NUL-delimited Git paths, case comparisons, and byte-preserving whitespace/newline fixes.
+Independent checks continue after a failure, and formatters reject
+the operation after making fixes so they can be reviewed and staged. Pre-commit isolates staged
+tracked content before loading the workflows; see [staged isolation](docs/git-hooks.md#staged-isolation).
+Push checks select files from Git's outgoing ref updates. As before, the large-file policy checks
+only staged additions, allows up to 500 KiB, and exempts Git LFS files. Generated `dist/` and
+`completions/` files are excluded. Staticcheck's configuration filter also covers the replacement
+Wuko configuration.
+CI runs the same all-files workflow, followed by Staticcheck and the full race test suite.
+
+`just snapshot` builds local release archives into `dist/`; do not commit them.
 
 ## Where things live
 

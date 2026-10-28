@@ -416,6 +416,19 @@ line terminator does not add an empty item, and the optional filters apply in or
 The decoded result is available as `.steps.<id>.value`. `trim` and `omit_empty` are valid only for
 `lines`; `decode` does not infer the format from a filename or create workflow variables.
 
+Set `validate_only: true` to check JSON, YAML, or TOML without exporting the parsed value:
+
+```yaml
+- id: validate_config
+  type: decode
+  with: {format: yaml, path: config.yaml, validate_only: true}
+```
+
+Successful validation returns `value: null`. YAML validation accepts an empty document and standard
+YAML types, rejects duplicate keys, multiple documents, invalid UTF-8 and custom tags, and does not
+require mapping keys or values to be JSON-compatible. Normal decoding retains its existing behavior.
+`validate_only` is not supported for `lines`; `max_bytes` applies to both modes.
+
 ## `jsonpath`
 
 Select data from a typed value with an [RFC 9535](https://www.rfc-editor.org/rfc/rfc9535.html)

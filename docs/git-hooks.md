@@ -44,7 +44,9 @@ hooks:
 ```
 
 `workflow` uses normal Wuko discovery. `target` is optional. Each hook must contain at least one
-binding. Bindings run in declaration order and stop at the first failure. A binding may only name a
+binding. Repository workflows are resolved first, so unrelated invalid global workflows do not
+block project hooks. Names absent from the repository fall back to normal discovery.
+Bindings run in declaration order and stop at the first failure. A binding may only name a
 locally discovered workflow; remote locators are rejected so that a manifest change alone can never
 make a hook fetch and run unreviewed code. A dispatcher whose worktree has no
 `.wuko/git-hooks.yaml`, or no binding for its hook, exits successfully without running anything.

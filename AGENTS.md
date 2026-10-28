@@ -17,7 +17,7 @@ Use the repository's `justfile` as the command entry point:
 - `just lint` runs staticcheck (configured in `staticcheck.conf`).
 - `just fmt` formats all Go sources with `gofmt`.
 - `just snapshot` creates local release artifacts in `dist/`.
-- `just hooks` installs pre-commit and pre-push checks; run `prek run --all-files` before broad changes.
+- `just hooks` builds Wuko and installs pre-commit and pre-push checks; run `just hooks-check` before broad changes.
 
 ## Coding Style & Naming Conventions
 

@@ -1,0 +1,84 @@
+version: 1
+name: repository-file-check
+description: Apply one repository policy to each selected file
+inputs:
+  check: {type: string, required: true}
+  files: {type: array, required: true}
+  lfs: {type: object, default: {}}
+steps:
+  - id: files
+    if: inputs.check in ["yaml", "toml"]
+    foreach:
+      items: inputs.files
+      max_concurrency: 1
+      max_iterations: 100000
+      fail_fast: false
+      steps:
+        - id: parse
+          type: decode
+          with:
+            format: "{{ .inputs.check }}"
+            path: "{{ .foreach.item }}"
+            validate_only: true
+            max_bytes: 1GiB
+
+  # One Lua pass reads each file once and keeps no per-file step state.
+  - id: contents
+    type: lua
+    if: inputs.check in ["merge", "private_key", "large"]
+    with:
+      args:
+        check: "{{ .inputs.check }}"
+        files: {expr: inputs.files}
+        lfs: {expr: inputs.lfs}
+      source: |
+        local check, failed = wuko.args.check, {}
+        -- Signatures are split so this file does not match the private key scan.
+        local signatures = {"BEGIN ".."PRIVATE KEY", "BEGIN ".."PGP PRIVATE KEY BLOCK", "PuTTY-".."User-Key-File-2", "BEGIN ".."OpenVPN Static key V1"}
+        for _, kind in ipairs({"RSA", "DSA", "EC", "OPENSSH", "SSH2 ENCRYPTED", "ENCRYPTED"}) do
+          signatures[#signatures+1] = "BEGIN "..kind.." PRIVATE KEY"
+        end
+        local function has_marker(text)
+          if not (text:find("<<<<<<< ", 1, true) or text:find("=======", 1, true) or text:find(">>>>>>> ", 1, true)) then return false end
+          for line, newline in text:gmatch("([^\n]*)(\n?)") do
+            local prefix = line:sub(1, 8)
+            if prefix == "<<<<<<< " or prefix == "======= " or prefix == ">>>>>>> " then return true end
+            if newline ~= "" and (line == "=======" or line == "=======\r") then return true end
+          end
+          return false
+        end
+        local function has_key(text)
+          for _, signature in ipairs(signatures) do
+            if text:find(signature, 1, true) then return true end
+          end
+          return false
+        end
+        for _, path in ipairs(wuko.args.files) do
+          if check == "large" then
+            if not wuko.args.lfs[path] and wuko.fs.stat(path).size > 512000 then failed[#failed+1] = path end
+          else
+            local text = wuko.fs.read(path)
+            if (check == "merge" and has_marker(text)) or (check == "private_key" and has_key(text)) then failed[#failed+1] = path end
+          end
+        end
+        local messages = {merge="Merge conflict marker in ", private_key="Private key found: ", large="Files exceed 500 KiB: "}
+        assert(#failed == 0, messages[check] .. table.concat(failed, ", "))
+
+  - id: gofmt
+    if: inputs.check == "gofmt"
+    batch:
+      items: inputs.files
+      size: 100
+      max_concurrency: 1
+      max_iterations: 100000
+      fail_fast: false
+      steps:
+        - id: format
+          type: shell
+          with:
+            argv: {expr: 'concat(["gofmt", "-l", "-w", "--"], batch.items)'}
+        - id: unchanged
+          type: assert
+          with:
+            expr: steps.format.stdout == ""
+            message: "gofmt modified files; review and stage the changes"

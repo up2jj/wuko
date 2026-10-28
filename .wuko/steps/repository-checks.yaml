@@ -1,0 +1,160 @@
+steps:
+  - require: repository-files.yaml
+
+  # Independent checks continue after failures; serial execution keeps fixers ordered.
+  - concurrent:
+      max_concurrency: 1
+      fail_fast: false
+      steps:
+        - id: trailing_whitespace
+          type: lua
+          if: len(steps.selected.text) > 0
+          with:
+            args: {files: {expr: steps.selected.text}}
+            source: |
+              local changed = {}
+              -- Lua patterns and per-line rewrites are slow, so plain searches pick the files to rewrite.
+              local endings = {"\r\r\n"}
+              for _, space in ipairs({" ", "\t", "\v", "\f"}) do
+                endings[#endings+1] = space .. "\n"
+                endings[#endings+1] = space .. "\r\n"
+              end
+              local function dirty(text)
+                local last = text:sub(-1)
+                if last == " " or last == "\t" or last == "\r" or last == "\v" or last == "\f" then return true end
+                for _, ending in ipairs(endings) do
+                  if text:find(ending, 1, true) then return true end
+                end
+                return false
+              end
+              for _, path in ipairs(wuko.args.files) do
+                local original = wuko.fs.read(path)
+                if dirty(original) then
+                  local fixed = original:gsub("([^\n]*)(\n?)", function(line, newline)
+                    local ending = newline
+                    if newline ~= "" and line:sub(-1) == "\r" then line, ending = line:sub(1,-2), "\r\n" end
+                    return line:gsub("[ \t\r\v\f]+$", "") .. ending
+                  end)
+                  if fixed ~= original then wuko.fs.write(path, fixed); changed[#changed+1] = path end
+                end
+              end
+              assert(#changed == 0, "Fixed trailing whitespace; review and stage: " .. table.concat(changed, ", "))
+
+        - id: end_of_file_fixer
+          type: lua
+          if: len(steps.selected.text) > 0
+          with:
+            args: {files: {expr: steps.selected.text}}
+            source: |
+              local changed = {}
+              for _, path in ipairs(wuko.args.files) do
+                local original = wuko.fs.read(path)
+                -- Scan back over the trailing newlines instead of pattern-matching the whole file.
+                local last = #original
+                while last > 0 and (original:byte(last) == 10 or original:byte(last) == 13) do last = last - 1 end
+                local ending = original:sub(last + 1)
+                local newline = ending:sub(1,2) == "\r\n" and "\r\n" or ending:sub(1,1)
+                if newline == "" then newline = "\n" end
+                if last == 0 and #original > 0 then
+                  wuko.fs.write(path, ""); changed[#changed+1] = path
+                elseif last > 0 and ending ~= newline then
+                  wuko.fs.write(path, original:sub(1, last) .. newline); changed[#changed+1] = path
+                end
+              end
+              assert(#changed == 0, "Fixed end-of-file newline; review and stage: " .. table.concat(changed, ", "))
+
+        - id: check_yaml
+          uses: ../actions/file-check
+          if: len(steps.selected.yaml) > 0
+          with:
+            check: yaml
+            files: {expr: steps.selected.yaml}
+
+        - id: check_toml
+          uses: ../actions/file-check
+          if: len(steps.selected.toml) > 0
+          with:
+            check: toml
+            files: {expr: steps.selected.toml}
+
+        - id: check_merge_conflict
+          uses: ../actions/file-check
+          if: steps.git_files.merge && len(steps.selected.text) > 0
+          with:
+            check: merge
+            files: {expr: steps.selected.text}
+
+        - id: check_added_large_files
+          uses: ../actions/file-check
+          if: len(steps.selected.added) > 0
+          with:
+            check: large
+            files: {expr: steps.selected.added}
+            lfs: {expr: steps.selected.lfs}
+
+        - id: check_case_conflict
+          type: lua
+          if: len(steps.selected.files) > 0
+          with:
+            args:
+              index: {expr: steps.git_files.index}
+              added: {expr: steps.git_files.added}
+              selected: {expr: steps.selected.files}
+            source: |
+              local groups, relevant = {}, {}
+              local function include(path, selected)
+                while path do
+                  local lower = wuko.helpers.lower(path)
+                  groups[lower] = groups[lower] or {}
+                  groups[lower][path] = true
+                  if selected then relevant[lower] = true end
+                  path = path:match("^(.*)/[^/]+$")
+                end
+              end
+              for _, path in ipairs(wuko.args.index) do include(path, false) end
+              for _, path in ipairs(wuko.args.added) do include(path, true) end
+              for _, path in ipairs(wuko.args.selected) do include(path, true) end
+              local conflicts = {}
+              for lower, paths in pairs(groups) do
+                local names = {}
+                for path in pairs(paths) do names[#names+1] = path end
+                if relevant[lower] and #names > 1 then
+                  for _, path in ipairs(names) do conflicts[#conflicts+1] = path end
+                end
+              end
+              table.sort(conflicts)
+              assert(#conflicts == 0, "Case-insensitivity conflict: " .. table.concat(conflicts, ", "))
+
+        - id: detect_private_key
+          uses: ../actions/file-check
+          if: len(steps.selected.text) > 0
+          with:
+            check: private_key
+            files: {expr: steps.selected.text}
+
+        - id: gofmt
+          uses: ../actions/file-check
+          if: len(steps.selected.go) > 0
+          with:
+            check: gofmt
+            files: {expr: steps.selected.go}
+
+        - id: go_vet
+          type: shell
+          if: len(steps.selected.go) > 0
+          with: {command: go, args: [vet, ./...]}
+
+        - id: go_mod_tidy
+          type: shell
+          if: steps.selected.tidy
+          with: {command: go, args: [mod, tidy, -diff]}
+
+        - id: staticcheck
+          type: shell
+          if: vars.stage == "push" && steps.selected.lint
+          with: {command: sh, args: [scripts/lint.sh]}
+
+        - id: go_test
+          type: shell
+          if: vars.stage == "push" && len(steps.selected.go) > 0
+          with: {command: go, args: [test, -race, ./...]}

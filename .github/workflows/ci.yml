@@ -64,11 +64,9 @@ jobs:
             test -s "$asset" || { echo "missing VHS asset: $asset"; missing=1; }
           done
           exit "$missing"
-      - name: gofmt
+      - name: repository checks
         run: |
-          test -z "$(gofmt -l .)" || { echo "Unformatted files:"; gofmt -l .; exit 1; }
-      - name: vet
-        run: go vet ./...
+          "$RUNNER_TEMP/wuko" --env-loader none run --file .wuko/workflows/repository-checks.yaml all --once --reporter plain
       - name: staticcheck
         run: sh scripts/lint.sh
       - name: test

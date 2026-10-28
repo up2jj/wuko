@@ -356,6 +356,24 @@ wuko.output("helpers", {
 	}
 }
 
+func TestLuaIsUTF8ValidatesByteStrings(t *testing.T) {
+	t.Parallel()
+	runner := steptest.Build(t, New, map[string]any{"source": `
+wuko.output("valid", wuko.helpers.is_utf8("wuko ✓"))
+wuko.output("empty", wuko.helpers.is_utf8(""))
+wuko.output("invalid", wuko.helpers.is_utf8(string.char(255)))
+wuko.output("truncated", wuko.helpers.is_utf8(string.char(226, 130)))
+`})
+	result, err := runner.Run(t.Context(), step.Request{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{"valid": true, "empty": true, "invalid": false, "truncated": false}
+	if diff := cmp.Diff(want, result.Outputs); diff != "" {
+		t.Fatalf("UTF-8 checks mismatch (-want +got):\n%s", diff)
+	}
+}
+
 func TestLuaTimeHelpersAndWorkflowTimezone(t *testing.T) {
 	t.Parallel()
 	runner := steptest.Build(t, New, map[string]any{"source": `

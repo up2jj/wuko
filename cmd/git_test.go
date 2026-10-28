@@ -43,6 +43,55 @@ func TestGitHookRunExposesStructuredContext(t *testing.T) {
 	}
 }
 
+func TestGitHookProjectBindingIgnoresUnrelatedInvalidGlobalWorkflow(t *testing.T) {
+	t.Parallel()
+	root := gittest.Init(t)
+	home := t.TempDir()
+	testfs.Write(t, filepath.Join(home, ".wuko", "workflows", "invalid.yaml"), "invalid: [workflow\n")
+	writeGitHookWorkflow(t, root, "check", "printf checked", nil)
+	writeGitHookManifest(t, root, "pre-commit:\n    - workflow: check")
+	var output bytes.Buffer
+	deps := gitHookTestDependencies(t, root, &output, io.Discard, func(string) string { return "" })
+	deps.homeDir = func() (string, error) { return home, nil }
+	executable := filepath.Join(root, "wuko")
+	testfs.WriteFile(t, executable, []byte("binary"), 0o755)
+	deps.executable = func() (string, error) { return executable, nil }
+	for _, args := range [][]string{{"git", "hook", "install"}, {"git", "hook", "run", "pre-commit"}} {
+		command := newRootCmd(deps)
+		command.SetArgs(args)
+		if err := command.ExecuteContext(t.Context()); err != nil {
+			t.Fatalf("%v failed: %v", args, err)
+		}
+	}
+	if !strings.Contains(output.String(), "checked") {
+		t.Fatalf("output = %q, want the repository check to run", output.String())
+	}
+}
+
+func TestGitHookBindingFallsBackToGlobalWorkflowWithoutRepositoryWorkflows(t *testing.T) {
+	t.Parallel()
+	root := gittest.Init(t)
+	home := t.TempDir()
+	writeGitHookWorkflow(t, home, "check", "printf checked", nil)
+	writeGitHookManifest(t, root, "pre-commit:\n    - workflow: check")
+	var output bytes.Buffer
+	deps := gitHookTestDependencies(t, root, &output, io.Discard, func(string) string { return "" })
+	deps.homeDir = func() (string, error) { return home, nil }
+	executable := filepath.Join(root, "wuko")
+	testfs.WriteFile(t, executable, []byte("binary"), 0o755)
+	deps.executable = func() (string, error) { return executable, nil }
+	for _, args := range [][]string{{"git", "hook", "install"}, {"git", "hook", "run", "pre-commit"}} {
+		command := newRootCmd(deps)
+		command.SetArgs(args)
+		if err := command.ExecuteContext(t.Context()); err != nil {
+			t.Fatalf("%v failed: %v", args, err)
+		}
+	}
+	if !strings.Contains(output.String(), "checked") {
+		t.Fatalf("output = %q, want the global check to run", output.String())
+	}
+}
+
 func TestGitHookRunStopsAfterFirstWorkflowFailure(t *testing.T) {
 	t.Parallel()
 	root := gittest.Init(t)

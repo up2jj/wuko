@@ -222,19 +222,33 @@ func newGitHookRunCmd(deps dependencies) *cobra.Command {
 			runDeps := deps
 			runDeps.cwd = func() (string, error) { return repository.Root, nil }
 			runDeps.environment = nil
+			home, err := deps.homeDir()
+			if err != nil {
+				return fmt.Errorf("finding home directory: %w", err)
+			}
+			configDir, err := deps.configDir()
+			if err != nil {
+				return fmt.Errorf("finding user config directory: %w", err)
+			}
+			findWorkflow, err := gitHookWorkflowFinder(repository.Root, home, configDir)
+			if err != nil {
+				return fmt.Errorf("Git hook %s: %w", name, err)
+			}
 			for _, binding := range bindings {
-				selector := []string{binding.Workflow}
-				if binding.Target != "" {
-					selector = append(selector, binding.Target)
+				source, err := findWorkflow(binding.Workflow)
+				if err != nil {
+					return fmt.Errorf("Git hook %s: %w", name, err)
 				}
 				hookReporter := newGitHookReporter(command, deps, repository.Root, name, binding.Workflow)
 				config := runWorkflowConfig{
 					once: true, nonInteractive: true,
+					workflowFile:    source.Path,
+					targetName:      binding.Target,
 					environment:     []string{gitHookStackEnvironment + "=" + stack},
 					providerValues:  map[string]map[string]any{"git": gitContext},
 					defaultReporter: hookReporter,
 				}
-				if err := runWorkflow(command, runDeps, selector, config); err != nil {
+				if err := runWorkflow(command, runDeps, nil, config); err != nil {
 					return hookReporter.failureError(err)
 				}
 			}
@@ -295,9 +309,13 @@ func validateGitHookBindings(command *cobra.Command, deps dependencies, reposito
 		"repository": map[string]any{"root": repository.Root, "git_dir": repository.GitDir, "common_dir": repository.CommonDir},
 		"hook":       map[string]any{"name": "", "args": []any{}, "stdin": "", "payload": map[string]any{}},
 	}
+	findWorkflow, err := gitHookWorkflowFinder(repository.Root, home, config)
+	if err != nil {
+		return err
+	}
 	for _, hookName := range manifest.HookNames() {
 		for _, binding := range manifest.Hooks[hookName] {
-			source, err := workflow.Find(repository.Root, home, config, binding.Workflow)
+			source, err := findWorkflow(binding.Workflow)
 			if err != nil {
 				return fmt.Errorf("Git hook %s: %w", hookName, err)
 			}
@@ -330,6 +348,25 @@ func validateGitHookBindings(command *cobra.Command, deps dependencies, reposito
 		}
 	}
 	return nil
+}
+
+// gitHookWorkflowFinder resolves hook bindings against the repository's workflows, which
+// are discovered once for all bindings. Repository bindings must not depend on unrelated
+// global workflows being valid, so normal discovery is only a fallback for names the
+// repository does not provide.
+func gitHookWorkflowFinder(root, home, configDir string) (func(string) (workflow.Source, error), error) {
+	sources, err := workflow.DiscoverDirectory(filepath.Join(root, ".wuko", "workflows"), "local")
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	return func(name string) (workflow.Source, error) {
+		for _, source := range sources {
+			if source.Name == name && source.Effective {
+				return source, nil
+			}
+		}
+		return workflow.Find(root, home, configDir, name)
+	}, nil
 }
 
 func gitHookCompletion(_ *cobra.Command, args []string, _ string) ([]string, cobra.ShellCompDirective) {

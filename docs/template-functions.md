@@ -803,6 +803,7 @@ or pass them through protected Lua arguments; never place them directly in workf
 | `ordinal` | `{{ value \| ordinal }}` | `ordinal(value)` | `h.ordinal(value)` | English ordinal such as `22nd` |
 | `countBytes` | `{{ value \| countBytes }}` | `countBytes(value)` | `h.count_bytes(value)` | UTF-8 byte count |
 | `countRunes` | `{{ value \| countRunes }}` | `countRunes(value)` | `h.count_runes(value)` | Unicode code-point count |
+| — | — | — | `h.is_utf8(value)` | Whether a Lua byte string contains valid UTF-8 |
 | `countGraphemes` | `{{ value \| countGraphemes }}` | `countGraphemes(value)` | `h.count_graphemes(value)` | User-perceived character count |
 | `countWords` | `{{ value \| countWords }}` | `countWords(value)` | `h.count_words(value)` | Whitespace-separated word count |
 | `countLines` | `{{ value \| countLines }}` | `countLines(value)` | `h.count_lines(value)` | Logical line count |

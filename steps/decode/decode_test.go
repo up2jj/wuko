@@ -96,6 +96,64 @@ func TestStructuredFormatsAcceptTopLevelScalarsAndNull(t *testing.T) {
 	}
 }
 
+func TestValidateOnlyAcceptsStructuredDocumentsWithoutJSONNormalization(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct{ name, format, input string }{
+		{"JSON", "json", `{"name":"wuko"}`},
+		{"empty YAML", "yaml", ""},
+		{"comment YAML", "yaml", "# comment\n"},
+		{"integer YAML key", "yaml", "1: value\n"},
+		{"YAML infinity", "yaml", "value: .inf\n"},
+		{"YAML set", "yaml", "!!set {one: null, two: null}\n"},
+		{"TOML infinity", "toml", "value = +inf\n"},
+		{"empty TOML", "toml", ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			result := runFrom(t, test.format, test.input, map[string]any{"validate_only": true})
+			if value, exists := result.Outputs["value"]; !exists || value != nil {
+				t.Fatalf("validation output = %#v, want value: null", result.Outputs)
+			}
+		})
+	}
+}
+
+func TestValidateOnlyReportsTOMLLocation(t *testing.T) {
+	t.Parallel()
+	runner := steptest.Build(t, New, map[string]any{"format": "toml", "from": "vars.data", "validate_only": true})
+	_, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{"data": "a = 1\nname = [\n"}})
+	if err == nil || !strings.Contains(err.Error(), "line 2, column") {
+		t.Fatalf("error = %v, want a line 2 location", err)
+	}
+}
+
+func TestValidateOnlyStillRejectsInvalidInput(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct{ name, format, input string }{
+		{"bad JSON", "json", "{"},
+		{"multiple JSON", "json", "{} {}"},
+		{"bad YAML", "yaml", "name: [\n"},
+		{"duplicate YAML key", "yaml", "name: one\nname: two\n"},
+		{"multiple YAML documents", "yaml", "a: 1\n---\nb: 2\n"},
+		{"custom YAML tag", "yaml", "!custom value\n"},
+		{"nested custom YAML tag", "yaml", "name: !custom value\n"},
+		{"invalid UTF-8 YAML", "yaml", "name: \xff\n"},
+		{"bad TOML", "toml", "name = [\n"},
+		{"duplicate TOML key", "toml", "name = 1\nname = 2\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			runner := steptest.Build(t, New, map[string]any{"format": test.format, "from": "vars.data", "validate_only": true})
+			if _, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{"data": test.input}}); err == nil {
+				t.Fatal("invalid document accepted")
+			}
+		})
+	}
+	if _, err := New(map[string]any{"format": "lines", "from": "vars.data", "validate_only": true}); err == nil {
+		t.Fatal("lines accepted validate_only")
+	}
+}
+
 func TestLinesOptionsAndEndings(t *testing.T) {
 	tests := []struct {
 		name      string

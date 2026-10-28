@@ -65,9 +65,13 @@ fmt:
 tidy:
     go mod tidy
 
-# Install git hooks via prek (pre-commit + pre-push).
-hooks:
-    prek install --hook-type pre-commit --hook-type pre-push
+# Build a persistent Wuko binary and install pre-commit + pre-push workflows.
+hooks: build
+    ./wuko git hook install
+
+# Run the commit checks on every tracked file, without staged isolation.
+hooks-check: build
+    ./wuko --env-loader none run --file .wuko/workflows/repository-checks.yaml all --once --reporter plain
 
 # Run wuko in the current directory, e.g. `just run --help`.
 [positional-arguments]

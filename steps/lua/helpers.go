@@ -3,6 +3,7 @@ package lua
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/up2jj/wuko/expression"
 	glua "github.com/yuin/gopher-lua"
@@ -93,6 +94,7 @@ func helperFunctions() map[string]glua.LGFunction {
 		"ordinal":                   helperOrdinal,
 		"count_bytes":               helperCountBytes,
 		"count_runes":               helperCountRunes,
+		"is_utf8":                   helperIsUTF8,
 		"count_graphemes":           helperCountGraphemes,
 		"count_words":               helperCountWords,
 		"count_lines":               helperCountLines,
@@ -836,6 +838,15 @@ func helperCountRunes(state *glua.LState) int {
 		return 0
 	}
 	state.Push(glua.LNumber(expression.CountRunes(state.CheckString(1))))
+	return 1
+}
+
+func helperIsUTF8(state *glua.LState) int {
+	if state.GetTop() != 1 {
+		state.RaiseError("helpers.is_utf8: expected one value")
+		return 0
+	}
+	state.Push(glua.LBool(utf8.ValidString(state.CheckString(1))))
 	return 1
 }
 
