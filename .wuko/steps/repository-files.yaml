@@ -29,13 +29,16 @@ steps:
           if not modes[path] then index[#index+1] = path end
           modes[path] = mode
         end
+        -- Changed paths include deletions, which can break the package that lost a file.
+        local changed = {}
         for _, file in ipairs(wuko.args.staged) do
+          changed[#changed+1] = file.path
           if file.status == "added" then added[#added+1] = file.path end
           if file.status ~= "deleted" then candidates[#candidates+1] = file.path end
         end
-        if wuko.args.source == "all" then candidates = index
+        if wuko.args.source == "all" then candidates, changed = index, index
         elseif wuko.args.source == "pushed" then
-          candidates = {}
+          candidates, changed = {}, {}
           for _, update in ipairs(wuko.json.decode(wuko.args.updates)) do
             local tip, base = update.local_oid, update.remote_oid
             assert(tip and base and not tip:match("^%-") and not base:match("^%-"), "Invalid push update")
@@ -48,8 +51,9 @@ steps:
                 else base = nil end
               end
               if base then
-                for _, path in ipairs(paths(git({"diff", "--name-only", "--no-renames", "--diff-filter=ACMRT", "-z", base, tip, "--"}))) do
+                for _, path in ipairs(paths(git({"diff", "--name-only", "--no-renames", "--diff-filter=ACDMRT", "-z", base, tip, "--"}))) do
                   candidates[#candidates+1] = path
+                  changed[#changed+1] = path
                 end
               end
             end
@@ -69,10 +73,41 @@ steps:
           end
         end
         table.sort(filtered)
+        -- Vet only the packages whose Go files changed, following the directories ./... skips.
+        -- A module change can affect every package, so it vets them all.
+        local vet, seen, modules = {}, {}, {}
+        local function exists(path) return (pcall(wuko.fs.stat, path)) end
+        local function nested(dir)
+          while dir ~= "." do
+            if modules[dir] == nil then modules[dir] = exists(dir.."/go.mod") end
+            if modules[dir] then return true end
+            dir = dir:match("^(.*)/[^/]+$") or "."
+          end
+          return false
+        end
+        local function has_go(dir)
+          local ok, entries = pcall(wuko.fs.list, dir)
+          if not ok then return false end
+          for _, entry in ipairs(entries) do
+            if not entry.is_dir and entry.name:match("%.go$") then return true end
+          end
+          return false
+        end
+        for _, path in ipairs(changed) do
+          if path == "go.mod" or path == "go.sum" or wuko.args.source == "all" then vet = {"./..."}; break end
+          local dir = path:match("^(.*)/[^/]+$") or "."
+          local skipped = ("/"..dir):match("/[._][^/]*") and dir ~= "." or ("/"..dir.."/"):match("/testdata/")
+          if path:match("%.go$") and not seen[dir] and not skipped and not path:match("^dist/") then
+            seen[dir] = true
+            if not nested(dir) and has_go(dir) then vet[#vet+1] = dir == "." and "." or "./"..dir end
+          end
+        end
+        table.sort(vet)
         local directory = git({"rev-parse", "--absolute-git-dir"}):gsub("\n$", "")
-        local function exists(name) return pcall(wuko.fs.stat, directory.."/"..name) end
-        wuko.output("merge", exists("MERGE_MSG") and (exists("MERGE_HEAD") or exists("rebase-apply") or exists("rebase-merge")))
+        local function state(name) return exists(directory.."/"..name) end
+        wuko.output("merge", state("MERGE_MSG") and (state("MERGE_HEAD") or state("rebase-apply") or state("rebase-merge")))
         wuko.output("files", filtered)
+        wuko.output("vet", vet)
         wuko.output("index", index)
         wuko.output("added", added)
 
@@ -82,8 +117,9 @@ steps:
       args:
         files: {expr: steps.git_files.files}
         added: {expr: steps.git_files.added}
+        vet: {expr: steps.git_files.vet}
       source: |
-        local result = {files={}, text={}, yaml={}, toml={}, go={}, added={}, lfs={}, tidy=false, lint=false}
+        local result = {files={}, text={}, yaml={}, toml={}, go={}, added={}, lfs={}, vet=wuko.args.vet, tidy=false, lint=false}
         local added = {}
         for _, path in ipairs(wuko.args.added) do added[path] = true end
         local text = {go=true, mod=true, sum=true, yaml=true, yml=true, toml=true, json=true, md=true, txt=true, sh=true, lua=true, js=true, ts=true, css=true, html=true, svg=true, xml=true, tmpl=true, tape=true}

@@ -141,8 +141,9 @@ steps:
 
         - id: go_vet
           type: shell
-          if: len(steps.selected.go) > 0
-          with: {command: go, args: [vet, ./...]}
+          if: len(steps.selected.vet) > 0
+          with:
+            argv: {expr: 'concat(["go", "vet"], steps.selected.vet)'}
 
         - id: go_mod_tidy
           type: shell

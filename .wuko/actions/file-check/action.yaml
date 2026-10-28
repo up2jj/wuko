@@ -68,7 +68,8 @@ steps:
     if: inputs.check == "gofmt"
     batch:
       items: inputs.files
-      size: 100
+      # One gofmt process per thousand files keeps argv well under the OS limit.
+      size: 1000
       max_concurrency: 1
       max_iterations: 100000
       fail_fast: false

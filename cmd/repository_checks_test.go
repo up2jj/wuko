@@ -306,6 +306,37 @@ func TestRepositoryFileSelectionPreservesFiltersAndNames(t *testing.T) {
 	}
 }
 
+func TestRepositoryVetSelectionScopesChangedPackages(t *testing.T) {
+	t.Parallel()
+	root := gittest.InitWithCommit(t)
+	testfs.WriteTree(t, root, map[string]string{
+		"go.mod": "module example\n", "keep/keep.go": "package keep\n", "gone/gone.go": "package gone\n",
+		"emptied/old.go": "package emptied\n", "emptied/README.md": "docs\n",
+	})
+	gittest.Run(t, root, "add", ".")
+	gittest.Run(t, root, "commit", "-qm", "baseline")
+	testfs.WriteTree(t, root, map[string]string{
+		"main.go": "package main\n", "pkg/a.go": "package pkg\n", "pkg/b.go": "package pkg\n",
+		"pkg/testdata/x.go": "package x\n", "_tools/t.go": "package tools\n", ".hidden/h.go": "package hidden\n",
+		"nested/go.mod": "module nested\n", "nested/inner/n.go": "package inner\n", "keep/doc.md": "docs\n",
+	})
+	gittest.Run(t, root, "add", ".")
+	gittest.Run(t, root, "rm", "-q", "keep/keep.go", "gone/gone.go", "emptied/old.go")
+	testfs.Write(t, filepath.Join(root, "keep", "other.go"), "package keep\n")
+	selected := runRepositorySelection(t, root, "staged", nil)
+	if diff := cmp.Diff([]any{".", "./keep", "./pkg"}, selected["vet"]); diff != "" {
+		t.Fatalf("vet packages mismatch (-want +got):\n%s", diff)
+	}
+	testfs.Write(t, filepath.Join(root, "go.mod"), "module example\n\ngo 1.26\n")
+	gittest.Run(t, root, "add", "go.mod")
+	if diff := cmp.Diff([]any{"./..."}, runRepositorySelection(t, root, "staged", nil)["vet"]); diff != "" {
+		t.Fatalf("module change mismatch (-want +got):\n%s", diff)
+	}
+	if diff := cmp.Diff([]any{"./..."}, runRepositorySelection(t, root, "all", nil)["vet"]); diff != "" {
+		t.Fatalf("all files mismatch (-want +got):\n%s", diff)
+	}
+}
+
 func TestRepositoryPushSelectionHandlesNewExistingDeletedAndRepeatedRefs(t *testing.T) {
 	t.Parallel()
 	root := gittest.InitWithCommit(t)
