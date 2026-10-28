@@ -424,7 +424,11 @@ checking one against a parent would report problems that belong to the merged br
 deduplicates commits shared by several updates, compares each remaining commit with its first
 parent (or the empty tree), and stops on the first violation.
 
-Outside a hook, provide the same four-field update records with an expression:
+Outside a `pre-push` hook, `pushed` checks what pushing the current branch would send: `HEAD`
+against `@{push}`, or its upstream when there is no push destination. Without either, the branch
+counts as a new ref, so only commits no remote-tracking ref has are checked. A detached `HEAD`
+works the same way, and a repository without commits has nothing to push. To check other refs,
+provide the same four-field update records with an expression:
 
 ```yaml
 - id: outgoing_whitespace
@@ -468,7 +472,8 @@ straight to later steps.
 `pushed` lists the paths changed by the commits the push sends: for an existing ref, the commits
 not reachable from the remote object; for a new ref, the commits no remote-tracking ref already
 has. Like [`git_diff_check`](#git_diff_check), it skips merge commits and deleted refs, reads the
-updates from an active `pre-push` hook, and accepts the same `updates` expression outside one.
+updates from an active `pre-push` hook or an `updates` expression, and otherwise selects what
+pushing the current branch would send.
 
 | Output | Meaning |
 | --- | --- |

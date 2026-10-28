@@ -2,6 +2,7 @@ package git
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"strconv"
@@ -10,6 +11,7 @@ import (
 	"github.com/expr-lang/expr"
 	"github.com/expr-lang/expr/vm"
 	wukoexpr "github.com/up2jj/wuko/expression"
+	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/step"
 	"go.yaml.in/yaml/v3"
 )
@@ -578,7 +580,7 @@ func checkDiff(ctx context.Context, request step.Request, comparison diffCompari
 }
 
 func (runner *diffCheckRunner) checkPushed(ctx context.Context, request step.Request) error {
-	updates, err := resolvePushUpdates(runner.updatesProgram, request)
+	updates, err := resolvePushUpdates(ctx, runner.updatesProgram, request)
 	if err != nil {
 		return err
 	}
@@ -616,30 +618,62 @@ func (runner *diffCheckRunner) checkPushed(ctx context.Context, request step.Req
 	return nil
 }
 
-func resolvePushUpdates(program *vm.Program, request step.Request) ([]pushUpdate, error) {
-	var value any
+// resolvePushUpdates returns the ref updates a pushed source inspects: the updates expression
+// when set, the active pre-push hook's updates, or otherwise what pushing the current branch
+// would send.
+func resolvePushUpdates(ctx context.Context, program *vm.Program, request step.Request) ([]pushUpdate, error) {
 	if program != nil {
 		resolved, err := expr.Run(program, request.ExpressionEnvironment(nil))
 		if err != nil {
 			return nil, fmt.Errorf("evaluating updates expr: %w", err)
 		}
-		value = resolved
-	} else {
-		gitContext, ok := request.Providers.Values["git"]
-		if !ok {
-			return nil, fmt.Errorf("source pushed requires updates or an active Git hook context")
-		}
-		hook, ok := gitContext["hook"].(map[string]any)
-		if !ok || hook["name"] != "pre-push" {
-			return nil, fmt.Errorf("source pushed requires a pre-push Git hook context")
-		}
-		payload, ok := hook["payload"].(map[string]any)
-		if !ok {
-			return nil, fmt.Errorf("pre-push Git hook payload is unavailable")
-		}
-		value = payload["updates"]
+		return decodePushUpdates(resolved)
 	}
-	return decodePushUpdates(value)
+	hook, _ := request.Providers.Values["git"]["hook"].(map[string]any)
+	if hook == nil || hook["name"] != "pre-push" {
+		return currentBranchPushUpdates(ctx, request)
+	}
+	payload, ok := hook["payload"].(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("pre-push Git hook payload is unavailable")
+	}
+	return decodePushUpdates(payload["updates"])
+}
+
+// currentBranchPushUpdates describes pushing HEAD to where `git push` would send it, falling
+// back to its upstream. Without either, the update counts as a new ref, so only commits no
+// remote-tracking ref has are inspected. A repository without commits has nothing to push.
+func currentBranchPushUpdates(ctx context.Context, request step.Request) ([]pushUpdate, error) {
+	revision := func(name string) (string, bool, error) {
+		result, err := runGitCapture(ctx, request, "rev-parse", "--verify", "--quiet", name)
+		if err != nil {
+			var exitErr *process.ExitError
+			if errors.As(err, &exitErr) {
+				return "", false, nil
+			}
+			return "", false, gitCommandError(fmt.Sprintf("resolving Git revision %q", name), result, err)
+		}
+		return strings.TrimSpace(result.Stdout), true, nil
+	}
+	head, found, err := revision("HEAD")
+	if err != nil || !found {
+		return nil, err
+	}
+	update := pushUpdate{localRef: "HEAD", localOID: head, remoteOID: strings.Repeat("0", len(head))}
+	if result, err := runGitCapture(ctx, request, "symbolic-ref", "--quiet", "HEAD"); err == nil {
+		update.localRef = strings.TrimSpace(result.Stdout)
+	}
+	for _, target := range []string{"@{push}", "@{upstream}"} {
+		remote, found, err := revision(target)
+		if err != nil {
+			return nil, err
+		}
+		if found {
+			update.remoteOID = remote
+			break
+		}
+	}
+	return []pushUpdate{update}, nil
 }
 
 func decodePushUpdates(value any) ([]pushUpdate, error) {

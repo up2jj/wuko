@@ -337,10 +337,31 @@ func TestGitDiffCheckPushedAcceptsExplicitUpdatesExpression(t *testing.T) {
 	if _, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{"updates": value}}); err != nil {
 		t.Fatal(err)
 	}
-	withoutContext := steptest.Build(t, NewDiffCheck, map[string]any{"source": "pushed"})
-	if _, err := withoutContext.Run(t.Context(), step.Request{}); err == nil || !strings.Contains(err.Error(), "active Git hook context") {
-		t.Fatalf("missing context error = %v", err)
+}
+
+func TestGitDiffCheckPushedOutsideAHookChecksTheCurrentBranch(t *testing.T) {
+	t.Parallel()
+	dir := gittest.InitWithCommit(t)
+	trackUpstream(t, dir)
+	runner := steptest.Build(t, NewDiffCheck, map[string]any{"source": "pushed"})
+	if _, err := runner.Run(t.Context(), step.Request{RunDir: dir}); err != nil {
+		t.Fatalf("up-to-date branch: %v", err)
 	}
+	testfs.Write(t, filepath.Join(dir, "outgoing.txt"), "bad \n")
+	gittest.Run(t, dir, "add", "outgoing.txt")
+	gittest.Run(t, dir, "commit", "-qm", "outgoing whitespace")
+	if _, err := runner.Run(t.Context(), step.Request{RunDir: dir}); err == nil || !strings.Contains(err.Error(), "outgoing.txt:1") {
+		t.Fatalf("outgoing commit error = %v", err)
+	}
+}
+
+// trackUpstream makes origin/main the upstream of the current branch at its current commit.
+func trackUpstream(t *testing.T, dir string) {
+	t.Helper()
+	branch := gittest.Output(t, dir, "symbolic-ref", "--short", "HEAD")
+	gittest.Run(t, dir, "update-ref", "refs/remotes/origin/main", "HEAD")
+	gittest.Run(t, dir, "config", "branch."+branch+".remote", "origin")
+	gittest.Run(t, dir, "config", "branch."+branch+".merge", "refs/heads/main")
 }
 
 type recordingGitExecutor struct {

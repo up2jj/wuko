@@ -59,7 +59,8 @@ targets:
         with: {source: pushed}
 ```
 
-The pushed target reads the active pre-push payload. It handles several ref updates, new and
+The pushed target reads the active pre-push payload; run outside the hook, it checks what pushing
+the current branch would send. It handles several ref updates, new and
 deleted branches, commits shared by more than one ref, and root commits. It skips merge commits,
 which carry no changes of their own; the staged target already checks a conflict resolution when it
 is committed. Restrict either check with

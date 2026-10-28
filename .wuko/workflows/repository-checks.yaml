@@ -16,7 +16,7 @@ targets:
     description: Check outgoing files, lint, and run race tests
     vars: {source: pushed, stage: push}
     steps:
-      # Outside a pre-push hook, pushed selection needs explicit updates and fails.
+      # Outside a pre-push hook, this checks what pushing the current branch would send.
       - id: files
         type: git_files
         with: {source: pushed, exclude: ['^dist/', '^completions/']}

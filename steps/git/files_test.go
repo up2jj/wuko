@@ -156,8 +156,43 @@ func TestGitFilesPushedFollowsHookUpdates(t *testing.T) {
 	if diff := cmp.Diff([]any{"kept.txt"}, result.Outputs["files"]); diff != "" {
 		t.Errorf("explicit updates files mismatch (-want +got):\n%s", diff)
 	}
-	if _, err := steptest.Build(t, NewFiles, map[string]any{"source": "pushed"}).Run(t.Context(), step.Request{RunDir: dir}); err == nil || !strings.Contains(err.Error(), "active Git hook context") {
-		t.Fatalf("missing context error = %v", err)
+}
+
+func TestGitFilesPushedOutsideAHookUsesTheCurrentBranch(t *testing.T) {
+	t.Parallel()
+	pushed := func(dir string) []any {
+		t.Helper()
+		result, err := steptest.Build(t, NewFiles, map[string]any{"source": "pushed"}).Run(t.Context(), step.Request{RunDir: dir})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result.Outputs["files"].([]any)
+	}
+	dir := gittest.InitWithCommit(t)
+	// Without an upstream or any remote-tracking ref, the branch is new and sends everything.
+	testfs.Write(t, filepath.Join(dir, "first.txt"), "one\n")
+	gittest.Run(t, dir, "add", "first.txt")
+	gittest.Run(t, dir, "commit", "-qm", "first")
+	if diff := cmp.Diff([]any{"README.md", "first.txt"}, pushed(dir)); diff != "" {
+		t.Errorf("new branch mismatch (-want +got):\n%s", diff)
+	}
+	trackUpstream(t, dir)
+	if diff := cmp.Diff([]any{}, pushed(dir)); diff != "" {
+		t.Errorf("up-to-date branch mismatch (-want +got):\n%s", diff)
+	}
+	testfs.Write(t, filepath.Join(dir, "second.txt"), "two\n")
+	gittest.Run(t, dir, "add", "second.txt")
+	gittest.Run(t, dir, "commit", "-qm", "second")
+	if diff := cmp.Diff([]any{"second.txt"}, pushed(dir)); diff != "" {
+		t.Errorf("ahead of upstream mismatch (-want +got):\n%s", diff)
+	}
+	// Detached HEAD has no upstream, so it sends what no remote-tracking ref has.
+	gittest.Run(t, dir, "checkout", "-q", "--detach")
+	if diff := cmp.Diff([]any{"second.txt"}, pushed(dir)); diff != "" {
+		t.Errorf("detached HEAD mismatch (-want +got):\n%s", diff)
+	}
+	if diff := cmp.Diff([]any{}, pushed(gittest.Init(t))); diff != "" {
+		t.Errorf("repository without commits mismatch (-want +got):\n%s", diff)
 	}
 }
 

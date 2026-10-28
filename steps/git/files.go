@@ -182,7 +182,7 @@ func (runner *filesRunner) changes(ctx context.Context, request step.Request) (m
 		}
 		return changes, nil
 	case diffSourcePushed:
-		updates, err := resolvePushUpdates(runner.updatesProgram, request)
+		updates, err := resolvePushUpdates(ctx, runner.updatesProgram, request)
 		if err != nil {
 			return nil, err
 		}
