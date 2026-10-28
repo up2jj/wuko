@@ -6,26 +6,10 @@ inputs:
   files: {type: array, required: true}
   lfs: {type: object, default: {}}
 steps:
-  - id: files
-    if: inputs.check in ["yaml", "toml"]
-    foreach:
-      items: inputs.files
-      max_concurrency: 1
-      max_iterations: 100000
-      fail_fast: false
-      steps:
-        - id: parse
-          type: decode
-          with:
-            format: "{{ .inputs.check }}"
-            path: "{{ .foreach.item }}"
-            validate_only: true
-            max_bytes: 1GiB
-
   # One Lua pass reads each file once and keeps no per-file step state.
   - id: contents
     type: lua
-    if: inputs.check in ["merge", "private_key", "large"]
+    if: inputs.check in ["yaml", "toml", "merge", "private_key", "large"]
     with:
       args:
         check: "{{ .inputs.check }}"
@@ -47,16 +31,22 @@ steps:
           end
           return false
         end
+        local parsers = {yaml=wuko.yaml.decode, toml=wuko.toml.decode}
         for _, path in ipairs(wuko.args.files) do
           if check == "large" then
             if not wuko.args.lfs[path] and wuko.fs.stat(path).size > 512000 then failed[#failed+1] = path end
+          elseif parsers[check] then
+            local ok, err = pcall(parsers[check], wuko.fs.read(path))
+            -- Drop the Lua position so the message names the file and its own line.
+            if not ok then failed[#failed+1] = path .. ": " .. wuko.helpers.regex_replace(tostring(err), [[^\S*:\d+: ]], "") end
           else
             local text = wuko.fs.read(path)
             if (check == "merge" and has_marker(text)) or (check == "private_key" and has_key(text)) then failed[#failed+1] = path end
           end
         end
-        local messages = {merge="Merge conflict marker in ", private_key="Private key found: ", large="Files exceed 500 KiB: "}
-        assert(#failed == 0, messages[check] .. table.concat(failed, ", "))
+        local messages = {yaml="Invalid YAML:\n", toml="Invalid TOML:\n", merge="Merge conflict marker in ", private_key="Private key found: ", large="Files exceed 500 KiB: "}
+        local separator = parsers[check] and "\n" or ", "
+        assert(#failed == 0, messages[check] .. table.concat(failed, separator))
 
   - id: gofmt
     if: inputs.check == "gofmt"
