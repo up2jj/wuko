@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"path/filepath"
 	"strings"
 	"sync"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/spf13/cobra"
 	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/engine"
@@ -15,17 +17,21 @@ import (
 	"github.com/up2jj/wuko/validation"
 )
 
-// gitHookReporter keeps successful hook runs quiet while retaining enough structured execution
-// detail to turn a rejected Git operation into one concise, actionable error.
+// gitHookReporter prints a final result for each top-level check and retains enough structured
+// execution detail to turn a rejected Git operation into one concise, actionable error.
 type gitHookReporter struct {
 	hookName     string
 	workflowName string
 	runDir       string
 	diagnostics  diagnostic.Reporter
+	output       io.Writer
 
 	mu        sync.Mutex
 	failure   gitHookFailure
 	candidate gitHookFailure
+	// concurrentGroups counts running top-level concurrent groups. Workflow validation rejects
+	// nested concurrent groups, so their branches always report at depth one.
+	concurrentGroups int
 }
 
 type gitHookFailure struct {
@@ -59,16 +65,38 @@ func newGitHookReporter(command *cobra.Command, deps dependencies, runDir, hookN
 	return &gitHookReporter{
 		hookName: hookName, workflowName: workflowName, runDir: runDir,
 		diagnostics: diagnosticsFor(command, deps, runDir),
+		output:      command.ErrOrStderr(),
 	}
 }
 
 func (reporter *gitHookReporter) Progress(event engine.ProgressEvent) {
-	if event.Kind != engine.WorkflowFinished || event.Depth != 0 || !event.Status.Unsuccessful() {
-		return
+	// The engine holds its report lock during this callback, so the line is written only after
+	// releasing ours: a slow stderr reader then stalls nothing but the write itself.
+	if line := reporter.record(event); line != "" {
+		io.WriteString(reporter.output, line)
 	}
-	stats, found := firstGitHookFailedStep(event.Stats.Steps)
+}
+
+// record updates the reporter's state for event and returns the check line to print, if any.
+func (reporter *gitHookReporter) record(event engine.ProgressEvent) (line string) {
 	reporter.mu.Lock()
 	defer reporter.mu.Unlock()
+	// Concurrent groups are transparent: their individual checks still get rows. Bodies of
+	// repeated controls and child workflows instead contribute to their enclosing check.
+	if event.ParentRunID == "" {
+		switch {
+		case event.Depth == 0 && event.Kind == engine.ConcurrentStarted:
+			reporter.concurrentGroups++
+		case event.Depth == 0 && event.Kind == engine.ConcurrentFinished:
+			reporter.concurrentGroups--
+		case event.Kind == engine.StepFinished && (event.Depth == 0 || event.Depth == 1 && reporter.concurrentGroups > 0):
+			line = reporter.checkLine(event)
+		}
+	}
+	if event.Kind != engine.WorkflowFinished || event.Depth != 0 || !event.Status.Unsuccessful() {
+		return line
+	}
+	stats, found := firstGitHookFailedStep(event.Stats.Steps)
 	reporter.failure = gitHookFailure{workflow: event.WorkflowName, err: event.Error}
 	if found {
 		reporter.failure.step = stats.ID
@@ -76,6 +104,35 @@ func (reporter *gitHookReporter) Progress(event engine.ProgressEvent) {
 		reporter.failure.attempts = len(stats.Attempts)
 		reporter.failure.err = stats.Error
 	}
+	return line
+}
+
+func (reporter *gitHookReporter) checkLine(event engine.ProgressEvent) string {
+	var status string
+	switch event.Status {
+	case engine.StatusSucceeded:
+		status = "Passed"
+	case engine.StatusFailed:
+		status = "Failed"
+	case engine.StatusSkipped:
+		status = "Skipped"
+	case engine.StatusTimedOut:
+		status = "Timed out"
+	case engine.StatusCanceled:
+		status = "Canceled"
+	default:
+		return ""
+	}
+	// Label checks by the workflow's declared name; the hook selector may be a path or target.
+	workflow := event.WorkflowName
+	if workflow == "" {
+		workflow = reporter.workflowName
+	}
+	// Measure terminal columns, not runes, and clip long labels so every status stays aligned.
+	const lineWidth, minDots = 72, 3
+	label := ansi.Truncate(workflow+" / "+event.StepID, lineWidth-minDots-len(status), "…")
+	dots := strings.Repeat(".", lineWidth-ansi.StringWidth(label)-len(status))
+	return label + dots + status + "\n"
 }
 
 func (reporter *gitHookReporter) Diagnostic(event diagnostic.Event) {

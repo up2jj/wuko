@@ -126,8 +126,21 @@ The same hook cannot recursively invoke itself. Wuko reports recursion instead o
 checks. Git's native bypass options, including `--no-verify` where supported, retain their normal
 behavior.
 
-Hook runs use a compact reporter suited to Git's command-line flow. Successful workflows add no
-status output; output written explicitly by steps is still forwarded. A failure identifies the
+Hook runs print one result line to stderr as each top-level workflow step finishes, using the
+workflow's declared `name` and step ID as the check label. Labels too long for the 72-column line
+end in `…`:
+
+```text
+repository-checks / whitespace.....................................Passed
+repository-checks / tidy..........................................Skipped
+repository-checks / vet............................................Failed
+```
+
+Conditions that skip a check show `Skipped`; timeouts and cancellation show `Timed out` and
+`Canceled`. Checks in concurrent groups print individually as they finish. Nested steps inside
+repeated controls or actions contribute to their enclosing check's result instead of printing
+separate rows. Retries and polling print only the check's final result.
+Output written explicitly by steps is still forwarded. A failure identifies the
 hook, configured workflow, failed step, source location, final error, and retry count when relevant.
 Intermediate retry and polling progress, spinners, timing summaries, and success banners are
 suppressed. Pass the global `--debug` flag when full loading, validation, and execution diagnostics

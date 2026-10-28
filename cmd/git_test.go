@@ -38,8 +38,8 @@ func TestGitHookRunExposesStructuredContext(t *testing.T) {
 	if stdout.String() != "pre-push|origin|refs/heads/main" {
 		t.Fatalf("stdout = %q", stdout.String())
 	}
-	if stderr.Len() != 0 {
-		t.Fatalf("stderr = %q, want a quiet successful hook run", stderr.String())
+	if !strings.HasPrefix(stderr.String(), "inspect / run.") || !strings.HasSuffix(stderr.String(), "Passed\n") {
+		t.Fatalf("stderr = %q, want a passed check", stderr.String())
 	}
 }
 
@@ -80,8 +80,8 @@ func TestGitHookRunUsesConciseFailureReporter(t *testing.T) {
 	if stdout.Len() != 0 {
 		t.Fatalf("stdout = %q, want no progress output", stdout.String())
 	}
-	if stderr.String() != "step detail\n" {
-		t.Fatalf("stderr = %q, want only explicit step output", stderr.String())
+	if !strings.HasPrefix(stderr.String(), "step detail\ncheck / run.") || !strings.HasSuffix(stderr.String(), "Failed\n") {
+		t.Fatalf("stderr = %q, want explicit step output followed by a failed check", stderr.String())
 	}
 }
 
