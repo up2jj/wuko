@@ -39,13 +39,7 @@ steps:
           signatures[#signatures+1] = "BEGIN "..kind.." PRIVATE KEY"
         end
         local function has_marker(text)
-          if not (text:find("<<<<<<< ", 1, true) or text:find("=======", 1, true) or text:find(">>>>>>> ", 1, true)) then return false end
-          for line, newline in text:gmatch("([^\n]*)(\n?)") do
-            local prefix = line:sub(1, 8)
-            if prefix == "<<<<<<< " or prefix == "======= " or prefix == ">>>>>>> " then return true end
-            if newline ~= "" and (line == "=======" or line == "=======\r") then return true end
-          end
-          return false
+          return wuko.helpers.regex_match(text, [[(?m)^(<<<<<<< |======= |=======\r?\n|>>>>>>> )]])
         end
         local function has_key(text)
           for _, signature in ipairs(signatures) do

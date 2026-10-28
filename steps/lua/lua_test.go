@@ -374,6 +374,70 @@ wuko.output("truncated", wuko.helpers.is_utf8(string.char(226, 130)))
 	}
 }
 
+func TestLuaRegexHelpers(t *testing.T) {
+	t.Parallel()
+	runner := steptest.Build(t, New, map[string]any{"source": `
+local h = wuko.helpers
+local whole, version, suffix = h.regex_find("release v1.2", "v([0-9.]+)(-rc)?")
+local captures = h.regex_captures("wuko@2.0", "(?P<name>[a-z]+)@(?P<version>[0-9.]+)(-dev)?")
+wuko.output("results", {
+  match = h.regex_match("line\n<<<<<<< ours\n", "(?m)^<<<<<<< "),
+  no_match = h.regex_match("plain", "^x"),
+  find = {whole, version, suffix == nil},
+  missing = h.regex_find("plain", "[0-9]+") == nil,
+  find_all = h.regex_find_all("a1 b22 c333", "[0-9]+"),
+  find_limit = h.regex_find_all("a1 b22 c333", "[0-9]+", 2),
+  captures = {captures[0], captures[1], captures.name, captures.version, captures[3] == nil},
+  no_captures = h.regex_captures("plain", "[0-9]+") == nil,
+  replace = h.regex_replace("2026-10-28", "(\\d+)-(\\d+)-(\\d+)", "$3.$2.$1"),
+  split = h.regex_split("a, b,c", ",\\s*"),
+  split_limit = h.regex_split("a,b,c", ",", 2),
+  bytes = h.regex_match(string.char(255) .. "x", "x$"),
+})
+`})
+	result, err := runner.Run(t.Context(), step.Request{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{"results": map[string]any{
+		"match": true, "no_match": false, "find": []any{"v1.2", "1.2", true}, "missing": true,
+		"find_all": []any{"1", "22", "333"}, "find_limit": []any{"1", "22"},
+		"captures":    []any{"wuko@2.0", "wuko", "wuko", "2.0", true},
+		"no_captures": true, "replace": "28.10.2026",
+		"split": []any{"a", "b", "c"}, "split_limit": []any{"a", "b,c"}, "bytes": true,
+	}}
+	if diff := cmp.Diff(want, result.Outputs); diff != "" {
+		t.Fatalf("regex helpers mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestLuaRegexHelpersKeepMatchingPastCacheLimit(t *testing.T) {
+	t.Parallel()
+	runner := steptest.Build(t, New, map[string]any{"source": `
+local matched = 0
+for i = 1, 600 do
+  if wuko.helpers.regex_match("item" .. i, "^item" .. i .. "$") then matched = matched + 1 end
+end
+wuko.output("matched", matched)
+`})
+	result, err := runner.Run(t.Context(), step.Request{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if diff := cmp.Diff(map[string]any{"matched": float64(600)}, result.Outputs); diff != "" {
+		t.Fatalf("cache reset mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestLuaRegexHelpersRejectInvalidPatterns(t *testing.T) {
+	t.Parallel()
+	runner := steptest.Build(t, New, map[string]any{"source": `wuko.helpers.regex_match("text", "(")`})
+	_, err := runner.Run(t.Context(), step.Request{})
+	if err == nil || !strings.Contains(err.Error(), "helpers.regex_match: invalid pattern") {
+		t.Fatalf("error = %v, want an invalid pattern error", err)
+	}
+}
+
 func TestLuaTimeHelpersAndWorkflowTimezone(t *testing.T) {
 	t.Parallel()
 	runner := steptest.Build(t, New, map[string]any{"source": `

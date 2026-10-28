@@ -55,6 +55,7 @@ results and are available only when the workflow explicitly declares the pinned 
 - [Numbers and inspection](#numbers-and-inspection)
 - [Secure generators and current time](#secure-generators-and-current-time)
 - [Go-template terminal presentation](#go-template-terminal-presentation)
+- [Lua regular expressions](#lua-regular-expressions)
 - [Availability and safety](#availability-and-safety)
 
 ## String functions
@@ -861,6 +862,40 @@ pipeline, which passes the values as the final argument:
 
 ```gotemplate
 {{ .data.samples | sparkline .widget.width .widget.height }}
+```
+
+## Lua regular expressions
+
+Lua patterns are not regular expressions and run slowly over large text. Lua scripts can use Go's
+RE2 syntax through these helpers instead. Expr already has the `matches` operator for the same
+syntax.
+
+| Lua | Result |
+| --- | --- |
+| `h.regex_match(text, pattern)` | Whether `pattern` matches anywhere in `text` |
+| `h.regex_find(text, pattern)` | Leftmost match followed by each capture group as separate values, or `nil` |
+| `h.regex_find_all(text, pattern, limit)` | List of non-overlapping matches |
+| `h.regex_captures(text, pattern)` | Table of the first match's groups by index and by name, with `[0]` as the whole match, or `nil` |
+| `h.regex_replace(text, pattern, replacement)` | Text with every match replaced; `$1` and `${name}` expand groups and `$$` is a literal `$` |
+| `h.regex_split(text, pattern, limit)` | List of the text between matches |
+
+`limit` is optional; a negative or omitted limit returns every match or part, and a positive
+limit returns at most that many, with the last part of a split holding the remainder. A capture
+group that did not take part in the match is `nil` in `regex_find` and absent from
+`regex_captures`. Use flags such as `(?m)` for line anchors and `(?i)` for case-insensitive
+matching; Lua long strings such as `[[\d+]]` avoid doubling backslashes. An invalid pattern stops
+the script with an error. Patterns work on Lua byte strings, so they also match text that is not
+valid UTF-8.
+
+```lua
+local h = wuko.helpers
+local version, major = h.regex_find(wuko.args.tag, [[^v(\d+)\.\d+\.\d+$]])
+assert(version, "tag must look like v1.2.3")
+wuko.output("major", major)
+if h.regex_match(wuko.fs.read("notes.md"), [[(?m)^TODO:]]) then
+  wuko.output("todo", true)
+end
+wuko.output("words", h.regex_split(wuko.args.list, [[[,\s]+]]))
 ```
 
 ## Availability and safety
