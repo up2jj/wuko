@@ -263,7 +263,7 @@ func writeTreeSteps(writer io.Writer, steps []workflow.Step, prefix string) erro
 func writeTreeStepsWithFollowing(writer io.Writer, steps []workflow.Step, prefix string, hasFollowing bool) error {
 	for index, workflowStep := range steps {
 		last := index == len(steps)-1 && !hasFollowing
-		needs := treeNeeds(workflowStep)
+		edges := workflowStep.EdgeLabel()
 		branch := "├── "
 		childPrefix := prefix + "│   "
 		if last {
@@ -271,7 +271,7 @@ func writeTreeStepsWithFollowing(writer io.Writer, steps []workflow.Step, prefix
 			childPrefix = prefix + "    "
 		}
 		if workflowStep.IsTryCatch() {
-			if _, err := fmt.Fprintf(writer, "%s%s%s (try)%s%s\n", prefix, branch, workflowStep.ID, treeCondition(workflowStep), needs); err != nil {
+			if _, err := fmt.Fprintf(writer, "%s%s%s (try)%s%s\n", prefix, branch, workflowStep.ID, treeCondition(workflowStep), edges); err != nil {
 				return err
 			}
 			if _, err := fmt.Fprintf(writer, "%s├── try\n", childPrefix); err != nil {
@@ -289,7 +289,7 @@ func writeTreeStepsWithFollowing(writer io.Writer, steps []workflow.Step, prefix
 			continue
 		}
 		if workflowStep.IsOnce() {
-			if _, err := fmt.Fprintf(writer, "%s%s%s (once %s; %s; on busy %s)%s%s\n", prefix, branch, workflowStep.ID, workflowStep.Once.Key, workflowStep.Once.Scope, workflowStep.Once.OnBusy, treeCondition(workflowStep), needs); err != nil {
+			if _, err := fmt.Fprintf(writer, "%s%s%s (once %s; %s; on busy %s)%s%s\n", prefix, branch, workflowStep.ID, workflowStep.Once.Key, workflowStep.Once.Scope, workflowStep.Once.OnBusy, treeCondition(workflowStep), edges); err != nil {
 				return err
 			}
 			if err := writeTreeSteps(writer, workflowStep.Once.Steps, childPrefix); err != nil {
@@ -298,7 +298,7 @@ func writeTreeStepsWithFollowing(writer io.Writer, steps []workflow.Step, prefix
 			continue
 		}
 		if workflowStep.IsAttempt() {
-			if _, err := fmt.Fprintf(writer, "%s%s%s (attempt)%s%s%s\n", prefix, branch, workflowStep.ID, treeExecutionPolicy(workflowStep), treeCondition(workflowStep), needs); err != nil {
+			if _, err := fmt.Fprintf(writer, "%s%s%s (attempt)%s%s%s\n", prefix, branch, workflowStep.ID, treeExecutionPolicy(workflowStep), treeCondition(workflowStep), edges); err != nil {
 				return err
 			}
 			if err := writeTreeSteps(writer, workflowStep.Attempt.Steps, childPrefix); err != nil {
@@ -311,7 +311,7 @@ func writeTreeStepsWithFollowing(writer io.Writer, steps []workflow.Step, prefix
 			if workflowStep.CancelOn.Collect != "" {
 				collect = " collect " + workflowStep.CancelOn.Collect
 			}
-			if _, err := fmt.Fprintf(writer, "%s%s%s (cancel_on%s)%s%s\n", prefix, branch, workflowStep.ID, collect, treeCondition(workflowStep), needs); err != nil {
+			if _, err := fmt.Fprintf(writer, "%s%s%s (cancel_on%s)%s%s\n", prefix, branch, workflowStep.ID, collect, treeCondition(workflowStep), edges); err != nil {
 				return err
 			}
 			if _, err := fmt.Fprintf(writer, "%s├── monitors\n", childPrefix); err != nil {
@@ -330,7 +330,7 @@ func writeTreeStepsWithFollowing(writer io.Writer, steps []workflow.Step, prefix
 		}
 		if workflowStep.IsObserve() {
 			group := workflowStep.Observe
-			if _, err := fmt.Fprintf(writer, "%s%s%s (observe %s)%s\n", prefix, branch, workflowStep.ID, workflowStep.BackgroundControlDescription(), needs); err != nil {
+			if _, err := fmt.Fprintf(writer, "%s%s%s (observe %s)%s\n", prefix, branch, workflowStep.ID, workflowStep.BackgroundControlDescription(), edges); err != nil {
 				return err
 			}
 			if err := writeTreeSteps(writer, group.Steps, childPrefix); err != nil {
@@ -343,7 +343,7 @@ func writeTreeStepsWithFollowing(writer io.Writer, steps []workflow.Step, prefix
 			if workflowStep.ID != "" {
 				label = fmt.Sprintf("%s (executor: %s)", workflowStep.ID, workflowStep.Executor.Type)
 			}
-			if _, err := fmt.Fprintf(writer, "%s%s%s%s\n", prefix, branch, label, needs); err != nil {
+			if _, err := fmt.Fprintf(writer, "%s%s%s%s\n", prefix, branch, label, edges); err != nil {
 				return err
 			}
 			if len(workflowStep.Finally) == 0 {
@@ -368,7 +368,7 @@ func writeTreeStepsWithFollowing(writer io.Writer, steps []workflow.Step, prefix
 			if workflowStep.ID != "" {
 				label = fmt.Sprintf("%s (%s)", workflowStep.ID, label)
 			}
-			if _, err := fmt.Fprintf(writer, "%s%s%s%s\n", prefix, branch, label, needs); err != nil {
+			if _, err := fmt.Fprintf(writer, "%s%s%s%s\n", prefix, branch, label, edges); err != nil {
 				return err
 			}
 			if err := writeTreeSteps(writer, workflowStep.Steps, childPrefix); err != nil {
@@ -381,7 +381,7 @@ func writeTreeStepsWithFollowing(writer io.Writer, steps []workflow.Step, prefix
 			if workflowStep.ID != "" {
 				label = fmt.Sprintf("%s (working_directory: %s)", workflowStep.ID, workflowStep.WorkingDirectory)
 			}
-			if _, err := fmt.Fprintf(writer, "%s%s%s%s\n", prefix, branch, label, needs); err != nil {
+			if _, err := fmt.Fprintf(writer, "%s%s%s%s\n", prefix, branch, label, edges); err != nil {
 				return err
 			}
 			if err := writeTreeSteps(writer, workflowStep.Steps, childPrefix); err != nil {
@@ -394,7 +394,7 @@ func writeTreeStepsWithFollowing(writer io.Writer, steps []workflow.Step, prefix
 			if workflowStep.Worktree.Publish != nil {
 				publish = " publish " + workflowStep.Worktree.Publish.Branch
 			}
-			if _, err := fmt.Fprintf(writer, "%s%s%s (worktree %s%s)%s\n", prefix, branch, workflowStep.ID, workflowStep.Worktree.Revision, publish, needs); err != nil {
+			if _, err := fmt.Fprintf(writer, "%s%s%s (worktree %s%s)%s\n", prefix, branch, workflowStep.ID, workflowStep.Worktree.Revision, publish, edges); err != nil {
 				return err
 			}
 			if err := writeTreeSteps(writer, workflowStep.Worktree.Steps, childPrefix); err != nil {
@@ -407,7 +407,7 @@ func writeTreeStepsWithFollowing(writer io.Writer, steps []workflow.Step, prefix
 			if workflowStep.ID != "" {
 				label = fmt.Sprintf("%s (if: %s)", workflowStep.ID, workflowStep.If)
 			}
-			if _, err := fmt.Fprintf(writer, "%s%s%s%s\n", prefix, branch, label, needs); err != nil {
+			if _, err := fmt.Fprintf(writer, "%s%s%s%s\n", prefix, branch, label, edges); err != nil {
 				return err
 			}
 			if err := writeTreeSteps(writer, workflowStep.Steps, childPrefix); err != nil {
@@ -420,7 +420,7 @@ func writeTreeStepsWithFollowing(writer io.Writer, steps []workflow.Step, prefix
 			if workflowStep.ID != "" {
 				label = workflowStep.ID + " (concurrent" + treeConcurrentPolicy(workflowStep.Concurrent) + ")"
 			}
-			if _, err := fmt.Fprintf(writer, "%s%s%s%s\n", prefix, branch, label, needs); err != nil {
+			if _, err := fmt.Fprintf(writer, "%s%s%s%s\n", prefix, branch, label, edges); err != nil {
 				return err
 			}
 			if err := writeTreeSteps(writer, workflowStep.Concurrent.Steps, childPrefix); err != nil {
@@ -437,14 +437,14 @@ func writeTreeStepsWithFollowing(writer io.Writer, steps []workflow.Step, prefix
 			if workflowStep.Return.To != "" {
 				destination = " to " + string(workflowStep.Return.To)
 			}
-			if _, err := fmt.Fprintf(writer, "%s%sreturn%s (outputs: %s)%s%s\n", prefix, branch, destination, names, treeCondition(workflowStep), needs); err != nil {
+			if _, err := fmt.Fprintf(writer, "%s%sreturn%s (outputs: %s)%s%s\n", prefix, branch, destination, names, treeCondition(workflowStep), edges); err != nil {
 				return err
 			}
 			continue
 		}
 		if workflowStep.Batch != nil {
 			condition := treeCondition(workflowStep)
-			if _, err := fmt.Fprintf(writer, "%s%s%s (batch %s by %s%s)%s%s%s\n", prefix, branch, workflowStep.ID, workflowStep.Batch.Items, treeBatchSize(workflowStep.Batch.Size), treeFanoutCollectSuffix(workflowStep.Batch.Collect), treeFanoutPolicy(workflowStep.Batch.MaxConcurrency, workflowStep.Batch.MaxIterations, workflowStep.Batch.Timeout, workflowStep.Batch.FailFast), condition, needs); err != nil {
+			if _, err := fmt.Fprintf(writer, "%s%s%s (batch %s by %s%s)%s%s%s\n", prefix, branch, workflowStep.ID, workflowStep.Batch.Items, treeBatchSize(workflowStep.Batch.Size), treeFanoutCollectSuffix(workflowStep.Batch.Collect), treeFanoutPolicy(workflowStep.Batch.MaxConcurrency, workflowStep.Batch.MaxIterations, workflowStep.Batch.Timeout, workflowStep.Batch.FailFast), condition, edges); err != nil {
 				return err
 			}
 			if err := writeTreeSteps(writer, workflowStep.Batch.Steps, childPrefix); err != nil {
@@ -454,7 +454,7 @@ func writeTreeStepsWithFollowing(writer io.Writer, steps []workflow.Step, prefix
 		}
 		if workflowStep.Foreach != nil {
 			condition := treeCondition(workflowStep)
-			if _, err := fmt.Fprintf(writer, "%s%s%s (foreach %s%s)%s%s%s\n", prefix, branch, workflowStep.ID, workflowStep.Foreach.Items, treeFanoutCollectSuffix(workflowStep.Foreach.Collect), treeFanoutPolicy(workflowStep.Foreach.MaxConcurrency, workflowStep.Foreach.MaxIterations, workflowStep.Foreach.Timeout, workflowStep.Foreach.FailFast), condition, needs); err != nil {
+			if _, err := fmt.Fprintf(writer, "%s%s%s (foreach %s%s)%s%s%s\n", prefix, branch, workflowStep.ID, workflowStep.Foreach.Items, treeFanoutCollectSuffix(workflowStep.Foreach.Collect), treeFanoutPolicy(workflowStep.Foreach.MaxConcurrency, workflowStep.Foreach.MaxIterations, workflowStep.Foreach.Timeout, workflowStep.Foreach.FailFast), condition, edges); err != nil {
 				return err
 			}
 			if err := writeTreeSteps(writer, workflowStep.Foreach.Steps, childPrefix); err != nil {
@@ -464,7 +464,7 @@ func writeTreeStepsWithFollowing(writer io.Writer, steps []workflow.Step, prefix
 		}
 		if workflowStep.Matrix != nil {
 			condition := treeCondition(workflowStep)
-			if _, err := fmt.Fprintf(writer, "%s%s%s (matrix %s%s)%s%s%s\n", prefix, branch, workflowStep.ID, treeMatrixAxes(workflowStep.Matrix.Axes), treeFanoutCollectSuffix(workflowStep.Matrix.Collect), treeFanoutPolicy(workflowStep.Matrix.MaxConcurrency, workflowStep.Matrix.MaxIterations, workflowStep.Matrix.Timeout, workflowStep.Matrix.FailFast), condition, needs); err != nil {
+			if _, err := fmt.Fprintf(writer, "%s%s%s (matrix %s%s)%s%s%s\n", prefix, branch, workflowStep.ID, treeMatrixAxes(workflowStep.Matrix.Axes), treeFanoutCollectSuffix(workflowStep.Matrix.Collect), treeFanoutPolicy(workflowStep.Matrix.MaxConcurrency, workflowStep.Matrix.MaxIterations, workflowStep.Matrix.Timeout, workflowStep.Matrix.FailFast), condition, edges); err != nil {
 				return err
 			}
 			if err := writeTreeSteps(writer, workflowStep.Matrix.Steps, childPrefix); err != nil {
@@ -480,7 +480,7 @@ func writeTreeStepsWithFollowing(writer io.Writer, steps []workflow.Step, prefix
 		if workflowStep.If != "" {
 			condition = " if: " + string(workflowStep.If)
 		}
-		if _, err := fmt.Fprintf(writer, "%s%s%s (%s)%s%s%s\n", prefix, branch, workflowStep.ID, kind, treeExecutionPolicy(workflowStep), condition, needs); err != nil {
+		if _, err := fmt.Fprintf(writer, "%s%s%s (%s)%s%s%s\n", prefix, branch, workflowStep.ID, kind, treeExecutionPolicy(workflowStep), condition, edges); err != nil {
 			return err
 		}
 		if workflowStep.Action != nil {
@@ -498,13 +498,6 @@ func writeTreeStepsWithFollowing(writer io.Writer, steps []workflow.Step, prefix
 		}
 	}
 	return nil
-}
-
-func treeNeeds(workflowStep workflow.Step) string {
-	if len(workflowStep.Needs) == 0 {
-		return ""
-	}
-	return " [needs: " + strings.Join(workflowStep.Needs, ", ") + "]"
 }
 
 func treeFanoutCollectSuffix(collect string) string {

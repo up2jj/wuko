@@ -21,10 +21,15 @@ type concurrentBranchOutcome struct {
 	skipped bool
 }
 
+// concurrentGraph holds two edge kinds. A need admits its dependent only after success, lets
+// it read the need's state, and skips it on failure. An after edge only orders: its dependent
+// waits for the sibling to end in any way and neither reads its state nor inherits a failure.
 type concurrentGraph struct {
-	dependencies [][]int
-	dependents   [][]int
-	ancestors    [][]int
+	dependencies    [][]int
+	dependents      [][]int
+	ancestors       [][]int
+	after           [][]int
+	afterDependents [][]int
 }
 
 type concurrentCompletion struct {
@@ -94,19 +99,30 @@ func (e *Engine) runConcurrent(ctx context.Context, definition *workflow.Definit
 
 func (e *Engine) runConcurrentGraph(ctx context.Context, definition *workflow.Definition, group *workflow.ConcurrentGroup, options Options, snapshot *State, indexes []int, total int, outcomes []concurrentBranchOutcome) {
 	graph := newConcurrentGraph(group.Steps)
+	status := make([]uint8, len(group.Steps)) // 0 pending, 1 running, 2 finished, 3 dependency-skipped
 	remaining := make([]int, len(group.Steps))
 	ready := make([]int, 0, len(group.Steps))
 	for index, dependencies := range graph.dependencies {
-		remaining[index] = len(dependencies)
-		if len(dependencies) == 0 {
+		remaining[index] = len(dependencies) + len(graph.after[index])
+		if remaining[index] == 0 {
 			ready = append(ready, index)
+		}
+	}
+	admit := func(dependents []int) {
+		for _, dependent := range dependents {
+			if status[dependent] != 0 {
+				continue
+			}
+			remaining[dependent]--
+			if remaining[dependent] == 0 {
+				ready = append(ready, dependent)
+			}
 		}
 	}
 
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	completed := make(chan concurrentCompletion, len(group.Steps))
-	status := make([]uint8, len(group.Steps)) // 0 pending, 1 running, 2 finished, 3 dependency-skipped
 	running := 0
 	terminal := 0
 	stopAdmission := false
@@ -144,23 +160,21 @@ func (e *Engine) runConcurrentGraph(ctx context.Context, definition *workflow.De
 		status[completion.index] = 2
 		outcomes[completion.index] = completion.outcome
 		if completion.outcome.err != nil {
-			terminal += skipConcurrentDescendants(definition, group.Steps, graph.dependents, completion.index, options, indexes, total, outcomes, status)
+			// Skip descendants first so an after edge cannot admit a step that a failed
+			// need also reaches.
+			skipped := skipConcurrentDescendants(definition, group.Steps, graph.dependents, completion.index, options, indexes, total, outcomes, status)
+			terminal += len(skipped)
+			for _, index := range skipped {
+				admit(graph.afterDependents[index])
+			}
 			if group.FailFast {
 				stopAdmission = true
 				cancel()
 			}
-			continue
+		} else {
+			admit(graph.dependents[completion.index])
 		}
-
-		for _, dependent := range graph.dependents[completion.index] {
-			if status[dependent] != 0 {
-				continue
-			}
-			remaining[dependent]--
-			if remaining[dependent] == 0 {
-				ready = append(ready, dependent)
-			}
-		}
+		admit(graph.afterDependents[completion.index])
 		slices.Sort(ready)
 	}
 }
@@ -173,9 +187,11 @@ func newConcurrentGraph(steps []workflow.Step) concurrentGraph {
 		}
 	}
 	graph := concurrentGraph{
-		dependencies: make([][]int, len(steps)),
-		dependents:   make([][]int, len(steps)),
-		ancestors:    make([][]int, len(steps)),
+		dependencies:    make([][]int, len(steps)),
+		dependents:      make([][]int, len(steps)),
+		ancestors:       make([][]int, len(steps)),
+		after:           make([][]int, len(steps)),
+		afterDependents: make([][]int, len(steps)),
 	}
 	for index, workflowStep := range steps {
 		for _, need := range workflowStep.Needs {
@@ -187,6 +203,14 @@ func newConcurrentGraph(steps []workflow.Step) concurrentGraph {
 			}
 			graph.dependencies[index] = append(graph.dependencies[index], dependency)
 			graph.dependents[dependency] = append(graph.dependents[dependency], index)
+		}
+		for _, sibling := range workflowStep.After {
+			dependency, exists := ids[sibling]
+			if !exists {
+				continue
+			}
+			graph.after[index] = append(graph.after[index], dependency)
+			graph.afterDependents[dependency] = append(graph.afterDependents[dependency], index)
 		}
 		slices.Sort(graph.dependencies[index])
 	}
@@ -227,8 +251,10 @@ func concurrentReadState(snapshot *State, steps []workflow.Step, outcomes []conc
 	return state
 }
 
-func skipConcurrentDescendants(definition *workflow.Definition, steps []workflow.Step, dependents [][]int, failed int, options Options, indexes []int, total int, outcomes []concurrentBranchOutcome, status []uint8) int {
-	skipped := 0
+// skipConcurrentDescendants skips everything that transitively needs the failed step and
+// returns the skipped indexes, whose after edges are then satisfied.
+func skipConcurrentDescendants(definition *workflow.Definition, steps []workflow.Step, dependents [][]int, failed int, options Options, indexes []int, total int, outcomes []concurrentBranchOutcome, status []uint8) []int {
+	var skipped []int
 	queue := slices.Clone(dependents[failed])
 	for len(queue) > 0 {
 		index := queue[0]
@@ -242,7 +268,7 @@ func skipConcurrentDescendants(definition *workflow.Definition, steps []workflow
 		stats.FinishedAt = time.Now()
 		stats.Duration = stats.FinishedAt.Sub(stats.StartedAt)
 		outcomes[index] = concurrentBranchOutcome{stats: stats, skipped: true}
-		skipped++
+		skipped = append(skipped, index)
 		queue = append(queue, dependents[index]...)
 	}
 	return skipped

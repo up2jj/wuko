@@ -14,6 +14,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
@@ -470,6 +471,115 @@ func TestRunConcurrentGroupConditionSkippedNeedAllowsDependent(t *testing.T) {
 	}
 	if dependentRuns.Load() != 1 {
 		t.Fatalf("dependent runs = %d", dependentRuns.Load())
+	}
+}
+
+func TestRunConcurrentGroupAfterRunsFollowingFailureWithoutReadingState(t *testing.T) {
+	t.Parallel()
+	var mu sync.Mutex
+	var events []string
+	observed := make(map[string]step.Request)
+	registry := steptest.Registry(t, map[string]step.Builder{"ordered": func(map[string]any) (step.Runner, error) {
+		return steptest.RunnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
+			mu.Lock()
+			events = append(events, "start "+request.StepID)
+			observed[request.StepID] = request
+			mu.Unlock()
+			defer func() {
+				mu.Lock()
+				events = append(events, "end "+request.StepID)
+				mu.Unlock()
+			}()
+			if request.StepID == "fix" {
+				return step.Result{}, errors.New("fixed files")
+			}
+			return step.Result{Outputs: map[string]any{"value": request.StepID}, Variables: map[string]any{"var_" + request.StepID: true}}, nil
+		}), nil
+	}})
+	steps := []workflow.Step{
+		{ID: "check", Type: "ordered", After: []string{"format"}, With: map[string]any{}},
+		{ID: "fix", Type: "ordered", With: map[string]any{}},
+		{ID: "format", Type: "ordered", After: []string{"fix"}, With: map[string]any{}},
+	}
+	statuses := make(map[string]ExecutionStatus)
+	state, err := New(registry).Run(t.Context(), concurrentDefinition(t, &workflow.ConcurrentGroup{Steps: steps, MaxConcurrency: 3, FailFast: false}), Options{Progress: func(event ProgressEvent) {
+		if event.Kind == StepFinished {
+			statuses[event.StepID] = event.Status
+		}
+	}})
+	if err == nil || !strings.Contains(err.Error(), "fixed files") {
+		t.Fatalf("error = %v", err)
+	}
+	want := []string{"start fix", "end fix", "start format", "end format", "start check", "end check"}
+	if diff := cmp.Diff(want, events); diff != "" {
+		t.Fatalf("order mismatch (-want +got):\n%s", diff)
+	}
+	if diff := cmp.Diff(map[string]ExecutionStatus{"fix": StatusFailed, "format": StatusSucceeded, "check": StatusSucceeded}, statuses); diff != "" {
+		t.Fatalf("statuses mismatch (-want +got):\n%s", diff)
+	}
+	if _, exists := observed["check"].Steps["format"]; exists {
+		t.Fatalf("after edge exposed sibling state: %#v", observed["check"].Steps)
+	}
+	if _, exists := observed["check"].Vars["var_format"]; exists {
+		t.Fatalf("after edge exposed sibling variable: %#v", observed["check"].Vars)
+	}
+	if state != nil {
+		t.Fatalf("failed group committed state = %#v", state)
+	}
+}
+
+func TestRunConcurrentGroupAfterFollowsDependencySkippedSibling(t *testing.T) {
+	t.Parallel()
+	var runs sync.Map
+	registry := steptest.Registry(t, map[string]step.Builder{"after_skip": func(map[string]any) (step.Runner, error) {
+		return steptest.RunnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
+			runs.Store(request.StepID, true)
+			if request.StepID == "failed" {
+				return step.Result{}, errors.New("broken prerequisite")
+			}
+			return step.Result{}, nil
+		}), nil
+	}})
+	steps := []workflow.Step{
+		{ID: "failed", Type: "after_skip", With: map[string]any{}},
+		{ID: "skipped", Type: "after_skip", Needs: []string{"failed"}, With: map[string]any{}},
+		{ID: "ordered", Type: "after_skip", After: []string{"skipped"}, With: map[string]any{}},
+		// Needing a skipped step still skips, even when an after edge is satisfied.
+		{ID: "needs_skipped", Type: "after_skip", Needs: []string{"skipped"}, After: []string{"failed"}, With: map[string]any{}},
+	}
+	_, err := New(registry).Run(t.Context(), concurrentDefinition(t, &workflow.ConcurrentGroup{Steps: steps, MaxConcurrency: 2, FailFast: false}), Options{})
+	if err == nil || !strings.Contains(err.Error(), "broken prerequisite") {
+		t.Fatalf("error = %v", err)
+	}
+	for id, want := range map[string]bool{"skipped": false, "ordered": true, "needs_skipped": false} {
+		if _, ran := runs.Load(id); ran != want {
+			t.Errorf("%s ran = %v, want %v", id, ran, want)
+		}
+	}
+}
+
+func TestRunConcurrentGroupAfterRespectsFailFast(t *testing.T) {
+	t.Parallel()
+	var orderedRuns atomic.Int32
+	registry := steptest.Registry(t, map[string]step.Builder{"after_fail_fast": func(map[string]any) (step.Runner, error) {
+		return steptest.RunnerFunc(func(_ context.Context, request step.Request) (step.Result, error) {
+			if request.StepID == "failed" {
+				return step.Result{}, errors.New("broken prerequisite")
+			}
+			orderedRuns.Add(1)
+			return step.Result{}, nil
+		}), nil
+	}})
+	steps := []workflow.Step{
+		{ID: "failed", Type: "after_fail_fast", With: map[string]any{}},
+		{ID: "ordered", Type: "after_fail_fast", After: []string{"failed"}, With: map[string]any{}},
+	}
+	_, err := New(registry).Run(t.Context(), concurrentDefinition(t, &workflow.ConcurrentGroup{Steps: steps, MaxConcurrency: 2, FailFast: true}), Options{})
+	if err == nil || !strings.Contains(err.Error(), "broken prerequisite") {
+		t.Fatalf("error = %v", err)
+	}
+	if orderedRuns.Load() != 0 {
+		t.Fatalf("ordered runs = %d, want fail_fast to stop admission", orderedRuns.Load())
 	}
 }
 

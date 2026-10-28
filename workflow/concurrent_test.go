@@ -106,7 +106,12 @@ func TestLoadRejectsInvalidConcurrentGroups(t *testing.T) {
 		{name: "unknown need", body: "      steps:\n        - {id: one, type: shell}\n        - {id: two, type: shell, needs: [missing]}\n", want: `needs unknown sibling "missing"`},
 		{name: "self need", body: "      steps:\n        - {id: one, type: shell, needs: [one]}\n        - {id: two, type: shell}\n", want: "cannot need itself"},
 		{name: "duplicate need", body: "      steps:\n        - {id: one, type: shell}\n        - {id: two, type: shell, needs: [one, one]}\n", want: `duplicate need "one"`},
-		{name: "needs cycle", body: "      steps:\n        - {id: one, type: shell, needs: [two]}\n        - {id: two, type: shell, needs: [one]}\n", want: "needs contain a cycle"},
+		{name: "needs cycle", body: "      steps:\n        - {id: one, type: shell, needs: [two]}\n        - {id: two, type: shell, needs: [one]}\n", want: "after edges contain a cycle"},
+		{name: "unknown after", body: "      steps:\n        - {id: one, type: shell}\n        - {id: two, type: shell, after: [missing]}\n", want: `runs after unknown sibling "missing"`},
+		{name: "self after", body: "      steps:\n        - {id: one, type: shell, after: [one]}\n        - {id: two, type: shell}\n", want: "cannot run after itself"},
+		{name: "duplicate after", body: "      steps:\n        - {id: one, type: shell}\n        - {id: two, type: shell, after: [one, one]}\n", want: `duplicate after "one"`},
+		{name: "needs and after", body: "      steps:\n        - {id: one, type: shell}\n        - {id: two, type: shell, needs: [one], after: [one]}\n", want: `lists "one" in both needs and after`},
+		{name: "mixed cycle", body: "      steps:\n        - {id: one, type: shell, needs: [two]}\n        - {id: two, type: shell, after: [one]}\n", want: "needs and after edges contain a cycle"},
 		{name: "unknown field", body: "      unknown: true\n      steps:\n        - {id: one, type: shell}\n        - {id: two, type: shell}\n", want: "field unknown"},
 	}
 	for _, test := range tests {
@@ -128,32 +133,44 @@ func TestLoadRejectsInvalidConcurrentGroups(t *testing.T) {
 func TestRejectsNeedsOutsideDirectConcurrentChildren(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name string
-		body string
+		name  string
+		body  string
+		field string
 	}{
 		{name: "sequential", body: "  - {id: one, type: shell, needs: [other]}\n"},
 		{name: "sequential empty", body: "  - {id: one, type: shell, needs: []}\n"},
 		{name: "nested branch body", body: "  - concurrent:\n      steps:\n        - id: wrapper\n          once: {key: test, scope: local, steps: [{id: nested, type: shell, needs: [other]}]}\n        - {id: other, type: shell}\n"},
+		{name: "sequential after", body: "  - {id: one, type: shell, after: [other]}\n", field: "after"},
+		{name: "sequential empty after", body: "  - {id: one, type: shell, after: []}\n", field: "after"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "workflow.yaml")
 			testfs.Write(t, path, "version: 1\nname: invalid\nsteps:\n"+test.body)
 			_, err := Load(path)
-			if err == nil || !strings.Contains(err.Error(), "needs is only supported on direct children of concurrent") {
+			field := test.field
+			if field == "" {
+				field = "needs"
+			}
+			if err == nil || !strings.Contains(err.Error(), field+" is only supported on direct children of concurrent") {
 				t.Fatalf("error = %v", err)
 			}
 		})
 	}
 }
 
-func TestLoadRejectsNonListNeeds(t *testing.T) {
+func TestLoadRejectsNonListNeedsAndAfter(t *testing.T) {
 	t.Parallel()
-	path := filepath.Join(t.TempDir(), "workflow.yaml")
-	testfs.Write(t, path, "version: 1\nname: invalid\nsteps:\n  - concurrent:\n      steps:\n        - {id: one, type: shell}\n        - {id: two, type: shell, needs: one}\n")
-	_, err := Load(path)
-	if err == nil || !strings.Contains(err.Error(), "needs must be a list") {
-		t.Fatalf("error = %v", err)
+	for _, field := range []string{"needs", "after"} {
+		t.Run(field, func(t *testing.T) {
+			t.Parallel()
+			path := filepath.Join(t.TempDir(), "workflow.yaml")
+			testfs.Write(t, path, "version: 1\nname: invalid\nsteps:\n  - concurrent:\n      steps:\n        - {id: one, type: shell}\n        - {id: two, type: shell, "+field+": one}\n")
+			_, err := Load(path)
+			if err == nil || !strings.Contains(err.Error(), field+" must be a list") {
+				t.Fatalf("error = %v", err)
+			}
+		})
 	}
 }
 
@@ -194,5 +211,22 @@ steps:
 `)
 	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), `duplicate step id "lint"`) {
 		t.Fatalf("duplicate error = %v", err)
+	}
+}
+
+func TestStepEdgeLabelListsNeedsThenAfter(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		step Step
+		want string
+	}{
+		{Step{}, ""},
+		{Step{Needs: []string{"deps"}}, " [needs: deps]"},
+		{Step{After: []string{"fix", "format"}}, " [after: fix, format]"},
+		{Step{Needs: []string{"deps"}, After: []string{"fix"}}, " [needs: deps] [after: fix]"},
+	} {
+		if got := test.step.EdgeLabel(); got != test.want {
+			t.Errorf("EdgeLabel() = %q, want %q", got, test.want)
+		}
 	}
 }

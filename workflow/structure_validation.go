@@ -119,14 +119,20 @@ func containsObserve(steps []Step) bool {
 
 func validateNeedsPlacement(steps []Step, concurrentChildren bool) error {
 	for index, workflowStep := range steps {
-		if (workflowStep.hasNeeds || len(workflowStep.Needs) > 0) && !concurrentChildren {
+		needs := workflowStep.hasNeeds || len(workflowStep.Needs) > 0
+		after := workflowStep.hasAfter || len(workflowStep.After) > 0
+		if (needs || after) && !concurrentChildren {
 			label := workflowStep.ID
 			if label == "" {
 				label = fmt.Sprintf("step %d", index+1)
 			} else {
 				label = fmt.Sprintf("step %q", label)
 			}
-			return fmt.Errorf("%s: needs is only supported on direct children of concurrent", label)
+			field := "needs"
+			if !needs {
+				field = "after"
+			}
+			return fmt.Errorf("%s: %s is only supported on direct children of concurrent", label, field)
 		}
 		for _, child := range workflowStep.ChildSequences() {
 			childrenAreConcurrent := workflowStep.Concurrent != nil && child.Role == ChildSteps

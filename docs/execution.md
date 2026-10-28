@@ -840,7 +840,33 @@ or timed-out child skips its descendants. With `fail_fast: false`, independent w
 results are committed in declaration order only after the whole group succeeds. Variable conflicts
 are still detected at that final join, including conflicts between ancestors and descendants.
 Interactive children require pre-supplied values. Directly nested concurrent groups are not
-supported. A group without `needs` retains the original independent fan-out behavior.
+supported. A group without `needs` or `after` retains the original independent fan-out behavior.
+
+### Ordering without dependency
+
+Use `after` when a child must wait for siblings but does not depend on their success or state,
+such as checks that read files a fixer may rewrite:
+
+```yaml
+- concurrent:
+    max_concurrency: 4
+    fail_fast: false
+    steps:
+      - {id: fix_whitespace, type: lua, with: {source: ...}}
+      - {id: fix_newlines, type: lua, after: [fix_whitespace], with: {source: ...}}
+      - {id: check_yaml, after: [fix_newlines], uses: ./actions/check-yaml}
+      - {id: vet, after: [fix_newlines], type: shell, with: {command: go, args: [vet, ./...]}}
+```
+
+An `after` child starts once each listed sibling has ended, whether it succeeded, failed, was
+skipped by its condition, or was skipped because a need failed. It reads neither their outputs nor
+their variables, and their failures do not skip it, so `fix_newlines`, `check_yaml`, and `vet` still
+run and report when `fix_whitespace` fails. The group still fails with every child error.
+`after` follows the same sibling rules as `needs`: it names direct siblings only, and unknown,
+duplicate, and self-referential entries fail validation. A sibling cannot appear in both lists,
+and cycles across both kinds of edge are rejected. Edges only order admission inside the group;
+with `fail_fast: true`, a failure still stops new admission, including children waiting on `after`.
+`wuko tree` and dry runs show the edges as `[needs: ...]` and `[after: ...]`.
 
 For repeated blocks, use [batch, foreach, and matrix controls](workflow-control.md).
 

@@ -15,9 +15,9 @@ func writeDryRun(writer io.Writer, steps []workflow.Step, indent string, parent 
 	for i, workflowStep := range steps {
 		path := append(append([]int(nil), parent...), i+1)
 		index := dryRunIndex(path)
-		needs := dryRunNeeds(workflowStep)
+		edges := workflowStep.EdgeLabel()
 		if workflowStep.IsTryCatch() {
-			if _, err := fmt.Fprintf(writer, "%s%s %s (try)%s%s\n", indent, index, workflowStep.ID, dryRunCondition(workflowStep), needs); err != nil {
+			if _, err := fmt.Fprintf(writer, "%s%s %s (try)%s%s\n", indent, index, workflowStep.ID, dryRunCondition(workflowStep), edges); err != nil {
 				return err
 			}
 			if _, err := fmt.Fprintln(writer, indent+"   try:"); err != nil {
@@ -39,7 +39,7 @@ func writeDryRun(writer io.Writer, steps []workflow.Step, indent string, parent 
 			if workflowStep.CancelOn.Collect != "" {
 				collect = "; collect " + workflowStep.CancelOn.Collect
 			}
-			if _, err := fmt.Fprintf(writer, "%s%s %s (cancel_on%s)%s%s\n", indent, index, workflowStep.ID, collect, dryRunCondition(workflowStep), needs); err != nil {
+			if _, err := fmt.Fprintf(writer, "%s%s %s (cancel_on%s)%s%s\n", indent, index, workflowStep.ID, collect, dryRunCondition(workflowStep), edges); err != nil {
 				return err
 			}
 			if _, err := fmt.Fprintln(writer, indent+"   monitors:"); err != nil {
@@ -57,7 +57,7 @@ func writeDryRun(writer io.Writer, steps []workflow.Step, indent string, parent 
 			continue
 		}
 		if workflowStep.IsBackgroundControl() {
-			if _, err := fmt.Fprintf(writer, "%s%s %s (%s %s)%s\n", indent, index, workflowStep.ID, workflowStep.BackgroundControlKind(), workflowStep.BackgroundControlDescription(), needs); err != nil {
+			if _, err := fmt.Fprintf(writer, "%s%s %s (%s %s)%s\n", indent, index, workflowStep.ID, workflowStep.BackgroundControlKind(), workflowStep.BackgroundControlDescription(), edges); err != nil {
 				return err
 			}
 			if err := writeDryRun(writer, workflowStep.BackgroundControlBody(), indent+"   ", path); err != nil {
@@ -66,7 +66,7 @@ func writeDryRun(writer io.Writer, steps []workflow.Step, indent string, parent 
 			continue
 		}
 		if workflowStep.IsOnce() {
-			if _, err := fmt.Fprintf(writer, "%s%s %s (once %s; %s; on busy %s)%s%s\n", indent, index, workflowStep.ID, workflowStep.Once.Key, workflowStep.Once.Scope, workflowStep.Once.OnBusy, dryRunCondition(workflowStep), needs); err != nil {
+			if _, err := fmt.Fprintf(writer, "%s%s %s (once %s; %s; on busy %s)%s%s\n", indent, index, workflowStep.ID, workflowStep.Once.Key, workflowStep.Once.Scope, workflowStep.Once.OnBusy, dryRunCondition(workflowStep), edges); err != nil {
 				return err
 			}
 			if err := writeDryRun(writer, workflowStep.Once.Steps, indent+"   ", path); err != nil {
@@ -75,7 +75,7 @@ func writeDryRun(writer io.Writer, steps []workflow.Step, indent string, parent 
 			continue
 		}
 		if workflowStep.IsAttempt() {
-			if _, err := fmt.Fprintf(writer, "%s%s %s (attempt)%s%s%s\n", indent, index, workflowStep.ID, executionPolicySuffix(workflowStep), dryRunCondition(workflowStep), needs); err != nil {
+			if _, err := fmt.Fprintf(writer, "%s%s %s (attempt)%s%s%s\n", indent, index, workflowStep.ID, executionPolicySuffix(workflowStep), dryRunCondition(workflowStep), edges); err != nil {
 				return err
 			}
 			if err := writeDryRun(writer, workflowStep.Attempt.Steps, indent+"   ", path); err != nil {
@@ -88,7 +88,7 @@ func writeDryRun(writer io.Writer, steps []workflow.Step, indent string, parent 
 			if workflowStep.ID != "" {
 				label = fmt.Sprintf("%s (executor: %s)", workflowStep.ID, workflowStep.Executor.Type)
 			}
-			if _, err := fmt.Fprintf(writer, "%s%s %s%s\n", indent, index, label, needs); err != nil {
+			if _, err := fmt.Fprintf(writer, "%s%s %s%s\n", indent, index, label, edges); err != nil {
 				return err
 			}
 			if err := writeDryRun(writer, workflowStep.Steps, indent+"   ", path); err != nil {
@@ -109,7 +109,7 @@ func writeDryRun(writer io.Writer, steps []workflow.Step, indent string, parent 
 			if workflowStep.ID != "" {
 				label = fmt.Sprintf("%s (%s)", workflowStep.ID, label)
 			}
-			if _, err := fmt.Fprintf(writer, "%s%s %s%s\n", indent, index, label, needs); err != nil {
+			if _, err := fmt.Fprintf(writer, "%s%s %s%s\n", indent, index, label, edges); err != nil {
 				return err
 			}
 			if err := writeDryRun(writer, workflowStep.Steps, indent+"   ", path); err != nil {
@@ -122,7 +122,7 @@ func writeDryRun(writer io.Writer, steps []workflow.Step, indent string, parent 
 			if workflowStep.ID != "" {
 				label = fmt.Sprintf("%s (working_directory: %s)", workflowStep.ID, workflowStep.WorkingDirectory)
 			}
-			if _, err := fmt.Fprintf(writer, "%s%s %s%s\n", indent, index, label, needs); err != nil {
+			if _, err := fmt.Fprintf(writer, "%s%s %s%s\n", indent, index, label, edges); err != nil {
 				return err
 			}
 			if err := writeDryRun(writer, workflowStep.Steps, indent+"   ", path); err != nil {
@@ -135,7 +135,7 @@ func writeDryRun(writer io.Writer, steps []workflow.Step, indent string, parent 
 			if workflowStep.Worktree.Publish != nil {
 				publish = "; publish " + workflowStep.Worktree.Publish.Branch
 			}
-			if _, err := fmt.Fprintf(writer, "%s%s %s (worktree %s%s)%s\n", indent, index, workflowStep.ID, workflowStep.Worktree.Revision, publish, needs); err != nil {
+			if _, err := fmt.Fprintf(writer, "%s%s %s (worktree %s%s)%s\n", indent, index, workflowStep.ID, workflowStep.Worktree.Revision, publish, edges); err != nil {
 				return err
 			}
 			if err := writeDryRun(writer, workflowStep.Worktree.Steps, indent+"   ", path); err != nil {
@@ -148,7 +148,7 @@ func writeDryRun(writer io.Writer, steps []workflow.Step, indent string, parent 
 			if workflowStep.ID != "" {
 				label = fmt.Sprintf("%s (if: %s)", workflowStep.ID, workflowStep.If)
 			}
-			if _, err := fmt.Fprintf(writer, "%s%s %s%s\n", indent, index, label, needs); err != nil {
+			if _, err := fmt.Fprintf(writer, "%s%s %s%s\n", indent, index, label, edges); err != nil {
 				return err
 			}
 			if err := writeDryRun(writer, workflowStep.Steps, indent+"   ", path); err != nil {
@@ -161,7 +161,7 @@ func writeDryRun(writer io.Writer, steps []workflow.Step, indent string, parent 
 			if workflowStep.ID != "" {
 				label = workflowStep.ID + " (concurrent" + concurrentPolicySuffix(workflowStep.Concurrent) + ")"
 			}
-			if _, err := fmt.Fprintf(writer, "%s%s %s%s\n", indent, index, label, needs); err != nil {
+			if _, err := fmt.Fprintf(writer, "%s%s %s%s\n", indent, index, label, edges); err != nil {
 				return err
 			}
 			if err := writeDryRun(writer, workflowStep.Concurrent.Steps, indent+"   ", path); err != nil {
@@ -178,13 +178,13 @@ func writeDryRun(writer io.Writer, steps []workflow.Step, indent string, parent 
 			if workflowStep.Return.To != "" {
 				destination = " to " + string(workflowStep.Return.To)
 			}
-			if _, err := fmt.Fprintf(writer, "%s%s return%s (outputs: %s)%s%s\n", indent, index, destination, names, dryRunCondition(workflowStep), needs); err != nil {
+			if _, err := fmt.Fprintf(writer, "%s%s return%s (outputs: %s)%s%s\n", indent, index, destination, names, dryRunCondition(workflowStep), edges); err != nil {
 				return err
 			}
 			continue
 		}
 		if workflowStep.Batch != nil {
-			if _, err := fmt.Fprintf(writer, "%s%s %s (batch %s by %s%s)%s%s%s\n", indent, index, workflowStep.ID, workflowStep.Batch.Items, batchSizeLabel(workflowStep.Batch.Size), fanoutCollectSuffix(workflowStep.Batch.Collect), fanoutPolicySuffix(workflowStep.Batch.MaxConcurrency, workflowStep.Batch.MaxIterations, workflowStep.Batch.Timeout, workflowStep.Batch.FailFast), dryRunCondition(workflowStep), needs); err != nil {
+			if _, err := fmt.Fprintf(writer, "%s%s %s (batch %s by %s%s)%s%s%s\n", indent, index, workflowStep.ID, workflowStep.Batch.Items, batchSizeLabel(workflowStep.Batch.Size), fanoutCollectSuffix(workflowStep.Batch.Collect), fanoutPolicySuffix(workflowStep.Batch.MaxConcurrency, workflowStep.Batch.MaxIterations, workflowStep.Batch.Timeout, workflowStep.Batch.FailFast), dryRunCondition(workflowStep), edges); err != nil {
 				return err
 			}
 			if err := writeDryRun(writer, workflowStep.Batch.Steps, indent+"   ", path); err != nil {
@@ -193,7 +193,7 @@ func writeDryRun(writer io.Writer, steps []workflow.Step, indent string, parent 
 			continue
 		}
 		if workflowStep.Foreach != nil {
-			if _, err := fmt.Fprintf(writer, "%s%s %s (foreach %s%s)%s%s%s\n", indent, index, workflowStep.ID, workflowStep.Foreach.Items, fanoutCollectSuffix(workflowStep.Foreach.Collect), fanoutPolicySuffix(workflowStep.Foreach.MaxConcurrency, workflowStep.Foreach.MaxIterations, workflowStep.Foreach.Timeout, workflowStep.Foreach.FailFast), dryRunCondition(workflowStep), needs); err != nil {
+			if _, err := fmt.Fprintf(writer, "%s%s %s (foreach %s%s)%s%s%s\n", indent, index, workflowStep.ID, workflowStep.Foreach.Items, fanoutCollectSuffix(workflowStep.Foreach.Collect), fanoutPolicySuffix(workflowStep.Foreach.MaxConcurrency, workflowStep.Foreach.MaxIterations, workflowStep.Foreach.Timeout, workflowStep.Foreach.FailFast), dryRunCondition(workflowStep), edges); err != nil {
 				return err
 			}
 			if err := writeDryRun(writer, workflowStep.Foreach.Steps, indent+"   ", path); err != nil {
@@ -202,7 +202,7 @@ func writeDryRun(writer io.Writer, steps []workflow.Step, indent string, parent 
 			continue
 		}
 		if workflowStep.Matrix != nil {
-			if _, err := fmt.Fprintf(writer, "%s%s %s (matrix %s%s)%s%s%s\n", indent, index, workflowStep.ID, matrixAxisNames(workflowStep.Matrix.Axes), fanoutCollectSuffix(workflowStep.Matrix.Collect), fanoutPolicySuffix(workflowStep.Matrix.MaxConcurrency, workflowStep.Matrix.MaxIterations, workflowStep.Matrix.Timeout, workflowStep.Matrix.FailFast), dryRunCondition(workflowStep), needs); err != nil {
+			if _, err := fmt.Fprintf(writer, "%s%s %s (matrix %s%s)%s%s%s\n", indent, index, workflowStep.ID, matrixAxisNames(workflowStep.Matrix.Axes), fanoutCollectSuffix(workflowStep.Matrix.Collect), fanoutPolicySuffix(workflowStep.Matrix.MaxConcurrency, workflowStep.Matrix.MaxIterations, workflowStep.Matrix.Timeout, workflowStep.Matrix.FailFast), dryRunCondition(workflowStep), edges); err != nil {
 				return err
 			}
 			if err := writeDryRun(writer, workflowStep.Matrix.Steps, indent+"   ", path); err != nil {
@@ -218,7 +218,7 @@ func writeDryRun(writer io.Writer, steps []workflow.Step, indent string, parent 
 		if workflowStep.If != "" {
 			condition = " if: " + string(workflowStep.If)
 		}
-		if _, err := fmt.Fprintf(writer, "%s%s %s (%s)%s%s%s\n", indent, index, workflowStep.ID, kind, executionPolicySuffix(workflowStep), condition, needs); err != nil {
+		if _, err := fmt.Fprintf(writer, "%s%s %s (%s)%s%s%s\n", indent, index, workflowStep.ID, kind, executionPolicySuffix(workflowStep), condition, edges); err != nil {
 			return err
 		}
 		if workflowStep.Action != nil {
@@ -244,13 +244,6 @@ func writeDryRun(writer io.Writer, steps []workflow.Step, indent string, parent 
 		}
 	}
 	return nil
-}
-
-func dryRunNeeds(workflowStep workflow.Step) string {
-	if len(workflowStep.Needs) == 0 {
-		return ""
-	}
-	return " [needs: " + strings.Join(workflowStep.Needs, ", ") + "]"
 }
 
 func fanoutCollectSuffix(collect string) string {

@@ -59,6 +59,7 @@ type Duration string
 type ActionStep struct {
 	ID               string            `json:"id,omitempty"`
 	Needs            []string          `json:"needs,omitempty"`
+	After            []string          `json:"after,omitempty"`
 	Type             string            `json:"type,omitempty"`
 	Env              map[string]string `json:"env,omitempty"`
 	WorkingDirectory string            `json:"working_directory,omitempty"`

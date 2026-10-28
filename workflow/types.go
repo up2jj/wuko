@@ -159,6 +159,7 @@ func (c *Condition) UnmarshalYAML(node *yaml.Node) error {
 type Step struct {
 	ID               string              `yaml:"id"`
 	Needs            []string            `yaml:"needs,omitempty"`
+	After            []string            `yaml:"after,omitempty"`
 	Type             string              `yaml:"type,omitempty"`
 	Uses             ActionSource        `yaml:"uses,omitempty"`
 	Require          *string             `yaml:"require,omitempty"`
@@ -189,6 +190,7 @@ type Step struct {
 	hasWorkingDir    bool
 	hasEnv           bool
 	hasNeeds         bool
+	hasAfter         bool
 	sourcePath       string
 	validationPath   validation.Path
 }
@@ -201,7 +203,7 @@ func (workflowStep *Step) UnmarshalYAML(node *yaml.Node) error {
 		return fmt.Errorf("step must be an object")
 	}
 	if err := rejectUnknownFields(node, "step", map[string]bool{
-		"id": true, "needs": true, "type": true, "uses": true, "require": true, "env": true, "working_directory": true, "worktree": true, "executor": true, "steps": true, "finally": true, "defer": true, "concurrent": true,
+		"id": true, "needs": true, "after": true, "type": true, "uses": true, "require": true, "env": true, "working_directory": true, "worktree": true, "executor": true, "steps": true, "finally": true, "defer": true, "concurrent": true,
 		"batch": true, "foreach": true, "matrix": true, "loop": true, "once": true, "attempt": true, "cancel_on": true, "observe": true, "try": true, "catch": true, "return": true, "sha256": true, "if": true,
 		"with": true,
 	}); err != nil {
@@ -213,6 +215,9 @@ func (workflowStep *Step) UnmarshalYAML(node *yaml.Node) error {
 		}
 		if node.Content[i].Value == "needs" && node.Content[i+1].Kind != yaml.SequenceNode {
 			return fmt.Errorf("needs must be a list")
+		}
+		if node.Content[i].Value == "after" && node.Content[i+1].Kind != yaml.SequenceNode {
+			return fmt.Errorf("after must be a list")
 		}
 		if node.Content[i].Value == "steps" && node.Content[i+1].Kind != yaml.SequenceNode {
 			return fmt.Errorf("steps must be a list")
@@ -233,6 +238,7 @@ func (workflowStep *Step) UnmarshalYAML(node *yaml.Node) error {
 	workflowStep.hasWorkingDir = hasMappingField(node, "working_directory")
 	workflowStep.hasEnv = hasMappingField(node, "env")
 	workflowStep.hasNeeds = hasMappingField(node, "needs")
+	workflowStep.hasAfter = hasMappingField(node, "after")
 	return nil
 }
 
@@ -756,18 +762,38 @@ func validateConcurrentNeeds(steps []Step) error {
 	indegree := make([]int, len(steps))
 	dependents := make([][]int, len(steps))
 	for index, workflowStep := range steps {
+		label := concurrentStepLabel(workflowStep, index)
 		seen := make(map[string]struct{}, len(workflowStep.Needs))
 		for _, need := range workflowStep.Needs {
 			if _, duplicate := seen[need]; duplicate {
-				return fmt.Errorf("concurrent child %q lists duplicate need %q", concurrentStepLabel(workflowStep, index), need)
+				return fmt.Errorf("concurrent child %q lists duplicate need %q", label, need)
 			}
 			seen[need] = struct{}{}
 			dependency, exists := ids[need]
 			if !exists {
-				return fmt.Errorf("concurrent child %q needs unknown sibling %q", concurrentStepLabel(workflowStep, index), need)
+				return fmt.Errorf("concurrent child %q needs unknown sibling %q", label, need)
 			}
 			if dependency == index {
-				return fmt.Errorf("concurrent child %q cannot need itself", concurrentStepLabel(workflowStep, index))
+				return fmt.Errorf("concurrent child %q cannot need itself", label)
+			}
+			indegree[index]++
+			dependents[dependency] = append(dependents[dependency], index)
+		}
+		ordered := make(map[string]struct{}, len(workflowStep.After))
+		for _, sibling := range workflowStep.After {
+			if _, duplicate := ordered[sibling]; duplicate {
+				return fmt.Errorf("concurrent child %q lists duplicate after %q", label, sibling)
+			}
+			if _, needed := seen[sibling]; needed {
+				return fmt.Errorf("concurrent child %q lists %q in both needs and after", label, sibling)
+			}
+			ordered[sibling] = struct{}{}
+			dependency, exists := ids[sibling]
+			if !exists {
+				return fmt.Errorf("concurrent child %q runs after unknown sibling %q", label, sibling)
+			}
+			if dependency == index {
+				return fmt.Errorf("concurrent child %q cannot run after itself", label)
 			}
 			indegree[index]++
 			dependents[dependency] = append(dependents[dependency], index)
@@ -801,7 +827,20 @@ func validateConcurrentNeeds(steps []Step) error {
 			cyclic = append(cyclic, concurrentStepLabel(steps[index], index))
 		}
 	}
-	return fmt.Errorf("concurrent needs contain a cycle involving %q", strings.Join(cyclic, ", "))
+	return fmt.Errorf("concurrent needs and after edges contain a cycle involving %q", strings.Join(cyclic, ", "))
+}
+
+// EdgeLabel describes a concurrent child's sibling edges for previews, such as
+// " [needs: lint] [after: fix]", or returns "" without edges.
+func (workflowStep Step) EdgeLabel() string {
+	var label string
+	if len(workflowStep.Needs) > 0 {
+		label += " [needs: " + strings.Join(workflowStep.Needs, ", ") + "]"
+	}
+	if len(workflowStep.After) > 0 {
+		label += " [after: " + strings.Join(workflowStep.After, ", ") + "]"
+	}
+	return label
 }
 
 func concurrentStepLabel(workflowStep Step, index int) string {
