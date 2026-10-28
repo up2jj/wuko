@@ -402,3 +402,29 @@ func writeWorkflow(t *testing.T, path, description string) {
 	data := "version: 1\nname: shared\ndescription: " + description + "\nsteps:\n  - id: run\n    type: shell\n    with:\n      command: true\n"
 	testfs.WriteFile(t, path, []byte(data), 0o644)
 }
+
+func TestFindIgnoresUnrelatedInvalidWorkflows(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	project, home := filepath.Join(root, "project"), filepath.Join(root, "home")
+	local, global := filepath.Join(project, ".wuko", "workflows"), filepath.Join(home, ".wuko", "workflows")
+	testfs.Write(t, filepath.Join(global, "broken.yaml"), "version: [")
+	testfs.Write(t, filepath.Join(local, "draft.yaml"), "version: 2\nname: draft\nsteps: [{return: {outputs: {}}}]\n")
+	testfs.Write(t, filepath.Join(global, "draft.yaml"), "version: 1\nname: draft\nsteps: [{return: {outputs: {}}}]\n")
+	checkPath := filepath.Join(local, "check.yaml")
+	testfs.Write(t, checkPath, "version: 1\nname: check\nsteps: [{return: {outputs: {}}}]\n")
+	source, err := Find(project, home, "", "check")
+	if err != nil || source.Path != checkPath {
+		t.Fatalf("Find(check) = %#v, %v, want the valid workflow despite broken.yaml", source, err)
+	}
+	// An invalid workflow still reserves its name rather than promoting the global namesake.
+	if _, err := Find(project, home, "", "draft"); err == nil || !strings.Contains(err.Error(), "version") {
+		t.Fatalf("Find(draft) error = %v, want the local workflow's load error", err)
+	}
+	if _, err := Find(project, home, "", "broken"); err == nil || strings.Contains(err.Error(), "not found") {
+		t.Fatalf("Find(broken) error = %v, want its load error", err)
+	}
+	if _, err := Find(project, home, "", "missing"); err == nil || !strings.Contains(err.Error(), `workflow "missing" not found`) {
+		t.Fatalf("Find(missing) error = %v", err)
+	}
+}

@@ -351,9 +351,8 @@ func validateGitHookBindings(command *cobra.Command, deps dependencies, reposito
 }
 
 // gitHookWorkflowFinder resolves hook bindings against the repository's workflows, which
-// are discovered once for all bindings. Repository bindings must not depend on unrelated
-// global workflows being valid, so normal discovery is only a fallback for names the
-// repository does not provide.
+// are discovered once for all bindings, so a hook run does not parse every global workflow.
+// Normal discovery is only a fallback for names the repository does not provide.
 func gitHookWorkflowFinder(root, home, configDir string) (func(string) (workflow.Source, error), error) {
 	sources, err := workflow.DiscoverDirectory(filepath.Join(root, ".wuko", "workflows"), "local")
 	if err != nil && !errors.Is(err, os.ErrNotExist) {

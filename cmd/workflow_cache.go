@@ -20,39 +20,39 @@ import (
 // run. It is safe for parallel branches.
 type workflowInvocationCache struct {
 	mu        sync.Mutex
-	sources   map[string][]workflow.Source
+	sources   map[string]workflow.Selection
 	validated map[string]struct{}
 }
 
-// discover returns the effective workflow sources for one discovery root. The returned slice is
+// discover returns the effective workflow selection for one discovery root. Its sources are
 // shared with later callers and must not be modified.
-func (cache *workflowInvocationCache) discover(cwd, homeDir, configDir string) ([]workflow.Source, error) {
+func (cache *workflowInvocationCache) discover(cwd, homeDir, configDir string) (workflow.Selection, error) {
 	if cache == nil {
-		return workflow.Discover(cwd, homeDir, configDir)
+		return workflow.DiscoverForSelection(cwd, homeDir, configDir)
 	}
 	key := strings.Join([]string{cwd, homeDir, configDir}, "\x00")
 	cache.mu.Lock()
 	defer cache.mu.Unlock()
-	if sources, cached := cache.sources[key]; cached {
-		return sources, nil
+	if selection, cached := cache.sources[key]; cached {
+		return selection, nil
 	}
-	sources, err := workflow.Discover(cwd, homeDir, configDir)
+	selection, err := workflow.DiscoverForSelection(cwd, homeDir, configDir)
 	if err != nil {
-		return nil, err
+		return workflow.Selection{}, err
 	}
 	if cache.sources == nil {
-		cache.sources = make(map[string][]workflow.Source)
+		cache.sources = make(map[string]workflow.Selection)
 	}
-	cache.sources[key] = sources
-	return sources, nil
+	cache.sources[key] = selection
+	return selection, nil
 }
 
 func (cache *workflowInvocationCache) find(cwd, homeDir, configDir, name string) (workflow.Source, error) {
-	sources, err := cache.discover(cwd, homeDir, configDir)
+	selection, err := cache.discover(cwd, homeDir, configDir)
 	if err != nil {
 		return workflow.Source{}, err
 	}
-	return workflow.SelectSource(sources, name)
+	return selection.Select(name)
 }
 
 func (cache *workflowInvocationCache) alreadyValidated(key string) bool {

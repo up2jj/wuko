@@ -383,18 +383,61 @@ func installedPackageManifest(directory string) (string, string, bool, error) {
 	return path, marketplaceURL, true, nil
 }
 
-// Find returns the effective workflow matching name.
+// Find returns the effective workflow matching name. An invalid workflow file only fails the
+// lookup when it is the one selected, so one broken file does not hide every other workflow.
 func Find(cwd, homeDir, configDir, name string) (Source, error) {
 	if !ValidWorkflowSelector(name) {
 		return Source{}, localWorkflowFileHint(cwd, name, fmt.Errorf("invalid workflow name %q", name))
 	}
-	sources, err := Discover(cwd, homeDir, configDir)
+	selection, err := DiscoverForSelection(cwd, homeDir, configDir)
 	if err != nil {
 		return Source{}, err
 	}
-	source, err := SelectSource(sources, name)
+	source, err := SelectSource(selection.Sources, name)
 	if err != nil {
 		return Source{}, localWorkflowFileHint(cwd, name, err)
+	}
+	if err := selection.invalid[source.Path]; err != nil {
+		return Source{}, err
+	}
+	return source, nil
+}
+
+// Selection holds the effective workflows for name lookups. Invalid workflow files stay in
+// Sources so they keep reserving their names over lower-precedence namesakes; selecting one
+// reports its load error.
+type Selection struct {
+	Sources []Source
+	invalid map[string]error
+}
+
+// DiscoverForSelection discovers effective workflows like Discover, but keeps invalid files
+// as name reservations instead of failing the whole discovery. Filesystem errors still fail.
+func DiscoverForSelection(cwd, homeDir, configDir string) (Selection, error) {
+	invalid := make(map[string]error)
+	sources, err := discoverAll(cwd, homeDir, configDir, func(source Source, err error) {
+		invalid[source.Path] = err
+	})
+	if err != nil {
+		return Selection{}, err
+	}
+	effective := sources[:0]
+	for _, source := range sources {
+		if source.Effective {
+			effective = append(effective, source)
+		}
+	}
+	return Selection{Sources: effective, invalid: invalid}, nil
+}
+
+// Select returns the effective workflow matching name, or the load error of an invalid one.
+func (selection Selection) Select(name string) (Source, error) {
+	source, err := SelectSource(selection.Sources, name)
+	if err != nil {
+		return Source{}, err
+	}
+	if err := selection.invalid[source.Path]; err != nil {
+		return Source{}, err
 	}
 	return source, nil
 }

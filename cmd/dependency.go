@@ -11,34 +11,30 @@ import (
 )
 
 func resolveDependencyPlan(ctx context.Context, root *workflow.Definition, loader *workflow.Loader, options workflow.LoadOptions, cwd, homeDir, configDir string) (*workflow.DependencyPlan, error) {
-	return resolveDependencyPlanWith(ctx, root, loader, options, func() ([]workflow.Source, error) {
-		return workflow.Discover(cwd, homeDir, configDir)
+	return resolveDependencyPlanWith(ctx, root, loader, options, func() (workflow.Selection, error) {
+		return workflow.DiscoverForSelection(cwd, homeDir, configDir)
 	})
 }
 
 // resolveDependencyPlanWith takes discovery as a callback so a caller that repeats the same
 // resolution - a child-workflow invocation inside a loop, say - can serve it from a cache
 // instead of re-reading and re-parsing every discoverable workflow file.
-func resolveDependencyPlanWith(ctx context.Context, root *workflow.Definition, loader *workflow.Loader, options workflow.LoadOptions, discover func() ([]workflow.Source, error)) (*workflow.DependencyPlan, error) {
+func resolveDependencyPlanWith(ctx context.Context, root *workflow.Definition, loader *workflow.Loader, options workflow.LoadOptions, discover func() (workflow.Selection, error)) (*workflow.DependencyPlan, error) {
 	if len(root.DependsOn) == 0 {
 		return workflow.ResolveDependencyPlan(ctx, root, nil)
 	}
-	sources, err := discover()
+	selection, err := discover()
 	if err != nil {
 		return nil, err
-	}
-	byName := make(map[string]workflow.Source, len(sources))
-	for _, source := range sources {
-		byName[source.Name] = source
 	}
 	loaded := make(map[string]*workflow.Definition)
 	return workflow.ResolveDependencyPlan(ctx, root, func(ctx context.Context, name string) (*workflow.Definition, error) {
 		if !workflow.ValidWorkflowName(name) {
 			return nil, fmt.Errorf("invalid workflow name %q", name)
 		}
-		source, exists := byName[name]
-		if !exists {
-			return nil, fmt.Errorf("workflow %q not found", name)
+		source, err := selection.Select(name)
+		if err != nil {
+			return nil, err
 		}
 		if source.Target != "" {
 			return nil, fmt.Errorf("workflow %q declares targets and cannot be used as a dependency", name)

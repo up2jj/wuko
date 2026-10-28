@@ -104,7 +104,7 @@ func (invoker commandWorkflowInvoker) prepare(ctx context.Context, invocation en
 	if err := requireDirectlyInvokable(definition); err != nil {
 		return preparedInvocation{}, err
 	}
-	plan, err := resolveDependencyPlanWith(nested, definition, loader, loadOptions, func() ([]workflow.Source, error) {
+	plan, err := resolveDependencyPlanWith(nested, definition, loader, loadOptions, func() (workflow.Selection, error) {
 		return cache.discover(runDir, homeDir, configDir)
 	})
 	if err != nil {
