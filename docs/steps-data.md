@@ -15,6 +15,7 @@ them through `.vars` and `.steps`; expressions use `vars` and `steps` without th
 | Load and decode | [`import_vars`](#import_vars) — JSON or TOML into variables · [`decode`](#decode) — JSON, YAML, TOML, or lines into a value · [`extract`](#extract) — records and markers from text |
 | Query and edit | [`jsonpath`](#jsonpath) — select values · [`edit`](#edit) — update structured files or values · [`markdown_edit`](#markdown_edit) — update Markdown by AST node |
 | Versions and time | [`semver`](#semver) — parse, compare, constrain, increment · [`time`](#time) — capture, parse, adjust, format |
+| Fix and check files | [`text_fix`](#text_fix) — trailing whitespace and final newlines |
 | Persist between runs | [`key_value`](#key_value) — JSON-compatible store · [`changed`](#changed) — detect changed files or inputs |
 
 ## `set`
@@ -834,6 +835,38 @@ paths resolve from the active run directory, follow executor filesystems, reject
 non-regular files, preserve permissions, and are installed atomically. Outputs are `value`,
 `changed`, `count`, `changed_count`, and `matches`; file sources also return the resolved `file`.
 The default `max_bytes` is `1MiB`.
+
+## `text_fix`
+
+Remove trailing whitespace and normalize final newlines in text files, the fixes a pre-commit
+framework applies before a commit. Enable one or both rules:
+
+```yaml
+- id: whitespace
+  type: text_fix
+  with:
+    files: {expr: steps.files.text}
+    trailing_whitespace: true
+    final_newline: true
+```
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `files` | required | List of paths, or `{expr: ...}` returning one; relative paths resolve against the run directory |
+| `trailing_whitespace` | `false` | Remove spaces, tabs, vertical tabs, form feeds, and stray carriage returns at line ends |
+| `final_newline` | `false` | End non-empty text with exactly one line ending; text holding only line endings becomes empty |
+| `check` | `false` | Report the files that need fixing without writing them |
+| `fail_on_change` | `true` | Fail when any file changed, or would change in `check` mode |
+
+Line endings are preserved: a CRLF line keeps its carriage return, and the final newline keeps the
+style of the first trailing ending, defaulting to `\n`. Files containing a NUL byte are binary and
+left alone, as are symbolic links and directories. Rewrites are atomic and keep the file mode;
+inside an [executor scope](executors.md#reading-and-writing-files) they go through the execution
+target's filesystem.
+
+Outputs are `changed` (the paths that changed, in input order), `count`, and `checked`. By default
+the step fails after fixing, so a commit stops for the fixes to be reviewed and staged; set
+`fail_on_change: false` to fix silently and read `changed` instead.
 
 ## `extract`
 

@@ -8,62 +8,15 @@ steps:
       fail_fast: false
       steps:
         - id: trailing_whitespace
-          type: lua
+          type: text_fix
           if: len(steps.selected.text) > 0
-          with:
-            args: {files: {expr: steps.selected.text}}
-            source: |
-              local changed = {}
-              -- Lua patterns and per-line rewrites are slow, so plain searches pick the files to rewrite.
-              local endings = {"\r\r\n"}
-              for _, space in ipairs({" ", "\t", "\v", "\f"}) do
-                endings[#endings+1] = space .. "\n"
-                endings[#endings+1] = space .. "\r\n"
-              end
-              local function dirty(text)
-                local last = text:sub(-1)
-                if last == " " or last == "\t" or last == "\r" or last == "\v" or last == "\f" then return true end
-                for _, ending in ipairs(endings) do
-                  if text:find(ending, 1, true) then return true end
-                end
-                return false
-              end
-              for _, path in ipairs(wuko.args.files) do
-                local original = wuko.fs.read(path)
-                if dirty(original) then
-                  local fixed = original:gsub("([^\n]*)(\n?)", function(line, newline)
-                    local ending = newline
-                    if newline ~= "" and line:sub(-1) == "\r" then line, ending = line:sub(1,-2), "\r\n" end
-                    return line:gsub("[ \t\r\v\f]+$", "") .. ending
-                  end)
-                  if fixed ~= original then wuko.fs.write(path, fixed); changed[#changed+1] = path end
-                end
-              end
-              assert(#changed == 0, "Fixed trailing whitespace; review and stage: " .. table.concat(changed, ", "))
+          with: {files: {expr: steps.selected.text}, trailing_whitespace: true}
 
         - id: end_of_file_fixer
           after: [trailing_whitespace]
-          type: lua
+          type: text_fix
           if: len(steps.selected.text) > 0
-          with:
-            args: {files: {expr: steps.selected.text}}
-            source: |
-              local changed = {}
-              for _, path in ipairs(wuko.args.files) do
-                local original = wuko.fs.read(path)
-                -- Scan back over the trailing newlines instead of pattern-matching the whole file.
-                local last = #original
-                while last > 0 and (original:byte(last) == 10 or original:byte(last) == 13) do last = last - 1 end
-                local ending = original:sub(last + 1)
-                local newline = ending:sub(1,2) == "\r\n" and "\r\n" or ending:sub(1,1)
-                if newline == "" then newline = "\n" end
-                if last == 0 and #original > 0 then
-                  wuko.fs.write(path, ""); changed[#changed+1] = path
-                elseif last > 0 and ending ~= newline then
-                  wuko.fs.write(path, original:sub(1, last) .. newline); changed[#changed+1] = path
-                end
-              end
-              assert(#changed == 0, "Fixed end-of-file newline; review and stage: " .. table.concat(changed, ", "))
+          with: {files: {expr: steps.selected.text}, final_newline: true}
 
         - id: gofmt
           after: [end_of_file_fixer]

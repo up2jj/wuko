@@ -40,7 +40,7 @@ the native `git_files` step, which excludes generated `dist/` and `completions/`
 classifies the rest as text or binary. File policies run through the local
 `.wuko/actions/file-check/action.yaml` action, where one Lua pass per check parses YAML and TOML
 with `wuko.yaml` and `wuko.toml` and scans content; `batch` groups Go formatting calls. Inline `lua` steps handle case comparisons,
-`go vet` package scoping, and byte-preserving whitespace/newline fixes. The fixers and gofmt run in
+and `go vet` package scoping; the native `text_fix` step fixes whitespace and final newlines. The fixers and gofmt run in
 order, then the remaining checks run concurrently; every check still runs and reports after a
 failure, and formatters reject the operation after making fixes so they can be reviewed and staged.
 Pre-commit isolates staged tracked content before loading the workflows; see
