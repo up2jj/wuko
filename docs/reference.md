@@ -45,6 +45,7 @@ Work with typed values, structured files, and persisted state.
 | `edit` | Update structured files or values with RFC 9535 JSONPath | [Data steps](steps-data.md#edit) |
 | `markdown_edit` | Update Markdown by semantic AST nodes while preserving unrelated source | [Data steps](steps-data.md#markdown_edit) |
 | `text_fix` | Remove trailing whitespace and normalize final newlines in text files | [Data steps](steps-data.md#text_fix) |
+| `text_check` | Report forbidden text, oversized files, and documents that do not parse | [Data steps](steps-data.md#text_check) |
 | `extract` | Extract typed records and marker fields from text | [Text extraction](extract.md) |
 | `semver` | Parse, compare, constrain, or increment versions | [Data steps](steps-data.md#semver) |
 | `time` | Capture, parse, adjust, and format an explicit time value | [Data steps](steps-data.md#time) |

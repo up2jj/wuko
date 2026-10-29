@@ -16,22 +16,24 @@ import (
 	"github.com/up2jj/wuko/step"
 )
 
-// fileList is the `files` field: a literal list of paths or `{expr: ...}` returning one.
+// fileList is a list-of-paths field such as `files`: a literal list or `{expr: ...}`
+// returning one.
 type fileList struct {
 	paths   []string
 	program *vm.Program
+	field   string
 }
 
-func parseFileList(raw map[string]any) (fileList, error) {
-	switch value := raw["files"].(type) {
+func parseFileList(raw map[string]any, field string) (fileList, error) {
+	switch value := raw[field].(type) {
 	case nil:
-		return fileList{}, fmt.Errorf("files is required")
+		return fileList{}, fmt.Errorf("%s is required", field)
 	case []any:
 		paths := make([]string, len(value))
 		for index, item := range value {
 			path, ok := item.(string)
 			if !ok || strings.TrimSpace(path) == "" {
-				return fileList{}, fmt.Errorf("files[%d] must be a non-empty path", index)
+				return fileList{}, fmt.Errorf("%s[%d] must be a non-empty path", field, index)
 			}
 			paths[index] = path
 		}
@@ -39,24 +41,28 @@ func parseFileList(raw map[string]any) (fileList, error) {
 	case map[string]any:
 		source, ok := value["expr"].(string)
 		if len(value) != 1 || !ok || strings.TrimSpace(source) == "" {
-			return fileList{}, fmt.Errorf("files must be a list or an object containing exactly a non-empty expr")
+			return fileList{}, fmt.Errorf("%s must be a list or an object containing exactly a non-empty expr", field)
 		}
 		program, err := wukoexpr.Compile(source, expr.Env(step.ExpressionEnvironmentShape(nil)), expr.AllowUndefinedVariables())
 		if err != nil {
-			return fileList{}, fmt.Errorf("compiling files expr: %w", err)
+			return fileList{}, fmt.Errorf("compiling %s expr: %w", field, err)
 		}
-		return fileList{program: program}, nil
+		return fileList{program: program, field: field}, nil
 	default:
-		return fileList{}, fmt.Errorf("files must be a list or an object containing expr")
+		return fileList{}, fmt.Errorf("%s must be a list or an object containing expr", field)
 	}
 }
 
-// fileListReferences reports a `files` expression to workflow validation.
+// fileListReferences reports the path-list expressions to workflow validation.
 func fileListReferences(raw map[string]any) (step.References, error) {
-	binding, _ := raw["files"].(map[string]any)
-	reference := step.ExpressionField(binding, "expr")
-	reference.Label = "files expr"
-	return step.References{Expressions: []step.ExpressionReference{reference}}, nil
+	var references step.References
+	for _, field := range []string{"files", "size_exempt"} {
+		binding, _ := raw[field].(map[string]any)
+		reference := step.ExpressionField(binding, "expr")
+		reference.Label = field + " expr"
+		references.Expressions = append(references.Expressions, reference)
+	}
+	return references, nil
 }
 
 // resolve returns the configured paths, evaluating the expression form for this run.
@@ -66,17 +72,17 @@ func (list fileList) resolve(request step.Request) ([]string, error) {
 	}
 	value, err := expr.Run(list.program, request.ExpressionEnvironment(nil))
 	if err != nil {
-		return nil, fmt.Errorf("evaluating files expr: %w", err)
+		return nil, fmt.Errorf("evaluating %s expr: %w", list.field, err)
 	}
 	items := reflect.ValueOf(value)
 	if !items.IsValid() || (items.Kind() != reflect.Slice && items.Kind() != reflect.Array) {
-		return nil, fmt.Errorf("files expr must return a list of paths")
+		return nil, fmt.Errorf("%s expr must return a list of paths", list.field)
 	}
 	paths := make([]string, items.Len())
 	for index := range items.Len() {
 		path, ok := items.Index(index).Interface().(string)
 		if !ok || strings.TrimSpace(path) == "" {
-			return nil, fmt.Errorf("files expr item %d must be a non-empty path", index)
+			return nil, fmt.Errorf("%s expr item %d must be a non-empty path", list.field, index)
 		}
 		paths[index] = path
 	}

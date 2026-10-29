@@ -34,7 +34,7 @@ func NewFix(raw map[string]any) (step.Runner, error) {
 	if !config.TrailingWhitespace && !config.FinalNewline {
 		return nil, fmt.Errorf("enable at least one of trailing_whitespace and final_newline")
 	}
-	files, err := parseFileList(raw)
+	files, err := parseFileList(raw, "files")
 	if err != nil {
 		return nil, err
 	}

@@ -1,8 +1,10 @@
-// Package dataformat parses YAML and TOML documents for every surface that reads them as
-// data, so the decode step and Lua report the same errors with the same locations.
+// Package dataformat parses JSON, YAML, and TOML documents for every surface that reads them
+// as data, so the decode and text_check steps and Lua report the same errors with the same
+// locations.
 package dataformat
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -110,4 +112,64 @@ func lineEndColumn(text string, line int) int {
 		return 1
 	}
 	return utf8.RuneCountInString(strings.TrimSuffix(lines[line-1], "\r")) + 1
+}
+
+// DecodeJSON decodes exactly one JSON value into value, keeping numbers as json.Number.
+// Decode into a json.RawMessage to check syntax without building the value.
+func DecodeJSON(text string, value any) error {
+	decoder := json.NewDecoder(strings.NewReader(text))
+	decoder.UseNumber()
+	if err := decoder.Decode(value); err != nil {
+		return jsonLocationError(text, err)
+	}
+	extraOffset := nextNonSpace(text, decoder.InputOffset())
+	var extra json.RawMessage
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err == nil {
+			line, column := lineColumn(text, extraOffset)
+			return fmt.Errorf("line %d, column %d: multiple JSON values are not supported", line, column)
+		}
+		return jsonLocationError(text, err)
+	}
+	return nil
+}
+
+func jsonLocationError(text string, err error) error {
+	offset := int64(len(text) + 1)
+	var syntaxErr *json.SyntaxError
+	if errors.As(err, &syntaxErr) {
+		offset = syntaxErr.Offset
+	}
+	var typeErr *json.UnmarshalTypeError
+	if errors.As(err, &typeErr) {
+		offset = typeErr.Offset
+	}
+	line, column := lineColumn(text, offset)
+	return fmt.Errorf("line %d, column %d: %w", line, column, err)
+}
+
+func lineColumn(text string, offset int64) (int, int) {
+	if offset < 1 {
+		offset = 1
+	}
+	if offset > int64(len(text)+1) {
+		offset = int64(len(text) + 1)
+	}
+	prefix := text[:offset-1]
+	line := strings.Count(prefix, "\n") + 1
+	start := strings.LastIndexByte(prefix, '\n') + 1
+	column := utf8.RuneCountInString(prefix[start:]) + 1
+	return line, column
+}
+
+func nextNonSpace(text string, offset int64) int64 {
+	for offset < int64(len(text)) {
+		switch text[offset] {
+		case ' ', '\t', '\r', '\n':
+			offset++
+		default:
+			return offset + 1
+		}
+	}
+	return int64(len(text) + 1)
 }

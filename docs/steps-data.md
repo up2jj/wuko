@@ -15,7 +15,7 @@ them through `.vars` and `.steps`; expressions use `vars` and `steps` without th
 | Load and decode | [`import_vars`](#import_vars) — JSON or TOML into variables · [`decode`](#decode) — JSON, YAML, TOML, or lines into a value · [`extract`](#extract) — records and markers from text |
 | Query and edit | [`jsonpath`](#jsonpath) — select values · [`edit`](#edit) — update structured files or values · [`markdown_edit`](#markdown_edit) — update Markdown by AST node |
 | Versions and time | [`semver`](#semver) — parse, compare, constrain, increment · [`time`](#time) — capture, parse, adjust, format |
-| Fix and check files | [`text_fix`](#text_fix) — trailing whitespace and final newlines |
+| Fix and check files | [`text_fix`](#text_fix) — trailing whitespace and final newlines · [`text_check`](#text_check) — forbidden text, size limits, and parse checks |
 | Persist between runs | [`key_value`](#key_value) — JSON-compatible store · [`changed`](#changed) — detect changed files or inputs |
 
 ## `set`
@@ -867,6 +867,54 @@ target's filesystem.
 Outputs are `changed` (the paths that changed, in input order), `count`, and `checked`. By default
 the step fails after fixing, so a commit stops for the fixes to be reviewed and staged; set
 `fail_on_change: false` to fix silently and read `changed` instead.
+
+## `text_check`
+
+Report files that contain forbidden text, exceed a size, or do not parse, the checks a
+pre-commit framework runs against what a commit adds. Combine any of the three:
+
+```yaml
+- id: policies
+  type: text_check
+  with:
+    files: {expr: steps.files.text}
+    forbid:
+      - {pattern: '(?m)^(<<<<<<< |>>>>>>> )', message: Merge conflict marker}
+      - 'TODO\(remove before merge\)'
+    max_size: 500KiB
+    size_exempt: {expr: vars.lfs_paths}
+
+- id: configuration
+  type: text_check
+  with: {files: [config.yaml, deploy.yaml], parse: yaml}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `files` | Required list of paths, or `{expr: ...}` returning one |
+| `forbid` | Go RE2 patterns; each entry is a pattern or `{pattern, message}` |
+| `max_size` | Largest allowed file, such as `500KiB` or `2MiB` |
+| `size_exempt` | Paths, or `{expr: ...}`, that may exceed `max_size`, such as Git LFS files |
+| `parse` | `json`, `yaml`, or `toml`: each file must hold exactly one valid document |
+
+Every file is checked and every problem reported, one per line, before the step fails:
+
+```text
+2 problem(s) found:
+secrets/id.pem:1: Private key found
+config.yaml: invalid YAML: line 4, column 3: yaml: line 4: mapping values are not allowed in this context
+```
+
+A forbidden match reports its line and the entry's message, never the matched text, so a pattern
+that catches secrets does not print them. Without a message the pattern itself is shown. Patterns
+match bytes across the whole file; use `(?m)` for `^` and `$` at line boundaries. A file over
+`max_size` is reported without being read. `parse` applies the
+[`decode` step's `validate_only` rules](#decode). Symbolic links and directories are skipped,
+and inside an [executor scope](executors.md#reading-and-writing-files) files are read from the
+execution target.
+
+Outputs are `checked`, `count`, and `failures`, a list of `{path, line, message}` with `line` 0
+when a problem has no position.
 
 ## `extract`
 

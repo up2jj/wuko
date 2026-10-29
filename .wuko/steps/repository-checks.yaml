@@ -20,44 +20,40 @@ steps:
 
         - id: gofmt
           after: [end_of_file_fixer]
-          uses: ../actions/file-check
+          uses: ../actions/gofmt
           if: len(steps.selected.go) > 0
           with:
-            check: gofmt
             files: {expr: steps.selected.go}
 
         - id: check_yaml
           after: [gofmt]
-          uses: ../actions/file-check
+          type: text_check
           if: len(steps.selected.yaml) > 0
-          with:
-            check: yaml
-            files: {expr: steps.selected.yaml}
+          with: {files: {expr: steps.selected.yaml}, parse: yaml}
 
         - id: check_toml
           after: [gofmt]
-          uses: ../actions/file-check
+          type: text_check
           if: len(steps.selected.toml) > 0
-          with:
-            check: toml
-            files: {expr: steps.selected.toml}
+          with: {files: {expr: steps.selected.toml}, parse: toml}
 
         - id: check_merge_conflict
           after: [gofmt]
-          uses: ../actions/file-check
+          type: text_check
           if: steps.repository.merge && len(steps.selected.text) > 0
           with:
-            check: merge
             files: {expr: steps.selected.text}
+            forbid:
+              - {pattern: '(?m)^(<<<<<<< |======= |=======\r?\n|>>>>>>> )', message: Merge conflict marker}
 
         - id: check_added_large_files
           after: [gofmt]
-          uses: ../actions/file-check
+          type: text_check
           if: len(steps.selected.added) > 0
           with:
-            check: large
             files: {expr: steps.selected.added}
-            lfs: {expr: steps.selected.lfs}
+            max_size: 500KiB
+            size_exempt: {expr: keys(steps.selected.lfs)}
 
         - id: check_case_conflict
           after: [gofmt]
@@ -95,11 +91,15 @@ steps:
 
         - id: detect_private_key
           after: [gofmt]
-          uses: ../actions/file-check
+          type: text_check
           if: len(steps.selected.text) > 0
           with:
-            check: private_key
             files: {expr: steps.selected.text}
+            # The patterns avoid spelling out a key header, so this file never matches itself.
+            forbid:
+              - {pattern: 'BEGIN (RSA |DSA |EC |OPENSSH |SSH2 ENCRYPTED |ENCRYPTED |PGP )?PRIVATE KEY', message: Private key found}
+              - {pattern: 'PuTTY-User-Key-File-[2]', message: Private key found}
+              - {pattern: 'BEGIN OpenVPN Static key V[1]', message: Private key found}
 
         - id: go_vet
           after: [gofmt]

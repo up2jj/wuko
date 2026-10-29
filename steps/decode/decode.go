@@ -203,7 +203,7 @@ func (r *Runner) decode(text string) (any, error) {
 			return nil, err
 		case "json":
 			// RawMessage checks syntax without building the value tree.
-			return nil, decodeJSONValue(text, new(json.RawMessage))
+			return nil, dataformat.DecodeJSON(text, new(json.RawMessage))
 		case "toml":
 			_, err := dataformat.DecodeTOML(text)
 			return nil, err
@@ -225,28 +225,10 @@ func (r *Runner) decode(text string) (any, error) {
 
 func decodeJSON(text string) (any, error) {
 	var value any
-	if err := decodeJSONValue(text, &value); err != nil {
+	if err := dataformat.DecodeJSON(text, &value); err != nil {
 		return nil, err
 	}
 	return value, nil
-}
-
-func decodeJSONValue(text string, value any) error {
-	decoder := json.NewDecoder(strings.NewReader(text))
-	decoder.UseNumber()
-	if err := decoder.Decode(value); err != nil {
-		return jsonLocationError(text, err)
-	}
-	extraOffset := nextNonSpace(text, decoder.InputOffset())
-	var extra json.RawMessage
-	if err := decoder.Decode(&extra); err != io.EOF {
-		if err == nil {
-			line, column := lineColumn(text, extraOffset)
-			return fmt.Errorf("line %d, column %d: multiple JSON values are not supported", line, column)
-		}
-		return jsonLocationError(text, err)
-	}
-	return nil
 }
 
 func decodeYAML(text string) (any, error) {
@@ -434,46 +416,6 @@ func readCapacity(maximum, size int64) int64 {
 		capacity = math.MaxInt
 	}
 	return capacity
-}
-
-func jsonLocationError(text string, err error) error {
-	offset := int64(len(text) + 1)
-	var syntaxErr *json.SyntaxError
-	if errors.As(err, &syntaxErr) {
-		offset = syntaxErr.Offset
-	}
-	var typeErr *json.UnmarshalTypeError
-	if errors.As(err, &typeErr) {
-		offset = typeErr.Offset
-	}
-	line, column := lineColumn(text, offset)
-	return fmt.Errorf("line %d, column %d: %w", line, column, err)
-}
-
-func lineColumn(text string, offset int64) (int, int) {
-	if offset < 1 {
-		offset = 1
-	}
-	if offset > int64(len(text)+1) {
-		offset = int64(len(text) + 1)
-	}
-	prefix := text[:offset-1]
-	line := strings.Count(prefix, "\n") + 1
-	start := strings.LastIndexByte(prefix, '\n') + 1
-	column := utf8.RuneCountInString(prefix[start:]) + 1
-	return line, column
-}
-
-func nextNonSpace(text string, offset int64) int64 {
-	for offset < int64(len(text)) {
-		switch text[offset] {
-		case ' ', '\t', '\r', '\n':
-			offset++
-		default:
-			return offset + 1
-		}
-	}
-	return int64(len(text) + 1)
 }
 
 func resolvePath(runDir, path string) (string, error) {
