@@ -1199,6 +1199,22 @@ snapshot tables for `wuko.inputs`, `wuko.steps`, `wuko.dependencies`, `wuko.work
 `wuko.run`. Changing these Lua tables does not change workflow state. Outputs may be nil, booleans,
 strings, numbers, arrays, or string-keyed objects; cyclic and mixed-key tables are rejected.
 
+An empty Lua table is an object unless it is marked as a list. Lists that reach Lua from workflow
+state, `wuko.json`, `wuko.yaml`, `wuko.toml`, and list-returning helpers are already marked, so a
+list that a script empties stays a list. Mark a table you build yourself with `wuko.array`, which
+returns the table, or a new empty list when called without one:
+
+```lua
+local records = wuko.array()
+for _, line in ipairs(lines) do
+  if line:find("ERROR") then table.insert(records, line) end
+end
+wuko.output("records", records) -- [] when nothing matched, not {}
+```
+
+The mark is a metatable, so `wuko.array` rejects a table that already has another one, and a
+marked table must stay a sequence.
+
 Lua runs on [gopher-lua](https://github.com/yuin/gopher-lua), which mishandles closures around a
 caught error ([upstream issue #448](https://github.com/yuin/gopher-lua/issues/448)). This applies to
 every Lua script Wuko runs, including `validation.lua` form rules:

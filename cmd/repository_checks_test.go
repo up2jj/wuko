@@ -371,8 +371,8 @@ func TestRepositoryPushSelectionHandlesNewExistingDeletedAndRepeatedRefs(t *test
 		}
 	}
 	selected = runRepositorySelection(t, root, "pushed", []any{pushUpdate(base, zero)})
-	if got := selected["files"]; len(got.(map[string]any)) != 0 {
-		t.Fatalf("already remote branch files = %v", got)
+	if diff := cmp.Diff([]any{}, selected["files"]); diff != "" {
+		t.Fatalf("already remote branch files mismatch (-want +got):\n%s", diff)
 	}
 }
 

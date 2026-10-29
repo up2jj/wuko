@@ -150,6 +150,58 @@ wuko.output("roots", {
 	}
 }
 
+func TestLuaEmptyListsStayLists(t *testing.T) {
+	t.Parallel()
+	runner := steptest.Build(t, New, map[string]any{"source": `
+local items = wuko.var("items")
+table.remove(items)
+wuko.set_var("items", items)
+wuko.output("marked", wuko.array({}))
+wuko.output("fresh", wuko.array())
+wuko.output("decoded", wuko.json.decode("[]"))
+wuko.output("encoded", wuko.json.encode(wuko.array()))
+wuko.output("found", wuko.helpers.regex_find_all("abc", "x"))
+wuko.output("object", {})
+`})
+	result, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{"items": []any{"only"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{
+		"marked": []any{}, "fresh": []any{}, "decoded": []any{}, "encoded": "[]", "found": []any{},
+		"object": map[string]any{},
+	}
+	if diff := cmp.Diff(want, result.Outputs); diff != "" {
+		t.Fatalf("outputs mismatch (-want +got):\n%s", diff)
+	}
+	if diff := cmp.Diff([]any{}, result.Variables["items"]); diff != "" {
+		t.Fatalf("items mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestLuaArrayRejectsNonLists(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{name: "object keys", source: `wuko.output("value", wuko.array({name = "x"}))`, want: "must be a sequence"},
+		{name: "foreign metatable", source: `wuko.array(setmetatable({}, {}))`, want: "already has a metatable"},
+		{name: "non-table", source: `wuko.array("x")`, want: "table expected"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			runner := steptest.Build(t, New, map[string]any{"source": test.source})
+			_, err := runner.Run(t.Context(), step.Request{})
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("Run() error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
 func TestLuaRejectsInvalidArgumentExpressions(t *testing.T) {
 	tests := []struct {
 		name string

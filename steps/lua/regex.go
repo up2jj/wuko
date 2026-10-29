@@ -66,7 +66,7 @@ func helperRegexFind(state *glua.LState) int {
 func helperRegexFindAll(state *glua.LState) int {
 	text := state.CheckString(1)
 	compiled := compileRegex(state, "regex_find_all", state.CheckString(2))
-	result := state.NewTable()
+	result := newList(state, 0)
 	for _, match := range compiled.FindAllString(text, state.OptInt(3, -1)) {
 		result.Append(glua.LString(match))
 	}
@@ -109,7 +109,7 @@ func helperRegexReplace(state *glua.LState) int {
 func helperRegexSplit(state *glua.LState) int {
 	text := state.CheckString(1)
 	compiled := compileRegex(state, "regex_split", state.CheckString(2))
-	result := state.NewTable()
+	result := newList(state, 0)
 	for _, part := range compiled.Split(text, state.OptInt(3, -1)) {
 		result.Append(glua.LString(part))
 	}

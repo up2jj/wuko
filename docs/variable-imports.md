@@ -154,7 +154,9 @@ end
 Variables supplied through `--var-file` are available to Lua from the beginning of execution.
 Variables produced by `import_vars` are available to later sequential steps. A Lua step can
 publish another typed value with `wuko.set_var(name, value)`; cyclic or mixed-key Lua tables
-cannot be converted into workflow variables.
+cannot be converted into workflow variables. An array read from a variable stays an array when
+written back, even if the script empties it; build a new empty list with
+[`wuko.array()`](steps-automation.md#lua).
 
 ## Sequential and concurrent execution
 

@@ -18,7 +18,7 @@ steps:
       source: |
         -- Vet only the packages whose Go files changed, following the directories ./... skips.
         -- A module change can affect every package, so it vets them all.
-        local vet, seen, modules = {}, {}, {}
+        local vet, seen, modules = wuko.array(), {}, {}
         local function exists(path) return (pcall(wuko.fs.stat, path)) end
         local function nested(dir)
           while dir ~= "." do
@@ -61,7 +61,7 @@ steps:
         added: {expr: steps.files.added}
         vet: {expr: steps.go_packages.vet}
       source: |
-        local result = {files=wuko.args.files, text=wuko.args.text, yaml={}, toml={}, go={}, added=wuko.args.added, vet=wuko.args.vet, tidy=false, lint=false}
+        local result = {files=wuko.args.files, text=wuko.args.text, yaml=wuko.array(), toml=wuko.array(), go=wuko.array(), added=wuko.args.added, vet=wuko.args.vet, tidy=false, lint=false}
         for _, path in ipairs(wuko.args.files) do
           local extension = wuko.helpers.lower(path:match("%.([^./]+)$") or "")
           local format = ({yml="yaml", yaml="yaml", toml="toml", go="go"})[extension]

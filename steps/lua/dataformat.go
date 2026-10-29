@@ -142,7 +142,7 @@ func decodedToLua(state *glua.LState, value any) (glua.LValue, error) {
 	case toml.LocalTime:
 		return glua.LString(typed.String()), nil
 	case []any:
-		table := state.CreateTable(len(typed), 0)
+		table := newList(state, len(typed))
 		for index, item := range typed {
 			converted, err := decodedToLua(state, item)
 			if err != nil {

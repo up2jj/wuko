@@ -249,7 +249,7 @@ func (r *runtime) module(state *glua.LState) (*glua.LTable, error) {
 		module.RawSetString(name, value)
 	}
 	state.SetFuncs(module, map[string]glua.LGFunction{
-		"var": r.varValue, "set_var": r.setVar, "output": r.output,
+		"var": r.varValue, "set_var": r.setVar, "output": r.output, "array": luaArray,
 	})
 
 	env := state.NewTable()
@@ -487,7 +487,7 @@ func (r *runtime) kvList(state *glua.LState) int {
 		state.RaiseError("listing key-value entries: %v", err)
 		return 0
 	}
-	result := state.NewTable()
+	result := newList(state, len(entries))
 	for _, entry := range entries {
 		item := state.NewTable()
 		item.RawSetString("key", glua.LString(entry.Key))
@@ -642,7 +642,7 @@ func (r *runtime) fsList(state *glua.LState) int {
 		state.RaiseError("listing directory: %v", err)
 		return 0
 	}
-	table := state.NewTable()
+	table := newList(state, len(entries))
 	for _, entry := range entries {
 		item := state.NewTable()
 		item.RawSetString("name", glua.LString(entry.Name()))
@@ -781,6 +781,50 @@ func tableStrings(value glua.LValue) ([]string, error) {
 	return result, nil
 }
 
+// listMarker is the metatable field that marks a Lua table as a list, so that an empty one
+// still converts back to a list rather than an object.
+const listMarker = "__wuko_list"
+
+// newList returns an empty table marked as a list.
+func newList(state *glua.LState, capacity int) *glua.LTable {
+	table := state.CreateTable(capacity, 0)
+	table.Metatable = listMetatable(state)
+	return table
+}
+
+func listMetatable(state *glua.LState) *glua.LTable {
+	registry := state.G.Registry
+	if metatable, ok := registry.RawGetString(listMarker).(*glua.LTable); ok {
+		return metatable
+	}
+	metatable := state.CreateTable(0, 1)
+	metatable.RawSetString(listMarker, glua.LTrue)
+	registry.RawSetString(listMarker, metatable)
+	return metatable
+}
+
+func isList(table *glua.LTable) bool {
+	metatable, ok := table.Metatable.(*glua.LTable)
+	return ok && metatable.RawGetString(listMarker) == glua.LTrue
+}
+
+// luaArray implements wuko.array: it marks a table as a list and returns it, or returns a new
+// empty list when called without one.
+func luaArray(state *glua.LState) int {
+	if state.Get(1) == glua.LNil {
+		state.Push(newList(state, 0))
+		return 1
+	}
+	table := state.CheckTable(1)
+	if table.Metatable != glua.LNil && !isList(table) {
+		state.RaiseError("wuko.array: table already has a metatable")
+		return 0
+	}
+	table.Metatable = listMetatable(state)
+	state.Push(table)
+	return 1
+}
+
 func toLua(state *glua.LState, value any) (glua.LValue, error) {
 	switch typed := value.(type) {
 	case nil:
@@ -802,7 +846,7 @@ func toLua(state *glua.LState, value any) (glua.LValue, error) {
 		}
 		return glua.LNumber(number), nil
 	case []any:
-		table := state.NewTable()
+		table := newList(state, len(typed))
 		for _, item := range typed {
 			converted, err := toLua(state, item)
 			if err != nil {
@@ -881,8 +925,12 @@ func fromLua(value glua.LValue, visiting map[*glua.LTable]bool) (any, error) {
 		if conversionErr != nil {
 			return nil, conversionErr
 		}
-		if typed.Len() > 0 && isArray && count == typed.Len() {
+		list := isList(typed)
+		if isArray && count == typed.Len() && (typed.Len() > 0 || list) {
 			return array, nil
+		}
+		if list {
+			return nil, fmt.Errorf("Lua list table must be a sequence")
 		}
 		if typed.Len() > 0 && count != len(object) {
 			return nil, fmt.Errorf("mixed Lua table cannot be converted")
