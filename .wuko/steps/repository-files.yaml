@@ -1,5 +1,11 @@
 steps:
-  # Each target selects its files with git_files as `files` before requiring this file.
+  # Each target sets vars.source to staged, pushed, or all.
+  - id: files
+    type: git_files
+    with:
+      source: "{{ .vars.source }}"
+      exclude: ['^dist/', '^completions/']
+
   - id: repository
     type: lua
     with:

@@ -8,24 +8,15 @@ targets:
   commit:
     description: Check staged files before committing
     steps:
-      - id: files
-        type: git_files
-        with: {source: staged, exclude: ['^dist/', '^completions/']}
       - require: ../steps/repository-checks.yaml
   push:
+    # Outside a pre-push hook, this checks what pushing the current branch would send.
     description: Check outgoing files, lint, and run race tests
     vars: {source: pushed, stage: push}
     steps:
-      # Outside a pre-push hook, this checks what pushing the current branch would send.
-      - id: files
-        type: git_files
-        with: {source: pushed, exclude: ['^dist/', '^completions/']}
       - require: ../steps/repository-checks.yaml
   all:
     description: Run the commit checks on all tracked files
     vars: {source: all}
     steps:
-      - id: files
-        type: git_files
-        with: {source: all, exclude: ['^dist/', '^completions/']}
       - require: ../steps/repository-checks.yaml

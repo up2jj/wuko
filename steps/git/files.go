@@ -49,18 +49,19 @@ func NewFiles(raw map[string]any) (step.Runner, error) {
 	if err := step.DecodeConfig(raw, &config); err != nil {
 		return nil, err
 	}
-	if strings.Contains(config.Source, "{{") {
-		return nil, fmt.Errorf("source must not be templated")
-	}
-	switch config.Source {
-	case diffSourceStaged, diffSourceUnstaged, diffSourcePushed, filesSourceAll:
-	case "":
-		return nil, fmt.Errorf("source is required")
-	default:
-		return nil, fmt.Errorf("source must be staged, unstaged, pushed, or all")
-	}
-	if config.Source != diffSourcePushed && config.Updates != nil {
-		return nil, fmt.Errorf("updates is only supported with source pushed")
+	// A templated source, such as one chosen per workflow target, is checked once the run
+	// builds the step again with rendered values; validation sees the template.
+	if !strings.Contains(config.Source, "{{") {
+		switch config.Source {
+		case diffSourceStaged, diffSourceUnstaged, diffSourcePushed, filesSourceAll:
+		case "":
+			return nil, fmt.Errorf("source is required")
+		default:
+			return nil, fmt.Errorf("source must be staged, unstaged, pushed, or all")
+		}
+		if config.Source != diffSourcePushed && config.Updates != nil {
+			return nil, fmt.Errorf("updates is only supported with source pushed")
+		}
 	}
 	if err := validatePathspecs(config.Paths); err != nil {
 		return nil, err
@@ -94,7 +95,7 @@ func (runner *filesRunner) Run(ctx context.Context, request step.Request) (step.
 	if err := ctx.Err(); err != nil {
 		return step.Result{}, err
 	}
-	if err := validateResolvedDiffValues("", "", append(slices.Clone(runner.config.Paths), runner.config.Exclude...)); err != nil {
+	if err := validateResolvedDiffValues(runner.config.Source, "", append(slices.Clone(runner.config.Paths), runner.config.Exclude...)); err != nil {
 		return step.Result{}, err
 	}
 	changes, err := runner.changes(ctx, request)

@@ -464,7 +464,7 @@ straight to later steps.
 
 | Field | Required | Meaning |
 | --- | --- | --- |
-| `source` | yes | `staged`, `unstaged`, `pushed`, or `all` tracked files |
+| `source` | yes | `staged`, `unstaged`, `pushed`, or `all` tracked files; may be a template such as `"{{ .vars.source }}"` |
 | `paths` | no | Non-empty Git pathspec list that limits the selection |
 | `exclude` | no | Go RE2 patterns; a path matching any of them is left out of every output |
 | `updates` | no | `{expr: ...}` returning push update records; only with `pushed` |

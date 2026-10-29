@@ -23,7 +23,6 @@ func TestNewFilesValidatesConfiguration(t *testing.T) {
 	}{
 		{"missing source", map[string]any{}, "source is required"},
 		{"unknown source", map[string]any{"source": "commit"}, "staged, unstaged, pushed, or all"},
-		{"templated source", map[string]any{"source": "{{ .vars.source }}"}, "must not be templated"},
 		{"updates on staged", map[string]any{"source": "staged", "updates": map[string]any{"expr": "vars.updates"}}, "only supported with source pushed"},
 		{"invalid updates", map[string]any{"source": "pushed", "updates": map[string]any{"expr": "("}}, "compiling updates expr"},
 		{"empty paths", map[string]any{"source": "all", "paths": []any{}}, "at least one pathspec"},
@@ -41,10 +40,22 @@ func TestNewFilesValidatesConfiguration(t *testing.T) {
 	for _, raw := range []map[string]any{
 		{"source": "staged"}, {"source": "unstaged", "paths": []any{"src"}}, {"source": "all", "exclude": []any{"{{ .vars.pattern }}"}},
 		{"source": "pushed", "updates": map[string]any{"expr": "vars.updates"}},
+		{"source": "{{ .vars.source }}", "updates": map[string]any{"expr": "vars.updates"}},
 	} {
 		if _, err := NewFiles(raw); err != nil {
 			t.Fatalf("NewFiles(%#v): %v", raw, err)
 		}
+	}
+}
+
+func TestGitFilesChecksATemplatedSourceOnceRendered(t *testing.T) {
+	t.Parallel()
+	dir := gittest.InitWithCommit(t)
+	if _, err := steptest.Build(t, NewFiles, map[string]any{"source": "{{ .vars.source }}"}).Run(t.Context(), step.Request{RunDir: dir}); err == nil || !strings.Contains(err.Error(), "unresolved template") {
+		t.Fatalf("unrendered source error = %v", err)
+	}
+	if _, err := NewFiles(map[string]any{"source": "commit"}); err == nil || !strings.Contains(err.Error(), "staged, unstaged, pushed, or all") {
+		t.Fatalf("rendered invalid source error = %v", err)
 	}
 }
 
