@@ -674,6 +674,28 @@ background (for example `my-server &`) is sent the termination signal, then `SIG
 grace period, and the step reports the command's own exit status. Run long-lived services with the
 `process` step instead.
 
+### Passing files
+
+Set `files` to a list of paths, or `{expr: ...}` returning one, to append them to the command's
+arguments the way a pre-commit framework passes the files a hook should check:
+
+```yaml
+- id: lint
+  type: shell
+  with:
+    command: eslint
+    args: [--fix, --]
+    files: {expr: 'filter(steps.files.text, {# endsWith ".js"})'}
+```
+
+With `script`, the files arrive as the positional parameters, so `"$@"` lists them. A long list
+is split across several runs so that each command line stays within 128 KiB of arguments, well
+under operating-system limits. Every run happens even after one fails, so a formatter still
+reaches every file; the step then fails with the first failure. `stdout` and `stderr` join the
+runs' output in order, `exit_code` is the first failing run's code or `0`, and `runs` counts the
+runs. An empty list runs nothing, since many tools would read standard input instead. `files`
+cannot be combined with `tty`, `interactions`, or `sdk`.
+
 ### Injected script SDK
 
 Set `sdk: node` to inject a bundled `wuko` API into Node.js 22+ scripts without installing an npm

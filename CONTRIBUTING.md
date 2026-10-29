@@ -39,8 +39,8 @@ formatting, vet, tidy, and push-only Staticcheck and race tests. Each target sel
 the native `git_files` step, which excludes generated `dist/` and `completions/` files and
 classifies the rest as text or binary. Native `text_fix` steps fix whitespace and final newlines,
 and `text_check` steps parse YAML and TOML and reject merge markers, private keys, and large
-additions. The local `.wuko/actions/gofmt` action batches Go formatting calls, and inline `lua`
-steps handle `go vet` package scoping; `git_files` also reports case conflicts, the merge state, and
+additions. A `shell` step passes the Go files to gofmt through `files`, and an inline `lua` step
+handles `go vet` package scoping; `git_files` also reports case conflicts, the merge state, and
 LFS attributes. The fixers and gofmt run in
 order, then the remaining checks run concurrently; every check still runs and reports after a
 failure, and formatters reject the operation after making fixes so they can be reviewed and staged.

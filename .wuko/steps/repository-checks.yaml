@@ -20,10 +20,14 @@ steps:
 
         - id: gofmt
           after: [end_of_file_fixer]
-          uses: ../actions/gofmt
+          type: shell
           if: len(steps.selected.go) > 0
           with:
             files: {expr: steps.selected.go}
+            # gofmt -l lists what -w rewrote; any file listed must be reviewed and staged.
+            script: |
+              changed=$(gofmt -l -w -- "$@") || exit
+              [ -z "$changed" ] || { printf 'gofmt modified files; review and stage the changes:\n%s\n' "$changed" >&2; exit 1; }
 
         - id: check_yaml
           after: [gofmt]

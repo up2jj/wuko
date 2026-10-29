@@ -78,9 +78,14 @@ func TestRepositoryHookWorkflowPreservesChecksAndContinuesAfterFailure(t *testin
 			}
 			var got []string
 			for _, call := range executor.Calls() {
+				// Inline scripts run as `sh -c SCRIPT wuko FILES...`; name them by their tool.
+				if call.Command == "/bin/sh" && len(call.Args) > 2 && strings.Contains(call.Args[1], "gofmt") {
+					got = append(got, "gofmt "+strings.Join(call.Args[3:], " "))
+					continue
+				}
 				got = append(got, call.Command+" "+strings.Join(call.Args, " "))
 			}
-			want := []string{"go vet ./...", "go mod tidy -diff"}
+			want := []string{"gofmt main.go", "go vet ./...", "go mod tidy -diff"}
 			if target == "push" {
 				want = append(want, "sh scripts/lint.sh", "go test -race ./...")
 			}

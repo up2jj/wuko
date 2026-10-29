@@ -28,7 +28,7 @@ var utf8ByteOrderMark = []byte{0xEF, 0xBB, 0xBF}
 
 type fixRunner struct {
 	config       fixConfig
-	files        fileList
+	files        step.PathList
 	failOnChange bool
 }
 
@@ -53,7 +53,7 @@ func NewFix(raw map[string]any) (step.Runner, error) {
 	if config.MaxBlankLines != nil && *config.MaxBlankLines < 0 {
 		return nil, fmt.Errorf("max_blank_lines must not be negative")
 	}
-	files, err := parseFileList(raw, "files")
+	files, err := requiredFiles(raw)
 	if err != nil {
 		return nil, err
 	}
@@ -65,7 +65,7 @@ func (*fixRunner) ExecutorAware()      {}
 func (*fixRunner) ExecutorFileSystem() {}
 
 func (runner *fixRunner) Run(ctx context.Context, request step.Request) (step.Result, error) {
-	paths, err := runner.files.resolve(request)
+	paths, err := runner.files.Resolve(request)
 	if err != nil {
 		return step.Result{}, err
 	}

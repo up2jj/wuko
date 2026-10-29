@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -24,6 +25,10 @@ import (
 )
 
 const ttyCaptureLimit = 1 << 20
+
+// filesArgumentBudget bounds the arguments of one run when `files` splits a long list, well
+// under the smallest common OS limit and the 128 KiB Linux allows for any single argument.
+const filesArgumentBudget = 128 << 10
 
 type Config struct {
 	Command          string               `yaml:"command,omitempty"`
@@ -46,6 +51,7 @@ type Config struct {
 	AllowedExitCodes []int                `yaml:"allowed_exit_codes,omitempty"`
 	SDK              string               `yaml:"sdk,omitempty"`
 	SDKArgs          map[string]any       `yaml:"sdk_args,omitempty"`
+	Files            any                  `yaml:"files,omitempty"`
 }
 
 type ArgvExpression struct {
@@ -77,6 +83,7 @@ type Runner struct {
 	interactions    *ptyinteract.Plan
 	hasInteractions bool
 	sdkArgPrograms  map[string]*vm.Program
+	files           step.PathList
 }
 
 func (*Runner) ExecutorAware() {}
@@ -85,10 +92,13 @@ type sdkRunner struct{ *Runner }
 
 func (*sdkRunner) InlineWorkflowAware() {}
 
-func shellOutputs(sdk bool) step.OutputSchema {
+func shellOutputs(sdk, files bool) step.OutputSchema {
 	schema := step.ClosedOutputs("stdout", "stderr", "exit_code", "stdout_truncated", "stderr_truncated")
 	if sdk {
 		schema.Fields["data"] = step.OpenObject()
+	}
+	if files {
+		schema.Fields["runs"] = step.Scalar()
 	}
 	return schema
 }
@@ -96,10 +106,11 @@ func shellOutputs(sdk bool) step.OutputSchema {
 func Register(registry *step.Registry) error {
 	return registry.RegisterDefinition("shell", step.Registration{
 		Builder: New,
-		Outputs: shellOutputs(true),
+		Outputs: shellOutputs(true, true),
 		ConfigOutputs: func(raw map[string]any) step.OutputSchema {
 			sdk, _ := raw["sdk"].(string)
-			return shellOutputs(sdk != "")
+			_, files := raw["files"]
+			return shellOutputs(sdk != "", files)
 		},
 		References: references,
 	})
@@ -113,7 +124,7 @@ func references(raw map[string]any) (step.References, error) {
 	argvExpr.Label = "argv expr"
 	interactionsExpr := step.ExpressionField(interactions, "expr")
 	interactionsExpr.Label = "interactions expr"
-	references := step.References{Expressions: []step.ExpressionReference{argvExpr, interactionsExpr}}
+	references := step.References{Expressions: []step.ExpressionReference{argvExpr, interactionsExpr, step.PathListReference(raw, "files")}}
 	args, _ := raw["sdk_args"].(map[string]any)
 	for name, value := range args {
 		binding, ok := value.(map[string]any)
@@ -211,6 +222,13 @@ func New(raw map[string]any) (step.Runner, error) {
 	if err := validateTerminalConfig(config.Terminal, config.TTY, handoff); err != nil {
 		return nil, err
 	}
+	files, err := step.ParsePathList(raw, "files")
+	if err != nil {
+		return nil, err
+	}
+	if files.Set() && (config.TTY || hasInteractions || config.SDK != "") {
+		return nil, fmt.Errorf("files cannot be combined with tty, interactions, or sdk")
+	}
 	_, exitCodesConfigured := raw["allowed_exit_codes"]
 	exitCodes, err := process.NewExitCodePolicy(config.AllowedExitCodes, exitCodesConfigured, allowAnyExitCode)
 	if err != nil {
@@ -260,7 +278,7 @@ func New(raw map[string]any) (step.Runner, error) {
 		config: config, exitCodes: exitCodes,
 		stdoutPolicy: stdoutPolicy, stderrPolicy: stderrPolicy, captureLimit: captureLimit,
 		argvProgram: argvProgram, interactionExpr: interactionExpr, interactions: interactions, hasInteractions: hasInteractions,
-		sdkArgPrograms: sdkArgPrograms,
+		sdkArgPrograms: sdkArgPrograms, files: files,
 	}
 	if config.SDK != "" {
 		return &sdkRunner{runner}, nil
@@ -371,14 +389,20 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 		}
 		captureLimit = ttyCaptureLimit
 	}
-	result, err := executor.Run(ctx, process.Options{
-		Command: command, Args: args, Dir: dir, Env: environment, User: r.config.User,
-		Stdin: stdin, Stdout: request.Stdout, Stderr: request.Stderr, TTY: r.config.TTY,
-		PromptStdin: request.Stdin, PromptStderr: request.Stderr, Interactive: request.Interactive,
-		Interactions: interactions, Interact: r.config.Interact, CaptureLimit: captureLimit,
-		Terminal:     terminalAppearance(r.config.Terminal),
-		StdoutPolicy: r.stdoutPolicy, StderrPolicy: r.stderrPolicy,
-	})
+	run := func(args []string) (process.Result, error) {
+		return executor.Run(ctx, process.Options{
+			Command: command, Args: args, Dir: dir, Env: environment, User: r.config.User,
+			Stdin: stdin, Stdout: request.Stdout, Stderr: request.Stderr, TTY: r.config.TTY,
+			PromptStdin: request.Stdin, PromptStderr: request.Stderr, Interactive: request.Interactive,
+			Interactions: interactions, Interact: r.config.Interact, CaptureLimit: captureLimit,
+			Terminal:     terminalAppearance(r.config.Terminal),
+			StdoutPolicy: r.stdoutPolicy, StderrPolicy: r.stderrPolicy,
+		})
+	}
+	if r.files.Set() {
+		return r.runFiles(ctx, request, command, args, run)
+	}
+	result, err := run(args)
 	outputs := map[string]any{
 		"stdout": result.Stdout, "stderr": result.Stderr, "exit_code": result.ExitCode,
 		"stdout_truncated": result.StdoutTruncated, "stderr_truncated": result.StderrTruncated,
@@ -393,18 +417,80 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 		outputs["data"] = staged.Outputs
 		variables = staged.Variables
 	}
-	stepResult := step.Result{Outputs: outputs, Variables: variables}
+	return step.Result{Outputs: outputs, Variables: variables}, r.failure(command, result, err)
+}
+
+// failure reports whether one run failed, honouring allowed_exit_codes.
+func (r *Runner) failure(command string, result process.Result, err error) error {
 	if err != nil {
 		exitErr, isExitError := soleProcessExitError(err)
 		if isExitError && exitErr.Code == result.ExitCode && r.exitCodes.Allows(result.ExitCode) {
-			return stepResult, nil
+			return nil
 		}
-		return stepResult, err
+		return err
 	}
 	if !r.exitCodes.Allows(result.ExitCode) {
-		return stepResult, &process.ExitError{Command: command, Code: result.ExitCode}
+		return &process.ExitError{Command: command, Code: result.ExitCode}
 	}
-	return stepResult, nil
+	return nil
+}
+
+// runFiles appends the configured files to the command, splitting them across runs that stay
+// within filesArgumentBudget. Every run happens even after one fails, so a formatter still
+// reaches every file; the first failure is reported. Without files the command does not run,
+// since many tools would read stdin instead.
+func (r *Runner) runFiles(ctx context.Context, request step.Request, command string, args []string, run func([]string) (process.Result, error)) (step.Result, error) {
+	paths, err := r.files.Resolve(request)
+	if err != nil {
+		return step.Result{}, err
+	}
+	var stdout, stderr strings.Builder
+	exitCode, runs := 0, 0
+	stdoutTruncated, stderrTruncated := false, false
+	var failure error
+	for _, chunk := range chunkPaths(command, args, paths) {
+		if err := ctx.Err(); err != nil {
+			return step.Result{}, err
+		}
+		result, err := run(append(slices.Clone(args), chunk...))
+		runs++
+		stdout.WriteString(result.Stdout)
+		stderr.WriteString(result.Stderr)
+		stdoutTruncated = stdoutTruncated || result.StdoutTruncated
+		stderrTruncated = stderrTruncated || result.StderrTruncated
+		if chunkFailure := r.failure(command, result, err); chunkFailure != nil && failure == nil {
+			failure, exitCode = chunkFailure, result.ExitCode
+		}
+	}
+	outputs := map[string]any{
+		"stdout": stdout.String(), "stderr": stderr.String(), "exit_code": exitCode,
+		"stdout_truncated": stdoutTruncated, "stderr_truncated": stderrTruncated, "runs": runs,
+	}
+	return step.Result{Outputs: outputs}, failure
+}
+
+// chunkPaths splits paths so that each run's command line stays within filesArgumentBudget,
+// counting each argument with its terminating NUL. A path too long for any budget runs alone.
+func chunkPaths(command string, args, paths []string) [][]string {
+	fixed := len(command) + 1
+	for _, arg := range args {
+		fixed += len(arg) + 1
+	}
+	var chunks [][]string
+	var current []string
+	size := fixed
+	for _, path := range paths {
+		if len(current) > 0 && size+len(path)+1 > filesArgumentBudget {
+			chunks = append(chunks, current)
+			current, size = nil, fixed
+		}
+		current = append(current, path)
+		size += len(path) + 1
+	}
+	if len(current) > 0 {
+		chunks = append(chunks, current)
+	}
+	return chunks
 }
 
 func soleProcessExitError(err error) (*process.ExitError, bool) {

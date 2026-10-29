@@ -59,8 +59,8 @@ type forbiddenPattern struct {
 
 type checkRunner struct {
 	config     checkConfig
-	files      fileList
-	sizeExempt fileList
+	files      step.PathList
+	sizeExempt step.PathList
 	forbid     []forbiddenPattern
 	maxSize    int64
 }
@@ -75,7 +75,7 @@ func NewCheck(raw map[string]any) (step.Runner, error) {
 	if len(config.Forbid) == 0 && config.MaxSize == "" && config.Parse == "" {
 		return nil, fmt.Errorf("configure at least one of forbid, max_size, and parse")
 	}
-	files, err := parseFileList(raw, "files")
+	files, err := requiredFiles(raw)
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +105,7 @@ func NewCheck(raw map[string]any) (step.Runner, error) {
 		if config.MaxSize == "" {
 			return nil, fmt.Errorf("size_exempt requires max_size")
 		}
-		if runner.sizeExempt, err = parseFileList(raw, "size_exempt"); err != nil {
+		if runner.sizeExempt, err = step.ParsePathList(raw, "size_exempt"); err != nil {
 			return nil, err
 		}
 	}
@@ -124,13 +124,13 @@ func (runner *checkRunner) Run(ctx context.Context, request step.Request) (step.
 	if strings.Contains(runner.config.MaxSize, "{{") {
 		return step.Result{}, fmt.Errorf("max_size contains an unresolved template")
 	}
-	paths, err := runner.files.resolve(request)
+	paths, err := runner.files.Resolve(request)
 	if err != nil {
 		return step.Result{}, err
 	}
 	exempt := make(map[string]bool)
 	if runner.config.SizeExempt != nil {
-		exemptPaths, err := runner.sizeExempt.resolve(request)
+		exemptPaths, err := runner.sizeExempt.Resolve(request)
 		if err != nil {
 			return step.Result{}, err
 		}
