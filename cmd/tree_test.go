@@ -303,6 +303,7 @@ func TestWorkflowTreeDisplaysConditionalBlock(t *testing.T) {
 		{If: "vars.deploy", Steps: []workflow.Step{
 			{ID: "build", Type: "shell"},
 			{ID: "deploy", Type: "shell", If: "steps.build.exit_code == 0"},
+			{If: "vars.announce", Steps: []workflow.Step{{ID: "announce", Type: "shell"}}},
 		}},
 		{ID: "notify", Type: "shell"},
 	}}
@@ -313,7 +314,9 @@ func TestWorkflowTreeDisplaysConditionalBlock(t *testing.T) {
 	want := `conditional
 ├── if: vars.deploy
 │   ├── build (shell)
-│   └── deploy (shell) if: steps.build.exit_code == 0
+│   ├── deploy (shell) if: steps.build.exit_code == 0
+│   └── if: vars.announce
+│       └── announce (shell)
 └── notify (shell)
 `
 	if output.String() != want {

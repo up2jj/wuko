@@ -794,7 +794,7 @@ finally:
 ```
 
 Working-directory wrappers preserve the normal nesting rules. They cannot be used to bypass the
-restrictions on directly nested conditional, concurrent, batch, foreach, or matrix controls.
+restrictions on directly nested concurrent, batch, foreach, or matrix controls.
 
 ## Concurrency
 

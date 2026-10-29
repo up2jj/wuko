@@ -63,7 +63,8 @@ func TestDefinitionValidateStructure(t *testing.T) {
 		{name: "return", steps: []Step{{Return: &ReturnControl{Outputs: map[string]string{}}}}},
 		{name: "finally", steps: []Step{step("run")}, finally: []Step{step("cleanup")}},
 		{name: "duplicate ids", steps: []Step{step("run"), step("run")}, want: `duplicate step id "run"`},
-		{name: "nested conditional", steps: []Step{{If: "true", Steps: []Step{{If: "true", Steps: []Step{step("run")}}}}}, want: "nested conditional"},
+		{name: "nested conditional", steps: []Step{{If: "true", Steps: []Step{{If: "true", Steps: []Step{step("run")}}}}}},
+		{name: "nested conditional duplicate id", steps: []Step{{If: "true", Steps: []Step{step("run"), {If: "true", Steps: []Step{step("run")}}}}}, want: `duplicate step id "run"`},
 		{name: "nested concurrent", steps: []Step{{Concurrent: &ConcurrentGroup{MaxConcurrency: 2, Steps: []Step{{Concurrent: &ConcurrentGroup{MaxConcurrency: 2, Steps: []Step{step("one"), step("two")}}}, step("three")}}}}, want: "nested concurrent"},
 		{
 			name: "nested fanout",

@@ -91,6 +91,88 @@ func TestConditionalBlockFalseRecordsLeafAndControlSkips(t *testing.T) {
 	}
 }
 
+func TestNestedConditionalBlocksEvaluateInnerConditionWhenReached(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name           string
+		outer          string
+		inner          string
+		wantStatuses   []ExecutionStatus
+		wantConditions int
+	}{
+		{name: "both true", outer: "true", inner: `steps.check.value == "missing"`, wantStatuses: []ExecutionStatus{StatusSucceeded, StatusSucceeded, StatusSucceeded, StatusSucceeded}, wantConditions: 2},
+		{name: "inner false", outer: "true", inner: `steps.check.value == "present"`, wantStatuses: []ExecutionStatus{StatusSucceeded, StatusSkipped, StatusSkipped, StatusSucceeded}, wantConditions: 2},
+		{name: "outer false", outer: "false", inner: `steps.check.value == "missing"`, wantStatuses: []ExecutionStatus{StatusSkipped, StatusSkipped, StatusSkipped, StatusSucceeded}, wantConditions: 1},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			var runs int
+			registry := conditionalTestRegistry(t, &runs)
+			definition := steptest.Definition(
+				t, "nested",
+				workflow.Step{If: workflow.Condition(test.outer), Steps: []workflow.Step{
+					{ID: "check", Type: "capture", With: map[string]any{"value": "missing"}},
+					{If: workflow.Condition(test.inner), Steps: []workflow.Step{
+						{ID: "offer", Type: "capture", With: map[string]any{"value": "{{ .steps.check.value }}"}},
+						{ID: "install", Type: "capture", With: map[string]any{"value": "installed"}},
+					}},
+				}},
+				workflow.Step{ID: "after", Type: "capture", With: map[string]any{"value": "after"}})
+
+			var conditions int
+			state, err := New(registry).Run(t.Context(), definition, Options{
+				Diagnostics: func(event diagnostic.Event) {
+					if event.Phase == diagnostic.PhaseCondition && event.Status == diagnostic.StatusStarted && event.StepID == "" {
+						conditions++
+					}
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if conditions != test.wantConditions {
+				t.Fatalf("block condition evaluations = %d, want %d", conditions, test.wantConditions)
+			}
+			wantIDs := []string{"check", "offer", "install", "after"}
+			if state.Stats.Total != 4 || len(state.Stats.Steps) != 4 {
+				t.Fatalf("stats = %#v", state.Stats)
+			}
+			for i, stats := range state.Stats.Steps {
+				if stats.ID != wantIDs[i] || stats.Index != i+1 || stats.Status != test.wantStatuses[i] {
+					t.Fatalf("step stats %d = %#v, want id %q status %q", i, stats, wantIDs[i], test.wantStatuses[i])
+				}
+			}
+			if test.wantStatuses[1] == StatusSucceeded && state.Steps["offer"].(map[string]any)["value"] != "missing" {
+				t.Fatalf("offer = %#v", state.Steps["offer"])
+			}
+		})
+	}
+}
+
+func TestReturnInsideNestedConditionalBlockStopsEnclosingSteps(t *testing.T) {
+	t.Parallel()
+	var runs int
+	registry := conditionalTestRegistry(t, &runs)
+	definition := steptest.Definition(
+		t, "nested-return",
+		workflow.Step{If: "true", Steps: []workflow.Step{
+			{If: "true", Steps: []workflow.Step{
+				{Return: &workflow.ReturnControl{Outputs: map[string]string{"result": `"early"`}}},
+			}},
+			{ID: "outer_after", Type: "capture", With: map[string]any{"value": "unused"}},
+		}},
+		workflow.Step{ID: "after", Type: "capture", With: map[string]any{"value": "unused"}})
+
+	state, err := New(registry).Run(t.Context(), definition, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runs != 0 || state.Stats.Skipped != 2 {
+		t.Fatalf("runs = %d, stats = %#v", runs, state.Stats)
+	}
+}
+
 func TestConditionalBlockStopsAfterChildFailure(t *testing.T) {
 	t.Parallel()
 	var runs int
@@ -164,15 +246,17 @@ func TestConditionalBlockDryRunDisplaysNestedPlan(t *testing.T) {
 		t, "dry",
 		workflow.Step{If: "vars.enabled", Steps: []workflow.Step{
 			{ID: "first", Type: "capture", With: map[string]any{"value": "first"}},
-			{ID: "second", Type: "capture", With: map[string]any{"value": "second"}},
+			{If: "vars.second", Steps: []workflow.Step{
+				{ID: "second", Type: "capture", With: map[string]any{"value": "second"}},
+			}},
 		}})
-	definition.Vars = map[string]any{"enabled": false}
+	definition.Vars = map[string]any{"enabled": false, "second": true}
 
 	var output bytes.Buffer
 	if _, err := New(registry).Run(t.Context(), definition, Options{DryRun: true, Stdout: &output, Stderr: io.Discard}); err != nil {
 		t.Fatal(err)
 	}
-	want := "1. if: vars.enabled\n   1.1 first (capture)\n   1.2 second (capture)\n"
+	want := "1. if: vars.enabled\n   1.1 first (capture)\n   1.2 if: vars.second\n      1.2.1 second (capture)\n"
 	if output.String() != want || runs != 0 {
 		t.Fatalf("output = %q, runs = %d", output.String(), runs)
 	}

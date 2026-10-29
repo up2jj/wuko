@@ -630,11 +630,6 @@ func validateConditionalBlock(workflowStep Step, scope stepScope, allowActions b
 	if scope == scopeConcurrent {
 		return fmt.Errorf("conditional blocks are not supported inside concurrent groups")
 	}
-	for _, child := range workflowStep.Steps {
-		if child.IsConditionalBlock() {
-			return fmt.Errorf("nested conditional blocks are not supported")
-		}
-	}
 	return validateSteps(workflowStep.Steps, allowActions, scope, seen)
 }
 

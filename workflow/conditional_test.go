@@ -35,6 +35,38 @@ steps:
 	}
 }
 
+func TestLoadNestedConditionalBlocks(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "workflow.yaml")
+	testfs.Write(t, path, `version: 1
+name: nested
+vars: {skip_check: false}
+steps:
+  - if: '!vars.skip_check'
+    steps:
+      - {id: check, type: shell}
+      - if: steps.check.exit_code != 0
+        steps:
+          - {id: offer, type: shell}
+          - {id: install, type: shell}
+`)
+	definition, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outer := definition.Steps[0]
+	if !outer.IsConditionalBlock() || len(outer.Steps) != 2 {
+		t.Fatalf("outer block = %#v", outer)
+	}
+	inner := outer.Steps[1]
+	if !inner.IsConditionalBlock() || inner.If != "steps.check.exit_code != 0" || len(inner.Steps) != 2 {
+		t.Fatalf("inner block = %#v", inner)
+	}
+	if inner.Location.Line != 8 || inner.Steps[1].Location.Source != path || inner.Steps[1].Location.Line != 11 {
+		t.Fatalf("locations = %#v, %#v", inner.Location, inner.Steps[1].Location)
+	}
+}
+
 func TestConditionalBlockValidation(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -46,7 +78,8 @@ func TestConditionalBlockValidation(t *testing.T) {
 		{name: "missing if", body: "  - steps: [{id: run, type: shell}]\n", want: "must set if"},
 		{name: "empty", body: "  - if: true\n    steps: []\n", want: "at least one step"},
 		{name: "mixed fields", body: "  - id: block\n    if: true\n    steps: [{id: run, type: shell}]\n", want: "cannot be combined"},
-		{name: "nested", body: "  - if: true\n    steps:\n      - if: true\n        steps: [{id: run, type: shell}]\n", want: "nested conditional"},
+		{name: "nested duplicate id", body: "  - if: true\n    steps:\n      - {id: run, type: shell}\n      - if: true\n        steps: [{id: run, type: shell}]\n", want: `duplicate step id "run"`},
+		{name: "nested inside concurrent", body: "  - if: true\n    steps:\n      - concurrent:\n          steps:\n            - if: true\n              steps: [{id: run, type: shell}]\n            - {id: other, type: shell}\n", want: "inside concurrent"},
 		{name: "inside concurrent", body: "  - concurrent:\n      steps:\n        - if: true\n          steps: [{id: run, type: shell}]\n        - {id: other, type: shell}\n", want: "inside concurrent"},
 		{name: "duplicate outer id", body: "  - {id: run, type: shell}\n  - if: true\n    steps: [{id: run, type: shell}]\n", want: `duplicate step id "run"`},
 	}

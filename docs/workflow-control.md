@@ -629,7 +629,28 @@ An anonymous `if` wrapper can guard a sequential block containing any of these c
 The condition is evaluated once. The wrapper adds no ID, state, output, or step-count entry of its
 own. A false condition reports its ordinary children and concurrent leaves as skipped and skips
 fan-out parents without expansion. Conditional wrappers may appear inside batch, foreach, and matrix
-bodies, but not directly inside a concurrent group; wrappers cannot be directly nested.
+bodies, but not directly inside a concurrent group.
+
+Conditional wrappers may nest. An inner condition is evaluated only when execution reaches it, so
+it can read outputs from earlier children of the outer block without a `"<id>" in steps` guard.
+When the outer condition is false, the inner condition is never evaluated and every leaf beneath
+it is reported as skipped:
+
+```yaml
+- if: '!vars.skip_check'
+  steps:
+    - id: check
+      type: shell
+      with: {command: ./check-tools}
+    - if: steps.check.exit_code != 0
+      steps:
+        - id: offer
+          type: shell
+          with: {command: ./offer-install}
+        - id: install
+          type: shell
+          with: {command: ./install-missing}
+```
 
 ## Foreach
 
@@ -982,8 +1003,7 @@ steps. The following are not supported:
 - batch, foreach, or matrix inside another fan-out control;
 - batch, foreach, or matrix inside a concurrent group;
 - nested concurrent groups;
-- conditional blocks directly inside concurrent groups;
-- directly nested conditional blocks.
+- conditional blocks directly inside concurrent groups.
 
 Put dependent work after the inner concurrent group or after the complete control parent.
 
