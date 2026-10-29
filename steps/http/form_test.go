@@ -12,7 +12,9 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/up2jj/wuko/internal/steptest"
@@ -217,24 +219,24 @@ func TestMultipartOpenDoesNotRetainAllUploadFiles(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	files := make([]FileConfig, 32)
+	paths := make([]string, len(files))
 	for i := range files {
 		name := fmt.Sprintf("upload-%02d.txt", i)
-		testfs.WriteFile(t, filepath.Join(dir, name), []byte(name), 0o600)
+		paths[i] = filepath.Join(dir, name)
+		testfs.WriteFile(t, paths[i], []byte(name), 0o600)
 		files[i] = FileConfig{Field: "attachment", Path: name}
 	}
 	body, err := prepareMultipartBody(t.Context(), dir, nil, files)
 	if err != nil {
 		t.Fatal(err)
 	}
-	before := countOpenFileDescriptors(t)
 	reader, err := body.Open()
 	if err != nil {
 		t.Fatal(err)
 	}
-	afterOpen := countOpenFileDescriptors(t)
-	if afterOpen > before+4 {
+	if open := countOpenDescriptorsOf(t, paths); open > 1 {
 		reader.Close()
-		t.Fatalf("Open retained %d additional file descriptors for %d uploads", afterOpen-before, len(files))
+		t.Fatalf("Open retained %d upload file descriptors for %d uploads", open, len(files))
 	}
 	if _, err := io.Copy(io.Discard, reader); err != nil {
 		reader.Close()
@@ -243,9 +245,8 @@ func TestMultipartOpenDoesNotRetainAllUploadFiles(t *testing.T) {
 	if err := reader.Close(); err != nil {
 		t.Fatal(err)
 	}
-	afterRead := countOpenFileDescriptors(t)
-	if afterRead > before+2 {
-		t.Fatalf("multipart stream leaked file descriptors: before=%d after=%d", before, afterRead)
+	if open := countOpenDescriptorsOf(t, paths); open != 0 {
+		t.Fatalf("multipart stream leaked %d upload file descriptors", open)
 	}
 }
 
@@ -331,14 +332,50 @@ func readMultipartParts(t *testing.T, data []byte, boundary string) map[string][
 	}
 }
 
-func countOpenFileDescriptors(t *testing.T) int {
+// countOpenDescriptorsOf counts this process's descriptors that refer to one of paths. Matching
+// by device and inode ignores the descriptors that parallel tests open at the same time.
+func countOpenDescriptorsOf(t *testing.T, paths []string) int {
 	t.Helper()
-	for _, path := range []string{"/proc/self/fd", "/dev/fd"} {
-		entries, err := os.ReadDir(path)
-		if err == nil {
-			return len(entries)
+	type identity struct{ device, inode uint64 }
+	wanted := make(map[identity]bool, len(paths))
+	for _, path := range paths {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
 		}
+		stat := info.Sys().(*syscall.Stat_t)
+		wanted[identity{uint64(stat.Dev), stat.Ino}] = true
+	}
+	for _, directory := range []string{"/proc/self/fd", "/dev/fd"} {
+		names, err := listDescriptorNames(directory)
+		if err != nil {
+			continue
+		}
+		count := 0
+		for _, name := range names {
+			descriptor, err := strconv.Atoi(name)
+			if err != nil {
+				continue
+			}
+			var stat syscall.Stat_t
+			// A descriptor can close between listing and fstat; it then matches nothing.
+			if syscall.Fstat(descriptor, &stat) == nil && wanted[identity{uint64(stat.Dev), stat.Ino}] {
+				count++
+			}
+		}
+		return count
 	}
 	t.Skip("open file descriptor directory is unavailable")
 	return 0
+}
+
+// listDescriptorNames reads names only. os.ReadDir also stats each entry, which fails on macOS
+// for the descriptor the listing itself held.
+func listDescriptorNames(directory string) ([]string, error) {
+	file, err := os.Open(directory)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	return file.Readdirnames(-1)
 }
