@@ -254,7 +254,7 @@ func TestRepositoryMergeMarkersOnlyFailDuringMerge(t *testing.T) {
 				t.Fatalf("non-merge marker rejected: %v", err)
 			}
 			testfs.Write(t, filepath.Join(root, ".git", "MERGE_MSG"), "merge\n")
-			testfs.Write(t, filepath.Join(root, ".git", "MERGE_HEAD"), "merge\n")
+			testfs.Write(t, filepath.Join(root, ".git", "MERGE_HEAD"), gittest.Output(t, root, "rev-parse", "HEAD")+"\n")
 			if _, err := runRepositoryPolicy(t, root, "check_merge_conflict"); err == nil {
 				t.Fatal("merge marker accepted")
 			}

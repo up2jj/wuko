@@ -468,6 +468,8 @@ straight to later steps.
 | `paths` | no | Non-empty Git pathspec list that limits the selection |
 | `exclude` | no | Go RE2 patterns; a path matching any of them is left out of every output |
 | `updates` | no | `{expr: ...}` returning push update records; only with `pushed` |
+| `attributes` | no | Git attribute names, such as `filter`, to read for each selected file |
+| `detect_case_conflicts` | no | `true` to report paths that differ only in letter case |
 
 `pushed` lists the paths changed by the commits the push sends: for an existing ref, the commits
 not reachable from the remote object; for a new ref, the commits no remote-tracking ref already
@@ -484,6 +486,32 @@ pushing the current branch would send.
 | `added` | The `files` the change adds; always empty for `unstaged` and `all` |
 | `deleted` | Paths whose latest change deletes them |
 | `count` | Number of `files` |
+| `state` | The operation in progress: `merging`, `rebasing`, `cherry_picking`, `reverting`, or `none` |
+| `case_conflicts` | Sorted paths that collide on a case-insensitive filesystem with a selected file; empty unless `detect_case_conflicts` |
+| `attributes` | `{attribute: {path: value}}` for each requested attribute, leaving out unspecified ones; values are `set`, `unset`, or the assigned text |
+
+`state` comes from the pseudo-refs an interrupted operation leaves behind, such as `MERGE_HEAD`,
+so a merge-marker check can run only while a conflict may be in progress:
+
+```yaml
+- id: markers
+  if: steps.files.state != "none"
+  type: text_check
+  with:
+    files: {expr: steps.files.text}
+    forbid: ['(?m)^(<<<<<<< |>>>>>>> )']
+
+- id: large_files
+  type: text_check
+  with:
+    files: {expr: steps.files.added}
+    max_size: 500KiB
+    size_exempt: {expr: 'filter(steps.files.added, {steps.files.attributes.filter[#] == "lfs"})'}
+```
+
+`case_conflicts` compares the selected files and every indexed path, directory names included,
+and reports both spellings of each collision that involves a selected file, such as `README.md`
+and `readme.md`, or `Src` and `src`.
 
 Renames count as a deletion plus an addition. Symbolic links, directories, submodules, and paths
 missing from the working tree never appear in `files`. A path that one pushed ref deletes stays

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"strings"
 	"time"
@@ -389,12 +390,17 @@ func queryCommits(ctx context.Context, request step.Request, args []string) ([]m
 }
 
 func runGitCapture(ctx context.Context, request step.Request, args ...string) (process.Result, error) {
+	return runGitCaptureInput(ctx, request, nil, args...)
+}
+
+// runGitCaptureInput is runGitCapture with input for commands that read paths or names on stdin.
+func runGitCaptureInput(ctx context.Context, request step.Request, stdin io.Reader, args ...string) (process.Result, error) {
 	executor := request.Executor
 	if executor == nil {
 		executor = process.LocalExecutor{}
 	}
 	result, err := executor.Run(ctx, process.Options{
-		Command: "git", Args: args, Dir: request.RunDir,
+		Command: "git", Args: args, Dir: request.RunDir, Stdin: stdin,
 		Env:          step.ApplyAttemptEnvironment(maps.Clone(request.Env), request),
 		CaptureLimit: historyCaptureLimit, StdoutPolicy: process.OutputCapture, StderrPolicy: process.OutputCapture,
 	})

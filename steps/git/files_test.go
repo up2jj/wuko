@@ -3,6 +3,7 @@ package git
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -88,6 +89,7 @@ func TestGitFilesStagedSelectsRegularFilesAndClassifiesContent(t *testing.T) {
 		"binary":  []any{"invalid.dat", "nul.dat"},
 		"added":   []any{"invalid.dat", "name with\nnewline.go", "nul.dat"},
 		"deleted": []any{"removed.txt", "untracked-later.txt"},
+		"state":   "none", "case_conflicts": []any{}, "attributes": map[string]any{},
 	}
 	if diff := cmp.Diff(want, result.Outputs); diff != "" {
 		t.Fatalf("outputs mismatch (-want +got):\n%s", diff)
@@ -204,6 +206,66 @@ func TestGitFilesPushedOutsideAHookUsesTheCurrentBranch(t *testing.T) {
 	}
 	if diff := cmp.Diff([]any{}, pushed(gittest.Init(t))); diff != "" {
 		t.Errorf("repository without commits mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestGitFilesReportsAnInterruptedMerge(t *testing.T) {
+	t.Parallel()
+	dir := gittest.InitWithCommit(t)
+	base := gittest.Output(t, dir, "symbolic-ref", "--short", "HEAD")
+	gittest.Run(t, dir, "checkout", "-q", "-b", "other")
+	testfs.Write(t, filepath.Join(dir, "README.md"), "other\n")
+	gittest.Run(t, dir, "commit", "-qam", "other")
+	gittest.Run(t, dir, "checkout", "-q", base)
+	testfs.Write(t, filepath.Join(dir, "README.md"), "base\n")
+	gittest.Run(t, dir, "commit", "-qam", "base")
+	runner := steptest.Build(t, NewFiles, map[string]any{"source": "staged"})
+	state := func() any {
+		t.Helper()
+		result, err := runner.Run(t.Context(), step.Request{RunDir: dir})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result.Outputs["state"]
+	}
+	if got := state(); got != "none" {
+		t.Fatalf("state before merge = %v", got)
+	}
+	if err := exec.Command("git", "-C", dir, "merge", "-q", "other").Run(); err == nil {
+		t.Fatal("conflicting merge succeeded")
+	}
+	if got := state(); got != "merging" {
+		t.Fatalf("state during merge = %v", got)
+	}
+}
+
+func TestGitFilesDetectsCaseConflictsAndReadsAttributes(t *testing.T) {
+	t.Parallel()
+	dir := gittest.InitWithCommit(t)
+	testfs.WriteTree(t, dir, map[string]string{"src/file.txt": "one\n", ".gitattributes": "*.bin filter=lfs\n*.txt text\n"})
+	gittest.Run(t, dir, "add", ".")
+	gittest.Run(t, dir, "commit", "-qm", "baseline")
+	testfs.WriteTree(t, dir, map[string]string{"Src/new.txt": "two\n", "asset.bin": "data\n", "readme.md": "three\n"})
+	gittest.Run(t, dir, "add", "asset.bin")
+	// Explicit index entries collide even on a case-insensitive filesystem.
+	for _, path := range []string{"Src/new.txt", "readme.md"} {
+		blob := gittest.Output(t, dir, "hash-object", "-w", "--", path)
+		gittest.Run(t, dir, "update-index", "--add", "--cacheinfo", "100644,"+blob+","+path)
+	}
+	runner := steptest.Build(t, NewFiles, map[string]any{"source": "staged", "detect_case_conflicts": true, "attributes": []any{"filter", "text"}})
+	result, err := runner.Run(t.Context(), step.Request{RunDir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if diff := cmp.Diff([]any{"README.md", "Src", "readme.md", "src"}, result.Outputs["case_conflicts"]); diff != "" {
+		t.Errorf("case conflicts mismatch (-want +got):\n%s", diff)
+	}
+	want := map[string]any{"filter": map[string]any{"asset.bin": "lfs"}, "text": map[string]any{"Src/new.txt": "set"}}
+	if diff := cmp.Diff(want, result.Outputs["attributes"]); diff != "" {
+		t.Errorf("attributes mismatch (-want +got):\n%s", diff)
+	}
+	if _, err := NewFiles(map[string]any{"source": "staged", "attributes": []any{"--all"}}); err == nil || !strings.Contains(err.Error(), "attributes[0]") {
+		t.Fatalf("option-like attribute error = %v", err)
 	}
 }
 

@@ -24,10 +24,22 @@ const (
 )
 
 type filesConfig struct {
-	Source  string             `yaml:"source"`
-	Paths   []string           `yaml:"paths,omitempty"`
-	Exclude []string           `yaml:"exclude,omitempty"`
-	Updates *updatesExpression `yaml:"updates,omitempty"`
+	Source              string             `yaml:"source"`
+	Paths               []string           `yaml:"paths,omitempty"`
+	Exclude             []string           `yaml:"exclude,omitempty"`
+	Updates             *updatesExpression `yaml:"updates,omitempty"`
+	Attributes          []string           `yaml:"attributes,omitempty"`
+	DetectCaseConflicts bool               `yaml:"detect_case_conflicts,omitempty"`
+}
+
+// attributeNamePattern keeps attribute names from being read as check-attr options.
+var attributeNamePattern = regexp.MustCompile(`^[A-Za-z0-9_.][A-Za-z0-9_.-]*$`)
+
+// inProgressOperations maps the pseudo-refs an interrupted operation leaves behind to the
+// state they mean, in the order they are checked.
+var inProgressOperations = []struct{ ref, state string }{
+	{"REBASE_HEAD", "rebasing"}, {"MERGE_HEAD", "merging"},
+	{"CHERRY_PICK_HEAD", "cherry_picking"}, {"REVERT_HEAD", "reverting"},
 }
 
 type filesRunner struct {
@@ -41,6 +53,13 @@ type filesRunner struct {
 type fileChange struct {
 	added   bool
 	deleted bool
+}
+
+// filesOutputs declares git_files outputs; attributes is keyed by the configured names.
+func filesOutputs() step.OutputSchema {
+	outputs := step.ClosedOutputs("source", "count", "files", "text", "binary", "added", "deleted", "state", "case_conflicts")
+	outputs.Fields["attributes"] = step.OpenObject()
+	return outputs
 }
 
 // NewFiles builds a git_files step, which selects the files a check should inspect.
@@ -80,6 +99,11 @@ func NewFiles(raw map[string]any) (step.Runner, error) {
 			return nil, fmt.Errorf("exclude[%d]: invalid pattern: %w", index, err)
 		}
 		exclude = append(exclude, compiled)
+	}
+	for index, name := range config.Attributes {
+		if !attributeNamePattern.MatchString(name) {
+			return nil, fmt.Errorf("attributes[%d] must be a Git attribute name", index)
+		}
 	}
 	program, err := compileUpdates(config.Updates)
 	if err != nil {
@@ -146,10 +170,134 @@ func (runner *filesRunner) Run(ctx context.Context, request step.Request) (step.
 			added = append(added, path)
 		}
 	}
+	state, err := operationInProgress(ctx, request)
+	if err != nil {
+		return step.Result{}, err
+	}
+	conflicts := []any{}
+	if runner.config.DetectCaseConflicts {
+		if conflicts, err = caseConflicts(ctx, request, files); err != nil {
+			return step.Result{}, err
+		}
+	}
+	attributes, err := pathAttributes(ctx, request, files, runner.config.Attributes)
+	if err != nil {
+		return step.Result{}, err
+	}
 	return step.Result{Outputs: map[string]any{
 		"source": runner.config.Source, "count": len(files),
 		"files": files, "text": text, "binary": binary, "added": added, "deleted": deleted,
+		"state": state, "case_conflicts": conflicts, "attributes": attributes,
 	}}, nil
+}
+
+// operationInProgress names the operation in progress, such as a merge stopped on conflicts, from
+// the pseudo-refs it leaves behind; "none" when nothing is in progress. One cat-file call
+// checks them all without reading the Git directory, so it also works inside executors.
+func operationInProgress(ctx context.Context, request step.Request) (string, error) {
+	names := make([]string, len(inProgressOperations))
+	for index, operation := range inProgressOperations {
+		names[index] = operation.ref
+	}
+	result, err := runGitCaptureInput(ctx, request, strings.NewReader(strings.Join(names, "\n")+"\n"), "cat-file", "--batch-check=%(objectname)")
+	if err != nil {
+		return "", gitCommandError("reading Git repository state", result, err)
+	}
+	lines := strings.Split(strings.TrimSuffix(result.Stdout, "\n"), "\n")
+	if len(lines) != len(names) {
+		return "", fmt.Errorf("reading Git repository state: Git returned %d records for %d names", len(lines), len(names))
+	}
+	for index, line := range lines {
+		if !strings.HasSuffix(line, " missing") {
+			return inProgressOperations[index].state, nil
+		}
+	}
+	return "none", nil
+}
+
+// caseConflicts lists paths that differ only in letter case, including through a directory
+// name, from a selected file or another indexed path. Such paths collide on case-insensitive
+// filesystems. Only collisions that involve a selected file are reported.
+func caseConflicts(ctx context.Context, request step.Request, files []any) ([]any, error) {
+	result, err := runGitCapture(ctx, request, "ls-files", "-z")
+	if err != nil {
+		return nil, gitCommandError("listing tracked Git files", result, err)
+	}
+	spellings := make(map[string]map[string]bool)
+	relevant := make(map[string]bool)
+	include := func(path string, selected bool) {
+		for {
+			folded := strings.ToLower(path)
+			if spellings[folded] == nil {
+				spellings[folded] = make(map[string]bool)
+			}
+			spellings[folded][path] = true
+			if selected {
+				relevant[folded] = true
+			}
+			parent := filepath.ToSlash(filepath.Dir(path))
+			if parent == "." || parent == path {
+				return
+			}
+			path = parent
+		}
+	}
+	for _, path := range strings.Split(result.Stdout, "\x00") {
+		if path != "" {
+			include(path, false)
+		}
+	}
+	for _, path := range files {
+		include(path.(string), true)
+	}
+	var conflicts []string
+	for folded, paths := range spellings {
+		if relevant[folded] && len(paths) > 1 {
+			for path := range paths {
+				conflicts = append(conflicts, path)
+			}
+		}
+	}
+	slices.Sort(conflicts)
+	listed := make([]any, len(conflicts))
+	for index, path := range conflicts {
+		listed[index] = path
+	}
+	return listed, nil
+}
+
+// pathAttributes reports the requested Git attributes of each file as
+// {attribute: {path: value}}, leaving out unspecified attributes. Values are "set", "unset",
+// or the assigned text, such as "lfs" for an LFS filter.
+func pathAttributes(ctx context.Context, request step.Request, files []any, names []string) (map[string]any, error) {
+	attributes := make(map[string]any, len(names))
+	for _, name := range names {
+		attributes[name] = map[string]any{}
+	}
+	if len(names) == 0 || len(files) == 0 {
+		return attributes, nil
+	}
+	var input strings.Builder
+	for _, path := range files {
+		input.WriteString(path.(string))
+		input.WriteByte(0)
+	}
+	args := append([]string{"check-attr", "-z", "--stdin"}, names...)
+	result, err := runGitCaptureInput(ctx, request, strings.NewReader(input.String()), args...)
+	if err != nil {
+		return nil, gitCommandError("reading Git attributes", result, err)
+	}
+	fields := strings.Split(strings.TrimSuffix(result.Stdout, "\x00"), "\x00")
+	if len(fields)%3 != 0 {
+		return nil, fmt.Errorf("reading Git attributes: malformed output")
+	}
+	for index := 0; index < len(fields); index += 3 {
+		path, name, value := fields[index], fields[index+1], fields[index+2]
+		if values, ok := attributes[name].(map[string]any); ok && value != "unspecified" {
+			values[path] = value
+		}
+	}
+	return attributes, nil
 }
 
 func (runner *filesRunner) excluded(path string) bool {

@@ -73,7 +73,7 @@ func Register(registry *step.Registry) error {
 		{"git_log", NewLog, step.OpenObject()},
 		{"git_diff", NewDiff, step.OpenObject()},
 		{"git_diff_check", NewDiffCheck, step.OpenObject()},
-		{"git_files", NewFiles, step.ClosedOutputs("source", "count", "files", "text", "binary", "added", "deleted")},
+		{"git_files", NewFiles, filesOutputs()},
 		{"git_worktree", NewWorktree, step.OpenObject()},
 		{"git_squash", NewSquash, step.OpenObject()},
 		{"git_rebase", NewRebase, step.OpenObject()},

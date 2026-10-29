@@ -5,8 +5,10 @@ steps:
     with:
       source: "{{ .vars.source }}"
       exclude: ['^dist/', '^completions/']
+      detect_case_conflicts: true
+      attributes: [filter]
 
-  - id: repository
+  - id: go_packages
     type: lua
     with:
       args:
@@ -14,16 +16,6 @@ steps:
         files: {expr: steps.files.files}
         deleted: {expr: steps.files.deleted}
       source: |
-        local function git(args)
-          table.insert(args, 1, "--literal-pathspecs")
-          local result = wuko.exec.run({command="git", args=args, stdout="capture", stderr="capture", capture_limit="16MiB"})
-          assert(not result.error and result.exit_code == 0 and not result.stdout_truncated, "Git repository inspection failed")
-          return result.stdout
-        end
-        local index, indexed = {}, {}
-        for path in git({"ls-files", "-z"}):gmatch("(.-)%z") do
-          if not indexed[path] then indexed[path] = true; index[#index+1] = path end
-        end
         -- Vet only the packages whose Go files changed, following the directories ./... skips.
         -- A module change can affect every package, so it vets them all.
         local vet, seen, modules = {}, {}, {}
@@ -58,10 +50,6 @@ steps:
           end
         end
         table.sort(vet)
-        local directory = git({"rev-parse", "--absolute-git-dir"}):gsub("\n$", "")
-        local function state(name) return exists(directory.."/"..name) end
-        wuko.output("merge", state("MERGE_MSG") and (state("MERGE_HEAD") or state("rebase-apply") or state("rebase-merge")))
-        wuko.output("index", index)
         wuko.output("vet", vet)
 
   - id: selected
@@ -71,21 +59,14 @@ steps:
         files: {expr: steps.files.files}
         text: {expr: steps.files.text}
         added: {expr: steps.files.added}
-        vet: {expr: steps.repository.vet}
+        vet: {expr: steps.go_packages.vet}
       source: |
-        local result = {files=wuko.args.files, text=wuko.args.text, yaml={}, toml={}, go={}, added=wuko.args.added, lfs={}, vet=wuko.args.vet, tidy=false, lint=false}
+        local result = {files=wuko.args.files, text=wuko.args.text, yaml={}, toml={}, go={}, added=wuko.args.added, vet=wuko.args.vet, tidy=false, lint=false}
         for _, path in ipairs(wuko.args.files) do
           local extension = wuko.helpers.lower(path:match("%.([^./]+)$") or "")
           local format = ({yml="yaml", yaml="yaml", toml="toml", go="go"})[extension]
           if format then result[format][#result[format]+1] = path end
           result.tidy = result.tidy or path == "go.mod" or path == "go.sum"
           result.lint = result.lint or extension == "go" or path == "go.mod" or path == "go.sum" or path == "staticcheck.conf" or path == "scripts/lint.sh" or path == "justfile" or path == ".github/workflows/ci.yml" or path:match("^%.wuko/") ~= nil
-        end
-        if #result.added > 0 then
-          local attrs = wuko.exec.run({command="git", args={"--literal-pathspecs", "check-attr", "filter", "-z", "--stdin"}, stdin=table.concat(result.added, string.char(0))..string.char(0), stdout="capture", stderr="capture", capture_limit="16MiB"})
-          assert(not attrs.error and attrs.exit_code == 0 and not attrs.stdout_truncated, "Git LFS attribute lookup failed")
-          local fields = {}
-          for field in attrs.stdout:gmatch("(.-)%z") do fields[#fields+1] = field end
-          for i=1,#fields,3 do if fields[i+2] == "lfs" then result.lfs[fields[i]] = true end end
         end
         for name, value in pairs(result) do wuko.output(name, value) end
