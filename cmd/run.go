@@ -16,6 +16,7 @@ import (
 	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/engine"
 	reporterpkg "github.com/up2jj/wuko/reporter"
+	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
 )
 
@@ -29,7 +30,8 @@ func newRunCmd(deps dependencies) *cobra.Command {
   wuko run --file ./deploy.yaml staging
   ./generate-workflow | wuko run --file -
   wuko run check --dry-run
-  wuko run check --var 'code="123"'`,
+  wuko run check --var 'code="123"'
+  wuko run bootstrap --yes`,
 		Args: cobra.MaximumNArgs(2),
 		RunE: func(command *cobra.Command, args []string) error {
 			if handled, err := runWithResourceLimits(command, deps, args, config); handled {
@@ -51,6 +53,8 @@ func newRunCmd(deps dependencies) *cobra.Command {
 	command.Flags().StringArrayVar(&config.environment, "env", nil, "override an environment variable (KEY=value; repeatable)")
 	command.Flags().BoolVar(&config.dryRun, "dry-run", false, "validate and print steps without running them")
 	command.Flags().BoolVar(&config.once, "once", false, "run immediately once, ignoring a declared cron schedule")
+	command.Flags().BoolVar(&config.prompts.Yes, "yes", false, "answer every tui_confirm prompt with true")
+	command.Flags().BoolVar(&config.prompts.Defaults, "defaults", false, "answer every prompt that declares a default with that default")
 	addReporterFlag(command, &config.reporters)
 	command.Flags().StringVar(&config.reportJSON, "report-json", "", "write the final execution report as JSON to a path, or - for stdout")
 	command.Flags().StringVar(&config.workflowFile, "file", "", "run a workflow from a file path, or - for stdin")
@@ -77,6 +81,7 @@ type runWorkflowConfig struct {
 	targetName      string
 	providerValues  map[string]map[string]any
 	nonInteractive  bool
+	prompts         step.PromptAnswers
 	defaultReporter reporterpkg.Reporter
 	returnObserver  *returnDestinationObserver
 	resultObserver  func(*engine.State)
@@ -339,7 +344,7 @@ func runWorkflow(command *cobra.Command, deps dependencies, args []string, confi
 			Dependencies:  dependencies,
 			LocalValueDir: localValueDir, GlobalValueDir: filepath.Join(configDir, "wuko", "values"),
 			Stdout: workflowOutput, Stderr: stepStderr,
-			Interactive: isInteractive, DryRun: config.dryRun, Progress: reporters.Progress,
+			Interactive: isInteractive, Prompts: config.prompts, DryRun: config.dryRun, Progress: reporters.Progress,
 			ElevationAllowed: elevationAllowed && installedWorkflowMayElevate(definition.Path),
 			Diagnostics:      reporters.Diagnostic,
 		}

@@ -15,7 +15,7 @@ import (
 func TestValidationRootsCoverRuntimeTemplateData(t *testing.T) {
 	t.Parallel()
 	definition := steptest.Definition(t, "roots")
-	data := templateData(definition, t.TempDir(), &State{})
+	data := templateData(definition, t.TempDir(), false, &State{})
 	for _, name := range slices.Sorted(maps.Keys(data)) {
 		if _, ok := baseTemplateRoots[name]; !ok {
 			t.Errorf("template data root %q is missing from baseTemplateRoots", name)

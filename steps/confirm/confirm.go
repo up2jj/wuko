@@ -14,6 +14,8 @@ type Config struct {
 	Variable string `yaml:"variable"`
 	Message  string `yaml:"message"`
 	Default  *bool  `yaml:"default,omitempty"`
+	// NonInteractive answers with Default when the run cannot prompt.
+	NonInteractive step.NonInteractive `yaml:"noninteractive,omitempty"`
 }
 
 type Runner struct{ config Config }
@@ -33,6 +35,9 @@ func New(raw map[string]any) (step.Runner, error) {
 	if strings.TrimSpace(config.Message) == "" {
 		return nil, fmt.Errorf("message is required")
 	}
+	if err := config.NonInteractive.Validate(config.Default != nil); err != nil {
+		return nil, err
+	}
 	return &Runner{config: config}, nil
 }
 
@@ -44,8 +49,14 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 		}
 		return result(r.config.Variable, confirmed), nil
 	}
+	if request.Prompts.Yes {
+		return result(r.config.Variable, true), nil
+	}
+	if r.config.Default != nil && request.UseDefault(r.config.NonInteractive) {
+		return result(r.config.Variable, *r.config.Default), nil
+	}
 	if !request.Interactive {
-		return step.Result{}, fmt.Errorf("variable %q is required when stdin is non-interactive; supply it with --var", r.config.Variable)
+		return step.Result{}, step.MissingAnswerError(r.config.Variable, r.config.Default != nil)
 	}
 	confirmed, err := tui.Confirm(ctx, request.Stdin, request.Stdout, r.config.Message, defaultValue(r.config.Default))
 	if err != nil {

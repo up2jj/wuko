@@ -21,6 +21,8 @@ type Config struct {
 	Content  string `yaml:"content"`
 	Format   string `yaml:"format,omitempty"`
 	Default  *bool  `yaml:"default,omitempty"`
+	// NonInteractive answers with Default when the run cannot prompt.
+	NonInteractive step.NonInteractive `yaml:"noninteractive,omitempty"`
 }
 
 type Runner struct{ config Config }
@@ -49,6 +51,9 @@ func New(raw map[string]any) (step.Runner, error) {
 	if config.Format != formatPlain && config.Format != formatDiff {
 		return nil, fmt.Errorf("format must be plain or diff")
 	}
+	if err := config.NonInteractive.Validate(config.Default != nil); err != nil {
+		return nil, err
+	}
 	return &Runner{config: config}, nil
 }
 
@@ -60,8 +65,11 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 		}
 		return result(r.config.Variable, approved), nil
 	}
+	if r.config.Default != nil && request.UseDefault(r.config.NonInteractive) {
+		return result(r.config.Variable, *r.config.Default), nil
+	}
 	if !request.Interactive {
-		return step.Result{}, fmt.Errorf("variable %q is required when stdin is non-interactive; supply it with --var", r.config.Variable)
+		return step.Result{}, step.MissingAnswerError(r.config.Variable, r.config.Default != nil)
 	}
 	approved, err := tui.Review(ctx, request.Stdin, request.Stdout, tui.ReviewConfig{
 		Message: r.config.Message, Content: r.config.Content, Format: r.config.Format, Default: defaultValue(r.config.Default),

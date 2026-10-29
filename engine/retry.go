@@ -167,7 +167,7 @@ func waitForRetry(ctx context.Context, delay time.Duration) error {
 // stable across the caller's passes; otherwise it is random.
 func executionOperationID(definition *workflow.Definition, stepID, template string, options Options, state *State) (string, error) {
 	if template != "" {
-		operationID, err := options.renderer.Render(template, templateData(definition, options.RunDir, state))
+		operationID, err := options.renderer.Render(template, templateData(definition, options.RunDir, options.Interactive, state))
 		if err != nil {
 			return "", fmt.Errorf("rendering attempt operation_id: %w", err)
 		}

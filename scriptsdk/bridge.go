@@ -112,7 +112,7 @@ func Open(ctx context.Context, request step.Request, args map[string]any) (*Brid
 		"dependencies": nonNilMap(request.Dependencies), "env": nonNilMap(request.Env),
 		"providers": nonNilMap(request.Providers.Values), "bindings": nonNilMap(request.Bindings),
 		"workflow": map[string]any{"name": request.WorkflowName, "dir": request.WorkflowDir, "timezone": request.WorkflowTimezone},
-		"run":      map[string]any{"dir": run.Dir, "environment_loaders": run.EnvironmentLoaders, "os": run.OS, "arch": run.Arch},
+		"run":      map[string]any{"dir": run.Dir, "environment_loaders": run.EnvironmentLoaders, "os": run.OS, "arch": run.Arch, "interactive": run.Interactive},
 		"attempt":  map[string]any{"number": max(request.Attempt, 1), "max_attempts": max(request.MaxAttempts, 1), "operation_id": request.OperationID},
 	}
 	// Encode once: the immutable bytes freeze the state for concurrent callbacks and

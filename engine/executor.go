@@ -57,7 +57,7 @@ func (e *Engine) executeExecutorBlock(ctx context.Context, definition *workflow.
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	rendered, err := renderValue(options.renderer, block.Executor.With, templateData(definition, options.RunDir, state), "")
+	rendered, err := renderValue(options.renderer, block.Executor.With, templateData(definition, options.RunDir, options.Interactive, state), "")
 	if err != nil {
 		return fmt.Errorf("workflow %q executor %q: rendering configuration: %w", definition.Name, block.Executor.Type, err)
 	}

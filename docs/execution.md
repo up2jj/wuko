@@ -1798,6 +1798,11 @@ steps:
     with: {command: ./scripts/macos-arm64.sh}
 ```
 
+`.run.interactive` (`run.interactive` in expressions, `wuko.run.interactive` in Lua) reports
+whether prompts can read from a terminal at that point of the run. It is `false` when stdin is not a
+terminal and inside concurrent groups, background jobs, and parallel control iterations. See
+[Answering prompts unattended](steps-interactive.md#answering-prompts-unattended).
+
 Strings use strict Go templates. Templates can read `.vars`, `.env`, `.steps`, `.workflow`,
 `.run`, and action `.inputs`. See [Templates](templates.md) and
 [Template, Expr, and Lua functions](template-functions.md).

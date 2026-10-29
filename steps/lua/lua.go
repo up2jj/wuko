@@ -221,7 +221,7 @@ func (r *runtime) module(state *glua.LState) (*glua.LTable, error) {
 		"workflow":     map[string]any{"name": r.request.WorkflowName, "dir": r.request.WorkflowDir, "timezone": r.request.WorkflowTimezone},
 		"run": map[string]any{
 			"dir": run.Dir, "environment_loaders": slices.Clone(run.EnvironmentLoaders),
-			"os": run.OS, "arch": run.Arch,
+			"os": run.OS, "arch": run.Arch, "interactive": run.Interactive,
 		},
 	} {
 		converted, err := toLua(state, value)

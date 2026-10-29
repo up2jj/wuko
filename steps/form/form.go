@@ -9,6 +9,7 @@ import (
 	"math"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -29,6 +30,9 @@ type Config struct {
 	Title       string  `yaml:"title"`
 	Description string  `yaml:"description,omitempty"`
 	Fields      []Field `yaml:"fields"`
+	// NonInteractive answers each field without a value with its default when the run
+	// cannot prompt.
+	NonInteractive step.NonInteractive `yaml:"noninteractive,omitempty"`
 }
 
 // Field names one output and describes its widget and immutable input sources.
@@ -162,6 +166,9 @@ func New(raw map[string]any) (step.Runner, error) {
 	rawFields, ok := raw["fields"].([]any)
 	if !ok {
 		return nil, fmt.Errorf("fields must be a list")
+	}
+	if err := config.NonInteractive.Validate(slices.ContainsFunc(config.Fields, func(field Field) bool { return field.Default != nil })); err != nil {
+		return nil, err
 	}
 	runner := &Runner{config: config, now: time.Now, read: func(ctx context.Context, request step.Request, config tui.FormConfig) (map[string]any, error) {
 		return tui.Form(ctx, request.Stdin, request.Stdout, config)
@@ -379,12 +386,21 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 	if err := ctx.Err(); err != nil {
 		return step.Result{}, err
 	}
-	if !request.Interactive {
-		var missing []string
-		for _, field := range r.fields {
-			if !field.value.present {
-				missing = append(missing, field.config.ID)
+	// A form answers with its defaults only when every field has a value or a default, so
+	// --defaults still shows a form that asks for something new.
+	var missing, undefaulted []string
+	for _, field := range r.fields {
+		if !field.value.present {
+			missing = append(missing, field.config.ID)
+			if !field.fallback.present {
+				undefaulted = append(undefaulted, field.config.ID)
 			}
+		}
+	}
+	useDefaults := request.UseDefault(r.config.NonInteractive) && len(undefaulted) == 0
+	if !request.Interactive && !useDefaults {
+		if request.UseDefault(r.config.NonInteractive) {
+			missing = undefaulted
 		}
 		if len(missing) > 0 {
 			return step.Result{}, fmt.Errorf("non-interactive form requires explicit value for fields: %s", strings.Join(missing, ", "))
@@ -403,14 +419,14 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 		}
 	}
 	for _, field := range r.fields {
-		resolved, err := field.resolve(ctx, request, reference, location)
+		resolved, err := field.resolve(ctx, request, request.Interactive || useDefaults, reference, location)
 		if err != nil {
 			return step.Result{}, fmt.Errorf("field %q: %w", field.config.ID, err)
 		}
 		config.Fields = append(config.Fields, resolved)
 	}
 	values := make(map[string]any, len(config.Fields))
-	if request.Interactive {
+	if request.Interactive && !useDefaults {
 		submitted, err := r.read(ctx, request, config)
 		if err != nil {
 			return step.Result{}, fmt.Errorf("reading form: %w", err)
@@ -442,11 +458,12 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 	return step.Result{Outputs: outputs}, nil
 }
 
-func (field compiledField) resolve(ctx context.Context, request step.Request, reference time.Time, location *time.Location) (tui.FormField, error) {
+// resolve builds one field; fallback selects its default when it has no explicit value.
+func (field compiledField) resolve(ctx context.Context, request step.Request, fallback bool, reference time.Time, location *time.Location) (tui.FormField, error) {
 	f := field.config
 	result := tui.FormField{ID: f.ID, Type: f.Type, Label: f.Label, Description: f.Description, Required: f.Required}
 	selected := field.value
-	if !selected.present && request.Interactive {
+	if !selected.present && fallback {
 		selected = field.fallback
 	}
 	value, err := selected.resolve(request)

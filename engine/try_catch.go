@@ -61,7 +61,7 @@ func (e *Engine) executeTryCatch(ctx context.Context, definition *workflow.Defin
 
 	conditionStarted := time.Now()
 	traceStep(options, definition, workflowStep, diagnostic.PhaseCondition, diagnostic.StatusStarted, time.Time{}, string(workflowStep.If), nil)
-	run, err := e.evaluateCondition(workflowStep.If, makeConditionEnvironment(definition, options.RunDir, state))
+	run, err := e.evaluateCondition(workflowStep.If, makeConditionEnvironment(definition, options.RunDir, options.Interactive, state))
 	if err != nil {
 		stepErr := fmt.Errorf("workflow %q step %q (try): evaluating if: %w", definition.Name, workflowStep.ID, err)
 		traceStep(options, definition, workflowStep, diagnostic.PhaseCondition, diagnostic.StatusFailed, conditionStarted, "", err)

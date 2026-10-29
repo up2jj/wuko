@@ -21,6 +21,8 @@ type Config struct {
 	Required   *bool               `yaml:"required,omitempty"`
 	Validation step.TextValidation `yaml:"validation,omitempty"`
 	Modifiers  Modifiers           `yaml:"modifiers,omitempty"`
+	// NonInteractive answers with Value when the run cannot prompt.
+	NonInteractive step.NonInteractive `yaml:"noninteractive,omitempty"`
 }
 
 type Modifiers struct {
@@ -30,9 +32,11 @@ type Modifiers struct {
 }
 
 type Runner struct {
-	config   Config
-	validate step.TextValidator
-	modify   func(string) (any, error)
+	config Config
+	// hasDefault records an explicit value, which may be empty, to answer with.
+	hasDefault bool
+	validate   step.TextValidator
+	modify     func(string) (any, error)
 }
 
 func Register(registry *step.Registry) error {
@@ -50,6 +54,10 @@ func New(raw map[string]any) (step.Runner, error) {
 	if strings.TrimSpace(config.Message) == "" {
 		return nil, fmt.Errorf("message is required")
 	}
+	_, hasDefault := raw["value"]
+	if err := config.NonInteractive.Validate(hasDefault); err != nil {
+		return nil, err
+	}
 	validate, err := step.CompileTextValidator(required(config.Required), config.Validation)
 	if err != nil {
 		return nil, err
@@ -66,7 +74,7 @@ func New(raw map[string]any) (step.Runner, error) {
 		_, err := modify(value)
 		return err
 	}
-	return &Runner{config: config, validate: validateAndModify, modify: modify}, nil
+	return &Runner{config: config, hasDefault: hasDefault, validate: validateAndModify, modify: modify}, nil
 }
 
 func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, error) {
@@ -80,8 +88,14 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 		}
 		return r.result(text)
 	}
+	if r.hasDefault && request.UseDefault(r.config.NonInteractive) {
+		if err := r.validate(r.config.Value); err != nil {
+			return step.Result{}, fmt.Errorf("default value for variable %q: %w", r.config.Variable, err)
+		}
+		return r.result(r.config.Value)
+	}
 	if !request.Interactive {
-		return step.Result{}, fmt.Errorf("variable %q is required when stdin is non-interactive; supply it with --var", r.config.Variable)
+		return step.Result{}, step.MissingAnswerError(r.config.Variable, r.hasDefault)
 	}
 	read := tui.TextWithValidation
 	if r.config.Multiline {

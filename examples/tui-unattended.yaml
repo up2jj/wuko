@@ -1,0 +1,36 @@
+version: 1
+name: bootstrap-offers
+description: Offer optional fixes that answer with their defaults when no terminal is attached
+
+steps:
+  - id: offer_tools
+    type: tui_confirm
+    with:
+      variable: install_tools
+      message: Install the missing tools now?
+      default: false
+      noninteractive: default
+
+  - id: environment
+    type: tui_choice
+    with:
+      variable: environment
+      message: Choose the environment to prepare
+      noninteractive: default
+      choices:
+        - {label: Development, value: dev, default: true}
+        - {label: Staging, value: staging}
+
+  - id: install
+    type: shell
+    if: vars.install_tools
+    with:
+      command: printf
+      args: ["%s\n", "Installing tools for {{ .vars.environment }}"]
+
+  - id: hint
+    type: shell
+    if: '!run.interactive && !vars.install_tools'
+    with:
+      command: printf
+      args: ["%s\n", "Rerun in a terminal, or with --yes, to install the missing tools."]

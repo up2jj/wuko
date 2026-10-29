@@ -228,3 +228,22 @@ func TestDateUnattendedNeedsSuppliedValue(t *testing.T) {
 		t.Fatalf("error = %v", err)
 	}
 }
+
+func TestDateUnattendedAnswersWithValue(t *testing.T) {
+	t.Parallel()
+	runner := dateRunner(t, map[string]any{"value": "+2d", "max": "+30d", "noninteractive": "default"}, "2026-03-10T12:00:00Z")
+	result, err := runner.Run(t.Context(), step.Request{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Outputs["value"] != "2026-03-12" || result.Variables["due"] != "2026-03-12" {
+		t.Fatalf("result = %#v", result)
+	}
+	outOfBounds := dateRunner(t, map[string]any{"value": "+40d", "max": "+30d"}, "2026-03-10T12:00:00Z")
+	if _, err := outOfBounds.Run(t.Context(), step.Request{Prompts: step.PromptAnswers{Defaults: true}}); err == nil {
+		t.Fatal("out-of-bounds default succeeded")
+	}
+	if _, err := NewWithClock(map[string]any{"variable": "due", "message": "Due", "noninteractive": "default"}, time.Now); err == nil {
+		t.Fatal("noninteractive: default without value succeeded")
+	}
+}

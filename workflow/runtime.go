@@ -103,7 +103,7 @@ func PrepareValues(definition *Definition, options LoadOptions) (map[string]any,
 		host = maps.Clone(options.BaseEnv)
 	}
 	wfEnv := make(map[string]string, len(definition.Env))
-	root := TemplateDataWithProviders(definition, options.RunDir, options.EnvironmentLoaders, nil, vars, host, nil, nil, nil, options.Providers)
+	root := TemplateDataWithProviders(definition, options.RunDir, options.EnvironmentLoaders, options.Interactive, nil, vars, host, nil, nil, nil, options.Providers)
 	keys := slices.Sorted(maps.Keys(definition.Env))
 	for _, key := range keys {
 		value, err := renderer.Render(definition.Env[key], root)
@@ -125,21 +125,21 @@ func TemplateData(definition *Definition, runDir string, inputs, vars map[string
 
 // TemplateDataWithRun constructs template roots with invocation environment provenance.
 func TemplateDataWithRun(definition *Definition, runDir string, environmentLoaders []string, inputs, vars map[string]any, environment map[string]string, steps map[string]any) map[string]any {
-	return templateData(definition, runDir, environmentLoaders, inputs, vars, environment, steps, nil, nil, provider.Set{})
+	return templateData(definition, runDir, environmentLoaders, false, inputs, vars, environment, steps, nil, nil, provider.Set{})
 }
 
 // TemplateDataWithRunDependencies includes invocation provenance and dependency outputs.
 func TemplateDataWithRunDependencies(definition *Definition, runDir string, environmentLoaders []string, inputs, vars map[string]any, environment map[string]string, steps map[string]any, dependencies map[string]map[string]any, bindings map[string]any) map[string]any {
-	return templateData(definition, runDir, environmentLoaders, inputs, vars, environment, steps, dependencies, bindings, provider.Set{})
+	return templateData(definition, runDir, environmentLoaders, false, inputs, vars, environment, steps, dependencies, bindings, provider.Set{})
 }
 
 // TemplateDataWithProviders constructs every workflow template root, including active execution
 // provider contexts. Registered but inactive providers remain absent.
-func TemplateDataWithProviders(definition *Definition, runDir string, environmentLoaders []string, inputs, vars map[string]any, environment map[string]string, steps map[string]any, dependencies map[string]map[string]any, bindings map[string]any, providers provider.Set) map[string]any {
-	return templateData(definition, runDir, environmentLoaders, inputs, vars, environment, steps, dependencies, bindings, providers)
+func TemplateDataWithProviders(definition *Definition, runDir string, environmentLoaders []string, interactive bool, inputs, vars map[string]any, environment map[string]string, steps map[string]any, dependencies map[string]map[string]any, bindings map[string]any, providers provider.Set) map[string]any {
+	return templateData(definition, runDir, environmentLoaders, interactive, inputs, vars, environment, steps, dependencies, bindings, providers)
 }
 
-func templateData(definition *Definition, runDir string, environmentLoaders []string, inputs, vars map[string]any, environment map[string]string, steps map[string]any, dependencies map[string]map[string]any, bindings map[string]any, providers provider.Set) map[string]any {
+func templateData(definition *Definition, runDir string, environmentLoaders []string, interactive bool, inputs, vars map[string]any, environment map[string]string, steps map[string]any, dependencies map[string]map[string]any, bindings map[string]any, providers provider.Set) map[string]any {
 	if inputs == nil {
 		inputs = map[string]any{}
 	}
@@ -165,7 +165,7 @@ func templateData(definition *Definition, runDir string, environmentLoaders []st
 		},
 		"run": map[string]any{
 			"dir": runDir, "environment_loaders": slices.Clone(environmentLoaders),
-			"os": runtime.GOOS, "arch": runtime.GOARCH,
+			"os": runtime.GOOS, "arch": runtime.GOARCH, "interactive": interactive,
 		},
 	}
 	for key, value := range bindings {

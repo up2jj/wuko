@@ -41,6 +41,8 @@ type Config struct {
 	ReasonExpr       string         `yaml:"reason_expr,omitempty"`
 	DefaultField     string         `yaml:"default_field,omitempty"`
 	DefaultExpr      string         `yaml:"default_expr,omitempty"`
+	// NonInteractive answers with the default choices when the run cannot prompt.
+	NonInteractive step.NonInteractive `yaml:"noninteractive,omitempty"`
 }
 
 type ChoiceConfig struct {
@@ -111,6 +113,11 @@ func New(raw map[string]any) (step.Runner, error) {
 		staticRows = workflow.Clone(staticRows).([]any)
 	}
 	if err := validateBounds(config); err != nil {
+		return nil, err
+	}
+	// Defaults may come from a source or an expression, so only the run can tell whether
+	// enough of them are marked.
+	if err := config.NonInteractive.Validate(true); err != nil {
 		return nil, err
 	}
 	programs, err := compileExpressions(raw, config)
@@ -279,11 +286,21 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 	if supplied, exists := request.Vars[r.config.Variable]; exists {
 		return r.preSupplied(supplied, options)
 	}
+	// --defaults answers only a prompt that marks defaults. A step that opts into its defaults
+	// answers an unattended run with however many it marks, and fails if that is too few.
+	defaults := defaultIndexes(options)
+	optedIn := !request.Interactive && r.config.NonInteractive == step.NonInteractiveDefault
+	if request.UseDefault(r.config.NonInteractive) && (len(defaults) > 0 || optedIn) {
+		if len(defaults) < r.minimum() {
+			return step.Result{}, fmt.Errorf("variable %q has %d default choices, but at least %d must be selected", r.config.Variable, len(defaults), r.minimum())
+		}
+		return r.selected(defaults, options), nil
+	}
 	if !request.Interactive {
 		if r.minimum() == 0 {
 			return r.selected(nil, options), nil
 		}
-		return step.Result{}, fmt.Errorf("variable %q is required when stdin is non-interactive; supply it with --var", r.config.Variable)
+		return step.Result{}, step.MissingAnswerError(r.config.Variable, len(defaults) > 0)
 	}
 	if r.config.AutoSelectSingle {
 		if index := soleEnabledIndex(options); index >= 0 {
@@ -691,6 +708,18 @@ func (r *Runner) selected(indexes []int, options []resolvedChoice) step.Result {
 		Outputs:   outputs,
 		Variables: map[string]any{r.config.Variable: values},
 	}
+}
+
+// defaultIndexes returns the choices marked default. validateOptions has already rejected
+// disabled defaults and more defaults than the selection allows.
+func defaultIndexes(options []resolvedChoice) []int {
+	var indexes []int
+	for index, option := range options {
+		if option.Default {
+			indexes = append(indexes, index)
+		}
+	}
+	return indexes
 }
 
 func (r *Runner) required() bool { return r.config.Required == nil || *r.config.Required }

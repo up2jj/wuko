@@ -12,7 +12,7 @@ export interface WukoSDK {
   readonly providers: Readonly<JSONObject>;
   readonly bindings: Readonly<JSONObject>;
   readonly workflow: Readonly<{ name: string; dir: string; timezone: string }>;
-  readonly run: Readonly<{ dir: string; environment_loaders: readonly string[]; os: string; arch: string }>;
+  readonly run: Readonly<{ dir: string; environment_loaders: readonly string[]; os: string; arch: string; interactive: boolean }>;
   readonly attempt: Readonly<{ number: number; max_attempts: number; operation_id: string }>;
   readonly helpers: Readonly<Record<string, (...args: JSONValue[]) => Promise<JSONValue>>>;
   output(name: string, value: JSONValue): Promise<null>;

@@ -57,3 +57,25 @@ func newRunner(t *testing.T) *Runner {
 	t.Helper()
 	return steptest.BuildAs[*Runner](t, New, map[string]any{"variable": "approved", "message": "Review", "content": "change", "format": "diff"})
 }
+
+func TestUnattendedReviewAnswersWithDefault(t *testing.T) {
+	t.Parallel()
+	runner := steptest.Build(t, New, map[string]any{
+		"variable": "approved", "message": "Review", "content": "change", "default": true, "noninteractive": "default",
+	})
+	result, err := runner.Run(t.Context(), step.Request{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Variables["approved"] != true {
+		t.Fatalf("result = %#v", result)
+	}
+	// --yes answers confirmations only; a review still needs its own default or variable.
+	plain := steptest.Build(t, New, map[string]any{"variable": "approved", "message": "Review", "content": "change"})
+	if _, err := plain.Run(t.Context(), step.Request{Prompts: step.PromptAnswers{Yes: true}}); err == nil {
+		t.Fatal("review without a default succeeded under --yes")
+	}
+	if _, err := New(map[string]any{"variable": "approved", "message": "Review", "content": "change", "noninteractive": "default"}); err == nil {
+		t.Fatal("noninteractive: default without default succeeded")
+	}
+}

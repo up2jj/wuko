@@ -264,3 +264,61 @@ func TestFormRequiredMultiselectRejectsImpossibleMaximum(t *testing.T) {
 		t.Fatal("required multiselect accepted a zero maximum")
 	}
 }
+
+func TestFormUnattendedAnswersWithDefaults(t *testing.T) {
+	raw := configFor(
+		map[string]any{"id": "name", "type": "text", "label": "Name", "default": "Ada"},
+		map[string]any{"id": "notify", "type": "checkbox", "label": "Notify", "value": true},
+	)
+	raw["noninteractive"] = "default"
+	runner := steptest.BuildAs[*Runner](t, New, raw)
+	result, err := runner.Run(t.Context(), step.Request{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if diff := cmp.Diff(map[string]any{"name": "Ada", "notify": true}, result.Outputs); diff != "" {
+		t.Fatalf("outputs (-want +got):\n%s", diff)
+	}
+
+	missing := configFor(
+		map[string]any{"id": "name", "type": "text", "label": "Name", "default": "Ada"},
+		map[string]any{"id": "notify", "type": "checkbox", "label": "Notify"},
+	)
+	missing["noninteractive"] = "default"
+	if _, err := steptest.BuildAs[*Runner](t, New, missing).Run(t.Context(), step.Request{}); err == nil || !strings.HasSuffix(err.Error(), "fields: notify") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestFormDefaultsFlagSkipsOnlyFullyDefaultedForms(t *testing.T) {
+	defaulted := steptest.BuildAs[*Runner](t, New, configFor(map[string]any{"id": "name", "type": "text", "label": "Name", "default": "Ada"}))
+	defaulted.read = func(context.Context, step.Request, tui.FormConfig) (map[string]any, error) {
+		t.Fatal("form opened despite --defaults")
+		return nil, nil
+	}
+	result, err := defaulted.Run(t.Context(), step.Request{Interactive: true, Prompts: step.PromptAnswers{Defaults: true}})
+	if err != nil || result.Outputs["name"] != "Ada" {
+		t.Fatalf("result=%#v err=%v", result, err)
+	}
+
+	partial := steptest.BuildAs[*Runner](t, New, configFor(
+		map[string]any{"id": "name", "type": "text", "label": "Name", "default": "Ada"},
+		map[string]any{"id": "notes", "type": "text", "label": "Notes"},
+	))
+	calls := 0
+	partial.read = func(context.Context, step.Request, tui.FormConfig) (map[string]any, error) {
+		calls++
+		return map[string]any{"name": "Grace", "notes": ""}, nil
+	}
+	if _, err := partial.Run(t.Context(), step.Request{Interactive: true, Prompts: step.PromptAnswers{Defaults: true}}); err != nil || calls != 1 {
+		t.Fatalf("calls=%d err=%v", calls, err)
+	}
+	if _, err := New(configFor(map[string]any{"id": "name", "type": "text", "label": "Name"})); err != nil {
+		t.Fatal(err)
+	}
+	invalid := configFor(map[string]any{"id": "name", "type": "text", "label": "Name"})
+	invalid["noninteractive"] = "default"
+	if _, err := New(invalid); err == nil {
+		t.Fatal("noninteractive: default without any field default succeeded")
+	}
+}

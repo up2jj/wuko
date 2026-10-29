@@ -66,7 +66,7 @@ func (predicate *Predicate) Evaluate(ctx context.Context, request step.Request, 
 	for key, value := range map[string]any{
 		"vars": request.Vars, "inputs": request.Inputs, "steps": request.Steps, "env": request.Env, "dependencies": request.Dependencies,
 		"workflow": map[string]any{"name": request.WorkflowName, "dir": request.WorkflowDir, "timezone": request.WorkflowTimezone},
-		"run":      map[string]any{"dir": run.Dir, "environment_loaders": run.EnvironmentLoaders, "os": run.OS, "arch": run.Arch},
+		"run":      map[string]any{"dir": run.Dir, "environment_loaders": run.EnvironmentLoaders, "os": run.OS, "arch": run.Arch, "interactive": run.Interactive},
 	} {
 		roots[key] = value
 	}

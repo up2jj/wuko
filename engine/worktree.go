@@ -92,14 +92,14 @@ func (e *Engine) executeWorktreeBlock(ctx context.Context, definition *workflow.
 		reportStepFinished(options, definition.Name, block.ID, "worktree", index, total, outcome.stats)
 	}()
 
-	renderedRevision, err := options.renderer.Render(block.Worktree.Revision, templateData(definition, options.RunDir, state))
+	renderedRevision, err := options.renderer.Render(block.Worktree.Revision, templateData(definition, options.RunDir, options.Interactive, state))
 	if err != nil {
 		outcome.err = fmt.Errorf("workflow %q worktree %q: rendering revision: %w", definition.Name, block.ID, err)
 		return outcome
 	}
 	renderedPath := block.Worktree.Path
 	if renderedPath != "auto" {
-		renderedPath, err = options.renderer.Render(renderedPath, templateData(definition, options.RunDir, state))
+		renderedPath, err = options.renderer.Render(renderedPath, templateData(definition, options.RunDir, options.Interactive, state))
 		if err != nil {
 			outcome.err = fmt.Errorf("workflow %q worktree %q: rendering path: %w", definition.Name, block.ID, err)
 			return outcome
@@ -188,7 +188,7 @@ func (e *Engine) executeWorktreeBlock(ctx context.Context, definition *workflow.
 	branch := ""
 	published := false
 	if block.Worktree.Publish != nil {
-		branch, err = options.renderer.Render(block.Worktree.Publish.Branch, templateData(definition, path, state))
+		branch, err = options.renderer.Render(block.Worktree.Publish.Branch, templateData(definition, path, options.Interactive, state))
 		if err != nil {
 			outcome.err = fmt.Errorf("workflow %q worktree %q: rendering publish branch: %w", definition.Name, block.ID, err)
 			return outcome

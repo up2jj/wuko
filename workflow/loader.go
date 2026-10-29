@@ -180,7 +180,7 @@ func (loader *Loader) Prepare(ctx context.Context, definition *Definition, optio
 		return err
 	}
 	traceFinish(options.Diagnostics, valuesStarted, diagnostic.PhaseValues, diagnostic.StatusSucceeded, definition.Location, definition.Name, "", "", "", nil, countAttr("variables", len(vars)), countAttr("environment", len(environment)))
-	data := TemplateDataWithProviders(definition, options.RunDir, options.EnvironmentLoaders, nil, vars, environment, nil, nil, nil, options.Providers)
+	data := TemplateDataWithProviders(definition, options.RunDir, options.EnvironmentLoaders, options.Interactive, nil, vars, environment, nil, nil, nil, options.Providers)
 	renderer, err := NewRendererWithHelpers(definition.HelperContext(), definition.Templates, session, definition.helpers)
 	if err != nil {
 		return err

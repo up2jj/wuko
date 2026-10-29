@@ -80,7 +80,7 @@ func (e *Engine) executeControl(ctx context.Context, definition *workflow.Defini
 
 	conditionStarted := time.Now()
 	traceStep(options, definition, workflowStep, diagnostic.PhaseCondition, diagnostic.StatusStarted, time.Time{}, string(workflowStep.If), nil)
-	run, err := e.evaluateCondition(workflowStep.If, makeConditionEnvironment(definition, options.RunDir, state))
+	run, err := e.evaluateCondition(workflowStep.If, makeConditionEnvironment(definition, options.RunDir, options.Interactive, state))
 	if err != nil {
 		traceStep(options, definition, workflowStep, diagnostic.PhaseCondition, diagnostic.StatusFailed, conditionStarted, "", err)
 		stepErr := fmt.Errorf("workflow %q step %q (%s): evaluating if: %w", definition.Name, workflowStep.ID, kind, err)
@@ -107,7 +107,7 @@ func (e *Engine) executeControl(ctx context.Context, definition *workflow.Defini
 
 	expansionStarted := time.Now()
 	traceStep(options, definition, workflowStep, diagnostic.PhaseControl, diagnostic.StatusStarted, time.Time{}, "expanding "+kind, nil)
-	iterations, err := expandControl(ctx, workflowStep, templateData(definition, options.RunDir, state), maxIterations)
+	iterations, err := expandControl(ctx, workflowStep, templateData(definition, options.RunDir, options.Interactive, state), maxIterations)
 	if err != nil {
 		traceStep(options, definition, workflowStep, diagnostic.PhaseControl, diagnostic.StatusFailed, expansionStarted, "expanding "+kind, err)
 		stepErr := fmt.Errorf("workflow %q step %q (%s): expanding: %w", definition.Name, workflowStep.ID, kind, err)
@@ -187,7 +187,7 @@ func (e *Engine) executeControl(ctx context.Context, definition *workflow.Defini
 	if collect := controlCollect(workflowStep); collect != "" {
 		collectionStarted := time.Now()
 		traceStep(options, definition, workflowStep, diagnostic.PhaseControl, diagnostic.StatusStarted, time.Time{}, "collecting "+kind+" results", nil)
-		results, err := collectControlResults(ctx, definition, options.RunDir, collect, outcomes)
+		results, err := collectControlResults(ctx, definition, options.RunDir, options.Interactive, collect, outcomes)
 		if err != nil {
 			traceStep(options, definition, workflowStep, diagnostic.PhaseControl, diagnostic.StatusFailed, collectionStarted, "collecting "+kind+" results", err)
 			stepErr := fmt.Errorf("workflow %q step %q (%s): %w", definition.Name, workflowStep.ID, kind, err)
@@ -205,13 +205,13 @@ func (e *Engine) executeControl(ctx context.Context, definition *workflow.Defini
 	return outcome
 }
 
-func collectControlResults(ctx context.Context, definition *workflow.Definition, runDir, expression string, outcomes []controlpkg.Outcome[controlExecution]) ([]any, error) {
+func collectControlResults(ctx context.Context, definition *workflow.Definition, runDir string, interactive bool, expression string, outcomes []controlpkg.Outcome[controlExecution]) ([]any, error) {
 	results := make([]any, len(outcomes))
 	for i, item := range outcomes {
 		if err := ctx.Err(); err != nil {
 			return nil, fmt.Errorf("collect iteration %d: %w", item.Iteration.Index, err)
 		}
-		value, err := controlpkg.EvaluateExpression(expression, templateData(definition, runDir, item.Value.state))
+		value, err := controlpkg.EvaluateExpression(expression, templateData(definition, runDir, interactive, item.Value.state))
 		if err != nil {
 			return nil, fmt.Errorf("collect iteration %d: %w", item.Iteration.Index, err)
 		}

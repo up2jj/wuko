@@ -45,7 +45,7 @@ func (e *Engine) executeReturn(ctx context.Context, definition *workflow.Definit
 		Phase: diagnostic.PhaseControl, Status: diagnostic.StatusStarted, Time: started,
 		WorkflowName: definition.Name, Location: workflowStep.Location, Message: "evaluating return",
 	})
-	environment := makeConditionEnvironment(definition, options.RunDir, state)
+	environment := makeConditionEnvironment(definition, options.RunDir, options.Interactive, state)
 	run, err := e.evaluateCondition(workflowStep.If, environment)
 	if err != nil {
 		trace(options, diagnostic.Event{Phase: diagnostic.PhaseControl, Status: diagnostic.StatusFailed, Time: time.Now(), Duration: time.Since(started), WorkflowName: definition.Name, Location: workflowStep.Location, Error: err})
@@ -98,7 +98,7 @@ func (e *Engine) finishWorkflowOutputs(definition *workflow.Definition, options 
 	if state.didReturn {
 		return validateWorkflowOutputValues(definition.Outputs, state.Outputs)
 	}
-	environment := makeConditionEnvironment(definition, options.RunDir, state)
+	environment := makeConditionEnvironment(definition, options.RunDir, options.Interactive, state)
 	outputs := make(map[string]any, len(definition.Outputs))
 	for _, name := range slices.Sorted(maps.Keys(definition.Outputs)) {
 		declaration := definition.Outputs[name]

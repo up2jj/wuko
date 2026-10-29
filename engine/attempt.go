@@ -86,7 +86,7 @@ func (e *Engine) executeAttempt(ctx context.Context, definition *workflow.Defini
 
 	conditionStarted := time.Now()
 	traceStep(options, definition, workflowStep, diagnostic.PhaseCondition, diagnostic.StatusStarted, time.Time{}, string(workflowStep.If), nil)
-	run, err := e.evaluateCondition(workflowStep.If, makeConditionEnvironment(definition, options.RunDir, state))
+	run, err := e.evaluateCondition(workflowStep.If, makeConditionEnvironment(definition, options.RunDir, options.Interactive, state))
 	if err != nil {
 		traceStep(options, definition, workflowStep, diagnostic.PhaseCondition, diagnostic.StatusFailed, conditionStarted, "", err)
 		return fail(fmt.Errorf("evaluating if: %w", err), RunStats{})
@@ -100,7 +100,7 @@ func (e *Engine) executeAttempt(ctx context.Context, definition *workflow.Defini
 	traceStep(options, definition, workflowStep, diagnostic.PhaseCondition, diagnostic.StatusSucceeded, conditionStarted, "condition evaluated true", nil)
 
 	policy, err := control.Resolve(func(expression string) (any, error) {
-		return controlpkg.EvaluateExpression(expression, templateData(definition, options.RunDir, state))
+		return controlpkg.EvaluateExpression(expression, templateData(definition, options.RunDir, options.Interactive, state))
 	})
 	if err != nil {
 		return fail(err, RunStats{})
@@ -247,7 +247,7 @@ func (e *Engine) executeAttempt(ctx context.Context, definition *workflow.Defini
 				Kind: PollStarted, Status: StatusRunning, Time: time.Now(), WorkflowName: definition.Name,
 				Depth: options.depth, StepID: workflowStep.ID, StepType: "attempt", Poll: polls,
 			})
-			environment := makeConditionEnvironment(definition, options.RunDir, private)
+			environment := makeConditionEnvironment(definition, options.RunDir, options.Interactive, private)
 			environment["poll"] = polls
 			matched, err := evaluateConditionProgram(untilProgram, environment)
 			if err != nil {
@@ -308,7 +308,7 @@ func (e *Engine) executeAttempt(ctx context.Context, definition *workflow.Defini
 			return fail(fmt.Errorf("attempt %d/%d failed: %w", attempt, policy.MaxAttempts, passErr), nested)
 		}
 		if whenProgram != nil {
-			environment := makeConditionEnvironment(definition, options.RunDir, state)
+			environment := makeConditionEnvironment(definition, options.RunDir, options.Interactive, state)
 			environment["error"] = attemptErrorValue(control, workflowStep.ID, passErr, private, failure, attempt, polls)
 			retry, err := evaluateConditionProgram(whenProgram, environment)
 			if err != nil {

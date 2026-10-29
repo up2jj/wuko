@@ -58,7 +58,7 @@ func (e *Engine) executeOnce(ctx context.Context, definition *workflow.Definitio
 
 	conditionStarted := time.Now()
 	traceStep(options, definition, workflowStep, diagnostic.PhaseCondition, diagnostic.StatusStarted, time.Time{}, string(workflowStep.If), nil)
-	run, err := e.evaluateCondition(workflowStep.If, makeConditionEnvironment(definition, options.RunDir, state))
+	run, err := e.evaluateCondition(workflowStep.If, makeConditionEnvironment(definition, options.RunDir, options.Interactive, state))
 	if err != nil {
 		stepErr := fmt.Errorf("workflow %q step %q (once): evaluating if: %w", definition.Name, workflowStep.ID, err)
 		traceStep(options, definition, workflowStep, diagnostic.PhaseCondition, diagnostic.StatusFailed, conditionStarted, "", err)
@@ -74,7 +74,7 @@ func (e *Engine) executeOnce(ctx context.Context, definition *workflow.Definitio
 	}
 	traceStep(options, definition, workflowStep, diagnostic.PhaseCondition, diagnostic.StatusSucceeded, conditionStarted, "condition evaluated true", nil)
 
-	key, err := options.renderer.Render(workflowStep.Once.Key, templateData(definition, options.RunDir, state))
+	key, err := options.renderer.Render(workflowStep.Once.Key, templateData(definition, options.RunDir, options.Interactive, state))
 	if err != nil {
 		stepErr := fmt.Errorf("workflow %q step %q (once): rendering key: %w", definition.Name, workflowStep.ID, err)
 		finish(StatusFailed, stepErr, RunStats{})

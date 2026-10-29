@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 )
@@ -297,5 +299,46 @@ func TestInputFailsNonInteractive(t *testing.T) {
 	runner := steptest.Build(t, New, map[string]any{"variable": "name", "message": "Name", "value": "suggested"})
 	if _, err := runner.Run(t.Context(), step.Request{}); err == nil {
 		t.Fatal("expected non-interactive input error")
+	}
+}
+
+func TestInputUnattendedAnswersWithValue(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		raw     map[string]any
+		request step.Request
+		want    any
+		wantErr string
+	}{
+		{"noninteractive default", map[string]any{"value": "a, b", "modifiers": map[string]any{"trim": true, "split": ","}, "noninteractive": "default"}, step.Request{}, []any{"a", "b"}, ""},
+		{"empty optional value", map[string]any{"value": "", "required": false, "noninteractive": "default"}, step.Request{}, "", ""},
+		{"defaults flag in a terminal", map[string]any{"value": "main"}, step.Request{Interactive: true, Prompts: step.PromptAnswers{Defaults: true}}, "main", ""},
+		{"supplied variable wins", map[string]any{"value": "main", "noninteractive": "default"}, step.Request{Vars: map[string]any{"name": "dev"}}, "dev", ""},
+		{"value is validated", map[string]any{"value": "x", "validation": map[string]any{"min_length": 3}, "noninteractive": "default"}, step.Request{}, nil, "default value"},
+		{"fail policy hints at default", map[string]any{"value": "main"}, step.Request{}, nil, "noninteractive: default"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			raw := map[string]any{"variable": "name", "message": "Name"}
+			maps.Copy(raw, test.raw)
+			result, err := steptest.Build(t, New, raw).Run(t.Context(), test.request)
+			if test.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), test.wantErr) {
+					t.Fatalf("error = %v, want %q", err, test.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if diff := cmp.Diff(test.want, result.Outputs["value"]); diff != "" {
+				t.Fatalf("value (-want +got):\n%s", diff)
+			}
+		})
+	}
+	if _, err := New(map[string]any{"variable": "name", "message": "Name", "noninteractive": "default"}); err == nil {
+		t.Fatal("noninteractive: default without value succeeded")
 	}
 }

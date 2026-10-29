@@ -65,7 +65,7 @@ func evaluateConditionProgram(program *vm.Program, environment conditionEnvironm
 	return result, nil
 }
 
-func makeConditionEnvironment(definition *workflow.Definition, runDir string, state *State) conditionEnvironment {
+func makeConditionEnvironment(definition *workflow.Definition, runDir string, interactive bool, state *State) conditionEnvironment {
 	environment := conditionEnvironment{
 		"inputs":       state.Inputs,
 		"vars":         state.Vars,
@@ -77,7 +77,7 @@ func makeConditionEnvironment(definition *workflow.Definition, runDir string, st
 		},
 		"run": step.RunValue{
 			Dir: runDir, EnvironmentLoaders: slices.Clone(state.EnvironmentLoaders),
-			OS: runtime.GOOS, Arch: runtime.GOARCH,
+			OS: runtime.GOOS, Arch: runtime.GOARCH, Interactive: interactive,
 		},
 		"batch": bindingRoot(state.Bindings, "batch"), "foreach": bindingRoot(state.Bindings, "foreach"),
 		"matrix": bindingRoot(state.Bindings, "matrix"), "finally": bindingRoot(state.Bindings, "finally"),

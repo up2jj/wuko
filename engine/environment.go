@@ -32,7 +32,7 @@ func (e *Engine) validateEnvironmentBlock(ctx context.Context, definition *workf
 	if err := validateEnvironmentTemplates(options.renderer, block.Env); err != nil {
 		return fail(err)
 	}
-	environment, resolved, err := renderEnvironmentOverlay(options.renderer, block.Env, templateData(definition, options.RunDir, state), state.Env, true)
+	environment, resolved, err := renderEnvironmentOverlay(options.renderer, block.Env, templateData(definition, options.RunDir, options.Interactive, state), state.Env, true)
 	if err != nil {
 		return fail(err)
 	}
@@ -63,7 +63,7 @@ func (e *Engine) executeEnvironmentBlock(ctx context.Context, definition *workfl
 		Phase: diagnostic.PhaseRender, Status: diagnostic.StatusStarted, Time: started,
 		WorkflowName: definition.Name, Location: block.Location, Message: "rendering env block",
 	})
-	environment, _, err := renderEnvironmentOverlay(options.renderer, block.Env, templateData(definition, options.RunDir, state), state.Env, false)
+	environment, _, err := renderEnvironmentOverlay(options.renderer, block.Env, templateData(definition, options.RunDir, options.Interactive, state), state.Env, false)
 	if err != nil {
 		trace(options, diagnostic.Event{
 			Phase: diagnostic.PhaseRender, Status: diagnostic.StatusFailed, Time: time.Now(), Duration: time.Since(started),

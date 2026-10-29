@@ -79,7 +79,7 @@ func (e *Engine) executeLoop(ctx context.Context, definition *workflow.Definitio
 			return outcome
 		}
 
-		matched, err := e.evaluateCondition(group.Until, makeConditionEnvironment(definition, options.RunDir, state))
+		matched, err := e.evaluateCondition(group.Until, makeConditionEnvironment(definition, options.RunDir, options.Interactive, state))
 		if err != nil {
 			err = fmt.Errorf("evaluating loop until: %w", err)
 			finish(StatusFailed, err, nested)
@@ -142,7 +142,7 @@ func loopDelay(delay workflow.LoopDelay, definition *workflow.Definition, option
 	if delay.Expression == "" {
 		return 0, nil
 	}
-	value, err := controlpkg.EvaluateExpression(delay.Expression, templateData(definition, options.RunDir, state))
+	value, err := controlpkg.EvaluateExpression(delay.Expression, templateData(definition, options.RunDir, options.Interactive, state))
 	if err != nil {
 		return 0, fmt.Errorf("evaluating loop delay: %w", err)
 	}

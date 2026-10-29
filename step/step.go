@@ -83,6 +83,8 @@ type Request struct {
 	Stdout      io.Writer
 	Stderr      io.Writer
 	Interactive bool
+	// Prompts carries invocation-wide prompt answers such as --yes and --defaults.
+	Prompts     PromptAnswers
 	Attempt     int
 	MaxAttempts int
 	OperationID string
@@ -202,6 +204,8 @@ type RunValue struct {
 	EnvironmentLoaders []string `expr:"environment_loaders"`
 	OS                 string   `expr:"os"`
 	Arch               string   `expr:"arch"`
+	// Interactive reports whether prompts can read from a terminal at this point of the run.
+	Interactive bool `expr:"interactive"`
 }
 
 // RunValue returns the request's run metadata in evaluator form.
@@ -211,6 +215,7 @@ func (request Request) RunValue() RunValue {
 		EnvironmentLoaders: slices.Clone(request.EnvironmentLoaders),
 		OS:                 runtime.GOOS,
 		Arch:               runtime.GOARCH,
+		Interactive:        request.Interactive,
 	}
 }
 

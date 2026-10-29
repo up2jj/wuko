@@ -178,6 +178,7 @@ func (invocation WorkflowInvocation) EngineOptions(dependencies map[string]map[s
 		Stdout:              parent.Stdout,
 		Stderr:              parent.Stderr,
 		Interactive:         parent.Interactive,
+		Prompts:             parent.Prompts,
 		ElevatedExecutor:    parent.ElevatedExecutor,
 		ElevationAllowed:    parent.ElevationAllowed,
 		Progress:            parent.Progress,

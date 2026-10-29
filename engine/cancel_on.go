@@ -75,7 +75,7 @@ func (e *Engine) executeCancelOn(ctx context.Context, definition *workflow.Defin
 
 	conditionStarted := time.Now()
 	traceStep(options, definition, workflowStep, diagnostic.PhaseCondition, diagnostic.StatusStarted, time.Time{}, string(workflowStep.If), nil)
-	run, err := e.evaluateCondition(workflowStep.If, makeConditionEnvironment(definition, options.RunDir, state))
+	run, err := e.evaluateCondition(workflowStep.If, makeConditionEnvironment(definition, options.RunDir, options.Interactive, state))
 	if err != nil {
 		stepErr := fmt.Errorf("workflow %q step %q (cancel_on): evaluating if: %w", definition.Name, workflowStep.ID, err)
 		traceStep(options, definition, workflowStep, diagnostic.PhaseCondition, diagnostic.StatusFailed, conditionStarted, "", err)
@@ -148,7 +148,7 @@ func (e *Engine) executeCancelOn(ctx context.Context, definition *workflow.Defin
 
 	outputs := cancelOnOutputs(group, participants, winner)
 	if group.Collect != "" {
-		collection, collectErr := collectCancelOn(definition, options.RunDir, state, outputs, group.Collect)
+		collection, collectErr := collectCancelOn(definition, options.RunDir, options.Interactive, state, outputs, group.Collect)
 		if collectErr != nil {
 			stepErr := fmt.Errorf("workflow %q step %q (cancel_on): collecting result: %w", definition.Name, workflowStep.ID, collectErr)
 			finish(StatusFailed, stepErr, cancelOnParticipantStats(participants), cancelOnNestedStats(participants))
@@ -304,8 +304,8 @@ func cancelOnNestedStats(participants []cancelOnParticipant) RunStats {
 	return nested
 }
 
-func collectCancelOn(definition *workflow.Definition, runDir string, outer *State, outputs map[string]any, expression string) (any, error) {
-	environment := templateData(definition, runDir, outer)
+func collectCancelOn(definition *workflow.Definition, runDir string, interactive bool, outer *State, outputs map[string]any, expression string) (any, error) {
+	environment := templateData(definition, runDir, interactive, outer)
 	environment["steps"] = outputs["steps"]
 	environment["vars"] = outputs["vars"]
 	environment["monitors"] = outputs["monitors"]

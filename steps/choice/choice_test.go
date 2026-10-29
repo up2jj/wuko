@@ -1037,3 +1037,37 @@ func TestChoiceExplicitBoundsSupersedeRequired(t *testing.T) {
 		t.Fatalf("outputs = %#v", result.Outputs)
 	}
 }
+
+func TestChoiceUnattendedAnswersWithDefaults(t *testing.T) {
+	t.Parallel()
+	choices := []any{
+		map[string]any{"label": "Staging", "value": "staging", "default": true},
+		map[string]any{"label": "Production", "value": "production"},
+		map[string]any{"label": "Preview", "value": "preview", "default": true},
+	}
+	multiple := steptest.Build(t, New, map[string]any{
+		"variable": "targets", "message": "Targets", "multiple": true, "choices": choices, "noninteractive": "default",
+	})
+	result, err := multiple.Run(t.Context(), step.Request{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if diff := cmp.Diff([]any{"staging", "preview"}, result.Outputs["values"]); diff != "" {
+		t.Fatalf("values (-want +got):\n%s", diff)
+	}
+
+	tooFew := steptest.Build(t, New, map[string]any{
+		"variable": "targets", "message": "Targets", "multiple": true, "min_selected": 3, "choices": choices, "noninteractive": "default",
+	})
+	if _, err := tooFew.Run(t.Context(), step.Request{}); err == nil || !strings.Contains(err.Error(), "at least 3") {
+		t.Fatalf("error = %v", err)
+	}
+
+	// --defaults leaves a picker without default choices interactive.
+	undefaulted := steptest.Build(t, New, map[string]any{
+		"variable": "target", "message": "Target", "choices": []any{map[string]any{"label": "One", "value": "one"}},
+	})
+	if _, err := undefaulted.Run(t.Context(), step.Request{Prompts: step.PromptAnswers{Defaults: true}}); err == nil || !strings.Contains(err.Error(), "supply it with --var") {
+		t.Fatalf("error = %v", err)
+	}
+}

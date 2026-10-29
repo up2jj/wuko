@@ -6,7 +6,8 @@ Standalone input steps such as `tui_input` and `tui_choice` write their result t
 `with.variable`. Single-value steps expose `value`; multiple choice and path selections expose
 `values`. A value supplied with `--var` skips the prompt. Non-interactive runs, and interactive
 steps inside concurrent groups, require a supplied value unless an optional `tui_choice` resolves
-to no selection. The display-only `tui_table` step does not publish a value and prints a static
+to no selection or the prompt opts into its default; see
+[Answering prompts unattended](#answering-prompts-unattended). The display-only `tui_table` step does not publish a value and prints a static
 table when input is non-interactive. `tui_form` publishes each field directly as a step output
 and never assigns workflow variables; its unattended inputs use explicit field `value` bindings.
 
@@ -16,6 +17,7 @@ does not force a string. Prefer environment-backed secrets for password values.
 
 ## Contents
 
+- [Answering prompts unattended](#answering-prompts-unattended)
 - [`tui_form`](#tui_form)
 - [`tui_input`](#tui_input)
 - [`tui_password`](#tui_password)
@@ -26,6 +28,61 @@ does not force a string. Prefer environment-backed secrets for password values.
 - [`tui_table`](#tui_table)
 - [`dashboard`](#dashboard)
 - [`tui_confirm`](#tui_confirm)
+
+## Answering prompts unattended
+
+A prompt answers from the first source that applies:
+
+1. A variable supplied with `--var`, `--var-file`, or the workflow's `vars` block.
+2. `wuko run --yes`, which answers every `tui_confirm` with `true`.
+3. The prompt's default, when `wuko run --defaults` is given, or when the run cannot prompt and the
+   step sets `noninteractive: default`.
+4. The terminal. Without one, the step fails and names the variable to supply.
+
+`noninteractive` accepts `fail`, the default, or `default`. Setting `default` requires the step to
+declare a default answer. Each prompt's default is:
+
+| Step | Default answer |
+| --- | --- |
+| `tui_confirm`, `tui_review` | `default` |
+| `tui_input`, `tui_date` | `value`, which may be empty |
+| `tui_choice` | The choices marked default; fewer than the required minimum fail |
+| `tui_form` | Each field's `value`, else its `default`; a field with neither fails |
+
+`--defaults` answers only prompts that declare a default and leaves the rest interactive, so a
+`tui_choice` without default choices or a form with a field that has neither `value` nor `default`
+still opens. `tui_password` and `tui_path` have no default and always need a variable or a terminal.
+
+`.run.interactive` reports whether prompts can read from a terminal at that point of the run. It is
+`false` when stdin is not a terminal, for `--file -`, and inside concurrent groups, background jobs,
+and parallel control iterations. Use it to skip optional offers entirely:
+
+```yaml
+steps:
+  - id: offer_install
+    type: tui_confirm
+    with:
+      variable: install_tools
+      message: Install the missing tools now?
+      default: false
+      noninteractive: default
+
+  - id: install
+    type: shell
+    if: vars.install_tools
+    with: {command: ./scripts/install-tools.sh}
+
+  - id: clone_hint
+    type: shell
+    if: '!run.interactive'
+    with:
+      command: printf
+      args: ["%s\n", "Rerun in a terminal, or with --yes, to clone the missing repositories."]
+```
+
+Run it unattended with every offer accepted using `wuko run bootstrap --yes`, or with every
+declared default using `wuko run bootstrap --defaults`. A variable supplied with `--var` still wins
+over both flags.
 
 ## `tui_form`
 
@@ -131,7 +188,9 @@ fields:
 literals, templates, and `{expr: ...}` bindings. Templates yield strings; use expressions for
 booleans, lists, numbers, or null. Interactive forms remain editable when every `value` is supplied.
 Unattended runs, including steps in concurrent groups, require an explicit `value` for **every**
-field, even optional ones. Defaults and matching workflow variables do not satisfy this requirement.
+field, even optional ones. Matching workflow variables do not satisfy this requirement. Set
+`noninteractive: default` on the step to let field defaults answer unattended; then only a field
+with neither `value` nor `default` fails.
 To support `--var`, bind that variable explicitly with `value: {expr: vars.person}`.
 
 Choices may be static `{label, value, description, disabled, reason}` records or come from a
@@ -280,6 +339,9 @@ Collect release notes while preserving line breaks:
 `trim` happens before validation. `split` uses a Go regular expression and preserves empty fields;
 when combined with `trim`, each item is trimmed. `json` preserves JSON objects, lists, strings,
 numbers, booleans, and null. `split` and `json` are mutually exclusive.
+
+`value` prefills the prompt. With `noninteractive: default`, a run without a terminal answers with
+`value` after the same validation and modifiers; `--defaults` does so in any run.
 
 ## `tui_password`
 
@@ -505,7 +567,8 @@ Pre-supplied values skip the picker but still reject disabled choices and enforc
 duplicate values are removed. For object-backed sources, each supplied scalar is matched against
 `value_field` and the corresponding source object is retained in `item` or `items`. Choice values
 must be unique, including mapped values from dynamic objects, so this match is unambiguous. Defaults
-only initialize an interactive picker; they never supply a missing value in a non-interactive run.
+only initialize an interactive picker unless the step sets `noninteractive: default` or the run
+uses `--defaults`; see [Answering prompts unattended](#answering-prompts-unattended).
 Without explicit bounds, optional empty choice sets and empty selections succeed with empty lists,
 and an optional missing non-interactive value resolves directly to no selection.
 
@@ -531,6 +594,8 @@ The result is available as `.steps.<id>.value` and the configured variable.
 `value` prefills the interactive picker. Without a prefill, it highlights today, clamped to
 `min`/`max`; Enter accepts that date. A configured prefill outside the bounds remains editable
 and reports an error. Bounds are inclusive and compared as dates; `min` cannot exceed `max`.
+With `noninteractive: default`, a run without a terminal answers with `value`, validated against
+the bounds; `--defaults` does so in any run.
 
 `format` is a Go date layout, defaulting to `2006-01-02` (`YYYY-MM-DD`). It must preserve a full
 date with a four-digit year and contain no time or timezone components. Examples include
@@ -698,7 +763,8 @@ pan a diff horizontally. Shortcut help wraps on narrow terminals.
 
 Reject is selected by default and returns `false` without failing the workflow. Set `default: true`
 to focus Approve initially. A supplied variable must be a boolean and skips the review; a missing
-variable fails a non-interactive run.
+variable fails a non-interactive run unless the step declares `default` and sets
+`noninteractive: default`. `--yes` does not approve a review.
 
 ## `tui_table`
 
@@ -837,8 +903,9 @@ than closing the step successfully.
 
 ## `tui_confirm`
 
-Collect a boolean decision. `default` selects the initial interactive answer; it does not answer a
-non-interactive prompt automatically.
+Collect a boolean decision. `default` selects the initial interactive answer. With
+`noninteractive: default` it also answers a run without a terminal, `--defaults` answers with it
+in any run, and `--yes` answers `true` regardless of `default`.
 
 Guard deployment:
 

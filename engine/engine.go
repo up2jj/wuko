@@ -72,12 +72,14 @@ type Options struct {
 	EnvironmentLoaders []string
 	RunDir             string
 	// LocalValueDir is empty when local persistence is unavailable, such as for a remote workflow.
-	LocalValueDir    string
-	GlobalValueDir   string
-	Stdin            io.Reader
-	Stdout           io.Writer
-	Stderr           io.Writer
-	Interactive      bool
+	LocalValueDir  string
+	GlobalValueDir string
+	Stdin          io.Reader
+	Stdout         io.Writer
+	Stderr         io.Writer
+	Interactive    bool
+	// Prompts answers prompt steps without asking, as --yes and --defaults request.
+	Prompts          step.PromptAnswers
 	DryRun           bool
 	Executor         process.Executor
 	ElevatedExecutor process.Executor
@@ -580,7 +582,7 @@ func (e *Engine) evaluateConditionalBlock(definition *workflow.Definition, workf
 		WorkflowName: definition.Name, Location: workflowStep.Location,
 		Message: string(workflowStep.If),
 	})
-	run, err := e.evaluateCondition(workflowStep.If, makeConditionEnvironment(definition, options.RunDir, state))
+	run, err := e.evaluateCondition(workflowStep.If, makeConditionEnvironment(definition, options.RunDir, options.Interactive, state))
 	if err != nil {
 		trace(options, diagnostic.Event{
 			Phase: diagnostic.PhaseCondition, Status: diagnostic.StatusFailed, Time: time.Now(), Duration: time.Since(started),
@@ -680,7 +682,7 @@ func (e *Engine) executeStep(ctx context.Context, definition *workflow.Definitio
 	}
 	conditionStarted := time.Now()
 	traceStep(options, definition, workflowStep, diagnostic.PhaseCondition, diagnostic.StatusStarted, time.Time{}, string(workflowStep.If), nil)
-	run, err := e.evaluateCondition(workflowStep.If, makeConditionEnvironment(definition, options.RunDir, state))
+	run, err := e.evaluateCondition(workflowStep.If, makeConditionEnvironment(definition, options.RunDir, options.Interactive, state))
 	if err != nil {
 		traceStep(options, definition, workflowStep, diagnostic.PhaseCondition, diagnostic.StatusFailed, conditionStarted, "", err)
 		stepErr := fmt.Errorf("workflow %q step %q (%s): evaluating if: %w", definition.Name, workflowStep.ID, kind, err)
@@ -721,7 +723,7 @@ func (e *Engine) executeStep(ctx context.Context, definition *workflow.Definitio
 	} else {
 		renderStarted := time.Now()
 		traceStep(options, definition, workflowStep, diagnostic.PhaseRender, diagnostic.StatusStarted, time.Time{}, "rendering step configuration", nil)
-		data := templateData(definition, options.RunDir, state)
+		data := templateData(definition, options.RunDir, options.Interactive, state)
 		rendered, err := renderStepValue(options.renderer, workflowStep.With, data, workflowStep.Type)
 		if err != nil {
 			traceStep(options, definition, workflowStep, diagnostic.PhaseRender, diagnostic.StatusFailed, renderStarted, "", err)
@@ -911,7 +913,7 @@ func initialState(definition *workflow.Definition, options Options) (*State, err
 	if options.initialState != nil {
 		return cloneState(options.initialState), nil
 	}
-	vars, environment, err := workflow.PrepareValues(definition, workflow.LoadOptions{Vars: options.Vars, DeclaredVars: options.DeclaredVars, Env: options.Env, BaseEnv: options.BaseEnv, EnvironmentLoaders: options.EnvironmentLoaders, RunDir: options.RunDir, SecretSession: definition.SecretSession(), Providers: options.Providers})
+	vars, environment, err := workflow.PrepareValues(definition, workflow.LoadOptions{Vars: options.Vars, DeclaredVars: options.DeclaredVars, Env: options.Env, BaseEnv: options.BaseEnv, EnvironmentLoaders: options.EnvironmentLoaders, RunDir: options.RunDir, SecretSession: definition.SecretSession(), Interactive: options.Interactive, Providers: options.Providers})
 	if err != nil {
 		return nil, err
 	}
@@ -921,8 +923,8 @@ func initialState(definition *workflow.Definition, options Options) (*State, err
 	}, nil
 }
 
-func templateData(definition *workflow.Definition, runDir string, state *State) map[string]any {
-	data := workflow.TemplateDataWithProviders(definition, runDir, state.EnvironmentLoaders, state.Inputs, state.Vars, state.Env, state.Steps, state.Dependencies, state.Bindings, state.Providers)
+func templateData(definition *workflow.Definition, runDir string, interactive bool, state *State) map[string]any {
+	data := workflow.TemplateDataWithProviders(definition, runDir, state.EnvironmentLoaders, interactive, state.Inputs, state.Vars, state.Env, state.Steps, state.Dependencies, state.Bindings, state.Providers)
 	for name, function := range definition.Helpers().Functions(definition.HelperContext()) {
 		data[name] = function
 	}
@@ -951,10 +953,10 @@ func (e *Engine) makeRequest(ctx context.Context, definition *workflow.Definitio
 		RunDir: options.RunDir, EnvironmentLoaders: slices.Clone(state.EnvironmentLoaders), LocalValueDir: options.LocalValueDir, GlobalValueDir: options.GlobalValueDir,
 		Inputs: cloneMap(state.Inputs), Vars: cloneMap(state.Vars), PresetVars: cloneMap(state.presetVars), Env: maps.Clone(state.Env),
 		Steps: cloneMap(state.Steps), Dependencies: cloneDependencies(state.Dependencies), Providers: state.Providers.Clone(), Bindings: cloneMap(state.Bindings), Stdin: options.Stdin, Stdout: options.Stdout,
-		Stderr: options.Stderr, Interactive: options.Interactive,
+		Stderr: options.Stderr, Interactive: options.Interactive, Prompts: options.Prompts,
 		Attempt: attempt, MaxAttempts: maxAttempts, OperationID: operationID,
 		TemplateRenderer: newBoundTemplateRenderer(options.renderer, func() map[string]any {
-			return templateData(definition, options.RunDir, state)
+			return templateData(definition, options.RunDir, options.Interactive, state)
 		}),
 		Executor: options.Executor, ElevatedExecutor: options.ElevatedExecutor,
 		ElevationAllowed: options.ElevationAllowed, InsideExecutor: options.insideExecutor,

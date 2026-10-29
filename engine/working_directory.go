@@ -30,7 +30,7 @@ func (e *Engine) validateWorkingDirectoryBlock(ctx context.Context, definition *
 		return fail(fmt.Errorf("working_directory template: %w", err))
 	}
 	childOptions := options
-	rendered, renderErr := options.renderer.Render(block.WorkingDirectory, templateData(definition, options.RunDir, state))
+	rendered, renderErr := options.renderer.Render(block.WorkingDirectory, templateData(definition, options.RunDir, options.Interactive, state))
 	if renderErr == nil && strings.TrimSpace(rendered) != "" && !strings.Contains(rendered, "<no value>") {
 		childOptions.RunDir = cleanWorkingDirectory(options.RunDir, rendered)
 	} else {
@@ -55,7 +55,7 @@ func (e *Engine) executeWorkingDirectoryBlock(ctx context.Context, definition *w
 		Phase: diagnostic.PhaseRender, Status: diagnostic.StatusStarted, Time: started,
 		WorkflowName: definition.Name, Location: block.Location, Message: "rendering working_directory",
 	})
-	rendered, err := options.renderer.Render(block.WorkingDirectory, templateData(definition, options.RunDir, state))
+	rendered, err := options.renderer.Render(block.WorkingDirectory, templateData(definition, options.RunDir, options.Interactive, state))
 	if err != nil {
 		trace(options, diagnostic.Event{
 			Phase: diagnostic.PhaseRender, Status: diagnostic.StatusFailed, Time: time.Now(), Duration: time.Since(started),

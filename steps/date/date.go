@@ -19,11 +19,15 @@ type Config struct {
 	Min      string `yaml:"min,omitempty"`
 	Max      string `yaml:"max,omitempty"`
 	Required *bool  `yaml:"required,omitempty"`
+	// NonInteractive answers with Value when the run cannot prompt.
+	NonInteractive step.NonInteractive `yaml:"noninteractive,omitempty"`
 }
 
 type Runner struct {
 	config Config
-	now    func() time.Time
+	// hasDefault records an explicit value, which may be empty, to answer with.
+	hasDefault bool
+	now        func() time.Time
 }
 
 func Register(registry *step.Registry) error {
@@ -49,6 +53,10 @@ func NewWithClock(raw map[string]any, now func() time.Time) (step.Runner, error)
 	if now == nil {
 		return nil, fmt.Errorf("clock is required")
 	}
+	_, hasDefault := raw["value"]
+	if err := config.NonInteractive.Validate(hasDefault); err != nil {
+		return nil, err
+	}
 	if _, exists := raw["format"]; !exists {
 		config.Format = defaultFormat
 	}
@@ -69,7 +77,7 @@ func NewWithClock(raw map[string]any, now func() time.Time) (step.Runner, error)
 			return nil, err
 		}
 	}
-	return &Runner{config: config, now: now}, nil
+	return &Runner{config: config, hasDefault: hasDefault, now: now}, nil
 }
 
 // Location resolves a workflow timezone, defaulting to the local zone. Callers
@@ -144,10 +152,13 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 		return step.Result{}, err
 	}
 	value, supplied := request.Vars[r.config.Variable]
-	if !supplied {
-		if !request.Interactive {
-			return step.Result{}, fmt.Errorf("variable %q is required when stdin is non-interactive; supply it with --var", r.config.Variable)
-		}
+	switch {
+	case supplied:
+	case r.hasDefault && request.UseDefault(r.config.NonInteractive):
+		value = r.config.Value
+	case !request.Interactive:
+		return step.Result{}, step.MissingAnswerError(r.config.Variable, r.hasDefault)
+	default:
 		value, err = tui.PickDate(ctx, request.Stdin, request.Stdout, config)
 		if err != nil {
 			return step.Result{}, fmt.Errorf("selecting date: %w", err)

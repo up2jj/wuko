@@ -75,6 +75,8 @@ wuko run check --var-file vars.json      # JSON or TOML variables
 wuko run check --env API_URL=http://localhost:8080
 wuko run check --dry-run                 # validate and print steps without running them
 wuko run check --once                    # ignore a declared cron schedule
+wuko run bootstrap --yes                 # answer every tui_confirm with true
+wuko run bootstrap --defaults            # answer every prompt that declares a default with it
 wuko run check --cpus 1.5 --memory 512MiB # shared budget for the local invocation
 wuko run check --report-json report.json # versioned execution report
 wuko run check --once --report-json -    # report JSON on stdout; terminal output on stderr

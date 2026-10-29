@@ -60,7 +60,7 @@ func (e *Engine) validateAction(ctx context.Context, definition *workflow.Defini
 		inputs:       inputs, BaseEnv: state.Env, EnvironmentLoaders: slices.Clone(state.EnvironmentLoaders), RunDir: options.RunDir, Providers: state.Providers.Clone(),
 		LocalValueDir: actionLocalValueDir(workflowStep, options), GlobalValueDir: options.GlobalValueDir,
 		ElevatedExecutor: options.ElevatedExecutor, ElevationAllowed: actionElevationAllowed(workflowStep, options),
-		Stdin: options.Stdin, Stdout: options.Stdout, Stderr: options.Stderr, Interactive: options.Interactive,
+		Stdin: options.Stdin, Stdout: options.Stdout, Stderr: options.Stderr, Interactive: options.Interactive, Prompts: options.Prompts,
 		Diagnostics: options.Diagnostics, runID: options.runID, parentRunID: options.parentRunID,
 		parentStepRunID: options.parentStepRunID, depth: options.depth + 1, runtime: options.runtime,
 		workflowEnvironment: options.workflowEnvironment,
@@ -71,7 +71,7 @@ func (e *Engine) validateAction(ctx context.Context, definition *workflow.Defini
 }
 
 func (e *Engine) prepareActionExecutor(definition *workflow.Definition, workflowStep workflow.Step, options Options, state *State) (stepExecutor, func(), error) {
-	inputs, err := resolveActionInputs(workflowStep.Action, workflowStep.With, options.renderer, templateData(definition, options.RunDir, state))
+	inputs, err := resolveActionInputs(workflowStep.Action, workflowStep.With, options.renderer, templateData(definition, options.RunDir, options.Interactive, state))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -97,7 +97,7 @@ func (e *Engine) prepareActionExecutor(definition *workflow.Definition, workflow
 			LocalValueDir: actionLocalValueDir(workflowStep, options), GlobalValueDir: options.GlobalValueDir,
 			ElevatedExecutor: options.ElevatedExecutor, ElevationAllowed: actionElevationAllowed(workflowStep, options),
 			Stdin: options.Stdin, Stdout: options.Stdout, Stderr: options.Stderr,
-			Interactive: options.Interactive, Progress: options.Progress,
+			Interactive: options.Interactive, Prompts: options.Prompts, Progress: options.Progress,
 			Diagnostics:     options.Diagnostics,
 			operationPrefix: request.OperationID, parentRunID: options.runID,
 			parentStepRunID: options.stepRunID, depth: options.depth + 1, runtime: options.runtime,
@@ -113,7 +113,7 @@ func (e *Engine) prepareActionExecutor(definition *workflow.Definition, workflow
 		if innerState.didReturn {
 			return step.Result{Outputs: cloneMap(innerState.Outputs)}, nil
 		}
-		environment := map[string]any{"inputs": innerState.Inputs, "vars": innerState.Vars, "steps": innerState.Steps, "env": innerState.Env, "workflow": map[string]any{"name": inner.Name, "dir": inner.Dir, "timezone": inner.Timezone}, "run": step.RunValue{Dir: options.RunDir, EnvironmentLoaders: slices.Clone(state.EnvironmentLoaders), OS: runtime.GOOS, Arch: runtime.GOARCH}}
+		environment := map[string]any{"inputs": innerState.Inputs, "vars": innerState.Vars, "steps": innerState.Steps, "env": innerState.Env, "workflow": map[string]any{"name": inner.Name, "dir": inner.Dir, "timezone": inner.Timezone}, "run": step.RunValue{Dir: options.RunDir, EnvironmentLoaders: slices.Clone(state.EnvironmentLoaders), OS: runtime.GOOS, Arch: runtime.GOARCH, Interactive: options.Interactive}}
 		for name, value := range innerState.Providers.Values {
 			environment[name] = cloneMap(value)
 		}
