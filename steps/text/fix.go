@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/up2jj/wuko/executor"
@@ -11,12 +12,19 @@ import (
 )
 
 type fixConfig struct {
-	Files              any   `yaml:"files"`
-	TrailingWhitespace bool  `yaml:"trailing_whitespace,omitempty"`
-	FinalNewline       bool  `yaml:"final_newline,omitempty"`
-	Check              bool  `yaml:"check,omitempty"`
-	FailOnChange       *bool `yaml:"fail_on_change,omitempty"`
+	Files                  any    `yaml:"files"`
+	TrailingWhitespace     bool   `yaml:"trailing_whitespace,omitempty"`
+	KeepMarkdownLineBreaks bool   `yaml:"keep_markdown_line_breaks,omitempty"`
+	FinalNewline           bool   `yaml:"final_newline,omitempty"`
+	LineEndings            string `yaml:"line_endings,omitempty"`
+	RemoveByteOrderMark    bool   `yaml:"remove_byte_order_mark,omitempty"`
+	MaxBlankLines          *int   `yaml:"max_blank_lines,omitempty"`
+	Check                  bool   `yaml:"check,omitempty"`
+	FailOnChange           *bool  `yaml:"fail_on_change,omitempty"`
 }
+
+// utf8ByteOrderMark is the encoded U+FEFF that some editors put at the start of UTF-8 text.
+var utf8ByteOrderMark = []byte{0xEF, 0xBB, 0xBF}
 
 type fixRunner struct {
 	config       fixConfig
@@ -24,15 +32,26 @@ type fixRunner struct {
 	failOnChange bool
 }
 
-// NewFix builds a text_fix step, which removes trailing whitespace and normalizes the final
-// newline of text files.
+// NewFix builds a text_fix step, which normalizes whitespace, line endings, and byte order
+// marks in text files.
 func NewFix(raw map[string]any) (step.Runner, error) {
 	var config fixConfig
 	if err := step.DecodeConfig(raw, &config); err != nil {
 		return nil, err
 	}
-	if !config.TrailingWhitespace && !config.FinalNewline {
-		return nil, fmt.Errorf("enable at least one of trailing_whitespace and final_newline")
+	if !config.TrailingWhitespace && !config.FinalNewline && config.LineEndings == "" && !config.RemoveByteOrderMark && config.MaxBlankLines == nil {
+		return nil, fmt.Errorf("enable at least one of trailing_whitespace, final_newline, line_endings, remove_byte_order_mark, and max_blank_lines")
+	}
+	switch config.LineEndings {
+	case "", "lf", "crlf", "auto":
+	default:
+		return nil, fmt.Errorf("line_endings must be lf, crlf, or auto")
+	}
+	if config.KeepMarkdownLineBreaks && !config.TrailingWhitespace {
+		return nil, fmt.Errorf("keep_markdown_line_breaks requires trailing_whitespace")
+	}
+	if config.MaxBlankLines != nil && *config.MaxBlankLines < 0 {
+		return nil, fmt.Errorf("max_blank_lines must not be negative")
 	}
 	files, err := parseFileList(raw, "files")
 	if err != nil {
@@ -75,13 +94,7 @@ func (runner *fixRunner) Run(ctx context.Context, request step.Request) (step.Re
 		if bytes.IndexByte(original, 0) >= 0 {
 			continue
 		}
-		fixed := original
-		if runner.config.TrailingWhitespace {
-			fixed = trimTrailingWhitespace(fixed)
-		}
-		if runner.config.FinalNewline {
-			fixed = normalizeFinalNewline(fixed)
-		}
+		fixed := runner.fix(path, original)
 		if bytes.Equal(fixed, original) {
 			continue
 		}
@@ -104,9 +117,35 @@ func (runner *fixRunner) Run(ctx context.Context, request step.Request) (step.Re
 	return step.Result{Outputs: outputs}, nil
 }
 
+// fix applies the enabled rules in an order where each sees the previous one's result: line
+// endings are settled before whitespace is trimmed, and blank lines are collapsed before the
+// final newline is normalized.
+func (runner *fixRunner) fix(path string, data []byte) []byte {
+	config := runner.config
+	if config.RemoveByteOrderMark {
+		data = bytes.TrimPrefix(data, utf8ByteOrderMark)
+	}
+	if config.LineEndings != "" {
+		data = convertLineEndings(data, config.LineEndings)
+	}
+	if config.TrailingWhitespace {
+		extension := strings.ToLower(filepath.Ext(path))
+		data = trimTrailingWhitespace(data, config.KeepMarkdownLineBreaks && (extension == ".md" || extension == ".markdown"))
+	}
+	if config.MaxBlankLines != nil {
+		data = collapseBlankLines(data, *config.MaxBlankLines)
+	}
+	if config.FinalNewline {
+		data = normalizeFinalNewline(data)
+	}
+	return data
+}
+
 // trimTrailingWhitespace removes spaces, tabs, vertical tabs, form feeds, and stray carriage
-// returns from the end of every line. The carriage return of a CRLF ending is kept.
-func trimTrailingWhitespace(data []byte) []byte {
+// returns from the end of every line. The carriage return of a CRLF ending is kept. With
+// markdownBreaks, a non-blank line ending in two or more spaces keeps exactly two, the
+// Markdown hard line break.
+func trimTrailingWhitespace(data []byte, markdownBreaks bool) []byte {
 	if !hasTrailingWhitespace(data) {
 		return data
 	}
@@ -120,7 +159,11 @@ func trimTrailingWhitespace(data []byte) []byte {
 				line, ending = line[:len(line)-1], "\r\n"
 			}
 		}
-		result = append(result, bytes.TrimRight(line, " \t\r\v\f")...)
+		trimmed := bytes.TrimRight(line, " \t\r\v\f")
+		result = append(result, trimmed...)
+		if markdownBreaks && len(trimmed) > 0 && bytes.HasSuffix(line, []byte("  ")) {
+			result = append(result, "  "...)
+		}
 		result = append(result, ending...)
 		data = rest
 	}
@@ -160,4 +203,75 @@ func normalizeFinalNewline(data []byte) []byte {
 		return data
 	}
 	return append(bytes.Clone(body), newline...)
+}
+
+// convertLineEndings rewrites LF, CRLF, and lone CR endings to one style. Auto picks the
+// style the file uses most, preferring LF and then CRLF on a tie.
+func convertLineEndings(data []byte, mode string) []byte {
+	lf, crlf, cr := 0, 0, 0
+	for index := 0; index < len(data); index++ {
+		switch data[index] {
+		case '\n':
+			lf++
+		case '\r':
+			if index+1 < len(data) && data[index+1] == '\n' {
+				crlf++
+				index++
+			} else {
+				cr++
+			}
+		}
+	}
+	target := mode
+	if mode == "auto" {
+		switch {
+		case lf >= crlf && lf >= cr:
+			target = "lf"
+		case crlf >= cr:
+			target = "crlf"
+		default:
+			target = "cr"
+		}
+	}
+	ending := map[string]string{"lf": "\n", "crlf": "\r\n", "cr": "\r"}[target]
+	if (target == "lf" && crlf+cr == 0) || (target == "crlf" && lf+cr == 0) || (target == "cr" && lf+crlf == 0) {
+		return data
+	}
+	result := make([]byte, 0, len(data)+crlf+lf+cr)
+	for index := 0; index < len(data); index++ {
+		switch data[index] {
+		case '\n':
+			result = append(result, ending...)
+		case '\r':
+			if index+1 < len(data) && data[index+1] == '\n' {
+				index++
+			}
+			result = append(result, ending...)
+		default:
+			result = append(result, data[index])
+		}
+	}
+	return result
+}
+
+// collapseBlankLines keeps at most limit consecutive blank lines. A line holding only spaces,
+// tabs, vertical tabs, or form feeds counts as blank.
+func collapseBlankLines(data []byte, limit int) []byte {
+	result := make([]byte, 0, len(data))
+	run := 0
+	for line := range bytes.Lines(data) {
+		if len(bytes.TrimRight(line, " \t\v\f\r\n")) > 0 {
+			run = 0
+			result = append(result, line...)
+			continue
+		}
+		run++
+		if run <= limit {
+			result = append(result, line...)
+		}
+	}
+	if len(result) == len(data) {
+		return data
+	}
+	return result
 }

@@ -15,7 +15,7 @@ them through `.vars` and `.steps`; expressions use `vars` and `steps` without th
 | Load and decode | [`import_vars`](#import_vars) — JSON or TOML into variables · [`decode`](#decode) — JSON, YAML, TOML, or lines into a value · [`extract`](#extract) — records and markers from text |
 | Query and edit | [`jsonpath`](#jsonpath) — select values · [`edit`](#edit) — update structured files or values · [`markdown_edit`](#markdown_edit) — update Markdown by AST node |
 | Versions and time | [`semver`](#semver) — parse, compare, constrain, increment · [`time`](#time) — capture, parse, adjust, format |
-| Fix and check files | [`text_fix`](#text_fix) — trailing whitespace and final newlines · [`text_check`](#text_check) — forbidden text, size limits, and parse checks |
+| Fix and check files | [`text_fix`](#text_fix) — whitespace, line endings, and byte order marks · [`text_check`](#text_check) — forbidden text, size limits, and parse checks |
 | Persist between runs | [`key_value`](#key_value) — JSON-compatible store · [`changed`](#changed) — detect changed files or inputs |
 
 ## `set`
@@ -838,8 +838,8 @@ The default `max_bytes` is `1MiB`.
 
 ## `text_fix`
 
-Remove trailing whitespace and normalize final newlines in text files, the fixes a pre-commit
-framework applies before a commit. Enable one or both rules:
+Normalize whitespace, line endings, and byte order marks in text files, the fixes a pre-commit
+framework applies before a commit. Enable any combination of rules:
 
 ```yaml
 - id: whitespace
@@ -854,12 +854,19 @@ framework applies before a commit. Enable one or both rules:
 | --- | --- | --- |
 | `files` | required | List of paths, or `{expr: ...}` returning one; relative paths resolve against the run directory |
 | `trailing_whitespace` | `false` | Remove spaces, tabs, vertical tabs, form feeds, and stray carriage returns at line ends |
+| `keep_markdown_line_breaks` | `false` | With `trailing_whitespace`, keep exactly two trailing spaces on non-blank lines of `.md` and `.markdown` files, Markdown's hard line break |
 | `final_newline` | `false` | End non-empty text with exactly one line ending; text holding only line endings becomes empty |
+| `line_endings` | none | Convert every LF, CRLF, and lone CR ending to `lf` or `crlf`; `auto` uses the file's most common ending, preferring LF on a tie |
+| `remove_byte_order_mark` | `false` | Remove a leading UTF-8 byte order mark |
+| `max_blank_lines` | none | Keep at most this many consecutive blank lines; whitespace-only lines count as blank, and `0` removes them all |
 | `check` | `false` | Report the files that need fixing without writing them |
 | `fail_on_change` | `true` | Fail when any file changed, or would change in `check` mode |
 
-Line endings are preserved: a CRLF line keeps its carriage return, and the final newline keeps the
-style of the first trailing ending, defaulting to `\n`. Files containing a NUL byte are binary and
+The rules run in a fixed order: the byte order mark, line endings, trailing whitespace, blank
+lines, and then the final newline. Without `line_endings`, existing endings are preserved: a CRLF
+line keeps its carriage return, and the final newline keeps the style of the first trailing
+ending, defaulting to `\n`. `line_endings` treats a carriage return without a following line feed
+as an ending, as old Mac text does. Files containing a NUL byte are binary and
 left alone, as are symbolic links and directories. Rewrites are atomic and keep the file mode;
 inside an [executor scope](executors.md#reading-and-writing-files) they go through the execution
 target's filesystem.

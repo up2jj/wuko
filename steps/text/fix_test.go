@@ -24,7 +24,7 @@ func TestTrimTrailingWhitespace(t *testing.T) {
 		{"clean", "a\nb\n", "a\nb\n"},
 		{"empty", "", ""},
 	} {
-		if got := string(trimTrailingWhitespace([]byte(test.input))); got != test.want {
+		if got := string(trimTrailingWhitespace([]byte(test.input), false)); got != test.want {
 			t.Errorf("%s: got %q, want %q", test.name, got, test.want)
 		}
 	}
@@ -127,5 +127,104 @@ func TestNewFixValidatesConfiguration(t *testing.T) {
 	runner := steptest.Build(t, NewFix, map[string]any{"files": map[string]any{"expr": "vars.files"}, "final_newline": true})
 	if _, err := runner.Run(t.Context(), step.Request{Vars: map[string]any{"files": "a.txt"}}); err == nil || !strings.Contains(err.Error(), "must return a list") {
 		t.Fatalf("non-list expr error = %v", err)
+	}
+}
+
+func TestConvertLineEndings(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct{ name, mode, input, want string }{
+		{"to lf", "lf", "a\r\nb\rc\nd", "a\nb\nc\nd"},
+		{"to crlf", "crlf", "a\nb\r\nc\r", "a\r\nb\r\nc\r\n"},
+		{"auto majority crlf", "auto", "a\r\nb\r\nc\n", "a\r\nb\r\nc\r\n"},
+		{"auto tie prefers lf", "auto", "a\r\nb\n", "a\nb\n"},
+		{"auto lone cr majority", "auto", "a\rb\rc\n", "a\rb\rc\r"},
+		{"already lf", "lf", "a\nb\n", "a\nb\n"},
+		{"no endings", "crlf", "abc", "abc"},
+	} {
+		if got := string(convertLineEndings([]byte(test.input), test.mode)); got != test.want {
+			t.Errorf("%s: got %q, want %q", test.name, got, test.want)
+		}
+	}
+}
+
+func TestCollapseBlankLines(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name  string
+		limit int
+		input string
+		want  string
+	}{
+		{"collapses runs", 1, "a\n\n\n\nb\n", "a\n\nb\n"},
+		{"whitespace-only lines are blank", 1, "a\n \n\t\r\n\nb", "a\n \nb"},
+		{"leading run", 1, "\n\n\na\n", "\na\n"},
+		{"zero removes blank lines", 0, "a\n\nb\n\n", "a\nb\n"},
+		{"within limit", 2, "a\n\n\nb\n", "a\n\n\nb\n"},
+	} {
+		if got := string(collapseBlankLines([]byte(test.input), test.limit)); got != test.want {
+			t.Errorf("%s: got %q, want %q", test.name, got, test.want)
+		}
+	}
+}
+
+func TestTrimTrailingWhitespaceKeepsMarkdownLineBreaks(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct{ name, input, want string }{
+		{"two spaces kept", "line  \nnext\n", "line  \nnext\n"},
+		{"extra spaces trimmed to two", "line    \r\n", "line  \r\n"},
+		{"one space removed", "line \n", "line\n"},
+		{"tab breaks the rule", "line  \t\n", "line\n"},
+		{"blank line emptied", "    \n", "\n"},
+	} {
+		if got := string(trimTrailingWhitespace([]byte(test.input), true)); got != test.want {
+			t.Errorf("%s: got %q, want %q", test.name, got, test.want)
+		}
+	}
+}
+
+func TestTextFixAppliesEveryRuleInOrder(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	testfs.WriteTree(t, dir, map[string]string{
+		"notes.md":  "\xef\xbb\xbfTitle  \r\nbreak   \r\n\r\n\r\n\r\nend \r\n\r\n",
+		"plain.txt": "\xef\xbb\xbfTitle  \r\n\r\n\r\n\r\nend",
+	})
+	runner := steptest.Build(t, NewFix, map[string]any{
+		"files": []any{"notes.md", "plain.txt"}, "remove_byte_order_mark": true, "line_endings": "lf",
+		"trailing_whitespace": true, "keep_markdown_line_breaks": true, "max_blank_lines": 1, "final_newline": true,
+		"fail_on_change": false,
+	})
+	if _, err := runner.Run(t.Context(), step.Request{RunDir: dir}); err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]string{"notes.md": "Title  \nbreak  \n\nend\n", "plain.txt": "Title\n\nend\n"} {
+		data, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil || string(data) != want {
+			t.Errorf("%s = %q, %v; want %q", name, data, err, want)
+		}
+	}
+}
+
+func TestNewFixValidatesNewRules(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name string
+		raw  map[string]any
+		want string
+	}{
+		{"bad line endings", map[string]any{"files": []any{"a"}, "line_endings": "cr"}, "line_endings must be lf, crlf, or auto"},
+		{"markdown without whitespace", map[string]any{"files": []any{"a"}, "final_newline": true, "keep_markdown_line_breaks": true}, "requires trailing_whitespace"},
+		{"negative blank lines", map[string]any{"files": []any{"a"}, "max_blank_lines": -1}, "must not be negative"},
+	} {
+		if _, err := NewFix(test.raw); err == nil || !strings.Contains(err.Error(), test.want) {
+			t.Errorf("%s: error = %v, want %q", test.name, err, test.want)
+		}
+	}
+	for _, raw := range []map[string]any{
+		{"files": []any{"a"}, "line_endings": "auto"}, {"files": []any{"a"}, "remove_byte_order_mark": true}, {"files": []any{"a"}, "max_blank_lines": 0},
+	} {
+		if _, err := NewFix(raw); err != nil {
+			t.Errorf("NewFix(%v): %v", raw, err)
+		}
 	}
 }
