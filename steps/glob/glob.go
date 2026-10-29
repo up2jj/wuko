@@ -18,20 +18,27 @@ import (
 )
 
 type Config struct {
-	Root     string   `yaml:"root,omitempty"`
-	Patterns []string `yaml:"patterns"`
+	Root        string `yaml:"root,omitempty"`
+	Patterns    any    `yaml:"patterns"`
+	MissingRoot string `yaml:"missing_root,omitempty"`
 }
 
 type Runner struct {
-	config Config
-	fsys   fs.FS
+	config   Config
+	patterns step.PathList
+	fsys     fs.FS
 }
 
 func Register(registry *step.Registry) error {
 	return registry.RegisterDefinition("glob", step.Registration{Builder: New, Outputs: step.ClosedObject(map[string]step.OutputSchema{
 		"root": step.Scalar(), "count": step.Scalar(),
 		"files": step.Array(step.ClosedOutputs("name", "path", "type", "size", "mode", "modified_at")),
-	})})
+	}), References: references})
+}
+
+// references reports the expression that computes the patterns.
+func references(raw map[string]any) (step.References, error) {
+	return step.References{Expressions: []step.ExpressionReference{step.PathListReference(raw, "patterns")}}, nil
 }
 
 func New(raw map[string]any) (step.Runner, error) {
@@ -42,19 +49,44 @@ func New(raw map[string]any) (step.Runner, error) {
 	if config.Root == "" {
 		config.Root = "."
 	}
-	if len(config.Patterns) == 0 {
+	if config.MissingRoot == "" {
+		config.MissingRoot = "fail"
+	}
+	if !templated(config.MissingRoot) && config.MissingRoot != "fail" && config.MissingRoot != "empty" {
+		return nil, fmt.Errorf("missing_root must be fail or empty")
+	}
+	patterns, err := step.ParsePathList(raw, "patterns")
+	if err != nil {
+		return nil, err
+	}
+	if !patterns.Set() {
 		return nil, fmt.Errorf("patterns must contain at least one pattern")
 	}
-	for index, pattern := range config.Patterns {
-		if err := validatePattern(pattern); err != nil {
-			return nil, fmt.Errorf("patterns[%d]: %w", index, err)
+	if _, literal := raw["patterns"].([]any); literal {
+		// A literal list resolves without evaluating anything, so check it before the run.
+		list, _ := patterns.Resolve(step.Request{})
+		if len(list) == 0 {
+			return nil, fmt.Errorf("patterns must contain at least one pattern")
+		}
+		if err := validatePatterns(list); err != nil {
+			return nil, err
 		}
 	}
-	return &Runner{config: config}, nil
+	return &Runner{config: config, patterns: patterns}, nil
 }
 
 func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, error) {
 	if err := ctx.Err(); err != nil {
+		return step.Result{}, err
+	}
+	if templated(r.config.MissingRoot) {
+		return step.Result{}, fmt.Errorf("missing_root contains an unresolved template")
+	}
+	patterns, err := r.patterns.Resolve(request)
+	if err != nil {
+		return step.Result{}, err
+	}
+	if err := validatePatterns(patterns); err != nil {
 		return step.Result{}, err
 	}
 	root, err := resolveRoot(request.RunDir, r.config.Root)
@@ -62,6 +94,9 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 		return step.Result{}, err
 	}
 	info, err := os.Stat(root)
+	if errors.Is(err, os.ErrNotExist) && r.config.MissingRoot == "empty" {
+		return step.Result{Outputs: map[string]any{"root": root, "count": 0, "files": []any{}}}, nil
+	}
 	if err != nil {
 		return step.Result{}, fmt.Errorf("inspecting glob root %s: %w", root, err)
 	}
@@ -81,7 +116,7 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 		doublestar.WithNoHidden(),
 		doublestar.WithFailOnIOErrors(),
 	}
-	for index, pattern := range r.config.Patterns {
+	for index, pattern := range patterns {
 		if err := ctx.Err(); err != nil {
 			return step.Result{}, err
 		}
@@ -126,6 +161,17 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 		"count": len(files),
 		"files": files,
 	}}, nil
+}
+
+// validatePatterns checks every pattern once its value is known. An expression may return an
+// empty list, which matches nothing.
+func validatePatterns(patterns []string) error {
+	for index, pattern := range patterns {
+		if err := validatePattern(pattern); err != nil {
+			return fmt.Errorf("patterns[%d]: %w", index, err)
+		}
+	}
+	return nil
 }
 
 func validatePattern(pattern string) error {

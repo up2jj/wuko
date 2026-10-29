@@ -1415,8 +1415,24 @@ Match normally hidden workflow files explicitly:
     patterns: [".github/**/*.yaml", ".wuko/workflows/*.yml"]
 ```
 
+Compute the patterns and tolerate a root that may not exist:
+
+```yaml
+- id: zsh_config
+  type: glob
+  with:
+    root: "{{ .env.ZDOTDIR }}"
+    missing_root: empty
+    patterns: {expr: vars.zsh_files}
+```
+
 Patterns form a union and results are deduplicated and path-sorted. Wildcards skip hidden paths
 unless the leading dot is explicit. Outputs include absolute `root`, `count`, and `files` metadata.
+
+`patterns` is a literal list or `{expr: ...}` returning a list of strings; an expression may return
+an empty list, which matches nothing. Computed patterns follow the same rules as literal ones:
+relative to `root`, no `..` components. `missing_root` is `fail` (default) or `empty`; with `empty`, a
+root that does not exist produces `count: 0` and no `files`, while a root that is a file still fails.
 
 ## `watch`
 

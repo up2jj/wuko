@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
@@ -98,7 +99,12 @@ func TestGlobRejectsInvalidConfiguration(t *testing.T) {
 		want string
 	}{
 		{name: "missing patterns", raw: map[string]any{}, want: "at least one"},
-		{name: "empty pattern", raw: map[string]any{"patterns": []any{""}}, want: "must not be empty"},
+		{name: "empty patterns", raw: map[string]any{"patterns": []any{}}, want: "at least one"},
+		{name: "empty pattern", raw: map[string]any{"patterns": []any{""}}, want: "non-empty"},
+		{name: "patterns scalar", raw: map[string]any{"patterns": "*.go"}, want: "must be a list"},
+		{name: "patterns expr extra key", raw: map[string]any{"patterns": map[string]any{"expr": "vars.files", "x": 1}}, want: "exactly a non-empty expr"},
+		{name: "patterns expr syntax", raw: map[string]any{"patterns": map[string]any{"expr": "vars.("}}, want: "compiling patterns expr"},
+		{name: "invalid missing root", raw: map[string]any{"patterns": []any{"*.go"}, "missing_root": "skip"}, want: "missing_root must be fail or empty"},
 		{name: "malformed pattern", raw: map[string]any{"patterns": []any{"[abc"}}, want: "invalid pattern"},
 		{name: "absolute pattern", raw: map[string]any{"patterns": []any{"/tmp/*.go"}}, want: "relative to root"},
 		{name: "windows absolute pattern", raw: map[string]any{"patterns": []any{`C:\tmp\*.go`}}, want: "relative to root"},
@@ -136,6 +142,80 @@ func TestGlobRejectsInvalidRootAndHonorsCancellation(t *testing.T) {
 	cancel()
 	if _, err := runner.Run(ctx, step.Request{RunDir: runDir}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancellation error = %v", err)
+	}
+}
+
+func TestGlobMissingRootEmpty(t *testing.T) {
+	t.Parallel()
+	runDir := t.TempDir()
+	result := run(t, runDir, map[string]any{"root": "absent", "patterns": []any{"**"}, "missing_root": "empty"})
+	want := map[string]any{"root": filepath.Join(runDir, "absent"), "count": 0, "files": []any{}}
+	if diff := cmp.Diff(want, result.Outputs); diff != "" {
+		t.Fatalf("outputs mismatch (-want +got):\n%s", diff)
+	}
+
+	writeFile(t, runDir, "not-directory", "file", 0o644)
+	runner := steptest.Build(t, New, map[string]any{"root": "not-directory", "patterns": []any{"**"}, "missing_root": "empty"})
+	if _, err := runner.Run(t.Context(), step.Request{RunDir: runDir}); err == nil || !strings.Contains(err.Error(), "not a directory") {
+		t.Fatalf("file root error = %v", err)
+	}
+}
+
+func TestGlobPatternsExpression(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeFile(t, root, ".zshrc", "", 0o644)
+	writeFile(t, root, ".zprofile", "", 0o644)
+	writeFile(t, root, ".bashrc", "", 0o644)
+	raw := map[string]any{"patterns": map[string]any{"expr": "vars.files"}}
+
+	tests := []struct {
+		name  string
+		files any
+		want  []string
+		err   string
+	}{
+		{name: "selected patterns", files: []any{".zshrc", ".z*", ".missing"}, want: []string{".zprofile", ".zshrc"}},
+		{name: "empty list", files: []any{}, want: []string{}},
+		{name: "not a list", files: ".zshrc", err: "must return a list"},
+		{name: "empty item", files: []any{""}, err: "non-empty path"},
+		{name: "parent pattern", files: []any{"../*"}, err: "patterns[0]: pattern must not contain a parent directory"},
+		{name: "absolute pattern", files: []any{"/etc/*"}, err: "relative to root"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			runner := steptest.Build(t, New, raw)
+			result, err := runner.Run(t.Context(), step.Request{RunDir: root, Vars: map[string]any{"files": test.files}})
+			if test.err != "" {
+				if err == nil || !strings.Contains(err.Error(), test.err) {
+					t.Fatalf("error = %v, want substring %q", err, test.err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := []string{}
+			for _, file := range result.Outputs["files"].([]any) {
+				got = append(got, file.(map[string]any)["path"].(string))
+			}
+			if diff := cmp.Diff(test.want, got); diff != "" {
+				t.Fatalf("paths mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestGlobReferencesPatternsExpression(t *testing.T) {
+	t.Parallel()
+	got, err := references(map[string]any{"patterns": map[string]any{"expr": "vars.files"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := step.References{Expressions: []step.ExpressionReference{{Label: "patterns expr", Source: "vars.files"}}}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Fatalf("references mismatch (-want +got):\n%s", diff)
 	}
 }
 
