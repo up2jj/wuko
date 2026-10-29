@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/up2jj/wuko/executor"
+	"github.com/up2jj/wuko/internal/fakecli"
 	"github.com/up2jj/wuko/process"
 )
 
@@ -127,10 +128,10 @@ func TestFileModes(t *testing.T) {
 // decoded by a real shell, so argument quoting and actual os/exec wiring are tested.
 func TestMain(main *testing.M) {
 	if len(os.Args) > 1 && os.Args[1] == "--fake-remote" {
-		os.Exit(fakeRemote(os.Args[2], os.Args[4:]))
+		fakecli.Exit(fakeRemote(os.Args[2], os.Args[4:]))
 	}
 	if filepath.Base(os.Args[0]) == "ssh" {
-		os.Exit(fakeSSH(os.Args[1:]))
+		fakecli.Exit(fakeSSH(os.Args[1:]))
 	}
 	os.Exit(main.Run())
 }

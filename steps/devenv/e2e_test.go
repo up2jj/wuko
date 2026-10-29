@@ -24,6 +24,7 @@ import (
 
 	"github.com/up2jj/wuko/engine"
 	"github.com/up2jj/wuko/executor"
+	"github.com/up2jj/wuko/internal/fakecli"
 	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/step"
 	assertstep "github.com/up2jj/wuko/steps/assert"
@@ -66,9 +67,9 @@ type invocation struct {
 func TestMain(main *testing.M) {
 	switch filepath.Base(os.Args[0]) {
 	case "devenv":
-		os.Exit(fakeDevenv(os.Args[1:]))
+		fakecli.Exit(fakeDevenv(os.Args[1:]))
 	case "secretspec":
-		os.Exit(fakeSecretspec(os.Args[1:]))
+		fakecli.Exit(fakeSecretspec(os.Args[1:]))
 	}
 	os.Exit(main.Run())
 }

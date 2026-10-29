@@ -28,10 +28,15 @@ func TestEveryBuiltinStepIsDocumented(t *testing.T) {
 	if err := registerBuiltinSteps(registry); err != nil {
 		t.Fatal(err)
 	}
+	text := docs.String()
 	for name := range registry.Definitions() {
 		t.Run(name, func(t *testing.T) {
-			mentioned := regexp.MustCompile("type: *" + regexp.QuoteMeta(name) + `\b|` + "`" + regexp.QuoteMeta(name) + "`")
-			if !mentioned.MatchString(docs.String()) {
+			// The plain search settles most names; the regex over every document is slow under -race.
+			if strings.Contains(text, "`"+name+"`") {
+				return
+			}
+			mentioned := regexp.MustCompile("type: *" + regexp.QuoteMeta(name) + `\b`)
+			if !mentioned.MatchString(text) {
 				t.Fatalf("step type %q is not documented in docs/ or README.md", name)
 			}
 		})
