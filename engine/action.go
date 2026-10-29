@@ -231,7 +231,7 @@ func resolveActionInputs(action *workflow.Action, bindings map[string]any, rende
 				value = literal
 			}
 		} else {
-			value, err = renderValue(renderer, value, data, false)
+			value, err = renderValue(renderer, value, data, "")
 			if err != nil {
 				return nil, fmt.Errorf("rendering input %q: %w", name, err)
 			}

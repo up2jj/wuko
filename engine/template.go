@@ -114,6 +114,21 @@ func rawSourceStep(stepType string) bool {
 	return stepType == "lua" || stepType == "template"
 }
 
+// runtimeRawField names the top-level field a step type renders itself at run time, or "".
+// Lua and template sources are not workflow templates at all. An assert message is one, and
+// is still validated statically, but it is rendered only when the assertion fails, so a
+// message describing a problem may be empty, or unrenderable, while there is none.
+func runtimeRawField(stepType string) string {
+	switch {
+	case rawSourceStep(stepType):
+		return "source"
+	case stepType == "assert":
+		return "message"
+	default:
+		return ""
+	}
+}
+
 func validateStepTemplates(renderer *workflow.Renderer, value any, stepType string) error {
 	if stepType != "dashboard" && stepType != "tui_form" {
 		// Only composite screens defer nested subtrees; skip path tracking on the hot path.
@@ -126,7 +141,7 @@ func validateStepTemplates(renderer *workflow.Renderer, value any, stepType stri
 
 func renderStepValue(renderer *workflow.Renderer, value any, data map[string]any, stepType string) (any, error) {
 	if stepType != "dashboard" && stepType != "tui_form" {
-		return renderValue(renderer, value, data, rawSourceStep(stepType))
+		return renderValue(renderer, value, data, runtimeRawField(stepType))
 	}
 	return transformStepTemplates(value, stepType, nil, func(text string) (string, error) {
 		return renderer.Render(text, data)
@@ -239,14 +254,14 @@ func validateTemplates(renderer *workflow.Renderer, value any, skipSource bool) 
 	return nil
 }
 
-func renderValue(renderer *workflow.Renderer, value any, data map[string]any, skipSource bool) (any, error) {
+func renderValue(renderer *workflow.Renderer, value any, data map[string]any, rawField string) (any, error) {
 	switch typed := value.(type) {
 	case string:
 		return renderString(renderer, typed, data)
 	case []any:
 		result := make([]any, len(typed))
 		for i, item := range typed {
-			rendered, err := renderValue(renderer, item, data, false)
+			rendered, err := renderValue(renderer, item, data, "")
 			if err != nil {
 				return nil, fmt.Errorf("item %d: %w", i, err)
 			}
@@ -256,11 +271,11 @@ func renderValue(renderer *workflow.Renderer, value any, data map[string]any, sk
 	case map[string]any:
 		result := make(map[string]any, len(typed))
 		for key, item := range typed {
-			if skipSource && key == "source" {
+			if rawField != "" && key == rawField {
 				result[key] = item
 				continue
 			}
-			rendered, err := renderValue(renderer, item, data, false)
+			rendered, err := renderValue(renderer, item, data, "")
 			if err != nil {
 				return nil, fmt.Errorf("field %s: %w", key, err)
 			}

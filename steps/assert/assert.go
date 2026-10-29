@@ -61,7 +61,25 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 		return step.Result{}, fmt.Errorf("evaluating expr: expression returned %T, want bool", value)
 	}
 	if !matched {
-		return step.Result{}, fmt.Errorf("assertion failed: %s", r.config.Message)
+		return step.Result{}, r.failure(request)
 	}
 	return step.Result{}, nil
+}
+
+// failure renders the message only now that the assertion has failed: the engine leaves it
+// raw so a passing assertion never depends on it. A message that renders empty falls back
+// to the expression, so the error still says what failed.
+func (r *Runner) failure(request step.Request) error {
+	message := r.config.Message
+	if request.TemplateRenderer != nil {
+		rendered, err := request.TemplateRenderer.Render(message)
+		if err != nil {
+			return fmt.Errorf("assertion failed: %s (rendering message: %w)", r.config.Expr, err)
+		}
+		message = rendered
+	}
+	if strings.TrimSpace(message) == "" {
+		message = r.config.Expr
+	}
+	return fmt.Errorf("assertion failed: %s", message)
 }

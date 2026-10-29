@@ -337,6 +337,11 @@ Stop the workflow with a clear message unless an Expr expression returns boolean
 Both fields are required. A false result fails with `assertion failed: <message>`; a true result
 succeeds with an empty output object.
 
+`message` is validated with the rest of the workflow but rendered only when the assertion fails, so a
+passing assertion never depends on it. That allows a message computed from a value that is empty when
+everything is fine, such as `"{{ .vars.problem }}"`. A message that renders empty falls back to the
+expression, and one that fails to render reports the expression and the rendering error.
+
 ## `import_vars`
 
 Load JSON or TOML while the workflow is running. Files merge from left to right with top-level

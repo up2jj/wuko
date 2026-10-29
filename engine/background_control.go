@@ -138,7 +138,7 @@ func (e *Engine) executeBackgroundControl(ctx context.Context, definition *workf
 	program, err := control.Launch(ctx, BackgroundControlRequest{
 		Step: workflowStep, RunDir: options.RunDir, Env: maps.Clone(state.Env),
 		Render: func(value any) (any, error) {
-			return renderValue(options.renderer, value, templateData(definition, options.RunDir, state), false)
+			return renderValue(options.renderer, value, templateData(definition, options.RunDir, state), "")
 		},
 	})
 	if err != nil {
