@@ -399,9 +399,9 @@ the executor's init command to be a recognized shell; a Docker executor configur
 init rejects filesystem steps during validation.
 
 The remaining `file` operations -- `copy`, `move`, `remove`, `list`, `chmod`, `find`, `link`,
-`truncate`, `tail`, `disk_usage`, `atomic_swap`, `permissions`, and `touch` -- depend on host
-semantics such as links, renames, and directory walks that the session filesystem does not carry,
-and are rejected during validation. An executor that runs commands but exposes no filesystem at all,
+`truncate`, `tail`, `disk_usage`, `atomic_swap`, `permissions`, `touch`, `append`, `ensure_line`, and
+`ensure_block` -- depend on host semantics such as links, renames, and directory walks that the
+session filesystem does not carry, and are rejected during validation. An executor that runs commands but exposes no filesystem at all,
 as [plugin executors](plugins.md) do, rejects every file step in its scope. A
 [`transform`](steps-data.md#transform) that streams `from: {file: ...}` reads the host file item by
 item, which an executor session cannot offer, so it fails inside any executor block; use `decode`

@@ -39,6 +39,9 @@ const (
 	operationAtomicSwap  = "atomic_swap"
 	operationPermissions = "permissions"
 	operationTouch       = "touch"
+	operationAppend      = "append"
+	operationEnsureLine  = "ensure_line"
+	operationEnsureBlock = "ensure_block"
 )
 
 var modePattern = regexp.MustCompile(`^0[0-7]{3}$`)
@@ -46,6 +49,7 @@ var modePattern = regexp.MustCompile(`^0[0-7]{3}$`)
 type Config struct {
 	Operation   string   `yaml:"operation"`
 	Path        string   `yaml:"path"`
+	Paths       []string `yaml:"paths,omitempty"`
 	Destination string   `yaml:"destination,omitempty"`
 	Content     string   `yaml:"content,omitempty"`
 	Recursive   bool     `yaml:"recursive,omitempty"`
@@ -67,6 +71,15 @@ type Config struct {
 	Create      bool     `yaml:"create,omitempty"`
 	AccessedAt  string   `yaml:"accessed_at,omitempty"`
 	ModifiedAt  string   `yaml:"modified_at,omitempty"`
+	Line        string   `yaml:"line,omitempty"`
+	Match       string   `yaml:"match,omitempty"`
+	PresentIf   string   `yaml:"present_if,omitempty"`
+	Marker      string   `yaml:"marker,omitempty"`
+	Check       bool     `yaml:"check,omitempty"`
+
+	EnsureNewline  bool   `yaml:"ensure_newline,omitempty"`
+	UnlessContains string `yaml:"unless_contains,omitempty"`
+	UnlessMatches  string `yaml:"unless_matches,omitempty"`
 }
 
 type Runner struct {
@@ -204,6 +217,8 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 		return r.permissions(ctx, path)
 	case operationTouch:
 		return r.touch(ctx, path)
+	case operationAppend, operationEnsureLine, operationEnsureBlock:
+		return r.edit(ctx, request.RunDir)
 	default:
 		return step.Result{}, fmt.Errorf("unsupported file operation %q", r.config.Operation)
 	}
@@ -213,7 +228,9 @@ func (r *Runner) validate(resolved bool) error {
 	if r.config.Operation == "" {
 		return fmt.Errorf("operation is required")
 	}
-	if r.config.Path == "" {
+	// The editing operations may name their files through paths instead; every other
+	// operation rejects paths below as a field it does not allow.
+	if r.config.Path == "" && !r.present["paths"] {
 		return fmt.Errorf("path is required")
 	}
 	if !resolved && templated(r.config.Operation) {
@@ -286,11 +303,19 @@ func (r *Runner) validate(resolved bool) error {
 		for _, field := range []string{"create", "mode", "accessed_at", "modified_at"} {
 			allowed[field] = true
 		}
+	case operationAppend, operationEnsureLine, operationEnsureBlock:
+		fields, required := editFields(r.config.Operation)
+		for _, field := range fields {
+			allowed[field] = true
+		}
+		if err := require(required); err != nil {
+			return err
+		}
 	default:
 		if !resolved && templated(r.config.Operation) {
 			return nil
 		}
-		return fmt.Errorf("operation must be read, write, copy, move, remove, mkdir, list, stat, chmod, find, link, truncate, tail, disk_usage, atomic_swap, permissions, or touch")
+		return fmt.Errorf("operation must be read, write, copy, move, remove, mkdir, list, stat, chmod, find, link, truncate, tail, disk_usage, atomic_swap, permissions, touch, append, ensure_line, or ensure_block")
 	}
 	for field := range r.present {
 		if !allowed[field] {

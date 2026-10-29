@@ -1340,7 +1340,8 @@ Read a file or copy a directory:
 ```
 
 Other operations are `move`, `remove`, `mkdir`, `list`, `stat`, `chmod`, `find`, `link`,
-`truncate`, `tail`, `disk_usage`, `atomic_swap`, `permissions`, and `touch`. See
+`truncate`, `tail`, `disk_usage`, `atomic_swap`, `permissions`, `touch`, `append`, `ensure_line`,
+and `ensure_block`. See
 [Filesystem operations](filesystem-operations.md) for every field, output, safety rule, and example.
 
 ## `scaffold`

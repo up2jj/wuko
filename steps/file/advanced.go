@@ -143,6 +143,8 @@ func (r *Runner) validateAdvanced(resolved bool) error {
 			return err
 		}
 		return validateTimestamp("modified_at", r.config.ModifiedAt)
+	case operationAppend, operationEnsureLine, operationEnsureBlock:
+		return r.validateEdit(resolved)
 	}
 	return nil
 }

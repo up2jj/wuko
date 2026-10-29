@@ -1,0 +1,35 @@
+version: 1
+name: file-ensure-line
+description: Check whether a startup file loads a hook, ask before adding it, then add it idempotently
+steps:
+  - id: hook
+    type: file
+    with:
+      operation: ensure_line
+      paths:
+        - .example-zshrc
+        - .example-zprofile
+      line: 'eval "$(direnv hook zsh)"'
+      present_if: 'direnv hook|^[^#]*plugins=\([^)]*\bdirenv\b'
+      create: true
+      check: true
+
+  - id: confirm_add_hook
+    if: steps.hook.would_change
+    type: tui_confirm
+    with:
+      variable: add_hook
+      message: "Add the direnv hook to {{ .steps.hook.path }}?"
+      default: false
+
+  - id: add_hook
+    if: '"confirm_add_hook" in steps && steps.confirm_add_hook.value'
+    type: file
+    with:
+      operation: ensure_line
+      paths:
+        - .example-zshrc
+        - .example-zprofile
+      line: 'eval "$(direnv hook zsh)"'
+      present_if: 'direnv hook|^[^#]*plugins=\([^)]*\bdirenv\b'
+      create: true

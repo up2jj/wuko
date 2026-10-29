@@ -90,11 +90,13 @@ func TestFileMarksOnlyRemoteCapableOperationsExecutorAware(t *testing.T) {
 		t.Run(name, func(t *testing.T) { remoteRunner(t, config) })
 	}
 	hostOnly := map[string]map[string]any{
-		"link":       {"operation": "link", "path": "artifact.txt", "destination": "link.txt", "link_type": "symbolic"},
-		"remove":     {"operation": "remove", "path": "artifact.txt"},
-		"list":       {"operation": "list", "path": "."},
-		"disk_usage": {"operation": "disk_usage", "path": "."},
-		"templated":  {"operation": "{{ .vars.operation }}", "path": "artifact.txt"},
+		"link":        {"operation": "link", "path": "artifact.txt", "destination": "link.txt", "link_type": "symbolic"},
+		"remove":      {"operation": "remove", "path": "artifact.txt"},
+		"list":        {"operation": "list", "path": "."},
+		"disk_usage":  {"operation": "disk_usage", "path": "."},
+		"append":      {"operation": "append", "path": "artifact.txt", "content": "data"},
+		"ensure_line": {"operation": "ensure_line", "path": "artifact.txt", "line": "data"},
+		"templated":   {"operation": "{{ .vars.operation }}", "path": "artifact.txt"},
 	}
 	for name, config := range hostOnly {
 		t.Run(name, func(t *testing.T) {

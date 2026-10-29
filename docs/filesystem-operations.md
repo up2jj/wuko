@@ -1,7 +1,7 @@
 # Filesystem operations
 
 The `file` step provides strict, shell-independent filesystem operations. Every operation requires
-`operation` and `path`; unknown fields and fields belonging to another operation are errors. Relative
+`operation` and `path` (the [editing operations](#edit-text-files) accept `paths` instead); unknown fields and fields belonging to another operation are errors. Relative
 paths are resolved from the workflow run directory, while absolute paths are used as written. Wuko
 workflows are trusted code, so paths are not confined to the run directory.
 
@@ -25,6 +25,7 @@ workflows are trusted code, so paths are not confined to the run directory.
 - [Atomic swap](#atomic-swap)
 - [Permissions](#permissions)
 - [Touch](#touch)
+- [Edit text files](#edit-text-files)
 - [Consuming outputs](#consuming-outputs)
 
 ## Common rules
@@ -65,6 +66,9 @@ workflows are trusted code, so paths are not confined to the run directory.
 | `atomic_swap` | `destination`, `replace` | `destination`, `replaced` |
 | `permissions` | `mode`, `recursive` | `changed`, `skipped_links` |
 | `touch` | `create`, `mode`, timestamps | `created`, `mode`, timestamps |
+| `append` | `content`, `create`, `mode`, `ensure_newline`, `unless_contains`, `unless_matches`, `paths`, `check` | `changed`, `would_change`, `matched_path`, `bytes` |
+| `ensure_line` | `line`, `match`, `present_if`, `create`, `mode`, `paths`, `check` | `changed`, `would_change`, `matched_path`, `action` |
+| `ensure_block` | `content`, `marker`, `present_if`, `create`, `mode`, `paths`, `check` | `changed`, `would_change`, `matched_path`, `action` |
 
 Every successful operation also outputs its resolved `path`. Operations with a destination output
 that resolved path as `destination`. Entry metadata contains `name`, a forward-slash `path`, `type`,
@@ -387,6 +391,147 @@ accept `now` or RFC3339. When only one is supplied, the other is preserved.
 ```
 
 Outputs include `created`, `mode`, `accessed_at`, and `modified_at`.
+
+## Edit text files
+
+`append`, `ensure_line`, and `ensure_block` change a text file in place without rewriting what they
+do not own, which suits configuration such as shell startup files. All three decide first and write
+second, and that decision can be made on its own with `check: true`.
+
+### Append
+
+`append` adds `content` to the end of the file. `ensure_newline: true` first writes a newline when the
+existing file does not end with one. The append is skipped, making the step idempotent, when the file
+contains the `unless_contains` string or has a line matching the `unless_matches` regular expression.
+
+```yaml
+- id: add_hook
+  type: file
+  with:
+    operation: append
+    path: "{{ .env.HOME }}/.zshrc"
+    content: |
+      # added by the bootstrap workflow
+      eval "$(direnv hook zsh)"
+    create: true
+    ensure_newline: true
+    unless_contains: direnv hook
+```
+
+The text is written with one append (`O_APPEND`), not atomically. It goes through a symbolic link to
+the file behind it, and the file keeps its inode, mode, and owner.
+
+### Ensure a line
+
+`ensure_line` makes sure `line` (a single line, without a line break) is in the file:
+
+1. If a line equals `line`, or matches the optional `present_if` regular expression, nothing changes.
+2. Otherwise, when `match` is set, the last line matching it is replaced by `line`, keeping that
+   line's `\r\n` ending if it had one.
+3. Otherwise `line` is appended, after a newline when the file does not end with one.
+
+```yaml
+- id: editor
+  type: file
+  with:
+    operation: ensure_line
+    path: "{{ .env.HOME }}/.config/tool/config"
+    line: editor = nvim
+    match: '^editor\s*='
+```
+
+### Ensure a block
+
+`ensure_block` keeps `content` between two marker lines. `marker` defaults to
+`# {mark} WUKO MANAGED BLOCK`, and `{mark}` becomes `BEGIN` and `END`. A block whose body differs is
+replaced; a block that is already current is left alone; a missing block is appended, unless a line
+matches `present_if`. An existing managed block is always kept current, even when `present_if` would
+match its old text. A begin marker without its end marker, or the reverse, is an error. Use a
+distinct marker for each block a workflow manages in the same file.
+
+```yaml
+- id: path_block
+  type: file
+  with:
+    operation: ensure_block
+    path: "{{ .env.HOME }}/.zshrc"
+    marker: "# {mark} tool paths"
+    content: |
+      export PATH="$HOME/.tool/bin:$PATH"
+```
+
+### Rules shared by the editing operations
+
+- `paths` (a list) may replace `path`. Every listed file is searched for the condition that makes
+  the step a no-op (`unless_*`, an equal line, `present_if`, or a managed block), and an in-place
+  replacement edits the file where its match was found. New text goes to the first path. Missing
+  files and missing directories count as "no match", not as errors.
+- A missing file to write is an error unless `create: true`; `mode` (default `"0644"`) applies only
+  to a file the step creates. The parent directory must already exist.
+- Regular expressions use Go syntax and are matched line by line, so `^` and `$` anchor at line
+  boundaries. `unless_contains` is a plain substring of the whole file.
+- A replacement (`ensure_line` with `match`, or a changed managed block) rewrites the file atomically
+  and keeps its mode. It writes the file behind a symbolic link, so the link survives; the rewritten
+  file is owned by the user running the workflow.
+- These operations act on the host and are not available inside executor scopes.
+
+Outputs:
+
+| Output | Meaning |
+| --- | --- |
+| `path` | The file written, or that would be written. With no change, the file where the condition matched. |
+| `matched_path` | The file where the condition, line, or block was found; `""` when nothing matched. |
+| `exists` | Whether `path` existed beforehand. |
+| `action` | `none`, `appended`, `inserted`, `replaced`, or `created`. |
+| `would_change` | Whether a write is needed. |
+| `changed` | Whether a write happened; always `false` with `check: true`. |
+| `created` | Whether the step created `path`. |
+| `bytes` | Bytes appended or written; `0` without a write. |
+
+### Check, then write
+
+`--dry-run` shows the workflow's structure without running steps, so it cannot preview an edit.
+`check: true` does: the step evaluates everything, writes nothing, and reports `would_change` and the
+`path` it would write. A later step with the same configuration and no `check` performs the write,
+which lets a prompt sit between the two:
+
+```yaml
+- id: hook
+  type: file
+  with:
+    operation: ensure_line
+    paths:
+      - "{{ .env.HOME }}/.zshrc"
+      - "{{ .env.HOME }}/.zprofile"
+      - "{{ .env.HOME }}/.zshenv"
+    line: 'eval "$(direnv hook zsh)"'
+    present_if: 'direnv hook|^[^#]*plugins=\([^)]*\bdirenv\b'   # also accept the oh-my-zsh plugin
+    create: true
+    check: true
+
+- id: confirm_add_hook
+  if: steps.hook.would_change
+  type: tui_confirm
+  with:
+    variable: add_hook
+    message: "Add the direnv hook to {{ .steps.hook.path }}?"
+    default: false
+
+- id: add_hook
+  if: '"confirm_add_hook" in steps && steps.confirm_add_hook.value'
+  type: file
+  with:
+    operation: ensure_line
+    paths:
+      - "{{ .env.HOME }}/.zshrc"
+      - "{{ .env.HOME }}/.zprofile"
+      - "{{ .env.HOME }}/.zshenv"
+    line: 'eval "$(direnv hook zsh)"'
+    present_if: 'direnv hook|^[^#]*plugins=\([^)]*\bdirenv\b'
+    create: true
+```
+
+A missing file without `create: true` fails the check as it would fail the write, so the two agree.
 
 ## Consuming outputs
 
