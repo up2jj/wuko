@@ -39,6 +39,10 @@ configuration directory into a list of selectable workflow sources. The same dis
 used by `wuko run NAME`, `wuko list`, `wuko validate`, shell completion, and the bare `wuko`
 workflow picker.
 
+CLI defaults are separate: `wuko.yml` or `wuko.yaml` in the invocation directory can configure
+flags and a default workflow for bare `wuko`. CLI config is not searched for in parent or global
+locations. See [Local configuration](cli.md#local-configuration); `--no-config` disables it.
+
 ## Search locations
 
 Discovery checks locations in this order:

@@ -1761,7 +1761,10 @@ wuko validate --env-loader asdf
 wuko run build --env-loader none
 ```
 
-`WUKO_ENV_LOADERS=mise,direnv` supplies the default when no flag is present. Valid values are
+`WUKO_ENV_LOADERS=mise,direnv` supplies the default when no flag is present, overriding
+`flags.env-loader` in [local CLI configuration](cli.md#local-configuration). When neither a flag
+nor the environment variable is supplied, configured loaders apply before the automatic default.
+Valid values are
 `auto`, `none`, `mise`, `asdf`, and `direnv`, repeated or comma-separated. `auto` and `none` must
 be used alone; an explicit chain accepts at most one of mise or asdf, followed optionally by
 direnv. Flags replace the environment variable. Explicit loaders are required to be installed.

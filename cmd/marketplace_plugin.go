@@ -33,7 +33,7 @@ func newMarketplacePluginReleaseCmd(deps dependencies) *cobra.Command {
 		Example: "  wuko marketplace plugin release --version 0.1.0 --description \"A simple uppercase step\" ../wuko-plugin-hello\n  wuko marketplace plugin release --skip-build ./completed-bundle",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(command *cobra.Command, args []string) error {
-			return releaseMarketplacePlugin(command, deps, args[0], requestedVersion, skipBuild, description, command.Flags().Changed("description"))
+			return releaseMarketplacePlugin(command, deps, args[0], requestedVersion, skipBuild, description, optionProvided(command, "description"))
 		},
 	}
 	command.Flags().StringVar(&description, "description", "", "describe a new plugin or replace its marketplace description")
@@ -348,7 +348,7 @@ func newMarketplacePluginAddCmd(deps dependencies) *cobra.Command {
 			"../wuko-plugin-hello",
 		Args: cobra.ExactArgs(1),
 		RunE: func(command *cobra.Command, args []string) error {
-			return importMarketplacePlugin(command.Context(), command.OutOrStdout(), deps, args[0], "", description, command.Flags().Changed("description"), false)
+			return importMarketplacePlugin(command.Context(), command.OutOrStdout(), deps, args[0], "", description, optionProvided(command, "description"), false)
 		},
 	}
 	command.Flags().StringVar(&description, "description", "", "describe the plugin in the marketplace picker")
@@ -366,7 +366,7 @@ func newMarketplacePluginUpdateCmd(deps dependencies) *cobra.Command {
 			if !pluginNamePattern.MatchString(args[0]) {
 				return fmt.Errorf("invalid plugin namespace %q", args[0])
 			}
-			return importMarketplacePlugin(command.Context(), command.OutOrStdout(), deps, args[1], args[0], description, command.Flags().Changed("description"), true)
+			return importMarketplacePlugin(command.Context(), command.OutOrStdout(), deps, args[1], args[0], description, optionProvided(command, "description"), true)
 		},
 	}
 	command.Flags().StringVar(&description, "description", "", "replace the marketplace description, including with an empty value")

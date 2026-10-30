@@ -378,6 +378,8 @@ func newRootCmd(deps dependencies) *cobra.Command {
 	}
 	debug := false
 	deps.debug = &debug
+	configuration := &localConfiguration{}
+	var defaultRun runWorkflowConfig
 	root := &cobra.Command{
 		Use:           "wuko",
 		Short:         "Run trusted YAML workflows",
@@ -386,12 +388,23 @@ func newRootCmd(deps dependencies) *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(command *cobra.Command, _ []string) error {
+			if preset := configuration.document.Default; preset != nil {
+				args := []string{string(preset.Workflow)}
+				if preset.Target != "" {
+					args = append(args, string(preset.Target))
+				}
+				return dispatchRun(command, deps, args, defaultRun)
+			}
 			return runWorkflowPicker(command, deps)
 		},
 	}
 	root.SetIn(deps.stdin)
 	root.SetOut(deps.stdout)
 	root.SetErr(deps.stderr)
+	addRunFlags(root, &defaultRun)
+	root.PersistentFlags().String("config", "", "read CLI configuration from a YAML file instead of the current directory")
+	root.PersistentFlags().Bool("no-config", false, "ignore CLI configuration, including the default workflow")
+	_ = root.MarkPersistentFlagFilename("config", "yaml", "yml")
 	root.PersistentFlags().Bool("frozen-lockfile", false, "require existing local plugin pins without modifying wuko.lock")
 	root.PersistentFlags().BoolVar(&debug, "debug", false, "trace workflow loading, validation, and execution to stderr (may expose non-secret configuration)")
 	root.PersistentFlags().StringArray("env-loader", nil, "load the invocation environment with auto, none, mise, asdf, or direnv (repeatable)")
@@ -401,6 +414,7 @@ func newRootCmd(deps dependencies) *cobra.Command {
 	root.AddCommand(newRunCmd(deps), newUICmd(deps), newListCmd(deps), newTreeCmd(deps), newValidateCmd(deps), newAgentCmd(deps), newGitCmd(deps), newInstallCmd(deps), newUninstallCmd(deps), newMarketplaceCmd(deps), newPluginCmd(deps), newCompletionCmd(), newScriptSDKCmd(deps))
 	registerWorkflowFlagCompletions(root)
 	wrapPluginTeardown(root, deps.plugins)
+	wrapLocalConfiguration(root, configuration, deps)
 	return root
 }
 

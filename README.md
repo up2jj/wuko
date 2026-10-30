@@ -94,6 +94,11 @@ wuko run check --cpus 1.5 --memory 512MiB # shared local CPU and memory budget
 Next: the [Getting started guide](docs/getting-started.md) walks from here to prompts, retries,
 parallel work, and composition. The [CLI cheatsheet](docs/cli.md) lists every command.
 
+Save CLI defaults in a current-directory `wuko.yml` or `wuko.yaml`. Its optional `default`
+section selects a workflow, target, and flags for bare `wuko`; explicit CLI flags override
+configured values. Use `--no-config` to ignore the file. See
+[Local configuration](docs/cli.md#local-configuration) for the format and precedence rules.
+
 ## Gallery
 
 Every recording is generated from an offline workflow in [`docs/demos/gallery`](docs/demos/gallery).

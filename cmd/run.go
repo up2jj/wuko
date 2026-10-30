@@ -35,21 +35,30 @@ func newRunCmd(deps dependencies) *cobra.Command {
   wuko run bootstrap --yes`,
 		Args: cobra.MaximumNArgs(2),
 		RunE: func(command *cobra.Command, args []string) error {
-			if handled, err := runWithResourceLimits(command, deps, args, config); handled {
-				return err
-			}
-			if config.pick {
-				// The picker is an interactive loop that can run several workflows or none, so it
-				// cannot honor the single-report stdout contract of --report-json -.
-				if config.reportJSON == "-" {
-					return fmt.Errorf("--pick cannot be used with --report-json -")
-				}
-				return runGitHubWorkflowPicker(command, deps, args, config)
-			}
-			config.replaceProcess = true
-			return runWorkflow(command, deps, args, config)
+			return dispatchRun(command, deps, args, config)
 		},
 	}
+	addRunFlags(command, &config)
+	command.ValidArgsFunction = workflowCompletion(deps, workflowCompletionOptions{invokableOnly: true})
+	return command
+}
+
+func dispatchRun(command *cobra.Command, deps dependencies, args []string, config runWorkflowConfig) error {
+	if handled, err := runWithResourceLimits(command, deps, args, config); handled {
+		return err
+	}
+	if config.pick {
+		// A picker may run several workflows, so it cannot produce one stdout report.
+		if config.reportJSON == "-" {
+			return fmt.Errorf("--pick cannot be used with --report-json -")
+		}
+		return runGitHubWorkflowPicker(command, deps, args, config)
+	}
+	config.replaceProcess = true
+	return runWorkflow(command, deps, args, config)
+}
+
+func addRunFlags(command *cobra.Command, config *runWorkflowConfig) {
 	command.Flags().StringArrayVar(&config.variables, "var", nil, "set a workflow variable (key=value; repeatable)")
 	command.Flags().StringArrayVar(&config.variableFiles, "var-file", nil, "import workflow variables from a JSON or TOML file (repeatable)")
 	command.Flags().StringArrayVar(&config.environment, "env", nil, "override an environment variable (KEY=value; repeatable)")
@@ -63,8 +72,26 @@ func newRunCmd(deps dependencies) *cobra.Command {
 	command.Flags().BoolVar(&config.pick, "pick", false, "select a workflow from a GitHub repository or tree")
 	command.Flags().StringVar(&config.cpus, "cpus", "", "limit aggregate local workflow CPU use in cores (for example 1.5)")
 	command.Flags().StringVar(&config.memory, "memory", "", "limit aggregate local workflow memory (for example 512MiB)")
-	command.ValidArgsFunction = workflowCompletion(deps, workflowCompletionOptions{invokableOnly: true})
-	return command
+}
+
+// Configuration is resolved before argument validation, earlier than runWorkflow's
+// reporting setup. Preserve the stdout report contract for failures at that boundary.
+func reportEarlyRunFailure(command *cobra.Command, runErr error) error {
+	if command.Flags().Lookup("report-json") == nil {
+		return runErr
+	}
+	destination, _ := command.Flags().GetString("report-json")
+	if destination != "-" {
+		return runErr
+	}
+	report, err := reporterpkg.NewJSONWriter(command.OutOrStdout())
+	if err != nil {
+		return errors.Join(runErr, err)
+	}
+	dryRun, _ := command.Flags().GetBool("dry-run")
+	return errors.Join(runErr, report.Finish(context.WithoutCancel(command.Context()), reporterpkg.Outcome{
+		InvocationID: correlation.NewInvocationID(), Status: engine.StatusFailed, Err: runErr, DryRun: dryRun,
+	}))
 }
 
 type runWorkflowConfig struct {

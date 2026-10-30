@@ -181,16 +181,18 @@ func TestListCommandAllIncludesShadowedTargets(t *testing.T) {
 
 func TestListCommandRejectsInvalidFormatBeforeDiscovery(t *testing.T) {
 	t.Parallel()
+	directory := t.TempDir()
 	discovered := false
 	var output bytes.Buffer
 	command := newRootCmd(dependencies{
 		stdin: bytes.NewReader(nil), stdout: &output, stderr: io.Discard,
-		cwd: func() (string, error) {
+		cwd: func() (string, error) { return directory, nil },
+		homeDir: func() (string, error) {
 			discovered = true
-			return t.TempDir(), nil
+			return "", nil
 		},
-		homeDir: func() (string, error) { return "", nil }, configDir: func() (string, error) { return "", nil },
-		registry: step.NewRegistry(),
+		configDir: func() (string, error) { return "", nil },
+		registry:  step.NewRegistry(),
 	})
 	command.SetArgs([]string{"list", "--format", "yaml"})
 	err := command.ExecuteContext(t.Context())

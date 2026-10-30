@@ -10,10 +10,10 @@ import (
 )
 
 func runWithResourceLimits(command *cobra.Command, deps dependencies, args []string, config runWorkflowConfig) (bool, error) {
-	if !command.Flags().Changed("cpus") && !command.Flags().Changed("memory") {
+	if !optionProvided(command, "cpus") && !optionProvided(command, "memory") {
 		return false, nil
 	}
-	if command.Flags().Changed("cpus") && config.cpus == "" || command.Flags().Changed("memory") && config.memory == "" {
+	if optionProvided(command, "cpus") && config.cpus == "" || optionProvided(command, "memory") && config.memory == "" {
 		return true, fmt.Errorf("--cpus and --memory must be non-empty when supplied")
 	}
 	limits, err := localresource.Parse(config.cpus, config.memory)
@@ -50,8 +50,8 @@ func runWithResourceLimits(command *cobra.Command, deps dependencies, args []str
 
 func resourceWorkerArgs(command *cobra.Command, args []string) []string {
 	worker := []string{"run"}
-	command.Flags().Visit(func(flag *pflag.Flag) {
-		if flag.Name == "cpus" || flag.Name == "memory" {
+	command.Flags().VisitAll(func(flag *pflag.Flag) {
+		if !optionProvided(command, flag.Name) || flag.Name == "cpus" || flag.Name == "memory" || flag.Name == "config" || flag.Name == "no-config" {
 			return
 		}
 		if flag.Value.Type() == "stringArray" {
@@ -62,5 +62,5 @@ func resourceWorkerArgs(command *cobra.Command, args []string) []string {
 		}
 		worker = append(worker, "--"+flag.Name+"="+flag.Value.String())
 	})
-	return append(append(worker, "--"), args...)
+	return append(append(worker, "--no-config", "--"), args...)
 }

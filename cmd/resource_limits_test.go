@@ -32,7 +32,7 @@ func TestResourceWorkerArgumentsPreserveValuesAndInheritedFlags(t *testing.T) {
 	if err := root.ExecuteContext(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"run", "--debug=true", "--env=TOKEN=a=b", "--env-loader=none", "--reporter=plain", "--reporter=github", "--var=a=x,y", "--var=b=$HOME", "--", "-workflow", "target"}
+	want := []string{"run", "--debug=true", "--env=TOKEN=a=b", "--env-loader=none", "--reporter=plain", "--reporter=github", "--var=a=x,y", "--var=b=$HOME", "--no-config", "--", "-workflow", "target"}
 	if diff := cmp.Diff(want, got); diff != "" {
 		t.Fatalf("worker arguments mismatch (-want +got):\n%s", diff)
 	}

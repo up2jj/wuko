@@ -101,6 +101,25 @@ func TestPluginLockCommandAndFrozenExecution(t *testing.T) {
 	}
 }
 
+func TestLocalConfigFrozenLockfileAppliesBeforeExecution(t *testing.T) {
+	t.Parallel()
+	directory, cache := t.TempDir(), t.TempDir()
+	workflows := filepath.Join(directory, ".wuko", "workflows")
+	commandPluginBundle(t, filepath.Join(workflows, "bundle"))
+	testfs.WriteFile(t, filepath.Join(workflows, "demo.yaml"), pluginWorkflow("./bundle/plugin.json"), 0o600)
+	testfs.Write(t, filepath.Join(directory, "wuko.yml"), "flags: {frozen-lockfile: true, env-loader: [none]}\ndefault: {workflow: demo}\n")
+	for _, args := range [][]string{{"run", "demo"}, {}} {
+		command := newRootCmd(pluginCommandDeps(t, directory, cache, nil))
+		command.SetArgs(args)
+		if err := command.ExecuteContext(t.Context()); err == nil || !strings.Contains(err.Error(), "missing plugin pin") {
+			t.Fatalf("%v: Execute() = %v, want frozen-lockfile rejection", args, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(workflows, "wuko.lock")); !os.IsNotExist(err) {
+		t.Fatalf("configured frozen execution created lock: %v", err)
+	}
+}
+
 func TestPluginLocalRunAndStdinCreatePins(t *testing.T) {
 	t.Parallel()
 	for _, stdin := range []bool{false, true} {

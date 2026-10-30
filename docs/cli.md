@@ -4,10 +4,12 @@
 
 Every command accepts `--help`. Global flags: `--debug` traces loading, validation, and execution
 to stderr with diagnostic redaction; `--env-loader auto|none|mise|asdf|direnv` loads the
-invocation environment.
+invocation environment. `--config PATH` selects a CLI defaults file; `--no-config` ignores CLI
+configuration entirely.
 
 ## Contents
 
+- [Local configuration](#local-configuration)
 - [Find and inspect workflows](#find-and-inspect-workflows)
 - [Run workflows](#run-workflows)
 - [Install and share workflows](#install-and-share-workflows)
@@ -15,6 +17,99 @@ invocation environment.
 - [Git hooks](#git-hooks)
 - [Coding-agent skills](#coding-agent-skills)
 - [Shell completion](#shell-completion)
+
+## Local configuration
+
+Place `wuko.yml` or `wuko.yaml` in the directory where you invoke Wuko to save CLI defaults.
+Wuko checks only the current directory; it does not search parents, your home directory, or
+workflow directories for CLI configuration. Workflow discovery keeps its existing search rules.
+
+```yaml
+flags:
+  debug: false
+  env-loader: [mise, direnv]
+
+default:
+  workflow: build
+  target: production # optional
+  flags:
+    once: true
+    reporter: [plain]
+    var: [stage=production]
+
+commands:
+  run:
+    flags:
+      reporter: [plain]
+      cpus: "1.5"
+      memory: 512MiB
+  list:
+    flags:
+      format: json
+  marketplace:
+    commands:
+      plugin:
+        commands:
+          release:
+            flags:
+              skip-build: true
+```
+
+Use long flag names without `--`. Root `flags` holds global options. A command's `flags` holds
+only options declared by that command; nest command groups under `commands`. Booleans use YAML
+`true` or `false`, string options use strings, and repeatable options use lists of strings.
+Quote numeric-looking strings such as `cpus: "1.5"`. `var` and `env` entries keep their usual
+`key=value` syntax.
+
+The optional `default` section changes bare `wuko` into a workflow invocation. `workflow` is
+required in that section and accepts the same name, URL, or GitHub locator as `wuko run`.
+`target` is optional. `default.flags` accepts run-specific options. Bare invocations also accept
+run flags, such as `wuko --dry-run` or `wuko --once=false`. Existing run-option validation still
+applies. Use `wuko run NAME [TARGET]` to select a different workflow explicitly.
+
+For bare invocations, run-option precedence is:
+
+1. Explicit CLI flags.
+2. `default.flags`.
+3. `commands.run.flags`.
+4. Built-in defaults.
+
+Explicit subcommands ignore `default` and use their own configured flags. CLI flags override
+configuration even when set to `false` or an empty string. Supplying a repeatable flag replaces
+its entire configured list; entries are not appended or merged by key. A configured empty list
+also replaces lower-priority lists. `WUKO_ENV_LOADERS`, when nonempty, overrides configured
+`flags.env-loader`; explicit `--env-loader` flags override both.
+
+Without `default`, bare `wuko` retains the picker (or prints available workflows without a
+terminal). Picker actions use global configuration and retain their existing launch behavior;
+they do not inherit `commands.run.flags` or other command defaults. Run-specific flags on bare
+`wuko` require `default.workflow`.
+
+```sh
+wuko                                  # configured default workflow, or the picker
+wuko --dry-run                        # preview the configured default workflow
+wuko --config ./settings/local.yml run build
+wuko --no-config                      # ignore all config and open the picker
+wuko --no-config run build            # explicit flags and built-in defaults
+```
+
+`--config PATH` selects exactly one file instead of automatic discovery; its extension need not
+be `.yml` or `.yaml`, but its contents must be YAML. Relative paths in configured options resolve
+from the invocation directory, including when the selected config is elsewhere. Configuration
+does not change the working directory.
+
+`--no-config` skips loading entirely, including malformed files. It cannot be combined with
+`--config`. If both automatic filenames exist, select one with `--config` or use `--no-config`.
+Missing automatic files are normal; an explicitly selected missing file fails. Empty files
+supply no defaults. Unknown fields, commands, flags, duplicate keys, invalid types, null option
+values, and multiple YAML documents are errors, including in inactive command sections.
+Config cannot set `config`, `no-config`, generated help/version flags, or private command options.
+Help, version, shell completion, and the private script SDK bypass config loading.
+
+Workflow packages also use the filenames `wuko.yaml` and `wuko.yml`. When invoking Wuko from
+a directory containing such a workflow manifest, use `wuko --no-config run --file ./wuko.yaml`
+so it is not interpreted as CLI config. CLI configuration files are trusted local settings;
+the `default` section can run a workflow immediately.
 
 ## Find and inspect workflows
 

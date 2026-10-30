@@ -50,7 +50,17 @@ func invocationEnvironmentPolicy(command *cobra.Command, deps dependencies) (env
 	if getenv == nil {
 		getenv = os.Getenv
 	}
-	return envload.ParsePolicyValue(getenv("WUKO_ENV_LOADERS"))
+	if value := getenv("WUKO_ENV_LOADERS"); value != "" {
+		return envload.ParsePolicyValue(value)
+	}
+	if optionConfigured(command, flags.Lookup("env-loader")) {
+		names, err := flags.GetStringArray("env-loader")
+		if err != nil {
+			return envload.Policy{}, fmt.Errorf("reading configured env-loader: %w", err)
+		}
+		return envload.ParsePolicy(splitLoaderNames(names))
+	}
+	return envload.ParsePolicyValue("")
 }
 
 // splitLoaderNames flattens comma-separated values so --env-loader mise,direnv reads
