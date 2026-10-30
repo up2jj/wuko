@@ -2,6 +2,8 @@ package tui
 
 import (
 	"bytes"
+	"io"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -155,6 +157,29 @@ func TestWriteTableIsPlainAndComplete(t *testing.T) {
 	}
 }
 
+func TestTableRejectsGroupedRows(t *testing.T) {
+	err := Table(t.Context(), strings.NewReader(""), &bytes.Buffer{}, TableConfig{
+		Message: "Releases", Columns: []TableColumn{{Header: "Version"}},
+		Rows: [][]string{{"1.0.0"}}, Groups: []string{"stable"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "grouped rows") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestTerminalWidthWithoutTerminalIsZero(t *testing.T) {
+	file, err := os.CreateTemp(t.TempDir(), "output")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	for _, output := range []io.Writer{&bytes.Buffer{}, file} {
+		if got := TerminalWidth(output); got != 0 {
+			t.Fatalf("TerminalWidth(%T) = %d, want 0", output, got)
+		}
+	}
+}
+
 func TestTableConfigValidation(t *testing.T) {
 	tests := []TableConfig{
 		{},
@@ -162,6 +187,7 @@ func TestTableConfigValidation(t *testing.T) {
 		{Message: "Table", Columns: []TableColumn{{}}},
 		{Message: "Table", Columns: []TableColumn{{Header: "Value", Width: -1}}},
 		{Message: "Table", Columns: []TableColumn{{Header: "Value"}}, Rows: [][]string{{"one", "two"}}},
+		{Message: "Table", Columns: []TableColumn{{Header: "Value"}}, Rows: [][]string{{"one"}}, Groups: []string{}},
 	}
 	for _, config := range tests {
 		if err := validateTableConfig(config); err == nil {

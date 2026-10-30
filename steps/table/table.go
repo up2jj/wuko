@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"unicode"
 
@@ -18,6 +19,13 @@ type Config struct {
 	Message string         `yaml:"message"`
 	From    string         `yaml:"from"`
 	Columns []ColumnConfig `yaml:"columns"`
+	// Browse opens the interactive browser in a terminal; false always prints.
+	Browse *bool `yaml:"browse,omitempty"`
+	// GroupField prints a heading per distinct value, in order of first
+	// appearance, and omits the columns showing that field.
+	GroupField string `yaml:"group_field,omitempty"`
+	// Empty replaces the table when the source list has no rows.
+	Empty string `yaml:"empty,omitempty"`
 }
 
 type ColumnConfig struct {
@@ -57,8 +65,18 @@ func New(raw map[string]any) (step.Runner, error) {
 			return nil, fmt.Errorf("column %d width must be positive", index+1)
 		}
 	}
+	if config.GroupField != "" {
+		if config.browse() {
+			return nil, fmt.Errorf("group_field requires browse: false")
+		}
+		if !slices.ContainsFunc(config.Columns, func(column ColumnConfig) bool { return column.Field != config.GroupField }) {
+			return nil, fmt.Errorf("group_field %q leaves no columns to show", config.GroupField)
+		}
+	}
 	return &Runner{config: config}, nil
 }
+
+func (c Config) browse() bool { return c.Browse == nil || *c.Browse }
 
 func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, error) {
 	source, err := step.Lookup(request, r.config.From)
@@ -69,12 +87,18 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 	if !ok {
 		return step.Result{}, fmt.Errorf("table source %q is not a list", r.config.From)
 	}
+	if len(items) == 0 && r.config.Empty != "" {
+		if _, err := fmt.Fprintf(request.Stdout, "%s\n%s\n", ansi.Strip(r.config.Message), sanitizeCell(r.config.Empty)); err != nil {
+			return step.Result{}, fmt.Errorf("writing table: %w", err)
+		}
+		return step.Result{}, nil
+	}
 	config, err := r.tableConfig(ctx, items)
 	if err != nil {
 		return step.Result{}, err
 	}
-	if !request.Interactive {
-		if err := tui.WriteTable(request.Stdout, config, 80); err != nil {
+	if !request.Interactive || !r.config.browse() {
+		if err := tui.WriteTable(request.Stdout, config, tui.TerminalWidth(request.Stdout)); err != nil {
 			return step.Result{}, fmt.Errorf("writing table: %w", err)
 		}
 		return step.Result{}, nil
@@ -86,14 +110,24 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 }
 
 func (r *Runner) tableConfig(ctx context.Context, items []any) (tui.TableConfig, error) {
-	columns := make([]tui.TableColumn, len(r.config.Columns))
-	for index, column := range r.config.Columns {
+	var shown []ColumnConfig
+	for _, column := range r.config.Columns {
+		if r.config.GroupField == "" || column.Field != r.config.GroupField {
+			shown = append(shown, column)
+		}
+	}
+	columns := make([]tui.TableColumn, len(shown))
+	for index, column := range shown {
 		columns[index] = tui.TableColumn{Header: column.Header}
 		if column.Width != nil {
 			columns[index].Width = *column.Width
 		}
 	}
 	rows := make([][]string, len(items))
+	var groups []string
+	if r.config.GroupField != "" {
+		groups = make([]string, len(items))
+	}
 	for rowIndex, item := range items {
 		if err := ctx.Err(); err != nil {
 			return tui.TableConfig{}, err
@@ -101,8 +135,8 @@ func (r *Runner) tableConfig(ctx context.Context, items []any) (tui.TableConfig,
 		if _, ok := item.(map[string]any); !ok {
 			return tui.TableConfig{}, fmt.Errorf("table source row %d is not an object", rowIndex+1)
 		}
-		row := make([]string, len(r.config.Columns))
-		for columnIndex, column := range r.config.Columns {
+		row := make([]string, len(shown))
+		for columnIndex, column := range shown {
 			value, err := step.LookupValue(item, column.Field)
 			if err != nil {
 				return tui.TableConfig{}, fmt.Errorf("table source row %d column %q: %w", rowIndex+1, column.Header, err)
@@ -113,8 +147,45 @@ func (r *Runner) tableConfig(ctx context.Context, items []any) (tui.TableConfig,
 			}
 		}
 		rows[rowIndex] = row
+		if groups != nil {
+			value, err := step.LookupValue(item, r.config.GroupField)
+			if err != nil {
+				return tui.TableConfig{}, fmt.Errorf("table source row %d group_field: %w", rowIndex+1, err)
+			}
+			if groups[rowIndex], err = formatCell(value); err != nil {
+				return tui.TableConfig{}, fmt.Errorf("table source row %d group_field: %w", rowIndex+1, err)
+			}
+			if groups[rowIndex] == "" {
+				groups[rowIndex] = "(none)"
+			}
+		}
 	}
-	return tui.TableConfig{Message: r.config.Message, Columns: columns, Rows: rows}, nil
+	if groups != nil {
+		rows, groups = groupRows(rows, groups)
+	}
+	return tui.TableConfig{Message: r.config.Message, Columns: columns, Rows: rows, Groups: groups}, nil
+}
+
+// groupRows orders rows by the first appearance of their group, keeping the
+// source order within each group.
+func groupRows(rows [][]string, groups []string) ([][]string, []string) {
+	var order []string
+	members := map[string][]int{}
+	for index, group := range groups {
+		if _, ok := members[group]; !ok {
+			order = append(order, group)
+		}
+		members[group] = append(members[group], index)
+	}
+	orderedRows := make([][]string, 0, len(rows))
+	orderedGroups := make([]string, 0, len(groups))
+	for _, group := range order {
+		for _, index := range members[group] {
+			orderedRows = append(orderedRows, rows[index])
+			orderedGroups = append(orderedGroups, group)
+		}
+	}
+	return orderedRows, orderedGroups
 }
 
 func formatCell(value any) (string, error) {

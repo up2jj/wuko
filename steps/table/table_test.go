@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
 )
@@ -28,6 +29,8 @@ func TestConfigValidation(t *testing.T) {
 		{"message": "Rows", "from": "vars.rows", "columns": []any{map[string]any{"header": "Name"}}},
 		{"message": "Rows", "from": "vars.rows", "columns": []any{map[string]any{"header": "Name", "field": "name", "width": 0}}},
 		{"message": "Rows", "from": "vars.rows", "columns": []any{map[string]any{"header": "Name", "field": "name", "unknown": true}}},
+		{"message": "Rows", "from": "vars.rows", "group_field": "state", "columns": []any{map[string]any{"header": "Name", "field": "name"}}},
+		{"message": "Rows", "from": "vars.rows", "browse": false, "group_field": "state", "columns": []any{map[string]any{"header": "State", "field": "state"}}},
 	}
 	for _, raw := range tests {
 		if _, err := New(raw); err == nil {
@@ -69,6 +72,75 @@ func TestNonInteractiveTableNormalizesAndPrintsRows(t *testing.T) {
 	}
 	if strings.Contains(output.String(), "\x1b[") {
 		t.Fatalf("output contains ANSI: %q", output.String())
+	}
+}
+
+func TestPrintModeWritesTableWithoutBrowsing(t *testing.T) {
+	runner := steptest.BuildAs[*Runner](t, New, map[string]any{
+		"message": "About to start", "from": "vars.rows", "browse": false,
+		"columns": []any{map[string]any{"header": "Service", "field": "name"}},
+	})
+	var output bytes.Buffer
+	// An interactive run with no input would block in the browser; print mode returns at once.
+	_, err := runner.Run(t.Context(), step.Request{
+		Vars:        map[string]any{"rows": []any{map[string]any{"name": "api"}}},
+		Stdin:       strings.NewReader(""),
+		Stdout:      &output,
+		Interactive: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "About to start\n Service \n api"; !strings.HasPrefix(output.String(), want) {
+		t.Fatalf("output = %q, want prefix %q", output.String(), want)
+	}
+}
+
+func TestPrintModeGroupsRowsByFirstAppearance(t *testing.T) {
+	runner := steptest.BuildAs[*Runner](t, New, map[string]any{
+		"message": "Plan", "from": "vars.rows", "browse": false, "group_field": "state",
+		"columns": []any{
+			map[string]any{"header": "State", "field": "state"},
+			map[string]any{"header": "Service", "field": "name"},
+		},
+	})
+	var output bytes.Buffer
+	_, err := runner.Run(t.Context(), step.Request{
+		Vars: map[string]any{"rows": []any{
+			map[string]any{"state": "start", "name": "api"},
+			map[string]any{"state": "skip", "name": "db"},
+			map[string]any{"state": "start", "name": "web"},
+			map[string]any{"state": nil, "name": "cache"},
+		}},
+		Stdout: &output,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lines []string
+	for line := range strings.Lines(output.String()) {
+		lines = append(lines, strings.TrimRight(line, " \n"))
+	}
+	want := []string{"Plan", " Service", "start", " api", " web", "", "skip", " db", "", "(none)", " cache", ""}
+	if diff := cmp.Diff(want, lines); diff != "" {
+		t.Fatalf("lines (-want +got):\n%s", diff)
+	}
+}
+
+func TestEmptySourcePrintsEmptyMessage(t *testing.T) {
+	runner := steptest.BuildAs[*Runner](t, New, map[string]any{
+		"message": "About to start", "from": "vars.rows", "empty": "Nothing to start.",
+		"columns": []any{map[string]any{"header": "Service", "field": "name"}},
+	})
+	var output bytes.Buffer
+	_, err := runner.Run(t.Context(), step.Request{
+		Vars: map[string]any{"rows": []any{}}, Stdin: strings.NewReader(""), Stdout: &output, Interactive: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := output.String(), "About to start\nNothing to start.\n"; got != want {
+		t.Fatalf("output = %q, want %q", got, want)
 	}
 }
 

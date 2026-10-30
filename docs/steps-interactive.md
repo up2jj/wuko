@@ -8,7 +8,7 @@ Standalone input steps such as `tui_input` and `tui_choice` write their result t
 steps inside concurrent groups, require a supplied value unless an optional `tui_choice` resolves
 to no selection or the prompt opts into its default; see
 [Answering prompts unattended](#answering-prompts-unattended). The display-only `tui_table` step does not publish a value and prints a static
-table when input is non-interactive. `tui_form` publishes each field directly as a step output
+table when input is non-interactive or it sets `browse: false`. `tui_form` publishes each field directly as a step output
 and never assigns workflow variables; its unattended inputs use explicit field `value` bindings.
 
 Text and password inputs require strings. Since `--var` parses JSON, pass numeric-looking text
@@ -797,7 +797,39 @@ range and current page. Page size follows the terminal height and updates when i
 
 The step is display-only and publishes no outputs or variables. With non-interactive input it
 prints the message, headers, and every row once, without pagination controls. Rows are never
-silently truncated or capped.
+silently truncated or capped. Printed tables fit the terminal width, or 80 columns when output is
+not a terminal.
+
+Set `browse: false` to print the table in every run and continue without waiting for Enter, for
+example to summarise a plan before a `tui_confirm`:
+
+```yaml
+- id: plan
+  type: tui_table
+  with:
+    message: About to start
+    from: vars.plan_rows
+    browse: false
+    group_field: state
+    empty: Nothing to start.
+    columns:
+      - {header: Service, field: name}
+      - {header: Kind, field: kind}
+
+- id: start
+  type: tui_confirm
+  with:
+    variable: start
+    message: Start them now?
+```
+
+`group_field` names an optionally dotted field and prints one heading per distinct value, in order
+of first appearance, followed by that group's rows in source order. Columns showing that field are
+omitted, and a `null` or empty value groups under `(none)`. It requires `browse: false`.
+
+`empty` replaces the table when `from` is an empty list: the step prints the message and that line
+instead, in any mode, and does not open the browser. Without it, an empty list prints the headers
+alone or opens an empty browser.
 
 ## `dashboard`
 

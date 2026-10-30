@@ -10,6 +10,7 @@ import (
 	bubblestable "charm.land/bubbles/v2/table"
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
+	"golang.org/x/term"
 )
 
 const (
@@ -29,6 +30,9 @@ type TableConfig struct {
 	Message string
 	Columns []TableColumn
 	Rows    [][]string
+	// Groups optionally labels each row. WriteTable prints a heading whenever the
+	// label changes, so rows sharing a group must be adjacent; Table rejects it.
+	Groups []string
 }
 
 type tableModel struct {
@@ -232,6 +236,9 @@ func validateTableConfig(config TableConfig) error {
 			return fmt.Errorf("row %d has %d cells; want %d", index+1, len(row), len(config.Columns))
 		}
 	}
+	if config.Groups != nil && len(config.Groups) != len(config.Rows) {
+		return fmt.Errorf("%d group labels for %d rows", len(config.Groups), len(config.Rows))
+	}
 	return nil
 }
 
@@ -239,6 +246,9 @@ func validateTableConfig(config TableConfig) error {
 func Table(ctx context.Context, input io.Reader, output io.Writer, config TableConfig) error {
 	if err := validateTableConfig(config); err != nil {
 		return err
+	}
+	if config.Groups != nil {
+		return fmt.Errorf("grouped rows can only be written")
 	}
 	program := tea.NewProgram(newTableModel(config),
 		tea.WithContext(ctx), tea.WithInput(input), tea.WithOutput(output), tea.WithoutSignalHandler())
@@ -268,9 +278,46 @@ func WriteTable(output io.Writer, config TableConfig, width int) error {
 	// Static output keeps its original one-row trailing space, independently of
 	// the borders and footer reserved by the interactive screen.
 	model.table.SetHeight(len(model.rows) + 2)
-	view := model.styles.message.Render(config.Message) + "\n" + model.table.View() + "\n"
-	_, err := io.WriteString(output, ansi.Strip(view))
+	table := ansi.Strip(model.table.View())
+	if config.Groups != nil {
+		table = groupTableLines(table, config.Groups, width)
+	}
+	view := ansi.Strip(model.styles.message.Render(config.Message)) + "\n" + table + "\n"
+	_, err := io.WriteString(output, view)
 	return err
+}
+
+// groupTableLines inserts a heading line before every run of rows that shares a
+// group label. The rendered table has one header line, one line per row, and
+// trailing padding, so row lines are found by position.
+func groupTableLines(table string, groups []string, width int) string {
+	lines := strings.Split(table, "\n")
+	grouped := make([]string, 0, len(lines)+2*len(groups))
+	grouped = append(grouped, lines[0])
+	for index, line := range lines[1:] {
+		if index < len(groups) && (index == 0 || groups[index] != groups[index-1]) {
+			if index > 0 {
+				grouped = append(grouped, "")
+			}
+			grouped = append(grouped, ansi.Truncate(groups[index], width, "…"))
+		}
+		grouped = append(grouped, line)
+	}
+	return strings.Join(grouped, "\n")
+}
+
+// TerminalWidth reports the column count of output when it is a terminal, and
+// zero otherwise so WriteTable falls back to its default width.
+func TerminalWidth(output io.Writer) int {
+	file, ok := output.(interface{ Fd() uintptr })
+	if !ok {
+		return 0
+	}
+	width, _, err := term.GetSize(int(file.Fd()))
+	if err != nil {
+		return 0
+	}
+	return width
 }
 
 func (m *tableModel) styleTable() {

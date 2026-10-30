@@ -25,7 +25,7 @@ Prompt for input or show rich terminal views. See also [browser forms](forms.md)
 | `tui_date` | Choose a bounded date with a calendar or relative day shortcut | [Interactive steps](steps-interactive.md#tui_date) |
 | `tui_path` | Select one or many files/directories | [Interactive steps](steps-interactive.md#tui_path) |
 | `tui_review` | Review plain text or a colored unified diff | [Interactive steps](steps-interactive.md#tui_review) |
-| `tui_table` | Browse object-backed data in a paginated table | [Interactive steps](steps-interactive.md#tui_table) |
+| `tui_table` | Browse or print object-backed data as a table | [Interactive steps](steps-interactive.md#tui_table) |
 | `dashboard` | Monitor grouped template widgets and run contextual actions | [Interactive steps](steps-interactive.md#dashboard) |
 | `tui_confirm` | Collect a boolean decision | [Interactive steps](steps-interactive.md#tui_confirm) |
 
