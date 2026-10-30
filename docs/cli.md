@@ -104,6 +104,9 @@ Missing automatic files are normal; an explicitly selected missing file fails. E
 supply no defaults. Unknown fields, commands, flags, duplicate keys, invalid types, null option
 values, and multiple YAML documents are errors, including in inactive command sections.
 Config cannot set `config`, `no-config`, generated help/version flags, or private command options.
+It also cannot set flags that confirm or scope a removal (`--yes` on `uninstall`,
+`plugin uninstall`, and `marketplace workflow|plugin remove`, and `--global` on both uninstall
+commands), so a checked-in config never removes anything without a prompt.
 Help, version, shell completion, and the private script SDK bypass config loading.
 
 Workflow packages also use the filenames `wuko.yaml` and `wuko.yml`. When invoking Wuko from

@@ -296,6 +296,7 @@ func newPluginUninstallCmd(deps dependencies) *cobra.Command {
 	}}
 	command.Flags().BoolVar(&global, "global", false, "use the user plugin directory")
 	command.Flags().BoolVar(&yes, "yes", false, "confirm uninstall non-interactively")
+	markCLIOnly(command, "yes", "global")
 	command.ValidArgsFunction = uninstallPluginCompletion(deps)
 	return command
 }

@@ -92,6 +92,7 @@ func newMarketplacePluginRemoveCmd(deps dependencies) *cobra.Command {
 		},
 	}
 	command.Flags().BoolVar(&yes, "yes", false, "confirm removal non-interactively")
+	markCLIOnly(command, "yes")
 	return command
 }
 

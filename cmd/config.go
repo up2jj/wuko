@@ -46,6 +46,19 @@ func (value *configString) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
+// cliOnlyAnnotation marks flags that confirm or scope a removal. A config file found in
+// the working directory is repository content, so it must not be able to remove anything
+// without the user asking for it on the command line.
+const cliOnlyAnnotation = "wuko_cli_only"
+
+func markCLIOnly(command *cobra.Command, names ...string) {
+	for _, name := range names {
+		if err := command.Flags().SetAnnotation(name, cliOnlyAnnotation, []string{"true"}); err != nil {
+			panic(err)
+		}
+	}
+}
+
 type localConfiguration struct {
 	document   localConfigDocument
 	configured map[*pflag.Flag]bool
@@ -256,6 +269,9 @@ func validateConfigFlags(values map[string]any, flags *pflag.FlagSet, path strin
 		flag := flags.Lookup(name)
 		if flag == nil || flag.Hidden || name == "config" || name == "no-config" || name == "help" || name == "version" {
 			return fmt.Errorf("%s.%s: unknown or non-configurable flag", path, name)
+		}
+		if _, ok := flag.Annotations[cliOnlyAnnotation]; ok {
+			return fmt.Errorf("%s.%s: must be passed on the command line", path, name)
 		}
 		valid := false
 		switch flag.Value.Type() {
