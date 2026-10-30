@@ -15,6 +15,13 @@ import (
 func (e *Engine) Validate(ctx context.Context, definition *workflow.Definition, options Options) (validateErr error) {
 	options = prepareWorkflowEnvironment(options)
 	options = recordCaller(options, definition)
+	options = scopeProcessReplacement(definition, options, true)
+	// Only the selected workflow owns an audit; nested action validation adds to it.
+	var audit *replacementAudit
+	if options.ReplaceProcess != nil {
+		audit = &replacementAudit{}
+		options.replacementAudit = audit
+	}
 	if options.workflowInvoker == nil {
 		options.workflowInvoker = e.workflowInvoker
 	}
@@ -95,6 +102,9 @@ func (e *Engine) Validate(ctx context.Context, definition *workflow.Definition, 
 		}
 	}
 	err = issues.Err()
+	if err == nil {
+		err = validateProcessReplacement(definition, options, audit)
+	}
 	status := diagnostic.StatusSucceeded
 	if err != nil {
 		status = diagnostic.StatusFailed
@@ -302,6 +312,7 @@ func (e *Engine) validateStepsRaw(ctx context.Context, definition *workflow.Defi
 			traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusFailed, started, "building runner", err)
 			return fmt.Errorf("step %q: %w", workflowStep.ID, err)
 		}
+		options.replacementAudit.record(workflowStep, runner)
 		if options.insideExecutor {
 			if validator := options.executorStepValidator; validator != nil {
 				if err := validator.ValidateStep(workflowStep.Type, workflowStep.With); err != nil {

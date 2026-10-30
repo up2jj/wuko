@@ -28,6 +28,7 @@ type ExecutionReport struct {
 	Workflow         string                   `json:"workflow,omitempty"`
 	Status           engine.ExecutionStatus   `json:"status"`
 	DryRun           bool                     `json:"dry_run"`
+	Replaced         bool                     `json:"replaced,omitempty"`
 	DurationMS       int64                    `json:"duration_ms"`
 	FailedStep       string                   `json:"failed_step,omitempty"`
 	Stats            ExecutionStats           `json:"stats"`
@@ -77,6 +78,7 @@ func NewExecutionReport(outcome Outcome) ExecutionReport {
 		Workflow:      outcome.WorkflowName,
 		Status:        status,
 		DryRun:        outcome.DryRun,
+		Replaced:      outcome.Replaced,
 		DurationMS:    milliseconds(outcome.Duration),
 		FailedStep:    firstFailedStep(outcome.Stats.Steps),
 		Stats: ExecutionStats{
@@ -94,7 +96,7 @@ func NewExecutionReport(outcome Outcome) ExecutionReport {
 	for _, issue := range validation.Issues(outcome.Err) {
 		report.ValidationIssues = append(report.ValidationIssues, issue.Safe())
 	}
-	if status == engine.StatusSucceeded && !outcome.DryRun && outcome.Err == nil {
+	if status == engine.StatusSucceeded && !outcome.DryRun && !outcome.Replaced && outcome.Err == nil {
 		outputs := outcome.Outputs
 		if outputs == nil {
 			outputs = map[string]any{}

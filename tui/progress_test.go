@@ -211,3 +211,14 @@ func TestProgressRendersPollLifecycleAndSummary(t *testing.T) {
 		t.Fatalf("output = %q, want %q", output.String(), want)
 	}
 }
+
+func TestProgressOmitsSummaryForReplacedWorkflow(t *testing.T) {
+	t.Parallel()
+	var output bytes.Buffer
+	NewProgress(&output, false).Report(engine.ProgressEvent{
+		Kind: engine.WorkflowFinished, Status: engine.StatusSucceeded, WorkflowName: "handoff", Replaced: true,
+	})
+	if output.Len() != 0 {
+		t.Fatalf("output = %q, want none", output.String())
+	}
+}

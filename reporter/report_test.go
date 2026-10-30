@@ -296,3 +296,11 @@ func assertNoTemporaryReports(t *testing.T, directory, destination string) {
 type failingReportWriter struct{}
 
 func (failingReportWriter) Write([]byte) (int, error) { return 0, errors.New("unavailable") }
+
+func TestExecutionReportMarksReplacedRunWithoutOutputs(t *testing.T) {
+	t.Parallel()
+	report := NewExecutionReport(Outcome{WorkflowName: "handoff", Status: engine.StatusSucceeded, Replaced: true})
+	if !report.Replaced || report.Outputs != nil {
+		t.Fatalf("report replaced = %v outputs = %v", report.Replaced, report.Outputs)
+	}
+}

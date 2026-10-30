@@ -1164,8 +1164,9 @@ same safe `validation_issues` projection emitted by `wuko validate --format json
 ```
 
 `invocation_id`, `status`, `dry_run`, `duration_ms`, and `stats` are always present. `run_id`,
-`workflow`, and `failed_step` are omitted when unavailable. `failed_step` is the declared ID of the
-first recorded unsuccessful top-level step and is omitted when that step has no ID. Successful non-dry runs also contain `outputs`,
+`workflow`, and `failed_step` are omitted when unavailable. `replaced` is `true` only when the final
+step replaced the Wuko process; such a run has no `outputs`. `failed_step` is the declared ID of the
+first recorded unsuccessful top-level step and is omitted when that step has no ID. Successful non-dry runs that were not replaced also contain `outputs`,
 including an empty object when the workflow declares none; failed and dry runs omit it. The
 optional `validation_issues` array contains stable codes, messages, hints, YAML paths, and sanitized
 source spans; it never contains excerpts or underlying error text. The

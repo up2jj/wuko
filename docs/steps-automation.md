@@ -847,6 +847,54 @@ TTY mode cannot be combined with non-empty `stdin`. Terminal state is restored w
 succeeds, fails, times out, or is canceled. `stdout`, `stderr`, and `capture_limit` cannot be set
 with `tty: true`; TTY output remains a live merged stream with its existing 1 MiB capture.
 
+### Process replacement
+
+When the last action of a workflow is to hand the terminal to an interactive program, such as a
+database client, SSH session, debugger, or remote console, set `replace: true` next to `tty: true`.
+Wuko then replaces its own process with the command instead of supervising it as a child:
+
+```yaml
+- id: connect
+  type: shell
+  with:
+    argv:
+      expr: steps.connection.argv
+    tty: true
+    replace: true
+```
+
+The command comes from `argv` or `command` and `args`. It is never reparsed by a shell, and it is
+resolved against the step's `PATH` before Wuko commits to the replacement. The program inherits
+stdin, stdout, stderr, and the terminal, together with the step's environment and working directory
+and Wuko's process ID. Its exit status becomes the exit status of the `wuko run` invocation. Using
+`exec` inside a `script` only replaces Wuko's child shell, so Wuko would stay in place as its parent.
+
+Once the replacement starts, Wuko does not resume. It prints no completion summary, publishes no
+workflow outputs, and retries nothing. A JSON run report written with `--report-json` marks the run
+`"replaced": true`. If the command cannot be started, for example because it is missing, not
+executable, or its working directory does not exist, the step fails like any other step.
+
+Nothing in Wuko runs after a replacement, so validation admits it only where nothing would be
+skipped:
+
+- The step must be the final top-level step of the workflow selected by `wuko run` or the workflow
+  picker, outside every block and control (no `if:` block, `attempt`, `foreach`, `concurrent`,
+  executor, worktree, and so on). It may still have a step-level `if:`. When that condition skips
+  it, the workflow finishes normally.
+- Dependency workflows, `run_workflow` children, composite actions, scheduled `cron` runs without
+  `--once`, Git hooks, and the web UI cannot replace the process.
+- The workflow may not declare `finally`, `defer`, background controls such as `observe`, or
+  `outputs`. It also may not use steps that create managed resources cleaned up when the workflow
+  ends, such as `temp`, managed downloads, or Docker operations, because that cleanup would either
+  be skipped or remove resources the replacement still needs. Background services that are still
+  running when the step starts make it fail instead of being orphaned.
+- `replace` requires `tty: true` and cannot be combined with `script`, `shell`, `sdk`, `files`,
+  `stdin`, `stdout`, `stderr`, `capture_limit`, `allowed_exit_codes`, `interactions`, `interact`,
+  `terminal`, `user`, or `elevated`. It is local-only and is rejected inside executor blocks.
+- The step declares no outputs.
+
+Process replacement is available on the supported Unix platforms, macOS and Linux.
+
 ### Scripted PTY interactions
 
 Use `interactions` to write initial input, wait for prompts, inject dynamic values, and optionally

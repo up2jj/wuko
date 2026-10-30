@@ -1,0 +1,26 @@
+version: 1
+name: shell-replace
+description: Resolve a client command, then replace the Wuko process with it
+
+vars:
+  environment: dev
+
+steps:
+  # A real workflow would discover an endpoint here and build, for example,
+  # ["psql", "--host", host, "--dbname", name]. The list is passed to the
+  # operating system as is, without being reparsed by a shell.
+  - id: connection
+    type: set
+    with:
+      variable: client_argv
+      expr: '["sh", "-c", "echo connected to " + vars.environment + "; exec sh -i"]'
+
+  # The final step replaces Wuko: the client owns the terminal, signals, and
+  # exit status, and Wuko prints no completion summary.
+  - id: connect
+    type: shell
+    with:
+      argv:
+        expr: vars.client_argv
+      tty: true
+      replace: true

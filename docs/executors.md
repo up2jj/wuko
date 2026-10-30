@@ -366,7 +366,7 @@ Each child is invoked with Docker exec; the image entrypoint is not rerun for ev
 command or shell named by the shell step must exist in the image. Workflow and step environment
 values, retry metadata, stdin, stdout, stderr, exit codes, timeouts, and shell output capture retain
 their normal shell-step behavior. Interactive `shell.with.tty` is local-only and is rejected inside
-Docker executor blocks.
+Docker executor blocks. `shell.with.replace` is rejected inside every executor block.
 
 ## Reading and writing files
 

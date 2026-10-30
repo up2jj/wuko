@@ -42,6 +42,7 @@ type Config struct {
 	Elevated         bool                 `yaml:"elevated,omitempty"`
 	Stdin            string               `yaml:"stdin,omitempty"`
 	TTY              bool                 `yaml:"tty,omitempty"`
+	Replace          bool                 `yaml:"replace,omitempty"`
 	Interactions     interactionsConfig   `yaml:"interactions,omitempty"`
 	Interact         bool                 `yaml:"interact,omitempty"`
 	Terminal         *terminalConfig      `yaml:"terminal,omitempty"`
@@ -88,6 +89,9 @@ type Runner struct {
 
 func (*Runner) ExecutorAware() {}
 
+// ReplacesProcess reports that the step ends the run by replacing the Wuko process.
+func (r *Runner) ReplacesProcess() bool { return r.config.Replace }
+
 type sdkRunner struct{ *Runner }
 
 func (*sdkRunner) InlineWorkflowAware() {}
@@ -108,6 +112,9 @@ func Register(registry *step.Registry) error {
 		Builder: New,
 		Outputs: shellOutputs(true, true),
 		ConfigOutputs: func(raw map[string]any) step.OutputSchema {
+			if replace, _ := raw["replace"].(bool); replace {
+				return step.ClosedOutputs()
+			}
 			sdk, _ := raw["sdk"].(string)
 			_, files := raw["files"]
 			return shellOutputs(sdk != "", files)
@@ -222,6 +229,9 @@ func New(raw map[string]any) (step.Runner, error) {
 	if err := validateTerminalConfig(config.Terminal, config.TTY, handoff); err != nil {
 		return nil, err
 	}
+	if err := validateReplaceConfig(raw, config); err != nil {
+		return nil, err
+	}
 	files, err := step.ParsePathList(raw, "files")
 	if err != nil {
 		return nil, err
@@ -286,7 +296,37 @@ func New(raw map[string]any) (step.Runner, error) {
 	return runner, nil
 }
 
+// replaceIncompatibleFields lists the settings that need Wuko to keep running after the
+// command starts, or that would reparse the command through a shell.
+var replaceIncompatibleFields = []string{
+	"script", "shell", "sdk", "sdk_args", "files", "stdin", "stdout", "stderr", "capture_limit",
+	"allowed_exit_codes", "interactions", "interact", "terminal", "user", "elevated",
+}
+
+func validateReplaceConfig(raw map[string]any, config Config) error {
+	if !config.Replace {
+		return nil
+	}
+	if !config.TTY {
+		return fmt.Errorf("replace requires tty")
+	}
+	for _, field := range replaceIncompatibleFields {
+		if _, exists := raw[field]; exists {
+			return fmt.Errorf("replace cannot be combined with %s", field)
+		}
+	}
+	return nil
+}
+
 func (r *Runner) Validate(_ context.Context, request step.Request) error {
+	if r.config.Replace {
+		if request.InsideExecutor {
+			return fmt.Errorf("replace is not supported inside executor blocks")
+		}
+		if request.ReplaceProcess == nil {
+			return fmt.Errorf("replace is available only to the final step of a workflow run directly by wuko run; cron schedules, dependency workflows, run_workflow, actions, and the web UI cannot replace the process")
+		}
+	}
 	if r.config.SDK != "" && request.InsideExecutor {
 		return fmt.Errorf("sdk injection is not supported inside executor blocks")
 	}
@@ -337,6 +377,13 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 	maps.Copy(environment, inherited)
 	maps.Copy(environment, r.config.Env)
 	environment = step.ApplyAttemptEnvironment(environment, request)
+	if r.config.Replace {
+		replacement, err := process.ResolveReplacement(append([]string{command}, args...), dir, environment)
+		if err != nil {
+			return step.Result{}, err
+		}
+		return step.Result{}, request.ReplaceProcess(replacement)
+	}
 	var bridge *scriptsdk.Bridge
 	if r.config.SDK != "" {
 		if request.InsideExecutor {

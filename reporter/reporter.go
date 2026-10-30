@@ -28,6 +28,9 @@ type Outcome struct {
 	Outputs         map[string]any
 	Err             error
 	DryRun          bool
+	// Replaced reports that the run handed the process to the program its final step
+	// resolved, so the outcome carries no outputs and terminal reporters print no summary.
+	Replaced bool
 }
 
 // Reporter receives ordered progress and diagnostic events, then one final outcome. Engine calls

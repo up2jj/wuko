@@ -145,6 +145,7 @@ func (reporters *runReporters) complete(ctx context.Context, workflowName string
 	if state != nil {
 		outcome.Stats = state.Stats
 		outcome.Outputs = workflow.CloneMap(state.Outputs)
+		outcome.Replaced = state.Replaced
 		applyStatsIdentity(&outcome, state.Stats)
 	}
 	reporters.mu.Lock()

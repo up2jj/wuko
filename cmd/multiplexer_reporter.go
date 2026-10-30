@@ -81,7 +81,7 @@ func (reporter *multiplexerProgressReporter) Progress(event engine.ProgressEvent
 		return
 	}
 	if event.Kind == engine.WorkflowFinished && event.Depth == 0 {
-		reporter.stopRun(finalTitle(event.Status, event.WorkflowName, false))
+		reporter.stopRun(finalTitle(event.Status, event.WorkflowName, false, event.Replaced))
 		return
 	}
 	reporter.mu.Lock()
@@ -116,7 +116,7 @@ func (reporter *multiplexerProgressReporter) Finish(_ context.Context, outcome r
 		reporter.stopRun("")
 		return nil
 	}
-	reporter.stopRun(finalTitle(outcome.Status, outcome.WorkflowName, outcome.DryRun))
+	reporter.stopRun(finalTitle(outcome.Status, outcome.WorkflowName, outcome.DryRun, outcome.Replaced))
 	return nil
 }
 
@@ -193,9 +193,12 @@ func (reporter *multiplexerProgressReporter) writeFrame() {
 	_ = reporter.sink.SetTitle(title)
 }
 
-func finalTitle(status engine.ExecutionStatus, workflow string, dryRun bool) string {
+func finalTitle(status engine.ExecutionStatus, workflow string, dryRun, replaced bool) string {
 	if dryRun {
 		return "◇ " + workflow + " · dry run"
+	}
+	if replaced {
+		return "↪ " + workflow
 	}
 	marker := "✗"
 	switch status {

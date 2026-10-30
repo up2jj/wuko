@@ -198,6 +198,10 @@ func (progress *Progress) Report(event engine.ProgressEvent) {
 		}
 		fmt.Fprintln(progress.writer, line)
 	case engine.WorkflowFinished:
+		if event.Replaced {
+			// The final step's program now owns the terminal; a summary would interleave with it.
+			return
+		}
 		parts := progress.runSummary(event.Stats)
 		label := "Workflow"
 		if event.Depth > 0 {

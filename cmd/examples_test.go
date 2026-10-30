@@ -56,7 +56,7 @@ func TestExamplesValidate(t *testing.T) {
 				if err != nil {
 					t.Fatalf("target %q: %v", target, err)
 				}
-				if err := engine.New(registry, engine.WithExecutors(executors)).Validate(t.Context(), definition, engine.Options{RunDir: runDir}); err != nil {
+				if err := engine.New(registry, engine.WithExecutors(executors)).Validate(t.Context(), definition, engine.Options{RunDir: runDir, ReplaceProcess: previewProcessReplacement}); err != nil {
 					t.Fatalf("target %q: %v", target, err)
 				}
 			}

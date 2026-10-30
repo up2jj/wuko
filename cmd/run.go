@@ -15,6 +15,7 @@ import (
 	"github.com/up2jj/wuko/correlation"
 	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/engine"
+	"github.com/up2jj/wuko/process"
 	reporterpkg "github.com/up2jj/wuko/reporter"
 	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
@@ -45,6 +46,7 @@ func newRunCmd(deps dependencies) *cobra.Command {
 				}
 				return runGitHubWorkflowPicker(command, deps, args, config)
 			}
+			config.replaceProcess = true
 			return runWorkflow(command, deps, args, config)
 		},
 	}
@@ -66,15 +68,18 @@ func newRunCmd(deps dependencies) *cobra.Command {
 }
 
 type runWorkflowConfig struct {
-	cpus            string
-	memory          string
-	variables       []string
-	variableFiles   []string
-	environment     []string
-	reporters       []string
-	reportJSON      string
-	dryRun          bool
-	once            bool
+	cpus          string
+	memory        string
+	variables     []string
+	variableFiles []string
+	environment   []string
+	reporters     []string
+	reportJSON    string
+	dryRun        bool
+	once          bool
+	// replaceProcess lets the selected workflow end the invocation by replacing the Wuko
+	// process. Only commands whose run is the last thing the invocation does set it.
+	replaceProcess  bool
 	workflowFile    string
 	remoteLocator   string
 	pick            bool
@@ -331,6 +336,15 @@ func runWorkflow(command *cobra.Command, deps dependencies, args []string, confi
 		cleanup()
 		return err
 	}
+	// Only the selected workflow of a run that ends with this invocation may replace the
+	// process: never a dependency, and never a schedule that must keep running.
+	var replaceProcess func(process.Replacement) error
+	if config.dryRun {
+		replaceProcess = previewProcessReplacement
+	} else if replacement := processReplacementFrom(command.Context()); replacement != nil && config.replaceProcess {
+		replaceProcess = replacement.request
+	}
+	rootDefinition, scheduled := plan.Root.Definition, definition.Cron != "" && !config.once && !config.dryRun
 	// preflightOptionsFor has no output side effects; preflight runs it for
 	// every plan node before execution prints each dry-run header once.
 	preflightOptionsFor := func(definition *workflow.Definition, dependencies map[string]map[string]any) engine.Options {
@@ -347,6 +361,7 @@ func runWorkflow(command *cobra.Command, deps dependencies, args []string, confi
 			Interactive: isInteractive, Prompts: config.prompts, DryRun: config.dryRun, Progress: reporters.Progress,
 			ElevationAllowed: elevationAllowed && installedWorkflowMayElevate(definition.Path),
 			Diagnostics:      reporters.Diagnostic,
+			ReplaceProcess:   replacementFor(definition, rootDefinition, scheduled, replaceProcess),
 		}
 	}
 	optionsFor := func(definition *workflow.Definition, dependencies map[string]map[string]any) engine.Options {

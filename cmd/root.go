@@ -171,9 +171,9 @@ func Execute() error {
 	signals := make(chan os.Signal, 2)
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(signals)
-	return executeWithSignals(signals, shutdownGracePeriod, func(ctx context.Context) error {
+	return executeWithSignals(signals, shutdownGracePeriod, replaceAfter(func(ctx context.Context) error {
 		return NewRootCmd().ExecuteContext(ctx)
-	})
+	}, process.Replace))
 }
 
 func executeWithSignals(signals <-chan os.Signal, gracePeriod time.Duration, execute func(context.Context) error) error {
@@ -576,12 +576,16 @@ func runWorkflowPicker(command *cobra.Command, deps dependencies) error {
 		switch selection.Intent {
 		case tui.SelectionPrimary:
 			returnObserver := &returnDestinationObserver{}
-			runErr := runWorkflow(command, deps, nil, runWorkflowConfig{workflowFile: source.Path, remoteLocator: source.Locator, targetName: source.Target, returnObserver: returnObserver})
+			runErr := runWorkflow(command, deps, nil, runWorkflowConfig{workflowFile: source.Path, remoteLocator: source.Locator, targetName: source.Target, returnObserver: returnObserver, replaceProcess: true})
 			if runErr == nil {
 				pickerState.markRecent(workflowPickerSourcePath(source))
 				if err := saveWorkflowPickerState(command.Context(), config, pickerState); err != nil {
 					fmt.Fprintf(command.ErrOrStderr(), "Warning: cannot save workflow picker state: %v\n", err)
 				}
+			}
+			if runErr == nil && processReplacementFrom(command.Context()).requested() {
+				// The workflow's final step takes over the process once the command returns.
+				return nil
 			}
 			resume, err := resumeAfterReturn(source, returnObserver, runErr)
 			if !resume {

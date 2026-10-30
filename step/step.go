@@ -119,6 +119,10 @@ type Request struct {
 	Helpers helper.Set
 	// HelperContext cancels helper RPCs with the current operation.
 	HelperContext context.Context
+	// ReplaceProcess asks the host to replace the Wuko process with a resolved program once
+	// the run has finished. The engine populates it only for a ProcessReplacer step that is
+	// the final step of a directly invoked root workflow; nil means replacement is unavailable.
+	ReplaceProcess func(process.Replacement) error
 }
 
 // WorkflowCall identifies one blocking child-workflow invocation. Vars contains only values
@@ -331,6 +335,13 @@ type ExecutorFileSystem interface {
 // overwhelming majority of steps - which never call a workflow - do not pay for the binding.
 type WorkflowAware interface {
 	WorkflowAware()
+}
+
+// ProcessReplacer marks a runner whose configuration may end the run by replacing the Wuko
+// process. Validation restricts such a step to the final step of a directly invoked root
+// workflow with nothing left to clean up, because nothing in Wuko runs after the replacement.
+type ProcessReplacer interface {
+	ReplacesProcess() bool
 }
 
 // InlineWorkflowAware asks the engine to bind isolated inline execution to this runner's request.

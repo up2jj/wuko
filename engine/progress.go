@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/up2jj/wuko/correlation"
@@ -164,6 +165,9 @@ type ProgressEvent struct {
 	PollWait       time.Duration
 	Error          error
 	Stats          RunStats
+	// Replaced reports, on WorkflowFinished, that the run ended by handing the process to
+	// the program its final step resolved. Reporters print no completion summary for it.
+	Replaced bool
 }
 
 func report(options Options, event ProgressEvent) {
@@ -233,6 +237,8 @@ type runRuntime struct {
 	// finishes. Background control bodies scope their own iteration instead.
 	cleanups   cleanupScope
 	background *backgroundSupervisor
+	// replaced records that the final step handed the process to a replacement program.
+	replaced atomic.Bool
 }
 
 // cleanupScope owns the managed resources created on one execution path and releases
@@ -240,6 +246,12 @@ type runRuntime struct {
 type cleanupScope struct {
 	mu       sync.Mutex
 	cleanups []func(context.Context) error
+}
+
+func (scope *cleanupScope) len() int {
+	scope.mu.Lock()
+	defer scope.mu.Unlock()
+	return len(scope.cleanups)
 }
 
 func (scope *cleanupScope) register(cleanup func(context.Context) error) {

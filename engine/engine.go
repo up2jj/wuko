@@ -89,6 +89,10 @@ type Options struct {
 	// A destinationless return supplies the empty value. Hosts should attach the callback only to
 	// the root workflow whose destination they intend to honor; nested action runs do not inherit it.
 	OnReturn func(workflow.ReturnDestination)
+	// ReplaceProcess accepts the program that replaces the Wuko process once the run ends.
+	// Hosts attach it only to a directly invoked root workflow that they will exit after;
+	// validation then admits a replacing step as that workflow's final top-level step.
+	ReplaceProcess func(process.Replacement) error
 	// Progress receives structured workflow, step, attempt, retry, poll, and timing events.
 	// Calls are serialized against each other and against Diagnostics, so the callback
 	// needs no locking of its own. It must not block indefinitely: every later event
@@ -151,6 +155,10 @@ type Options struct {
 	// run_workflow call made from inside an action could not name the workflow it came from.
 	callerName string
 	callerPath string
+	// replaceStepID names the final top-level step that may use ReplaceProcess.
+	replaceStepID string
+	// replacementAudit collects replacing and cleanup-owning steps during validation.
+	replacementAudit *replacementAudit
 }
 
 // State carries one workflow's mutable values and is deliberately unsynchronized.
@@ -174,6 +182,9 @@ type State struct {
 	// Bindings contains lifecycle and iteration-local roots such as batch, error, finally, foreach, and matrix.
 	Bindings map[string]any
 	Stats    RunStats
+	// Replaced reports that the run ended by handing the process to the program resolved by
+	// its final step. The host must replace itself with that program; Outputs stays empty.
+	Replaced bool
 	// presetVars is the variable set the run started with. It is fixed once the run
 	// begins and shared by every derived state, so it is never mutated.
 	presetVars  map[string]any
@@ -215,6 +226,7 @@ func (e *Engine) run(ctx context.Context, definition *workflow.Definition, optio
 	if session := definition.SecretSession(); session != nil {
 		defer func() { runErr = session.RedactError(runErr) }()
 	}
+	options = scopeProcessReplacement(definition, options, options.runtime == nil)
 	rootRun := options.runtime == nil || options.workflowRoot
 	// workflowRoot is cleared below so nested action runs do not inherit it, but the lifecycle
 	// events still have to say that this occurrence is a child workflow rather than an action.
@@ -286,7 +298,7 @@ func (e *Engine) run(ctx context.Context, definition *workflow.Definition, optio
 			Kind: WorkflowFinished, Status: status, Time: finishedAt,
 			WorkflowName: definition.Name, Depth: options.depth, Total: total,
 			Duration: stats.Duration, Error: runErr, Stats: stats,
-			ChildWorkflow: childWorkflow,
+			ChildWorkflow: childWorkflow, Replaced: runErr == nil && rootRun && options.runtime.replaced.Load(),
 		})
 	}()
 
@@ -314,6 +326,12 @@ func (e *Engine) run(ctx context.Context, definition *workflow.Definition, optio
 	runErr = errors.Join(append([]error{mainErr}, cleanupErrors...)...)
 	if runErr != nil {
 		return nil, runErr
+	}
+	if rootRun && options.runtime.replaced.Load() {
+		state.Replaced = true
+		// Validation forbids outputs alongside a replacing step: the replacement owns the
+		// process from here, so nothing is published.
+		return state, nil
 	}
 	if err := e.finishWorkflowOutputs(definition, options, state); err != nil {
 		return nil, err
@@ -963,6 +981,7 @@ func (e *Engine) makeRequest(ctx context.Context, definition *workflow.Definitio
 		Services:  reportingServiceLauncher{launcher: options.services, options: options, workflowName: definition.Name},
 		Workflows: workflows, InlineWorkflows: inlineWorkflows,
 		Secret: resolveSecret, Helpers: definition.Helpers(), HelperContext: ctx,
+		ReplaceProcess: processReplacementHook(stepID, options, operationID),
 	}
 }
 

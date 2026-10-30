@@ -216,6 +216,7 @@ func validateWorkflowSources(command *cobra.Command, deps dependencies, args []s
 				LocalValueDir: localValueDir, GlobalValueDir: filepath.Join(configDir, "wuko", "values"),
 				ElevationAllowed: !fromStdin && source.Locator == "" && installedWorkflowMayElevate(definition.Path),
 				Diagnostics:      reporter,
+				ReplaceProcess:   replacementFor(definition, plan.Root.Definition, false, previewProcessReplacement),
 			}
 		}
 		if err := preflightDependencyPlan(command.Context(), plan, func() *engine.Engine { return workflowEngine(deps) }, optionsFor); err != nil {

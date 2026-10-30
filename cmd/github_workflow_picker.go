@@ -113,12 +113,17 @@ func runGitHubWorkflowPicker(command *cobra.Command, deps dependencies, args []s
 			observer := &returnDestinationObserver{}
 			active := config
 			active.pick, active.workflowFile, active.remoteLocator, active.targetName, active.returnObserver = false, source.Path, source.Locator, source.Target, observer
+			active.replaceProcess = true
 			err := runWorkflow(command, deps, nil, active)
 			if err == nil {
 				state.markRecent(workflowPickerSourcePath(source))
 				if saveErr := saveWorkflowPickerState(command.Context(), configDir, state); saveErr != nil {
 					fmt.Fprintf(command.ErrOrStderr(), "Warning: cannot save workflow picker state: %v\n", saveErr)
 				}
+			}
+			if err == nil && processReplacementFrom(command.Context()).requested() {
+				// The workflow's final step takes over the process once the command returns.
+				return nil
 			}
 			if resumeAfterReturn(observer, err) {
 				continue
