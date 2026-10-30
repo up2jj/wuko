@@ -200,10 +200,30 @@ targets:
 
 func TestLocalConfigRunFlagsRequireDefaultWorkflow(t *testing.T) {
 	t.Parallel()
-	root := newRootCmd(configTestDependencies(t.TempDir(), io.Discard))
-	root.SetArgs([]string{"--dry-run"})
+	var output bytes.Buffer
+	root := newRootCmd(configTestDependencies(t.TempDir(), &output))
+	root.SetArgs([]string{"--dry-run", "--report-json=-"})
 	if err := root.ExecuteContext(t.Context()); err == nil || !strings.Contains(err.Error(), "requires default.workflow") {
 		t.Fatalf("Execute() = %v", err)
+	}
+	if output.Len() != 0 {
+		t.Fatalf("output = %q, want no report when no workflow was selected", output.String())
+	}
+}
+
+func TestLocalConfigDefaultFailureReportsRun(t *testing.T) {
+	t.Parallel()
+	directory := t.TempDir()
+	testfs.Write(t, filepath.Join(directory, "wuko.yml"), "default: {workflow: build, flags: {dry-run: invalid}}")
+	var output bytes.Buffer
+	root := newRootCmd(configTestDependencies(directory, &output))
+	root.SetArgs([]string{"--report-json=-"})
+	if err := root.ExecuteContext(t.Context()); err == nil || !strings.Contains(err.Error(), "expected bool") {
+		t.Fatalf("Execute() = %v", err)
+	}
+	report := decodeStreamExecutionReport(t, output.Bytes())
+	if report.Status != "failed" || report.InvocationID == "" {
+		t.Fatalf("report = %#v", report)
 	}
 }
 

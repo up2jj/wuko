@@ -89,6 +89,11 @@ func wrapLocalConfiguration(command *cobra.Command, configuration *localConfigur
 		validateArgs := command.Args
 		command.Args = func(command *cobra.Command, args []string) error {
 			if err := configuration.apply(command, deps); err != nil {
+				// A bare invocation runs a workflow only through default:. Without one no
+				// run was selected, so there is no run to report.
+				if command == command.Root() && configuration.document.Default == nil {
+					return err
+				}
 				return reportEarlyRunFailure(command, err)
 			}
 			if validateArgs != nil {
