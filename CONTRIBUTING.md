@@ -53,6 +53,21 @@ CI runs the same all-files workflow, followed by Staticcheck and the full race t
 
 `just snapshot` builds local release archives into `dist/`; do not commit them.
 
+## Releasing
+
+Cut a release from a clean, up-to-date `master` with `just release patch`, `minor`, `major`, or
+an explicit version such as `just release 0.21.0`. The recipe runs `scripts/release.sh`, which
+bumps `action/version`, the plugin scaffold's SDK fallback version, and the `up2jj/wuko@v...`
+references in Markdown files. It then runs `go vet`, `go test`, and `goreleaser check`, asks for
+confirmation, commits `chore: prepare vX.Y.Z release`, tags it, and pushes `master` and the tag
+together. The tag starts the GitHub release workflow; with `gh` installed, the script follows that
+run and prints the release URL.
+
+Add `--dry-run` to preview the changes and run the checks without committing, `--yes` to skip the
+confirmation, and `--no-watch` to stop after pushing. If a release is interrupted after the
+prepare commit, run it again with the explicit version, such as `just release 0.21.0`: it tags and
+pushes the existing commit. A `patch`, `minor`, or `major` bump would count from the new version.
+
 ## Where things live
 
 | Path | Contents |

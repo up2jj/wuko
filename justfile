@@ -102,31 +102,8 @@ check:
 snapshot:
     goreleaser release --snapshot --clean
 
-# Tag and push a release, triggering the GitHub Actions release workflow.
-# Usage: just release 0.2.0   (creates and pushes tag v0.2.0)
-release version:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    version="{{ version }}"
-    version="${version#v}"
-    tag="v${version}"
-    action_version="$(tr -d '[:space:]' < action/version)"
-    if [ "$action_version" != "$version" ]; then
-        echo "error: action/version is $action_version; expected $version" >&2
-        exit 1
-    fi
-    if [ -n "$(git status --porcelain)" ]; then
-        echo "error: working tree is not clean; commit or stash changes first" >&2
-        exit 1
-    fi
-    if git rev-parse "$tag" >/dev/null 2>&1; then
-        echo "error: tag $tag already exists" >&2
-        exit 1
-    fi
-    echo "Running pre-release checks..."
-    go test ./...
-    goreleaser check
-    echo "Tagging and pushing $tag..."
-    git tag -a "$tag" -m "Release $tag"
-    git push origin "$tag"
-    echo "Pushed $tag — the release workflow will now build and publish it."
+# Prepare, check, tag, and push a release; the pushed tag triggers the GitHub release workflow.
+# Usage: just release minor   (or patch, major, 0.21.0; add --dry-run to preview)
+[positional-arguments]
+release *args:
+    bash scripts/release.sh "$@"
