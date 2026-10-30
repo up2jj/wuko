@@ -211,6 +211,46 @@ func TestLocalConfigRunFlagsRequireDefaultWorkflow(t *testing.T) {
 	}
 }
 
+func TestLocalConfigFailureKeepsArgumentErrors(t *testing.T) {
+	t.Parallel()
+	directory := t.TempDir()
+	testfs.Write(t, filepath.Join(directory, "wuko.yml"), "[broken")
+	root := newRootCmd(configTestDependencies(directory, io.Discard))
+	root.SetArgs([]string{"typo"})
+	err := root.ExecuteContext(t.Context())
+	if err == nil {
+		t.Fatal("Execute() = nil, want an error")
+	}
+	message := err.Error()
+	unknown, decoding := strings.Index(message, `unknown command "typo"`), strings.Index(message, "decoding CLI config")
+	if unknown < 0 || decoding < unknown {
+		t.Fatalf("Execute() = %q, want the unknown command error before the config error", message)
+	}
+}
+
+func TestLocalConfigUnreadableWorkingDirectory(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"discovery skipped", []string{"list"}, "finding current directory"},
+		{"relative explicit config", []string{"--config=wuko.yml", "list"}, "resolving --config wuko.yml"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			deps := configTestDependencies(t.TempDir(), io.Discard)
+			deps.cwd = func() (string, error) { return "", os.ErrNotExist }
+			root := newRootCmd(deps)
+			root.SetArgs(test.args)
+			if err := root.ExecuteContext(t.Context()); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("Execute() = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
 func TestLocalConfigDefaultFailureReportsRun(t *testing.T) {
 	t.Parallel()
 	directory := t.TempDir()

@@ -88,18 +88,23 @@ func wrapLocalConfiguration(command *cobra.Command, configuration *localConfigur
 	if command.Runnable() {
 		validateArgs := command.Args
 		command.Args = func(command *cobra.Command, args []string) error {
-			if err := configuration.apply(command, deps); err != nil {
-				// A bare invocation runs a workflow only through default:. Without one no
-				// run was selected, so there is no run to report.
-				if command == command.Root() && configuration.document.Default == nil {
-					return err
-				}
-				return reportEarlyRunFailure(command, err)
-			}
+			configErr := configuration.apply(command, deps)
+			var argsErr error
 			if validateArgs != nil {
-				return validateArgs(command, args)
+				argsErr = validateArgs(command, args)
 			}
-			return nil
+			if configErr == nil {
+				return argsErr
+			}
+			// Argument errors such as an unknown command come first: a broken config
+			// should not hide what was wrong with the invocation itself.
+			err := errors.Join(argsErr, configErr)
+			// A bare invocation runs a workflow only through default:. Without one no
+			// run was selected, so there is no run to report.
+			if command == command.Root() && configuration.document.Default == nil {
+				return err
+			}
+			return reportEarlyRunFailure(command, err)
 		}
 	}
 	for _, child := range command.Commands() {
@@ -203,15 +208,20 @@ func localConfigPath(command *cobra.Command, deps dependencies) (string, error) 
 	if cwd == nil {
 		cwd = os.Getwd
 	}
+	if explicit && filepath.IsAbs(path) {
+		return path, nil
+	}
 	directory, err := cwd()
 	if err != nil {
-		return "", fmt.Errorf("finding CLI config directory: %w", err)
+		if explicit {
+			return "", fmt.Errorf("resolving --config %s: %w", path, err)
+		}
+		// Without a working directory there is no config to discover. Commands that
+		// need the directory report that themselves.
+		return "", nil
 	}
 	if explicit {
-		if !filepath.IsAbs(path) {
-			path = filepath.Join(directory, path)
-		}
-		return path, nil
+		return filepath.Join(directory, path), nil
 	}
 	var found string
 	for _, name := range []string{"wuko.yml", "wuko.yaml"} {
