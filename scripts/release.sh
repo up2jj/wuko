@@ -43,6 +43,10 @@ for arg in "$@"; do
     esac
 done
 [ -n "$request" ] || { usage >&2; exit 2; }
+# Fail before the slow checks when nobody can answer the confirmation prompt.
+if [ "$assume_yes" -eq 0 ] && [ "$dry_run" -eq 0 ] && ! (: < /dev/tty) 2>/dev/null; then
+    die "no terminal to confirm the release; run it in a terminal or pass --yes"
+fi
 
 cd "$(git rev-parse --show-toplevel)"
 
@@ -117,7 +121,8 @@ if [ "$dry_run" -eq 1 ]; then
 fi
 
 if [ "$assume_yes" -eq 0 ]; then
-    read -r -p "Commit, tag, and push $tag to origin? [y/N] " answer
+    printf 'Commit, tag, and push %s to origin? [y/N] ' "$tag" > /dev/tty
+    read -r answer < /dev/tty || answer=""
     case "$answer" in
         y | Y | yes) ;;
         *) die "release cancelled" ;;
