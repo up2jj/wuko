@@ -35,9 +35,12 @@ func invocationEnvironment(command *cobra.Command, deps dependencies, cwd string
 	return result, nil
 }
 
+// A configured env-loader is applied only when WUKO_ENV_LOADERS is empty (see
+// localConfiguration.apply), so a set flag always wins here. The resource-limit worker
+// receives the same flag explicitly and resolves the same loaders.
 func invocationEnvironmentPolicy(command *cobra.Command, deps dependencies) (envload.Policy, error) {
 	flags := command.Root().PersistentFlags()
-	if flags.Changed("env-loader") {
+	if flag := flags.Lookup("env-loader"); flag.Changed || optionConfigured(command, flag) {
 		names, err := flags.GetStringArray("env-loader")
 		if err != nil {
 			return envload.Policy{}, fmt.Errorf("reading --env-loader: %w", err)
@@ -50,17 +53,7 @@ func invocationEnvironmentPolicy(command *cobra.Command, deps dependencies) (env
 	if getenv == nil {
 		getenv = os.Getenv
 	}
-	if value := getenv("WUKO_ENV_LOADERS"); value != "" {
-		return envload.ParsePolicyValue(value)
-	}
-	if optionConfigured(command, flags.Lookup("env-loader")) {
-		names, err := flags.GetStringArray("env-loader")
-		if err != nil {
-			return envload.Policy{}, fmt.Errorf("reading configured env-loader: %w", err)
-		}
-		return envload.ParsePolicy(splitLoaderNames(names))
-	}
-	return envload.ParsePolicyValue("")
+	return envload.ParsePolicyValue(getenv("WUKO_ENV_LOADERS"))
 }
 
 // splitLoaderNames flattens comma-separated values so --env-loader mise,direnv reads

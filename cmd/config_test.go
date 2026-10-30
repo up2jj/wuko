@@ -340,10 +340,13 @@ func TestLocalConfigEnvironmentPrecedence(t *testing.T) {
 	for _, test := range []struct {
 		name, environment, want string
 		args                    []string
+		// The resource-limit worker resolves the same loaders only when it receives the
+		// flag exactly when the parent used it.
+		forwarded bool
 	}{
-		{name: "config", want: "mise,direnv"},
+		{name: "config", want: "mise,direnv", forwarded: true},
 		{name: "environment", environment: "asdf", want: "asdf"},
-		{name: "CLI", environment: "asdf", args: []string{"--env-loader=none"}, want: "none"},
+		{name: "CLI", environment: "asdf", args: []string{"--env-loader=none"}, want: "none", forwarded: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
@@ -360,6 +363,10 @@ func TestLocalConfigEnvironmentPrecedence(t *testing.T) {
 				}
 				if policy.String() != test.want {
 					t.Fatalf("policy = %q, want %q", policy.String(), test.want)
+				}
+				worker := resourceWorkerArgs(command, nil)
+				if got := slices.ContainsFunc(worker, func(arg string) bool { return strings.HasPrefix(arg, "--env-loader") }); got != test.forwarded {
+					t.Fatalf("worker args %q forward env-loader = %v, want %v", worker, got, test.forwarded)
 				}
 				return nil
 			}

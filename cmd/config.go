@@ -173,6 +173,8 @@ func (configuration *localConfiguration) apply(command *cobra.Command, deps depe
 		if flag.Changed {
 			continue
 		}
+		// WUKO_ENV_LOADERS outranks configured loaders. Leaving the flag unset keeps that
+		// rule here only; invocationEnvironmentPolicy and the resource-limit worker read the flag.
 		if name == "env-loader" && deps.getenv("WUKO_ENV_LOADERS") != "" {
 			continue
 		}
