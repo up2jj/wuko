@@ -251,6 +251,33 @@ func TestLocalConfigUnreadableWorkingDirectory(t *testing.T) {
 	}
 }
 
+func TestRootHelpHidesRunFlags(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name  string
+		args  []string
+		shown bool
+	}{
+		{"root help", []string{"--help"}, false},
+		{"run help", []string{"run", "--help"}, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			var output bytes.Buffer
+			root := newRootCmd(configTestDependencies(t.TempDir(), &output))
+			root.SetArgs(test.args)
+			if err := root.ExecuteContext(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			for _, flag := range []string{"--dry-run", "--report-json", "--cpus"} {
+				if got := strings.Contains(output.String(), flag); got != test.shown {
+					t.Fatalf("help lists %s = %v, want %v; help:\n%s", flag, got, test.shown, output.String())
+				}
+			}
+		})
+	}
+}
+
 func TestLocalConfigDefaultFailureReportsRun(t *testing.T) {
 	t.Parallel()
 	directory := t.TempDir()

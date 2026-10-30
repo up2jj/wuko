@@ -64,8 +64,9 @@ Quote numeric-looking strings such as `cpus: "1.5"`. `var` and `env` entries kee
 The optional `default` section changes bare `wuko` into a workflow invocation. `workflow` is
 required in that section and accepts the same name, URL, or GitHub locator as `wuko run`.
 `target` is optional. `default.flags` accepts run-specific options. Bare invocations also accept
-run flags, such as `wuko --dry-run` or `wuko --once=false`. Existing run-option validation still
-applies. Use `wuko run NAME [TARGET]` to select a different workflow explicitly.
+run flags, such as `wuko --dry-run` or `wuko --once=false`; `wuko --help` leaves them out, and
+`wuko run --help` lists them. Existing run-option validation still applies. Use
+`wuko run NAME [TARGET]` to select a different workflow explicitly.
 
 For bare invocations, run-option precedence is:
 

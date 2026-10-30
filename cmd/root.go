@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/elevation"
 	"github.com/up2jj/wuko/engine"
@@ -383,6 +384,7 @@ func newRootCmd(deps dependencies) *cobra.Command {
 	root := &cobra.Command{
 		Use:           "wuko",
 		Short:         "Run trusted YAML workflows",
+		Long:          "Run trusted YAML workflows.\n\nWith a default workflow in wuko.yml, bare wuko runs it and accepts the flags of `wuko run`.",
 		Version:       fmt.Sprintf("%s (commit: %s, built: %s)", version, commit, date),
 		Args:          cobra.NoArgs,
 		SilenceUsage:  true,
@@ -402,6 +404,9 @@ func newRootCmd(deps dependencies) *cobra.Command {
 	root.SetOut(deps.stdout)
 	root.SetErr(deps.stderr)
 	addRunFlags(root, &defaultRun)
+	// Bare wuko accepts run flags only with a default workflow, so keep them out of the
+	// root help and completion; `wuko run --help` documents them.
+	root.Flags().VisitAll(func(flag *pflag.Flag) { flag.Hidden = true })
 	root.PersistentFlags().String("config", "", "read CLI configuration from a YAML file instead of the current directory")
 	root.PersistentFlags().Bool("no-config", false, "ignore CLI configuration, including the default workflow")
 	_ = root.MarkPersistentFlagFilename("config", "yaml", "yml")

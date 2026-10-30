@@ -247,7 +247,13 @@ func (document localConfigDocument) validate(root *cobra.Command) error {
 		if strings.TrimSpace(string(preset.Workflow)) == "" {
 			return fmt.Errorf("default.workflow must be a nonempty string")
 		}
-		if err := validateConfigFlags(preset.Flags, root.LocalNonPersistentFlags(), "default.flags"); err != nil {
+		// The root carries the run flags hidden, so validate against the run command
+		// that documents them.
+		run, _, err := root.Find([]string{"run"})
+		if err != nil {
+			return fmt.Errorf("default.flags: %w", err)
+		}
+		if err := validateConfigFlags(preset.Flags, run.LocalNonPersistentFlags(), "default.flags"); err != nil {
 			return err
 		}
 	}
