@@ -48,7 +48,12 @@ job can invoke Wuko, but the two workflow formats are separate.
 ```sh
 brew install --cask up2jj/tap/wuko      # macOS
 go install github.com/up2jj/wuko@latest # Go 1.26 or newer
+nix profile add github:up2jj/wuko      # Linux or macOS, with Nix flakes enabled
 ```
+
+On Nix releases older than 2.26, use `nix profile install` instead of `nix profile add`.
+Run without installing with `nix run github:up2jj/wuko -- --help`. See
+[Nix and devenv](docs/nix.md) for pinned project inputs, devenv usage, and local development.
 
 ## Quick start
 
@@ -199,6 +204,8 @@ The [reference](docs/reference.md) describes every step and control, with links 
   `uses: up2jj/wuko@v0.20.0`. [GitHub Actions guide →](docs/github-actions.md)
 - **Git hooks.** Bind workflows to `pre-commit`, `commit-msg`, or `pre-push` with
   `wuko git hook init`. [Git hooks →](docs/git-hooks.md)
+- **Nix and devenv.** Pin Wuko in a project shell and run steps in devenv environments.
+  [Nix and devenv guide →](docs/nix.md)
 - **Coding agents.** Hand tasks to Claude or Codex with `shell` steps and `stdin`, and install Wuko's authoring
   skills with `wuko agent install`. [Automation steps →](docs/steps-automation.md#calling-coding-agents)
 - **Remote workflows and marketplaces.** Run workflows from GitHub, reuse actions from private

@@ -205,6 +205,9 @@ The devenv executor runs process-backed steps in a reproducible devenv environme
 steps remain host-side. A devenv shell runs on the host, so `file` and `edit` inside the block act on
 the host filesystem. Devenv must be version 2.2 or newer.
 
+To install Wuko into a devenv shell through its flake package, see
+[Nix and devenv](nix.md#use-wuko-with-devenv).
+
 ```yaml
 - executor:
     type: devenv

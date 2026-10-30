@@ -1,0 +1,18 @@
+version: 1
+name: nix-smoke
+steps:
+  - id: command
+    type: shell
+    with:
+      command: printf
+      args: ["%s", nix-command-ready]
+  - id: check_command
+    type: assert
+    with:
+      expr: steps.command.stdout == "nix-command-ready"
+      message: The packaged binary did not capture the command output
+  - id: script
+    type: shell
+    with:
+      shell: sh
+      script: printf '%s\n' nix-workflow-ready
