@@ -174,6 +174,34 @@ type client struct {
 }
 
 func launch(ctx context.Context, path string, stderr io.Writer) (*client, error) {
+	return retryPluginLaunch(ctx, func() (*client, error) {
+		return launchOnce(ctx, path, stderr)
+	})
+}
+
+func retryPluginLaunch(ctx context.Context, attempt func() (*client, error)) (*client, error) {
+	for retries := 0; ; retries++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		c, err := attempt()
+		if !errors.Is(err, syscall.ETXTBSY) || retries == 3 {
+			return c, err
+		}
+		// A concurrent fork can inherit the extracted executable's writable descriptor
+		// until exec closes it, even after Extract closes its own copy. Retry only this
+		// pre-start failure, using a fresh command and pipes on each attempt.
+		timer := time.NewTimer(100 * time.Millisecond << retries)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func launchOnce(ctx context.Context, path string, stderr io.Writer) (*client, error) {
 	cmd := exec.CommandContext(context.WithoutCancel(ctx), path)
 	// A terminal sends Ctrl-C and job-control termination signals to the whole foreground
 	// process group. Keep the plugin outside Wuko's group so the host can deliver protocol
