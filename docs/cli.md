@@ -371,6 +371,52 @@ from, and that directory's `wuko.yml` applies unless the shim bakes in `--no-con
 `--force`. Install and uninstall never replace or remove a file that Wuko did not generate, and
 `wuko shim list` marks a shim whose pinned workflow file no longer exists.
 
+### Project shims
+
+Bind a command to a Wuko project to access all its workflows from any directory:
+
+```sh
+wuko shim install --project ./automation --as mytools
+mytools                         # picker, or the project's configured default workflow
+mytools list
+mytools run deploy production
+mytools validate
+wuko shim list
+wuko shim uninstall mytools
+```
+
+The project must contain a `.wuko/workflows/` directory, which may be empty. Its absolute
+path is recorded in the shim. The shim enters that project and forwards every argument to
+`wuko` on PATH. Project `wuko.yml` defaults, environment loaders, plugins, and relative paths
+behave as if you ran Wuko inside the project. That includes relative paths you pass, so
+`mytools run --file ./x.yaml` reads `x.yaml` from the project, not from your current directory;
+pass an absolute path for a file elsewhere. Normal discovery includes parent and global
+workflows. Workflow edits take effect immediately; moving the project requires reinstalling
+with `--project NEW_PATH --as mytools --force`.
+
+Project mode requires `--as` and cannot be combined with a workflow selector, target, `--file`,
+`--by-name`, or baked flags after `--`. Pass workflow flags when invoking the installed command.
+The existing `--dir` and `--force` options work for both kinds of shim. `shim list` identifies
+project bindings and marks missing project workflow directories. Help retains Wuko branding;
+completion registration under the custom command name is not installed automatically.
+
+Project installations automatically append the shim directory to PATH for the shell identified
+by `SHELL`. Use `--shell bash`, `--shell zsh`, or `--shell fish` to choose a shell explicitly, or
+`--no-path` to leave startup files unchanged. Open a new shell after installation, or invoke
+the printed absolute shim path in your current terminal. Wuko itself must also be on PATH.
+
+PATH setup uses marked, duplicate-safe entries in Zsh's `.zshrc` (respecting `ZDOTDIR`), Bash's
+`.bashrc` and first existing login profile (`.bash_profile`, `.bash_login`, or `.profile`, creating
+`.bash_profile` if none exists), or Fish's `config.fish` under `XDG_CONFIG_HOME` or `~/.config`.
+Existing file permissions and dotfile symlinks are preserved. Unsupported shells fail before a
+shim is written unless `--no-path` is supplied. Automatic setup supports macOS and Linux.
+
+Ownership is recorded in `wuko/shim-path.json` under the platform user configuration directory.
+When the last shim in a bin directory is uninstalled, Wuko removes its unchanged owned PATH
+entries, preserving user edits and entries still needed by other shims. A PATH write failure
+reports the installed shim path; retry installation with `--force` to finish setup, or uninstall
+the shim to clean up. A modified managed entry is left unchanged and reported for manual review.
+
 ## Shell completion
 
 ```sh

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,8 +17,8 @@ import (
 func newShimCmd(deps dependencies) *cobra.Command {
 	command := &cobra.Command{
 		Use:   "shim",
-		Short: "Install commands that run one workflow",
-		Long: "A shim is a small executable script that runs one workflow under its own command name. " +
+		Short: "Install commands for workflows or projects",
+		Long: "A shim is a small executable script that runs a workflow or opens Wuko in a bound project. " +
 			"Shims live in ~/.wuko/bin by default; add that directory to PATH to call them from anywhere.",
 		Args: cobra.NoArgs,
 	}
@@ -26,24 +27,35 @@ func newShimCmd(deps dependencies) *cobra.Command {
 }
 
 func newShimInstallCmd(deps dependencies) *cobra.Command {
-	var file, name, dir string
-	var byName, force bool
+	var file, name, dir, project, shell string
+	var byName, force, noPath bool
 	command := &cobra.Command{
 		Use:   "install [NAME|URL|GITHUB] [TARGET] [-- RUN_FLAGS...]",
-		Short: "Install a shim that runs a workflow",
+		Short: "Install a workflow or project shim",
 		Long: "Install an executable shim for a workflow. A discovered NAME or --file is pinned to its absolute " +
 			"path, so the shim works from any directory; --by-name instead resolves NAME from the directory the " +
 			"shim runs in. Arguments after -- are wuko run flags baked into the shim; arguments passed to the shim " +
-			"follow them.",
+			"follow them. With --project DIR --as NAME, the shim enters the project and forwards the full Wuko CLI. " +
+			"Project shims set up PATH automatically for Bash, Zsh, or Fish; use --no-path to manage PATH yourself.",
 		Example: `  wuko shim install check
   wuko shim install deploy staging --as deploy-staging
   wuko shim install --file ./release.yaml
   wuko shim install check --by-name --as wcheck
-  wuko shim install lint -- --no-config --var strict=true`,
+  wuko shim install lint -- --no-config --var strict=true
+  wuko shim install --project ./automation --as mytools`,
 		RunE: func(command *cobra.Command, args []string) error {
 			var runArgs []string
 			if dash := command.ArgsLenAtDash(); dash >= 0 {
 				args, runArgs = args[:dash], args[dash:]
+			}
+			if command.Flags().Changed("project") {
+				if project == "" || len(args) > 0 || command.ArgsLenAtDash() >= 0 {
+					return fmt.Errorf("--project requires a directory and cannot be combined with workflow selectors, targets, or arguments after --")
+				}
+				return installProjectShim(command, deps, project, name, dir, shell, force, noPath)
+			}
+			if command.Flags().Changed("shell") || command.Flags().Changed("no-path") {
+				return fmt.Errorf("--shell and --no-path require --project")
 			}
 			if err := validateShimRunArgs(command, deps, runArgs); err != nil {
 				return err
@@ -79,8 +91,82 @@ func newShimInstallCmd(deps dependencies) *cobra.Command {
 	command.Flags().StringVar(&dir, "dir", "", "directory to write the shim to (default: ~/.wuko/bin)")
 	command.Flags().BoolVar(&byName, "by-name", false, "resolve NAME by discovery each time the shim runs")
 	command.Flags().BoolVar(&force, "force", false, "replace an existing shim of the same name")
-	command.ValidArgsFunction = workflowCompletion(deps, workflowCompletionOptions{invokableOnly: true})
+	command.Flags().StringVar(&project, "project", "", "bind the full Wuko CLI to a project directory (requires --as)")
+	command.Flags().StringVar(&shell, "shell", "", "shell for project PATH setup: bash, zsh, or fish (default: SHELL)")
+	command.Flags().BoolVar(&noPath, "no-path", false, "skip automatic PATH setup for a project shim")
+	markCLIOnly(command, "project", "shell", "no-path")
+	command.MarkFlagsMutuallyExclusive("shell", "no-path")
+	command.MarkFlagsMutuallyExclusive("project", "file")
+	command.MarkFlagsMutuallyExclusive("project", "by-name")
+	_ = command.MarkFlagDirname("project")
+	_ = command.MarkFlagDirname("dir")
+	_ = command.RegisterFlagCompletionFunc("shell", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
+		return []string{"bash", "zsh", "fish"}, cobra.ShellCompDirectiveNoFileComp
+	})
+	command.ValidArgsFunction = func(command *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		if command.Flags().Changed("project") {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+		return workflowCompletion(deps, workflowCompletionOptions{invokableOnly: true})(command, args, toComplete)
+	}
 	return command
+}
+
+func installProjectShim(command *cobra.Command, deps dependencies, project, name, dir, shell string, force, noPath bool) error {
+	if name == "" {
+		return fmt.Errorf("--as is required for a project shim")
+	}
+	cwd, err := deps.cwd()
+	if err != nil {
+		return fmt.Errorf("finding current directory: %w", err)
+	}
+	if !filepath.IsAbs(project) {
+		project = filepath.Join(cwd, project)
+	}
+	project = filepath.Clean(project)
+	if !hasProjectWorkflows(project) {
+		return fmt.Errorf("project %s must contain a .wuko/workflows directory", project)
+	}
+	directory, err := shimDirectory(deps, dir)
+	if err != nil {
+		return err
+	}
+	var setup *shim.PathSetup
+	if !noPath {
+		home, err := deps.homeDir()
+		if err != nil {
+			return err
+		}
+		config, err := deps.configDir()
+		if err != nil {
+			return err
+		}
+		if shell == "" {
+			shell = deps.getenv("SHELL")
+		}
+		setup, err = shim.PreparePath(directory, shim.PathOptions{
+			HomeDir: home, ConfigDir: config, Shell: shell,
+			ZDotDir: deps.getenv("ZDOTDIR"), XDGConfigHome: deps.getenv("XDG_CONFIG_HOME"),
+		})
+		if err != nil {
+			return err
+		}
+	}
+	installed, err := shim.Install(directory, name, shim.Spec{Project: project}, force)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(command.OutOrStdout(), "installed shim %s -> %s\n", installed.Path, describeShim(installed.Spec))
+	if setup != nil {
+		if err := setup.Apply(command.Context()); err != nil {
+			return fmt.Errorf("shim is installed at %s, but PATH setup failed (retry with --force or uninstall the shim): %w", installed.Path, err)
+		}
+		fmt.Fprintf(command.OutOrStdout(), "Configured PATH for %s; open a new shell to activate it.\n", filepath.Base(shell))
+	}
+	if !onPath(deps, directory) {
+		fmt.Fprintf(command.ErrOrStderr(), "For this terminal, add %s to PATH or invoke %s directly.\n", directory, installed.Path)
+	}
+	return nil
 }
 
 func newShimListCmd(deps dependencies) *cobra.Command {
@@ -105,6 +191,11 @@ func newShimListCmd(deps dependencies) *cobra.Command {
 						line += "\t(workflow file missing)"
 					}
 				}
+				if installed.Spec.Project != "" {
+					if !hasProjectWorkflows(installed.Spec.Project) {
+						line += "\t(project workflow directory missing)"
+					}
+				}
 				fmt.Fprintln(command.OutOrStdout(), line)
 			}
 			return nil
@@ -125,14 +216,26 @@ func newShimUninstallCmd(deps dependencies) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			var removeErr error
 			for _, name := range args {
 				removed, err := shim.Remove(directory, name)
 				if err != nil {
-					return err
+					removeErr = err
+					break
 				}
 				fmt.Fprintf(command.OutOrStdout(), "removed shim %s\n", removed.Path)
 			}
-			return nil
+			// Clean up PATH even after a failed removal: an earlier name may have been the last shim.
+			// Without a config directory no PATH ownership can have been recorded, so there is
+			// nothing to clean up.
+			config, err := deps.configDir()
+			if err != nil {
+				return removeErr
+			}
+			if err := shim.CleanupPath(command.Context(), directory, config); err != nil {
+				return errors.Join(removeErr, fmt.Errorf("PATH cleanup failed: %w", err))
+			}
+			return removeErr
 		},
 	}
 	command.Flags().StringVar(&dir, "dir", "", "shim directory (default: ~/.wuko/bin)")
@@ -244,13 +347,25 @@ func validateShimRunArgs(command *cobra.Command, deps dependencies, runArgs []st
 
 func shimDirectory(deps dependencies, dir string) (string, error) {
 	if dir != "" {
-		return filepath.Abs(dir)
+		if filepath.IsAbs(dir) {
+			return filepath.Clean(dir), nil
+		}
+		cwd, err := deps.cwd()
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(cwd, dir), nil
 	}
 	home, err := deps.homeDir()
 	if err != nil {
 		return "", fmt.Errorf("finding home directory: %w", err)
 	}
 	return filepath.Join(home, ".wuko", "bin"), nil
+}
+
+func hasProjectWorkflows(project string) bool {
+	info, err := os.Stat(filepath.Join(project, ".wuko", "workflows"))
+	return err == nil && info.IsDir()
 }
 
 func onPath(deps dependencies, dir string) bool {
@@ -274,6 +389,9 @@ func shimName(workflowName, target string) string {
 }
 
 func describeShim(spec shim.Spec) string {
+	if spec.Project != "" {
+		return "project " + spec.Project
+	}
 	parts := []string{spec.Source()}
 	if spec.Target != "" {
 		parts = append(parts, spec.Target)
