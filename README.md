@@ -15,9 +15,8 @@
 <p align="center">
   <a href="#install">Install</a> ·
   <a href="#quick-start">Quick start</a> ·
-  <a href="docs/gallery.md">Gallery</a> ·
-  <a href="docs/getting-started.md">Guide</a> ·
-  <a href="docs/reference.md">Reference</a> ·
+  <a href="#gallery">Gallery</a> ·
+  <a href="#whats-in-the-box">Built-ins</a> ·
   <a href="#documentation">Docs</a>
 </p>
 
@@ -31,14 +30,10 @@
   and list or object transforms stay typed between steps.
 - **Real control flow.** Conditions, retries and polling, parallel DAGs, `foreach` and `matrix`,
   `try`/`catch`, guaranteed cleanup, early returns, and cron schedules.
-- **Portable building blocks.** Built-in steps cover Git, GitHub, HTTP, files,
-  Docker, processes, Lua, and coding agents, so you write fewer platform-specific shell scripts.
+- **Fewer platform-specific scripts.** Built-in steps cover Git, GitHub, HTTP, files, Docker,
+  processes, Lua, and coding agents.
 - **Fails before it runs.** Validation catches unknown steps, variables, and references with
   source locations and suggestions. Use `--dry-run` and `wuko tree` to see what will happen.
-- **Shareable.** Compose workflows, reuse actions from GitHub, install from marketplaces, extend
-  with plugins, and run the same YAML locally, in Git hooks, or in GitHub Actions.
-- **Remote execution.** Keep Wuko local and run a block's commands and file operations on a Linux
-  server with the built-in [SSH executor](docs/executors.md#ssh-executor).
 
 Wuko is not a GitHub Actions runtime. It is for local and interactive development automation; a CI
 job can invoke Wuko, but the two workflow formats are separate.
@@ -51,9 +46,8 @@ go install github.com/up2jj/wuko@latest # Go 1.26 or newer
 nix profile add github:up2jj/wuko      # Linux or macOS, with Nix flakes enabled
 ```
 
-On Nix releases older than 2.26, use `nix profile install` instead of `nix profile add`.
-Run without installing with `nix run github:up2jj/wuko -- --help`. See
-[Nix and devenv](docs/nix.md) for pinned project inputs, devenv usage, and local development.
+On Nix releases older than 2.26, use `nix profile install`; to try Wuko without installing, run
+`nix run github:up2jj/wuko -- --help`.
 
 ## Quick start
 
@@ -84,17 +78,17 @@ steps:
 Then run it:
 
 ```sh
-wuko                                    # pick from every discovered workflow
-wuko run check                          # run by name
-wuko run check --var package=./cmd/...  # override a variable
-wuko run check --dry-run                # validate and preview without running
+wuko                                      # pick from every discovered workflow
+wuko run check                            # run by name
+wuko run check --var package=./cmd/...    # override a variable
+wuko run check --dry-run                  # validate and preview without running
 wuko run check --cpus 1.5 --memory 512MiB # shared local CPU and memory budget
 ```
 
-Next: the [Getting started guide](docs/getting-started.md) walks from here to prompts, retries,
-parallel work, and composition. The [CLI cheatsheet](docs/cli.md) lists every command.
+To save defaults for bare `wuko`, add a `wuko.yml` to the current directory; explicit flags
+override it and `--no-config` ignores it. See [Local configuration](docs/cli.md#local-configuration).
 
-Explore the reference bundled with the binary, including complete examples for every built-in:
+The binary bundles a reference with a complete example for every built-in:
 
 ```sh
 wuko reference step shell
@@ -102,12 +96,8 @@ wuko reference example set basic --format yaml
 wuko help run --format json
 ```
 
-The [agent guide](docs/agents.md) explains structured discovery, workflow authoring, and execution reports.
-
-Save CLI defaults in a current-directory `wuko.yml` or `wuko.yaml`. Its optional `default`
-section selects a workflow, target, and flags for bare `wuko`; explicit CLI flags override
-configured values. Use `--no-config` to ignore the file. See
-[Local configuration](docs/cli.md#local-configuration) for the format and precedence rules.
+Next, the [Getting started guide](docs/getting-started.md) walks from here to prompts, retries,
+parallel work, and composition.
 
 ## Gallery
 
@@ -206,12 +196,10 @@ finally:
 | [Interactive](docs/steps-interactive.md) | `tui_form`, `tui_input`, `tui_password`, `tui_choice`, `tui_date`, `tui_path`, `tui_confirm`, `tui_review`, `tui_table`, `dashboard`, [browser forms](docs/forms.md) |
 | [Data](docs/steps-data.md) | `set`, `template`, `transform`, `decode`, `jsonpath`, `edit`, `markdown_edit`, [`extract`](docs/extract.md), `semver`, `time`, `assert`, `print`, `import_vars`, `key_value`, `changed` |
 | [Git and GitHub](docs/steps-system.md#git_revision) | `git_diff`, `git_log`, `git_commit`, `git_conventional_commit`, [worktrees](docs/worktrees.md), squash, rebase, merge, branch checks, `github_pr`, `github_release`, `github_actions` |
-| [Files and system](docs/steps-system.md) | `file`, `glob`, `scaffold`, `watch`, `log_wait`, `temp`, `cache`, `require_tool`, `tcp_probe`, `multiplexer` |
+| [Files and system](docs/steps-system.md) | [`file`](docs/filesystem-operations.md), `glob`, `scaffold`, `watch`, `log_wait`, `temp`, `cache`, `require_tool`, `tcp_probe`, `multiplexer` |
 | [Network, processes, and automation](docs/steps-automation.md) | `http`, [`docker`](docs/docker-operations.md), `shell` (including scripted PTY sessions and the [Node and Bash SDKs](docs/script-sdk.md)), `process`, `process_call`, `lua` |
 | [Controls](docs/workflow-control.md) | `if`, `attempt`, `concurrent`, `foreach`, `batch`, `matrix`, `loop`, `try`/`catch`, `cancel_on`, `observe`, `return`, `defer`, `finally`, `cron`, [`executor`](docs/executors.md) |
 | [Composition](docs/execution.md#choosing-a-composition-mechanism) | `depends_on`, `run_workflow`, `targets`, `require`, `uses` composite actions, `once` |
-
-The [reference](docs/reference.md) describes every step and control, with links to examples.
 
 ## Use Wuko with your tools
 
@@ -221,8 +209,11 @@ The [reference](docs/reference.md) describes every step and control, with links 
   `wuko git hook init`. [Git hooks →](docs/git-hooks.md)
 - **Nix and devenv.** Pin Wuko in a project shell and run steps in devenv environments.
   [Nix and devenv guide →](docs/nix.md)
-- **Coding agents.** Hand tasks to Claude or Codex with `shell` steps and `stdin`, and install Wuko's authoring
-  skills with `wuko agent install`. [Automation steps →](docs/steps-automation.md#calling-coding-agents)
+- **Remote servers.** Keep Wuko local and run a block's commands and file operations on a Linux
+  server. [SSH executor →](docs/executors.md#ssh-executor)
+- **Coding agents.** Hand tasks to Claude or Codex with `shell` steps and `stdin`, install Wuko's
+  authoring skills with `wuko agent install`, and give agents structured discovery and execution
+  reports. [Agent guide →](docs/agents.md) · [Calling agents →](docs/steps-automation.md#calling-coding-agents)
 - **Remote workflows and marketplaces.** Run workflows from GitHub, reuse actions from private
   repositories, and install packages with `wuko install`.
   [Discovery →](docs/workflow-discovery.md) · [Marketplaces →](docs/execution.md#workflow-marketplaces)
@@ -231,21 +222,22 @@ The [reference](docs/reference.md) describes every step and control, with links 
 
 ## Documentation
 
-| Start here | Write workflows | Run and share | Extend |
-| --- | --- | --- | --- |
-| [Getting started](docs/getting-started.md) | [Templates](docs/templates.md) | [Workflow discovery](docs/workflow-discovery.md) | [Executable plugins](docs/plugins.md) |
-| [Demo gallery](docs/gallery.md) | [Functions](docs/template-functions.md) | [Execution and composition](docs/execution.md) | [Plugin protocol v1](docs/plugin-protocol.md) |
-| [CLI cheatsheet](docs/cli.md) | [Workflow controls](docs/workflow-control.md) | [GitHub Actions](docs/github-actions.md) | [Plugin protocol v2](docs/plugin-protocol-v2.md) |
-| [Reference](docs/reference.md) | [Early return](docs/return.md) | [Git hooks](docs/git-hooks.md) | [Plugin protocol v4](docs/plugin-protocol-v4.md) |
-| [Validation](docs/validation.md) | [Cleanup with finally](docs/finally.md) | [Executor scopes](docs/executors.md) |  |
-| | [Variable imports](docs/variable-imports.md) | [Graceful shutdown](docs/graceful-shutdown.md) | |
-| | [Secrets](docs/secrets.md) | [Persistent Git worktrees](docs/worktrees.md) | |
-| | [Browser forms](docs/forms.md) | [Git change recipes](docs/git-changes.md) | |
-
-**Step guides:** [Interactive](docs/steps-interactive.md) · [Data](docs/steps-data.md) ·
-[System](docs/steps-system.md) · [Automation](docs/steps-automation.md) ·
-[Text extraction](docs/extract.md) · [Filesystem operations](docs/filesystem-operations.md) ·
-[Docker operations](docs/docker-operations.md)
+- **Start here:** [Getting started](docs/getting-started.md) · [CLI cheatsheet](docs/cli.md) ·
+  [Reference](docs/reference.md) · [Validation](docs/validation.md) · [Gallery](docs/gallery.md)
+- **Write workflows:** [Templates](docs/templates.md) · [Functions](docs/template-functions.md) ·
+  [Workflow controls](docs/workflow-control.md) · [Early return](docs/return.md) ·
+  [Cleanup with finally](docs/finally.md) · [Variable imports](docs/variable-imports.md) ·
+  [Secrets](docs/secrets.md) · [Browser forms](docs/forms.md)
+- **Steps:** [Interactive](docs/steps-interactive.md) · [Data](docs/steps-data.md) ·
+  [System](docs/steps-system.md) · [Automation](docs/steps-automation.md) ·
+  [Text extraction](docs/extract.md) · [Filesystem operations](docs/filesystem-operations.md) ·
+  [Docker operations](docs/docker-operations.md)
+- **Run and share:** [Workflow discovery](docs/workflow-discovery.md) ·
+  [Execution and composition](docs/execution.md) · [Executor scopes](docs/executors.md) ·
+  [Graceful shutdown](docs/graceful-shutdown.md) · [Persistent Git worktrees](docs/worktrees.md) ·
+  [Git change recipes](docs/git-changes.md)
+- **Extend:** [Executable plugins](docs/plugins.md) · Plugin protocol
+  [v1](docs/plugin-protocol.md), [v2](docs/plugin-protocol-v2.md), [v4](docs/plugin-protocol-v4.md)
 
 ## Trust model
 
