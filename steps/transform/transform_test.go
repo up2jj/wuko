@@ -493,7 +493,7 @@ func TestConfigurationAndCancellationErrors(t *testing.T) {
 		raw  map[string]any
 		want string
 	}{
-		{name: "invalid source root", raw: map[string]any{"from": "inputs.values", "operations": []any{"unique"}}, want: "steps. or vars."},
+		{name: "invalid source root", raw: map[string]any{"from": "inputs.values", "operations": []any{"unique"}}, want: "rooted at vars or steps"},
 		{name: "empty operations", raw: map[string]any{"from": "vars.values", "operations": []any{}}, want: "at least one"},
 		{name: "unknown operation", raw: map[string]any{"from": "vars.values", "operations": []any{"mop"}}, want: "unknown operation"},
 		{name: "unknown field", raw: map[string]any{"from": "vars.values", "operations": []any{map[string]any{"slice": map[string]any{"start": 0, "end": 1, "extra": true}}}}, want: "unknown argument"},

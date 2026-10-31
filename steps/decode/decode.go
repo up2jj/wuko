@@ -93,11 +93,8 @@ func (r *Runner) validate(resolved bool) error {
 		if strings.TrimSpace(r.config.From) == "" {
 			return fmt.Errorf("from must not be empty")
 		}
-		if !templated(r.config.From) {
-			parts := strings.Split(r.config.From, ".")
-			if len(parts) < 2 || parts[1] == "" || (parts[0] != "vars" && parts[0] != "steps") {
-				return fmt.Errorf("from must be a dotted path rooted at vars or steps")
-			}
+		if err := step.ValidatePath(r.config.From); err != nil {
+			return fmt.Errorf("from %w", err)
 		}
 	}
 	if r.present["path"] && strings.TrimSpace(r.config.Path) == "" {

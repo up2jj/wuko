@@ -219,3 +219,11 @@ func benchmarkNormalizeTable(b *testing.B, count int) {
 		}
 	}
 }
+
+func TestNewRejectsFromOutsideVarsAndSteps(t *testing.T) {
+	t.Parallel()
+	_, err := New(map[string]any{"message": "Rows", "from": "rows", "columns": []any{map[string]any{"header": "A", "field": "a"}}})
+	if err == nil || !strings.Contains(err.Error(), "rooted at vars or steps") {
+		t.Fatalf("error = %v", err)
+	}
+}

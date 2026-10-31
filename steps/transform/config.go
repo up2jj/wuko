@@ -226,8 +226,10 @@ func New(raw map[string]any) (step.Runner, error) {
 	if err := config.From.validateFile(false); err != nil {
 		return nil, err
 	}
-	if config.From.path != "" && !validSourcePath(config.From.path) {
-		return nil, fmt.Errorf("from path must start with steps. or vars.")
+	if config.From.path != "" {
+		if err := step.ValidatePath(config.From.path); err != nil {
+			return nil, fmt.Errorf("from %w; to compute the value, write from: {expr: ...}", err)
+		}
 	}
 	if len(config.Operations) == 0 {
 		return nil, fmt.Errorf("operations must contain at least one operation")
@@ -310,12 +312,3 @@ func compile(source string, locals map[string]any, boolean bool) (*vm.Program, e
 }
 
 func templated(value string) bool { return strings.Contains(value, "{{") }
-
-func validSourcePath(path string) bool {
-	for _, prefix := range []string{"steps.", "vars."} {
-		if strings.HasPrefix(path, prefix) && len(path) > len(prefix) {
-			return true
-		}
-	}
-	return false
-}

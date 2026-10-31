@@ -51,6 +51,9 @@ func New(raw map[string]any) (step.Runner, error) {
 	if strings.TrimSpace(config.From) == "" {
 		return nil, fmt.Errorf("from is required")
 	}
+	if err := step.ValidatePath(config.From); step.ConfigKnown(raw, "from") && err != nil {
+		return nil, fmt.Errorf("from %w", err)
+	}
 	if step.ConfigKnown(raw, "columns") && len(config.Columns) == 0 {
 		return nil, fmt.Errorf("at least one column is required")
 	}

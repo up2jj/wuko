@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/up2jj/wuko/internal/steptest"
@@ -105,5 +106,22 @@ func TestLoopFinishedEventCountsOnlySucceededIterations(t *testing.T) {
 	}
 	if finished == nil || finished.Started != 3 || finished.Succeeded != 2 {
 		t.Fatalf("finished event = %#v, want 3 started and 2 succeeded", finished)
+	}
+}
+
+func TestLoopValidationCompilesDelayExpression(t *testing.T) {
+	t.Parallel()
+	registry := steptest.Registry(t, map[string]step.Builder{"never": func(map[string]any) (step.Runner, error) {
+		return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) {
+			t.Fatal("runner executed after loop delay validation failure")
+			return step.Result{}, nil
+		}), nil
+	}})
+	definition := steptest.Definition(t, "loop", workflow.Step{ID: "wait", Loop: &workflow.LoopGroup{
+		Until: "true", MaxIterations: 1, Delay: workflow.LoopDelay{Expression: "vars.delay +"},
+		Steps: []workflow.Step{{ID: "poll", Type: "never", With: map[string]any{}}},
+	}})
+	if _, err := New(registry).Run(t.Context(), definition, Options{}); err == nil || !strings.Contains(err.Error(), "compiling loop delay") {
+		t.Fatalf("error = %v", err)
 	}
 }

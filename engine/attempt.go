@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -46,6 +48,12 @@ func (e *Engine) validateAttempt(ctx context.Context, definition *workflow.Defin
 	if control.When != "" {
 		if _, err := e.compileCondition(control.When); err != nil {
 			return fmt.Errorf("compiling attempt when: %w", err)
+		}
+	}
+	expressions := attemptOptionExpressions(control)
+	for _, label := range slices.Sorted(maps.Keys(expressions)) {
+		if err := controlpkg.ValidateExpression(expressions[label]); err != nil {
+			return fmt.Errorf("compiling attempt %s: %w", label, err)
 		}
 	}
 	if control.OperationID != "" {

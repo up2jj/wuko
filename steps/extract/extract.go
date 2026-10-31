@@ -89,11 +89,8 @@ func New(raw map[string]any) (step.Runner, error) {
 		if strings.TrimSpace(config.From) == "" {
 			return nil, fmt.Errorf("from must not be empty")
 		}
-		if !templated(config.From) {
-			parts := strings.Split(config.From, ".")
-			if len(parts) < 2 || parts[1] == "" || (parts[0] != "vars" && parts[0] != "steps") {
-				return nil, fmt.Errorf("from must be a dotted path rooted at vars or steps")
-			}
+		if err := step.ValidatePath(config.From); err != nil {
+			return nil, fmt.Errorf("from %w", err)
 		}
 	}
 

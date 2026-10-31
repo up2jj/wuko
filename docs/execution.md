@@ -1035,7 +1035,10 @@ reaches the control — the same literal-or-expression form `loop.delay` and `ba
 ```
 
 Numeric rules for a literal are checked by `wuko validate`; for an expression they are checked when
-the control runs.
+the control runs. `wuko validate` compiles each expression, as it does `loop.delay`, so a syntax
+error is reported before the run starts. Write `vars.deploy_timeout`, not
+`{{ .vars.deploy_timeout }}`: these options are expressions, not templates, and validation suggests the
+expression when it finds one written as a template.
 
 ### Attempt metadata
 

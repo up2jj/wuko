@@ -469,3 +469,21 @@ func TestRunKeepsAttemptPassThatSucceededAtItsDeadline(t *testing.T) {
 		}
 	})
 }
+
+func TestAttemptValidationCompilesOptionExpressions(t *testing.T) {
+	t.Parallel()
+	registry := steptest.Registry(t, map[string]step.Builder{"never": func(map[string]any) (step.Runner, error) {
+		return steptest.RunnerFunc(func(context.Context, step.Request) (step.Result, error) {
+			t.Fatal("runner executed after attempt option validation failure")
+			return step.Result{}, nil
+		}), nil
+	}})
+	policy := immediateRetry(2)
+	policy.MaxElapsedTime = workflow.AttemptDuration{Expression: "{{ .vars.timeout }}"}
+	definition := steptest.Definition(t, "invalid", attemptStep("run", policy, workflow.Step{Type: "never", With: map[string]any{}}))
+
+	_, err := New(registry).Run(t.Context(), definition, Options{})
+	if err == nil || !strings.Contains(err.Error(), "attempt max_elapsed_time") || !strings.Contains(err.Error(), "write vars.timeout instead of {{ .vars.timeout }}") {
+		t.Fatalf("error = %v", err)
+	}
+}

@@ -16,6 +16,11 @@ func (e *Engine) validateLoop(ctx context.Context, definition *workflow.Definiti
 	if err := group.Validate(); err != nil {
 		return err
 	}
+	if group.Delay.Expression != "" {
+		if err := controlpkg.ValidateExpression(group.Delay.Expression); err != nil {
+			return fmt.Errorf("compiling loop delay: %w", err)
+		}
+	}
 	childOptions := options
 	childOptions.depth++
 	return e.validateSteps(ctx, definition, group.Steps, childOptions, state)

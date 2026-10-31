@@ -1071,3 +1071,11 @@ func TestChoiceUnattendedAnswersWithDefaults(t *testing.T) {
 		t.Fatalf("error = %v", err)
 	}
 }
+
+func TestNewRejectsExpressionInFromPath(t *testing.T) {
+	t.Parallel()
+	_, err := New(map[string]any{"variable": "env", "message": "Environment", "from": `filter(vars.envs, # != "prod")`})
+	if err == nil || !strings.Contains(err.Error(), "rooted at vars or steps") || !strings.Contains(err.Error(), "from: {expr: ...}") {
+		t.Fatalf("error = %v", err)
+	}
+}

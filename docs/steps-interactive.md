@@ -194,7 +194,10 @@ with neither `value` nor `default` fails.
 To support `--var`, bind that variable explicitly with `value: {expr: vars.person}`.
 
 Choices may be static `{label, value, description, disabled, reason}` records or come from a
-workflow lookup such as `from: steps.fetch_regions.value`. Dynamic records support `label_field`,
+workflow lookup such as `from: steps.fetch_regions.value`. A plain `from` string is a dotted path
+rooted at `vars` or `steps`, and `wuko validate` rejects anything else; to filter the list, add
+section markers, or otherwise compute it, write an expression binding instead, such as
+`from: {expr: 'filter(vars.envs, # != "prod")'}`. Dynamic records support `label_field`,
 `value_field`, `description_field`, `disabled_field`, and `reason_field`; scalar items provide their
 own label and value. Dynamic mappings default to `label` and `value`. Choices and initial values
 are resolved once before display. Disabled choices require a reason and cannot be submitted.

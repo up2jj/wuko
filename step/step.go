@@ -781,6 +781,19 @@ func Encodable(value any) any {
 	}
 }
 
+// ValidatePath checks the static shape of a path that Lookup will resolve: a dotted path rooted
+// at vars or steps with no empty segment. A path containing a template is checked once rendered.
+func ValidatePath(path string) error {
+	if strings.Contains(path, "{{") {
+		return nil
+	}
+	parts := strings.Split(path, ".")
+	if len(parts) >= 2 && (parts[0] == "vars" || parts[0] == "steps") && !slices.Contains(parts, "") {
+		return nil
+	}
+	return errors.New("must be a dotted path rooted at vars or steps, such as vars.items")
+}
+
 // Lookup resolves a dotted path rooted at vars or steps.
 func Lookup(request Request, path string) (any, error) {
 	parts := strings.Split(path, ".")

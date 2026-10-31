@@ -2,6 +2,7 @@ package expression
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"text/template"
 
@@ -136,8 +137,28 @@ func TemplateFuncsWithSecret(resolver SecretResolver) template.FuncMap {
 // Compile compiles an Expr expression with Wuko's shared helper functions.
 func Compile(source string, options ...expr.Option) (*vm.Program, error) {
 	allOptions := append(exprOptions(), options...)
-	return expr.Compile(source, allOptions...)
+	program, err := expr.Compile(source, allOptions...)
+	if err != nil && strings.HasPrefix(strings.TrimSpace(source), "{{") {
+		return nil, fmt.Errorf("%w\nhint: %s", err, templateHint(source))
+	}
+	return program, err
 }
+
+// templateHint explains the common mix-up of writing a template where an Expr expression
+// belongs, suggesting the expression when the template is a single data reference.
+func templateHint(source string) string {
+	inner, found := strings.CutPrefix(strings.TrimSpace(source), "{{")
+	if inner, ok := strings.CutSuffix(inner, "}}"); found && ok {
+		reference := strings.TrimSpace(strings.Trim(strings.TrimSpace(inner), "-"))
+		reference = strings.TrimPrefix(reference, ".")
+		if templateReferencePattern.MatchString(reference) {
+			return fmt.Sprintf("this field is an Expr expression, not a template; write %s instead of %s", reference, strings.TrimSpace(source))
+		}
+	}
+	return "this field is an Expr expression, not a template; write the expression without {{ }}"
+}
+
+var templateReferencePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$`)
 
 // Eval compiles and evaluates an Expr expression with Wuko's shared helpers.
 func Eval(source string, environment any) (any, error) {

@@ -103,10 +103,12 @@ func New(raw map[string]any) (step.Runner, error) {
 		return nil, fmt.Errorf("exactly one of choices or from is required")
 	}
 	if hasFrom && step.ConfigKnown(raw, "from") {
-		if _, path := config.From.(string); !path {
-			if _, list := asSlice(config.From); !list {
-				return nil, fmt.Errorf("from must be a lookup path or a list")
+		if path, isPath := config.From.(string); isPath {
+			if err := step.ValidatePath(path); err != nil {
+				return nil, fmt.Errorf("from %w; to compute the list, write from: {expr: ...}", err)
 			}
+		} else if _, list := asSlice(config.From); !list {
+			return nil, fmt.Errorf("from must be a lookup path or a list")
 		}
 	}
 	var staticRows []any
