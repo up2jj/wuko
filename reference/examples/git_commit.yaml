@@ -1,0 +1,22 @@
+- id: basic
+  title: Use git_commit
+  description: A complete workflow demonstrating git_commit. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: git-commit-basic
+    steps:
+      - id: example
+        type: git_commit
+        with:
+          message: 'docs: add example'
+          paths:
+            - notes.txt
+  files:
+    notes.txt: |
+      An example change.
+  prerequisites:
+    - Git available on PATH; run in a disposable repository with an initial commit and a main branch
+    - Configure an example Git author identity; the example creates a commit
+  expected: Commits notes.txt with the explicit message.
+  check: ""
+  run: false

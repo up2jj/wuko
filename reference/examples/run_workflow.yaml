@@ -1,0 +1,23 @@
+- id: basic
+  title: Use run_workflow
+  description: A complete workflow demonstrating run_workflow. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: run-workflow-basic
+    steps:
+      - id: example
+        type: run_workflow
+        with:
+          workflow: child
+  files:
+    .wuko/workflows/child.yaml: |
+      version: 1
+      name: child
+      steps:
+        - id: greeting
+          type: print
+          with: {message: "Hello from the child"}
+  prerequisites: []
+  expected: Discovers and runs the child workflow, waiting for it and its cleanup to finish.
+  check: ""
+  run: false

@@ -1,0 +1,19 @@
+- id: basic
+  title: Use github_actions
+  description: A complete workflow demonstrating github_actions. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: github-actions-basic
+    steps:
+      - id: example
+        type: github_actions
+        with:
+          operation: watch
+          workflow: ci
+  files: {}
+  prerequisites:
+    - Authenticated gh CLI
+    - Run inside a repository containing a GitHub Actions workflow named ci
+  expected: Waits for the selected CI run and reports its outcome.
+  check: ""
+  run: false

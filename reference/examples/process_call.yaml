@@ -1,0 +1,32 @@
+- id: basic
+  title: Use process_call
+  description: A complete workflow demonstrating process_call. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: process-call-basic
+    steps:
+      - id: worker
+        type: process
+        with:
+          command: python3
+          args:
+            - worker.py
+          rpc: jsonl
+      - id: example
+        type: process_call
+        with:
+          worker: '{{ .steps.worker.worker_id }}'
+          payload:
+            message: Hello Wuko
+          timeout: 5s
+  files:
+    worker.py: |
+      import json, sys
+      for line in sys.stdin:
+          request = json.loads(line)
+          print(json.dumps({"id": request["id"], "result": request["payload"]}), flush=True)
+  prerequisites:
+    - Python 3 available on PATH
+  expected: Sends one correlated JSONL request to the worker, receives the echoed result, and cleans up the process.
+  check: ""
+  run: false

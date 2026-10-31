@@ -1,0 +1,19 @@
+- id: basic
+  title: Use tcp_probe
+  description: A complete workflow demonstrating tcp_probe. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: tcp-probe-basic
+    steps:
+      - id: example
+        type: tcp_probe
+        with:
+          hosts:
+            - 127.0.0.1
+          ports:
+            - 8080
+  files: {}
+  prerequisites: []
+  expected: Reports whether local port 8080 is accepting TCP connections; it does not start a server.
+  check: ""
+  run: false

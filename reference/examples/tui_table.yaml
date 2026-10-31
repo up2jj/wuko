@@ -1,0 +1,26 @@
+- id: basic
+  title: Use tui_table
+  description: A complete workflow demonstrating tui_table. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: tui-table-basic
+    vars:
+      releases:
+        - version: 1.2.3
+          channel: stable
+    steps:
+      - id: example
+        type: tui_table
+        with:
+          message: Available releases
+          from: vars.releases
+          columns:
+            - header: Version
+              field: version
+            - header: Channel
+              field: channel
+  files: {}
+  prerequisites: []
+  expected: Displays the release row in a terminal or prints its table representation without one.
+  check: ""
+  run: false

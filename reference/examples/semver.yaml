@@ -1,0 +1,91 @@
+- id: basic
+  title: Semantic version parse
+  description: A complete workflow demonstrating semver. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: semver-basic
+    steps:
+      - id: example
+        type: semver
+        with:
+          operation: parse
+          version: 1.2.3
+      - id: verify
+        type: assert
+        with:
+          expr: steps.example.major == 1 && steps.example.minor == 2
+          message: Example result must match the documented expectation
+  files: {}
+  prerequisites: []
+  expected: The parse result is available as structured step outputs.
+  check: steps.example.major == 1 && steps.example.minor == 2
+  run: true
+- id: compare
+  title: Semantic version compare
+  description: A complete workflow demonstrating semver. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: semver-compare
+    steps:
+      - id: example
+        type: semver
+        with:
+          operation: compare
+          version: 1.2.3
+          other: 2.0.0
+      - id: verify
+        type: assert
+        with:
+          expr: steps.example.less
+          message: Example result must match the documented expectation
+  files: {}
+  prerequisites: []
+  expected: The compare result is available as structured step outputs.
+  check: steps.example.less
+  run: true
+- id: constrain
+  title: Semantic version constrain
+  description: A complete workflow demonstrating semver. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: semver-constrain
+    steps:
+      - id: example
+        type: semver
+        with:
+          operation: constrain
+          version: 1.2.3
+          constraint: '>= 1.0.0'
+      - id: verify
+        type: assert
+        with:
+          expr: steps.example.matched
+          message: Example result must match the documented expectation
+  files: {}
+  prerequisites: []
+  expected: The constrain result is available as structured step outputs.
+  check: steps.example.matched
+  run: true
+- id: increment
+  title: Semantic version increment
+  description: A complete workflow demonstrating semver. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: semver-increment
+    steps:
+      - id: example
+        type: semver
+        with:
+          operation: increment
+          version: 1.2.3
+          part: minor
+      - id: verify
+        type: assert
+        with:
+          expr: steps.example.version == "1.3.0"
+          message: Example result must match the documented expectation
+  files: {}
+  prerequisites: []
+  expected: The increment result is available as structured step outputs.
+  check: steps.example.version == "1.3.0"
+  run: true

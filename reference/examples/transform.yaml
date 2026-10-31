@@ -1,0 +1,29 @@
+- id: basic
+  title: Use transform
+  description: A complete workflow demonstrating transform. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: transform-basic
+    vars:
+      numbers:
+        - 1
+        - 2
+        - 3
+    steps:
+      - id: example
+        type: transform
+        with:
+          from: vars.numbers
+          operations:
+            - filter: item > 1
+            - map: item * 2
+      - id: verify
+        type: assert
+        with:
+          expr: steps.example.value == [4,6]
+          message: Example result must match the documented expectation
+  files: {}
+  prerequisites: []
+  expected: Filtering and mapping [1,2,3] produces [4,6].
+  check: steps.example.value == [4,6]
+  run: true

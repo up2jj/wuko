@@ -1,0 +1,30 @@
+- id: basic
+  title: Use jsonpath
+  description: A complete workflow demonstrating jsonpath. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: jsonpath-basic
+    vars:
+      document:
+        projects:
+          - name: api
+            active: true
+          - name: web
+            active: false
+    steps:
+      - id: example
+        type: jsonpath
+        with:
+          from: vars.document
+          query: $.projects[?@.active == true].name
+          result: all
+      - id: verify
+        type: assert
+        with:
+          expr: steps.example.value == ["api"] && steps.example.count == 1
+          message: Example result must match the documented expectation
+  files: {}
+  prerequisites: []
+  expected: steps.example.value is ["api"], and count is 1.
+  check: steps.example.value == ["api"] && steps.example.count == 1
+  run: true

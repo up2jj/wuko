@@ -1,0 +1,18 @@
+- id: basic
+  title: Use git_on_branch
+  description: A complete workflow demonstrating git_on_branch. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: git-on-branch-basic
+    steps:
+      - id: example
+        type: git_on_branch
+        with:
+          branch: main
+  files: {}
+  prerequisites:
+    - Git available on PATH; run in a disposable repository with an initial commit and a main branch
+    - Check out main before running
+  expected: Runs the git_on_branch operation against the disposable repository and exposes its documented outputs.
+  check: ""
+  run: false

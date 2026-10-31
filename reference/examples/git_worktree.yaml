@@ -1,0 +1,60 @@
+- id: basic
+  title: Use git_worktree
+  description: A complete workflow demonstrating git_worktree. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: git-worktree-basic
+    steps:
+      - id: example
+        type: git_worktree
+        with:
+          operation: list
+          comparison: HEAD
+  files: {}
+  prerequisites:
+    - Git available on PATH; run in a disposable repository with an initial commit and a main branch
+  expected: Runs the git_worktree operation against the disposable repository and exposes its documented outputs.
+  check: ""
+  run: false
+- id: ensure
+  title: Ensure a persistent feature worktree
+  description: A complete workflow demonstrating git_worktree. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: git-worktree-ensure
+    steps:
+      - id: example
+        type: git_worktree
+        with:
+          operation: ensure
+          branch: feature/example
+          base: main
+          path: ../wuko-example-worktree
+          create: true
+  files: {}
+  prerequisites:
+    - A disposable Git repository with an initial main commit
+    - The sibling directory wuko-example-worktree must be unused
+  expected: Creates a feature branch and persistent sibling worktree; it survives workflow cleanup.
+  check: ""
+  run: false
+- id: remove
+  title: Remove the example worktree while preserving its branch
+  description: A complete workflow demonstrating git_worktree. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: git-worktree-remove
+    steps:
+      - id: example
+        type: git_worktree
+        with:
+          operation: remove
+          target: ../wuko-example-worktree
+          delete_branch: never
+  files: {}
+  prerequisites:
+    - Run in the disposable repository used by the ensure example
+    - The sibling wuko-example-worktree must be clean
+  expected: Removes the selected worktree and preserves its branch.
+  check: ""
+  run: false

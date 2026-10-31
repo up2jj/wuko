@@ -1,0 +1,22 @@
+- id: basic
+  title: Use edit
+  description: A complete workflow demonstrating edit. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: edit-basic
+    steps:
+      - id: example
+        type: edit
+        with:
+          operation: set
+          from:
+            file: package.json
+          path: $.version
+          value: 1.3.0
+  files:
+    package.json: |
+      {"name":"example","version":"1.2.3"}
+  prerequisites: []
+  expected: Updates only the version value in package.json to 1.3.0.
+  check: ""
+  run: true

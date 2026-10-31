@@ -1,0 +1,20 @@
+- id: basic
+  title: Use git_merge
+  description: A complete workflow demonstrating git_merge. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: git-merge-basic
+    steps:
+      - id: example
+        type: git_merge
+        with:
+          target: main
+          source: feature/example
+          mode: ff_only
+  files: {}
+  prerequisites:
+    - Git available on PATH; run in a disposable repository with an initial commit and a main branch
+    - Create feature/example as a descendant of main; keep the worktree clean
+  expected: Fast-forwards main to feature/example when the preconditions hold.
+  check: ""
+  run: false

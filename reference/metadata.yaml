@@ -1,0 +1,593 @@
+assert:
+  required:
+    - "expr"
+    - "message"
+  rules:
+    - "expr must evaluate to a boolean; false fails the step. exit_code requires plain: true and must be between 1 and 255."
+  defaults: {}
+  choices: {}
+cache:
+  required:
+    - "operation"
+    - "cache_dir"
+    - "key_files"
+    - "paths"
+  rules:
+    - "Derives the cache key from key_files. restore reports hit without executing a build; save archives paths."
+  defaults: {}
+  choices:
+    operation:
+      - "restore"
+      - "save"
+changed:
+  required: []
+  rules:
+    - "Compares files or structured values with the last successful snapshot. The first observation reports a change."
+  defaults: {}
+  choices: {}
+dashboard:
+  required:
+    - "groups"
+  rules:
+    - "Groups contain widgets and optional refresh work. Refresh and action workflows have isolated outputs. Requires an interactive terminal."
+  defaults: {}
+  choices: {}
+decode:
+  required:
+    - "format"
+  rules:
+    - "Exactly one of from or path is required. from is a dotted lookup, not a template. Format-specific options determine the accepted input."
+  defaults:
+    max_bytes: "1MiB"
+  choices:
+    format:
+      - "json"
+      - "yaml"
+      - "toml"
+      - "lines"
+devenv_task:
+  required: []
+  rules:
+    - "Requires a devenv executor and exactly one of name or names. value is published only when stdout is one complete, untruncated JSON document."
+  defaults:
+    capture_limit: "1MiB"
+  choices:
+    mode:
+      - "single"
+      - "before"
+      - "after"
+      - "all"
+docker:
+  required: []
+  rules:
+    - "Requirements and allowed fields depend on operation. A running Docker daemon is required; build requires Buildx. Managed resources follow the documented cleanup policy."
+  defaults:
+    operation: "run"
+  choices:
+    operation:
+      - "run"
+      - "build"
+      - "pull"
+      - "push"
+      - "tag"
+      - "inspect"
+      - "health_wait"
+      - "copy_to"
+      - "copy_from"
+      - "login"
+      - "network_create"
+      - "volume_create"
+      - "verify_digest"
+edit:
+  required:
+    - "operation"
+    - "from"
+    - "path"
+  rules:
+    - "from selects a file or an in-memory value. Operation-specific operands and JSONPath matches determine the edit. missing: create is supported only for set."
+  defaults:
+    result: "one"
+    missing: "error"
+    max_bytes: "1MiB"
+  choices:
+    operation:
+      - "set"
+      - "delete"
+      - "append"
+      - "insert"
+      - "merge"
+      - "rename"
+extract:
+  required: []
+  rules:
+    - "Exactly one of text or from is required. Choose format, pattern, or fields as the extraction grammar. Named outputs depend on the declared captures."
+  defaults: {}
+  choices: {}
+file:
+  required:
+    - "operation"
+  rules:
+    - "Allowed fields, requirements, defaults, and outputs depend on operation; see its documentation section. Modes are quoted octal strings. Replacement and recursive removal require the documented explicit options."
+  defaults: {}
+  choices:
+    operation:
+      - "read"
+      - "write"
+      - "copy"
+      - "move"
+      - "remove"
+      - "mkdir"
+      - "list"
+      - "stat"
+      - "chmod"
+      - "find"
+      - "link"
+      - "truncate"
+      - "tail"
+      - "disk_usage"
+      - "atomic_swap"
+      - "permissions"
+      - "touch"
+      - "append"
+      - "ensure_line"
+      - "ensure_block"
+git_branch:
+  required:
+    - "operation"
+    - "branch"
+    - "exists"
+  rules:
+    - "Asserts local branch existence without creating it."
+  defaults: {}
+  choices:
+    operation:
+      - "assert"
+git_branch_name:
+  required:
+    - "name"
+  rules:
+    - "Validates a Git branch name without creating it."
+  defaults: {}
+  choices: {}
+git_clean:
+  required: []
+  rules:
+    - "Fails when the Git worktree contains changes under the documented clean policy."
+  defaults: {}
+  choices: {}
+git_commit:
+  required:
+    - "message"
+  rules:
+    - "Creates a commit from selected paths or configured staging policy. Requires a repository and author identity."
+  defaults: {}
+  choices: {}
+git_conventional_commit:
+  required:
+    - "operation"
+  rules:
+    - "create requires type and subject; validate requires a message source. Produces or validates message text without creating a commit."
+  defaults: {}
+  choices:
+    operation:
+      - "create"
+      - "validate"
+git_diff:
+  required: []
+  rules:
+    - "source selects the comparison; accepted endpoints and fields depend on source."
+  defaults:
+    source: "commit"
+    through: "HEAD"
+  choices: {}
+git_diff_check:
+  required:
+    - "source"
+  rules:
+    - "Rejects whitespace errors and conflict markers in the selected Git comparison."
+  defaults: {}
+  choices: {}
+git_files:
+  required:
+    - "source"
+  rules:
+    - "Selects Git paths and classifies text and binary files. Available fields depend on source."
+  defaults: {}
+  choices: {}
+git_log:
+  required: []
+  rules:
+    - "after is exclusive; through is inclusive. Results are bounded and newest-first; inspect has_more before treating them as complete."
+  defaults:
+    through: "HEAD"
+    limit: 100
+  choices: {}
+git_merge:
+  required: []
+  rules:
+    - "Merges source into target using ff_only or no_ff with the documented clean-worktree preconditions."
+  defaults: {}
+  choices: {}
+git_merge_base:
+  required:
+    - "from"
+  rules:
+    - "Requires one unambiguous common ancestor between the selected revisions."
+  defaults:
+    through: "HEAD"
+  choices: {}
+git_on_branch:
+  required:
+    - "branch"
+  rules:
+    - "Asserts that the current checkout is on the selected branch."
+  defaults: {}
+  choices: {}
+git_rebase:
+  required: []
+  rules:
+    - "Rebases the current branch onto target, using the documented default when omitted. Requires a suitable clean host-local checkout."
+  defaults: {}
+  choices: {}
+git_remote_branch:
+  required:
+    - "branch"
+    - "exists"
+  rules:
+    - "Checks local remote-tracking references without an implicit fetch."
+  defaults: {}
+  choices: {}
+git_revision:
+  required: []
+  rules:
+    - "Resolves a Git revision into structured commit metadata."
+  defaults:
+    revision: "HEAD"
+  choices: {}
+git_squash:
+  required:
+    - "message"
+  rules:
+    - "Squashes branch work relative to target with an explicit message and staging policy."
+  defaults: {}
+  choices: {}
+git_worktree:
+  required:
+    - "operation"
+  rules:
+    - "ensure requires branch; remove requires target and applies deletion and integration policies. Persistent worktrees survive workflow completion."
+  defaults: {}
+  choices:
+    operation:
+      - "list"
+      - "ensure"
+      - "remove"
+github_actions:
+  required:
+    - "operation"
+  rules:
+    - "Uses the authenticated gh CLI to select and watch an Actions run."
+  defaults: {}
+  choices: {}
+github_pr:
+  required:
+    - "operation"
+  rules:
+    - "Uses the authenticated gh CLI to find pull request metadata for a repository and branch."
+  defaults: {}
+  choices: {}
+github_release:
+  required:
+    - "operation"
+    - "repository"
+  rules:
+    - "Uses the authenticated gh CLI to compare the default branch with the latest release."
+  defaults: {}
+  choices:
+    operation:
+      - "check_drift"
+glob:
+  required:
+    - "patterns"
+  rules:
+    - "patterns accepts a literal list or an expr binding and must contain at least one pattern."
+  defaults:
+    root: "."
+    missing_root: "fail"
+  choices:
+    missing_root:
+      - "fail"
+      - "empty"
+http:
+  required:
+    - "url"
+  rules:
+    - "body, json, and form/files request-body families are mutually exclusive. download and response are mutually exclusive; download requires a path."
+  defaults:
+    method: "GET"
+    response: "text"
+  choices:
+    response:
+      - "text"
+      - "json"
+import_vars:
+  required:
+    - "files"
+  rules:
+    - "Imports JSON or TOML mappings into workflow variables in file order."
+  defaults: {}
+  choices: {}
+jsonpath:
+  required:
+    - "from"
+    - "query"
+  rules:
+    - "from is a dotted lookup. query uses RFC 9535 JSONPath. result: one requires exactly one match; result: all returns an array."
+  defaults:
+    result: "all"
+  choices:
+    result:
+      - "all"
+      - "one"
+key_value:
+  required:
+    - "operation"
+    - "scope"
+    - "store"
+  rules:
+    - "get, set, update, and delete require key. set requires exactly one of value or expr; update requires expr and sees current and found under one lock. list accepts prefix; clear empties the store."
+  defaults: {}
+  choices:
+    operation:
+      - "get"
+      - "set"
+      - "update"
+      - "delete"
+      - "list"
+      - "clear"
+    scope:
+      - "local"
+      - "global"
+log_wait:
+  required:
+    - "path"
+    - "pattern"
+  rules:
+    - "Follows the log until pattern matches; named groups appear under captures. Bound waiting with an enclosing attempt timeout."
+  defaults:
+    max_bytes: "1MiB"
+  choices: {}
+lua:
+  required: []
+  rules:
+    - "Exactly one of file or source is required. Use wuko.output to declare result fields. Lua and its modules are trusted executable code."
+  defaults: {}
+  choices: {}
+markdown_edit:
+  required:
+    - "from"
+    - "edits"
+  rules:
+    - "Selectors see the original document. Duplicate matches require an explicit occurrence or all-match policy; overlapping edits fail before writing."
+  defaults: {}
+  choices: {}
+multiplexer:
+  required:
+    - "operation"
+  rules:
+    - "Uses the active supported terminal multiplexer context. Requirements and effects depend on operation."
+  defaults: {}
+  choices: {}
+print:
+  required:
+    - "message"
+  rules:
+    - "Writes a user-facing message to stderr. An error-level message does not itself fail the step."
+  defaults:
+    level: "info"
+  choices:
+    level:
+      - "info"
+      - "success"
+      - "warn"
+      - "error"
+process:
+  required: []
+  rules:
+    - "Choose command with args or argv.expr. Readiness, restart, and shutdown settings govern the managed process lifetime. rpc: jsonl reserves stdout for the protocol and cannot be combined with detached or stdout: discard."
+  defaults: {}
+  choices: {}
+process_call:
+  required: []
+  rules:
+    - "Exactly one of worker or pool is required. payload and payload_expr are mutually exclusive. timeout must be positive. Targets must declare rpc: jsonl; requests are not replayed after writing."
+  defaults: {}
+  choices: {}
+require_tool:
+  required:
+    - "tool"
+  rules:
+    - "Checks PATH and optionally a version constraint. Does not install tools."
+  defaults:
+    version_args:
+      - "--version"
+    required: true
+  choices: {}
+run_workflow:
+  required:
+    - "workflow"
+  rules:
+    - "Available to trusted local workflows. The child must be directly invokable. Calls wait through cleanup; only declared outputs cross the workflow boundary."
+  defaults: {}
+  choices: {}
+scaffold:
+  required:
+    - "from"
+    - "into"
+  rules:
+    - "from selects a template directory; into selects the destination. on_conflict controls existing paths."
+  defaults: {}
+  choices: {}
+semver:
+  required:
+    - "operation"
+    - "version"
+  rules:
+    - "compare requires other; constrain requires constraint; increment selects part. Fields belonging to another operation are rejected."
+  defaults: {}
+  choices:
+    operation:
+      - "parse"
+      - "compare"
+      - "constrain"
+      - "increment"
+set:
+  required: []
+  rules:
+    - "Exactly one of variable or variables is required. The single-variable form requires exactly one of value or expr. Batch assignments see the state from before the step and commit together."
+  defaults: {}
+  choices: {}
+shell:
+  required: []
+  rules:
+    - "Choose command with args, script with optional shell and args, or argv with exactly one expr. argv is mutually exclusive with command, script, shell, and args. Use process for long-lived background work."
+  defaults: {}
+  choices: {}
+tcp_probe:
+  required:
+    - "hosts"
+    - "ports"
+  rules:
+    - "ports contains valid port numbers after rendering. expect can assert the observed state; owner discovery is platform-dependent."
+  defaults:
+    timeout: "1s"
+  choices: {}
+temp:
+  required:
+    - "kind"
+  rules:
+    - "Returns a managed temporary path that is removed during scope cleanup."
+  defaults: {}
+  choices:
+    kind:
+      - "file"
+      - "directory"
+template:
+  required: []
+  rules:
+    - "Exactly one of source or file is required. Without destination, returns content and size; with destination, writes a file. Source renders once after data is resolved."
+  defaults: {}
+  choices: {}
+text_check:
+  required:
+    - "files"
+  rules:
+    - "Configure forbidden patterns, size limits, or structured parsing. Policy violations fail without modifying files."
+  defaults: {}
+  choices: {}
+text_fix:
+  required:
+    - "files"
+  rules:
+    - "Enable at least one normalization. keep_markdown_line_breaks requires trailing_whitespace. By default, writes changes and then fails; fail_on_change: false continues after fixing."
+  defaults:
+    fail_on_change: true
+  choices: {}
+time:
+  required: []
+  rules:
+    - "Omitting value captures the current time. parse_format requires value. add accepts calendar adjustments and duration; format uses Go time layouts."
+  defaults: {}
+  choices: {}
+transform:
+  required:
+    - "from"
+    - "operations"
+  rules:
+    - "from accepts a dotted lookup, an expr object, or a file-source object. operations is an ordered pipeline with operation-specific grammars and input/output kinds."
+  defaults: {}
+  choices: {}
+tui_choice:
+  required:
+    - "variable"
+    - "message"
+  rules:
+    - "Select static choices or a dynamic from source. multiple changes the result shape. Unattended defaults must be explicitly declared."
+  defaults: {}
+  choices: {}
+tui_confirm:
+  required:
+    - "variable"
+    - "message"
+  rules:
+    - "Returns a boolean. noninteractive: default requires an explicit default. --yes answers confirmation prompts with true."
+  defaults: {}
+  choices: {}
+tui_date:
+  required:
+    - "variable"
+    - "message"
+  rules:
+    - "value supplies an editable default. min and max bound selection. For unattended execution, supply the variable or an explicit default policy."
+  defaults: {}
+  choices: {}
+tui_form:
+  required:
+    - "fields"
+  rules:
+    - "Field IDs must be unique. Each field declares a supported type. Results appear directly under the field IDs in step outputs."
+  defaults: {}
+  choices: {}
+tui_input:
+  required:
+    - "variable"
+    - "message"
+  rules:
+    - "value supplies an editable default. For unattended execution, pre-supply the variable or configure noninteractive: default with an explicit value."
+  defaults: {}
+  choices: {}
+tui_password:
+  required:
+    - "variable"
+    - "message"
+  rules:
+    - "Reads masked input; pre-supply the variable for unattended use. Never print real credentials in an example."
+  defaults: {}
+  choices: {}
+tui_path:
+  required:
+    - "variable"
+    - "message"
+  rules:
+    - "Selects paths under root according to kind, patterns, and selection bounds. multiple changes the variable to a list."
+  defaults: {}
+  choices: {}
+tui_review:
+  required:
+    - "variable"
+    - "message"
+    - "content"
+  rules:
+    - "Returns a boolean review decision. For unattended execution, pre-supply the variable or declare a default policy."
+  defaults:
+    format: "plain"
+  choices:
+    format:
+      - "plain"
+      - "diff"
+tui_table:
+  required:
+    - "message"
+    - "from"
+    - "columns"
+  rules:
+    - "from is a dotted lookup to rows. Every column needs header and field. Without a terminal, prints a plain table."
+  defaults: {}
+  choices: {}
+watch:
+  required:
+    - "patterns"
+  rules:
+    - "Waits for a matching filesystem event. Bound waiting with an enclosing attempt timeout."
+  defaults: {}
+  choices: {}

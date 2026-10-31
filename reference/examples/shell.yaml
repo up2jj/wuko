@@ -1,0 +1,50 @@
+- id: basic
+  title: Use shell
+  description: A complete workflow demonstrating shell. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: shell-basic
+    steps:
+      - id: example
+        type: shell
+        with:
+          command: printf
+          args:
+            - |
+              %s
+            - Hello Wuko
+      - id: verify
+        type: assert
+        with:
+          expr: steps.example.stdout == "Hello Wuko\n" && steps.example.exit_code == 0
+          message: Example result must match the documented expectation
+  files: {}
+  prerequisites:
+    - printf available on PATH
+  expected: Captures Hello Wuko followed by a newline in stdout, with exit_code 0.
+  check: steps.example.stdout == "Hello Wuko\n" && steps.example.exit_code == 0
+  run: true
+- id: script
+  title: Pass arguments to an inline script
+  description: A complete workflow demonstrating shell. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: shell-script
+    steps:
+      - id: example
+        type: shell
+        with:
+          script: printf "%s\n" "$1"
+          args:
+            - Hello Wuko
+      - id: verify
+        type: assert
+        with:
+          expr: steps.example.exit_code == 0
+          message: Example result must match the documented expectation
+  files: {}
+  prerequisites:
+    - A POSIX shell and printf
+  expected: Prints the argument through $1, preserving its spaces.
+  check: steps.example.exit_code == 0
+  run: true

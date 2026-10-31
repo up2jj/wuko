@@ -1,0 +1,20 @@
+- id: basic
+  title: Use github_pr
+  description: A complete workflow demonstrating github_pr. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: github-pr-basic
+    steps:
+      - id: example
+        type: github_pr
+        with:
+          operation: find
+          repository: owner/repository
+          branch: feature/example
+  files: {}
+  prerequisites:
+    - Authenticated gh CLI with access to the repository
+    - Replace owner/repository and feature/example with an accessible repository and branch
+  expected: Finds the open pull request for the selected branch, if any.
+  check: ""
+  run: false

@@ -1,0 +1,29 @@
+- id: basic
+  title: Use markdown_edit
+  description: A complete workflow demonstrating markdown_edit. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: markdown-edit-basic
+    steps:
+      - id: example
+        type: markdown_edit
+        with:
+          from:
+            file: notes.md
+          edits:
+            - operation: set
+              select:
+                kind: heading
+                level: 1
+                text: Draft
+              field: text
+              value: Release notes
+  files:
+    notes.md: |
+      # Draft
+
+      Initial notes.
+  prerequisites: []
+  expected: Changes the first heading from Draft to Release notes while preserving the paragraph.
+  check: ""
+  run: true

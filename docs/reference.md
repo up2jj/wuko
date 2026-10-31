@@ -6,6 +6,12 @@ Every built-in step, control, and composition pattern, with links to detailed gu
 guide contains multiple examples. For a guided introduction, start with
 [Getting started](getting-started.md).
 
+This reference is also available offline through `wuko reference`. Use `wuko reference step TYPE`
+for configuration and output contracts, and `wuko reference example TYPE` for named complete
+workflows. The canonical examples are embedded from `reference/examples/` and validated by tests;
+`wuko reference example TYPE ID --format json` includes prerequisites and supporting files.
+For agent usage, start with `wuko reference topic agents` or the [agent guide](agents.md).
+
 - [Steps](#steps)
 - [Workflow controls](#workflow-controls)
 - [Workflow composition](#workflow-composition)

@@ -1,0 +1,23 @@
+- id: basic
+  title: Use lua
+  description: A complete workflow demonstrating lua. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: lua-basic
+    steps:
+      - id: example
+        type: lua
+        with:
+          source: wuko.output("message", "Hello " .. wuko.args.name)
+          args:
+            name: Wuko
+      - id: verify
+        type: assert
+        with:
+          expr: steps.example.message == "Hello Wuko"
+          message: Example result must match the documented expectation
+  files: {}
+  prerequisites: []
+  expected: 'The Lua step publishes message: Hello Wuko.'
+  check: steps.example.message == "Hello Wuko"
+  run: true

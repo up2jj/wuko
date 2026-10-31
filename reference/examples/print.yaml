@@ -1,0 +1,19 @@
+- id: basic
+  title: Use print
+  description: A complete workflow demonstrating print. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: print-basic
+    vars:
+      environment: development
+    steps:
+      - id: example
+        type: print
+        with:
+          message: 'Selected environment: {{ .vars.environment }}'
+          level: info
+  files: {}
+  prerequisites: []
+  expected: 'Prints Selected environment: development; the step has no data outputs.'
+  check: ""
+  run: true

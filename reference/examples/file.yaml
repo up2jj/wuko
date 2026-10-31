@@ -1,0 +1,409 @@
+- id: basic
+  title: Use file
+  description: A complete workflow demonstrating file. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: file-basic
+    steps:
+      - id: write
+        type: file
+        with:
+          operation: write
+          path: greeting.txt
+          content: |
+            Hello Wuko
+      - id: example
+        type: file
+        with:
+          operation: read
+          path: greeting.txt
+  files: {}
+  prerequisites: []
+  expected: Creates greeting.txt in the invocation directory and reads it back. Run in an empty scratch directory.
+  check: ""
+  run: true
+  expected_files:
+    greeting.txt: |
+      Hello Wuko
+- id: copy
+  title: 'File operation: copy'
+  description: A complete workflow demonstrating file. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: file-copy
+    steps:
+      - id: example
+        type: file
+        with:
+          operation: copy
+          path: input.txt
+          destination: copy.txt
+  files:
+    input.txt: |
+      Hello
+  prerequisites: []
+  expected: Applies copy only to the example files in the invocation directory. Use an empty scratch directory.
+  check: ""
+  run: true
+  expected_files:
+    copy.txt: |
+      Hello
+- id: move
+  title: 'File operation: move'
+  description: A complete workflow demonstrating file. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: file-move
+    steps:
+      - id: example
+        type: file
+        with:
+          operation: move
+          path: input.txt
+          destination: moved.txt
+  files:
+    input.txt: |
+      Hello
+  prerequisites: []
+  expected: Applies move only to the example files in the invocation directory. Use an empty scratch directory.
+  check: ""
+  run: true
+  expected_files:
+    moved.txt: |
+      Hello
+  absent_files:
+    - input.txt
+- id: remove
+  title: 'File operation: remove'
+  description: A complete workflow demonstrating file. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: file-remove
+    steps:
+      - id: example
+        type: file
+        with:
+          operation: remove
+          path: input.txt
+  files:
+    input.txt: |
+      Hello
+  prerequisites: []
+  expected: Applies remove only to the example files in the invocation directory. Use an empty scratch directory.
+  check: ""
+  run: true
+  absent_files:
+    - input.txt
+- id: mkdir
+  title: 'File operation: mkdir'
+  description: A complete workflow demonstrating file. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: file-mkdir
+    steps:
+      - id: example
+        type: file
+        with:
+          operation: mkdir
+          path: generated
+  files: {}
+  prerequisites: []
+  expected: Applies mkdir only to the example files in the invocation directory. Use an empty scratch directory.
+  check: ""
+  run: true
+- id: list
+  title: 'File operation: list'
+  description: A complete workflow demonstrating file. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: file-list
+    steps:
+      - id: example
+        type: file
+        with:
+          operation: list
+          path: .
+  files:
+    input.txt: |
+      Hello
+  prerequisites: []
+  expected: Applies list only to the example files in the invocation directory. Use an empty scratch directory.
+  check: ""
+  run: true
+- id: stat
+  title: 'File operation: stat'
+  description: A complete workflow demonstrating file. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: file-stat
+    steps:
+      - id: example
+        type: file
+        with:
+          operation: stat
+          path: input.txt
+  files:
+    input.txt: |
+      Hello
+  prerequisites: []
+  expected: Applies stat only to the example files in the invocation directory. Use an empty scratch directory.
+  check: ""
+  run: true
+- id: chmod
+  title: 'File operation: chmod'
+  description: A complete workflow demonstrating file. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: file-chmod
+    steps:
+      - id: example
+        type: file
+        with:
+          operation: chmod
+          path: input.txt
+          mode: "0600"
+  files:
+    input.txt: |
+      Hello
+  prerequisites: []
+  expected: Applies chmod only to the example files in the invocation directory. Use an empty scratch directory.
+  check: ""
+  run: true
+- id: find
+  title: 'File operation: find'
+  description: A complete workflow demonstrating file. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: file-find
+    steps:
+      - id: example
+        type: file
+        with:
+          operation: find
+          path: .
+          patterns:
+            - '*.txt'
+  files:
+    input.txt: |
+      Hello
+  prerequisites: []
+  expected: Applies find only to the example files in the invocation directory. Use an empty scratch directory.
+  check: ""
+  run: true
+- id: link
+  title: 'File operation: link'
+  description: A complete workflow demonstrating file. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: file-link
+    steps:
+      - id: example
+        type: file
+        with:
+          operation: link
+          path: input.txt
+          destination: alias.txt
+          link_type: symbolic
+  files:
+    input.txt: |
+      Hello
+  prerequisites: []
+  expected: Applies link only to the example files in the invocation directory. Use an empty scratch directory.
+  check: ""
+  run: true
+- id: truncate
+  title: 'File operation: truncate'
+  description: A complete workflow demonstrating file. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: file-truncate
+    steps:
+      - id: example
+        type: file
+        with:
+          operation: truncate
+          path: input.txt
+          size: 5B
+  files:
+    input.txt: |
+      Hello world
+  prerequisites: []
+  expected: Applies truncate only to the example files in the invocation directory. Use an empty scratch directory.
+  check: ""
+  run: true
+  expected_files:
+    input.txt: Hello
+- id: tail
+  title: 'File operation: tail'
+  description: A complete workflow demonstrating file. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: file-tail
+    steps:
+      - id: example
+        type: file
+        with:
+          operation: tail
+          path: input.txt
+          lines: 1
+  files:
+    input.txt: |
+      one
+      two
+  prerequisites: []
+  expected: Applies tail only to the example files in the invocation directory. Use an empty scratch directory.
+  check: ""
+  run: true
+- id: disk_usage
+  title: 'File operation: disk_usage'
+  description: A complete workflow demonstrating file. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: file-disk_usage
+    steps:
+      - id: example
+        type: file
+        with:
+          operation: disk_usage
+          path: .
+          largest: 3
+  files:
+    input.txt: |
+      Hello
+  prerequisites: []
+  expected: Applies disk_usage only to the example files in the invocation directory. Use an empty scratch directory.
+  check: ""
+  run: true
+- id: atomic_swap
+  title: 'File operation: atomic_swap'
+  description: A complete workflow demonstrating file. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: file-atomic_swap
+    steps:
+      - id: example
+        type: file
+        with:
+          operation: atomic_swap
+          path: staging
+          destination: published
+  files:
+    staging/index.txt: |
+      Hello
+  prerequisites: []
+  expected: Applies atomic_swap only to the example files in the invocation directory. Use an empty scratch directory.
+  check: ""
+  run: true
+  expected_files:
+    published/index.txt: |
+      Hello
+  absent_files:
+    - staging
+- id: permissions
+  title: 'File operation: permissions'
+  description: A complete workflow demonstrating file. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: file-permissions
+    steps:
+      - id: example
+        type: file
+        with:
+          operation: permissions
+          path: input.txt
+          mode: "0600"
+  files:
+    input.txt: |
+      Hello
+  prerequisites: []
+  expected: Applies permissions only to the example files in the invocation directory. Use an empty scratch directory.
+  check: ""
+  run: true
+- id: touch
+  title: 'File operation: touch'
+  description: A complete workflow demonstrating file. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: file-touch
+    steps:
+      - id: example
+        type: file
+        with:
+          operation: touch
+          path: created.txt
+          create: true
+  files: {}
+  prerequisites: []
+  expected: Applies touch only to the example files in the invocation directory. Use an empty scratch directory.
+  check: ""
+  run: true
+- id: append
+  title: 'File operation: append'
+  description: A complete workflow demonstrating file. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: file-append
+    steps:
+      - id: example
+        type: file
+        with:
+          operation: append
+          path: input.txt
+          content: |
+            World
+  files:
+    input.txt: |
+      Hello
+  prerequisites: []
+  expected: Applies append only to the example files in the invocation directory. Use an empty scratch directory.
+  check: ""
+  run: true
+  expected_files:
+    input.txt: |
+      Hello
+      World
+- id: ensure_line
+  title: 'File operation: ensure_line'
+  description: A complete workflow demonstrating file. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: file-ensure_line
+    steps:
+      - id: example
+        type: file
+        with:
+          operation: ensure_line
+          path: settings.txt
+          line: enabled=true
+  files:
+    settings.txt: |
+      mode=demo
+  prerequisites: []
+  expected: Applies ensure_line only to the example files in the invocation directory. Use an empty scratch directory.
+  check: ""
+  run: true
+  expected_files:
+    settings.txt: |
+      mode=demo
+      enabled=true
+- id: ensure_block
+  title: 'File operation: ensure_block'
+  description: A complete workflow demonstrating file. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: file-ensure_block
+    steps:
+      - id: example
+        type: file
+        with:
+          operation: ensure_block
+          path: settings.txt
+          content: |
+            enabled=true
+  files:
+    settings.txt: |
+      mode=demo
+  prerequisites: []
+  expected: Applies ensure_block only to the example files in the invocation directory. Use an empty scratch directory.
+  check: ""
+  run: true

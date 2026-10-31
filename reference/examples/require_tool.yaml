@@ -1,0 +1,17 @@
+- id: basic
+  title: Use require_tool
+  description: A complete workflow demonstrating require_tool. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: require-tool-basic
+    steps:
+      - id: example
+        type: require_tool
+        with:
+          tool: git
+  files: {}
+  prerequisites:
+    - Git available on PATH
+  expected: Succeeds when Git can be resolved on PATH; does not install it.
+  check: ""
+  run: false

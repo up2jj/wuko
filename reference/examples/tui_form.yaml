@@ -1,0 +1,27 @@
+- id: basic
+  title: Use tui_form
+  description: A complete workflow demonstrating tui_form. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: tui-form-basic
+    steps:
+      - id: example
+        type: tui_form
+        with:
+          title: Release settings
+          fields:
+            - id: name
+              type: text
+              label: Release name
+              default: next-release
+              required: true
+            - id: notify
+              type: checkbox
+              label: Notify the team
+              default: false
+  files: {}
+  prerequisites:
+    - An interactive terminal
+  expected: Publishes field IDs directly as steps.example.name and steps.example.notify.
+  check: ""
+  run: false

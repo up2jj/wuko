@@ -1,0 +1,34 @@
+List a step's examples or read a complete example
+
+Usage:
+  wuko reference example TYPE [ID] [flags]
+
+Arguments:
+  TYPE
+      Built-in step type from wuko reference step
+  [ID]
+      Stable topic or example ID from the corresponding reference index
+
+Examples:
+  wuko reference example file
+  wuko reference example set basic --format yaml
+  wuko reference example shell basic --format json
+
+Flags:
+      --format string  example output format: text, json, or yaml (single-file examples only) (default "text")
+  -h, --help           help for example
+
+Global Flags:
+      --config string           read CLI configuration from a YAML file instead of the current directory
+      --debug                   trace workflow loading, validation, and execution to stderr (may expose non-secret configuration)
+      --env-loader stringArray  load the invocation environment with auto, none, mise, asdf, or direnv (repeatable)
+      --frozen-lockfile         require existing local plugin pins without modifying wuko.lock
+      --no-config               ignore CLI configuration, including the default workflow
+
+Behavior:
+  Offline and non-interactive. Ignores local configuration. Text is the default; JSON is one schema_version: 1 document on stdout. Errors use stderr and a nonzero exit status. Does not run workflows, plugins, or examples.
+
+Related help:
+  wuko help
+  wuko reference
+  wuko reference topic agents

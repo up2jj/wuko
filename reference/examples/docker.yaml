@@ -1,0 +1,275 @@
+- id: basic
+  title: Use docker
+  description: A complete workflow demonstrating docker. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: docker-basic
+    steps:
+      - id: example
+        type: docker
+        with:
+          image: alpine:3.22
+          command: printf
+          args:
+            - |
+              %s
+            - Hello Wuko
+          network: none
+          pull: if-missing
+  files: {}
+  prerequisites:
+    - A running Docker daemon
+    - Network access to pull alpine:3.22 unless already cached
+  expected: Runs printf in an isolated container, captures its output, and removes the managed container.
+  check: ""
+  run: false
+- id: pull
+  title: 'Docker operation: pull'
+  description: A complete workflow demonstrating docker. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: docker-pull
+    steps:
+      - id: example
+        type: docker
+        with:
+          operation: pull
+          image: alpine:3.22
+  files: {}
+  prerequisites:
+    - A running Docker daemon; use a disposable Docker environment
+    - Network access to the image registry
+  expected: Performs the documented pull operation against the prepared Docker environment.
+  check: ""
+  run: false
+- id: inspect
+  title: 'Docker operation: inspect'
+  description: A complete workflow demonstrating docker. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: docker-inspect
+    steps:
+      - id: example
+        type: docker
+        with:
+          operation: inspect
+          image: alpine:3.22
+  files: {}
+  prerequisites:
+    - A running Docker daemon; use a disposable Docker environment
+    - Pull alpine:3.22 first
+  expected: Performs the documented inspect operation against the prepared Docker environment.
+  check: ""
+  run: false
+- id: tag
+  title: 'Docker operation: tag'
+  description: A complete workflow demonstrating docker. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: docker-tag
+    steps:
+      - id: example
+        type: docker
+        with:
+          operation: tag
+          source: alpine:3.22
+          target: wuko-example:local
+  files: {}
+  prerequisites:
+    - A running Docker daemon; use a disposable Docker environment
+    - Pull alpine:3.22 first
+  expected: Performs the documented tag operation against the prepared Docker environment.
+  check: ""
+  run: false
+- id: push
+  title: 'Docker operation: push'
+  description: A complete workflow demonstrating docker. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: docker-push
+    steps:
+      - id: example
+        type: docker
+        with:
+          operation: push
+          image: localhost:5000/wuko-example:local
+  files: {}
+  prerequisites:
+    - A running Docker daemon; use a disposable Docker environment
+    - Run a test registry at localhost:5000; for push, tag a local image as localhost:5000/wuko-example:local
+  expected: Performs the documented push operation against the prepared Docker environment.
+  check: ""
+  run: false
+- id: health_wait
+  title: 'Docker operation: health_wait'
+  description: A complete workflow demonstrating docker. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: docker-health-wait
+    steps:
+      - id: bounded_health
+        attempt:
+          timeout: 30s
+          steps:
+            - id: example
+              type: docker
+              with:
+                operation: health_wait
+                container: wuko-example-service
+  files: {}
+  prerequisites:
+    - A running Docker daemon; use a disposable Docker environment
+    - Create a container named wuko-example-service first; for health_wait it must have a health check, and for copy_from it must contain /tmp/greeting.txt
+  expected: Performs the documented health_wait operation against the prepared Docker environment.
+  check: ""
+  run: false
+- id: copy_to
+  title: 'Docker operation: copy_to'
+  description: A complete workflow demonstrating docker. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: docker-copy_to
+    steps:
+      - id: example
+        type: docker
+        with:
+          operation: copy_to
+          container: wuko-example-service
+          source: greeting.txt
+          target: /tmp/greeting.txt
+  files:
+    greeting.txt: |
+      Hello Wuko
+  prerequisites:
+    - A running Docker daemon; use a disposable Docker environment
+    - Create a container named wuko-example-service first; for health_wait it must have a health check, and for copy_from it must contain /tmp/greeting.txt
+  expected: Performs the documented copy_to operation against the prepared Docker environment.
+  check: ""
+  run: false
+- id: copy_from
+  title: 'Docker operation: copy_from'
+  description: A complete workflow demonstrating docker. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: docker-copy_from
+    steps:
+      - id: example
+        type: docker
+        with:
+          operation: copy_from
+          container: wuko-example-service
+          source: /tmp/greeting.txt
+          target: copied.txt
+  files: {}
+  prerequisites:
+    - A running Docker daemon; use a disposable Docker environment
+    - Create a container named wuko-example-service first; for health_wait it must have a health check, and for copy_from it must contain /tmp/greeting.txt
+  expected: Performs the documented copy_from operation against the prepared Docker environment.
+  check: ""
+  run: false
+- id: login
+  title: 'Docker operation: login'
+  description: A complete workflow demonstrating docker. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: docker-login
+    steps:
+      - id: example
+        type: docker
+        with:
+          operation: login
+          auth:
+            username: '{{ .env.EXAMPLE_REGISTRY_USER }}'
+            password: '{{ .env.EXAMPLE_REGISTRY_PASSWORD }}'
+            server_address: localhost:5000
+  files: {}
+  prerequisites:
+    - A running Docker daemon; use a disposable Docker environment
+    - Run a test registry at localhost:5000; for push, tag a local image as localhost:5000/wuko-example:local
+    - Export EXAMPLE_REGISTRY_USER and EXAMPLE_REGISTRY_PASSWORD for that registry without placing credentials in YAML
+  expected: Performs the documented login operation against the prepared Docker environment.
+  check: ""
+  run: false
+- id: network_create
+  title: 'Docker operation: network_create'
+  description: A complete workflow demonstrating docker. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: docker-network_create
+    steps:
+      - id: example
+        type: docker
+        with:
+          operation: network_create
+          name: wuko-example-network
+  files: {}
+  prerequisites:
+    - A running Docker daemon; use a disposable Docker environment
+  expected: Performs the documented network_create operation against the prepared Docker environment.
+  check: ""
+  run: false
+- id: volume_create
+  title: 'Docker operation: volume_create'
+  description: A complete workflow demonstrating docker. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: docker-volume_create
+    steps:
+      - id: example
+        type: docker
+        with:
+          operation: volume_create
+          name: wuko-example-volume
+  files: {}
+  prerequisites:
+    - A running Docker daemon; use a disposable Docker environment
+  expected: Performs the documented volume_create operation against the prepared Docker environment.
+  check: ""
+  run: false
+- id: verify_digest
+  title: 'Docker operation: verify_digest'
+  description: A complete workflow demonstrating docker. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: docker-verify_digest
+    steps:
+      - id: example
+        type: docker
+        with:
+          operation: verify_digest
+          image: alpine:3.22
+          expected_digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+  files: {}
+  prerequisites:
+    - A running Docker daemon; use a disposable Docker environment
+    - Pull alpine:3.22 and replace the all-zero digest with its actual OCI digest before running
+  expected: Performs the documented verify_digest operation against the prepared Docker environment.
+  check: ""
+  run: false
+- id: build
+  title: 'Docker operation: build'
+  description: A complete workflow demonstrating docker. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: docker-build
+    steps:
+      - id: example
+        type: docker
+        with:
+          operation: build
+          context: .
+          tags:
+            - wuko-example:local
+          output: load
+  files:
+    greeting.txt: |
+      Hello Wuko
+    Dockerfile: |
+      FROM scratch
+      COPY greeting.txt /greeting.txt
+  prerequisites:
+    - A running Docker daemon; use a disposable Docker environment
+    - Docker Buildx available
+  expected: Performs the documented build operation against the prepared Docker environment.
+  check: ""
+  run: false

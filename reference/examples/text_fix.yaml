@@ -1,0 +1,24 @@
+- id: basic
+  title: Use text_fix
+  description: A complete workflow demonstrating text_fix. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: text-fix-basic
+    steps:
+      - id: example
+        type: text_fix
+        with:
+          files:
+            - notes.txt
+          trailing_whitespace: true
+          final_newline: true
+          fail_on_change: false
+  files:
+    notes.txt: 'Hello   '
+  prerequisites: []
+  expected: Removes trailing spaces and ensures notes.txt ends in one newline.
+  check: ""
+  run: true
+  expected_files:
+    notes.txt: |
+      Hello

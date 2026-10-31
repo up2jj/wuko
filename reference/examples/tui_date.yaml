@@ -1,0 +1,19 @@
+- id: basic
+  title: Use tui_date
+  description: A complete workflow demonstrating tui_date. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: tui-date-basic
+    steps:
+      - id: example
+        type: tui_date
+        with:
+          variable: release_date
+          message: Choose the release date
+          value: "2026-01-02"
+  files: {}
+  prerequisites:
+    - An interactive terminal
+  expected: Stores the selected ISO date in vars.release_date and steps.example.value.
+  check: ""
+  run: false

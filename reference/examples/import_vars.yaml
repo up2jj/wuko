@@ -1,0 +1,24 @@
+- id: basic
+  title: Use import_vars
+  description: A complete workflow demonstrating import_vars. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: import-vars-basic
+    steps:
+      - id: example
+        type: import_vars
+        with:
+          files:
+            - defaults.toml
+      - id: verify
+        type: assert
+        with:
+          expr: vars.retries == 3
+          message: Example result must match the documented expectation
+  files:
+    defaults.toml: |
+      retries = 3
+  prerequisites: []
+  expected: Imports retries = 3 from defaults.toml into workflow variables.
+  check: vars.retries == 3
+  run: true

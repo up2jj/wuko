@@ -1,0 +1,23 @@
+- id: basic
+  title: Use time
+  description: A complete workflow demonstrating time. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: time-basic
+    steps:
+      - id: example
+        type: time
+        with:
+          value: "2026-01-02T03:04:05Z"
+          format: "2006-01-02"
+          timezone: UTC
+      - id: verify
+        type: assert
+        with:
+          expr: steps.example.value == "2026-01-02"
+          message: Example result must match the documented expectation
+  files: {}
+  prerequisites: []
+  expected: Formats the explicit timestamp as 2026-01-02 without depending on the current clock.
+  check: steps.example.value == "2026-01-02"
+  run: true

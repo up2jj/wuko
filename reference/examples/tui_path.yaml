@@ -1,0 +1,22 @@
+- id: basic
+  title: Use tui_path
+  description: A complete workflow demonstrating tui_path. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: tui-path-basic
+    steps:
+      - id: example
+        type: tui_path
+        with:
+          variable: source_path
+          message: Select a file
+          root: .
+          kind: file
+  files:
+    greeting.txt: |
+      Hello
+  prerequisites:
+    - An interactive terminal
+  expected: Publishes the selected path through the configured variable and the step outputs.
+  check: ""
+  run: false

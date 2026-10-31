@@ -1,0 +1,37 @@
+- id: basic
+  title: Use git_conventional_commit
+  description: A complete workflow demonstrating git_conventional_commit. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: git-conventional-commit-basic
+    steps:
+      - id: example
+        type: git_conventional_commit
+        with:
+          operation: create
+          type: feat
+          scope: workflow
+          subject: add an example
+          variable: commit_message
+  files: {}
+  prerequisites: []
+  expected: 'Creates the message feat(workflow): add an example; it does not create a Git commit.'
+  check: ""
+  run: true
+- id: validate
+  title: Validate conventional commit text
+  description: A complete workflow demonstrating git_conventional_commit. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: git-conventional-commit-validate
+    steps:
+      - id: example
+        type: git_conventional_commit
+        with:
+          operation: validate
+          message: 'feat(workflow): add an example'
+  files: {}
+  prerequisites: []
+  expected: Succeeds because the message follows Conventional Commits syntax; no commit is created.
+  check: ""
+  run: true

@@ -1,0 +1,51 @@
+Run a named or remotely located workflow
+
+Usage:
+  wuko run [NAME|URL|GITHUB] [TARGET] [flags]
+
+Arguments:
+  [NAME|URL|GITHUB]
+      Discovered workflow name, HTTPS URL, or github:owner/repo@ref:path locator; with --file, the positional argument selects a target
+  [TARGET]
+      Target declared by the selected workflow
+
+Examples:
+  wuko run check
+  wuko run deploy staging
+  wuko run --file ./deploy.yaml staging
+  ./generate-workflow | wuko run --file -
+  wuko run check --dry-run
+  wuko run check --var 'code="123"'
+  wuko run bootstrap --yes
+
+Flags:
+      --cpus string                      limit aggregate local workflow CPU use in cores (for example 1.5)
+      --defaults                         answer every prompt that declares a default with that default
+      --dry-run                          validate and print steps without running them
+      --env stringArray                  override an environment variable (KEY=value; repeatable)
+      --file string                      run a workflow from a file path, or - for stdin
+  -h, --help                             help for run
+      --memory string                    limit aggregate local workflow memory (for example 512MiB)
+      --once                             run immediately once, ignoring a declared cron schedule
+      --pick                             select a workflow from a GitHub repository or tree
+      --report-json string               write the final execution report as JSON to a path, or - for stdout
+      --report-json-include stringSlice  add redacted values to the JSON report (outputs for step outputs, vars for final variables; comma-separated)
+      --reporter stringArray             select a run reporter (plain or quiet or github or multiplexer; repeatable; overrides workflow reporter; defaults to plain)
+      --var stringArray                  set a workflow variable (key=value; repeatable)
+      --var-file stringArray             import workflow variables from a JSON or TOML file (repeatable)
+      --yes                              answer every tui_confirm prompt with true
+
+Global Flags:
+      --config string           read CLI configuration from a YAML file instead of the current directory
+      --debug                   trace workflow loading, validation, and execution to stderr (may expose non-secret configuration)
+      --env-loader stringArray  load the invocation environment with auto, none, mise, asdf, or direnv (repeatable)
+      --frozen-lockfile         require existing local plugin pins without modifying wuko.lock
+      --no-config               ignore CLI configuration, including the default workflow
+
+Behavior:
+  Executes trusted workflow code. --file - reads stdin. --dry-run previews without running steps, but loading can execute source resolvers or plugin helpers. --once ignores cron repetition. --yes answers confirmation prompts only; --defaults uses declared prompt defaults. --report-json - reserves stdout for one execution-report schema_version: 2 document and sends workflow output to stderr. Exit status 0 means success, 1 failure, and 130 cancellation.
+
+Related help:
+  wuko help
+  wuko reference
+  wuko reference topic agents

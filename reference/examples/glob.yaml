@@ -1,0 +1,20 @@
+- id: basic
+  title: Use glob
+  description: A complete workflow demonstrating glob. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: glob-basic
+    steps:
+      - id: example
+        type: glob
+        with:
+          root: .
+          patterns:
+            - '*.txt'
+  files:
+    greeting.txt: |
+      Hello
+  prerequisites: []
+  expected: Finds greeting.txt beneath the invocation directory.
+  check: ""
+  run: true

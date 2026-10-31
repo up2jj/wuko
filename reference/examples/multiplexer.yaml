@@ -1,0 +1,18 @@
+- id: basic
+  title: Use multiplexer
+  description: A complete workflow demonstrating multiplexer. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: multiplexer-basic
+    steps:
+      - id: example
+        type: multiplexer
+        with:
+          operation: title
+          title: Wuko example
+  files: {}
+  prerequisites:
+    - Run inside a supported tmux, cmux, or Herdr session
+  expected: Changes the current terminal context title to Wuko example.
+  check: ""
+  run: false

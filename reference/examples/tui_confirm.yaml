@@ -1,0 +1,43 @@
+- id: basic
+  title: Use tui_confirm
+  description: A complete workflow demonstrating tui_confirm. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: tui-confirm-basic
+    steps:
+      - id: example
+        type: tui_confirm
+        with:
+          variable: approved
+          message: Continue the demonstration?
+          default: false
+  files: {}
+  prerequisites:
+    - An interactive terminal
+  expected: Stores the boolean response in vars.approved; does not perform an external action.
+  check: ""
+  run: false
+- id: unattended
+  title: Use an explicit false default unattended
+  description: A complete workflow demonstrating tui_confirm. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: tui-confirm-unattended
+    steps:
+      - id: example
+        type: tui_confirm
+        with:
+          variable: approved
+          message: Continue the demonstration?
+          default: false
+          noninteractive: default
+      - id: verify
+        type: assert
+        with:
+          expr: vars.approved == false
+          message: Example result must match the documented expectation
+  files: {}
+  prerequisites: []
+  expected: Stores false without prompting when no terminal is attached.
+  check: vars.approved == false
+  run: true

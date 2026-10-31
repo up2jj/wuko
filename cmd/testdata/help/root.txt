@@ -1,0 +1,51 @@
+Run trusted YAML workflows.
+
+With a default workflow in wuko.yml, bare wuko runs it and accepts the flags of `wuko run`.
+
+Usage:
+  wuko [flags]
+  wuko [command]
+
+Workflows:
+  list      List effective workflows
+  run       Run a named or remotely located workflow
+  tree      Display a workflow as a tree
+  ui        Run a workflow through its local browser form
+  validate  Validate one or all effective workflows
+
+Packages and Plugins:
+  install      Install a workflow in the local or global workflow directory
+  marketplace  Create and build workflow and plugin marketplaces
+  plugin       Install and manage executable plugins
+  uninstall    Uninstall a workflow from the local or global workflow directory
+
+Integrations:
+  agent       Discover and install coding-agent skills
+  completion  Generate shell completion
+  git         Integrate Wuko workflows with Git
+
+Help and Reference:
+  help       Show command help as text or JSON
+  reference  Explore built-in steps, examples, and workflow topics offline
+
+Examples:
+  wuko list --format json
+  wuko help run
+  wuko reference topic agents
+
+Flags:
+      --config string           read CLI configuration from a YAML file instead of the current directory
+      --debug                   trace workflow loading, validation, and execution to stderr (may expose non-secret configuration)
+      --env-loader stringArray  load the invocation environment with auto, none, mise, asdf, or direnv (repeatable)
+      --frozen-lockfile         require existing local plugin pins without modifying wuko.lock
+  -h, --help                    help for wuko
+      --no-config               ignore CLI configuration, including the default workflow
+  -v, --version                 version for wuko
+
+Behavior:
+  With a configured default workflow, runs that workflow and accepts run flags (see wuko run --help). Otherwise opens the workflow picker in a terminal or lists workflows without one. Help does not load configuration.
+
+Related help:
+  wuko help
+  wuko reference
+  wuko reference topic agents

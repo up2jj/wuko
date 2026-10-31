@@ -1,0 +1,22 @@
+- id: basic
+  title: Use extract
+  description: A complete workflow demonstrating extract. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: extract-basic
+    steps:
+      - id: example
+        type: extract
+        with:
+          text: Release 1.2.3 build 42
+          format: Release {version:string} build {build:integer}
+      - id: verify
+        type: assert
+        with:
+          expr: steps.example.version == "1.2.3" && steps.example.build == 42
+          message: Example result must match the documented expectation
+  files: {}
+  prerequisites: []
+  expected: Named outputs version and build hold a string and an integer.
+  check: steps.example.version == "1.2.3" && steps.example.build == 42
+  run: true

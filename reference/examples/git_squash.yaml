@@ -1,0 +1,20 @@
+- id: basic
+  title: Use git_squash
+  description: A complete workflow demonstrating git_squash. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: git-squash-basic
+    steps:
+      - id: example
+        type: git_squash
+        with:
+          target: main
+          message: 'feat: demonstrate squash'
+          stage: all
+  files: {}
+  prerequisites:
+    - Git available on PATH; run in a disposable repository with an initial commit and a main branch
+    - Check out a feature branch with commits beyond main
+  expected: Squashes feature work relative to main into the explicitly messaged commit.
+  check: ""
+  run: false

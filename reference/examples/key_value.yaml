@@ -1,0 +1,148 @@
+- id: basic
+  title: Use key_value
+  description: A complete workflow demonstrating key_value. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: key-value-basic
+    steps:
+      - id: save
+        type: key_value
+        with:
+          operation: set
+          scope: local
+          store: example
+          key: theme
+          value: dark
+      - id: example
+        type: key_value
+        with:
+          operation: get
+          scope: local
+          store: example
+          key: theme
+      - id: verify
+        type: assert
+        with:
+          expr: steps.example.value == "dark" && steps.example.found
+          message: Example result must match the documented expectation
+  files: {}
+  prerequisites: []
+  expected: Persists theme=dark in the local example store and reads it back.
+  check: steps.example.value == "dark" && steps.example.found
+  run: true
+- id: get
+  title: 'Persistent values: get'
+  description: A complete workflow demonstrating key_value. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: key-value-get
+    steps:
+      - id: example
+        type: key_value
+        with:
+          operation: get
+          scope: local
+          store: example
+          key: missing
+          default: light
+  files: {}
+  prerequisites: []
+  expected: Applies get to the workflow-local example store. Use a scratch directory; clear removes all values in that store.
+  check: ""
+  run: true
+- id: set
+  title: 'Persistent values: set'
+  description: A complete workflow demonstrating key_value. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: key-value-set
+    steps:
+      - id: example
+        type: key_value
+        with:
+          operation: set
+          scope: local
+          store: example
+          key: theme
+          value: dark
+  files: {}
+  prerequisites: []
+  expected: Applies set to the workflow-local example store. Use a scratch directory; clear removes all values in that store.
+  check: ""
+  run: true
+- id: update
+  title: 'Persistent values: update'
+  description: A complete workflow demonstrating key_value. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: key-value-update
+    steps:
+      - id: example
+        type: key_value
+        with:
+          operation: update
+          scope: local
+          store: example
+          key: runs
+          expr: 'found ? current + 1 : 1'
+  files: {}
+  prerequisites: []
+  expected: Applies update to the workflow-local example store. Use a scratch directory; clear removes all values in that store.
+  check: ""
+  run: true
+- id: delete
+  title: 'Persistent values: delete'
+  description: A complete workflow demonstrating key_value. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: key-value-delete
+    steps:
+      - id: example
+        type: key_value
+        with:
+          operation: delete
+          scope: local
+          store: example
+          key: theme
+  files: {}
+  prerequisites: []
+  expected: Applies delete to the workflow-local example store. Use a scratch directory; clear removes all values in that store.
+  check: ""
+  run: true
+- id: list
+  title: 'Persistent values: list'
+  description: A complete workflow demonstrating key_value. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: key-value-list
+    steps:
+      - id: example
+        type: key_value
+        with:
+          operation: list
+          scope: local
+          store: example
+          prefix: theme
+  files: {}
+  prerequisites: []
+  expected: Applies list to the workflow-local example store. Use a scratch directory; clear removes all values in that store.
+  check: ""
+  run: true
+- id: clear
+  title: 'Persistent values: clear'
+  description: A complete workflow demonstrating key_value. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: key-value-clear
+    steps:
+      - id: example
+        type: key_value
+        with:
+          operation: clear
+          scope: local
+          store: example
+  files: {}
+  prerequisites: []
+  expected: Applies clear to the workflow-local example store. Use a scratch directory; clear removes all values in that store.
+  check: ""
+  run: true

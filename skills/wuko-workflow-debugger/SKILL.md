@@ -7,6 +7,11 @@ description: Diagnose Wuko workflow loading, validation, and runtime failures in
 
 Find the smallest evidence-backed cause of a Wuko workflow failure before changing behavior.
 
+Check the installed interface with `wuko help COMMAND --format json` and
+`wuko reference step TYPE --format json` before guessing flags or configuration. Use
+`wuko reference example TYPE` for complete examples and `wuko reference search QUERY` to find
+related language topics. These offline lookups do not load workflows or start plugins.
+
 ## Triage workflow
 
 1. Capture the exact workflow selector or file, command, supplied variables, relevant environment names, failing step, and complete non-secret error output.

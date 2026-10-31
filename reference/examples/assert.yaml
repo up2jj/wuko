@@ -1,0 +1,19 @@
+- id: basic
+  title: Use assert
+  description: A complete workflow demonstrating assert. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: assert-basic
+    vars:
+      retries: 3
+    steps:
+      - id: example
+        type: assert
+        with:
+          expr: vars.retries > 0
+          message: Retries must be positive
+  files: {}
+  prerequisites: []
+  expected: The assertion succeeds because retries is positive.
+  check: ""
+  run: true

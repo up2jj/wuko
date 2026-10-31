@@ -1,0 +1,24 @@
+- id: basic
+  title: Use decode
+  description: A complete workflow demonstrating decode. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: decode-basic
+    vars:
+      document: '{"items":[1,2]}'
+    steps:
+      - id: example
+        type: decode
+        with:
+          format: json
+          from: vars.document
+      - id: verify
+        type: assert
+        with:
+          expr: steps.example.value.items == [1,2]
+          message: Example result must match the documented expectation
+  files: {}
+  prerequisites: []
+  expected: The JSON string becomes a typed object with an items array.
+  check: steps.example.value.items == [1,2]
+  run: true

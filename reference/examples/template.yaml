@@ -1,0 +1,23 @@
+- id: basic
+  title: Use template
+  description: A complete workflow demonstrating template. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: template-basic
+    steps:
+      - id: example
+        type: template
+        with:
+          source: Hello {{ .data.name }}
+          data:
+            name: Wuko
+      - id: verify
+        type: assert
+        with:
+          expr: steps.example.content == "Hello Wuko"
+          message: Example result must match the documented expectation
+  files: {}
+  prerequisites: []
+  expected: steps.example.content is Hello Wuko.
+  check: steps.example.content == "Hello Wuko"
+  run: true

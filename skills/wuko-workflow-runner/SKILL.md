@@ -7,6 +7,11 @@ description: Discover, select, preview, and execute an existing Wuko workflow, t
 
 Run a trusted existing workflow only after its source, inputs, and expected effects are clear.
 
+Inspect the installed CLI with `wuko help run --format json` and read
+`wuko reference topic agents` for output contracts and unattended behavior. For an unfamiliar step,
+use `wuko reference step TYPE --format json`; named examples are available through
+`wuko reference example TYPE`. Help and reference lookups are offline and never run workflow code.
+
 ## Discover and select
 
 If the user supplied an exact workflow name and target, preserve that selector and continue to

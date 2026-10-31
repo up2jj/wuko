@@ -1,0 +1,43 @@
+- id: basic
+  title: Use tui_input
+  description: A complete workflow demonstrating tui_input. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: tui-input-basic
+    steps:
+      - id: example
+        type: tui_input
+        with:
+          variable: name
+          message: Enter a name
+          required: true
+  files: {}
+  prerequisites:
+    - An interactive terminal
+  expected: Stores the entered string in vars.name and steps.example.value.
+  check: ""
+  run: false
+- id: unattended
+  title: Use a declared default without a terminal
+  description: A complete workflow demonstrating tui_input. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: tui-input-unattended
+    steps:
+      - id: example
+        type: tui_input
+        with:
+          variable: name
+          message: Enter a name
+          value: Wuko
+          noninteractive: default
+      - id: verify
+        type: assert
+        with:
+          expr: vars.name == "Wuko"
+          message: Example result must match the documented expectation
+  files: {}
+  prerequisites: []
+  expected: Uses Wuko without prompting when no terminal is attached.
+  check: vars.name == "Wuko"
+  run: true

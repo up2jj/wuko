@@ -1,0 +1,16 @@
+- id: basic
+  title: Use git_revision
+  description: A complete workflow demonstrating git_revision. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: git-revision-basic
+    steps:
+      - id: example
+        type: git_revision
+        with: {}
+  files: {}
+  prerequisites:
+    - Git available on PATH; run in a disposable repository with an initial commit and a main branch
+  expected: Runs the git_revision operation against the disposable repository and exposes its documented outputs.
+  check: ""
+  run: false

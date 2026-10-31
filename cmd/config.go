@@ -82,7 +82,7 @@ func optionConfigured(command *cobra.Command, flag *pflag.Flag) bool {
 }
 
 func wrapLocalConfiguration(command *cobra.Command, configuration *localConfiguration, deps dependencies) {
-	if command.Hidden || command.Name() == "completion" {
+	if command.Hidden || command.Name() == "completion" || command.Annotations[referenceAnnotation] == "true" {
 		return
 	}
 	if command.Runnable() {

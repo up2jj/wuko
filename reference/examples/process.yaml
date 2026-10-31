@@ -1,0 +1,24 @@
+- id: basic
+  title: Use process
+  description: A complete workflow demonstrating process. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: process-basic
+    steps:
+      - id: example
+        type: process
+        with:
+          command: sh
+          args:
+            - -c
+            - while :; do sleep 1; done
+      - id: status
+        type: print
+        with:
+          message: The managed process is running.
+  files: {}
+  prerequisites:
+    - POSIX sh and sleep available on PATH
+  expected: Starts a managed process, prints a message, then terminates the process during workflow cleanup.
+  check: ""
+  run: false

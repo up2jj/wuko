@@ -1,0 +1,17 @@
+- id: basic
+  title: Use temp
+  description: A complete workflow demonstrating temp. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: temp-basic
+    steps:
+      - id: example
+        type: temp
+        with:
+          kind: directory
+          pattern: wuko-example-*
+  files: {}
+  prerequisites: []
+  expected: Publishes an absolute temporary directory path; the managed resource is cleaned up after the workflow.
+  check: ""
+  run: true

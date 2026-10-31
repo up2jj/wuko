@@ -1,0 +1,19 @@
+- id: basic
+  title: Use git_branch
+  description: A complete workflow demonstrating git_branch. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: git-branch-basic
+    steps:
+      - id: example
+        type: git_branch
+        with:
+          operation: assert
+          branch: example-absent
+          exists: false
+  files: {}
+  prerequisites:
+    - Git available on PATH; run in a disposable repository with an initial commit and a main branch
+  expected: Runs the git_branch operation against the disposable repository and exposes its documented outputs.
+  check: ""
+  run: false

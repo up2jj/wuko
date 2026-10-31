@@ -1,0 +1,51 @@
+- id: basic
+  title: Use tui_choice
+  description: A complete workflow demonstrating tui_choice. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: tui-choice-basic
+    steps:
+      - id: example
+        type: tui_choice
+        with:
+          variable: environment
+          message: Select an environment
+          choices:
+            - label: Development
+              value: dev
+              default: true
+            - label: Staging
+              value: staging
+  files: {}
+  prerequisites:
+    - An interactive terminal
+  expected: Publishes the selected environment as vars.environment and steps.example.value.
+  check: ""
+  run: false
+- id: unattended
+  title: Select the declared default without prompting
+  description: A complete workflow demonstrating tui_choice. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: tui-choice-unattended
+    steps:
+      - id: example
+        type: tui_choice
+        with:
+          variable: environment
+          message: Select an environment
+          choices:
+            - label: Development
+              value: dev
+              default: true
+          noninteractive: default
+      - id: verify
+        type: assert
+        with:
+          expr: vars.environment == "dev"
+          message: Example result must match the documented expectation
+  files: {}
+  prerequisites: []
+  expected: Selects dev without a terminal.
+  check: vars.environment == "dev"
+  run: true

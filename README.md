@@ -31,7 +31,7 @@
   and list or object transforms stay typed between steps.
 - **Real control flow.** Conditions, retries and polling, parallel DAGs, `foreach` and `matrix`,
   `try`/`catch`, guaranteed cleanup, early returns, and cron schedules.
-- **Portable building blocks.** 60 built-in steps cover Git, GitHub, HTTP, files,
+- **Portable building blocks.** Built-in steps cover Git, GitHub, HTTP, files,
   Docker, processes, Lua, and coding agents, so you write fewer platform-specific shell scripts.
 - **Fails before it runs.** Validation catches unknown steps, variables, and references with
   source locations and suggestions. Use `--dry-run` and `wuko tree` to see what will happen.
@@ -93,6 +93,16 @@ wuko run check --cpus 1.5 --memory 512MiB # shared local CPU and memory budget
 
 Next: the [Getting started guide](docs/getting-started.md) walks from here to prompts, retries,
 parallel work, and composition. The [CLI cheatsheet](docs/cli.md) lists every command.
+
+Explore the reference bundled with the binary, including complete examples for every built-in:
+
+```sh
+wuko reference step shell
+wuko reference example set basic --format yaml
+wuko help run --format json
+```
+
+The [agent guide](docs/agents.md) explains structured discovery, workflow authoring, and execution reports.
 
 Save CLI defaults in a current-directory `wuko.yml` or `wuko.yaml`. Its optional `default`
 section selects a workflow, target, and flags for bare `wuko`; explicit CLI flags override

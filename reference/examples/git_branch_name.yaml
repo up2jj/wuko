@@ -1,0 +1,16 @@
+- id: basic
+  title: Use git_branch_name
+  description: A complete workflow demonstrating git_branch_name. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: git-branch-name-basic
+    steps:
+      - id: example
+        type: git_branch_name
+        with:
+          name: feature/example
+  files: {}
+  prerequisites: []
+  expected: Succeeds because feature/example is a valid Git branch name.
+  check: ""
+  run: true

@@ -7,6 +7,13 @@ description: Create, update, or review Wuko version-1 YAML workflows. Use for wo
 
 Create clear, strict, reviewable Wuko workflows and verify them before execution.
 
+Use the installed binary's offline reference before guessing syntax: `wuko reference step --format json`
+lists built-ins, `wuko reference step TYPE --format json` gives fields, rules, and output contracts,
+and `wuko reference example TYPE` lists complete examples. Fetch one with
+`wuko reference example TYPE ID --format json` for its workflow, fixtures, prerequisites, and expected
+result. Use `wuko reference topic templates` or `wuko reference topic agents` for focused guidance.
+These lookups ignore local configuration and never execute examples or plugins.
+
 ## Workflow
 
 1. Inspect `README.md`, nearby workflows, referenced files, and the repository state before editing. Treat the task brief and existing workflow behavior as requirements.

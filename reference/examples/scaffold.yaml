@@ -1,0 +1,23 @@
+- id: basic
+  title: Use scaffold
+  description: A complete workflow demonstrating scaffold. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: scaffold-basic
+    steps:
+      - id: example
+        type: scaffold
+        with:
+          from: templates
+          into: generated
+          on_conflict: fail
+  files:
+    templates/hello.txt: |
+      Hello Wuko
+  prerequisites: []
+  expected: Creates generated/hello.txt from the template directory.
+  check: ""
+  run: true
+  expected_files:
+    generated/hello.txt: |
+      Hello Wuko

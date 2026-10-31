@@ -9,6 +9,7 @@ configuration entirely.
 
 ## Contents
 
+- [Help and offline reference](#help-and-offline-reference)
 - [Local configuration](#local-configuration)
 - [Find and inspect workflows](#find-and-inspect-workflows)
 - [Run workflows](#run-workflows)
@@ -17,6 +18,37 @@ configuration entirely.
 - [Git hooks](#git-hooks)
 - [Coding-agent skills](#coding-agent-skills)
 - [Shell completion](#shell-completion)
+
+## Help and offline reference
+
+```sh
+wuko --help                               # grouped command overview
+wuko run --help                           # arguments, flags, examples, and behavior
+wuko help run                             # the same text help
+wuko help plugin install --format json    # structured command metadata
+wuko reference                            # compact offline reference index
+wuko reference step                       # every built-in step
+wuko reference step http --format json    # fields, rules, outputs, docs, example index
+wuko reference topic templates            # workflow language guidance
+wuko reference search "write file"        # matching steps and topics
+wuko reference example file               # named complete examples
+wuko reference example set basic --format yaml
+wuko reference example file basic --format json
+```
+
+Help and reference commands ignore local configuration and do not discover or execute workflows,
+load the invocation environment, start plugins, access the network, or prompt. Their content is
+shipped with the binary. A help JSON document describes built-in flag defaults rather than
+effective values from the current directory. Existing commands keep their own output formats.
+
+Every built-in has a complete `basic` example; named variants cover additional operations and input
+modes. Each example describes prerequisites and expected results. JSON examples include the workflow
+and supporting files. `--format yaml` emits only a standalone workflow and rejects examples needing
+supporting files; use their JSON bundle instead. Save files and run commands explicitly from the
+example directory. Reference lookups never create files or run an example.
+
+All help and reference JSON uses a `schema_version: 1`, `kind`, and `data` envelope. See the
+[agent guide](agents.md#help-and-reference-json-contract) for fields, error behavior, and compatibility.
 
 ## Local configuration
 
@@ -108,7 +140,7 @@ Config cannot set `config`, `no-config`, generated help/version flags, or privat
 It also cannot set flags that confirm or scope a removal (`--yes` on `uninstall`,
 `plugin uninstall`, and `marketplace workflow|plugin remove`, and `--global` on both uninstall
 commands), so a checked-in config never removes anything without a prompt.
-Help, version, shell completion, and the private script SDK bypass config loading.
+Help, offline reference, version, shell completion, and the private script SDK bypass config loading.
 
 Workflow packages also use the filenames `wuko.yaml` and `wuko.yml`. When invoking Wuko from
 a directory containing such a workflow manifest, use `wuko --no-config run --file ./wuko.yaml`

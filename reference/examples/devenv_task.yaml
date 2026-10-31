@@ -1,0 +1,34 @@
+- id: basic
+  title: Use devenv_task
+  description: A complete workflow demonstrating devenv_task. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: devenv-task-basic
+    steps:
+      - executor:
+          type: devenv
+          with:
+            directory: .
+            secrets:
+              mode: disabled
+        steps:
+          - id: example
+            type: devenv_task
+            with:
+              name: example:hello
+              mode: single
+  files:
+    devenv.nix: |
+      { ... }: {
+        tasks."example:hello".exec = "echo Hello Wuko";
+      }
+    devenv.yaml: |
+      inputs:
+        nixpkgs:
+          url: github:cachix/devenv-nixpkgs/rolling
+  prerequisites:
+    - devenv 2.2 or newer and a working Nix installation
+    - Network access for initial Nix inputs
+  expected: Runs example:hello inside the declared devenv executor and captures its process outputs.
+  check: ""
+  run: false

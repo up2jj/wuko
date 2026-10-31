@@ -1,0 +1,24 @@
+- id: basic
+  title: Use dashboard
+  description: A complete workflow demonstrating dashboard. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: dashboard-basic
+    steps:
+      - id: example
+        type: dashboard
+        with:
+          title: Example dashboard
+          groups:
+            - id: overview
+              title: Overview
+              widgets:
+                - id: greeting
+                  title: Greeting
+                  template: Hello Wuko
+  files: {}
+  prerequisites:
+    - An interactive terminal; close the dashboard to finish
+  expected: Displays one static widget and exits when the dashboard is closed.
+  check: ""
+  run: false

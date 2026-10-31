@@ -1,0 +1,34 @@
+- id: basic
+  title: Use cache
+  description: A complete workflow demonstrating cache. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: cache-basic
+    steps:
+      - id: save
+        type: cache
+        with:
+          operation: save
+          cache_dir: .example-cache
+          key_files:
+            - lock.txt
+          paths:
+            - output
+      - id: example
+        type: cache
+        with:
+          operation: restore
+          cache_dir: .example-cache
+          key_files:
+            - lock.txt
+          paths:
+            - output
+  files:
+    lock.txt: |
+      version=1
+    output/result.txt: |
+      compiled output
+  prerequisites: []
+  expected: 'Saves output under a content-derived cache key, then restores it with hit: true.'
+  check: ""
+  run: true

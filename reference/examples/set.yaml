@@ -1,0 +1,71 @@
+- id: basic
+  title: Use set
+  description: A complete workflow demonstrating set. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: set-basic
+    steps:
+      - id: example
+        type: set
+        with:
+          variable: retries
+          value: 3
+      - id: verify
+        type: assert
+        with:
+          expr: vars.retries == 3 && steps.example.value == 3
+          message: Example result must match the documented expectation
+  files: {}
+  prerequisites: []
+  expected: The variable retries and steps.example.value are both the number 3.
+  check: vars.retries == 3 && steps.example.value == 3
+  run: true
+- id: expression
+  title: Compute a typed value
+  description: A complete workflow demonstrating set. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: set-expression
+    vars:
+      base: 2
+    steps:
+      - id: example
+        type: set
+        with:
+          variable: retries
+          expr: vars.base + 1
+      - id: verify
+        type: assert
+        with:
+          expr: vars.retries == 3
+          message: Example result must match the documented expectation
+  files: {}
+  prerequisites: []
+  expected: The workflow succeeds and the example step publishes the outputs described in its reference.
+  check: vars.retries == 3
+  run: true
+- id: batch
+  title: Assign several typed variables together
+  description: A complete workflow demonstrating set. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: set-batch
+    steps:
+      - id: example
+        type: set
+        with:
+          variables:
+            enabled: true
+            ports:
+              - 8080
+              - 8081
+      - id: verify
+        type: assert
+        with:
+          expr: vars.enabled && len(vars.ports) == 2
+          message: Example result must match the documented expectation
+  files: {}
+  prerequisites: []
+  expected: The workflow succeeds and the example step publishes the outputs described in its reference.
+  check: vars.enabled && len(vars.ports) == 2
+  run: true

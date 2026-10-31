@@ -1,0 +1,24 @@
+- id: basic
+  title: Use log_wait
+  description: A complete workflow demonstrating log_wait. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: log-wait-basic
+    steps:
+      - id: example
+        type: log_wait
+        with:
+          path: service.log
+          pattern: ready on port (?P<port>[0-9]+)
+      - id: verify
+        type: assert
+        with:
+          expr: steps.example.captures.port == "8080"
+          message: Example result must match the documented expectation
+  files:
+    service.log: |
+      ready on port 8080
+  prerequisites: []
+  expected: Matches the existing readiness line and publishes the named port capture.
+  check: steps.example.captures.port == "8080"
+  run: true

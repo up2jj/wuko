@@ -1,0 +1,17 @@
+- id: basic
+  title: Use git_files
+  description: A complete workflow demonstrating git_files. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: git-files-basic
+    steps:
+      - id: example
+        type: git_files
+        with:
+          source: staged
+  files: {}
+  prerequisites:
+    - Git available on PATH; run in a disposable repository with an initial commit and a main branch
+  expected: Runs the git_files operation against the disposable repository and exposes its documented outputs.
+  check: ""
+  run: false

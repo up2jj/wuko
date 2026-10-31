@@ -418,6 +418,8 @@ func newRootCmd(deps dependencies) *cobra.Command {
 		return []string{envload.LoaderAuto, envload.LoaderNone, envload.LoaderMise, envload.LoaderASDF, envload.LoaderDirenv}, cobra.ShellCompDirectiveNoFileComp
 	})
 	root.AddCommand(newRunCmd(deps), newUICmd(deps), newListCmd(deps), newTreeCmd(deps), newValidateCmd(deps), newAgentCmd(deps), newGitCmd(deps), newInstallCmd(deps), newUninstallCmd(deps), newMarketplaceCmd(deps), newPluginCmd(deps), newCompletionCmd(), newScriptSDKCmd(deps))
+	root.AddCommand(newReferenceCmd())
+	configureHelp(root)
 	registerWorkflowFlagCompletions(root)
 	wrapPluginTeardown(root, deps.plugins)
 	wrapLocalConfiguration(root, configuration, deps)
@@ -432,6 +434,9 @@ func defaultWorkflowLoader(plugins *plugin.Manager) *workflow.Loader {
 }
 
 func wrapPluginTeardown(command *cobra.Command, manager *plugin.Manager) {
+	if command.Annotations[referenceAnnotation] == "true" {
+		return
+	}
 	if command.RunE != nil {
 		run := command.RunE
 		command.RunE = func(command *cobra.Command, args []string) (runErr error) {

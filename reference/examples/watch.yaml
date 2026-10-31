@@ -1,0 +1,27 @@
+- id: basic
+  title: Use watch
+  description: A complete workflow demonstrating watch. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: watch-basic
+    steps:
+      - id: bounded_watch
+        attempt:
+          timeout: 30s
+          steps:
+            - id: example
+              type: watch
+              with:
+                root: .
+                patterns:
+                  - input.txt
+                events:
+                  - modify
+  files:
+    input.txt: |
+      Edit this file from another terminal.
+  prerequisites:
+    - While the workflow is running, edit input.txt from another terminal
+  expected: Reports the first matching file change. Fails after 30 seconds if no matching change occurs.
+  check: ""
+  run: false

@@ -1,0 +1,20 @@
+- id: basic
+  title: Use http
+  description: A complete workflow demonstrating http. Save it as workflow.yaml together with any supporting files.
+  workflow: |
+    version: 1
+    name: http-basic
+    steps:
+      - id: example
+        type: http
+        with:
+          url: https://example.com/
+          response: text
+          success_statuses:
+            - 200
+  files: {}
+  prerequisites:
+    - Network access to https://example.com/
+  expected: Performs a GET request and exposes status, headers, and the response body. The response content can change.
+  check: ""
+  run: false
