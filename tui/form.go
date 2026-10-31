@@ -633,7 +633,9 @@ func (m formModel) widgetView(widget formWidget, focused bool) string {
 				text += " — " + option.Description
 			}
 			if option.Disabled {
-				text += " — disabled: " + option.DisabledReason
+				if option.DisabledReason != "" {
+					text += " — " + option.DisabledReason
+				}
 				text = m.styles.disabled.Render(text)
 			}
 			b.WriteString(text)

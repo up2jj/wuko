@@ -61,10 +61,10 @@ func (palette actionPalette) view() string {
 		description := action.Description
 		if action.Disabled {
 			label = palette.styles.disabled.Render(label)
-			if description != "" {
+			if description != "" && action.DisabledReason != "" {
 				description += " • "
 			}
-			description += "disabled: " + action.DisabledReason
+			description += action.DisabledReason
 			description = palette.styles.disabled.Render(description)
 		} else if index == palette.Cursor {
 			label = palette.styles.selected.Render(label)

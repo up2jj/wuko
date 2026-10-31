@@ -154,8 +154,8 @@ func TestFormDisabledOptionsCannotBeSelected(t *testing.T) {
 	if len(m.widgets[0].selection) > 0 {
 		t.Fatal("disabled option was selected")
 	}
-	if !strings.Contains(m.View().Content, "Unavailable") {
-		t.Fatal("missing disabled reason")
+	if view := ansi.Strip(m.View().Content); !strings.Contains(view, "Blocked — Unavailable") || strings.Contains(view, "disabled:") {
+		t.Fatalf("view = %q, want the reason without a prefix", view)
 	}
 }
 

@@ -486,12 +486,13 @@ func (m choiceModel) View() tea.View {
 		if item.description != "" {
 			fmt.Fprintf(&line, " %s %s", m.styles.description.Render("—"), m.styles.description.Render(item.description))
 		}
-		if item.disabled {
+		// The disabled style already marks the choice unavailable, so the reason is shown as written.
+		if item.disabled && item.reason != "" {
 			separator := "—"
 			if item.description != "" {
 				separator = "•"
 			}
-			fmt.Fprintf(&line, " %s %s", m.styles.disabled.Render(separator), m.styles.disabled.Render("disabled: "+item.reason))
+			fmt.Fprintf(&line, " %s %s", m.styles.disabled.Render(separator), m.styles.disabled.Render(item.reason))
 		}
 		text := ansi.Truncate(line.String(), max(m.width, 1), "…")
 		if row.visibleIndex == m.cursor && !item.disabled {

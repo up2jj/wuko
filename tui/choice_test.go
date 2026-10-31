@@ -452,11 +452,14 @@ func TestChoiceModelShowsAndBlocksDisabledChoice(t *testing.T) {
 	if command != nil || model.done || model.err != "maintenance window" {
 		t.Fatalf("done = %v, err = %q, command nil = %v", model.done, model.err, command == nil)
 	}
-	view := model.View().Content
-	for _, want := range []string{"Unavailable", "Production", "disabled: maintenance window"} {
-		if !strings.Contains(strings.ReplaceAll(ansi.Strip(view), "\n", ""), want) {
+	view := strings.ReplaceAll(ansi.Strip(model.View().Content), "\n", "")
+	for _, want := range []string{"Unavailable", "Production • maintenance window"} {
+		if !strings.Contains(view, want) {
 			t.Fatalf("view = %q, want %q", view, want)
 		}
+	}
+	if strings.Contains(view, "disabled:") {
+		t.Fatalf("view = %q, want the reason without a prefix", view)
 	}
 	model.filter.SetValue("maintenance")
 	model.refreshVisible()
@@ -732,6 +735,9 @@ func TestSelectionModelActionPaletteSelectsIntentAndReturnsFromDisabledAction(t 
 	model = updated.(selectionModel)
 	if command != nil || !model.actionMode || !strings.Contains(model.View().Content, "Actions — release") {
 		t.Fatalf("action mode = %v, command nil = %v, view = %q", model.actionMode, command == nil, model.View().Content)
+	}
+	if view := ansi.Strip(model.View().Content); !strings.Contains(view, "no form") || strings.Contains(view, "disabled:") {
+		t.Fatalf("view = %q, want the disabled reason without a prefix", view)
 	}
 	updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	model = updated.(selectionModel)
