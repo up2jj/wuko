@@ -174,6 +174,9 @@ func (reporters *runReporters) complete(ctx context.Context, workflowName string
 	case outcome.RunID == "":
 		applyRunIdentity(&outcome, latest)
 	}
+	if terminal != nil && terminal.RunID != "" && terminal.RunID == outcome.RunID {
+		outcome.Values = terminal.Values
+	}
 	return reporters.Finish(context.WithoutCancel(ctx), outcome)
 }
 

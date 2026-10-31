@@ -143,7 +143,7 @@ func TestNewExecutionReportPreservesUnsuccessfulStatuses(t *testing.T) {
 func TestJSONWriterWritesOneCompactReport(t *testing.T) {
 	t.Parallel()
 	var output bytes.Buffer
-	reporter, err := NewJSONWriter(&output)
+	reporter, err := NewJSONWriter(&output, ValueInclude{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +167,7 @@ func TestJSONWriterWritesOneCompactReport(t *testing.T) {
 
 func TestNewJSONWriterRequiresWriter(t *testing.T) {
 	t.Parallel()
-	_, err := NewJSONWriter(nil)
+	_, err := NewJSONWriter(nil, ValueInclude{})
 	if err == nil || !strings.Contains(err.Error(), "writer is required") {
 		t.Fatalf("NewJSONWriter() error = %v, want required writer", err)
 	}
@@ -186,7 +186,7 @@ func TestJSONWriterReportsEncodingAndWriteFailures(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			reporter, err := NewJSONWriter(test.writer)
+			reporter, err := NewJSONWriter(test.writer, ValueInclude{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -203,7 +203,7 @@ func TestJSONFileAtomicallyOverwritesWithPrivatePrettyReport(t *testing.T) {
 	directory := t.TempDir()
 	path := filepath.Join(directory, "report.json")
 	testfs.WriteFile(t, path, []byte("old"), 0o644)
-	reporter, err := NewJSONFile(path)
+	reporter, err := NewJSONFile(path, ValueInclude{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,7 +229,7 @@ func TestJSONFileAtomicallyOverwritesWithPrivatePrettyReport(t *testing.T) {
 
 func TestNewJSONFileRequiresExistingDirectory(t *testing.T) {
 	t.Parallel()
-	_, err := NewJSONFile(filepath.Join(t.TempDir(), "missing", "report.json"))
+	_, err := NewJSONFile(filepath.Join(t.TempDir(), "missing", "report.json"), ValueInclude{})
 	if err == nil || !strings.Contains(err.Error(), "inspecting execution report directory") {
 		t.Fatalf("NewJSONFile() error = %v, want missing directory", err)
 	}
@@ -240,7 +240,7 @@ func TestJSONFilePreservesExistingDestinationWhenEncodingFails(t *testing.T) {
 	directory := t.TempDir()
 	path := filepath.Join(directory, "report.json")
 	testfs.WriteFile(t, path, []byte("old"), 0o600)
-	reporter, err := NewJSONFile(path)
+	reporter, err := NewJSONFile(path, ValueInclude{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,7 +267,7 @@ func TestJSONFileCleansTemporaryFileWhenRenameFails(t *testing.T) {
 	if err := os.Mkdir(path, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	reporter, err := NewJSONFile(path)
+	reporter, err := NewJSONFile(path, ValueInclude{})
 	if err != nil {
 		t.Fatal(err)
 	}

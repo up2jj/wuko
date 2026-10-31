@@ -20,7 +20,8 @@ import (
 const ExecutionReportSchemaVersion = 2
 
 // ExecutionReport is the stable, safe JSON projection of a completed Wuko invocation.
-// It deliberately excludes errors, inputs, variables, environment, and intermediate outputs.
+// It excludes errors, inputs, and environment. Step outputs and variables appear only when the
+// JSON writer was asked to include them, redacted and size-limited.
 type ExecutionReport struct {
 	SchemaVersion    int                      `json:"schema_version"`
 	InvocationID     correlation.InvocationID `json:"invocation_id"`
@@ -33,6 +34,9 @@ type ExecutionReport struct {
 	FailedStep       string                   `json:"failed_step,omitempty"`
 	Stats            ExecutionStats           `json:"stats"`
 	Outputs          *map[string]any          `json:"outputs,omitempty"`
+	StepOutputs      map[string]any           `json:"step_outputs,omitempty"`
+	Vars             map[string]any           `json:"vars,omitempty"`
+	ValuesTruncated  bool                     `json:"values_truncated,omitempty"`
 	ValidationIssues []validation.SafeIssue   `json:"validation_issues,omitempty"`
 }
 
@@ -121,15 +125,16 @@ func milliseconds(duration time.Duration) int64 {
 
 // JSONWriter writes one compact execution report to a stream when the invocation finishes.
 type JSONWriter struct {
-	writer io.Writer
+	writer  io.Writer
+	include ValueInclude
 }
 
 // NewJSONWriter constructs a stream-backed execution report writer.
-func NewJSONWriter(writer io.Writer) (*JSONWriter, error) {
+func NewJSONWriter(writer io.Writer, include ValueInclude) (*JSONWriter, error) {
 	if writer == nil {
 		return nil, fmt.Errorf("execution report writer is required")
 	}
-	return &JSONWriter{writer: writer}, nil
+	return &JSONWriter{writer: writer, include: include}, nil
 }
 
 func (*JSONWriter) Progress(engine.ProgressEvent) {}
@@ -138,7 +143,7 @@ func (*JSONWriter) Diagnostic(diagnostic.Event) {}
 
 // Finish writes one compact JSON document followed by a newline.
 func (reporter *JSONWriter) Finish(_ context.Context, outcome Outcome) error {
-	data, err := json.Marshal(NewExecutionReport(outcome))
+	data, err := json.Marshal(reportWithValues(outcome, reporter.include))
 	if err != nil {
 		return fmt.Errorf("encoding execution report: %w", err)
 	}
@@ -151,11 +156,12 @@ func (reporter *JSONWriter) Finish(_ context.Context, outcome Outcome) error {
 
 // JSONFile writes one canonical execution report to a local file when the invocation finishes.
 type JSONFile struct {
-	path string
+	path    string
+	include ValueInclude
 }
 
 // NewJSONFile validates a destination for an atomically written execution report.
-func NewJSONFile(path string) (*JSONFile, error) {
+func NewJSONFile(path string, include ValueInclude) (*JSONFile, error) {
 	if path == "" {
 		return nil, fmt.Errorf("execution report path is required")
 	}
@@ -168,7 +174,7 @@ func NewJSONFile(path string) (*JSONFile, error) {
 	if !info.IsDir() {
 		return nil, fmt.Errorf("execution report directory %s is not a directory", directory)
 	}
-	return &JSONFile{path: path}, nil
+	return &JSONFile{path: path, include: include}, nil
 }
 
 func (*JSONFile) Progress(engine.ProgressEvent) {}
@@ -177,7 +183,7 @@ func (*JSONFile) Diagnostic(diagnostic.Event) {}
 
 // Finish writes an indented report through a mode-0600 temporary sibling and atomic rename.
 func (reporter *JSONFile) Finish(_ context.Context, outcome Outcome) error {
-	data, err := json.MarshalIndent(NewExecutionReport(outcome), "", "  ")
+	data, err := json.MarshalIndent(reportWithValues(outcome, reporter.include), "", "  ")
 	if err != nil {
 		return fmt.Errorf("encoding execution report: %w", err)
 	}

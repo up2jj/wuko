@@ -445,6 +445,7 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 	// Recheck every output against the complete submitted draft, using the same
 	// frozen choices and path root.
 	outputs := make(map[string]any, len(config.Fields))
+	var sensitive []string
 	draft := tui.FormDraft(config.Fields, values)
 	for _, field := range config.Fields {
 		value, exists := values[field.ID]
@@ -456,8 +457,11 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 			return step.Result{}, fmt.Errorf("field %q: %w", field.ID, err)
 		}
 		outputs[field.ID] = workflow.Clone(normalized)
+		if text, ok := normalized.(string); ok && field.Type == "password" {
+			sensitive = append(sensitive, text)
+		}
 	}
-	return step.Result{Outputs: outputs}, nil
+	return step.Result{Outputs: outputs, Sensitive: sensitive}, nil
 }
 
 // resolve builds one field; fallback selects its default when it has no explicit value.

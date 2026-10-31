@@ -295,6 +295,9 @@ func ExpressionEnvironmentShape(extra map[string]any) map[string]any {
 type Result struct {
 	Outputs   map[string]any
 	Variables map[string]any
+	// Sensitive lists values the step returned that the host must redact wherever it reports
+	// workflow values, such as an entered password. It does not change workflow state.
+	Sensitive []string
 }
 
 // Runner executes one step. Run must stop spawned work and return promptly when ctx is canceled;

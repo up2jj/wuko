@@ -68,5 +68,5 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 func required(value *bool) bool { return value == nil || *value }
 
 func result(variable, value string) step.Result {
-	return step.Result{Outputs: map[string]any{"value": value}, Variables: map[string]any{variable: value}}
+	return step.Result{Outputs: map[string]any{"value": value}, Variables: map[string]any{variable: value}, Sensitive: []string{value}}
 }

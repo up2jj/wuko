@@ -15,8 +15,8 @@ import (
 )
 
 // Outcome is the safe, final result exposed to reporters. Duration covers the whole reporting
-// invocation. Outputs contains a deep copy of the workflow's declared outputs; execution inputs,
-// variables, environment, and intermediate state are deliberately excluded.
+// invocation. Outputs contains a deep copy of the workflow's declared outputs. Execution inputs
+// and environment are excluded; step outputs and variables arrive only as the redacted Values.
 type Outcome struct {
 	Presentation    workflow.ReporterConfig
 	InvocationID    correlation.InvocationID
@@ -28,8 +28,11 @@ type Outcome struct {
 	Duration        time.Duration
 	Stats           engine.RunStats
 	Outputs         map[string]any
-	Err             error
-	DryRun          bool
+	// Values is the redacted step outputs and variables snapshot, when the run captured one.
+	// Only JSON reports configured to include values render it.
+	Values *engine.RunValues
+	Err    error
+	DryRun bool
 	// Replaced reports that the run handed the process to the program its final step
 	// resolved, so the outcome carries no outputs and terminal reporters print no summary.
 	Replaced bool

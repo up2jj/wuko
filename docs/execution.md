@@ -1183,7 +1183,7 @@ because the picker may run several workflows or none. Keep stdin
 and stderr attached to the terminal when an interactive workflow needs to prompt the user.
 
 The version 2 report is a compact, safe projection. It contains no raw causes, source excerpts,
-environment, inputs, variables, or intermediate step outputs. Validation failures may include the
+environment, or inputs, and by default no variables or intermediate step outputs. Validation failures may include the
 same safe `validation_issues` projection emitted by `wuko validate --format json`:
 
 ```json
@@ -1225,6 +1225,29 @@ source spans; it never contains excerpts or underlying error text. The
 top-level duration covers the whole invocation, while `stats.run_duration_ms` covers only the
 engine run. Scheduled commands write one final report when the scheduler exits; use `--once` for
 one report per workflow run.
+
+When a step fails because of data rather than a command, such as an unexpected type, an empty list or
+a wrong path, add `--report-json-include` to see what the run saw. It takes a comma-separated list and
+requires `--report-json`:
+
+```sh
+wuko run check --once --report-json - --report-json-include outputs,vars
+```
+
+- `outputs` adds `step_outputs`, mapping each step ID whose result reached the workflow's state to its
+  outputs.
+- `vars` adds `vars`, the final workflow variables.
+
+Both reflect the state when the selected workflow finished, including after a failure; prerequisite
+workflows are not included. Values are redacted before they are written: values resolved through the
+`secret` helper, values entered at `password` steps and `form` password fields (including copies of
+them inside other strings), values under credential-like keys such as `password`, `token` or
+`api_key` (a variable with such a name is redacted entirely), and the user information and query of
+HTTP(S) URLs. Redaction matches known values and names, so a secret that reached the workflow some
+other way, for example a shell step printing an environment variable, can still appear; treat the
+report as sensitive. Each string is limited to 4 KiB and ends in `…<truncated>` when shortened, and
+each step's outputs or variable is limited to 64 KiB of JSON and replaced by `"<truncated: N bytes>"`
+when larger. `values_truncated` is `true` when any value was shortened.
 
 The `stats.steps` counters are not a partition. `total` is the planned leaf step count, so steps
 that never started are counted nowhere else, and the remaining fields do not sum to it. `succeeded`,

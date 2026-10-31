@@ -68,6 +68,7 @@ func addRunFlags(command *cobra.Command, config *runWorkflowConfig) {
 	command.Flags().BoolVar(&config.prompts.Defaults, "defaults", false, "answer every prompt that declares a default with that default")
 	addReporterFlag(command, &config.reporters)
 	command.Flags().StringVar(&config.reportJSON, "report-json", "", "write the final execution report as JSON to a path, or - for stdout")
+	command.Flags().StringSliceVar(&config.reportJSONInclude, "report-json-include", nil, "add redacted values to the JSON report (outputs for step outputs, vars for final variables; comma-separated)")
 	command.Flags().StringVar(&config.workflowFile, "file", "", "run a workflow from a file path, or - for stdin")
 	command.Flags().BoolVar(&config.pick, "pick", false, "select a workflow from a GitHub repository or tree")
 	command.Flags().StringVar(&config.cpus, "cpus", "", "limit aggregate local workflow CPU use in cores (for example 1.5)")
@@ -84,7 +85,7 @@ func reportEarlyRunFailure(command *cobra.Command, runErr error) error {
 	if destination != "-" {
 		return runErr
 	}
-	report, err := reporterpkg.NewJSONWriter(command.OutOrStdout())
+	report, err := reporterpkg.NewJSONWriter(command.OutOrStdout(), reporterpkg.ValueInclude{})
 	if err != nil {
 		return errors.Join(runErr, err)
 	}
@@ -102,8 +103,10 @@ type runWorkflowConfig struct {
 	environment   []string
 	reporters     []string
 	reportJSON    string
-	dryRun        bool
-	once          bool
+	// reportJSONInclude names the run values the JSON report adds.
+	reportJSONInclude []string
+	dryRun            bool
+	once              bool
 	// replaceProcess lets the selected workflow end the invocation by replacing the Wuko
 	// process. Only commands whose run is the last thing the invocation does set it.
 	replaceProcess  bool
@@ -199,10 +202,17 @@ func runWorkflow(command *cobra.Command, deps dependencies, args []string, confi
 		command.SetContext(workflow.ContextWithPluginLockPolicy(command.Context(), workflow.PluginLockPolicy{ReadOnly: true}))
 	}
 	workflowOutput := command.OutOrStdout()
+	include, err := reporterpkg.ParseValueInclude(config.reportJSONInclude)
+	if err != nil {
+		return err
+	}
+	if include.Any() && config.reportJSON == "" {
+		return fmt.Errorf("--report-json-include requires --report-json")
+	}
 	var additionalReporters []reporterpkg.Reporter
 	reportsReady := false
 	if config.reportJSON == "-" {
-		streamReporter, err := reporterpkg.NewJSONWriter(command.OutOrStdout())
+		streamReporter, err := reporterpkg.NewJSONWriter(command.OutOrStdout(), include)
 		if err != nil {
 			return err
 		}
@@ -226,7 +236,7 @@ func runWorkflow(command *cobra.Command, deps dependencies, args []string, confi
 		if !filepath.IsAbs(path) {
 			path = filepath.Join(cwd, path)
 		}
-		fileReporter, err := reporterpkg.NewJSONFile(path)
+		fileReporter, err := reporterpkg.NewJSONFile(path, include)
 		if err != nil {
 			return err
 		}
@@ -410,8 +420,11 @@ func runWorkflow(command *cobra.Command, deps dependencies, args []string, confi
 		config.returnObserver.reset()
 		state, err := executeDependencyPlan(ctx, active, engineFor, func(definition *workflow.Definition, dependencies map[string]map[string]any) engine.Options {
 			options := optionsFor(definition, dependencies)
-			if definition == active.Root.Definition && config.returnObserver != nil {
-				options.OnReturn = config.returnObserver.observe
+			if definition == active.Root.Definition {
+				options.CaptureValues = include.Any()
+				if config.returnObserver != nil {
+					options.OnReturn = config.returnObserver.observe
+				}
 			}
 			return options
 		})

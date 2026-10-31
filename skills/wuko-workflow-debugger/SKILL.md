@@ -71,6 +71,9 @@ Find the smallest evidence-backed cause of a Wuko workflow failure before changi
   one root action manifest, local archives are unsupported, and local references reject `sha256`.
 - Distinguish parse-time template errors from runtime data errors. Validation can prove syntax and
   named references; `.steps` values exist only when an earlier sequential producer has succeeded.
+- For a runtime data error, rerun with `--once --report-json - --report-json-include outputs,vars`
+  to read the redacted step outputs and final variables the failed run saw, instead of copying the
+  expression into a separate workflow.
 - Require a workflow declaration for every plugin namespace. Local workflows use `wuko.lock` in
   their own directory, never a parent lockfile; validation, tree, and dry-run require existing
   pins. Check canonical source and manifest digest, then verified cache or installation bytes.

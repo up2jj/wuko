@@ -172,6 +172,9 @@ type ProgressEvent struct {
 	PollWait       time.Duration
 	Error          error
 	Stats          RunStats
+	// Values is set only on the selected workflow's WorkflowFinished event when
+	// Options.CaptureValues is enabled. It is already redacted and owned by the event.
+	Values *RunValues
 	// Replaced reports, on WorkflowFinished, that the run ended by handing the process to
 	// the program its final step resolved. Reporters print no completion summary for it.
 	Replaced bool
@@ -256,6 +259,8 @@ type runRuntime struct {
 	background *backgroundSupervisor
 	// replaced records that the final step handed the process to a replacement program.
 	replaced atomic.Bool
+	// sensitive collects values steps declared sensitive, for redacting captured values.
+	sensitive sensitiveValues
 }
 
 // cleanupScope owns the managed resources created on one execution path and releases

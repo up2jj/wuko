@@ -43,6 +43,12 @@ func RedactedJSON(value any) string {
 	return truncateUTF8(strings.TrimSuffix(output.String(), "\n"), ConfigLimit)
 }
 
+// RedactValue applies RedactedJSON's key and URL rules to an already JSON-shaped value
+// (maps, slices and scalars as encoding/json decodes them) and returns a new value.
+func RedactValue(value any) any {
+	return redact(value, false)
+}
+
 func redact(value any, redactValues bool) any {
 	switch typed := value.(type) {
 	case map[string]any:

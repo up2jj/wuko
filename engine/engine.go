@@ -55,6 +55,9 @@ func WithWorkflowInvoker(invoker WorkflowInvoker) Option {
 }
 
 type Options struct {
+	// CaptureValues attaches a redacted snapshot of step outputs and variables to the
+	// selected workflow's WorkflowFinished event. It is off by default because it copies state.
+	CaptureValues bool
 	presentation  workflow.ReporterConfig
 	quietOverride *bool
 	quiet         bool
@@ -299,10 +302,14 @@ func (e *Engine) run(ctx context.Context, definition *workflow.Definition, optio
 		if mainErr != nil {
 			status = statusFromError(mainErr)
 		}
+		var values *RunValues
+		if options.CaptureValues && options.depth == 0 {
+			values = captureRunValues(state, options.runtime.sensitive.snapshot(), options.secretSession)
+		}
 		report(options, ProgressEvent{
 			Kind: WorkflowFinished, Status: status, Time: finishedAt,
 			WorkflowName: definition.Name, Depth: options.depth, Total: total,
-			Duration: stats.Duration, Error: runErr, Stats: stats,
+			Duration: stats.Duration, Error: runErr, Stats: stats, Values: values,
 			ChildWorkflow: childWorkflow, Replaced: runErr == nil && rootRun && options.runtime.replaced.Load(),
 		})
 	}()
@@ -844,6 +851,7 @@ func (options Options) cleanupScope() *cleanupScope {
 func managedExecutor(options Options, stepID string, runner step.Runner, outputs step.OutputSchema) stepExecutor {
 	return func(ctx context.Context, request step.Request) (step.Result, error) {
 		result, err := runContained(ctx, runner, request)
+		options.runtime.sensitive.add(result.Sensitive)
 		if err != nil {
 			return result, err
 		}

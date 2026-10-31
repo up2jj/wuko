@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/reporter"
 	"github.com/up2jj/wuko/step"
@@ -519,5 +520,50 @@ func TestRunCommandRejectsPickWithStreamedReport(t *testing.T) {
 	}
 	if stdout.Len() != 0 {
 		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+}
+
+func TestReportJSONIncludesValuesFromFailedRun(t *testing.T) {
+	t.Parallel()
+	source := `version: 1
+name: values
+vars: {expected: list}
+steps:
+  - {id: shape, type: set, with: {variable: shape, expr: '{"kind": "map"}'}}
+  - {id: check, type: assert, with: {expr: 'vars.shape.kind == vars.expected', message: 'unexpected shape'}}
+`
+	stdout, _, err := runOutputWorkflow(t, source, "--report-json", "-", "--report-json-include", "outputs,vars")
+	if err == nil {
+		t.Fatal("workflow succeeded")
+	}
+	report := decodeStreamExecutionReport(t, []byte(stdout))
+	if report.Status != "failed" || report.FailedStep != "check" {
+		t.Fatalf("report=%#v", report)
+	}
+	want := map[string]any{"expected": "list", "shape": map[string]any{"kind": "map"}}
+	if diff := cmp.Diff(want, report.Vars); diff != "" {
+		t.Fatalf("vars (-want +got):\n%s", diff)
+	}
+	if _, ok := report.StepOutputs["shape"]; !ok {
+		t.Fatalf("step outputs = %#v", report.StepOutputs)
+	}
+}
+
+func TestReportJSONIncludeRequiresReportJSON(t *testing.T) {
+	t.Parallel()
+	_, _, err := runOutputWorkflow(t, "version: 1\nname: values\nsteps: [{id: note, type: print, with: {message: hi}}]\n", "--report-json-include", "vars")
+	if err == nil || !strings.Contains(err.Error(), "--report-json-include requires --report-json") {
+		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestReportJSONOmitsValuesByDefault(t *testing.T) {
+	t.Parallel()
+	stdout, _, err := runOutputWorkflow(t, "version: 1\nname: values\nvars: {name: wuko}\nsteps: [{id: note, type: print, with: {message: hi}}]\n", "--report-json", "-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(stdout, `"vars"`) || strings.Contains(stdout, `"step_outputs"`) {
+		t.Fatalf("report includes values: %s", stdout)
 	}
 }

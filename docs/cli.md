@@ -179,6 +179,7 @@ wuko run bootstrap --defaults            # answer every prompt that declares a d
 wuko run check --cpus 1.5 --memory 512MiB # shared budget for the local invocation
 wuko run check --report-json report.json # versioned execution report
 wuko run check --once --report-json -    # report JSON on stdout; terminal output on stderr
+wuko run check --once --report-json - --report-json-include outputs,vars # add redacted step outputs and variables
 wuko run check --reporter plain --reporter github
 wuko ui check                            # run through the local browser form
 ```
