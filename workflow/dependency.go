@@ -176,7 +176,11 @@ func stepDependencyReferences(steps []Step) []dependencyOutputReference {
 		if workflowStep.Type == "tui_form" {
 			configuration = formTemplateConfiguration(configuration)
 		}
-		references = append(references, templateValueDependencyReferences(configuration)...)
+		if BuiltinStepBindings(workflowStep.Type) && workflowStep.Action == nil {
+			references = append(references, configBindingDependencyReferences(workflowStep.Type, configuration, nil)...)
+		} else {
+			references = append(references, templateValueDependencyReferences(configuration)...)
+		}
 		if workflowStep.Return != nil {
 			for _, output := range workflowStep.Return.Outputs {
 				references = append(references, expressionDependencyReferences(output)...)
@@ -296,6 +300,41 @@ func typedBindingDependencyReferences(bindings map[string]any) []dependencyOutpu
 		}
 	}
 	return references
+}
+
+// configBindingDependencyReferences finds host-owned expressions recursively, without
+// interpreting plugin configuration or the expression grammars owned by native steps.
+func configBindingDependencyReferences(stepType string, value any, path []string) []dependencyOutputReference {
+	if StepOwnsBindings(stepType, path) {
+		if binding, ok := OwnedBinding(stepType, path, value); ok {
+			return bindingDependencyReferences(binding)
+		}
+		return templateValueDependencyReferences(value)
+	}
+	if binding, ok := ParseBinding(value); ok && len(path) > 0 {
+		return bindingDependencyReferences(binding)
+	}
+	var references []dependencyOutputReference
+	switch typed := value.(type) {
+	case string:
+		return templateDependencyReferences(typed)
+	case []any:
+		for i, child := range typed {
+			references = append(references, configBindingDependencyReferences(stepType, child, append(slices.Clone(path), fmt.Sprint(i)))...)
+		}
+	case map[string]any:
+		for _, name := range slices.Sorted(maps.Keys(typed)) {
+			references = append(references, configBindingDependencyReferences(stepType, typed[name], append(slices.Clone(path), name))...)
+		}
+	}
+	return references
+}
+
+func bindingDependencyReferences(binding Binding) []dependencyOutputReference {
+	if binding.IsLiteral {
+		return nil
+	}
+	return append(templateDependencyReferences(binding.Expr), expressionDependencyReferences(binding.Expr)...)
 }
 
 func expressionDependencyReferences(expression string) []dependencyOutputReference {

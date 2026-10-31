@@ -30,7 +30,7 @@ type Runner struct {
 }
 
 func Register(registry *step.Registry) error {
-	return registry.RegisterDefinition("glob", step.Registration{Builder: New, Outputs: step.ClosedObject(map[string]step.OutputSchema{
+	return registry.RegisterDefinition("glob", step.Registration{Builder: New, Config: Config{}, Outputs: step.ClosedObject(map[string]step.OutputSchema{
 		"root": step.Scalar(), "count": step.Scalar(),
 		"files": step.Array(step.ClosedOutputs("name", "path", "type", "size", "mode", "modified_at")),
 	}), References: references})

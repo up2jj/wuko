@@ -57,7 +57,9 @@ type Validator interface {
 }
 
 // StepValidator restricts child steps without opening an executor connection.
-// It also applies to children of controls and cleanup scopes inside the block.
+// It also applies to children of controls and cleanup scopes inside the block. In raw,
+// literal bindings are resolved and expression bindings are step.DeferredValue; it is
+// checked only statically, so a restricted field must reject unknown values.
 type StepValidator interface {
 	ValidateStep(stepType string, raw map[string]any) error
 }

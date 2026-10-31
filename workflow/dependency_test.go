@@ -482,3 +482,27 @@ func TestFormCustomValidationDependencyReferences(t *testing.T) {
 		}
 	}
 }
+
+func TestDependencyReferencesIncludeNestedStepBindings(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name  string
+		value any
+		want  int
+	}{
+		{"expression", []any{map[string]any{"expr": "dependencies.build.artifact"}}, 1},
+		{"nested expression", map[string]any{"nested": []any{map[string]any{"expr": "dependencies.build.artifact"}}}, 1},
+		{"literal", map[string]any{"literal": map[string]any{"expr": "dependencies.missing.output", "text": "{{ .dependencies.missing.output }}"}}, 0},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			references := stepDependencyReferences([]Step{{ID: "out", Type: "shell", With: map[string]any{"args": tt.value}}})
+			if len(references) != tt.want {
+				t.Fatalf("references=%#v, want %d", references, tt.want)
+			}
+			if tt.want > 0 && (references[0].alias != "build" || references[0].output != "artifact") {
+				t.Fatalf("reference=%#v", references[0])
+			}
+		})
+	}
+}

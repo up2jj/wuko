@@ -235,6 +235,9 @@ wuko.output("helpers", {
   trim_prefix = h.trim_prefix("release-v1", "release-"),
   trim_suffix = h.trim_suffix("release.yaml", ".yaml"),
   contains = h.contains("workflow", "flow"),
+  has = h.has({"a", "b"}, "a"),
+  has_numeric = h.has({1}, 1.0),
+  has_empty = h.has(h.list(), "a"),
   has_prefix = h.has_prefix("release-v1", "release-"),
   has_suffix = h.has_suffix("release.yaml", ".yaml"),
   replace = h.replace("hello_world", "_", "-"),
@@ -266,6 +269,7 @@ wuko.output("helpers", {
 		"lower": "wuko", "upper": "WUKO", "trim": "value",
 		"trim_prefix": "v1", "trim_suffix": "release", "contains": true,
 		"has_prefix": true, "has_suffix": true, "replace": "hello-world",
+		"has": true, "has_numeric": true, "has_empty": false,
 		"split_join": "a:b", "default": "fallback", "coalesce": "value",
 		"required": "value", "indent": "  one\n  two", "nindent": "\n  one\n  two",
 		"get": float64(1), "missing": true, "has_key": true, "keys": "a,b",
@@ -1109,4 +1113,13 @@ type zeroReader struct{}
 func (zeroReader) Read(data []byte) (int, error) {
 	clear(data)
 	return len(data), nil
+}
+
+func TestLuaHasRejectsNonLists(t *testing.T) {
+	t.Parallel()
+	runner := steptest.Build(t, New, map[string]any{"source": `wuko.output("found", wuko.helpers.has("abc", "a"))`})
+	_, err := runner.Run(t.Context(), step.Request{})
+	if err == nil || !strings.Contains(err.Error(), "has expects a list or array") {
+		t.Fatalf("Run() error = %v", err)
+	}
 }

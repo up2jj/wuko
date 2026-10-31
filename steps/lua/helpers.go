@@ -60,6 +60,7 @@ func helperFunctions() map[string]glua.LGFunction {
 		"indent":                    helperIndent,
 		"nindent":                   helperNindent,
 		"list":                      helperList,
+		"has":                       helperHas,
 		"dict":                      helperDict,
 		"get":                       helperGet,
 		"has_key":                   helperHasKey,
@@ -475,6 +476,19 @@ func helperList(state *glua.LState) int {
 		return pushHelperResult(state, "list", nil, err)
 	}
 	return pushHelperResult(state, "list", expression.List(values...), nil)
+}
+
+func helperHas(state *glua.LState) int {
+	collection, err := helperValue(state.CheckAny(1))
+	if err != nil {
+		return pushHelperResult(state, "has", nil, err)
+	}
+	needle, err := helperValue(state.CheckAny(2))
+	if err != nil {
+		return pushHelperResult(state, "has", nil, err)
+	}
+	result, err := expression.Has(collection, needle)
+	return pushHelperResult(state, "has", result, err)
 }
 
 func helperDict(state *glua.LState) int {

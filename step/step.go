@@ -7,6 +7,7 @@ import (
 	"io"
 	"maps"
 	"math"
+	"reflect"
 	"runtime"
 	"slices"
 	"strconv"
@@ -442,6 +443,9 @@ func objectSchema(open bool, fieldSets ...map[string]OutputSchema) OutputSchema 
 type Registration struct {
 	Builder Builder
 	Outputs OutputSchema
+	// Config opts a native step into host-owned typed bindings and describes its configuration.
+	// Leave nil for plugins and registrations that own their configuration grammar.
+	Config any
 	// ConfigOutputs narrows Outputs for a step whose emitted keys depend on statically
 	// visible configuration, such as a mode selected by the presence of one field. It is
 	// consulted with that step's own raw configuration; Outputs stands for callers that
@@ -611,6 +615,14 @@ func (r *Registry) Definitions() map[string]Registration {
 	return definitions
 }
 
+// ConfigShape returns the configuration of a step that accepts host-owned bindings.
+func (r *Registry) ConfigShape(name string) any {
+	if r == nil {
+		return nil
+	}
+	return r.definitions[name].Config
+}
+
 // Len reports the number of explicitly registered step definitions.
 func (r *Registry) Len() int {
 	if r == nil {
@@ -689,6 +701,9 @@ func (r *Registry) BuildContext(ctx context.Context, name string, raw map[string
 
 // DecodeConfig converts an untyped YAML mapping into a strict typed step configuration.
 func DecodeConfig(raw map[string]any, target any) error {
+	if !knownValue(raw) {
+		raw = validationValues(raw, reflect.TypeOf(target)).(map[string]any)
+	}
 	return yamlstrict.Convert(Encodable(raw), target)
 }
 

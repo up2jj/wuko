@@ -64,7 +64,7 @@ func (*Runner) ExecutorAware()      {}
 func (*Runner) ExecutorFileSystem() {}
 
 func Register(registry *step.Registry) error {
-	return registry.RegisterDefinition("edit", step.Registration{Builder: New, Outputs: step.ClosedObject(map[string]step.OutputSchema{
+	return registry.RegisterDefinition("edit", step.Registration{Builder: New, Config: Config{}, Outputs: step.ClosedObject(map[string]step.OutputSchema{
 		"value": step.OpenObject(), "paths": step.Array(step.Scalar()), "replacements": step.Array(step.OpenObject()),
 		"count": step.Scalar(), "changed": step.Scalar(), "changed_count": step.Scalar(), "file": step.Scalar(), "format": step.Scalar(),
 	})})
@@ -103,14 +103,14 @@ func New(raw map[string]any) (step.Runner, error) {
 		if !templated(config.Position) && config.Position != "before" && config.Position != "after" {
 			return nil, fmt.Errorf("position must be before or after with operation insert")
 		}
-	} else if config.Position != "" {
+	} else if step.ConfigKnown(raw, "position") && config.Position != "" {
 		return nil, fmt.Errorf("position is only allowed with operation insert")
 	}
 	if config.Operation == "rename" {
 		if strings.TrimSpace(config.Name) == "" {
 			return nil, fmt.Errorf("name is required with operation rename")
 		}
-	} else if config.Name != "" {
+	} else if step.ConfigKnown(raw, "name") && config.Name != "" {
 		return nil, fmt.Errorf("name is only allowed with operation rename")
 	}
 	if !templated(config.Result) && config.Result != "one" && config.Result != "all" {
@@ -119,10 +119,10 @@ func New(raw map[string]any) (step.Runner, error) {
 	if !templated(config.Missing) && !oneOf(config.Missing, "error", "ignore", "create") {
 		return nil, fmt.Errorf("missing must be error, ignore, or create")
 	}
-	if config.Missing == "create" && config.Operation != "set" {
+	if step.ConfigKnown(raw, "missing") && (config.Missing == "create" && config.Operation != "set") {
 		return nil, fmt.Errorf("missing create is only allowed with operation set")
 	}
-	if config.From.File == "" && config.Format != "" {
+	if step.ConfigKnown(raw, "format", "from.file") && (config.From.File == "" && config.Format != "") {
 		return nil, fmt.Errorf("format is only supported with from.file")
 	}
 	if config.Format != "" && !templated(config.Format) && config.Format != "json" && config.Format != "yaml" && config.Format != "toml" {
@@ -164,7 +164,7 @@ func New(raw map[string]any) (step.Runner, error) {
 		}
 	}
 	if hasValue {
-		if err := validateJSON(config.Value); err != nil {
+		if err := validateJSON(config.Value); step.ConfigKnown(raw, "value") && err != nil {
 			return nil, fmt.Errorf("value is not JSON-compatible: %w", err)
 		}
 	}

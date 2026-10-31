@@ -37,7 +37,7 @@ type ColumnConfig struct {
 type Runner struct{ config Config }
 
 func Register(registry *step.Registry) error {
-	return registry.RegisterDefinition("tui_table", step.Registration{Builder: New, Outputs: step.ClosedOutputs(), References: step.LookupFrom})
+	return registry.RegisterDefinition("tui_table", step.Registration{Builder: New, Config: Config{}, Outputs: step.ClosedOutputs(), References: step.LookupFrom})
 }
 
 func New(raw map[string]any) (step.Runner, error) {
@@ -51,7 +51,7 @@ func New(raw map[string]any) (step.Runner, error) {
 	if strings.TrimSpace(config.From) == "" {
 		return nil, fmt.Errorf("from is required")
 	}
-	if len(config.Columns) == 0 {
+	if step.ConfigKnown(raw, "columns") && len(config.Columns) == 0 {
 		return nil, fmt.Errorf("at least one column is required")
 	}
 	for index, column := range config.Columns {
@@ -65,11 +65,11 @@ func New(raw map[string]any) (step.Runner, error) {
 			return nil, fmt.Errorf("column %d width must be positive", index+1)
 		}
 	}
-	if config.GroupField != "" {
+	if step.ConfigKnown(raw, "group_field") && config.GroupField != "" {
 		if config.browse() {
 			return nil, fmt.Errorf("group_field requires browse: false")
 		}
-		if !slices.ContainsFunc(config.Columns, func(column ColumnConfig) bool { return column.Field != config.GroupField }) {
+		if step.ConfigKnown(raw, "columns", "group_field") && !slices.ContainsFunc(config.Columns, func(column ColumnConfig) bool { return column.Field != config.GroupField }) {
 			return nil, fmt.Errorf("group_field %q leaves no columns to show", config.GroupField)
 		}
 	}

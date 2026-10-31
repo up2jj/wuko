@@ -80,6 +80,7 @@ func TemplateFuncsWithSecret(resolver SecretResolver) template.FuncMap {
 		"indent":                  indent,
 		"nindent":                 nindent,
 		"list":                    list,
+		"has":                     has,
 		"dict":                    dict,
 		"get":                     get,
 		"hasKey":                  hasKey,
@@ -149,6 +150,9 @@ func Eval(source string, environment any) (any, error) {
 
 func exprOptions() []expr.Option {
 	return []expr.Option{
+		expr.Function("has", func(values ...any) (any, error) {
+			return Has(values[0], values[1])
+		}, new(func(any, any) (bool, error))),
 		// Expr's implicit now() would let any expression read the clock without saying so.
 		// Wuko keeps the clock behind explicitly named boundaries instead: the recordable,
 		// --var-overridable time step, and the documented currentTime() and unixTimestamp()

@@ -209,6 +209,7 @@ func references(raw map[string]any) (step.References, error) {
 func Register(registry *step.Registry) error {
 	return registry.RegisterDefinition("transform", step.Registration{
 		Builder:    New,
+		Config:     config{},
 		Outputs:    step.ClosedObject(map[string]step.OutputSchema{"value": step.OpenObject()}),
 		References: references,
 	})

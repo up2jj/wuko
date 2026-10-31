@@ -84,7 +84,7 @@ type pullRequest struct {
 }
 
 func Register(registry *step.Registry) error {
-	return registry.RegisterDefinition("github_actions", step.Registration{Builder: New, Outputs: step.OpenObject()})
+	return registry.RegisterDefinition("github_actions", step.Registration{Builder: New, Config: Config{}, Outputs: step.OpenObject()})
 }
 
 func New(raw map[string]any) (step.Runner, error) {
@@ -119,18 +119,18 @@ func New(raw map[string]any) (step.Runner, error) {
 	if config.Step != "" && config.Job == "" {
 		return nil, fmt.Errorf("job is required when step is set")
 	}
-	if _, configured := raw["interval"]; configured && config.Interval <= 0 {
+	if _, configured := raw["interval"]; step.ConfigKnown(raw, "interval") && (configured && config.Interval <= 0) {
 		return nil, fmt.Errorf("interval must be a positive integer")
 	}
 
 	selectors := 0
-	if config.RunID != "" {
+	if step.ConfigKnown(raw, "run_id") && config.RunID != "" {
 		selectors++
 	}
-	if config.PullRequest != "" {
+	if step.ConfigKnown(raw, "pull_request") && config.PullRequest != "" {
 		selectors++
 	}
-	if config.HeadSHA != "" {
+	if step.ConfigKnown(raw, "head_sha") && config.HeadSHA != "" {
 		selectors++
 	}
 	if selectors > 1 {

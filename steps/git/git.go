@@ -60,27 +60,28 @@ func Register(registry *step.Registry) error {
 		name    string
 		builder step.Builder
 		outputs step.OutputSchema
+		config  any
 	}{
-		{"git_clean", NewClean, step.OpenObject()},
-		{"git_branch", NewBranch, step.OpenObject()},
-		{"git_remote_branch", NewRemoteBranch, step.OpenObject()},
-		{"git_branch_name", NewBranchName, step.OpenObject()},
-		{"git_on_branch", NewOnBranch, step.OpenObject()},
-		{"git_conventional_commit", NewConventionalCommit, step.OpenObject()},
-		{"git_commit", NewCommit, step.ClosedOutputs("created", "commit")},
-		{"git_revision", NewRevision, step.OpenObject()},
-		{"git_merge_base", NewMergeBase, step.OpenObject()},
-		{"git_log", NewLog, step.OpenObject()},
-		{"git_diff", NewDiff, step.OpenObject()},
-		{"git_diff_check", NewDiffCheck, step.OpenObject()},
-		{"git_files", NewFiles, filesOutputs()},
-		{"git_worktree", NewWorktree, step.OpenObject()},
-		{"git_squash", NewSquash, step.OpenObject()},
-		{"git_rebase", NewRebase, step.OpenObject()},
-		{"git_merge", NewMerge, step.OpenObject()},
+		{"git_clean", NewClean, step.OpenObject(), cleanConfig{}},
+		{"git_branch", NewBranch, step.OpenObject(), branchConfig{}},
+		{"git_remote_branch", NewRemoteBranch, step.OpenObject(), remoteBranchConfig{}},
+		{"git_branch_name", NewBranchName, step.OpenObject(), branchNameConfig{}},
+		{"git_on_branch", NewOnBranch, step.OpenObject(), onBranchConfig{}},
+		{"git_conventional_commit", NewConventionalCommit, step.OpenObject(), conventionalCommitConfig{}},
+		{"git_commit", NewCommit, step.ClosedOutputs("created", "commit"), commitConfig{}},
+		{"git_revision", NewRevision, step.OpenObject(), revisionConfig{}},
+		{"git_merge_base", NewMergeBase, step.OpenObject(), mergeBaseConfig{}},
+		{"git_log", NewLog, step.OpenObject(), logConfig{}},
+		{"git_diff", NewDiff, step.OpenObject(), diffConfig{}},
+		{"git_diff_check", NewDiffCheck, step.OpenObject(), diffCheckConfig{}},
+		{"git_files", NewFiles, filesOutputs(), filesConfig{}},
+		{"git_worktree", NewWorktree, step.OpenObject(), worktreeConfig{}},
+		{"git_squash", NewSquash, step.OpenObject(), squashConfig{}},
+		{"git_rebase", NewRebase, step.OpenObject(), rebaseConfig{}},
+		{"git_merge", NewMerge, step.OpenObject(), mergeConfig{}},
 	}
 	for _, registration := range registrations {
-		if err := registry.RegisterDefinition(registration.name, step.Registration{Builder: registration.builder, Outputs: registration.outputs}); err != nil {
+		if err := registry.RegisterDefinition(registration.name, step.Registration{Builder: registration.builder, Config: registration.config, Outputs: registration.outputs}); err != nil {
 			return err
 		}
 	}
@@ -111,7 +112,7 @@ func NewBranch(raw map[string]any) (step.Runner, error) {
 	if strings.TrimSpace(config.Branch) == "" {
 		return nil, fmt.Errorf("branch is required")
 	}
-	if config.Exists == nil {
+	if step.ConfigKnown(raw, "exists") && config.Exists == nil {
 		return nil, fmt.Errorf("exists is required")
 	}
 	return &Runner{
@@ -131,7 +132,7 @@ func NewRemoteBranch(raw map[string]any) (step.Runner, error) {
 	if strings.TrimSpace(config.Branch) == "" {
 		return nil, fmt.Errorf("branch is required")
 	}
-	if config.Exists == nil {
+	if step.ConfigKnown(raw, "exists") && config.Exists == nil {
 		return nil, fmt.Errorf("exists is required")
 	}
 	if _, configured := raw["remote"]; configured && strings.TrimSpace(config.Remote) == "" {

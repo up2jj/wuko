@@ -148,6 +148,7 @@ func redactURLError(err error) error {
 func Register(registry *step.Registry) error {
 	return registry.RegisterDefinition("http", step.Registration{
 		Builder: New,
+		Config:  Config{},
 		Outputs: step.ClosedObject(map[string]step.OutputSchema{
 			"status": step.Scalar(), "headers": step.OpenObject(), "body": step.Scalar(),
 			"value": step.OpenObject(), "path": step.Scalar(), "size": step.Scalar(),
@@ -169,7 +170,7 @@ func New(raw map[string]any) (step.Runner, error) {
 	if (hasBody && hasJSON) || ((hasBody || hasJSON) && (hasForm || hasFiles)) {
 		return nil, fmt.Errorf("body, json, and form/files request bodies are mutually exclusive")
 	}
-	if hasDownload && config.Download == nil {
+	if step.ConfigKnown(raw, "download") && (hasDownload && config.Download == nil) {
 		return nil, fmt.Errorf("download must configure a path")
 	}
 	if hasDownload && hasResponse {
@@ -188,7 +189,7 @@ func New(raw map[string]any) (step.Runner, error) {
 		config: config, hasBody: hasBody, hasJSON: hasJSON,
 		hasForm: hasForm, hasFiles: hasFiles,
 	}
-	if err := runner.validate(false); err != nil {
+	if err := runner.validate(false, raw); err != nil {
 		return nil, err
 	}
 	return runner, nil
@@ -217,7 +218,7 @@ func newClient(transport http.RoundTripper, jar http.CookieJar) *http.Client {
 }
 
 func (r *Runner) Run(ctx context.Context, execution step.Request) (result step.Result, resultErr error) {
-	if err := r.validate(true); err != nil {
+	if err := r.validate(true, nil); err != nil {
 		return step.Result{}, err
 	}
 	parsed, err := url.Parse(r.config.URL)
@@ -498,7 +499,9 @@ func (r *Runner) newTransport(workflowDir string) (*http.Transport, error) {
 	return transport, nil
 }
 
-func (r *Runner) validate(resolved bool) error {
+// validate checks the configuration. raw is the build-time configuration, used to skip
+// checks on unresolved bindings; it is nil once the configuration is resolved.
+func (r *Runner) validate(resolved bool, raw map[string]any) error {
 	if r.config.Method == "" {
 		return fmt.Errorf("method must not be empty")
 	}
@@ -510,12 +513,12 @@ func (r *Runner) validate(resolved bool) error {
 	if r.config.Download != nil && (resolved || !templated(r.config.Download.Path)) && strings.TrimSpace(r.config.Download.Path) == "" {
 		return fmt.Errorf("download path must not be empty")
 	}
-	for _, status := range r.config.SuccessStatuses {
-		if status < 100 || status > 599 {
+	for i, status := range r.config.SuccessStatuses {
+		if step.ConfigKnown(raw, fmt.Sprintf("success_statuses.%d", i)) && (status < 100 || status > 599) {
 			return fmt.Errorf("success status %d must be between 100 and 599", status)
 		}
 	}
-	if err := r.validateRequestBody(resolved); err != nil {
+	if err := r.validateRequestBody(resolved, raw); err != nil {
 		return err
 	}
 	if err := r.validateAuthentication(resolved); err != nil {
@@ -537,8 +540,8 @@ func (r *Runner) validate(resolved bool) error {
 	return validateURL(parsed)
 }
 
-func (r *Runner) validateRequestBody(resolved bool) error {
-	if r.hasFiles && len(r.config.Files) == 0 {
+func (r *Runner) validateRequestBody(resolved bool, raw map[string]any) error {
+	if step.ConfigKnown(raw, "files") && r.hasFiles && len(r.config.Files) == 0 {
 		return fmt.Errorf("files must contain at least one file")
 	}
 	if r.hasFiles && headerExists(r.config.Headers, "Content-Type") {

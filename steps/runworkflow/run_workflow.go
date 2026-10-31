@@ -47,7 +47,7 @@ const (
 )
 
 func Register(registry *step.Registry) error {
-	return registry.RegisterDefinition("run_workflow", step.Registration{Builder: New, Outputs: step.OpenObject()})
+	return registry.RegisterDefinition("run_workflow", step.Registration{Builder: New, Config: Config{}, Outputs: step.OpenObject()})
 }
 
 func New(raw map[string]any) (step.Runner, error) {
@@ -57,10 +57,10 @@ func New(raw map[string]any) (step.Runner, error) {
 	}
 	config.Workflow = strings.TrimSpace(config.Workflow)
 	config.Target = strings.TrimSpace(config.Target)
-	if !workflow.ValidWorkflowSelector(config.Workflow) {
+	if step.ConfigKnown(raw, "workflow") && !workflow.ValidWorkflowSelector(config.Workflow) {
 		return nil, fmt.Errorf("workflow must be a static discovered workflow name")
 	}
-	if templated(config.Workflow) || templated(config.Target) {
+	if step.ConfigKnown(raw, "target", "workflow") && (templated(config.Workflow) || templated(config.Target)) {
 		return nil, fmt.Errorf("workflow and target must be static")
 	}
 

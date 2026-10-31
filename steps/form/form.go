@@ -106,7 +106,7 @@ var fieldID = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 func Register(registry *step.Registry) error {
 	return registry.RegisterDefinition("tui_form", step.Registration{
-		Builder: New, Outputs: step.OpenObject(), ConfigOutputs: outputSchema, References: references,
+		Builder: New, Config: Config{}, Outputs: step.OpenObject(), ConfigOutputs: outputSchema, References: references,
 	})
 }
 
@@ -160,14 +160,14 @@ func New(raw map[string]any) (step.Runner, error) {
 	if strings.TrimSpace(config.Title) == "" {
 		return nil, fmt.Errorf("title is required")
 	}
-	if len(config.Fields) == 0 {
+	if step.ConfigKnown(raw, "fields") && len(config.Fields) == 0 {
 		return nil, fmt.Errorf("fields must not be empty")
 	}
 	rawFields, ok := raw["fields"].([]any)
 	if !ok {
 		return nil, fmt.Errorf("fields must be a list")
 	}
-	if err := config.NonInteractive.Validate(slices.ContainsFunc(config.Fields, func(field Field) bool { return field.Default != nil })); err != nil {
+	if err := config.NonInteractive.Validate(slices.ContainsFunc(config.Fields, func(field Field) bool { return field.Default != nil })); step.ConfigKnown(raw, "fields", "noninteractive") && err != nil {
 		return nil, err
 	}
 	runner := &Runner{config: config, now: time.Now, read: func(ctx context.Context, request step.Request, config tui.FormConfig) (map[string]any, error) {

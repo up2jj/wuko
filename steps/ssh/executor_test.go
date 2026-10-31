@@ -21,6 +21,7 @@ import (
 	"github.com/up2jj/wuko/executor"
 	"github.com/up2jj/wuko/internal/fakecli"
 	"github.com/up2jj/wuko/process"
+	"github.com/up2jj/wuko/step"
 )
 
 func TestExecutorConfiguration(t *testing.T) {
@@ -59,6 +60,7 @@ func TestStepRestrictions(t *testing.T) {
 		{"process", nil}, {"shell", map[string]any{"tty": true}},
 		{"shell", map[string]any{"user": "root"}}, {"shell", map[string]any{"interact": true}},
 		{"shell", map[string]any{"interactions": []any{}}},
+		{"shell", map[string]any{"tty": step.DeferredValue{}}}, {"shell", map[string]any{"user": step.DeferredValue{}}},
 	} {
 		if err := p.ValidateStep(test.kind, test.raw); err == nil {
 			t.Fatalf("accepted %s %#v", test.kind, test.raw)

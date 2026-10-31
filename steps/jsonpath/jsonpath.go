@@ -28,7 +28,7 @@ type Runner struct {
 }
 
 func Register(registry *step.Registry) error {
-	return registry.RegisterDefinition("jsonpath", step.Registration{Builder: New, Outputs: step.ClosedObject(map[string]step.OutputSchema{
+	return registry.RegisterDefinition("jsonpath", step.Registration{Builder: New, Config: Config{}, Outputs: step.ClosedObject(map[string]step.OutputSchema{
 		"value": step.OpenObject(), "paths": step.Array(step.Scalar()), "count": step.Scalar(),
 	}), References: step.LookupFrom})
 }

@@ -58,7 +58,7 @@ type Runner struct {
 }
 
 func Register(registry *step.Registry) error {
-	return registry.RegisterDefinition("multiplexer", step.Registration{Builder: New, Outputs: step.ClosedOutputs(
+	return registry.RegisterDefinition("multiplexer", step.Registration{Builder: New, Config: Config{}, Outputs: step.ClosedOutputs(
 		"active", "provider", "operation", "scope", "previous_title", "target", "changed", "text", "created_target", "created_pane",
 	)})
 }

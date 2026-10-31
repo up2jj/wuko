@@ -36,7 +36,7 @@ func (watcher nativeWatcher) ErrorChannel() <-chan error          { return watch
 
 // Register adds the watch step to a registry.
 func Register(registry *step.Registry) error {
-	return registry.RegisterDefinition("watch", step.Registration{Builder: New, Outputs: step.ClosedOutputs("root", "path", "operations")})
+	return registry.RegisterDefinition("watch", step.Registration{Builder: New, Config: Config{}, Outputs: step.ClosedOutputs("root", "path", "operations")})
 }
 
 // New decodes and validates a watch step configuration.

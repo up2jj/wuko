@@ -450,6 +450,18 @@ Use scalar dynamic values without field mappings:
     from: vars.available_regions
 ```
 
+`from` also accepts a list directly or an expression returning a list. This uses the same
+per-item mappings and selection rules as a lookup path:
+
+```yaml
+- id: environment
+  type: tui_choice
+  with:
+    variable: environment
+    message: Select an environment
+    from: {expr: 'filter(vars.environments, # != "prod")'}
+```
+
 Skip a redundant single-choice prompt when only one enabled mode is available:
 
 ```yaml

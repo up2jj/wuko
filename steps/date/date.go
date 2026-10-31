@@ -31,7 +31,7 @@ type Runner struct {
 }
 
 func Register(registry *step.Registry) error {
-	return registry.RegisterDefinition("tui_date", step.Registration{Builder: New, Outputs: step.ClosedOutputs("value")})
+	return registry.RegisterDefinition("tui_date", step.Registration{Builder: New, Config: Config{}, Outputs: step.ClosedOutputs("value")})
 }
 
 func New(raw map[string]any) (step.Runner, error) {
@@ -54,7 +54,7 @@ func NewWithClock(raw map[string]any, now func() time.Time) (step.Runner, error)
 		return nil, fmt.Errorf("clock is required")
 	}
 	_, hasDefault := raw["value"]
-	if err := config.NonInteractive.Validate(hasDefault); err != nil {
+	if err := config.NonInteractive.Validate(hasDefault); step.ConfigKnown(raw, "noninteractive") && err != nil {
 		return nil, err
 	}
 	if _, exists := raw["format"]; !exists {

@@ -78,11 +78,11 @@ func NewFiles(raw map[string]any) (step.Runner, error) {
 		default:
 			return nil, fmt.Errorf("source must be staged, unstaged, pushed, or all")
 		}
-		if config.Source != diffSourcePushed && config.Updates != nil {
+		if step.ConfigKnown(raw, "source", "updates") && (config.Source != diffSourcePushed && config.Updates != nil) {
 			return nil, fmt.Errorf("updates is only supported with source pushed")
 		}
 	}
-	if err := validatePathspecs(config.Paths); err != nil {
+	if err := validatePathspecs(config.Paths); step.ConfigKnown(raw, "paths") && err != nil {
 		return nil, err
 	}
 	exclude := make([]*regexp.Regexp, 0, len(config.Exclude))

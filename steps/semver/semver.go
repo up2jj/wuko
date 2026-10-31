@@ -35,7 +35,7 @@ type Runner struct {
 }
 
 func Register(registry *step.Registry) error {
-	return registry.RegisterDefinition("semver", step.Registration{Builder: New, Outputs: step.ClosedOutputs(
+	return registry.RegisterDefinition("semver", step.Registration{Builder: New, Config: Config{}, Outputs: step.ClosedOutputs(
 		"version", "value", "major", "minor", "patch", "prerelease", "metadata", "other", "comparison", "less", "equal", "greater",
 		"constraint", "matched", "previous", "part",
 	)})
@@ -70,14 +70,14 @@ func New(raw map[string]any) (step.Runner, error) {
 
 	switch config.Operation {
 	case operationParse:
-		if config.Other != "" || config.Constraint != "" || config.Part != "" {
+		if step.ConfigKnown(raw, "constraint", "other", "part") && (config.Other != "" || config.Constraint != "" || config.Part != "") {
 			return nil, fmt.Errorf("parse does not accept other, constraint, or part")
 		}
 	case operationCompare:
 		if strings.TrimSpace(config.Other) == "" {
 			return nil, fmt.Errorf("other is required for compare")
 		}
-		if config.Constraint != "" || config.Part != "" {
+		if step.ConfigKnown(raw, "constraint", "part") && (config.Constraint != "" || config.Part != "") {
 			return nil, fmt.Errorf("compare does not accept constraint or part")
 		}
 		if !templated(config.Other) {
@@ -91,7 +91,7 @@ func New(raw map[string]any) (step.Runner, error) {
 		if strings.TrimSpace(config.Constraint) == "" {
 			return nil, fmt.Errorf("constraint is required for constrain")
 		}
-		if config.Other != "" || config.Part != "" {
+		if step.ConfigKnown(raw, "other", "part") && (config.Other != "" || config.Part != "") {
 			return nil, fmt.Errorf("constrain does not accept other or part")
 		}
 		if !templated(config.Constraint) {
@@ -102,7 +102,7 @@ func New(raw map[string]any) (step.Runner, error) {
 			runner.constraint = constraint
 		}
 	case operationIncrement:
-		if config.Other != "" || config.Constraint != "" {
+		if step.ConfigKnown(raw, "constraint", "other") && (config.Other != "" || config.Constraint != "") {
 			return nil, fmt.Errorf("increment does not accept other or constraint")
 		}
 		if !templated(config.Part) && config.Part != "major" && config.Part != "minor" && config.Part != "patch" {

@@ -741,8 +741,7 @@ func (e *Engine) executeStep(ctx context.Context, definition *workflow.Definitio
 	} else {
 		renderStarted := time.Now()
 		traceStep(options, definition, workflowStep, diagnostic.PhaseRender, diagnostic.StatusStarted, time.Time{}, "rendering step configuration", nil)
-		data := templateData(definition, options.RunDir, options.Interactive, state)
-		rendered, err := renderStepValue(options.renderer, workflowStep.With, data, workflowStep.Type)
+		raw, err := e.prepareStepConfig(definition, workflowStep, options, state, false)
 		if err != nil {
 			traceStep(options, definition, workflowStep, diagnostic.PhaseRender, diagnostic.StatusFailed, renderStarted, "", err)
 			stepErr := fmt.Errorf("workflow %q step %q (%s): rendering configuration: %w", definition.Name, workflowStep.ID, workflowStep.Type, err)
@@ -752,20 +751,13 @@ func (e *Engine) executeStep(ctx context.Context, definition *workflow.Definitio
 		}
 		var configuration []diagnostic.Attribute
 		if options.Diagnostics != nil {
-			configText := diagnostic.RedactedJSON(rendered)
+			configText := diagnostic.RedactedJSON(raw)
 			if session := definition.SecretSession(); session != nil {
 				configText = session.Redact(configText)
 			}
 			configuration = []diagnostic.Attribute{diagnostic.Attr("config", configText)}
 		}
 		traceStep(options, definition, workflowStep, diagnostic.PhaseRender, diagnostic.StatusSucceeded, renderStarted, "", nil, configuration...)
-		raw, ok := rendered.(map[string]any)
-		if !ok {
-			stepErr := fmt.Errorf("workflow %q step %q (%s): configuration is not an object", definition.Name, workflowStep.ID, workflowStep.Type)
-			finishStep(StatusFailed, stepErr, nil, 0)
-			outcome.err = stepErr
-			return outcome
-		}
 		runnerStarted := time.Now()
 		traceStep(options, definition, workflowStep, diagnostic.PhaseRunner, diagnostic.StatusStarted, time.Time{}, "building step runner", nil)
 		runner, err := e.registry.BuildContext(ctx, workflowStep.Type, raw)

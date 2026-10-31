@@ -342,6 +342,17 @@ passing assertion never depends on it. That allows a message computed from a val
 everything is fine, such as `"{{ .vars.problem }}"`. A message that renders empty falls back to the
 expression, and one that fails to render reports the expression and the rendering error.
 
+Use a typed binding when the message is easier to compute in Expr. It must return a string and
+is evaluated only on failure; its result is not rendered again:
+
+```yaml
+- id: check_services
+  type: assert
+  with:
+    expr: len(vars.missing) == 0
+    message: {expr: '"missing: " + join(vars.missing, ", ")'}
+```
+
 ## `import_vars`
 
 Load JSON or TOML while the workflow is running. Files merge from left to right with top-level

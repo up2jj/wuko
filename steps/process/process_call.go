@@ -45,10 +45,10 @@ func newCall(raw map[string]any, registry *rpcRegistry) (step.Runner, error) {
 	if hasPayload && strings.TrimSpace(config.PayloadExpr) != "" {
 		return nil, fmt.Errorf("payload cannot be combined with payload_expr")
 	}
-	if hasPayload && !workflow.ActionDataValue(config.Payload) {
+	if step.ConfigKnown(raw, "payload") && (hasPayload && !workflow.ActionDataValue(config.Payload)) {
 		return nil, fmt.Errorf("payload must be a YAML/JSON-compatible value")
 	}
-	if config.Timeout != nil && config.Timeout.Value() <= 0 {
+	if step.ConfigKnown(raw, "timeout") && (config.Timeout != nil && config.Timeout.Value() <= 0) {
 		return nil, fmt.Errorf("timeout must be positive")
 	}
 

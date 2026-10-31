@@ -38,7 +38,7 @@ type Runner struct {
 
 func Register(registry *step.Registry) error {
 	return registry.RegisterDefinition("set", step.Registration{
-		Builder: New, Outputs: step.ClosedObject(map[string]step.OutputSchema{"value": step.OpenObject()}), References: references,
+		Builder: New, Config: Config{}, Outputs: step.ClosedObject(map[string]step.OutputSchema{"value": step.OpenObject()}), References: references,
 	})
 }
 
@@ -82,7 +82,7 @@ func New(raw map[string]any) (step.Runner, error) {
 		return nil, fmt.Errorf("exactly one of value or expr is required")
 	}
 	if hasValue {
-		if err := validateJSON(config.Value); err != nil {
+		if err := validateJSON(config.Value); step.ConfigKnown(raw, "value") && err != nil {
 			return nil, fmt.Errorf("value is not JSON-compatible: %w", err)
 		}
 		return &Runner{config: config, hasValue: true}, nil

@@ -18,6 +18,10 @@ func Nindent(value string, spaces int) (string, error) { return nindent(spaces, 
 // List constructs a list from values.
 func List(values ...any) []any { return list(values...) }
 
+// Has reports whether a slice or array contains needle, using Expr equality.
+// A nil collection is empty; other non-list values are errors.
+func Has(collection, needle any) (bool, error) { return has(needle, collection) }
+
 // Dict constructs a string-keyed map from alternating key and value arguments.
 func Dict(values ...any) (map[string]any, error) { return dict(values...) }
 

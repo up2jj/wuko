@@ -18,7 +18,7 @@ type Runner struct {
 }
 
 func Register(registry *step.Registry) error {
-	return registry.RegisterDefinition("import_vars", step.Registration{Builder: New, Outputs: step.ClosedObject(map[string]step.OutputSchema{
+	return registry.RegisterDefinition("import_vars", step.Registration{Builder: New, Config: Config{}, Outputs: step.ClosedObject(map[string]step.OutputSchema{
 		"variables": step.OpenObject(), "count": step.Scalar(),
 	})})
 }
@@ -28,7 +28,7 @@ func New(raw map[string]any) (step.Runner, error) {
 	if err := step.DecodeConfig(raw, &config); err != nil {
 		return nil, err
 	}
-	if len(config.Files) == 0 {
+	if step.ConfigKnown(raw, "files") && len(config.Files) == 0 {
 		return nil, fmt.Errorf("files must contain at least one path")
 	}
 	for index, path := range config.Files {

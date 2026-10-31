@@ -53,6 +53,7 @@ var (
 func Register(registry *step.Registry) error {
 	return registry.RegisterDefinition("template", step.Registration{
 		Builder:       New,
+		Config:        Config{},
 		Outputs:       step.ClosedOutputs("content", "path", "size", "mode", "created"),
 		ConfigOutputs: configOutputs,
 		References:    references,
@@ -70,7 +71,7 @@ func configOutputs(raw map[string]any) step.OutputSchema {
 }
 
 func New(raw map[string]any) (step.Runner, error) {
-	if value, ok := raw["mode"]; ok {
+	if value, ok := raw["mode"]; ok && step.ConfigKnown(raw, "mode") {
 		if _, ok := value.(string); !ok {
 			return nil, fmt.Errorf("mode must be a quoted octal string")
 		}

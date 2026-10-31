@@ -88,7 +88,7 @@ type Runner struct {
 }
 
 func Register(registry *step.Registry) error {
-	return registry.RegisterDefinition("file", step.Registration{Builder: New, Outputs: step.OpenObject()})
+	return registry.RegisterDefinition("file", step.Registration{Builder: New, Config: Config{}, Outputs: step.OpenObject()})
 }
 
 // Write describes one write another step performs through the file step's own
@@ -139,7 +139,7 @@ func ValidateMode(value string) error {
 }
 
 func New(raw map[string]any) (step.Runner, error) {
-	if value, ok := raw["mode"]; ok {
+	if value, ok := raw["mode"]; ok && step.ConfigKnown(raw, "mode") {
 		if _, ok := value.(string); !ok {
 			return nil, fmt.Errorf("mode must be a quoted octal string")
 		}

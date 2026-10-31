@@ -96,7 +96,7 @@ func NewWorktree(raw map[string]any) (step.Runner, error) {
 		if config.DeleteBranch == "" {
 			config.DeleteBranch = deleteSafe
 		}
-		if config.DeleteBranch != deleteSafe && config.DeleteBranch != deleteNever && config.DeleteBranch != deleteForce {
+		if step.ConfigKnown(raw, "delete_branch") && (config.DeleteBranch != deleteSafe && config.DeleteBranch != deleteNever && config.DeleteBranch != deleteForce) {
 			return nil, fmt.Errorf("delete_branch must be safe, never, or force")
 		}
 	default:

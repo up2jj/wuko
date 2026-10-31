@@ -72,7 +72,7 @@ type Runner struct {
 }
 
 func Register(registry *step.Registry) error {
-	return registry.RegisterDefinition("extract", step.Registration{Builder: New, Outputs: step.OpenObject(), References: step.LookupFrom})
+	return registry.RegisterDefinition("extract", step.Registration{Builder: New, Config: Config{}, Outputs: step.OpenObject(), References: step.LookupFrom})
 }
 
 func New(raw map[string]any) (step.Runner, error) {
@@ -97,7 +97,7 @@ func New(raw map[string]any) (step.Runner, error) {
 		}
 	}
 
-	if err := validateVariables(config.Variables); err != nil {
+	if err := validateVariables(config.Variables); step.ConfigKnown(raw, "variables") && err != nil {
 		return nil, err
 	}
 
@@ -106,7 +106,7 @@ func New(raw map[string]any) (step.Runner, error) {
 	_, hasPattern := raw["pattern"]
 	runner := &Runner{config: config, format: hasFormat}
 	if hasFields {
-		if len(config.Fields) == 0 {
+		if step.ConfigKnown(raw, "fields") && len(config.Fields) == 0 {
 			return nil, fmt.Errorf("fields must contain at least one field")
 		}
 		for _, name := range []string{"format", "pattern", "types", "match"} {
@@ -123,7 +123,7 @@ func New(raw map[string]any) (step.Runner, error) {
 	if hasFormat == hasPattern {
 		return nil, fmt.Errorf("exactly one of format or pattern is required")
 	}
-	if hasFormat && config.Types != nil {
+	if step.ConfigKnown(raw, "types") && (hasFormat && config.Types != nil) {
 		return nil, fmt.Errorf("types is only supported with pattern")
 	}
 	for name, kind := range config.Types {

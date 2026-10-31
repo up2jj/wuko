@@ -7,6 +7,7 @@ silently producing an empty value.
 ## Contents
 
 - [Template data](#template-data)
+- [Typed step values](#typed-step-values)
 - [Execution provider contexts](#execution-provider-contexts)
 - [Named templates](#named-templates)
 - [File-backed templates](#file-backed-templates)
@@ -56,6 +57,60 @@ functions](template-functions.md) for the complete reference and equivalent synt
 
 Lua `source` is deliberately not rendered. Pass dynamic values through the Lua step's typed
 `args` instead.
+
+## Typed step values
+
+Built-in steps accept an exact one-key `{expr: ...}` binding for runtime values under `with`.
+Bindings can appear inside lists and objects, or supply a whole value-bearing list or object:
+
+```yaml
+- id: report
+  type: shell
+  with:
+    command: printf
+    args:
+      - "%s\n"
+      - {expr: 'join(filter(vars.selected, # in vars.running), " ")'}
+
+- id: selected
+  type: set
+  with:
+    variable: selection
+    value:
+      names: {expr: 'filter(vars.selected, # in vars.running)'}
+      active: {expr: 'len(vars.running) > 0'}
+      expression_shaped_object: {literal: {expr: keep-this-text}}
+```
+
+Expressions use the normal workflow roots, providers, secrets, and declared plugin helpers.
+They run when the step prepares to execute, after its `if` condition succeeds. Results retain
+their types and are passed directly to the step; strings and expression-shaped objects returned
+by a binding are not interpreted again. A string field requires a string result. Convert other
+values explicitly, for example `{expr: 'string(vars.count)'}` or `{expr: 'toJSON(vars.payload)'}`.
+An exact `{literal: ...}` wrapper preserves its contents without rendering templates or evaluating
+bindings inside them. An integer field accepts any whole number, so a count read from JSON, Lua, or
+an Expr division (which produce floats) works; `2.5` is still rejected.
+
+> **Behavior change:** any one-key `expr` or `literal` mapping under `with` is now a binding,
+> including inside free-form data such as an `http` `json` body, a `process_call` `payload`, a
+> `key_value`, `set`, or `edit` `value`, `devenv_task` `inputs`, or `changed` `values`. A workflow
+> that sends such a mapping as data must wrap it: `json: {literal: {expr: "status == 'ok'"}}`.
+> Mappings with more than one key, and the step-owned fields listed below, are unaffected.
+
+Static errors, expression syntax, and references are checked before execution. Constraints that
+need expression results are checked once those values are available. Structural selectors remain
+static, including variable names, operation names, form field IDs/types, workflow names/targets,
+and shell `sdk`/`replace`. Bindings supply field values, not the entire `with` mapping or workflow
+fragments such as form fields and dashboard groups.
+
+Existing specialized expression fields keep their own grammar and timing: action inputs,
+`template.data`, Lua arguments, form values/validation, transform operations, and dashboard
+callbacks continue to resolve in their established scopes. An `assert.message` expression is
+evaluated only when the assertion fails. Lua and template source remain owned by their steps.
+
+Executable plugins retain their existing configuration grammar. Generic field bindings apply
+to built-ins; plugin helpers can still be called from those bindings. See
+[Executable plugins](plugins.md#helpers) for examples.
 
 ## Execution provider contexts
 

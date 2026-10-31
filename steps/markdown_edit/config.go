@@ -83,7 +83,7 @@ func (*Runner) ExecutorAware()      {}
 func (*Runner) ExecutorFileSystem() {}
 
 func Register(registry *step.Registry) error {
-	return registry.RegisterDefinition("markdown_edit", step.Registration{Builder: New, Outputs: step.ClosedObject(map[string]step.OutputSchema{
+	return registry.RegisterDefinition("markdown_edit", step.Registration{Builder: New, Config: Config{}, Outputs: step.ClosedObject(map[string]step.OutputSchema{
 		"value": step.Scalar(), "changed": step.Scalar(), "count": step.Scalar(), "changed_count": step.Scalar(), "file": step.Scalar(),
 		"matches": step.Array(step.ClosedOutputs("edit", "operation", "path", "kind", "line", "column")),
 	})})
@@ -94,10 +94,10 @@ func New(raw map[string]any) (step.Runner, error) {
 	if err := step.DecodeConfig(raw, &config); err != nil {
 		return nil, err
 	}
-	if countNonEmpty(config.From.File, config.From.Var, config.From.Expr) != 1 {
+	if step.ConfigKnown(raw, "from.expr", "from.file", "from.var") && countNonEmpty(config.From.File, config.From.Var, config.From.Expr) != 1 {
 		return nil, fmt.Errorf("from must contain exactly one of file, var, or expr")
 	}
-	if len(config.Edits) == 0 {
+	if step.ConfigKnown(raw, "edits") && len(config.Edits) == 0 {
 		return nil, fmt.Errorf("edits must contain at least one edit")
 	}
 
@@ -109,7 +109,7 @@ func New(raw map[string]any) (step.Runner, error) {
 		}
 		runner.maxBytes = maximum
 	}
-	if config.From.Expr != "" && !templated(config.From.Expr) {
+	if step.ConfigKnown(raw, "from.expr") && (config.From.Expr != "" && !templated(config.From.Expr)) {
 		program, err := wukoexpr.Compile(config.From.Expr,
 			expr.Env(step.ExpressionEnvironmentShape(nil)), expr.AllowUndefinedVariables())
 		if err != nil {

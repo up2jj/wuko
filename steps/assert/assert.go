@@ -4,6 +4,7 @@ package assert
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/expr-lang/expr"
@@ -14,20 +15,29 @@ import (
 
 type Config struct {
 	Expr    string `yaml:"expr"`
-	Message string `yaml:"message"`
+	Message any    `yaml:"message"`
 }
 
 type Runner struct {
-	config  Config
-	program *vm.Program
+	config         Config
+	program        *vm.Program
+	messageExpr    string
+	messageProgram *vm.Program
+	literalMessage bool
 }
 
 func Register(registry *step.Registry) error {
-	return registry.RegisterDefinition("assert", step.Registration{Builder: New, Outputs: step.ClosedOutputs(), References: references})
+	return registry.RegisterDefinition("assert", step.Registration{Builder: New, Config: Config{}, Outputs: step.ClosedOutputs(), References: references})
 }
 
 func references(raw map[string]any) (step.References, error) {
-	return step.References{Expressions: []step.ExpressionReference{step.ExpressionField(raw, "expr")}}, nil
+	references := step.References{Expressions: []step.ExpressionReference{step.ExpressionField(raw, "expr")}}
+	if message, ok := raw["message"].(map[string]any); ok && len(message) == 1 {
+		reference := step.ExpressionField(message, "expr")
+		reference.Label = "message expr"
+		references.Expressions = append(references.Expressions, reference)
+	}
+	return references, nil
 }
 
 func New(raw map[string]any) (step.Runner, error) {
@@ -38,14 +48,55 @@ func New(raw map[string]any) (step.Runner, error) {
 	if strings.TrimSpace(config.Expr) == "" {
 		return nil, fmt.Errorf("expr is required")
 	}
-	if strings.TrimSpace(config.Message) == "" {
-		return nil, fmt.Errorf("message is required")
+	var messageExpr string
+	var messageProgram *vm.Program
+	var literalMessage bool
+	switch message := config.Message.(type) {
+	case string:
+		if strings.TrimSpace(message) == "" {
+			return nil, fmt.Errorf("message is required")
+		}
+	case map[string]any:
+		if literal, ok := message["literal"].(string); ok && len(message) == 1 {
+			config.Message = literal
+			literalMessage = true
+			break
+		}
+		var ok bool
+		messageExpr, ok = message["expr"].(string)
+		if !ok || len(message) != 1 || strings.TrimSpace(messageExpr) == "" {
+			return nil, fmt.Errorf("message must be a string or a non-empty expr binding")
+		}
+		if !strings.Contains(messageExpr, "{{") {
+			var err error
+			messageProgram, err = wukoexpr.Compile(messageExpr, expr.Env(step.ExpressionEnvironmentShape(nil)), expr.AllowUndefinedVariables())
+			if err != nil {
+				return nil, fmt.Errorf("compiling message expr: %w", err)
+			}
+			if resultType := messageProgram.Node().Type(); resultType != nil && resultType.Kind() != reflect.Interface && resultType.Kind() != reflect.String {
+				return nil, fmt.Errorf("message expr must return a string")
+			}
+		}
+	default:
+		// Preserve the existing YAML decoder's scalar-to-string behavior for plain
+		// configuration. Expression results take the strict string path in failure.
+		var plain struct {
+			Expr    string `yaml:"expr"`
+			Message string `yaml:"message"`
+		}
+		if err := step.DecodeConfig(raw, &plain); err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(plain.Message) == "" {
+			return nil, fmt.Errorf("message is required")
+		}
+		config.Message = plain.Message
 	}
 	program, err := wukoexpr.Compile(config.Expr, expr.Env(step.ExpressionEnvironmentShape(nil)), expr.AllowUndefinedVariables(), expr.AsBool())
 	if err != nil {
 		return nil, fmt.Errorf("compiling expr: %w", err)
 	}
-	return &Runner{config: config, program: program}, nil
+	return &Runner{config: config, program: program, messageExpr: messageExpr, messageProgram: messageProgram, literalMessage: literalMessage}, nil
 }
 
 func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, error) {
@@ -70,8 +121,34 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 // raw so a passing assertion never depends on it. A message that renders empty falls back
 // to the expression, so the error still says what failed.
 func (r *Runner) failure(request step.Request) error {
-	message := r.config.Message
-	if request.TemplateRenderer != nil {
+	message, _ := r.config.Message.(string)
+	if r.messageExpr != "" {
+		program := r.messageProgram
+		if program == nil {
+			source := r.messageExpr
+			if request.TemplateRenderer != nil {
+				var err error
+				source, err = request.TemplateRenderer.Render(source)
+				if err != nil {
+					return fmt.Errorf("assertion failed: %s (rendering message expr: %w)", r.config.Expr, err)
+				}
+			}
+			var err error
+			program, err = wukoexpr.Compile(source, expr.Env(step.ExpressionEnvironmentShape(nil)), expr.AllowUndefinedVariables())
+			if err != nil {
+				return fmt.Errorf("assertion failed: %s (compiling message expr: %w)", r.config.Expr, err)
+			}
+		}
+		value, err := expr.Run(program, request.ExpressionEnvironment(nil))
+		if err != nil {
+			return fmt.Errorf("assertion failed: %s (evaluating message expr: %w)", r.config.Expr, err)
+		}
+		var ok bool
+		message, ok = value.(string)
+		if !ok {
+			return fmt.Errorf("assertion failed: %s (message expr returned %T, want string)", r.config.Expr, value)
+		}
+	} else if request.TemplateRenderer != nil && !r.literalMessage {
 		rendered, err := request.TemplateRenderer.Render(message)
 		if err != nil {
 			return fmt.Errorf("assertion failed: %s (rendering message: %w)", r.config.Expr, err)

@@ -57,6 +57,12 @@ type ReadinessConfig struct {
 	HTTP *HTTPProbe `yaml:"http,omitempty"`
 }
 
+// bindingConfig describes the exit-code union accepted before Config is decoded.
+type bindingConfig struct {
+	Config           `yaml:",inline"`
+	AllowedExitCodes any `yaml:"allowed_exit_codes"`
+}
+
 type LivenessConfig struct {
 	Exec *ExecProbe `yaml:"exec,omitempty"`
 	HTTP *HTTPProbe `yaml:"http,omitempty"`
@@ -130,6 +136,7 @@ func (*Runner) ExecutorAware() {}
 func Register(registry *step.Registry) error {
 	rpc := newRPCRegistry()
 	if err := registry.RegisterDefinition("process", step.Registration{
+		Config:  bindingConfig{},
 		Builder: func(raw map[string]any) (step.Runner, error) { return newProcess(raw, rpc) },
 		Outputs: step.ClosedOutputs("ready", "label", "detached", "readiness", "worker_id"),
 		References: func(raw map[string]any) (step.References, error) {
@@ -142,6 +149,7 @@ func Register(registry *step.Registry) error {
 		return err
 	}
 	return registry.RegisterDefinition("process_call", step.Registration{
+		Config:  CallConfig{},
 		Builder: func(raw map[string]any) (step.Runner, error) { return newCall(raw, rpc) },
 		Outputs: step.ClosedObject(map[string]step.OutputSchema{"result": step.OpenObject(), "worker_id": step.Scalar()}),
 		References: func(raw map[string]any) (step.References, error) {
@@ -157,7 +165,12 @@ func New(raw map[string]any) (step.Runner, error) {
 }
 
 func newProcess(raw map[string]any, rpcRegistry *rpcRegistry) (step.Runner, error) {
-	decodedRaw, allowAnyExitCode, err := processpkg.NormalizeAllowedExitCodes(raw)
+	exitCodeConfig := raw
+	if !step.ConfigKnown(raw, "allowed_exit_codes") {
+		exitCodeConfig = maps.Clone(raw)
+		delete(exitCodeConfig, "allowed_exit_codes")
+	}
+	decodedRaw, allowAnyExitCode, err := processpkg.NormalizeAllowedExitCodes(exitCodeConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -178,12 +191,12 @@ func newProcess(raw map[string]any, rpcRegistry *rpcRegistry) (step.Runner, erro
 	} else if err := validateCommand(config.Command, config.Script, config.Shell, "process"); err != nil {
 		return nil, err
 	}
-	if config.Elevated && config.User != "" {
+	if step.ConfigKnown(raw, "elevated", "user") && (config.Elevated && config.User != "") {
 		return nil, fmt.Errorf("elevated cannot be combined with user")
 	}
 	// An RPC worker keeps its request pipe open past the child's exit, which the elevated
 	// transport cannot carry because sudo only forwards a file-backed stdin.
-	if config.Elevated && config.RPC != "" {
+	if step.ConfigKnown(raw, "elevated", "rpc") && (config.Elevated && config.RPC != "") {
 		return nil, fmt.Errorf("elevated cannot be combined with rpc")
 	}
 	for name := range config.Env {
@@ -191,68 +204,68 @@ func newProcess(raw map[string]any, rpcRegistry *rpcRegistry) (step.Runner, erro
 			return nil, fmt.Errorf("invalid environment name %q", name)
 		}
 	}
-	_, exitCodesConfigured := raw["allowed_exit_codes"]
+	_, exitCodesConfigured := exitCodeConfig["allowed_exit_codes"]
 	exitCodes, err := processpkg.NewExitCodePolicy(config.AllowedExitCodes, exitCodesConfigured, allowAnyExitCode)
 	if err != nil {
 		return nil, err
 	}
 	stdoutPolicy, err := streamPolicy("stdout", config.Stdout)
-	if err != nil {
+	if err != nil && step.ConfigKnown(raw, "stdout") {
 		return nil, err
 	}
 	stderrPolicy, err := streamPolicy("stderr", config.Stderr)
-	if err != nil {
+	if err != nil && step.ConfigKnown(raw, "stderr") {
 		return nil, err
 	}
-	if config.Restart.Policy == "" {
+	if step.ConfigKnown(raw, "restart.policy") && config.Restart.Policy == "" {
 		config.Restart.Policy = "never"
 	}
-	if !slices.Contains([]string{"never", "on_failure", "always"}, config.Restart.Policy) {
+	if step.ConfigKnown(raw, "restart.policy") && !slices.Contains([]string{"never", "on_failure", "always"}, config.Restart.Policy) {
 		return nil, fmt.Errorf("restart policy must be never, on_failure, or always")
 	}
-	if config.Restart.MaxRestarts < 0 {
+	if step.ConfigKnown(raw, "restart.max_restarts") && config.Restart.MaxRestarts < 0 {
 		return nil, fmt.Errorf("restart max_restarts cannot be negative")
 	}
-	if config.Detached && config.Shutdown.Command == nil {
+	if step.ConfigKnown(raw, "detached", "shutdown.command") && (config.Detached && config.Shutdown.Command == nil) {
 		return nil, fmt.Errorf("detached requires shutdown.command")
 	}
-	if config.RPC != "" && config.RPC != "jsonl" {
+	if step.ConfigKnown(raw, "rpc") && (config.RPC != "" && config.RPC != "jsonl") {
 		return nil, fmt.Errorf("rpc must be jsonl")
 	}
-	if config.RPC != "" {
-		if config.Detached {
+	if step.ConfigKnown(raw, "rpc") && config.RPC != "" {
+		if step.ConfigKnown(raw, "detached") && config.Detached {
 			return nil, fmt.Errorf("rpc cannot be combined with detached")
 		}
-		if config.Stdout != "" && config.Stdout != "inherit" {
+		if step.ConfigKnown(raw, "stdout") && (config.Stdout != "" && config.Stdout != "inherit") {
 			return nil, fmt.Errorf("rpc reserves stdout for protocol messages")
 		}
 	}
-	if config.Shutdown.Command != nil {
-		if err := validateCommand(config.Shutdown.Command.Command, config.Shutdown.Command.Script, config.Shutdown.Command.Shell, "shutdown command"); err != nil {
+	if step.ConfigKnown(raw, "shutdown.command") && config.Shutdown.Command != nil {
+		if err := validateCommand(config.Shutdown.Command.Command, config.Shutdown.Command.Script, config.Shutdown.Command.Shell, "shutdown command"); step.ConfigKnown(raw, "shutdown.command.command", "shutdown.command.script", "shutdown.command.shell") && err != nil {
 			return nil, err
 		}
 	}
-	if config.Shutdown.Signal == "" {
+	if step.ConfigKnown(raw, "shutdown.signal") && config.Shutdown.Signal == "" {
 		config.Shutdown.Signal = "SIGTERM"
 	}
 	signal, err := parseSignal(config.Shutdown.Signal)
-	if err != nil {
+	if err != nil && step.ConfigKnown(raw, "shutdown.signal") {
 		return nil, err
 	}
 	var pattern *regexp.Regexp
-	if config.Readiness != nil {
+	if step.ConfigKnown(raw, "readiness") && config.Readiness != nil {
 		count := boolInt(config.Readiness.Log != nil) + boolInt(config.Readiness.Exec != nil) + boolInt(config.Readiness.HTTP != nil)
 		if count != 1 {
 			return nil, fmt.Errorf("readiness requires exactly one of log, exec, or http")
 		}
-		if config.Readiness.Log != nil {
+		if step.ConfigKnown(raw, "readiness.log") && config.Readiness.Log != nil {
 			pattern, err = regexp.Compile(config.Readiness.Log.Pattern)
 			if err != nil {
 				return nil, fmt.Errorf("readiness log pattern: %w", err)
 			}
 			// A discarded stream never reaches the log matcher, so a readiness log that can
 			// only ever time out is rejected here rather than after its timeout expires.
-			if config.RPC != "" && !stderrPolicy.Streams() {
+			if step.ConfigKnown(raw, "rpc", "stderr") && (config.RPC != "" && !stderrPolicy.Streams()) {
 				return nil, fmt.Errorf("readiness log for rpc requires stderr to be inherit")
 			}
 			if config.RPC == "" && !stdoutPolicy.Streams() && !stderrPolicy.Streams() {
@@ -260,7 +273,7 @@ func newProcess(raw map[string]any, rpcRegistry *rpcRegistry) (step.Runner, erro
 			}
 		}
 	}
-	if config.Liveness != nil && boolInt(config.Liveness.Exec != nil)+boolInt(config.Liveness.HTTP != nil) != 1 {
+	if step.ConfigKnown(raw, "liveness", "liveness.exec", "liveness.http") && (config.Liveness != nil && boolInt(config.Liveness.Exec != nil)+boolInt(config.Liveness.HTTP != nil) != 1) {
 		return nil, fmt.Errorf("liveness requires exactly one of exec or http")
 	}
 	if err := validateProbes(config); err != nil {
@@ -274,7 +287,7 @@ func newProcess(raw map[string]any, rpcRegistry *rpcRegistry) (step.Runner, erro
 		}
 	}
 	var workerID string
-	if config.RPC != "" {
+	if step.ConfigKnown(raw, "rpc") && config.RPC != "" {
 		workerID, err = opaqueID("worker")
 		if err != nil {
 			return nil, err

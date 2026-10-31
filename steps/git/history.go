@@ -74,7 +74,7 @@ func NewRevision(raw map[string]any) (step.Runner, error) {
 	if configured && strings.TrimSpace(config.Revision) == "" {
 		return nil, fmt.Errorf("revision must not be blank")
 	}
-	if strings.ContainsRune(config.Revision, '\x00') {
+	if step.ConfigKnown(raw, "revision") && strings.ContainsRune(config.Revision, '\x00') {
 		return nil, fmt.Errorf("revision must not contain NUL")
 	}
 	if !configured {
@@ -92,7 +92,7 @@ func NewMergeBase(raw map[string]any) (step.Runner, error) {
 	if strings.TrimSpace(config.From) == "" {
 		return nil, fmt.Errorf("from is required")
 	}
-	if strings.ContainsRune(config.From, '\x00') {
+	if step.ConfigKnown(raw, "from") && strings.ContainsRune(config.From, '\x00') {
 		return nil, fmt.Errorf("from must not contain NUL")
 	}
 	if _, configured := raw["through"]; !configured {
@@ -100,7 +100,7 @@ func NewMergeBase(raw map[string]any) (step.Runner, error) {
 	} else if strings.TrimSpace(config.Through) == "" {
 		return nil, fmt.Errorf("through must not be blank")
 	}
-	if strings.ContainsRune(config.Through, '\x00') {
+	if step.ConfigKnown(raw, "through") && strings.ContainsRune(config.Through, '\x00') {
 		return nil, fmt.Errorf("through must not contain NUL")
 	}
 	return &mergeBaseRunner{config: config}, nil
@@ -127,10 +127,10 @@ func NewLog(raw map[string]any) (step.Runner, error) {
 	if !hasThrough {
 		config.Through = "HEAD"
 	}
-	if !hasPaths && config.Paths == nil {
+	if step.ConfigKnown(raw, "paths") && (!hasPaths && config.Paths == nil) {
 		config.Paths = []string{}
 	}
-	if hasPaths && len(config.Paths) == 0 {
+	if step.ConfigKnown(raw, "paths") && (hasPaths && len(config.Paths) == 0) {
 		return nil, fmt.Errorf("paths must contain at least one pathspec")
 	}
 	if !hasAncestry {
@@ -139,10 +139,10 @@ func NewLog(raw map[string]any) (step.Runner, error) {
 	if hasAncestry && strings.TrimSpace(config.Ancestry) == "" {
 		return nil, fmt.Errorf("ancestry must not be blank")
 	}
-	if strings.Contains(config.Ancestry, "{{") {
+	if step.ConfigKnown(raw, "ancestry") && strings.Contains(config.Ancestry, "{{") {
 		return nil, fmt.Errorf("ancestry must not be templated")
 	}
-	if config.Ancestry != ancestryAll && config.Ancestry != ancestryFirstParent {
+	if step.ConfigKnown(raw, "ancestry") && (config.Ancestry != ancestryAll && config.Ancestry != ancestryFirstParent) {
 		return nil, fmt.Errorf("ancestry must be all or first_parent")
 	}
 	if !hasMerges {
@@ -151,16 +151,16 @@ func NewLog(raw map[string]any) (step.Runner, error) {
 	if hasMerges && strings.TrimSpace(config.Merges) == "" {
 		return nil, fmt.Errorf("merges must not be blank")
 	}
-	if strings.Contains(config.Merges, "{{") {
+	if step.ConfigKnown(raw, "merges") && strings.Contains(config.Merges, "{{") {
 		return nil, fmt.Errorf("merges must not be templated")
 	}
-	if config.Merges != mergesInclude && config.Merges != mergesExclude && config.Merges != mergesOnly {
+	if step.ConfigKnown(raw, "merges") && (config.Merges != mergesInclude && config.Merges != mergesExclude && config.Merges != mergesOnly) {
 		return nil, fmt.Errorf("merges must be include, exclude, or only")
 	}
 	if !hasLimit {
 		config.Limit = defaultLogLimit
 	}
-	if config.Limit < 1 || config.Limit > maximumLogLimit {
+	if step.ConfigKnown(raw, "limit") && (config.Limit < 1 || config.Limit > maximumLogLimit) {
 		return nil, fmt.Errorf("limit must be between 1 and %d", maximumLogLimit)
 	}
 	runner := &logRunner{config: config, hasAfter: hasAfter, hasThrough: hasThrough, hasPaths: hasPaths}

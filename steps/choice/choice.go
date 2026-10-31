@@ -28,7 +28,7 @@ type Config struct {
 	MinSelected      *int           `yaml:"min_selected,omitempty"`
 	MaxSelected      *int           `yaml:"max_selected,omitempty"`
 	Choices          []ChoiceConfig `yaml:"choices,omitempty"`
-	From             string         `yaml:"from,omitempty"`
+	From             any            `yaml:"from,omitempty"`
 	LabelField       string         `yaml:"label_field,omitempty"`
 	LabelExpr        string         `yaml:"label_expr,omitempty"`
 	ValueField       string         `yaml:"value_field,omitempty"`
@@ -83,7 +83,7 @@ type Runner struct {
 }
 
 func Register(registry *step.Registry) error {
-	return registry.RegisterDefinition("tui_choice", step.Registration{Builder: New, Outputs: step.ClosedObject(map[string]step.OutputSchema{
+	return registry.RegisterDefinition("tui_choice", step.Registration{Builder: New, Config: Config{}, Outputs: step.ClosedObject(map[string]step.OutputSchema{
 		"value": step.OpenObject(), "label": step.Scalar(), "selected": step.Scalar(), "item": step.OpenObject(),
 		"values": step.Array(step.OpenObject()), "labels": step.Array(step.Scalar()), "count": step.Scalar(), "items": step.Array(step.OpenObject()),
 	})})
@@ -97,11 +97,20 @@ func New(raw map[string]any) (step.Runner, error) {
 	if config.Variable == "" || strings.TrimSpace(config.Message) == "" {
 		return nil, fmt.Errorf("variable and message are required")
 	}
-	if (len(config.Choices) == 0) == (config.From == "") {
+	hasChoices := len(config.Choices) > 0 || !step.ConfigKnown(raw, "choices")
+	hasFrom := choiceSourceSet(config.From) || !step.ConfigKnown(raw, "from")
+	if hasChoices == hasFrom {
 		return nil, fmt.Errorf("exactly one of choices or from is required")
 	}
+	if hasFrom && step.ConfigKnown(raw, "from") {
+		if _, path := config.From.(string); !path {
+			if _, list := asSlice(config.From); !list {
+				return nil, fmt.Errorf("from must be a lookup path or a list")
+			}
+		}
+	}
 	var staticRows []any
-	if len(config.Choices) > 0 {
+	if step.ConfigKnown(raw, "choices") && len(config.Choices) > 0 {
 		var ok bool
 		staticRows, ok = asSlice(raw["choices"])
 		if !ok {
@@ -112,12 +121,12 @@ func New(raw map[string]any) (step.Runner, error) {
 		}
 		staticRows = workflow.Clone(staticRows).([]any)
 	}
-	if err := validateBounds(config); err != nil {
+	if err := validateBounds(config, raw); err != nil {
 		return nil, err
 	}
 	// Defaults may come from a source or an expression, so only the run can tell whether
 	// enough of them are marked.
-	if err := config.NonInteractive.Validate(true); err != nil {
+	if err := config.NonInteractive.Validate(true); step.ConfigKnown(raw, "noninteractive") && err != nil {
 		return nil, err
 	}
 	programs, err := compileExpressions(raw, config)
@@ -177,7 +186,7 @@ func compileExpressions(raw map[string]any, config Config) (expressionPrograms, 
 		if strings.TrimSpace(declaration.expression) == "" {
 			return expressionPrograms{}, fmt.Errorf("%s must be a non-empty expression", key)
 		}
-		if config.From == "" {
+		if !choiceSourceSet(config.From) && step.ConfigKnown(raw, "from") {
 			return expressionPrograms{}, fmt.Errorf("%s requires from", key)
 		}
 		if declaration.field != "" {
@@ -329,13 +338,17 @@ func (r *Runner) resolveChoices(request step.Request) (resolvedChoices, error) {
 		return resolveChoiceRows(r.staticRows, resolveStaticChoice)
 	}
 
-	value, err := step.Lookup(request, r.config.From)
-	if err != nil {
-		return resolvedChoices{}, fmt.Errorf("resolving choices: %w", err)
+	value := r.config.From
+	if path, lookup := value.(string); lookup {
+		var err error
+		value, err = step.Lookup(request, path)
+		if err != nil {
+			return resolvedChoices{}, fmt.Errorf("resolving choices: %w", err)
+		}
 	}
 	items, ok := asSlice(value)
 	if !ok {
-		return resolvedChoices{}, fmt.Errorf("choice source %q is not a list", r.config.From)
+		return resolvedChoices{}, fmt.Errorf("choice source %v is not a list", r.config.From)
 	}
 	return resolveChoiceRows(items, func(item any, index int) (resolvedChoice, error) {
 		option, err := r.resolveDynamicChoice(request, item, index)
@@ -347,6 +360,13 @@ func (r *Runner) resolveChoices(request step.Request) (resolvedChoices, error) {
 			item:   workflow.Clone(item), hasItem: !scalar(item),
 		}, nil
 	})
+}
+
+func choiceSourceSet(source any) bool {
+	if path, ok := source.(string); ok {
+		return path != ""
+	}
+	return source != nil
 }
 
 func resolveStaticChoice(item any, index int) (resolvedChoice, error) {
@@ -773,17 +793,17 @@ func (r *Runner) validateOptions(options []resolvedChoice) error {
 	return nil
 }
 
-func validateBounds(config Config) error {
-	if config.FilterOnType && config.Multiple {
+func validateBounds(config Config, raw map[string]any) error {
+	if step.ConfigKnown(raw, "filter_on_type", "multiple") && config.FilterOnType && config.Multiple {
 		return fmt.Errorf("filter_on_type requires multiple: false")
 	}
-	if config.AutoSelectSingle && config.Multiple {
+	if step.ConfigKnown(raw, "auto_select_single", "multiple") && config.AutoSelectSingle && config.Multiple {
 		return fmt.Errorf("auto_select_single requires multiple: false")
 	}
-	if config.SelectAll && !config.Multiple {
+	if step.ConfigKnown(raw, "select_all", "multiple") && config.SelectAll && !config.Multiple {
 		return fmt.Errorf("select_all requires multiple: true")
 	}
-	if (config.MinSelected != nil || config.MaxSelected != nil) && !config.Multiple {
+	if step.ConfigKnown(raw, "min_selected", "max_selected", "multiple") && (config.MinSelected != nil || config.MaxSelected != nil) && !config.Multiple {
 		return fmt.Errorf("min_selected and max_selected require multiple: true")
 	}
 	if config.MinSelected != nil && *config.MinSelected < 0 {

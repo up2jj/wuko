@@ -65,25 +65,25 @@ func NewSquash(raw map[string]any) (step.Runner, error) {
 	if strings.TrimSpace(config.Message) == "" {
 		return nil, fmt.Errorf("message is required")
 	}
-	if strings.ContainsRune(config.Message, '\x00') {
+	if step.ConfigKnown(raw, "message") && strings.ContainsRune(config.Message, '\x00') {
 		return nil, fmt.Errorf("message must not contain NUL")
 	}
 	if _, ok := raw["body"]; ok && strings.TrimSpace(config.Body) == "" {
 		return nil, fmt.Errorf("body must not be blank")
 	}
-	if strings.ContainsRune(config.Body, '\x00') {
+	if step.ConfigKnown(raw, "body") && strings.ContainsRune(config.Body, '\x00') {
 		return nil, fmt.Errorf("body must not contain NUL")
 	}
-	if err := validateCommitIdentity(raw, "author", config.Author); err != nil {
+	if err := validateCommitIdentity(raw, "author", config.Author); step.ConfigKnown(raw, "author") && err != nil {
 		return nil, err
 	}
-	if err := validateCommitIdentity(raw, "committer", config.Committer); err != nil {
+	if err := validateCommitIdentity(raw, "committer", config.Committer); step.ConfigKnown(raw, "committer") && err != nil {
 		return nil, err
 	}
-	if err := validateCommitTrailers(raw, config.Trailers); err != nil {
+	if err := validateCommitTrailers(raw, config.Trailers); step.ConfigKnown(raw, "trailers") && err != nil {
 		return nil, err
 	}
-	if _, ok := raw["verify"]; ok && config.Verify == nil {
+	if _, ok := raw["verify"]; step.ConfigKnown(raw, "verify") && (ok && config.Verify == nil) {
 		return nil, fmt.Errorf("verify must be a boolean")
 	}
 	if value, ok := raw["signoff"]; ok && value == nil {
@@ -92,14 +92,14 @@ func NewSquash(raw map[string]any) (step.Runner, error) {
 	if config.Stage == "" {
 		config.Stage = stageAll
 	}
-	if strings.Contains(config.Stage, "{{") {
+	if step.ConfigKnown(raw, "stage") && strings.Contains(config.Stage, "{{") {
 		return nil, fmt.Errorf("stage must not be templated")
 	}
-	if config.Stage != stageAll && config.Stage != stageTracked && config.Stage != stageNone {
+	if step.ConfigKnown(raw, "stage") && (config.Stage != stageAll && config.Stage != stageTracked && config.Stage != stageNone) {
 		return nil, fmt.Errorf("stage must be all, tracked, or none")
 	}
 	verify := true
-	if config.Verify != nil {
+	if step.ConfigKnown(raw, "verify") && config.Verify != nil {
 		verify = *config.Verify
 	}
 	return &squashRunner{config: config, verify: verify}, nil
@@ -123,19 +123,19 @@ func NewMerge(raw map[string]any) (step.Runner, error) {
 	if config.Mode == "" {
 		config.Mode = mergeFFOnly
 	}
-	if strings.Contains(config.Mode, "{{") {
+	if step.ConfigKnown(raw, "mode") && strings.Contains(config.Mode, "{{") {
 		return nil, fmt.Errorf("mode must not be templated")
 	}
-	if config.Mode != mergeFFOnly && config.Mode != mergeNoFF {
+	if step.ConfigKnown(raw, "mode") && (config.Mode != mergeFFOnly && config.Mode != mergeNoFF) {
 		return nil, fmt.Errorf("mode must be ff_only or no_ff")
 	}
 	if config.Mode == mergeNoFF && strings.TrimSpace(config.Message) == "" {
 		return nil, fmt.Errorf("message is required for no_ff merge")
 	}
-	if strings.ContainsRune(config.Message, '\x00') {
+	if step.ConfigKnown(raw, "message") && strings.ContainsRune(config.Message, '\x00') {
 		return nil, fmt.Errorf("message must not contain NUL")
 	}
-	if config.Mode == mergeFFOnly {
+	if step.ConfigKnown(raw, "mode") && config.Mode == mergeFFOnly {
 		if _, ok := raw["message"]; ok {
 			return nil, fmt.Errorf("message is only valid for no_ff merge")
 		}

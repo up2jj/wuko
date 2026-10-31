@@ -54,27 +54,27 @@ func NewCommit(raw map[string]any) (step.Runner, error) {
 	if strings.TrimSpace(config.Message) == "" {
 		return nil, fmt.Errorf("message is required")
 	}
-	if strings.ContainsRune(config.Message, '\x00') {
+	if step.ConfigKnown(raw, "message") && strings.ContainsRune(config.Message, '\x00') {
 		return nil, fmt.Errorf("message must not contain NUL")
 	}
 	if _, configured := raw["body"]; configured {
 		if strings.TrimSpace(config.Body) == "" {
 			return nil, fmt.Errorf("body must not be blank")
 		}
-		if strings.ContainsRune(config.Body, '\x00') {
+		if step.ConfigKnown(raw, "body") && strings.ContainsRune(config.Body, '\x00') {
 			return nil, fmt.Errorf("body must not contain NUL")
 		}
 	}
-	if err := validateCommitPaths(raw, config.Paths); err != nil {
+	if err := validateCommitPaths(raw, config.Paths); step.ConfigKnown(raw, "paths") && err != nil {
 		return nil, err
 	}
-	if err := validateCommitIdentity(raw, "author", config.Author); err != nil {
+	if err := validateCommitIdentity(raw, "author", config.Author); step.ConfigKnown(raw, "author") && err != nil {
 		return nil, err
 	}
-	if err := validateCommitIdentity(raw, "committer", config.Committer); err != nil {
+	if err := validateCommitIdentity(raw, "committer", config.Committer); step.ConfigKnown(raw, "committer") && err != nil {
 		return nil, err
 	}
-	if err := validateCommitTrailers(raw, config.Trailers); err != nil {
+	if err := validateCommitTrailers(raw, config.Trailers); step.ConfigKnown(raw, "trailers") && err != nil {
 		return nil, err
 	}
 	if _, configured := raw["on_empty"]; configured && strings.TrimSpace(config.OnEmpty) == "" {
@@ -83,20 +83,20 @@ func NewCommit(raw map[string]any) (step.Runner, error) {
 	if _, configured := raw["signoff"]; configured && raw["signoff"] == nil {
 		return nil, fmt.Errorf("signoff must be a boolean")
 	}
-	if _, configured := raw["verify"]; configured && config.Verify == nil {
+	if _, configured := raw["verify"]; step.ConfigKnown(raw, "verify") && (configured && config.Verify == nil) {
 		return nil, fmt.Errorf("verify must be a boolean")
 	}
 	if _, configured := raw["on_empty"]; !configured {
 		config.OnEmpty = onEmptySkip
 	}
-	if strings.Contains(config.OnEmpty, "{{") {
+	if step.ConfigKnown(raw, "on_empty") && strings.Contains(config.OnEmpty, "{{") {
 		return nil, fmt.Errorf("on_empty must not be templated")
 	}
-	if config.OnEmpty != onEmptySkip && config.OnEmpty != onEmptyFail && config.OnEmpty != onEmptyCommit {
+	if step.ConfigKnown(raw, "on_empty") && (config.OnEmpty != onEmptySkip && config.OnEmpty != onEmptyFail && config.OnEmpty != onEmptyCommit) {
 		return nil, fmt.Errorf("on_empty must be skip, fail, or commit")
 	}
 	verify := true
-	if config.Verify != nil {
+	if step.ConfigKnown(raw, "verify") && config.Verify != nil {
 		verify = *config.Verify
 	}
 	return &commitRunner{config: config, verify: verify}, nil

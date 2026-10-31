@@ -102,3 +102,12 @@ func TestAssertionPropagatesCancellation(t *testing.T) {
 		t.Fatalf("result = %#v, want empty result", result)
 	}
 }
+
+func TestAssertionRetainsPlainScalarMessageCoercion(t *testing.T) {
+	t.Parallel()
+	runner := steptest.Build(t, New, map[string]any{"expr": "false", "message": 42})
+	_, err := runner.Run(t.Context(), step.Request{})
+	if err == nil || err.Error() != "assertion failed: 42" {
+		t.Fatalf("Run() error = %v", err)
+	}
+}

@@ -46,7 +46,7 @@ type Runner struct {
 
 // Register adds the changed step to a registry.
 func Register(registry *step.Registry) error {
-	return registry.RegisterDefinition("changed", step.Registration{Builder: New, Outputs: step.ClosedOutputs("changed")})
+	return registry.RegisterDefinition("changed", step.Registration{Builder: New, Config: Config{}, Outputs: step.ClosedOutputs("changed")})
 }
 
 // New decodes and validates a changed step configuration.

@@ -40,7 +40,7 @@ type Runner struct {
 }
 
 func Register(registry *step.Registry) error {
-	return registry.RegisterDefinition("tui_input", step.Registration{Builder: New, Outputs: step.ClosedOutputs("value")})
+	return registry.RegisterDefinition("tui_input", step.Registration{Builder: New, Config: Config{}, Outputs: step.ClosedOutputs("value")})
 }
 
 func New(raw map[string]any) (step.Runner, error) {
@@ -55,7 +55,7 @@ func New(raw map[string]any) (step.Runner, error) {
 		return nil, fmt.Errorf("message is required")
 	}
 	_, hasDefault := raw["value"]
-	if err := config.NonInteractive.Validate(hasDefault); err != nil {
+	if err := config.NonInteractive.Validate(hasDefault); step.ConfigKnown(raw, "noninteractive") && err != nil {
 		return nil, err
 	}
 	validate, err := step.CompileTextValidator(required(config.Required), config.Validation)
@@ -68,7 +68,7 @@ func New(raw map[string]any) (step.Runner, error) {
 		return nil, err
 	}
 	validateAndModify := func(value string) error {
-		if err := validate(normalize(value, config.Modifiers.Trim)); err != nil {
+		if err := validate(normalize(value, config.Modifiers.Trim)); step.ConfigKnown(raw, "modifiers.trim") && err != nil {
 			return err
 		}
 		_, err := modify(value)

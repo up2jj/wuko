@@ -28,7 +28,7 @@ type Config struct {
 type Runner struct{ config Config }
 
 func Register(registry *step.Registry) error {
-	return registry.RegisterDefinition("tui_review", step.Registration{Builder: New, Outputs: step.ClosedOutputs("value")})
+	return registry.RegisterDefinition("tui_review", step.Registration{Builder: New, Config: Config{}, Outputs: step.ClosedOutputs("value")})
 }
 
 func New(raw map[string]any) (step.Runner, error) {
@@ -48,10 +48,10 @@ func New(raw map[string]any) (step.Runner, error) {
 	if config.Format == "" {
 		config.Format = formatPlain
 	}
-	if config.Format != formatPlain && config.Format != formatDiff {
+	if step.ConfigKnown(raw, "format") && (config.Format != formatPlain && config.Format != formatDiff) {
 		return nil, fmt.Errorf("format must be plain or diff")
 	}
-	if err := config.NonInteractive.Validate(config.Default != nil); err != nil {
+	if err := config.NonInteractive.Validate(config.Default != nil); step.ConfigKnown(raw, "default", "noninteractive") && err != nil {
 		return nil, err
 	}
 	return &Runner{config: config}, nil

@@ -104,18 +104,18 @@ func NewDiff(raw map[string]any) (step.Runner, error) {
 	if _, configured := raw["source"]; !configured {
 		config.Source = diffSourceCommit
 	}
-	if _, configured := raw["through"]; !configured && config.Source == diffSourceCommit {
+	if _, configured := raw["through"]; step.ConfigKnown(raw, "source") && (!configured && config.Source == diffSourceCommit) {
 		config.Through = "HEAD"
 	}
 	renames := true
-	if config.Renames != nil {
+	if step.ConfigKnown(raw, "renames") && config.Renames != nil {
 		renames = *config.Renames
 	}
 	_, hasFrom := raw["from"]
-	if err := validateDiffConfig(config.Source, config.From, config.Through, config.Paths, hasFrom, true); err != nil {
+	if err := validateDiffConfig(config.Source, config.From, config.Through, config.Paths, hasFrom, true); step.ConfigKnown(raw, "from", "paths", "source", "through") && err != nil {
 		return nil, err
 	}
-	if config.Copies && !renames {
+	if step.ConfigKnown(raw, "copies") && (config.Copies && !renames) {
 		return nil, fmt.Errorf("copies requires renames")
 	}
 	return &diffRunner{config: config, renames: renames, hasFrom: hasFrom}, nil
@@ -130,14 +130,14 @@ func NewDiffCheck(raw map[string]any) (step.Runner, error) {
 	if strings.TrimSpace(config.Source) == "" {
 		return nil, fmt.Errorf("source is required")
 	}
-	if _, configured := raw["through"]; !configured && config.Source == diffSourceCommit {
+	if _, configured := raw["through"]; step.ConfigKnown(raw, "source") && (!configured && config.Source == diffSourceCommit) {
 		config.Through = "HEAD"
 	}
 	_, hasFrom := raw["from"]
-	if err := validateDiffConfig(config.Source, config.From, config.Through, config.Paths, hasFrom, false); err != nil {
+	if err := validateDiffConfig(config.Source, config.From, config.Through, config.Paths, hasFrom, false); step.ConfigKnown(raw, "from", "paths", "source", "through") && err != nil {
 		return nil, err
 	}
-	if config.Source != diffSourcePushed && config.Updates != nil {
+	if step.ConfigKnown(raw, "source", "updates") && (config.Source != diffSourcePushed && config.Updates != nil) {
 		return nil, fmt.Errorf("updates is only supported with source pushed")
 	}
 	program, err := compileUpdates(config.Updates)

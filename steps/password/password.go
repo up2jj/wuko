@@ -23,7 +23,7 @@ type Runner struct {
 }
 
 func Register(registry *step.Registry) error {
-	return registry.RegisterDefinition("tui_password", step.Registration{Builder: New, Outputs: step.ClosedOutputs("value")})
+	return registry.RegisterDefinition("tui_password", step.Registration{Builder: New, Config: Config{}, Outputs: step.ClosedOutputs("value")})
 }
 
 func New(raw map[string]any) (step.Runner, error) {

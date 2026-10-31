@@ -110,6 +110,13 @@ func (*ExecutorProvider) ValidateStep(kind string, raw map[string]any) error {
 	if kind != "shell" && kind != "file" && kind != "edit" {
 		return fmt.Errorf("step type %q is not supported by the SSH executor", kind)
 	}
+	// Expression bindings are unresolved during validation, and nothing re-checks these
+	// restrictions at run time, so the restricted fields must be static.
+	for _, key := range []string{"tty", "interact", "user"} {
+		if !step.ConfigKnown(raw, key) {
+			return fmt.Errorf("%s must be static under the SSH executor", key)
+		}
+	}
 	for _, key := range []string{"tty", "interact"} {
 		if enabled, _ := raw[key].(bool); enabled {
 			return fmt.Errorf("SSH executor does not support %s", key)

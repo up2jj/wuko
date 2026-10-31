@@ -39,7 +39,7 @@ type pullRequest struct {
 }
 
 func Register(registry *step.Registry) error {
-	return registry.RegisterDefinition("github_pr", step.Registration{Builder: New, Outputs: step.ClosedOutputs(
+	return registry.RegisterDefinition("github_pr", step.Registration{Builder: New, Config: Config{}, Outputs: step.ClosedOutputs(
 		"found", "number", "url", "title", "state", "is_draft", "head_branch", "head_sha", "base_branch", "repository",
 	)})
 }

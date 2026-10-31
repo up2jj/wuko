@@ -49,7 +49,7 @@ type runtime struct {
 }
 
 func Register(registry *step.Registry) error {
-	return registry.RegisterDefinition("lua", step.Registration{Builder: New, Outputs: step.OpenObject()})
+	return registry.RegisterDefinition("lua", step.Registration{Builder: New, Config: Config{}, Outputs: step.OpenObject()})
 }
 
 func New(raw map[string]any) (step.Runner, error) {
@@ -99,6 +99,9 @@ func compileArgExpressions(args map[string]any) (map[string]*vm.Program, error) 
 }
 
 func (r *Runner) Validate(_ context.Context, request step.Request) error {
+	if strings.Contains(r.config.File, "{{") {
+		return nil
+	}
 	source, name, err := r.source(request)
 	if err != nil {
 		return err

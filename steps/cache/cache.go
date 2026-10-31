@@ -60,7 +60,7 @@ type directoryMetadata struct {
 }
 
 func Register(registry *step.Registry) error {
-	return registry.RegisterDefinition("cache", step.Registration{Builder: New, Outputs: step.ClosedOutputs("key", "hit", "stored", "size")})
+	return registry.RegisterDefinition("cache", step.Registration{Builder: New, Config: Config{}, Outputs: step.ClosedOutputs("key", "hit", "stored", "size")})
 }
 
 func New(raw map[string]any) (step.Runner, error) {

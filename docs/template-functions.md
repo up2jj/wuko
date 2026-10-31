@@ -272,6 +272,7 @@ default(get(vars, "region"), "eu-west-1")
 | Function | Go template | Expr | Lua | Result |
 | --- | --- | --- | --- | --- |
 | `list` | `{{ list first second ... }}` | `list(first, second, ...)` | `h.list(first, second, ...)` | List containing the arguments |
+| `has` | `{{ has needle values }}` | `has(values, needle)` | `h.has(values, needle)` | Boolean list-membership test |
 | `dict` | `{{ dict "key" value ... }}` | `dict("key", value, ...)` | `h.dict("key", value, ...)` | String-keyed object |
 | `get` | `{{ get key object }}` | `get(object, key)` | `h.get(object, key)` | Entry value, or `nil` when absent |
 | `hasKey` | `{{ hasKey key object }}` | `hasKey(object, key)` | `h.has_key(object, key)` | Boolean key-presence test |
@@ -281,6 +282,12 @@ default(get(vars, "region"), "eu-west-1")
 `dict` requires alternating string keys and values. An odd argument count or non-string key is an
 error. Repeated keys are allowed and the final value wins. `get`, `hasKey`, and `keys` accept maps
 with string keys. `sortAlpha` never mutates the source list.
+
+`has` accepts lists and arrays, and returns false for an empty or nil list. It uses Expr's
+equality rules, including numeric equivalents such as `1` and `1.0`, and compares complete values
+rather than substrings. Other containers are errors; `contains` remains string-only. Templates
+put the list last for pipelines: `{{ .vars.running | has "api" }}`. Expr can also use
+`"api" in vars.running` directly.
 
 Expr also supports native list and object literals, which are usually clearer than constructors:
 

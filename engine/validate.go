@@ -303,11 +303,12 @@ func (e *Engine) validateStepsRaw(ctx context.Context, definition *workflow.Defi
 			traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusSucceeded, started, "", nil)
 			continue
 		}
-		if err := validateStepTemplates(options.renderer, workflowStep.With, workflowStep.Type); err != nil {
+		validationConfig, err := e.prepareStepConfig(definition, workflowStep, options, state, true)
+		if err != nil {
 			traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusFailed, started, "validating templates", err)
 			return fmt.Errorf("step %q template: %w", workflowStep.ID, err)
 		}
-		runner, err := e.registry.BuildContext(ctx, workflowStep.Type, workflowStep.With)
+		runner, err := e.registry.BuildContext(ctx, workflowStep.Type, validationConfig)
 		if err != nil {
 			traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusFailed, started, "building runner", err)
 			return fmt.Errorf("step %q: %w", workflowStep.ID, err)
@@ -315,7 +316,7 @@ func (e *Engine) validateStepsRaw(ctx context.Context, definition *workflow.Defi
 		options.replacementAudit.record(workflowStep, runner)
 		if options.insideExecutor {
 			if validator := options.executorStepValidator; validator != nil {
-				if err := validator.ValidateStep(workflowStep.Type, workflowStep.With); err != nil {
+				if err := validator.ValidateStep(workflowStep.Type, validationConfig); err != nil {
 					traceStep(options, definition, workflowStep, diagnostic.PhaseValidation, diagnostic.StatusFailed, started, "validating executor step restrictions", err)
 					return fmt.Errorf("step %q: %w", workflowStep.ID, err)
 				}

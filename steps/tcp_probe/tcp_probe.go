@@ -127,6 +127,7 @@ func Register(registry *step.Registry) error {
 	})
 	return registry.RegisterDefinition("tcp_probe", step.Registration{
 		Builder: New,
+		Config:  Config{},
 		Outputs: step.ClosedObject(map[string]step.OutputSchema{
 			"count": step.Scalar(), "listening": step.Scalar(), "free": step.Scalar(),
 			"indeterminate": step.Scalar(), "matched": step.Scalar(),

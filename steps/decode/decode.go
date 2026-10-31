@@ -40,7 +40,7 @@ type Runner struct {
 
 func Register(registry *step.Registry) error {
 	return registry.RegisterDefinition("decode", step.Registration{
-		Builder: New, Outputs: step.ClosedObject(map[string]step.OutputSchema{"value": step.OpenObject()}), References: step.LookupFrom,
+		Builder: New, Config: Config{}, Outputs: step.ClosedObject(map[string]step.OutputSchema{"value": step.OpenObject()}), References: step.LookupFrom,
 	})
 }
 

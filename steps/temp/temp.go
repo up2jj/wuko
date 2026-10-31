@@ -32,7 +32,7 @@ type Runner struct {
 }
 
 func Register(registry *step.Registry) error {
-	return registry.RegisterDefinition("temp", step.Registration{Builder: New, Outputs: step.ClosedOutputs("path", "kind")})
+	return registry.RegisterDefinition("temp", step.Registration{Builder: New, Config: Config{}, Outputs: step.ClosedOutputs("path", "kind")})
 }
 
 func New(raw map[string]any) (step.Runner, error) {

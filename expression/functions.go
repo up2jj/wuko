@@ -9,6 +9,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/expr-lang/expr/vm/runtime"
+
 	"go.yaml.in/yaml/v3"
 )
 
@@ -102,6 +104,22 @@ func nindent(spaces int, value string) (string, error) {
 
 func list(values ...any) []any {
 	return values
+}
+
+func has(needle, collection any) (bool, error) {
+	if collection == nil {
+		return false, nil
+	}
+	value := reflect.ValueOf(collection)
+	if value.Kind() != reflect.Slice && value.Kind() != reflect.Array {
+		return false, fmt.Errorf("has expects a list or array, got %T", collection)
+	}
+	for i := range value.Len() {
+		if runtime.Equal(value.Index(i).Interface(), needle) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func dict(values ...any) (map[string]any, error) {

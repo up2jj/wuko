@@ -65,6 +65,7 @@ type Runner struct {
 func Register(registry *step.Registry) error {
 	return registry.RegisterDefinition("dashboard", step.Registration{
 		Builder: New,
+		Config:  Config{},
 		Outputs: step.ClosedObject(map[string]step.OutputSchema{"groups": step.OpenObject()}),
 	})
 }
@@ -77,13 +78,13 @@ func New(raw map[string]any) (step.Runner, error) {
 	if strings.TrimSpace(config.Title) == "" {
 		config.Title = "Dashboard"
 	}
-	if config.MaxConcurrency == 0 {
+	if step.ConfigKnown(raw, "max_concurrency") && config.MaxConcurrency == 0 {
 		config.MaxConcurrency = defaultMaxConcurrency
 	}
-	if config.MaxConcurrency < 1 {
+	if step.ConfigKnown(raw, "max_concurrency") && config.MaxConcurrency < 1 {
 		return nil, fmt.Errorf("max_concurrency must be positive")
 	}
-	if len(config.Groups) == 0 {
+	if step.ConfigKnown(raw, "groups") && len(config.Groups) == 0 {
 		return nil, fmt.Errorf("at least one group is required")
 	}
 	groups := make(map[string]struct{}, len(config.Groups))

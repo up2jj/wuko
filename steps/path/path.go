@@ -35,7 +35,7 @@ type Config struct {
 type Runner struct{ config Config }
 
 func Register(registry *step.Registry) error {
-	return registry.RegisterDefinition("tui_path", step.Registration{Builder: New, Outputs: step.ClosedOutputs("value", "values", "count", "root")})
+	return registry.RegisterDefinition("tui_path", step.Registration{Builder: New, Config: Config{}, Outputs: step.ClosedOutputs("value", "values", "count", "root")})
 }
 
 func New(raw map[string]any) (step.Runner, error) {
@@ -55,10 +55,10 @@ func New(raw map[string]any) (step.Runner, error) {
 	if config.Kind == "" {
 		config.Kind = kindFile
 	}
-	if config.Kind != kindFile && config.Kind != kindDirectory && config.Kind != kindEither {
+	if step.ConfigKnown(raw, "kind") && (config.Kind != kindFile && config.Kind != kindDirectory && config.Kind != kindEither) {
 		return nil, fmt.Errorf("kind must be file, directory, or either")
 	}
-	if config.Kind == kindDirectory && len(config.Patterns) > 0 {
+	if step.ConfigKnown(raw, "kind", "patterns") && (config.Kind == kindDirectory && len(config.Patterns) > 0) {
 		return nil, fmt.Errorf("patterns cannot be used with kind directory")
 	}
 	for index, pattern := range config.Patterns {

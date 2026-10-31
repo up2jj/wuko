@@ -59,6 +59,12 @@ type ArgvExpression struct {
 	Expr string `yaml:"expr"`
 }
 
+// bindingConfig describes the exit-code union accepted before Config is decoded.
+type bindingConfig struct {
+	Config           `yaml:",inline"`
+	AllowedExitCodes any `yaml:"allowed_exit_codes"`
+}
+
 func (expression *ArgvExpression) UnmarshalYAML(node *yaml.Node) error {
 	if node.Kind != yaml.MappingNode {
 		return fmt.Errorf("argv must be an object containing expr")
@@ -110,6 +116,7 @@ func shellOutputs(sdk, files bool) step.OutputSchema {
 func Register(registry *step.Registry) error {
 	return registry.RegisterDefinition("shell", step.Registration{
 		Builder: New,
+		Config:  bindingConfig{},
 		Outputs: shellOutputs(true, true),
 		ConfigOutputs: func(raw map[string]any) step.OutputSchema {
 			if replace, _ := raw["replace"].(bool); replace {
@@ -145,7 +152,12 @@ func references(raw map[string]any) (step.References, error) {
 }
 
 func New(raw map[string]any) (step.Runner, error) {
-	decodedRaw, allowAnyExitCode, err := process.NormalizeAllowedExitCodes(raw)
+	exitCodeConfig := raw
+	if !step.ConfigKnown(raw, "allowed_exit_codes") {
+		exitCodeConfig = maps.Clone(raw)
+		delete(exitCodeConfig, "allowed_exit_codes")
+	}
+	decodedRaw, allowAnyExitCode, err := process.NormalizeAllowedExitCodes(exitCodeConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -159,7 +171,7 @@ func New(raw map[string]any) (step.Runner, error) {
 	if _, present := raw["sdk_args"]; present && config.SDK == "" {
 		return nil, fmt.Errorf("sdk_args requires sdk")
 	}
-	if config.SDK != "" && (config.User != "" || config.Elevated) {
+	if step.ConfigKnown(raw, "elevated", "user") && (config.SDK != "" && (config.User != "" || config.Elevated)) {
 		return nil, fmt.Errorf("sdk cannot be combined with user or elevated")
 	}
 	sdkArgPrograms := make(map[string]*vm.Program)
@@ -201,13 +213,13 @@ func New(raw map[string]any) (step.Runner, error) {
 	if config.Script != "" && strings.TrimSpace(config.Script) == "" {
 		return nil, fmt.Errorf("script cannot be blank")
 	}
-	if config.Elevated && config.User != "" {
+	if step.ConfigKnown(raw, "elevated", "user") && (config.Elevated && config.User != "") {
 		return nil, fmt.Errorf("elevated cannot be combined with user")
 	}
-	if config.TTY && config.Stdin != "" {
+	if step.ConfigKnown(raw, "stdin", "tty") && (config.TTY && config.Stdin != "") {
 		return nil, fmt.Errorf("tty and stdin cannot be combined")
 	}
-	if config.TTY && (config.Stdout != "" || config.Stderr != "" || config.CaptureLimit != "") {
+	if step.ConfigKnown(raw, "capture_limit", "stderr", "stdout", "tty") && (config.TTY && (config.Stdout != "" || config.Stderr != "" || config.CaptureLimit != "")) {
 		return nil, fmt.Errorf("tty cannot be combined with stdout, stderr, or capture_limit")
 	}
 	_, hasInteractions := raw["interactions"]
@@ -216,17 +228,17 @@ func New(raw map[string]any) (step.Runner, error) {
 		if raw["interactions"] == nil {
 			return nil, fmt.Errorf("interactions must be a list or an object containing expr")
 		}
-		if !config.TTY {
+		if step.ConfigKnown(raw, "tty") && !config.TTY {
 			return nil, fmt.Errorf("interactions require tty")
 		}
 	} else if hasInteract {
 		return nil, fmt.Errorf("interact requires interactions")
 	}
-	if config.Interact && !config.TTY {
+	if step.ConfigKnown(raw, "interact", "tty") && (config.Interact && !config.TTY) {
 		return nil, fmt.Errorf("interact requires tty")
 	}
 	handoff := config.TTY && (!hasInteractions || config.Interact)
-	if err := validateTerminalConfig(config.Terminal, config.TTY, handoff); err != nil {
+	if err := validateTerminalConfig(config.Terminal, config.TTY, handoff); step.ConfigKnown(raw, "terminal", "tty") && err != nil {
 		return nil, err
 	}
 	if err := validateReplaceConfig(raw, config); err != nil {
@@ -236,10 +248,10 @@ func New(raw map[string]any) (step.Runner, error) {
 	if err != nil {
 		return nil, err
 	}
-	if files.Set() && (config.TTY || hasInteractions || config.SDK != "") {
+	if step.ConfigKnown(raw, "tty") && (files.Set() && (config.TTY || hasInteractions || config.SDK != "")) {
 		return nil, fmt.Errorf("files cannot be combined with tty, interactions, or sdk")
 	}
-	_, exitCodesConfigured := raw["allowed_exit_codes"]
+	_, exitCodesConfigured := exitCodeConfig["allowed_exit_codes"]
 	exitCodes, err := process.NewExitCodePolicy(config.AllowedExitCodes, exitCodesConfigured, allowAnyExitCode)
 	if err != nil {
 		return nil, err

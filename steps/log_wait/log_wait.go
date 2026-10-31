@@ -53,7 +53,7 @@ func (w nativeWatcher) Events() <-chan fsnotify.Event { return w.Watcher.Events 
 func (w nativeWatcher) Errors() <-chan error          { return w.Watcher.Errors }
 
 func Register(registry *step.Registry) error {
-	return registry.RegisterDefinition("log_wait", step.Registration{Builder: New, Outputs: step.ClosedObject(map[string]step.OutputSchema{
+	return registry.RegisterDefinition("log_wait", step.Registration{Builder: New, Config: Config{}, Outputs: step.ClosedObject(map[string]step.OutputSchema{
 		"path": step.Scalar(), "match": step.Scalar(), "captures": step.OpenObject(),
 	})})
 }

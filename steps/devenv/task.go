@@ -36,6 +36,7 @@ func (*TaskRunner) ExecutorAware() {}
 func RegisterTask(registry *step.Registry) error {
 	return registry.RegisterDefinition("devenv_task", step.Registration{
 		Builder: NewTask,
+		Config:  TaskConfig{},
 		Outputs: step.ClosedObject(map[string]step.OutputSchema{
 			"stdout": step.Scalar(), "stderr": step.Scalar(), "exit_code": step.Scalar(),
 			"stdout_truncated": step.Scalar(), "stderr_truncated": step.Scalar(),
@@ -57,10 +58,10 @@ func NewTask(raw map[string]any) (step.Runner, error) {
 	if hasName && strings.TrimSpace(config.Name) == "" {
 		return nil, fmt.Errorf("task name must not be blank")
 	}
-	if strings.HasPrefix(config.Name, "-") {
+	if step.ConfigKnown(raw, "name") && strings.HasPrefix(config.Name, "-") {
 		return nil, fmt.Errorf("task name must not start with a dash")
 	}
-	if hasNames && len(config.Names) == 0 {
+	if step.ConfigKnown(raw, "names") && (hasNames && len(config.Names) == 0) {
 		return nil, fmt.Errorf("task names must not be empty")
 	}
 	for i, name := range config.Names {
@@ -74,7 +75,7 @@ func NewTask(raw map[string]any) (step.Runner, error) {
 	if config.Mode == "" {
 		config.Mode = "before"
 	}
-	if config.Mode != "single" && config.Mode != "before" && config.Mode != "after" && config.Mode != "all" {
+	if step.ConfigKnown(raw, "mode") && (config.Mode != "single" && config.Mode != "before" && config.Mode != "after" && config.Mode != "all") {
 		return nil, fmt.Errorf("task mode %q is invalid", config.Mode)
 	}
 	captureLimit := int64(defaultCaptureLimit)

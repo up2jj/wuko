@@ -295,6 +295,39 @@ installations can supply matching content, but do not override declarations or l
 
 ## Helpers
 
+Built-in template functions, including `has`, are available when the host renders a plugin's
+string configuration. For example, with the JWT plugin declared:
+
+```yaml
+- id: token
+  type: jwt.generate
+  with:
+    subject: "{{ .vars.user }}"
+    ttl: '{{ if has "admin" .vars.roles }}15m{{ else }}1h{{ end }}'
+```
+
+Plugin helpers may also appear in typed bindings passed to built-in steps:
+
+```yaml
+- id: request
+  type: shell
+  with:
+    command: curl
+    args:
+      - --header
+      - {expr: '"Authorization: Bearer " + jwt_generate({sub: vars.user})'}
+      - https://example.test/api
+```
+
+General `{expr: ...}` field bindings are supported by built-in steps. Executable plugin fields
+keep their existing interpretation, including plugin-owned objects containing `expr` or `literal`.
+The host does not evaluate these objects on a plugin's behalf or introduce a new protocol
+requirement. Host-rendered templates gain `has` with a Wuko update; expression or Lua runtimes
+compiled into a plugin retain the helpers provided by that plugin's own version.
+
+The `host.function.call` callback continues to expose declared plugin helpers and `secret`;
+adding a built-in template function does not add it to that callback.
+
 A declared plugin can return immutable helper metadata from `initialize`:
 
 ```json

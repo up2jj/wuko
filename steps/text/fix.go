@@ -39,7 +39,7 @@ func NewFix(raw map[string]any) (step.Runner, error) {
 	if err := step.DecodeConfig(raw, &config); err != nil {
 		return nil, err
 	}
-	if !config.TrailingWhitespace && !config.FinalNewline && config.LineEndings == "" && !config.RemoveByteOrderMark && config.MaxBlankLines == nil {
+	if step.ConfigKnown(raw, "final_newline", "line_endings", "max_blank_lines", "remove_byte_order_mark", "trailing_whitespace") && (!config.TrailingWhitespace && !config.FinalNewline && config.LineEndings == "" && !config.RemoveByteOrderMark && config.MaxBlankLines == nil) {
 		return nil, fmt.Errorf("enable at least one of trailing_whitespace, final_newline, line_endings, remove_byte_order_mark, and max_blank_lines")
 	}
 	switch config.LineEndings {
@@ -47,10 +47,10 @@ func NewFix(raw map[string]any) (step.Runner, error) {
 	default:
 		return nil, fmt.Errorf("line_endings must be lf, crlf, or auto")
 	}
-	if config.KeepMarkdownLineBreaks && !config.TrailingWhitespace {
+	if step.ConfigKnown(raw, "keep_markdown_line_breaks", "trailing_whitespace") && (config.KeepMarkdownLineBreaks && !config.TrailingWhitespace) {
 		return nil, fmt.Errorf("keep_markdown_line_breaks requires trailing_whitespace")
 	}
-	if config.MaxBlankLines != nil && *config.MaxBlankLines < 0 {
+	if step.ConfigKnown(raw, "max_blank_lines") && (config.MaxBlankLines != nil && *config.MaxBlankLines < 0) {
 		return nil, fmt.Errorf("max_blank_lines must not be negative")
 	}
 	files, err := requiredFiles(raw)

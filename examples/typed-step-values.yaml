@@ -1,0 +1,31 @@
+version: 1
+name: typed-step-values
+description: Test membership in text and compute typed step values directly.
+vars:
+  selected: [api, web]
+  running: [api]
+steps:
+  - id: summary
+    type: template
+    with:
+      source: '{{ range .vars.selected }}{{ if has . $.vars.running }}{{ . }} {{ end }}{{ end }}'
+  - id: report
+    type: shell
+    with:
+      command: printf
+      args:
+        - "%s\n"
+        - {expr: 'join(filter(vars.selected, # in vars.running), " ")'}
+  - id: choose
+    type: tui_choice
+    with:
+      variable: service
+      message: Select a running service
+      from: {expr: 'filter(vars.selected, # in vars.running)'}
+      default_expr: "true"
+      noninteractive: default
+  - id: check
+    type: assert
+    with:
+      expr: vars.service in vars.running
+      message: {expr: '"service is not running: " + vars.service'}

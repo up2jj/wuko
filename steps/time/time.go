@@ -42,7 +42,7 @@ type Runner struct {
 }
 
 func Register(registry *step.Registry) error {
-	return registry.RegisterDefinition("time", step.Registration{Builder: New, Outputs: step.ClosedOutputs("value")})
+	return registry.RegisterDefinition("time", step.Registration{Builder: New, Config: Config{}, Outputs: step.ClosedOutputs("value")})
 }
 
 func New(raw map[string]any) (step.Runner, error) {
@@ -83,7 +83,7 @@ func NewWithClock(raw map[string]any, now func() stdtime.Time) (step.Runner, err
 		}
 	}
 	addKeys := adjustmentKeys(raw)
-	if hasAdd && !templated(config.Add.Duration) {
+	if step.ConfigKnown(raw, "add.duration") && (hasAdd && !templated(config.Add.Duration)) {
 		adjustments := adjustmentMap(config.Add, addKeys, "UTC")
 		if _, err := expression.AddTime("2000-01-01T00:00:00Z", adjustments); err != nil {
 			return nil, err

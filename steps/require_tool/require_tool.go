@@ -33,7 +33,7 @@ type Runner struct {
 func (*Runner) ExecutorAware() {}
 
 func Register(registry *step.Registry) error {
-	return registry.RegisterDefinition("require_tool", step.Registration{Builder: New, Outputs: step.ClosedOutputs(
+	return registry.RegisterDefinition("require_tool", step.Registration{Builder: New, Config: Config{}, Outputs: step.ClosedOutputs(
 		"available", "path", "version", "constraint_matched",
 	)})
 }
