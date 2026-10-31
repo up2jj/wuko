@@ -16,10 +16,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/up2jj/wuko/correlation"
 	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/engine"
 	reporterpkg "github.com/up2jj/wuko/reporter"
+	"github.com/up2jj/wuko/useroutput"
 	"github.com/up2jj/wuko/validation"
+	"github.com/up2jj/wuko/workflow"
 )
 
 const (
@@ -50,10 +53,12 @@ type Options struct {
 
 // Reporter translates Wuko lifecycle events into GitHub Actions integration data.
 type Reporter struct {
-	outputPath  string
-	summaryPath string
-	workspace   string
-	commands    io.Writer
+	presentation workflow.ReporterConfig
+	quietSteps   map[correlation.StepRunID]bool
+	outputPath   string
+	summaryPath  string
+	workspace    string
+	commands     io.Writer
 
 	mu          sync.Mutex
 	annotations map[string]struct{}
@@ -103,6 +108,19 @@ func New(options Options) (*Reporter, error) {
 // Progress retains the latest root workflow result. The engine redacts this copy before delivery,
 // so Finish prefers it when it describes the same outcome that is being finalized.
 func (reporter *Reporter) Progress(event engine.ProgressEvent) {
+	if event.Kind == engine.WorkflowStarted && event.Depth == 0 {
+		reporter.mu.Lock()
+		reporter.quietSteps = make(map[correlation.StepRunID]bool)
+		reporter.mu.Unlock()
+	}
+	if event.Kind == engine.StepFinished {
+		reporter.mu.Lock()
+		if reporter.quietSteps == nil {
+			reporter.quietSteps = make(map[correlation.StepRunID]bool)
+		}
+		reporter.quietSteps[event.StepRunID] = event.Quiet
+		reporter.mu.Unlock()
+	}
 	if event.Kind != engine.WorkflowFinished || event.Depth != 0 {
 		return
 	}
@@ -113,8 +131,19 @@ func (reporter *Reporter) Progress(event engine.ProgressEvent) {
 	reporter.mu.Unlock()
 }
 
+// Configure applies shared presentation preferences to the rendered summary.
+func (reporter *Reporter) Configure(config workflow.ReporterConfig) {
+	reporter.mu.Lock()
+	defer reporter.mu.Unlock()
+	config.Quiet = slices.Clone(config.Quiet)
+	reporter.presentation = config
+}
+
 // Diagnostic emits one deduplicated GitHub error annotation for a failed diagnostic.
 func (reporter *Reporter) Diagnostic(event diagnostic.Event) {
+	if useroutput.OnlyPlain(event.Error) {
+		return
+	}
 	if event.Status != diagnostic.StatusFailed {
 		return
 	}
@@ -128,7 +157,7 @@ func (reporter *Reporter) Finish(_ context.Context, outcome reporterpkg.Outcome)
 	reporter.mu.Lock()
 	defer reporter.mu.Unlock()
 
-	if outcome.Err != nil && !reporter.annotated {
+	if outcome.Err != nil && !reporter.annotated && !useroutput.OnlyPlain(outcome.Err) {
 		reporter.writeCommand("::error title=Wuko::" + escapeData(singleLine(outcome.Err.Error())) + "\n")
 		reporter.annotated = true
 	}
@@ -404,6 +433,12 @@ func (reporter *Reporter) stepSummary(stats engine.RunStats, redacted bool) stri
 	summary.WriteString("| --- | --- | ---: | ---: | ---: | ---: |\n")
 	for _, step := range stats.Steps {
 		attempts := len(step.Attempts)
+		if reporter.presentation.HideSkipped && step.Status == engine.StatusSkipped {
+			continue
+		}
+		if (reporter.presentation.Type == "quiet" || reporter.quietSteps[step.StepRunID]) && !step.Status.Unsuccessful() {
+			continue
+		}
 		fmt.Fprintf(&summary, "| %s | %s | %s | %s | %s | %s |\n",
 			markdownCell(html.EscapeString(stepSummaryName(step))), statusLabel(step.Status), formatDuration(step.Duration),
 			stepCount(attempts), retryCount(attempts), stepCount(step.Polls))

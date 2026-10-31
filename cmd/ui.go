@@ -121,6 +121,9 @@ func runWorkflowUI(command *cobra.Command, deps dependencies, args []string, con
 		return err
 	}
 	workflowName = definition.Name
+	if err := reporters.configure(definition.Reporter); err != nil {
+		return err
+	}
 	if err := requireDirectlyInvokable(definition); err != nil {
 		return err
 	}
@@ -154,7 +157,7 @@ func runWorkflowUI(command *cobra.Command, deps dependencies, args []string, con
 			result.Duration = time.Since(started)
 			return result
 		}
-		browser := browserReporter{stage: "workflow", emit: emit}
+		browser := browserReporter{stage: "workflow", emit: emit, quiet: reporters.selection == "quiet", hideSkipped: reporters.presentation.HideSkipped}
 		activeReporters := reporters.With(browser)
 		remoteDefinitions := map[string]bool{definition.Path: target.remote}
 		optionsFor := func(item *workflow.Definition, dependencies map[string]map[string]any) engine.Options {
@@ -255,12 +258,12 @@ func formLoadFunc(command *cobra.Command, deps dependencies, loader *workflow.Lo
 			Version: owner.Version, Name: owner.Name + " form data", Description: owner.Description,
 			Templates: owner.Templates, Vars: workflow.CloneMap(owner.Vars), Env: maps.Clone(owner.Env),
 			Steps: steps, Finally: append([]workflow.Step(nil), declaration.Load.Finally...),
-			Path: owner.Path, Dir: owner.Dir, Location: owner.Location,
+			Reporter: owner.Reporter, Path: owner.Path, Dir: owner.Dir, Location: owner.Location,
 		}
 		if err := loader.Prepare(ctx, definition, options); err != nil {
 			return nil, err
 		}
-		browser := browserReporter{stage: "form", emit: emit}
+		browser := browserReporter{stage: "form", emit: emit, quiet: reporters.selection == "quiet", hideSkipped: reporters.presentation.HideSkipped}
 		activeReporters := reporters.With(browser)
 		localValueDir := ""
 		if !remote {
@@ -281,13 +284,19 @@ func formLoadFunc(command *cobra.Command, deps dependencies, loader *workflow.Lo
 	}
 }
 
+// browserReporter forwards every event; the browser applies the quiet reporter and
+// hide_skipped preferences itself so it can still show failures.
 type browserReporter struct {
-	stage string
-	emit  func(webui.Progress)
+	quiet       bool
+	hideSkipped bool
+	stage       string
+	emit        func(webui.Progress)
 }
 
 func (reporter browserReporter) Progress(event engine.ProgressEvent) {
 	reporter.emit(webui.Progress{
+		Message: event.Message.Text, Level: string(event.Message.Level), Plain: event.Message.Plain,
+		Quiet: event.Quiet || reporter.quiet, HideSkipped: event.Presentation.HideSkipped || reporter.hideSkipped,
 		InvocationID: event.InvocationID, RunID: event.RunID, ParentRunID: event.ParentRunID,
 		ParentStepRunID: event.ParentStepRunID, StepRunID: event.StepRunID, Sequence: event.Sequence,
 		Stage: reporter.stage, Kind: string(event.Kind), Status: string(event.Status), StepID: event.StepID,

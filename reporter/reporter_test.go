@@ -10,7 +10,36 @@ import (
 	"github.com/up2jj/wuko/correlation"
 	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/engine"
+	"github.com/up2jj/wuko/workflow"
 )
+
+func TestGroupPassesIndependentPresentationOptionsToEveryReporter(t *testing.T) {
+	t.Parallel()
+	config := workflow.ReporterConfig{Type: "github", Quiet: []string{"set"}, HideSkipped: true}
+	var received []workflow.ReporterConfig
+	reporters := Group{Funcs{ConfigureFunc: func(copy workflow.ReporterConfig) { copy.Quiet[0] = "modified"; received = append(received, copy) }}, Funcs{ConfigureFunc: func(copy workflow.ReporterConfig) { received = append(received, copy) }}}
+	reporters.Configure(config)
+	if len(received) != 2 || received[1].Quiet[0] != "set" || !received[1].HideSkipped || config.Quiet[0] != "set" {
+		t.Fatalf("config=%#v received=%#v", config, received)
+	}
+}
+
+func TestSessionRetainsIdentityAndSequenceWhenSelectingWorkflowReporters(t *testing.T) {
+	t.Parallel()
+	var sequences []correlation.Sequence
+	var identities []correlation.InvocationID
+	collect := Funcs{ProgressFunc: func(event engine.ProgressEvent) {
+		sequences = append(sequences, event.Sequence)
+		identities = append(identities, event.InvocationID)
+	}}
+	session := NewSession("invocation", collect)
+	session.Progress(engine.ProgressEvent{})
+	session.SetReporters(collect)
+	session.Progress(engine.ProgressEvent{})
+	if len(sequences) != 2 || sequences[0] != 1 || sequences[1] != 2 || identities[0] != identities[1] {
+		t.Fatalf("sequences=%v identities=%v", sequences, identities)
+	}
+}
 
 func TestGroupPreservesOrderAndJoinsFinishErrors(t *testing.T) {
 	t.Parallel()

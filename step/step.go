@@ -17,6 +17,7 @@ import (
 	"github.com/up2jj/wuko/internal/yamlstrict"
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/provider"
+	"github.com/up2jj/wuko/useroutput"
 	"github.com/up2jj/wuko/workflow"
 	"go.yaml.in/yaml/v3"
 )
@@ -51,6 +52,8 @@ type DataTemplateRenderer interface {
 }
 
 type Request struct {
+	// UI delivers explicit messages in the reporting stream's order.
+	UI           func(useroutput.Message)
 	StepID       string
 	WorkflowName string
 	// WorkflowSource is the stable logical source of the workflow or action definition.

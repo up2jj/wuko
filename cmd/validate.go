@@ -198,6 +198,11 @@ func validateWorkflowSources(command *cobra.Command, deps dependencies, args []s
 			}
 			return err
 		}
+		if name := definition.Reporter.Type; name != "" {
+			if _, found := runReporterFactoryFor(name); !found {
+				return fmt.Errorf("%s: %w", definition.Path, unknownReporterError(name))
+			}
+		}
 		plan, err := resolveDependencyPlan(command.Context(), definition, loader, loadOptions, cwd, home, configDir)
 		if err != nil {
 			if validationIssues.AddError(err) {

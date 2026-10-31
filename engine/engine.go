@@ -18,6 +18,7 @@ import (
 	"github.com/up2jj/wuko/provider"
 	"github.com/up2jj/wuko/secret"
 	"github.com/up2jj/wuko/step"
+	"github.com/up2jj/wuko/useroutput"
 	"github.com/up2jj/wuko/workflow"
 )
 
@@ -54,6 +55,9 @@ func WithWorkflowInvoker(invoker WorkflowInvoker) Option {
 }
 
 type Options struct {
+	presentation  workflow.ReporterConfig
+	quietOverride *bool
+	quiet         bool
 	// InvocationID correlates this run with its surrounding reporting session. When empty, the
 	// run remains valid and reporters may supply an invocation identity at delivery time.
 	InvocationID correlation.InvocationID
@@ -213,6 +217,7 @@ func (e *Engine) RunValidated(ctx context.Context, definition *workflow.Definiti
 }
 
 func (e *Engine) run(ctx context.Context, definition *workflow.Definition, options Options, validate bool) (runState *State, runErr error) {
+	options.presentation = definition.Reporter
 	options = prepareWorkflowEnvironment(options)
 	options = recordCaller(options, definition)
 	if options.workflowInvoker == nil {
@@ -440,15 +445,17 @@ func finallyErrorRecord(status ExecutionStatus, stepID, stepType string, err err
 
 func (e *Engine) executeSequence(ctx context.Context, definition *workflow.Definition, steps []workflow.Step, options Options, state *State, stats *RunStats, firstIndex, total int) error {
 	options.stepRunID = ""
+	baseOptions := options
 	index := firstIndex
 	for position, workflowStep := range steps {
+		options := presentationOptions(baseOptions, workflowStep)
 		if workflowStep.IsExecutorBlock() {
 			if err := e.executeExecutorBlock(ctx, definition, workflowStep, options, state, stats, index, total); err != nil {
 				return err
 			}
 			index += leafStepCount(workflowStep.Steps) + newDeferStack(workflowStep.Steps).stepCount() + leafStepCount(workflowStep.Finally)
 			if state.returning {
-				recordSkippedSteps(definition, steps[position+1:], options, stats, index, total)
+				recordSkippedSteps(definition, steps[position+1:], baseOptions, stats, index, total)
 				return nil
 			}
 			continue
@@ -459,7 +466,7 @@ func (e *Engine) executeSequence(ctx context.Context, definition *workflow.Defin
 			}
 			index += leafStepCount(workflowStep.Steps)
 			if state.returning {
-				recordSkippedSteps(definition, steps[position+1:], options, stats, index, total)
+				recordSkippedSteps(definition, steps[position+1:], baseOptions, stats, index, total)
 				return nil
 			}
 			continue
@@ -470,7 +477,7 @@ func (e *Engine) executeSequence(ctx context.Context, definition *workflow.Defin
 			}
 			index += leafStepCount(workflowStep.Steps)
 			if state.returning {
-				recordSkippedSteps(definition, steps[position+1:], options, stats, index, total)
+				recordSkippedSteps(definition, steps[position+1:], baseOptions, stats, index, total)
 				return nil
 			}
 			continue
@@ -494,7 +501,7 @@ func (e *Engine) executeSequence(ctx context.Context, definition *workflow.Defin
 			traceStep(stepOptions, definition, workflowStep, diagnostic.PhaseCommit, diagnostic.StatusSucceeded, commitStarted, "", nil,
 				diagnostic.Attr("outputs", fmt.Sprint(len(outcome.result.Outputs))))
 			if state.returning {
-				recordSkippedSteps(definition, steps[position+1:], options, stats, index, total)
+				recordSkippedSteps(definition, steps[position+1:], baseOptions, stats, index, total)
 				return nil
 			}
 			continue
@@ -516,7 +523,7 @@ func (e *Engine) executeSequence(ctx context.Context, definition *workflow.Defin
 			}
 			index += leafStepCount(workflowStep.Steps)
 			if state.returning {
-				recordSkippedSteps(definition, steps[position+1:], options, stats, index, total)
+				recordSkippedSteps(definition, steps[position+1:], baseOptions, stats, index, total)
 				return nil
 			}
 			continue
@@ -527,7 +534,7 @@ func (e *Engine) executeSequence(ctx context.Context, definition *workflow.Defin
 				return err
 			}
 			if triggered {
-				recordSkippedSteps(definition, steps[position+1:], options, stats, index, total)
+				recordSkippedSteps(definition, steps[position+1:], baseOptions, stats, index, total)
 				return nil
 			}
 			continue
@@ -623,8 +630,10 @@ func (e *Engine) evaluateConditionalBlock(definition *workflow.Definition, workf
 
 func recordSkippedSteps(definition *workflow.Definition, steps []workflow.Step, options Options, stats *RunStats, firstIndex, total int) {
 	options.stepRunID = ""
+	baseOptions := options
 	index := firstIndex
 	for _, workflowStep := range steps {
+		options := presentationOptions(baseOptions, workflowStep)
 		if workflowStep.IsExecutorBlock() {
 			recordSkippedSteps(definition, workflowStep.Steps, options, stats, index, total)
 			index += leafStepCount(workflowStep.Steps)
@@ -958,6 +967,9 @@ func (e *Engine) makeRequest(ctx context.Context, definition *workflow.Definitio
 		inlineWorkflows = boundInlineWorkflowRunner{engine: e, definition: definition, options: options, state: cloneState(state), operationID: operationID}
 	}
 	return step.Request{
+		UI: func(message useroutput.Message) {
+			report(options, ProgressEvent{Kind: MessagePrinted, Time: time.Now(), WorkflowName: definition.Name, StepID: stepID, Depth: options.depth, Message: message})
+		},
 		StepID: stepID, WorkflowName: definition.Name, WorkflowSource: definition.Location.Source, WorkflowDir: definition.Dir,
 		WorkflowDirBorrowed: definition.DirBorrowed, WorkflowTimezone: definition.Timezone,
 		RunDir: options.RunDir, EnvironmentLoaders: slices.Clone(state.EnvironmentLoaders), LocalValueDir: options.LocalValueDir, GlobalValueDir: options.GlobalValueDir,

@@ -11,12 +11,14 @@ import (
 	"github.com/up2jj/wuko/correlation"
 	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/engine"
+	"github.com/up2jj/wuko/workflow"
 )
 
 // Outcome is the safe, final result exposed to reporters. Duration covers the whole reporting
 // invocation. Outputs contains a deep copy of the workflow's declared outputs; execution inputs,
 // variables, environment, and intermediate state are deliberately excluded.
 type Outcome struct {
+	Presentation    workflow.ReporterConfig
 	InvocationID    correlation.InvocationID
 	RunID           correlation.RunID
 	ParentRunID     correlation.RunID
@@ -42,11 +44,34 @@ type Reporter interface {
 	Finish(context.Context, Outcome) error
 }
 
+// Configurer is an optional reporter capability for shared presentation settings.
+// Reporters must retain complete execution data even when rendering less detail.
+type Configurer interface{ Configure(workflow.ReporterConfig) }
+
+// Configure passes shared settings to every reporter that supports them.
+func (reporters Group) Configure(config workflow.ReporterConfig) {
+	for _, reporter := range reporters {
+		if configurable, ok := reporter.(Configurer); ok {
+			copy := config
+			copy.Quiet = slices.Clone(config.Quiet)
+			configurable.Configure(copy)
+		}
+	}
+}
+
 // Funcs adapts optional callbacks into a Reporter. Its zero value is a no-op reporter.
 type Funcs struct {
+	ConfigureFunc  func(workflow.ReporterConfig)
 	ProgressFunc   func(engine.ProgressEvent)
 	DiagnosticFunc func(diagnostic.Event)
 	FinishFunc     func(context.Context, Outcome) error
+}
+
+// Configure calls ConfigureFunc when configured.
+func (reporter Funcs) Configure(config workflow.ReporterConfig) {
+	if reporter.ConfigureFunc != nil {
+		reporter.ConfigureFunc(config)
+	}
 }
 
 // Progress calls ProgressFunc when configured.
@@ -115,6 +140,13 @@ type Session struct {
 // NewSession constructs a reporting session. A zero invocationID generates a new identity.
 func NewSession(invocationID correlation.InvocationID, reporters ...Reporter) *Session {
 	return &Session{invocationID: invocationID, reporters: slices.Clone(reporters)}
+}
+
+// SetReporters changes destinations before execution, retaining identity and ordering.
+func (session *Session) SetReporters(reporters ...Reporter) {
+	session.dispatchMu.Lock()
+	defer session.dispatchMu.Unlock()
+	session.reporters = slices.Clone(reporters)
 }
 
 // InvocationID returns the session identity, generating it on first use when necessary.

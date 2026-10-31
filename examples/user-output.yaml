@@ -1,0 +1,41 @@
+version: 1
+name: user-output
+description: User-facing findings with selected progress and a plain failure option.
+reporter:
+  type: plain
+  quiet: [set, decode, extract, jsonpath]
+  hide_skipped: true
+vars:
+  ready: true
+steps:
+  - id: welcome
+    type: print
+    with:
+      message: Checking the project...
+  - quiet: true
+    steps:
+      - id: inspect
+        type: lua
+        with:
+          source: |
+            wuko.ui.info("Bookkeeping progress is hidden.")
+            wuko.ui.warn("This is an example finding, not a failure.")
+      - id: work
+        type: shell
+        quiet: false
+        with:
+          command: go
+          args: [version]
+  - id: verify
+    type: assert
+    with:
+      expr: vars.ready
+      message: Complete setup before continuing.
+      plain: true
+      exit_code: 2
+finally:
+  - id: finished
+    type: print
+    with:
+      message: Checks finished.
+      level: success

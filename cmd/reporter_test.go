@@ -329,14 +329,33 @@ func TestNewRunReportersRejectsUnknownReporter(t *testing.T) {
 	command.SetErr(new(bytes.Buffer))
 	debug := false
 	_, err := newRunReporters(command, dependencies{debug: &debug, getenv: func(string) string { return "" }}, t.TempDir(), []string{"otel"})
-	if err == nil || !strings.Contains(err.Error(), `unknown reporter "otel"; expected plain or github or multiplexer`) {
+	if err == nil || !strings.Contains(err.Error(), `unknown reporter "otel"; expected plain or quiet or github or multiplexer`) {
 		t.Fatalf("error = %v, want catalog-derived unknown reporter error", err)
 	}
 }
 
 func TestRunReporterNamesFollowCatalogOrder(t *testing.T) {
 	t.Parallel()
-	if got := strings.Join(runReporterNames(), ","); got != "plain,github,multiplexer" {
-		t.Fatalf("reporter names = %q, want plain,github,multiplexer", got)
+	if got := strings.Join(runReporterNames(), ","); got != "plain,quiet,github,multiplexer" {
+		t.Fatalf("reporter names = %q, want plain,quiet,github,multiplexer", got)
+	}
+}
+
+func TestWorkflowReporterOverridesHostDefaultAndConfiguresObservers(t *testing.T) {
+	t.Parallel()
+	command := &cobra.Command{}
+	command.SetErr(new(bytes.Buffer))
+	debug := false
+	var got workflow.ReporterConfig
+	observer := reporterpkg.Funcs{ConfigureFunc: func(config workflow.ReporterConfig) { got = config }}
+	reporters, err := newRunReportersWithDefault(command, dependencies{debug: &debug, getenv: func(string) string { return "" }}, t.TempDir(), nil, reporterpkg.Funcs{}, observer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reporters.configure(workflow.ReporterConfig{Type: "quiet", Quiet: []string{"set"}, HideSkipped: true}); err != nil {
+		t.Fatal(err)
+	}
+	if reporters.selection != "quiet" || got.Type != "quiet" || len(got.Quiet) != 1 || !got.HideSkipped {
+		t.Fatalf("selection=%q options=%#v", reporters.selection, got)
 	}
 }

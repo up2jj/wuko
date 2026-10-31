@@ -14,6 +14,7 @@ import (
 	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/engine"
 	reporterpkg "github.com/up2jj/wuko/reporter"
+	"github.com/up2jj/wuko/useroutput"
 	"github.com/up2jj/wuko/validation"
 )
 
@@ -108,6 +109,9 @@ func (reporter *gitHookReporter) record(event engine.ProgressEvent) (line string
 }
 
 func (reporter *gitHookReporter) checkLine(event engine.ProgressEvent) string {
+	if event.Hidden() || useroutput.OnlyPlain(event.Error) {
+		return ""
+	}
 	var status string
 	switch event.Status {
 	case engine.StatusSucceeded:

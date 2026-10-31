@@ -9,7 +9,35 @@ import (
 	"time"
 
 	"github.com/up2jj/wuko/engine"
+	"github.com/up2jj/wuko/useroutput"
+	"github.com/up2jj/wuko/workflow"
 )
+
+func TestQuietProgressKeepsOrdinaryFailuresAndOmitsPlainDuplicates(t *testing.T) {
+	t.Parallel()
+	var output bytes.Buffer
+	progress := NewProgress(&output, false)
+	for _, event := range []engine.ProgressEvent{
+		{Kind: engine.StepStarted, Quiet: true, StepID: "hidden"},
+		{Kind: engine.StepFinished, Status: engine.StatusSkipped, Presentation: workflow.ReporterConfig{HideSkipped: true}, StepID: "skipped"},
+		{Kind: engine.StepFinished, Quiet: true, Status: engine.StatusFailed, StepID: "failed", Error: errors.New("failure detail")},
+		{Kind: engine.StepFinished, Status: engine.StatusFailed, StepID: "plain", Error: &useroutput.Failure{Message: "already printed", Code: 2, Reported: true}},
+	} {
+		progress.Report(event)
+	}
+	if strings.Contains(output.String(), "hidden") || strings.Contains(output.String(), "skipped") || strings.Contains(output.String(), "already printed") || !strings.Contains(output.String(), "failure detail") {
+		t.Fatalf("output=%q", output.String())
+	}
+}
+
+func TestProgressRendersExplicitMessagesForDirectEngineIntegrations(t *testing.T) {
+	t.Parallel()
+	var output bytes.Buffer
+	NewProgress(&output, false).Report(engine.ProgressEvent{Kind: engine.MessagePrinted, Quiet: true, Message: useroutput.Message{Text: "finding", Level: useroutput.Warn}})
+	if output.String() != "! finding\n" {
+		t.Fatalf("output=%q", output.String())
+	}
+}
 
 func TestProgressRendersLifecycleAndSummary(t *testing.T) {
 	var output bytes.Buffer

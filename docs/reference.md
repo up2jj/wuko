@@ -39,6 +39,7 @@ Work with typed values, structured files, and persisted state.
 | `template` | Render inline or packaged templates to memory or a file | [Data steps](steps-data.md#template) |
 | `transform` | Run deterministic list, object, aggregation, and tuple pipelines | [Data steps](steps-data.md#transform) |
 | `assert` | Stop unless an expression is true | [Data steps](steps-data.md#assert) |
+| `print` | Show a user-facing message with a level symbol | [Data steps](steps-data.md#print) |
 | `import_vars` | Load JSON or TOML into workflow state | [Data steps](steps-data.md#import_vars) |
 | `decode` | Convert JSON, YAML, TOML, or lines into a typed value | [Data steps](steps-data.md#decode) |
 | `jsonpath` | Select values with RFC 9535 JSONPath | [Data steps](steps-data.md#jsonpath) |

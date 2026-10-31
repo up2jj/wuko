@@ -28,6 +28,11 @@ import (
 
 // Progress is the browser-safe projection of one execution event.
 type Progress struct {
+	Message         string                   `json:"message,omitempty"`
+	Level           string                   `json:"level,omitempty"`
+	Plain           bool                     `json:"plain,omitempty"`
+	Quiet           bool                     `json:"quiet,omitempty"`
+	HideSkipped     bool                     `json:"hide_skipped,omitempty"`
 	InvocationID    correlation.InvocationID `json:"invocation_id,omitempty"`
 	RunID           correlation.RunID        `json:"run_id,omitempty"`
 	ParentRunID     correlation.RunID        `json:"parent_run_id,omitempty"`
@@ -547,7 +552,7 @@ const pageHTML = `<!doctype html>
 {{if or (eq .Phase "loading") (eq .Phase "running")}}<script src="app.js"></script>{{end}}
 </body></html>`
 
-const appJS = `const list=document.getElementById('progress');const source=new EventSource('events');source.onmessage=(event)=>{const state=JSON.parse(event.data);list.replaceChildren(...state.progress.slice(-12).map(p=>{const li=document.createElement('li');li.textContent=[p.stage,p.step_id||p.kind,p.status,p.duration].filter(Boolean).join(' · ');return li}));if(state.phase==='ready'||state.phase==='done'){source.close();location.reload()}};`
+const appJS = `const list=document.getElementById('progress');const source=new EventSource('events');source.onmessage=(event)=>{const state=JSON.parse(event.data);list.replaceChildren(...state.progress.filter(p=>p.kind==='message_printed'||((!p.quiet||['failed','timed_out','canceled'].includes(p.status))&&!(p.hide_skipped&&p.status==='skipped'))).slice(-12).map(p=>{const li=document.createElement('li');li.textContent=p.kind==='message_printed'?(p.plain?'':({info:'•',success:'✓',warn:'!',error:'✗'}[p.level]||'•')+' ')+p.message:[p.stage,p.step_id||p.kind,p.status,p.duration].filter(Boolean).join(' · ');return li}));if(state.phase==='ready'||state.phase==='done'){source.close();location.reload()}};`
 
 // ValuesFromQuery is exported for focused transport tests.
 func ValuesFromQuery(raw string) (url.Values, error) { return url.ParseQuery(raw) }

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/up2jj/wuko/useroutput"
 	"github.com/up2jj/wuko/validation"
 )
 
@@ -17,6 +18,28 @@ type fakeRunner struct {
 	mu       sync.Mutex
 	commands []Command
 	run      func(Command) (string, error)
+}
+
+func TestRedactPreservesSafePlainFailureMetadata(t *testing.T) {
+	t.Parallel()
+	session := NewSession(t.Context(), Options{Runner: &fakeRunner{run: func(Command) (string, error) { return "private-token", nil }}, BaseEnv: map[string]string{}})
+	if _, err := session.Resolve("op://Production/API/token"); err != nil {
+		t.Fatal(err)
+	}
+	plain := &useroutput.Failure{Message: "token private-token rejected", Code: 2, Reported: true}
+	for _, err := range []error{fmt.Errorf("workflow: %w", plain), errors.Join(plain, errors.New("cleanup private-token failed"))} {
+		safe := session.RedactError(err)
+		view := useroutput.Inspect(safe)
+		if len(view.Failures) != 1 || view.Failures[0].Message != "token <redacted> rejected" || view.Failures[0].Code != 2 || !view.Failures[0].Reported {
+			t.Fatalf("view=%#v", view)
+		}
+		if view.Ordinary != nil && strings.Contains(view.Ordinary.Error(), "private-token") {
+			t.Fatal("ordinary error leaked secret")
+		}
+		if !errors.Is(safe, plain) {
+			t.Fatal("redaction lost original error identity")
+		}
+	}
 }
 
 func (runner *fakeRunner) Run(_ context.Context, command Command) (string, error) {

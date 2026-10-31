@@ -89,12 +89,16 @@ func (reporter *multiplexerProgressReporter) Progress(event engine.ProgressEvent
 	if !reporter.running {
 		return
 	}
+	// Presentation preferences hide detail text only; the step counter keeps advancing.
+	if event.Kind == engine.StepStarted && event.Depth == 0 {
+		reporter.index, reporter.total = event.Index, event.Total
+	}
+	if event.Hidden() {
+		return
+	}
 	switch event.Kind {
 	case engine.StepStarted:
 		reporter.detail = event.StepID
-		if event.Depth == 0 {
-			reporter.index, reporter.total = event.Index, event.Total
-		}
 	case engine.RetryScheduled:
 		reporter.detail = fmt.Sprintf("%s retry %d/%d", event.StepID, event.Attempt, event.MaxAttempts)
 	case engine.PollScheduled:

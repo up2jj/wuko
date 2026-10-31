@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/up2jj/wuko/engine"
+	"github.com/up2jj/wuko/useroutput"
 )
 
 // Progress renders durable execution status lines. It is safe to call from multiple goroutines.
@@ -27,6 +28,23 @@ func NewProgress(writer io.Writer, color bool) *Progress {
 
 // Report renders one progress event.
 func (progress *Progress) Report(event engine.ProgressEvent) {
+	if event.Kind == engine.MessagePrinted {
+		progress.mu.Lock()
+		defer progress.mu.Unlock()
+		useroutput.Write(progress.writer, event.Message, progress.color)
+		return
+	}
+	if event.Hidden() {
+		return
+	}
+	// Deliberate failures already printed their message; render only ordinary errors.
+	if event.Error != nil {
+		view := useroutput.Inspect(event.Error)
+		if len(view.Failures) > 0 && view.Ordinary == nil {
+			return
+		}
+		event.Error = view.Ordinary
+	}
 	progress.mu.Lock()
 	defer progress.mu.Unlock()
 
@@ -193,6 +211,9 @@ func (progress *Progress) Report(event engine.ProgressEvent) {
 			return
 		}
 		line := fmt.Sprintf("%s%s %s %s %s %s", indent, marker, progress.counter(event.Index, event.Total), progress.name(event.StepID), progress.status(event.Status), progress.after(event.Duration))
+		if event.Quiet && event.Error != nil {
+			line += progress.failure(event.Error)
+		}
 		if event.Attempt > 1 {
 			line += progress.dim(" · " + count(event.Attempt, "attempt"))
 		}

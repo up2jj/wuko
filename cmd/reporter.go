@@ -15,6 +15,7 @@ import (
 	"github.com/up2jj/wuko/githubactions"
 	reporterpkg "github.com/up2jj/wuko/reporter"
 	"github.com/up2jj/wuko/tui"
+	"github.com/up2jj/wuko/useroutput"
 	"github.com/up2jj/wuko/workflow"
 )
 
@@ -28,6 +29,11 @@ type runReporterDefinition struct {
 var runReporterCatalog = []runReporterDefinition{
 	{name: "plain", new: func(command *cobra.Command, deps dependencies, runDir string) (reporterpkg.Reporter, error) {
 		return newPlainReporter(command, deps, runDir), nil
+	}},
+	{name: "quiet", new: func(command *cobra.Command, deps dependencies, runDir string) (reporterpkg.Reporter, error) {
+		reporter := newPlainReporter(command, deps, runDir)
+		reporter.quiet = true
+		return reporter, nil
 	}},
 	{name: "github", new: func(command *cobra.Command, deps dependencies, runDir string) (reporterpkg.Reporter, error) {
 		workspace := deps.getenv("GITHUB_WORKSPACE")
@@ -47,10 +53,18 @@ var runReporterCatalog = []runReporterDefinition{
 // runReporters adapts command completion into the safe public reporter outcome. It records the
 // latest root workflow event because Engine.Run returns no State after an execution failure.
 type runReporters struct {
-	group   reporterpkg.Group
-	session *reporterpkg.Session
-	now     func() time.Time
-	started time.Time
+	command      *cobra.Command
+	deps         dependencies
+	runDir       string
+	explicit     bool
+	additional   reporterpkg.Group
+	messages     reporterpkg.Reporter
+	selection    string
+	presentation workflow.ReporterConfig
+	group        reporterpkg.Group
+	session      *reporterpkg.Session
+	now          func() time.Time
+	started      time.Time
 
 	mu       sync.Mutex
 	finished *engine.ProgressEvent
@@ -136,6 +150,7 @@ func (reporters *runReporters) complete(ctx context.Context, workflowName string
 		started = finished
 	}
 	outcome := reporterpkg.Outcome{
+		Presentation: reporters.presentation,
 		WorkflowName: workflowName,
 		Status:       outcomeStatus(runErr),
 		Duration:     finished.Sub(started),
@@ -209,6 +224,8 @@ func outcomeStatus(runErr error) engine.ExecutionStatus {
 }
 
 type plainReporter struct {
+	quiet       bool
+	hideSkipped bool
 	progress    *tui.Progress
 	diagnostics diagnostic.Reporter
 }
@@ -221,7 +238,17 @@ func newPlainReporter(command *cobra.Command, deps dependencies, runDir string) 
 }
 
 func (reporter *plainReporter) Progress(event engine.ProgressEvent) {
+	// The session renders messages once, including when several reporters are selected.
+	if event.Kind == engine.MessagePrinted {
+		return
+	}
+	event.Quiet = event.Quiet || reporter.quiet
+	event.Presentation.HideSkipped = event.Presentation.HideSkipped || reporter.hideSkipped
 	reporter.progress.Report(event)
+}
+
+func (reporter *plainReporter) Configure(config workflow.ReporterConfig) {
+	reporter.hideSkipped = config.HideSkipped
 }
 
 func (reporter *plainReporter) Diagnostic(event diagnostic.Event) {
@@ -233,7 +260,7 @@ func (*plainReporter) Finish(context.Context, reporterpkg.Outcome) error { retur
 func addReporterFlag(command *cobra.Command, target *[]string) {
 	names := runReporterNames()
 	command.Flags().StringArrayVar(target, "reporter", nil, fmt.Sprintf(
-		"enable a run reporter (%s; repeatable; defaults to plain)", strings.Join(names, " or "),
+		"select a run reporter (%s; repeatable; overrides workflow reporter; defaults to plain)", strings.Join(names, " or "),
 	))
 	_ = command.RegisterFlagCompletionFunc("reporter", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 		return names, cobra.ShellCompDirectiveNoFileComp
@@ -253,7 +280,33 @@ func newRunReporters(command *cobra.Command, deps dependencies, runDir string, n
 }
 
 func newRunReportersWithDefault(command *cobra.Command, deps dependencies, runDir string, names []string, fallback reporterpkg.Reporter, additional ...reporterpkg.Reporter) (*runReporters, error) {
-	group := make(reporterpkg.Group, 0, len(names)+len(additional)+1)
+	reporters := &runReporters{command: command, deps: deps, runDir: runDir, explicit: len(names) > 0, additional: additional}
+	group, selection, err := reporters.build(names, fallback)
+	if err != nil {
+		return nil, err
+	}
+	now := deps.now
+	if now == nil {
+		now = time.Now
+	}
+	reporters.messages = reporterpkg.Funcs{ProgressFunc: func(event engine.ProgressEvent) {
+		if event.Kind == engine.MessagePrinted {
+			useroutput.Write(command.ErrOrStderr(), event.Message, colorEnabled(command.ErrOrStderr()))
+		}
+	}}
+	reporters.group, reporters.selection = group, selection
+	reporters.session = reporterpkg.NewSession("", append(reporterpkg.Group{reporters.messages}, group...)...)
+	reporters.now, reporters.started = now, now()
+	return reporters, nil
+}
+
+// build creates the named reporters followed by the additional ones, and returns the
+// selection that decides run-wide presentation (quiet wins when it is selected).
+func (reporters *runReporters) build(names []string, fallback reporterpkg.Reporter) (reporterpkg.Group, string, error) {
+	if containsReporter(names, "plain") && containsReporter(names, "quiet") {
+		return nil, "", fmt.Errorf("plain and quiet reporters are mutually exclusive")
+	}
+	group := make(reporterpkg.Group, 0, len(names)+len(reporters.additional)+1)
 	if len(names) == 0 {
 		if fallback != nil {
 			group = append(group, fallback)
@@ -269,20 +322,52 @@ func newRunReportersWithDefault(command *cobra.Command, deps dependencies, runDi
 		seen[name] = struct{}{}
 		factory, found := runReporterFactoryFor(name)
 		if !found {
-			return nil, fmt.Errorf("unknown reporter %q; expected %s", name, strings.Join(runReporterNames(), " or "))
+			return nil, "", unknownReporterError(name)
 		}
-		created, err := factory(command, deps, runDir)
+		created, err := factory(reporters.command, reporters.deps, reporters.runDir)
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		group = append(group, created)
 	}
-	group = append(group, additional...)
-	now := deps.now
-	if now == nil {
-		now = time.Now
+	group = append(group, reporters.additional...)
+	selection := "plain"
+	if len(names) > 0 {
+		selection = names[0]
 	}
-	return &runReporters{group: group, session: reporterpkg.NewSession("", group...), now: now, started: now()}, nil
+	if containsReporter(names, "quiet") {
+		selection = "quiet"
+	}
+	return group, selection, nil
+}
+
+func unknownReporterError(name string) error {
+	return fmt.Errorf("unknown reporter %q; expected %s", name, strings.Join(runReporterNames(), " or "))
+}
+
+func containsReporter(names []string, target string) bool {
+	for _, name := range names {
+		if name == target {
+			return true
+		}
+	}
+	return false
+}
+
+// configure binds the selected root workflow without replacing CLI-selected reporters.
+func (reporters *runReporters) configure(config workflow.ReporterConfig) error {
+	if !reporters.explicit && config.Type != "" {
+		group, selection, err := reporters.build([]string{config.Type}, nil)
+		if err != nil {
+			return err
+		}
+		reporters.group, reporters.selection = group, selection
+		reporters.activeSession().SetReporters(append(reporterpkg.Group{reporters.messages}, reporters.group...)...)
+	}
+	config.Type = reporters.selection
+	reporters.presentation = config
+	reporters.group.Configure(config)
+	return nil
 }
 
 func runReporterFactoryFor(name string) (runReporterFactory, bool) {

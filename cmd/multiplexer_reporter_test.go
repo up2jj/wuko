@@ -117,3 +117,25 @@ func TestSanitizeMultiplexerTitleRemovesControlsAndLimitsRunes(t *testing.T) {
 		t.Fatalf("title length = %d", length)
 	}
 }
+
+func TestMultiplexerReporterKeepsCountingHiddenSteps(t *testing.T) {
+	t.Parallel()
+	sink := &fakeTitleSink{wrote: make(chan string, 8)}
+	ticker := &fakeReporterTicker{ticks: make(chan time.Time, 1), stopped: make(chan struct{})}
+	reporter := newMultiplexerProgressReporterWithSink(sink, func(time.Duration) reporterTicker { return ticker })
+
+	reporter.Progress(engine.ProgressEvent{Kind: engine.WorkflowStarted, WorkflowName: "release", Total: 4, Quiet: true})
+	if title := <-sink.wrote; title != "⠋ release · 0/4" {
+		t.Fatalf("initial title = %q", title)
+	}
+	reporter.Progress(engine.ProgressEvent{Kind: engine.StepStarted, StepID: "visible", Index: 1, Total: 4})
+	reporter.Progress(engine.ProgressEvent{Kind: engine.StepStarted, StepID: "hidden", Index: 2, Total: 4, Quiet: true})
+	ticker.ticks <- time.Now()
+	if title := <-sink.wrote; title != "⠙ release · 2/4 · visible" {
+		t.Fatalf("animated title = %q", title)
+	}
+	reporter.Progress(engine.ProgressEvent{Kind: engine.WorkflowFinished, WorkflowName: "release", Status: engine.StatusSucceeded, Quiet: true})
+	if title := <-sink.wrote; title != "✓ release" {
+		t.Fatalf("final title = %q", title)
+	}
+}

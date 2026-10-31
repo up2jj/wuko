@@ -8,10 +8,12 @@ import (
 
 	"github.com/up2jj/wuko/diagnostic"
 	workflowschedule "github.com/up2jj/wuko/schedule"
+	"github.com/up2jj/wuko/useroutput"
 	"github.com/up2jj/wuko/workflow"
 )
 
 type scheduledRunner struct {
+	quiet   bool
 	load    func(context.Context) (*workflow.Definition, func(), error)
 	execute func(context.Context, *workflow.Definition) error
 	// stopAfterAttempt lets an interactive host end scheduling without manufacturing a run error.
@@ -108,7 +110,9 @@ func parseReloadedSchedule(definition *workflow.Definition) (*workflowschedule.S
 
 func (runner scheduledRunner) reportWait(name string, schedule *workflowschedule.Schedule, next time.Time) {
 	local := next.In(schedule.Location())
-	fmt.Fprintf(runner.stderr, "Waiting for workflow %s until %s (%s)\n", name, local.Format(time.RFC3339), schedule.Location())
+	if !runner.quiet {
+		fmt.Fprintf(runner.stderr, "Waiting for workflow %s until %s (%s)\n", name, local.Format(time.RFC3339), schedule.Location())
+	}
 	diagnostic.Emit(runner.diagnostics, diagnostic.Event{
 		Phase: diagnostic.PhaseSchedule, Status: diagnostic.StatusDetail,
 		WorkflowName: name, Message: "waiting for scheduled workflow",
@@ -132,7 +136,15 @@ func (runner scheduledRunner) reportAttemptError(definition *workflow.Definition
 	status := diagnostic.StatusSucceeded
 	if err != nil {
 		status = diagnostic.StatusFailed
-		fmt.Fprintf(runner.stderr, "Workflow %s scheduled attempt failed: %v\n", definition.Name, err)
+		view := useroutput.Inspect(err)
+		for _, failure := range view.Failures {
+			if !failure.Reported {
+				useroutput.Write(runner.stderr, useroutput.Message{Text: failure.Message, Plain: true}, false)
+			}
+		}
+		if view.Ordinary != nil {
+			fmt.Fprintf(runner.stderr, "Workflow %s scheduled attempt failed: %v\n", definition.Name, view.Ordinary)
+		}
 	}
 	diagnostic.Emit(runner.diagnostics, diagnostic.Event{
 		Phase: diagnostic.PhaseSchedule, Status: status,

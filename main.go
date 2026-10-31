@@ -9,6 +9,7 @@ import (
 	"github.com/up2jj/wuko/cmd"
 	"github.com/up2jj/wuko/elevation"
 	"github.com/up2jj/wuko/localresource"
+	"github.com/up2jj/wuko/useroutput"
 )
 
 func main() {
@@ -35,6 +36,12 @@ func exitCode(err error) int {
 	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, cmd.ErrForcedShutdown) {
 		return 130
+	}
+	view := useroutput.Inspect(err)
+	if view.Ordinary == nil && len(view.Failures) > 0 {
+		if code := view.Failures[0].Code; code >= 1 && code <= 255 {
+			return code
+		}
 	}
 	return 1
 }

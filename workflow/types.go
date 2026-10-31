@@ -28,7 +28,8 @@ var (
 
 // Definition is a fully loaded workflow document.
 type Definition struct {
-	Version int `yaml:"version"`
+	Version  int            `yaml:"version"`
+	Reporter ReporterConfig `yaml:"reporter,omitempty"`
 	// PackageVersion is publisher metadata and is independent of the workflow schema Version.
 	PackageVersion string                    `yaml:"package_version,omitempty"`
 	Name           string                    `yaml:"name"`
@@ -157,6 +158,7 @@ func (c *Condition) UnmarshalYAML(node *yaml.Node) error {
 // Step declares a concrete step, a transparent block, a named control, a composite action,
 // or a local step-file requirement.
 type Step struct {
+	Quiet            *bool               `yaml:"quiet,omitempty"`
 	ID               string              `yaml:"id"`
 	Needs            []string            `yaml:"needs,omitempty"`
 	After            []string            `yaml:"after,omitempty"`
@@ -205,11 +207,14 @@ func (workflowStep *Step) UnmarshalYAML(node *yaml.Node) error {
 	if err := rejectUnknownFields(node, "step", map[string]bool{
 		"id": true, "needs": true, "after": true, "type": true, "uses": true, "require": true, "env": true, "working_directory": true, "worktree": true, "executor": true, "steps": true, "finally": true, "defer": true, "concurrent": true,
 		"batch": true, "foreach": true, "matrix": true, "loop": true, "once": true, "attempt": true, "cancel_on": true, "observe": true, "try": true, "catch": true, "return": true, "sha256": true, "if": true,
-		"with": true,
+		"with": true, "quiet": true,
 	}); err != nil {
 		return err
 	}
 	for i := 0; i < len(node.Content); i += 2 {
+		if node.Content[i].Value == "quiet" && (node.Content[i+1].Kind != yaml.ScalarNode || node.Content[i+1].Tag != "!!bool") {
+			return fmt.Errorf("quiet must be a boolean")
+		}
 		if node.Content[i].Value == "working_directory" && (node.Content[i+1].Kind != yaml.ScalarNode || node.Content[i+1].Tag != "!!str") {
 			return fmt.Errorf("working_directory must be a string path")
 		}
@@ -354,7 +359,7 @@ func (workflowStep Step) validateBlock() error {
 			return fmt.Errorf("working_directory block cannot be combined with other step fields")
 		}
 	case workflowStep.IsConditionalBlock():
-		if workflowStep.If == "" {
+		if workflowStep.If == "" && workflowStep.Quiet == nil {
 			return fmt.Errorf("conditional block must set if")
 		}
 		if len(workflowStep.Steps) == 0 {

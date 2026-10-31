@@ -353,6 +353,10 @@ func runWorkflow(command *cobra.Command, deps dependencies, args []string, confi
 		return err
 	}
 	workflowName = definition.Name
+	if err := reporters.configure(definition.Reporter); err != nil {
+		cleanup()
+		return err
+	}
 	elevationAllowed := !target.remote && !target.fromStdin
 	remoteDefinitions := make(map[string]bool)
 	if target.remote {
@@ -421,6 +425,7 @@ func runWorkflow(command *cobra.Command, deps dependencies, args []string, confi
 
 	plans := map[*workflow.Definition]*workflow.DependencyPlan{definition: plan}
 	runner := scheduledRunner{
+		quiet: reporters.selection == "quiet",
 		load: func(ctx context.Context) (*workflow.Definition, func(), error) {
 			definition, release, err := target.load(ctx, loader, loadOptions)
 			if err != nil {

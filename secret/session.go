@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/up2jj/wuko/useroutput"
 	"github.com/up2jj/wuko/validation"
 )
 
@@ -494,7 +495,17 @@ func (session *Session) RedactError(err error) error {
 	if redacted == err.Error() && !issuesChanged {
 		return err
 	}
-	return redactedError{text: redacted, err: err, issues: issues}
+	view := useroutput.Inspect(err)
+	if len(view.Failures) == 0 {
+		return redactedError{text: redacted, err: err, issues: issues}
+	}
+	for index := range view.Failures {
+		view.Failures[index].Message = session.Redact(view.Failures[index].Message)
+	}
+	if view.Ordinary != nil {
+		view.Ordinary = errors.New(session.Redact(view.Ordinary.Error()))
+	}
+	return redactedError{text: redacted, err: err, issues: issues, output: &view}
 }
 
 // redactIssues redacts every rendered field of structured validation issues;
@@ -533,6 +544,18 @@ type redactedError struct {
 	text   string
 	err    error
 	issues []validation.Issue
+	output *useroutput.ErrorView
+}
+
+// UserOutputErrors prevents presentation adapters from exposing unredacted causes.
+func (err redactedError) UserOutputErrors() useroutput.ErrorView {
+	if err.output == nil {
+		// Keep the redacted wrapper so renderers still see its validation issues.
+		return useroutput.ErrorView{Ordinary: err}
+	}
+	view := *err.output
+	view.Failures = slices.Clone(view.Failures)
+	return view
 }
 
 func (err redactedError) Error() string { return err.text }

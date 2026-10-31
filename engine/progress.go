@@ -11,12 +11,15 @@ import (
 	"github.com/up2jj/wuko/correlation"
 	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/process"
+	"github.com/up2jj/wuko/useroutput"
+	"github.com/up2jj/wuko/workflow"
 )
 
 // ProgressKind identifies one point in the execution lifecycle.
 type ProgressKind string
 
 const (
+	MessagePrinted      ProgressKind = "message_printed"
 	WorkflowStarted     ProgressKind = "workflow_started"
 	WorkflowFinished    ProgressKind = "workflow_finished"
 	StepStarted         ProgressKind = "step_started"
@@ -125,6 +128,10 @@ type RunStats struct {
 // ProgressEvent is delivered synchronously and serialized as execution changes state. Depth is
 // zero for the selected workflow and increases inside concurrent groups and composite actions.
 type ProgressEvent struct {
+	// Presentation preferences accompany every event; observers retain the full stream.
+	Presentation    workflow.ReporterConfig
+	Quiet           bool
+	Message         useroutput.Message
 	InvocationID    correlation.InvocationID
 	RunID           correlation.RunID
 	ParentRunID     correlation.RunID
@@ -170,8 +177,18 @@ type ProgressEvent struct {
 	Replaced bool
 }
 
+// Hidden reports whether presentation preferences suppress the event from progress output.
+// Unsuccessful events stay visible inside quiet scopes.
+func (event ProgressEvent) Hidden() bool {
+	return event.Quiet && !event.Status.Unsuccessful() || event.Presentation.HideSkipped && event.Status == StatusSkipped
+}
+
 func report(options Options, event ProgressEvent) {
+	// Presentation is shared read-only with every event; reporters must not modify Quiet.
+	event.Presentation = options.presentation
+	event.Quiet = options.quiet
 	if options.secretSession != nil {
+		event.Message.Text = options.secretSession.Redact(event.Message.Text)
 		event.Error = options.secretSession.RedactError(event.Error)
 		event.Stats = redactRunStats(event.Stats, options.secretSession.RedactError)
 	}
@@ -347,6 +364,16 @@ func prepareRunOptions(options Options) Options {
 }
 
 func reportLegacy(options Options, event ProgressEvent) {
+	if event.Kind == MessagePrinted {
+		useroutput.Write(options.Stderr, event.Message, false)
+		return
+	}
+	if useroutput.OnlyPlain(event.Error) {
+		return
+	}
+	if event.Hidden() {
+		return
+	}
 	switch event.Kind {
 	case StepStarted:
 		fmt.Fprintf(writerOrDiscard(options.Stdout), "[%d/%d] %s (%s)\n", event.Index, event.Total, event.StepID, event.StepType)

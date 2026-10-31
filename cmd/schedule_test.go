@@ -8,8 +8,29 @@ import (
 	"testing"
 	"time"
 
+	workflowschedule "github.com/up2jj/wuko/schedule"
+	"github.com/up2jj/wuko/useroutput"
 	"github.com/up2jj/wuko/workflow"
 )
+
+func TestQuietScheduledReportingKeepsDiagnosticsWithoutRepeatingPlainFailures(t *testing.T) {
+	t.Parallel()
+	var stderr bytes.Buffer
+	runner := scheduledRunner{quiet: true, stderr: &stderr}
+	schedule, err := workflowschedule.Parse("* * * * * *", "UTC")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner.reportWait("scheduled", schedule, time.Now())
+	runner.reportAttemptError(scheduledDefinition("* * * * * *"), &useroutput.Failure{Message: "already printed", Code: 2, Reported: true})
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr=%q", stderr.String())
+	}
+	runner.reportAttemptError(scheduledDefinition("* * * * * *"), errors.Join(&useroutput.Failure{Message: "already printed", Code: 2, Reported: true}, errors.New("cleanup failed")))
+	if !strings.Contains(stderr.String(), "cleanup failed") || strings.Contains(stderr.String(), "already printed") {
+		t.Fatalf("stderr=%q", stderr.String())
+	}
+}
 
 func scheduledDefinition(cron string) *workflow.Definition {
 	return &workflow.Definition{Version: 1, Name: "scheduled", Cron: cron, Timezone: "UTC", Steps: []workflow.Step{{ID: "run", Type: "test"}}}

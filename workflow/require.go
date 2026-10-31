@@ -96,7 +96,11 @@ func expandRequiredStepsInSource(steps []Step, source, display string, stack []s
 		if err != nil {
 			return nil, fmt.Errorf("step %d in %s requires %q: %w", i+1, display, *workflowStep.Require, err)
 		}
-		expanded = append(expanded, required...)
+		if workflowStep.Quiet != nil {
+			expanded = append(expanded, Step{Quiet: workflowStep.Quiet, Steps: required, Location: workflowStep.Location})
+		} else {
+			expanded = append(expanded, required...)
+		}
 	}
 	return expanded, nil
 }

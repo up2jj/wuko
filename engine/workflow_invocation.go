@@ -164,6 +164,8 @@ func (invocation WorkflowInvocation) EngineOptions(dependencies map[string]map[s
 	}
 	child := Options{
 		InvocationID:        parent.InvocationID,
+		quietOverride:       parent.quietOverride,
+		quiet:               parent.quiet,
 		Vars:                invocation.Vars(),
 		DeclaredVars:        invocation.DeclaredVars(),
 		Env:                 maps.Clone(environment.env),

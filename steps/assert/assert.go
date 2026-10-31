@@ -11,11 +11,14 @@ import (
 	"github.com/expr-lang/expr/vm"
 	wukoexpr "github.com/up2jj/wuko/expression"
 	"github.com/up2jj/wuko/step"
+	"github.com/up2jj/wuko/useroutput"
 )
 
 type Config struct {
-	Expr    string `yaml:"expr"`
-	Message any    `yaml:"message"`
+	Expr     string `yaml:"expr"`
+	Message  any    `yaml:"message"`
+	Plain    bool   `yaml:"plain,omitempty"`
+	ExitCode *int   `yaml:"exit_code,omitempty"`
 }
 
 type Runner struct {
@@ -47,6 +50,14 @@ func New(raw map[string]any) (step.Runner, error) {
 	}
 	if strings.TrimSpace(config.Expr) == "" {
 		return nil, fmt.Errorf("expr is required")
+	}
+	if value, exists := raw["exit_code"]; exists && value != nil && step.ConfigKnown(raw, "exit_code") {
+		if err := step.CheckBindingType(Config{}, []string{"exit_code"}, value); err != nil {
+			return nil, err
+		}
+	}
+	if step.ConfigKnown(raw, "plain", "exit_code") && config.ExitCode != nil && (!config.Plain || *config.ExitCode < 1 || *config.ExitCode > 255) {
+		return nil, fmt.Errorf("exit_code requires plain: true and must be between 1 and 255")
 	}
 	var messageExpr string
 	var messageProgram *vm.Program
@@ -81,8 +92,10 @@ func New(raw map[string]any) (step.Runner, error) {
 		// Preserve the existing YAML decoder's scalar-to-string behavior for plain
 		// configuration. Expression results take the strict string path in failure.
 		var plain struct {
-			Expr    string `yaml:"expr"`
-			Message string `yaml:"message"`
+			Expr     string `yaml:"expr"`
+			Message  string `yaml:"message"`
+			Plain    bool   `yaml:"plain,omitempty"`
+			ExitCode *int   `yaml:"exit_code,omitempty"`
 		}
 		if err := step.DecodeConfig(raw, &plain); err != nil {
 			return nil, err
@@ -112,7 +125,11 @@ func (r *Runner) Run(ctx context.Context, request step.Request) (step.Result, er
 		return step.Result{}, fmt.Errorf("evaluating expr: expression returned %T, want bool", value)
 	}
 	if !matched {
-		return step.Result{}, r.failure(request)
+		failure := r.failure(request)
+		if plain, ok := failure.(*useroutput.Failure); ok {
+			plain.Reported = request.PrintMessage(useroutput.Message{Text: plain.Message, Level: useroutput.Error, Plain: true})
+		}
+		return step.Result{}, failure
 	}
 	return step.Result{}, nil
 }
@@ -157,6 +174,13 @@ func (r *Runner) failure(request step.Request) error {
 	}
 	if strings.TrimSpace(message) == "" {
 		message = r.config.Expr
+	}
+	if r.config.Plain {
+		code := 1
+		if r.config.ExitCode != nil {
+			code = *r.config.ExitCode
+		}
+		return &useroutput.Failure{Message: message, Code: code}
 	}
 	return fmt.Errorf("assertion failed: %s", message)
 }

@@ -1100,12 +1100,64 @@ wuko run cleanup --once
 
 ## Run reporters
 
-With no reporter flags, `wuko run` uses the `plain` reporter for terminal progress. Select one or
-more reporters explicitly by repeating `--reporter`; events are delivered in declaration order:
+With no reporter selection, `wuko run` uses `plain` for terminal progress. A workflow can select
+any reporter available through `--reporter`, using shorthand or shared presentation settings:
+
+```yaml
+reporter: quiet
+```
+
+```yaml
+reporter:
+  type: plain
+  quiet: [set, decode, extract, jsonpath]
+  hide_skipped: true
+```
+
+`type` defaults to `plain`, `quiet` to an empty list, and `hide_skipped` to false. CLI `--reporter`
+flags replace the YAML selection while retaining its shared presentation settings. Repeat the flag
+to select several reporters; `plain` and `quiet` are mutually exclusive. Events are delivered in
+declaration order:
 
 ```sh
 wuko run check --reporter plain --reporter github
 ```
+
+The `quiet` reporter shows explicit [`print`](steps-data.md#print) and Lua `wuko.ui` messages,
+prompts, process output, and failures. It omits progress, polling, retries, and success summaries.
+Messages go to stderr, with a level symbol and terminal-only color; printing at `error` level does
+not fail the workflow. A print step's own progress is quiet by default.
+
+Use `quiet: true` on a step or block to suppress its progress, including descendants and associated
+cleanup. An explicit child `quiet: false` restores progress unless the run-wide reporter is quiet:
+
+```yaml
+steps:
+  - quiet: true
+    steps:
+      - id: prepare
+        type: lua
+        with:
+          source: 'wuko.ui.info("Preparing the project...")'
+      - id: tests
+        type: shell
+        quiet: false
+        with:
+          command: go
+          args: [test, ./...]
+```
+
+Local settings override inherited block settings, which override defaults from the reporter's
+quiet step-type list. Siblings do not inherit one another's settings. `hide_skipped` hides skipped
+rows while preserving skipped counts. Workflow defaults apply to its targets and composite actions;
+child workflows use their own type defaults while inheriting the caller's active quiet setting.
+Only the selected root chooses reporters for the invocation. Git hooks retain their host reporter
+unless the workflow or command line selects a reporter explicitly.
+
+Shared settings reach every selected reporter. Each applies relevant options to its presentation:
+for example, GitHub summaries omit quiet successful rows and hidden skipped rows, while keeping
+failure details and complete aggregate statistics. The engine and reporting session still deliver
+every event. Canonical JSON reports retain their full data and existing schema.
 
 Use `--report-json PATH` independently of the selected reporters to write the canonical execution
 report when the invocation finishes. Relative paths are resolved from the invocation directory,
@@ -1223,6 +1275,13 @@ the workflow name, status, invocation duration, statistics, declared outputs, er
 and correlation identity. `reporter.NewExecutionReport` projects that outcome into the public JSON
 schema without error text. Reporters never receive the workflow's full engine state, environment,
 inputs, variables, or intermediate values.
+
+Explicit user output arrives as `engine.MessagePrinted`, with `Message`, correlation identity, and
+the same serialized sequence as other events. `ProgressEvent.Presentation` carries shared options
+and `Quiet` the effective visibility preference. Reporters can also implement optional
+`reporter.Configurer` to receive shared configuration before execution. `step.Request.UI` delivers
+messages from native steps; `PrintMessage` falls back to stderr when a runner is used directly.
+Message text and plain-failure metadata pass through secret redaction before reaching reporters.
 
 Use `reporter.Session` when wiring reporters outside the CLI. It supplies one opaque invocation ID
 and a shared sequence across progress and diagnostic events. Every `Engine.Run` attempt has a run

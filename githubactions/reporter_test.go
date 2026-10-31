@@ -16,7 +16,43 @@ import (
 	"github.com/up2jj/wuko/internal/testfs"
 	reporterpkg "github.com/up2jj/wuko/reporter"
 	"github.com/up2jj/wuko/validation"
+	"github.com/up2jj/wuko/workflow"
 )
+
+func TestReporterPresentationHidesRowsWithoutChangingExecutionData(t *testing.T) {
+	t.Parallel()
+	reporter, output, summary, _ := newTestReporter(t, t.TempDir())
+	reporter.Configure(workflow.ReporterConfig{Type: "github", HideSkipped: true})
+	stats := engine.RunStats{RunID: "run", Total: 4, Succeeded: 2, Skipped: 1, Failed: 1, Steps: []engine.StepStats{
+		{StepRunID: "hidden", ID: "hidden", Type: "set", Status: engine.StatusSucceeded},
+		{StepRunID: "visible", ID: "visible", Type: "shell", Status: engine.StatusSucceeded},
+		{StepRunID: "skipped", ID: "skipped", Type: "shell", Status: engine.StatusSkipped},
+		{StepRunID: "failed", ID: "failed", Type: "assert", Status: engine.StatusFailed, Error: errors.New("failure detail")},
+	}}
+	reporter.Progress(engine.ProgressEvent{Kind: engine.WorkflowStarted, WorkflowName: "check", RunID: "run"})
+	for _, step := range stats.Steps {
+		reporter.Progress(engine.ProgressEvent{Kind: engine.StepFinished, StepRunID: step.StepRunID, Quiet: step.ID == "hidden" || step.ID == "failed"})
+	}
+	reporter.Progress(engine.ProgressEvent{Kind: engine.WorkflowFinished, Status: engine.StatusFailed, WorkflowName: "check", RunID: "run", Stats: stats})
+	if err := reporter.Finish(t.Context(), reporterpkg.Outcome{WorkflowName: "check", RunID: "run", Status: engine.StatusFailed, Stats: stats}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(summary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if strings.Contains(text, "| hidden |") || strings.Contains(text, "| skipped |") || !strings.Contains(text, "| visible |") || !strings.Contains(text, "| failed |") || !strings.Contains(text, "failure detail") {
+		t.Fatalf("summary=%s", text)
+	}
+	data, err = os.ReadFile(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"total":4`) || !strings.Contains(string(data), `"skipped":1`) {
+		t.Fatalf("outputs=%s", data)
+	}
+}
 
 func TestNewRequiresGitHubFiles(t *testing.T) {
 	tests := []struct {

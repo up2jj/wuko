@@ -80,6 +80,7 @@ var builtinBindingRules = map[string]stepBindingRules{
 	},
 	"multiplexer":  {},
 	"process":      {owned: under("argv", "env")},
+	"print":        {},
 	"process_call": {owned: under("pool")},
 	"require_tool": {},
 	"run_workflow": {owned: under("vars"), static: exactly("workflow", "target")},

@@ -12,6 +12,7 @@ them through `.vars` and `.steps`; expressions use `vars` and `steps` without th
 | Create values | [`set`](#set) — assign a literal or expression · [`template`](#template) — render text to memory or a file |
 | Reshape values | [`transform`](#transform) — list, object, and aggregation pipelines ([list](#list-operations), [object](#object-operations), [tuple and join](#tuple-and-join-operations) operations, [result records](#terminal-result-records)) |
 | Check values | [`assert`](#assert) — stop unless an expression is true |
+| Show findings | [`print`](#print) — user-facing messages with a level symbol |
 | Load and decode | [`import_vars`](#import_vars) — JSON or TOML into variables · [`decode`](#decode) — JSON, YAML, TOML, or lines into a value · [`extract`](#extract) — records and markers from text |
 | Query and edit | [`jsonpath`](#jsonpath) — select values · [`edit`](#edit) — update structured files or values · [`markdown_edit`](#markdown_edit) — update Markdown by AST node |
 | Versions and time | [`semver`](#semver) — parse, compare, constrain, increment · [`time`](#time) — capture, parse, adjust, format |
@@ -314,6 +315,28 @@ Equality is structural for nested lists and objects, ignores object key order, a
 equivalents such as `1` and `1.0` as equal. Ordering accepts a homogeneous collection of numbers or
 strings. `sort` and `sort_by` are stable.
 
+## `print`
+
+Print a user-facing message through the ordered reporting stream, without shell quoting:
+
+```yaml
+- id: finding
+  type: print
+  with:
+    message: "Selected environment: {{ .vars.environment }}"
+    level: info
+```
+
+`message` is required and supports workflow templates and standard field bindings. `level` is
+`info` (default), `success`, `warn`, or `error`, rendered with `•`, `✓`, `!`, or `✗`. Each line of a
+multiline message gets its own symbol. Messages go to stderr; colors are enabled only by the
+existing terminal color policy. An error-level message is informational and does not fail the run.
+The step returns no outputs. Its progress lines are hidden by default; add `quiet: false` to show
+them. Explicit messages remain visible inside quiet blocks and with `--reporter quiet`.
+
+Lua provides the matching `wuko.ui.info`, `success`, `warn`, and `error` functions. See
+[run reporters](execution.md#run-reporters) for workflow defaults and CLI overrides.
+
 ## `assert`
 
 Stop the workflow with a clear message unless an Expr expression returns boolean `true`.
@@ -336,6 +359,26 @@ Stop the workflow with a clear message unless an Expr expression returns boolean
 
 Both fields are required. A false result fails with `assertion failed: <message>`; a true result
 succeeds with an empty output object.
+
+For deliberate user-facing failures, use `plain: true` and optionally `exit_code`:
+
+```yaml
+- id: require_setup
+  type: assert
+  with:
+    expr: vars.ready
+    message: Complete setup before continuing.
+    plain: true
+    exit_code: 2
+```
+
+This prints only the message for each failed assertion execution. Enclosing step, attempt,
+workflow, and CLI error renderers do not repeat it. Ordinary progress and cleanup output still
+follow the selected reporter's settings. The assertion remains catchable and retryable, and
+`finally` and deferred cleanup still run. An unhandled plain failure exits with `exit_code`
+(default 1, range 1–255). `exit_code` requires `plain: true`. A recovered failure does not determine
+the process exit code; joined ordinary failures use code 1, and cancellation retains code 130.
+Expression and message-evaluation errors remain ordinary diagnostic errors.
 
 `message` is validated with the rest of the workflow but rendered only when the assertion fails, so a
 passing assertion never depends on it. That allows a message computed from a value that is empty when

@@ -17,7 +17,25 @@ import (
 	"github.com/up2jj/wuko/helper"
 	"github.com/up2jj/wuko/internal/steptest"
 	"github.com/up2jj/wuko/step"
+	"github.com/up2jj/wuko/useroutput"
 )
+
+func TestLuaUIMessagesUseTheHostOutputChannel(t *testing.T) {
+	t.Parallel()
+	runner := steptest.Build(t, New, map[string]any{"source": `wuko.ui.info("one"); wuko.ui.success("two"); wuko.ui.warn("three"); wuko.ui.error("four")`})
+	var got []useroutput.Message
+	result, err := runner.Run(t.Context(), step.Request{UI: func(message useroutput.Message) { got = append(got, message) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []useroutput.Message{{Text: "one", Level: useroutput.Info}, {Text: "two", Level: useroutput.Success}, {Text: "three", Level: useroutput.Warn}, {Text: "four", Level: useroutput.Error}}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Fatalf("messages (-want +got):\n%s", diff)
+	}
+	if len(result.Outputs) != 0 {
+		t.Fatalf("outputs=%#v", result.Outputs)
+	}
+}
 
 func TestLuaExposesPluginHelpers(t *testing.T) {
 	runner := steptest.Build(t, New, map[string]any{"source": `wuko.output("value", wuko.helpers.acme_slug("Hello World"))`})

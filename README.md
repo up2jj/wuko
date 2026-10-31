@@ -194,7 +194,7 @@ finally:
 | Area | Built in |
 | --- | --- |
 | [Interactive](docs/steps-interactive.md) | `tui_form`, `tui_input`, `tui_password`, `tui_choice`, `tui_date`, `tui_path`, `tui_confirm`, `tui_review`, `tui_table`, `dashboard`, [browser forms](docs/forms.md) |
-| [Data](docs/steps-data.md) | `set`, `template`, `transform`, `decode`, `jsonpath`, `edit`, `markdown_edit`, [`extract`](docs/extract.md), `semver`, `time`, `assert`, `import_vars`, `key_value`, `changed` |
+| [Data](docs/steps-data.md) | `set`, `template`, `transform`, `decode`, `jsonpath`, `edit`, `markdown_edit`, [`extract`](docs/extract.md), `semver`, `time`, `assert`, `print`, `import_vars`, `key_value`, `changed` |
 | [Git and GitHub](docs/steps-system.md#git_revision) | `git_diff`, `git_log`, `git_commit`, `git_conventional_commit`, [worktrees](docs/worktrees.md), squash, rebase, merge, branch checks, `github_pr`, `github_release`, `github_actions` |
 | [Files and system](docs/steps-system.md) | `file`, `glob`, `scaffold`, `watch`, `log_wait`, `temp`, `cache`, `require_tool`, `tcp_probe`, `multiplexer` |
 | [Network, processes, and automation](docs/steps-automation.md) | `http`, [`docker`](docs/docker-operations.md), `shell` (including scripted PTY sessions and the [Node and Bash SDKs](docs/script-sdk.md)), `process`, `process_call`, `lua` |

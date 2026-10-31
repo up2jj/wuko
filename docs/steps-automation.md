@@ -1099,6 +1099,12 @@ task-to-agent flow.
 
 ## `lua`
 
+Use `wuko.ui.info("message")`, `wuko.ui.success("message")`, `wuko.ui.warn("message")`, or
+`wuko.ui.error("message")` for ordered user-facing output. They share the `print` step's symbols,
+stderr stream, terminal color policy, and secret redaction. They remain visible with quiet
+reporters and quiet steps. `wuko.ui.error` prints a message without failing the step; use `assert`
+with `plain: true` for a deliberate failure. Lua's ordinary `print` retains its existing behavior.
+
 Run a Lua file or inline source with typed arguments. Lua source is not templated; pass dynamic
 values through `args`.
 

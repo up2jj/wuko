@@ -223,8 +223,10 @@ func (e *Engine) validateStepsRaw(ctx context.Context, definition *workflow.Defi
 				})
 				return err
 			}
-			if _, err := e.compileCondition(workflowStep.If); err != nil {
-				return fail(fmt.Errorf("conditional block if: %w", err))
+			if workflowStep.If != "" {
+				if _, err := e.compileCondition(workflowStep.If); err != nil {
+					return fail(fmt.Errorf("conditional block if: %w", err))
+				}
 			}
 			if err := e.validateSteps(ctx, definition, workflowStep.Steps, options, state); err != nil {
 				return fail(fmt.Errorf("conditional block: %w", err))

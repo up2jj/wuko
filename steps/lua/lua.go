@@ -20,6 +20,7 @@ import (
 	storepkg "github.com/up2jj/wuko/keyvalue"
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/step"
+	"github.com/up2jj/wuko/useroutput"
 	"github.com/up2jj/wuko/workflow"
 	glua "github.com/yuin/gopher-lua"
 )
@@ -316,6 +317,15 @@ func (r *runtime) module(state *glua.LState) (*glua.LTable, error) {
 	execModule := state.NewTable()
 	state.SetFuncs(execModule, map[string]glua.LGFunction{"run": r.execRun})
 	module.RawSetString("exec", execModule)
+	ui := state.NewTable()
+	for _, level := range []useroutput.Level{useroutput.Info, useroutput.Success, useroutput.Warn, useroutput.Error} {
+		ui.RawSetString(string(level), state.NewFunction(func(state *glua.LState) int {
+			message := state.CheckString(1)
+			r.request.PrintMessage(useroutput.Message{Text: message, Level: level})
+			return 0
+		}))
+	}
+	module.RawSetString("ui", ui)
 	return module, nil
 }
 
