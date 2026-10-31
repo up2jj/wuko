@@ -5,22 +5,131 @@ import (
 	"strings"
 )
 
-// BuiltinStepBindings identifies built-in syntax while loading dependency references,
-// before a runtime registry exists. External configurations retain their own grammar.
-// The built-in registration contract test keeps this list aligned with the registry.
+// stepBindingRules describes where a built-in step departs from the generic binding grammar.
+type stepBindingRules struct {
+	// owned matches configuration with a step-specific expression grammar or a later
+	// evaluation scope, which generic field bindings must not consume.
+	owned func(path []string) bool
+	// static matches selectors that determine workflow structure, variable declarations,
+	// or runner capabilities before execution, so they reject expression bindings.
+	static func(path []string) bool
+}
+
+// builtinBindingRules lists every built-in step that accepts host-owned bindings. It is
+// consulted while loading dependency references, before a runtime registry exists; the
+// built-in registration contract test keeps its keys aligned with the registry.
+var builtinBindingRules = map[string]stepBindingRules{
+	"assert":  {owned: under("message")},
+	"cache":   {},
+	"changed": {},
+	"dashboard": {
+		owned: func(path []string) bool {
+			return slices.ContainsFunc(path, func(component string) bool {
+				return component == "refresh" || component == "actions" || component == "template" || component == "confirm"
+			})
+		},
+		static: func(path []string) bool {
+			if len(path) == 1 {
+				return path[0] == "groups"
+			}
+			// Group and widget IDs: groups.N.id and groups.N.widgets.N.id.
+			return path[0] == "groups" && path[len(path)-1] == "id" && (len(path) == 3 || (len(path) == 5 && path[2] == "widgets"))
+		},
+	},
+	"decode":                  {},
+	"devenv_task":             {},
+	"docker":                  {static: exactly("cleanup")},
+	"edit":                    {owned: under("from")},
+	"extract":                 {},
+	"file":                    {},
+	"git_branch":              {},
+	"git_branch_name":         {},
+	"git_clean":               {},
+	"git_commit":              {},
+	"git_conventional_commit": {},
+	"git_diff":                {owned: under("files", "size_exempt")},
+	"git_diff_check":          {owned: under("files", "size_exempt")},
+	"git_files":               {owned: under("files", "size_exempt")},
+	"git_log":                 {},
+	"git_merge":               {},
+	"git_merge_base":          {},
+	"git_on_branch":           {},
+	"git_rebase":              {},
+	"git_remote_branch":       {},
+	"git_revision":            {},
+	"git_squash":              {},
+	"git_worktree":            {},
+	"github_actions":          {},
+	"github_pr":               {},
+	"github_release":          {},
+	"glob":                    {owned: under("patterns")},
+	"http":                    {},
+	"import_vars":             {},
+	"jsonpath":                {},
+	"key_value":               {},
+	"log_wait":                {},
+	"lua":                     {owned: under("source", "args")},
+	"markdown_edit": {
+		owned: func(path []string) bool {
+			return path[0] == "edits" || (path[0] == "from" && len(path) > 1 && path[1] == "expr")
+		},
+		static: exactly("edits"),
+	},
+	"multiplexer":  {},
+	"process":      {owned: under("argv", "env")},
+	"process_call": {owned: under("pool")},
+	"require_tool": {},
+	"run_workflow": {owned: under("vars"), static: exactly("workflow", "target")},
+	"scaffold":     {},
+	"semver":       {},
+	"set":          {owned: under("variables")},
+	"shell": {
+		owned:  under("argv", "sdk_args", "files", "interactions", "env"),
+		static: exactly("replace", "sdk"),
+	},
+	"tcp_probe":   {},
+	"temp":        {},
+	"template":    {owned: under("source", "data")},
+	"text_check":  {owned: under("files", "size_exempt")},
+	"text_fix":    {owned: under("files", "size_exempt")},
+	"time":        {},
+	"transform":   {owned: under("from", "operations")},
+	"tui_choice":  {},
+	"tui_confirm": {},
+	"tui_date":    {},
+	"tui_form": {
+		// Field values and validation resolve in the form's own scope: fields.N.value.
+		owned: func(path []string) bool {
+			return path[0] == "fields" && len(path) >= 3 && slices.Contains([]string{"value", "default", "validation", "from"}, path[2])
+		},
+		static: func(path []string) bool {
+			return (len(path) == 1 && path[0] == "fields") ||
+				(len(path) == 3 && path[0] == "fields" && (path[2] == "id" || path[2] == "type"))
+		},
+	},
+	"tui_input":    {},
+	"tui_password": {},
+	"tui_path":     {},
+	"tui_review":   {},
+	"tui_table":    {},
+	"watch":        {},
+}
+
+// under matches a top-level field and everything beneath it.
+func under(fields ...string) func([]string) bool {
+	return func(path []string) bool { return slices.Contains(fields, path[0]) }
+}
+
+// exactly matches only the top-level fields themselves.
+func exactly(fields ...string) func([]string) bool {
+	return func(path []string) bool { return len(path) == 1 && slices.Contains(fields, path[0]) }
+}
+
+// BuiltinStepBindings reports whether a step type uses the built-in binding grammar.
+// External configurations retain their own grammar.
 func BuiltinStepBindings(stepType string) bool {
-	switch stepType {
-	case "assert", "cache", "changed", "dashboard", "decode", "devenv_task", "docker", "edit", "extract", "file",
-		"git_branch", "git_branch_name", "git_clean", "git_commit", "git_conventional_commit", "git_diff", "git_diff_check",
-		"git_files", "git_log", "git_merge", "git_merge_base", "git_on_branch", "git_rebase", "git_remote_branch",
-		"git_revision", "git_squash", "git_worktree", "github_actions", "github_pr", "github_release", "glob", "http",
-		"import_vars", "jsonpath", "key_value", "log_wait", "lua", "markdown_edit", "multiplexer", "process", "process_call",
-		"require_tool", "run_workflow", "scaffold", "semver", "set", "shell", "tcp_probe", "temp", "template",
-		"text_check", "text_fix", "time", "transform", "tui_choice", "tui_confirm", "tui_date", "tui_form", "tui_input",
-		"tui_password", "tui_path", "tui_review", "tui_table", "watch":
-		return true
-	}
-	return false
+	_, ok := builtinBindingRules[stepType]
+	return ok
 }
 
 // Binding is a typed configuration value written as {expr: ...} or {literal: ...}.
@@ -97,80 +206,22 @@ func StepOwnsBindings(stepType string, path []string) bool {
 	if len(path) == 0 {
 		return false
 	}
-	field := path[0]
-	if field == "expr" || strings.HasSuffix(field, "_expr") {
+	if field := path[0]; field == "expr" || strings.HasSuffix(field, "_expr") {
 		return true
 	}
-	switch stepType {
-	case "shell":
-		return field == "argv" || field == "sdk_args" || field == "files" || field == "interactions" || field == "env"
-	case "process":
-		return field == "argv" || field == "env"
-	case "process_call":
-		return field == "pool"
-	case "template":
-		return field == "source" || field == "data"
-	case "lua":
-		return field == "source" || field == "args"
-	case "assert":
-		return field == "message"
-	case "set":
-		return field == "variables"
-	case "run_workflow":
-		return field == "vars"
-	case "transform":
-		return field == "from" || field == "operations"
-	case "edit":
-		return field == "from"
-	case "markdown_edit":
-		return field == "edits" || (field == "from" && len(path) > 1 && path[1] == "expr")
-	case "tui_form":
-		if field == "fields" && len(path) >= 3 {
-			return path[2] == "value" || path[2] == "default" || path[2] == "validation" || path[2] == "from"
-		}
-	case "dashboard":
-		for _, component := range path {
-			if component == "refresh" || component == "actions" || component == "template" || component == "confirm" {
-				return true
-			}
-		}
-	case "glob":
-		return field == "patterns"
-	case "git_files", "git_diff", "git_diff_check", "text_fix", "text_check":
-		return field == "files" || field == "size_exempt"
-	}
-	return false
+	owned := builtinBindingRules[stepType].owned
+	return owned != nil && owned(path)
 }
 
 // StaticStepBindingField names selectors whose values determine workflow structure,
 // variable declarations, or runner capabilities before execution.
 func StaticStepBindingField(stepType string, path []string) bool {
-	if stepType == "tui_form" && len(path) == 3 && path[0] == "fields" {
-		return path[2] == "id" || path[2] == "type"
-	}
-	if stepType == "dashboard" && len(path) > 0 && path[len(path)-1] == "id" {
-		return (len(path) == 3 && path[0] == "groups") || (len(path) == 5 && path[0] == "groups" && path[2] == "widgets")
-	}
-	if len(path) != 1 {
+	if len(path) == 0 {
 		return false
 	}
-	field := path[0]
-	if field == "variable" || field == "operation" {
+	if len(path) == 1 && (path[0] == "variable" || path[0] == "operation") {
 		return true
 	}
-	switch stepType {
-	case "run_workflow":
-		return field == "workflow" || field == "target"
-	case "shell":
-		return field == "replace" || field == "sdk"
-	case "tui_form":
-		return field == "fields"
-	case "dashboard":
-		return field == "groups"
-	case "markdown_edit":
-		return field == "edits"
-	case "docker":
-		return field == "cleanup"
-	}
-	return false
+	static := builtinBindingRules[stepType].static
+	return static != nil && static(path)
 }
