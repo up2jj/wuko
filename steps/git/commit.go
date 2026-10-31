@@ -65,17 +65,25 @@ func NewCommit(raw map[string]any) (step.Runner, error) {
 			return nil, fmt.Errorf("body must not contain NUL")
 		}
 	}
-	if err := validateCommitPaths(raw, config.Paths); step.ConfigKnown(raw, "paths") && err != nil {
-		return nil, err
+	if step.ConfigKnown(raw, "paths") {
+		if err := validateCommitPaths(raw, config.Paths); err != nil {
+			return nil, err
+		}
 	}
-	if err := validateCommitIdentity(raw, "author", config.Author); step.ConfigKnown(raw, "author") && err != nil {
-		return nil, err
+	if step.ConfigKnown(raw, "author") {
+		if err := validateCommitIdentity(raw, "author", config.Author); err != nil {
+			return nil, err
+		}
 	}
-	if err := validateCommitIdentity(raw, "committer", config.Committer); step.ConfigKnown(raw, "committer") && err != nil {
-		return nil, err
+	if step.ConfigKnown(raw, "committer") {
+		if err := validateCommitIdentity(raw, "committer", config.Committer); err != nil {
+			return nil, err
+		}
 	}
-	if err := validateCommitTrailers(raw, config.Trailers); step.ConfigKnown(raw, "trailers") && err != nil {
-		return nil, err
+	if step.ConfigKnown(raw, "trailers") {
+		if err := validateCommitTrailers(raw, config.Trailers); err != nil {
+			return nil, err
+		}
 	}
 	if _, configured := raw["on_empty"]; configured && strings.TrimSpace(config.OnEmpty) == "" {
 		return nil, fmt.Errorf("on_empty must not be blank")

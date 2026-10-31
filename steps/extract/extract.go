@@ -97,8 +97,10 @@ func New(raw map[string]any) (step.Runner, error) {
 		}
 	}
 
-	if err := validateVariables(config.Variables); step.ConfigKnown(raw, "variables") && err != nil {
-		return nil, err
+	if step.ConfigKnown(raw, "variables") {
+		if err := validateVariables(config.Variables); err != nil {
+			return nil, err
+		}
 	}
 
 	_, hasFields := raw["fields"]

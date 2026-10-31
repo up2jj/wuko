@@ -74,14 +74,20 @@ func NewSquash(raw map[string]any) (step.Runner, error) {
 	if step.ConfigKnown(raw, "body") && strings.ContainsRune(config.Body, '\x00') {
 		return nil, fmt.Errorf("body must not contain NUL")
 	}
-	if err := validateCommitIdentity(raw, "author", config.Author); step.ConfigKnown(raw, "author") && err != nil {
-		return nil, err
+	if step.ConfigKnown(raw, "author") {
+		if err := validateCommitIdentity(raw, "author", config.Author); err != nil {
+			return nil, err
+		}
 	}
-	if err := validateCommitIdentity(raw, "committer", config.Committer); step.ConfigKnown(raw, "committer") && err != nil {
-		return nil, err
+	if step.ConfigKnown(raw, "committer") {
+		if err := validateCommitIdentity(raw, "committer", config.Committer); err != nil {
+			return nil, err
+		}
 	}
-	if err := validateCommitTrailers(raw, config.Trailers); step.ConfigKnown(raw, "trailers") && err != nil {
-		return nil, err
+	if step.ConfigKnown(raw, "trailers") {
+		if err := validateCommitTrailers(raw, config.Trailers); err != nil {
+			return nil, err
+		}
 	}
 	if _, ok := raw["verify"]; step.ConfigKnown(raw, "verify") && (ok && config.Verify == nil) {
 		return nil, fmt.Errorf("verify must be a boolean")

@@ -238,8 +238,10 @@ func New(raw map[string]any) (step.Runner, error) {
 		return nil, fmt.Errorf("interact requires tty")
 	}
 	handoff := config.TTY && (!hasInteractions || config.Interact)
-	if err := validateTerminalConfig(config.Terminal, config.TTY, handoff); step.ConfigKnown(raw, "terminal", "tty") && err != nil {
-		return nil, err
+	if step.ConfigKnown(raw, "terminal", "tty") {
+		if err := validateTerminalConfig(config.Terminal, config.TTY, handoff); err != nil {
+			return nil, err
+		}
 	}
 	if err := validateReplaceConfig(raw, config); err != nil {
 		return nil, err

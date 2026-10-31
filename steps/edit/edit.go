@@ -164,8 +164,10 @@ func New(raw map[string]any) (step.Runner, error) {
 		}
 	}
 	if hasValue {
-		if err := validateJSON(config.Value); step.ConfigKnown(raw, "value") && err != nil {
-			return nil, fmt.Errorf("value is not JSON-compatible: %w", err)
+		if step.ConfigKnown(raw, "value") {
+			if err := validateJSON(config.Value); err != nil {
+				return nil, fmt.Errorf("value is not JSON-compatible: %w", err)
+			}
 		}
 	}
 	return runner, nil

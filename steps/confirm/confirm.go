@@ -35,8 +35,10 @@ func New(raw map[string]any) (step.Runner, error) {
 	if strings.TrimSpace(config.Message) == "" {
 		return nil, fmt.Errorf("message is required")
 	}
-	if err := config.NonInteractive.Validate(config.Default != nil); step.ConfigKnown(raw, "default", "noninteractive") && err != nil {
-		return nil, err
+	if step.ConfigKnown(raw, "default", "noninteractive") {
+		if err := config.NonInteractive.Validate(config.Default != nil); err != nil {
+			return nil, err
+		}
 	}
 	return &Runner{config: config}, nil
 }

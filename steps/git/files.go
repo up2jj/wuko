@@ -82,8 +82,10 @@ func NewFiles(raw map[string]any) (step.Runner, error) {
 			return nil, fmt.Errorf("updates is only supported with source pushed")
 		}
 	}
-	if err := validatePathspecs(config.Paths); step.ConfigKnown(raw, "paths") && err != nil {
-		return nil, err
+	if step.ConfigKnown(raw, "paths") {
+		if err := validatePathspecs(config.Paths); err != nil {
+			return nil, err
+		}
 	}
 	exclude := make([]*regexp.Regexp, 0, len(config.Exclude))
 	for index, pattern := range config.Exclude {

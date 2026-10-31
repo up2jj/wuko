@@ -98,8 +98,10 @@ func NewConventionalCommit(raw map[string]any) (step.Runner, error) {
 		}
 		return runner, nil
 	}
-	if _, err := expression.InspectConventionalCommit(config.Message, runner.validationOptions()); step.ConfigKnown(raw, "message") && err != nil {
-		return nil, err
+	if step.ConfigKnown(raw, "message") {
+		if _, err := expression.InspectConventionalCommit(config.Message, runner.validationOptions()); err != nil {
+			return nil, err
+		}
 	}
 	return runner, nil
 }

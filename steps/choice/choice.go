@@ -126,8 +126,10 @@ func New(raw map[string]any) (step.Runner, error) {
 	}
 	// Defaults may come from a source or an expression, so only the run can tell whether
 	// enough of them are marked.
-	if err := config.NonInteractive.Validate(true); step.ConfigKnown(raw, "noninteractive") && err != nil {
-		return nil, err
+	if step.ConfigKnown(raw, "noninteractive") {
+		if err := config.NonInteractive.Validate(true); err != nil {
+			return nil, err
+		}
 	}
 	programs, err := compileExpressions(raw, config)
 	if err != nil {

@@ -55,8 +55,10 @@ func New(raw map[string]any) (step.Runner, error) {
 		return nil, fmt.Errorf("message is required")
 	}
 	_, hasDefault := raw["value"]
-	if err := config.NonInteractive.Validate(hasDefault); step.ConfigKnown(raw, "noninteractive") && err != nil {
-		return nil, err
+	if step.ConfigKnown(raw, "noninteractive") {
+		if err := config.NonInteractive.Validate(hasDefault); err != nil {
+			return nil, err
+		}
 	}
 	validate, err := step.CompileTextValidator(required(config.Required), config.Validation)
 	if err != nil {
@@ -68,8 +70,10 @@ func New(raw map[string]any) (step.Runner, error) {
 		return nil, err
 	}
 	validateAndModify := func(value string) error {
-		if err := validate(normalize(value, config.Modifiers.Trim)); step.ConfigKnown(raw, "modifiers.trim") && err != nil {
-			return err
+		if step.ConfigKnown(raw, "modifiers.trim") {
+			if err := validate(normalize(value, config.Modifiers.Trim)); err != nil {
+				return err
+			}
 		}
 		_, err := modify(value)
 		return err

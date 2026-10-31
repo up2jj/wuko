@@ -241,8 +241,10 @@ func newProcess(raw map[string]any, rpcRegistry *rpcRegistry) (step.Runner, erro
 		}
 	}
 	if step.ConfigKnown(raw, "shutdown.command") && config.Shutdown.Command != nil {
-		if err := validateCommand(config.Shutdown.Command.Command, config.Shutdown.Command.Script, config.Shutdown.Command.Shell, "shutdown command"); step.ConfigKnown(raw, "shutdown.command.command", "shutdown.command.script", "shutdown.command.shell") && err != nil {
-			return nil, err
+		if step.ConfigKnown(raw, "shutdown.command.command", "shutdown.command.script", "shutdown.command.shell") {
+			if err := validateCommand(config.Shutdown.Command.Command, config.Shutdown.Command.Script, config.Shutdown.Command.Shell, "shutdown command"); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if step.ConfigKnown(raw, "shutdown.signal") && config.Shutdown.Signal == "" {

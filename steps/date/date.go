@@ -54,8 +54,10 @@ func NewWithClock(raw map[string]any, now func() time.Time) (step.Runner, error)
 		return nil, fmt.Errorf("clock is required")
 	}
 	_, hasDefault := raw["value"]
-	if err := config.NonInteractive.Validate(hasDefault); step.ConfigKnown(raw, "noninteractive") && err != nil {
-		return nil, err
+	if step.ConfigKnown(raw, "noninteractive") {
+		if err := config.NonInteractive.Validate(hasDefault); err != nil {
+			return nil, err
+		}
 	}
 	if _, exists := raw["format"]; !exists {
 		config.Format = defaultFormat

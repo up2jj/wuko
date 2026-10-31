@@ -112,8 +112,10 @@ func NewDiff(raw map[string]any) (step.Runner, error) {
 		renames = *config.Renames
 	}
 	_, hasFrom := raw["from"]
-	if err := validateDiffConfig(config.Source, config.From, config.Through, config.Paths, hasFrom, true); step.ConfigKnown(raw, "from", "paths", "source", "through") && err != nil {
-		return nil, err
+	if step.ConfigKnown(raw, "from", "paths", "source", "through") {
+		if err := validateDiffConfig(config.Source, config.From, config.Through, config.Paths, hasFrom, true); err != nil {
+			return nil, err
+		}
 	}
 	if step.ConfigKnown(raw, "copies") && (config.Copies && !renames) {
 		return nil, fmt.Errorf("copies requires renames")
@@ -134,8 +136,10 @@ func NewDiffCheck(raw map[string]any) (step.Runner, error) {
 		config.Through = "HEAD"
 	}
 	_, hasFrom := raw["from"]
-	if err := validateDiffConfig(config.Source, config.From, config.Through, config.Paths, hasFrom, false); step.ConfigKnown(raw, "from", "paths", "source", "through") && err != nil {
-		return nil, err
+	if step.ConfigKnown(raw, "from", "paths", "source", "through") {
+		if err := validateDiffConfig(config.Source, config.From, config.Through, config.Paths, hasFrom, false); err != nil {
+			return nil, err
+		}
 	}
 	if step.ConfigKnown(raw, "source", "updates") && (config.Source != diffSourcePushed && config.Updates != nil) {
 		return nil, fmt.Errorf("updates is only supported with source pushed")

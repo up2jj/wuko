@@ -51,8 +51,10 @@ func New(raw map[string]any) (step.Runner, error) {
 	if step.ConfigKnown(raw, "format") && (config.Format != formatPlain && config.Format != formatDiff) {
 		return nil, fmt.Errorf("format must be plain or diff")
 	}
-	if err := config.NonInteractive.Validate(config.Default != nil); step.ConfigKnown(raw, "default", "noninteractive") && err != nil {
-		return nil, err
+	if step.ConfigKnown(raw, "default", "noninteractive") {
+		if err := config.NonInteractive.Validate(config.Default != nil); err != nil {
+			return nil, err
+		}
 	}
 	return &Runner{config: config}, nil
 }

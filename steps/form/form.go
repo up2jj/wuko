@@ -167,8 +167,10 @@ func New(raw map[string]any) (step.Runner, error) {
 	if !ok {
 		return nil, fmt.Errorf("fields must be a list")
 	}
-	if err := config.NonInteractive.Validate(slices.ContainsFunc(config.Fields, func(field Field) bool { return field.Default != nil })); step.ConfigKnown(raw, "fields", "noninteractive") && err != nil {
-		return nil, err
+	if step.ConfigKnown(raw, "fields", "noninteractive") {
+		if err := config.NonInteractive.Validate(slices.ContainsFunc(config.Fields, func(field Field) bool { return field.Default != nil })); err != nil {
+			return nil, err
+		}
 	}
 	runner := &Runner{config: config, now: time.Now, read: func(ctx context.Context, request step.Request, config tui.FormConfig) (map[string]any, error) {
 		return tui.Form(ctx, request.Stdin, request.Stdout, config)
