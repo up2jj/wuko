@@ -17,6 +17,7 @@ configuration entirely.
 - [Plugins](#plugins)
 - [Git hooks](#git-hooks)
 - [Coding-agent skills](#coding-agent-skills)
+- [Workflow shims](#workflow-shims)
 - [Shell completion](#shell-completion)
 
 ## Help and offline reference
@@ -330,6 +331,45 @@ wuko agent install         # install for every available agent
 
 Claude skills are installed under `~/.claude/skills/`; Codex skills under `~/.agents/skills/`.
 Reinstalling replaces the bundled skill files.
+
+## Workflow shims
+
+A shim is a small executable script that runs one workflow under its own command name, so
+`deploy staging` can replace `wuko run --file ~/work/app/.wuko/workflows/deploy.yaml staging`.
+
+```sh
+wuko shim install check                              # ~/.wuko/bin/check
+wuko shim install deploy staging                     # ~/.wuko/bin/deploy-staging
+wuko shim install deploy staging --as ship           # choose the command name
+wuko shim install --file ./release.yaml              # pin a file; named after its stem
+wuko shim install check --by-name --as wcheck        # resolve "check" wherever wcheck runs
+wuko shim install github:acme/flows@v1.2.0:ci.yaml --as ci
+wuko shim install lint -- --no-config --var strict=true  # bake wuko run flags into the shim
+wuko shim list
+wuko shim uninstall check deploy-staging
+```
+
+Add the shim directory to `PATH` once; `wuko shim install` prints the line when it is missing:
+
+```sh
+export PATH="$HOME/.wuko/bin:$PATH"
+```
+
+A discovered `NAME` or `--file` is pinned to its absolute path when you install, so the shim
+works from any directory and keeps working if another project defines a workflow of the same
+name. `--by-name` defers discovery to the directory the shim runs in, which suits a command such
+as `wcheck` that runs each project's own `check`. Remote locators always need `--as`; pin them to a
+tag or commit for reproducible shims.
+
+The shim calls `wuko run` from `PATH`, so it keeps working after upgrades that move the binary.
+Arguments after `--` are `wuko run` flags placed before the shim's own arguments, which `wuko run`
+receives unchanged: `deploy-staging --dry-run` and `check --var package=./cmd/...` work as usual.
+Baked flags are checked when you install. The workflow runs in the directory you call the shim
+from, and that directory's `wuko.yml` applies unless the shim bakes in `--no-config`.
+
+`--dir` selects another directory for every `shim` subcommand. Reinstalling a shim requires
+`--force`. Install and uninstall never replace or remove a file that Wuko did not generate, and
+`wuko shim list` marks a shim whose pinned workflow file no longer exists.
 
 ## Shell completion
 

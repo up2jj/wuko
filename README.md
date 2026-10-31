@@ -205,6 +205,8 @@ finally:
 
 - **GitHub Actions.** Run any workflow in CI with annotations, a job summary, and typed outputs:
   `uses: up2jj/wuko@v0.21.0`. [GitHub Actions guide →](docs/github-actions.md)
+- **Shell commands.** Turn a workflow into its own command on `PATH` with
+  `wuko shim install check`. [Workflow shims →](docs/cli.md#workflow-shims)
 - **Git hooks.** Bind workflows to `pre-commit`, `commit-msg`, or `pre-push` with
   `wuko git hook init`. [Git hooks →](docs/git-hooks.md)
 - **Nix and devenv.** Pin Wuko in a project shell and run steps in devenv environments.

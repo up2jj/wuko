@@ -60,7 +60,7 @@ func configureHelp(root *cobra.Command) {
 	}{
 		{"workflows", "Workflows", []string{"run", "ui", "list", "tree", "validate"}},
 		{"packages", "Packages and Plugins", []string{"install", "uninstall", "plugin", "marketplace"}},
-		{"integrations", "Integrations", []string{"git", "agent", "completion"}},
+		{"integrations", "Integrations", []string{"git", "agent", "shim", "completion"}},
 		{"help", "Help and Reference", []string{"help", "reference"}},
 	}
 	for _, group := range groups {
@@ -255,6 +255,9 @@ func commandBehavior(command *cobra.Command) string {
 	case " ui":
 		return "Starts a local browser form and executes the submitted workflow. Requires an explicit workflow form."
 	}
+	if path == " shim uninstall" {
+		return "Removes the named Wuko shims from ~/.wuko/bin, or --dir, without prompting. Refuses a file Wuko did not generate and leaves the workflows themselves in place."
+	}
 	if strings.Contains(path, " uninstall") || strings.HasSuffix(path, " remove") {
 		return "Removes the selected installation or source. May prompt for confirmation; use --yes only when the removal is intended. Scope and confirmation flags must be supplied explicitly where marked CLI-only."
 	}
@@ -265,6 +268,8 @@ func commandBehavior(command *cobra.Command) string {
 		return "Writes a shell completion script to stdout. Does not load local configuration."
 	}
 	if behavior, ok := map[string]string{
+		" shim install":               "Writes an executable shell script to ~/.wuko/bin, or --dir, that runs the workflow through wuko on PATH. A discovered NAME or --file is pinned to its absolute path; --by-name resolves NAME where the shim runs. Flags after -- are baked into the shim. Refuses to replace an existing shim without --force and never replaces a file Wuko did not generate. Does not run the workflow.",
+		" shim list":                  "Lists Wuko shims in ~/.wuko/bin, or --dir, with what each runs. Ignores other files. Does not run workflows.",
 		" agent install":              "Installs the bundled skills into the selected available agent's skill directory. Omitting AGENT installs for all supported agents found on PATH. Writes an installation summary to stdout.",
 		" install":                    "Installs a workflow into the local directory or the home-global directory with --global. Marketplace sources may prompt for package selection; repeated --package flags select packages explicitly. Installation can run declared workflow lifecycle steps.",
 		" plugin install":             "Installs executable plugin releases into the local or global plugin directory. Marketplace sources may prompt for selection; --package selects namespaces explicitly. --reinstall replaces an existing installation.",
@@ -311,7 +316,10 @@ func commandExamples(command *cobra.Command) []string {
 		"git hook init":        {"wuko git hook init"}, "git hook install": {"wuko git hook install"},
 		"git hook uninstall": {"wuko git hook uninstall pre-commit"},
 		"git hook status":    {"wuko git hook status"}, "git hook run": {"wuko git hook run pre-commit"},
-		"completion": {"wuko completion bash", "wuko completion zsh"},
+		"completion":   {"wuko completion bash", "wuko completion zsh"},
+		"shim":         {"wuko shim install check", "wuko shim list"},
+		"shim install": {"wuko shim install check", "wuko shim install deploy staging --as deploy-staging", "wuko shim install lint -- --no-config"},
+		"shim list":    {"wuko shim list"}, "shim uninstall": {"wuko shim uninstall check"},
 	}
 	if values, ok := examples[path]; ok {
 		return values

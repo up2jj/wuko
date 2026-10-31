@@ -23,6 +23,7 @@ Integrations:
   agent       Discover and install coding-agent skills
   completion  Generate shell completion
   git         Integrate Wuko workflows with Git
+  shim        Install commands that run one workflow
 
 Help and Reference:
   help       Show command help as text or JSON
