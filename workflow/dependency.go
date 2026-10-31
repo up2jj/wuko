@@ -177,7 +177,7 @@ func stepDependencyReferences(steps []Step) []dependencyOutputReference {
 			configuration = formTemplateConfiguration(configuration)
 		}
 		if BuiltinStepBindings(workflowStep.Type) && workflowStep.Action == nil {
-			references = append(references, configBindingDependencyReferences(workflowStep.Type, configuration, nil)...)
+			references = append(references, configBindingDependencyReferences(workflowStep.Type, configuration)...)
 		} else {
 			references = append(references, templateValueDependencyReferences(configuration)...)
 		}
@@ -304,29 +304,27 @@ func typedBindingDependencyReferences(bindings map[string]any) []dependencyOutpu
 
 // configBindingDependencyReferences finds host-owned expressions recursively, without
 // interpreting plugin configuration or the expression grammars owned by native steps.
-func configBindingDependencyReferences(stepType string, value any, path []string) []dependencyOutputReference {
-	if StepOwnsBindings(stepType, path) {
-		if binding, ok := OwnedBinding(stepType, path, value); ok {
-			return bindingDependencyReferences(binding)
-		}
-		return templateValueDependencyReferences(value)
-	}
-	if binding, ok := ParseBinding(value); ok && len(path) > 0 {
-		return bindingDependencyReferences(binding)
-	}
+func configBindingDependencyReferences(stepType string, value any) []dependencyOutputReference {
 	var references []dependencyOutputReference
-	switch typed := value.(type) {
-	case string:
-		return templateDependencyReferences(typed)
-	case []any:
-		for i, child := range typed {
-			references = append(references, configBindingDependencyReferences(stepType, child, append(slices.Clone(path), fmt.Sprint(i)))...)
-		}
-	case map[string]any:
-		for _, name := range slices.Sorted(maps.Keys(typed)) {
-			references = append(references, configBindingDependencyReferences(stepType, typed[name], append(slices.Clone(path), name))...)
-		}
-	}
+	// The visitor never fails, and only the collected references matter.
+	_, _ = TransformStepConfig(stepType, value, StepConfigVisitor{
+		Owned: func(value any, path []string) (any, error) {
+			if binding, ok := OwnedBinding(stepType, path, value); ok {
+				references = append(references, bindingDependencyReferences(binding)...)
+			} else {
+				references = append(references, templateValueDependencyReferences(value)...)
+			}
+			return nil, nil
+		},
+		Binding: func(binding Binding, _ []string) (any, error) {
+			references = append(references, bindingDependencyReferences(binding)...)
+			return nil, nil
+		},
+		Text: func(text string, _ []string) (any, error) {
+			references = append(references, templateDependencyReferences(text)...)
+			return nil, nil
+		},
+	})
 	return references
 }
 

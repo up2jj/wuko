@@ -1,7 +1,10 @@
 package workflow
 
 import (
+	"fmt"
+	"maps"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -198,6 +201,58 @@ func HasStepBindings(stepType string, raw map[string]any) bool {
 		return false
 	}
 	return visit(raw, nil)
+}
+
+// StepConfigVisitor handles the leaves of a built-in step configuration.
+type StepConfigVisitor struct {
+	// Owned receives, whole, a subtree the step owns (see StepOwnsBindings).
+	Owned func(value any, path []string) (any, error)
+	// Binding receives each host-owned {expr} or {literal} binding below the root.
+	Binding func(binding Binding, path []string) (any, error)
+	// Text receives every other string.
+	Text func(text string, path []string) (any, error)
+}
+
+// TransformStepConfig rebuilds a built-in step configuration in its binding grammar,
+// replacing owned subtrees, bindings, and strings with the visitor's results. Other
+// scalars are kept. Fields are visited in sorted order, so the first error is stable.
+func TransformStepConfig(stepType string, value any, visitor StepConfigVisitor) (any, error) {
+	return transformStepConfig(stepType, value, nil, visitor)
+}
+
+func transformStepConfig(stepType string, value any, path []string, visitor StepConfigVisitor) (any, error) {
+	if StepOwnsBindings(stepType, path) {
+		return visitor.Owned(value, path)
+	}
+	if binding, ok := ParseBinding(value); ok && len(path) > 0 {
+		return visitor.Binding(binding, path)
+	}
+	switch typed := value.(type) {
+	case string:
+		return visitor.Text(typed, path)
+	case []any:
+		result := make([]any, len(typed))
+		for i, child := range typed {
+			resolved, err := transformStepConfig(stepType, child, append(slices.Clone(path), strconv.Itoa(i)), visitor)
+			if err != nil {
+				return nil, fmt.Errorf("item %d: %w", i, err)
+			}
+			result[i] = resolved
+		}
+		return result, nil
+	case map[string]any:
+		result := make(map[string]any, len(typed))
+		for _, name := range slices.Sorted(maps.Keys(typed)) {
+			resolved, err := transformStepConfig(stepType, typed[name], append(slices.Clone(path), name), visitor)
+			if err != nil {
+				return nil, fmt.Errorf("field %s: %w", name, err)
+			}
+			result[name] = resolved
+		}
+		return result, nil
+	default:
+		return value, nil
+	}
 }
 
 // StepOwnsBindings identifies configuration that already has a step-specific expression

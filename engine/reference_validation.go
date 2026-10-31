@@ -1097,11 +1097,11 @@ func (validator *referenceValidator) validateAction(action *workflow.Action, cal
 func (validator *referenceValidator) validateStepConfiguration(stepID, stepType string, raw map[string]any, scope *referenceScope) error {
 	referenceConfig := raw
 	if validator.registry.ConfigShape(stepType) != nil {
-		value, err := validator.validateConfigBindings(stepType, raw, scope, nil)
+		value, err := validator.validateConfigBindings(stepType, raw, scope)
 		if err != nil {
 			return err
 		}
-		referenceConfig = value.(map[string]any)
+		referenceConfig = value
 	} else {
 		// Dashboard owns nested workflow fragments and live templates. Static fields are checked here;
 		// callback workflows are checked by the runner against the captured parent state.

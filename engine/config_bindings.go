@@ -2,9 +2,7 @@ package engine
 
 import (
 	"fmt"
-	"maps"
 	"reflect"
-	"slices"
 	"strings"
 
 	"github.com/expr-lang/expr"
@@ -34,11 +32,7 @@ func (e *Engine) prepareStepConfig(definition *workflow.Definition, declaration 
 		resolver.data = templateData(definition, options.RunDir, options.Interactive, state)
 		resolver.environment = makeConditionEnvironment(definition, options.RunDir, options.Interactive, state)
 	}
-	value, err := resolver.resolve(declaration.With, nil)
-	if err != nil {
-		return nil, err
-	}
-	return value.(map[string]any), nil
+	return resolver.resolve(declaration.With)
 }
 
 // bindingResolver walks one step configuration, rendering templates and evaluating
@@ -54,39 +48,16 @@ type bindingResolver struct {
 	environment conditionEnvironment
 }
 
-func (r *bindingResolver) resolve(value any, path []string) (any, error) {
-	if workflow.StepOwnsBindings(r.stepType, path) {
-		return r.resolveOwned(value, path)
+func (r *bindingResolver) resolve(config map[string]any) (map[string]any, error) {
+	value, err := workflow.TransformStepConfig(r.stepType, config, workflow.StepConfigVisitor{
+		Owned:   r.resolveOwned,
+		Binding: r.resolveBinding,
+		Text:    func(text string, _ []string) (any, error) { return r.template(text) },
+	})
+	if err != nil {
+		return nil, err
 	}
-	if binding, ok := workflow.ParseBinding(value); ok && len(path) > 0 {
-		return r.resolveBinding(binding, path)
-	}
-	switch typed := value.(type) {
-	case string:
-		return r.template(typed)
-	case []any:
-		result := make([]any, len(typed))
-		for i, child := range typed {
-			resolved, err := r.resolve(child, appendPath(path, fmt.Sprint(i)))
-			if err != nil {
-				return nil, fmt.Errorf("item %d: %w", i, err)
-			}
-			result[i] = resolved
-		}
-		return result, nil
-	case map[string]any:
-		result := make(map[string]any, len(typed))
-		for _, name := range slices.Sorted(maps.Keys(typed)) {
-			resolved, err := r.resolve(typed[name], appendPath(path, name))
-			if err != nil {
-				return nil, fmt.Errorf("field %s: %w", name, err)
-			}
-			result[name] = resolved
-		}
-		return result, nil
-	default:
-		return value, nil
-	}
+	return value.(map[string]any), nil
 }
 
 // resolveOwned keeps a step's own grammar and rendering timing: only workflow templates
@@ -165,8 +136,4 @@ func (r *bindingResolver) template(text string) (string, error) {
 // so validation and execution agree on the available roots.
 func (e *Engine) compileBinding(source string) (*vm.Program, error) {
 	return wukoexpr.Compile(source, expr.Env(e.conditionEnvironmentShape()), expr.AllowUndefinedVariables())
-}
-
-func appendPath(path []string, component string) []string {
-	return append(slices.Clone(path), component)
 }
