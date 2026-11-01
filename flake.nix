@@ -19,7 +19,8 @@
 
       # Only Go sources and embedded assets reach the build, so documentation edits do not
       # rebuild Wuko and path: builds never copy untracked output such as dist/ into the store.
-      # docs/ holds a separate demo module whose Go files must stay out of the main module.
+      # docs/demos holds a separate demo module whose Go files must stay out of the main module;
+      # docs/embed.go embeds only the top-level manuals.
       goFiles = lib.fileset.fileFilter (file: file.hasExt "go") ./.;
       src = lib.fileset.toSource {
         root = ./.;
@@ -29,7 +30,17 @@
           ./cmd
           ./scriptsdk
           ./skills
-          (lib.fileset.difference goFiles ./docs)
+          ./reference/examples
+          ./reference/metadata.yaml
+          (lib.fileset.difference goFiles ./docs/demos)
+          (lib.fileset.difference (lib.fileset.fileFilter (file: file.hasExt "md") ./docs) (
+            lib.fileset.unions [
+              ./docs/assets
+              ./docs/benchmarks
+              ./docs/demos
+              ./docs/releases
+            ]
+          ))
         ];
       };
 
