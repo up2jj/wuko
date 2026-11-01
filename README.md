@@ -204,7 +204,7 @@ finally:
 ## Use Wuko with your tools
 
 - **GitHub Actions.** Run any workflow in CI with annotations, a job summary, and typed outputs:
-  `uses: up2jj/wuko@v0.21.0`. [GitHub Actions guide →](docs/github-actions.md)
+  `uses: up2jj/wuko@v0.22.0`. [GitHub Actions guide →](docs/github-actions.md)
 - **Shell commands.** Turn a workflow into its own command with `wuko shim install check`,
   or expose a project's workflows from anywhere with
   `wuko shim install --project ./automation --as mytools`. [Workflow shims →](docs/cli.md#workflow-shims)
