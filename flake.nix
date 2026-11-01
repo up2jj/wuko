@@ -33,13 +33,14 @@
           ./reference/examples
           ./reference/metadata.yaml
           (lib.fileset.difference goFiles ./docs/demos)
-          (lib.fileset.difference (lib.fileset.fileFilter (file: file.hasExt "md") ./docs) (
-            lib.fileset.unions [
-              ./docs/assets
-              ./docs/benchmarks
-              ./docs/demos
-              ./docs/releases
-            ]
+          (lib.fileset.unions (
+            map (name: ./docs + "/${name}") (
+              builtins.attrNames (
+                lib.filterAttrs (name: type: type == "regular" && lib.hasSuffix ".md" name) (
+                  builtins.readDir ./docs
+                )
+              )
+            )
           ))
         ];
       };
