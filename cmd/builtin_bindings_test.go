@@ -23,6 +23,7 @@ func TestBuiltinsValidateDeferredRuntimeValues(t *testing.T) {
 		{"process shutdown signal", "process", map[string]any{"command": "echo", "shutdown": map[string]any{"signal": binding()}}, "SIGTERM"},
 		{"shell exit codes", "shell", map[string]any{"command": "echo", "allowed_exit_codes": binding()}, []any{0, 1}},
 		{"file contents", "file", map[string]any{"operation": "write", "path": "out", "content": binding()}, "body"},
+		{"file follow symlinks", "file", map[string]any{"operation": "write", "path": "out", "content": "body", "follow_symlinks": binding()}, true},
 		{"file mode", "file", map[string]any{"operation": "mkdir", "path": "out", "mode": binding()}, "0755"},
 		{"file patterns", "file", map[string]any{"operation": "find", "path": ".", "patterns": binding()}, []any{"**"}},
 		{"file paths", "file", map[string]any{"operation": "append", "paths": binding(), "content": "text"}, []any{"out"}},

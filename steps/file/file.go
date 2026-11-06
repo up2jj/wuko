@@ -47,35 +47,36 @@ const (
 var modePattern = regexp.MustCompile(`^0[0-7]{3}$`)
 
 type Config struct {
-	Operation   string   `yaml:"operation"`
-	Path        string   `yaml:"path"`
-	Paths       []string `yaml:"paths,omitempty"`
-	Destination string   `yaml:"destination,omitempty"`
-	Content     string   `yaml:"content,omitempty"`
-	Recursive   bool     `yaml:"recursive,omitempty"`
-	Overwrite   bool     `yaml:"overwrite,omitempty"`
-	Mode        string   `yaml:"mode,omitempty"`
-	Patterns    []string `yaml:"patterns,omitempty"`
-	Types       []string `yaml:"types,omitempty"`
-	MinSize     string   `yaml:"min_size,omitempty"`
-	MaxSize     string   `yaml:"max_size,omitempty"`
-	MinAge      string   `yaml:"min_age,omitempty"`
-	MaxAge      string   `yaml:"max_age,omitempty"`
-	LinkType    string   `yaml:"link_type,omitempty"`
-	Replace     string   `yaml:"replace,omitempty"`
-	Size        string   `yaml:"size,omitempty"`
-	Lines       int      `yaml:"lines,omitempty"`
-	Bytes       string   `yaml:"bytes,omitempty"`
-	MaxBytes    string   `yaml:"max_bytes,omitempty"`
-	Largest     int      `yaml:"largest,omitempty"`
-	Create      bool     `yaml:"create,omitempty"`
-	AccessedAt  string   `yaml:"accessed_at,omitempty"`
-	ModifiedAt  string   `yaml:"modified_at,omitempty"`
-	Line        string   `yaml:"line,omitempty"`
-	Match       string   `yaml:"match,omitempty"`
-	PresentIf   string   `yaml:"present_if,omitempty"`
-	Marker      string   `yaml:"marker,omitempty"`
-	Check       bool     `yaml:"check,omitempty"`
+	Operation      string   `yaml:"operation"`
+	Path           string   `yaml:"path"`
+	Paths          []string `yaml:"paths,omitempty"`
+	Destination    string   `yaml:"destination,omitempty"`
+	Content        string   `yaml:"content,omitempty"`
+	Recursive      bool     `yaml:"recursive,omitempty"`
+	Overwrite      bool     `yaml:"overwrite,omitempty"`
+	FollowSymlinks bool     `yaml:"follow_symlinks,omitempty"`
+	Mode           string   `yaml:"mode,omitempty"`
+	Patterns       []string `yaml:"patterns,omitempty"`
+	Types          []string `yaml:"types,omitempty"`
+	MinSize        string   `yaml:"min_size,omitempty"`
+	MaxSize        string   `yaml:"max_size,omitempty"`
+	MinAge         string   `yaml:"min_age,omitempty"`
+	MaxAge         string   `yaml:"max_age,omitempty"`
+	LinkType       string   `yaml:"link_type,omitempty"`
+	Replace        string   `yaml:"replace,omitempty"`
+	Size           string   `yaml:"size,omitempty"`
+	Lines          int      `yaml:"lines,omitempty"`
+	Bytes          string   `yaml:"bytes,omitempty"`
+	MaxBytes       string   `yaml:"max_bytes,omitempty"`
+	Largest        int      `yaml:"largest,omitempty"`
+	Create         bool     `yaml:"create,omitempty"`
+	AccessedAt     string   `yaml:"accessed_at,omitempty"`
+	ModifiedAt     string   `yaml:"modified_at,omitempty"`
+	Line           string   `yaml:"line,omitempty"`
+	Match          string   `yaml:"match,omitempty"`
+	PresentIf      string   `yaml:"present_if,omitempty"`
+	Marker         string   `yaml:"marker,omitempty"`
+	Check          bool     `yaml:"check,omitempty"`
 
 	EnsureNewline  bool   `yaml:"ensure_newline,omitempty"`
 	UnlessContains string `yaml:"unless_contains,omitempty"`
@@ -247,6 +248,7 @@ func (r *Runner) validate(resolved bool) error {
 	case operationRead, operationStat:
 	case operationWrite:
 		allowed["content"], allowed["overwrite"], allowed["mode"] = true, true, true
+		allowed["follow_symlinks"] = true
 		if err := require("content"); err != nil {
 			return err
 		}
@@ -361,6 +363,7 @@ func (r *Runner) read(ctx context.Context, path string) (step.Result, error) {
 
 func (r *Runner) write(ctx context.Context, path string) (step.Result, error) {
 	mode := os.FileMode(0o644)
+	writePath := path
 	info, err := os.Lstat(path)
 	exists := err == nil
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -369,6 +372,18 @@ func (r *Runner) write(ctx context.Context, path string) (step.Result, error) {
 	if exists {
 		if !r.config.Overwrite {
 			return step.Result{}, fmt.Errorf("destination %s already exists; set overwrite to true", path)
+		}
+		if r.config.FollowSymlinks && info.Mode()&os.ModeSymlink != 0 {
+			// Stat follows the whole chain, so dangling links and loops fail here.
+			if info, err = os.Stat(path); err != nil {
+				return step.Result{}, fmt.Errorf("resolving destination %s: %w", path, err)
+			}
+			if !info.Mode().IsRegular() {
+				return step.Result{}, fmt.Errorf("destination %s must link to a regular file", path)
+			}
+			if writePath, err = filepath.EvalSymlinks(path); err != nil {
+				return step.Result{}, fmt.Errorf("resolving destination %s: %w", path, err)
+			}
 		}
 		if info.IsDir() {
 			return step.Result{}, fmt.Errorf("destination %s is a directory", path)
@@ -383,7 +398,7 @@ func (r *Runner) write(ctx context.Context, path string) (step.Result, error) {
 			return step.Result{}, err
 		}
 	}
-	if err := atomicWrite(ctx, path, strings.NewReader(r.config.Content), mode, r.config.Overwrite); err != nil {
+	if err := atomicWrite(ctx, writePath, strings.NewReader(r.config.Content), mode, r.config.Overwrite); err != nil {
 		return step.Result{}, err
 	}
 	return step.Result{Outputs: map[string]any{

@@ -50,7 +50,7 @@ workflows are trusted code, so paths are not confined to the run directory.
 | Operation | Additional fields | Principal outputs |
 | --- | --- | --- |
 | `read` | none | `content`, `size` |
-| `write` | `content`, `overwrite`, `mode` | `size`, `mode`, `created` |
+| `write` | `content`, `overwrite`, `follow_symlinks`, `mode` | `size`, `mode`, `created` |
 | `copy` | `destination`, `overwrite` | `destination`, `size`, `mode` |
 | `move` | `destination`, `overwrite` | `destination`, `size`, `mode` |
 | `remove` | `recursive` | `removed` |
@@ -90,8 +90,10 @@ reading but does not impose a size limit.
 ## Write
 
 `write` requires `content` and creates a regular file atomically. The parent directory must already
-exist. A destination is rejected unless `overwrite: true` is set. New files default to mode `"0644"`;
-overwriting without `mode` preserves an existing regular file's permissions.
+exist. An existing destination is rejected unless `overwrite: true` is set. By default,
+overwriting a leaf symbolic link replaces the link with a regular file and leaves its target
+unchanged. New files default to mode `"0644"`; overwriting without `mode` preserves an existing
+regular file's permissions.
 
 ```yaml
 - id: write_script
@@ -106,7 +108,32 @@ overwriting without `mode` preserves an existing regular file's permissions.
     mode: "0755"
 ```
 
-Outputs are `created`, `size`, and normalized `mode`.
+Set `follow_symlinks: true` to preserve a symbolic link and atomically replace the regular file it
+points to. Relative and absolute links and chains of links are resolved; the temporary file is
+created in the resolved target's directory. The target keeps its permissions unless `mode` is
+set, and the replacement file is owned by the user running the workflow. An existing link still
+requires `overwrite: true`. Dangling links, loops, and links to directories or special files fail
+without replacing the link or target. Concurrent changes to the link chain are not guarded against.
+
+```yaml
+- id: write_dotfile
+  type: file
+  with:
+    operation: write
+    path: "{{ .env.HOME }}/.zshrc"
+    content: "export EDITOR=nvim\n"
+    overwrite: true
+    follow_symlinks: true
+```
+
+`follow_symlinks` defaults to `false` and is only available for `write`. Setting it to `true` on a
+non-local executor filesystem is an error before filesystem access; it never resolves remote
+paths on the host. Ordinary files and new destinations retain their usual write behavior, and
+the parent directory must already exist.
+
+Outputs are `created`, `size`, and normalized `mode`. `path` remains the original path resolved
+from the run directory, even when a symlink is followed. `created` is `false` when that destination
+already existed, including a symlink, and `mode` describes the written file.
 
 ## Copy and move
 

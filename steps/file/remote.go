@@ -56,6 +56,9 @@ func (r *Runner) readRemote(ctx context.Context, target executor.FileSystem, pat
 }
 
 func (r *Runner) writeRemote(ctx context.Context, target executor.FileSystem, path string) (step.Result, error) {
+	if r.config.FollowSymlinks {
+		return step.Result{}, fmt.Errorf("file %s: follow_symlinks is only supported on the local filesystem", r.config.Operation)
+	}
 	mode := os.FileMode(0o644)
 	info, err := target.Stat(ctx, path)
 	exists := err == nil

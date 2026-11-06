@@ -4,12 +4,14 @@ import (
 	"context"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/up2jj/wuko/executor"
 	"github.com/up2jj/wuko/internal/steptest"
+	"github.com/up2jj/wuko/internal/testfs"
 	"github.com/up2jj/wuko/process"
 	"github.com/up2jj/wuko/step"
 )
@@ -126,6 +128,35 @@ func TestFileWritesThroughTheExecutorFileSystem(t *testing.T) {
 	}
 	if _, err := os.Lstat(target); err == nil {
 		t.Fatalf("write inside an executor block also touched the host at %s", target)
+	}
+}
+
+func TestFileRefusesFollowingSymlinksOnNonLocalFileSystems(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	target := filepath.Join(root, "target")
+	testfs.WriteFile(t, target, []byte("host"), 0o600)
+	path := filepath.Join(root, "link")
+	if err := os.Symlink("target", path); err != nil {
+		t.Fatal(err)
+	}
+	session := newTargetSession()
+	session.files[path] = []byte("remote")
+	runner, err := New(map[string]any{
+		"operation": "write", "path": path, "content": "new", "overwrite": true, "follow_symlinks": true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runner.Run(t.Context(), step.Request{RunDir: root, Executor: session})
+	if err == nil || !strings.Contains(err.Error(), "follow_symlinks is only supported on the local filesystem") {
+		t.Fatalf("Run() error = %v, want unsupported option", err)
+	}
+	if string(session.files[path]) != "remote" {
+		t.Error("refused write changed the remote file")
+	}
+	if got, err := os.ReadFile(target); err != nil || string(got) != "host" {
+		t.Fatalf("host target = %q, error = %v", got, err)
 	}
 }
 
