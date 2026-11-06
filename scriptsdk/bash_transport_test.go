@@ -88,6 +88,35 @@ printf preserved >&9
 	}
 }
 
+func TestBashTransportReportsConnectFailureOnce(t *testing.T) {
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("Bash is unavailable")
+	}
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Skip("IPv4 loopback is unavailable")
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	listener.Close()
+	// Retried connects stay silent; the caller's fd 8 survives the transport.
+	source := fmt.Sprintf("__wuko_sdk_port=%d\n%s\nexec 8>caller-fd\n", port, bashBootstrap) +
+		`if __wuko_sdk_builtin_call output name value; then exit 90; fi
+printf preserved >&8
+[[ $(<caller-fd) == preserved ]]
+`
+	command := exec.CommandContext(t.Context(), bash, "--noprofile", "--norc", "-c", source)
+	command.Dir = t.TempDir()
+	var stderr bytes.Buffer
+	command.Stderr = &stderr
+	if err := command.Run(); err != nil {
+		t.Fatalf("%v: %s", err, stderr.String())
+	}
+	if got, want := stderr.String(), "connecting to Bash SDK bridge failed\n"; got != want {
+		t.Fatalf("stderr = %q, want %q", got, want)
+	}
+}
+
 func TestBashTransportAuthenticatesLimitsAndCloses(t *testing.T) {
 	bridge := openBridge(t, step.Request{})
 	port, err := bridge.openBashListener()
