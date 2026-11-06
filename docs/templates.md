@@ -27,6 +27,7 @@ Every rendered string can access these roots:
 | `.vars` | Workflow variables, including values written by earlier sequential steps. |
 | `.env` | The effective workflow environment, including any enclosing scoped `env` blocks. |
 | `.steps` | Outputs committed by earlier sequential steps. |
+| `.checks` | Latest committed findings by ID, as `{id, status, message, fix}` records; initially an empty list. |
 | `.workflow.name` | The owning workflow or action name. |
 | `.workflow.dir` | The directory containing the owning workflow or materialized action. |
 | `.workflow.timezone` | The workflow's declared IANA timezone, or an empty string when none is declared. |

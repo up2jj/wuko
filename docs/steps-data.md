@@ -11,7 +11,7 @@ them through `.vars` and `.steps`; expressions use `vars` and `steps` without th
 | --- | --- |
 | Create values | [`set`](#set) — assign a literal or expression · [`template`](#template) — render text to memory or a file |
 | Reshape values | [`transform`](#transform) — list, object, and aggregation pipelines ([list](#list-operations), [object](#object-operations), [tuple and join](#tuple-and-join-operations) operations, [result records](#terminal-result-records)) |
-| Check values | [`assert`](#assert) — stop unless an expression is true |
+| Check values | [`assert`](#assert) — stop unless an expression is true · [`check`](#check) — collect findings and fail at workflow completion |
 | Show findings | [`print`](#print) — user-facing messages with a level symbol |
 | Load and decode | [`import_vars`](#import_vars) — JSON or TOML into variables · [`decode`](#decode) — JSON, YAML, TOML, or lines into a value · [`extract`](#extract) — records and markers from text |
 | Query and edit | [`jsonpath`](#jsonpath) — select values · [`edit`](#edit) — update structured files or values · [`markdown_edit`](#markdown_edit) — update Markdown by AST node |
@@ -336,6 +336,58 @@ them. Explicit messages remain visible inside quiet blocks and with `--reporter 
 
 Lua provides the matching `wuko.ui.info`, `success`, `warn`, and `error` functions. See
 [run reporters](execution.md#run-reporters) for workflow defaults and CLI overrides.
+
+## `check`
+
+Evaluate several boolean checks, record every finding, and continue the workflow. A workflow can
+contain any number of `check` steps, each with a nonempty `with.checks` list:
+
+```yaml
+- id: prerequisites
+  type: check
+  with:
+    checks:
+      - id: node_version
+        expr: steps.node.constraint_matched
+        message: "Node {{ .steps.node.version }} is older than 22"
+        fix: brew install node@22
+      - id: credentials
+        expr: steps.credentials.available
+        message: Credentials are unavailable
+        fix: gh auth login
+        severity: warn
+```
+
+Each entry requires a nonempty `id`, boolean `expr`, and nonempty `message`. `severity` defaults
+to `fail` and accepts `fail` or `warn`; `fix` is optional text and is never executed automatically.
+Fields accept ordinary templates and typed bindings. Messages and fixes render before evaluation,
+including for passing checks, so guard references to optional probe values. Probe steps still need
+their normal optional/allowed-exit configuration when an expected negative result is not an error.
+
+True expressions record `ok`; false expressions record the selected severity. The step output
+`.steps.<step-id>.checks` contains its findings as `{id, status, message, fix}` records. Every entry
+sees the same step-start snapshot, and the whole list publishes together. Invalid expressions,
+missing runtime values, rendering errors, and cancellation remain ordinary failures; they do not
+publish a partial list.
+
+The read-only `.checks` root (Expr: `checks`, Lua and Node: `wuko.checks`) holds the latest finding
+for each ID across the workflow, initially an empty list. A later committed finding with the same
+rendered ID replaces the earlier finding without moving its position. Use a later `check` step to
+recheck after an accepted fix. Loop-generated IDs can include the iteration item to keep findings
+separate.
+
+At completion, the report groups failed checks, warnings, and passed checks, preserving first-seen
+order inside each group. Unresolved findings show their message and fix text. Any remaining `fail`
+makes the workflow exit nonzero; warnings alone succeed. `finally` can read all committed findings
+and sees `finally.status == "failed"` when failures are pending. Rechecks in `finally` or deferred
+work can clear them before the final exit decision. Real execution and cleanup errors still fail.
+
+Composite actions and successful control groups contribute to the enclosing workflow. Failed
+isolated attempts and groups discard their findings. Parallel branches and iterations merge in
+declaration/index order, regardless of completion order. Independent `run_workflow` calls have
+their own findings and exit status; isolated inline callbacks retain their own state. Dry-run and
+validation do not evaluate checks. JSON execution reports include a redacted `checks` array when
+findings exist, including when the run fails.
 
 ## `assert`
 

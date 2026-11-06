@@ -1,3 +1,11 @@
+check:
+  required:
+    - "checks"
+  rules:
+    - "checks is a nonempty list. Each entry requires id, expr and message; severity defaults to fail and accepts fail or warn. fix is optional text and is never executed."
+    - "False records a finding and continues. Later findings replace the same ID. The workflow fails after finally if any fail remains; evaluation errors remain ordinary step failures."
+  defaults: {}
+  choices: {}
 assert:
   required:
     - "expr"

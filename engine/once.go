@@ -247,8 +247,10 @@ func (e *Engine) executeOnce(ctx context.Context, definition *workflow.Definitio
 			"vars":  variables,
 		},
 		Variables: variables,
+		Checks:    private.checkWrites,
 	}
 	record := map[string]any{
+		"checks":  step.CheckValues(result.Checks),
 		"version": onceRecordVersion,
 		"steps":   result.Outputs["steps"],
 		"vars":    result.Outputs["vars"],
@@ -297,9 +299,31 @@ func decodeOnceRecord(key string, value any) (step.Result, error) {
 	if !stepsOK || !varsOK {
 		return step.Result{}, fmt.Errorf("record for key %q has an invalid outcome", key)
 	}
+	var checks []step.CheckFinding
+	if values, exists := record["checks"]; exists {
+		items, ok := values.([]any)
+		if !ok {
+			return step.Result{}, fmt.Errorf("record for key %q has invalid checks", key)
+		}
+		for _, item := range items {
+			value, ok := item.(map[string]any)
+			if !ok {
+				return step.Result{}, fmt.Errorf("record for key %q has invalid checks", key)
+			}
+			id, idOK := value["id"].(string)
+			status, statusOK := value["status"].(string)
+			message, messageOK := value["message"].(string)
+			fix, fixOK := value["fix"].(string)
+			if !idOK || id == "" || !statusOK || (status != "ok" && status != "warn" && status != "fail") || !messageOK || !fixOK {
+				return step.Result{}, fmt.Errorf("record for key %q has invalid checks", key)
+			}
+			checks = append(checks, step.CheckFinding{ID: id, Status: status, Message: message, Fix: fix})
+		}
+	}
 	decodedSteps, _ := workflow.RuntimeValue(steps).(map[string]any)
 	decodedVars, _ := workflow.RuntimeValue(variables).(map[string]any)
 	return step.Result{
+		Checks:    checks,
 		Outputs:   map[string]any{"steps": decodedSteps, "vars": decodedVars},
 		Variables: decodedVars,
 	}, nil

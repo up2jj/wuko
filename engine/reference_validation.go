@@ -51,12 +51,12 @@ var (
 	baseTemplateRoots = map[string]struct{}{
 		"inputs": {}, "vars": {}, "env": {}, "steps": {}, "dependencies": {},
 		"batch": {}, "foreach": {}, "matrix": {}, "finally": {}, "error": {},
-		"workflow": {}, "run": {},
+		"workflow": {}, "run": {}, "checks": {},
 	}
 	baseExpressionRoots = map[string]struct{}{
 		"inputs": {}, "vars": {}, "env": {}, "steps": {}, "dependencies": {},
 		"batch": {}, "foreach": {}, "matrix": {}, "finally": {}, "error": {},
-		"workflow": {}, "run": {}, "cancel_on": {}, "monitors": {},
+		"workflow": {}, "run": {}, "checks": {}, "cancel_on": {}, "monitors": {},
 		"result": {}, "poll": {}, "current": {}, "found": {}, "path": {}, "index": {},
 		"item": {}, "label": {}, "value": {}, "description": {}, "disabled": {}, "reason": {},
 	}
@@ -89,6 +89,7 @@ func (e *Engine) validateDataReferences(ctx context.Context, definition *workflo
 
 func newReferenceScope(state *State, stepSchemas map[string]*referenceSchema) *referenceScope {
 	scope := &referenceScope{roots: map[string]*referenceSchema{
+		"checks":       schemaForStepOutputs(step.CheckSchema()),
 		"inputs":       schemaForAnyMap(state.Inputs),
 		"vars":         schemaForAnyMap(state.Vars),
 		"env":          openReference,

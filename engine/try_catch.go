@@ -175,7 +175,7 @@ func (e *Engine) executeTryCatch(ctx context.Context, definition *workflow.Defin
 		},
 		"vars": controlVariables(private, allWritten),
 	}
-	outcome.result = step.Result{Outputs: outputs, Variables: variables}
+	outcome.result = step.Result{Outputs: outputs, Variables: variables, Checks: private.checkWrites}
 	finish(StatusSucceeded, nil, phases, nested)
 	return outcome
 }

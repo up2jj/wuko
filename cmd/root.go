@@ -35,6 +35,7 @@ import (
 	assertstep "github.com/up2jj/wuko/steps/assert"
 	cachestep "github.com/up2jj/wuko/steps/cache"
 	changedstep "github.com/up2jj/wuko/steps/changed"
+	checkstep "github.com/up2jj/wuko/steps/check"
 	"github.com/up2jj/wuko/steps/choice"
 	"github.com/up2jj/wuko/steps/confirm"
 	dashboardstep "github.com/up2jj/wuko/steps/dashboard"
@@ -302,7 +303,7 @@ func NewRootCmd() *cobra.Command {
 func registerBuiltinSteps(registry *step.Registry) error {
 	for _, register := range []func(*step.Registry) error{
 		formstep.Register, inputstep.Register, passwordstep.Register, choice.Register, datestep.Register, pathstep.Register, review.Register, tablestep.Register, dashboardstep.Register,
-		confirm.Register, assertstep.Register, printstep.Register, setstep.Register, transformstep.Register, templatestep.Register, importvarsstep.Register, decodestep.Register, jsonpathstep.Register, editstep.Register, markdowneditstep.Register, textstep.Register, extractstep.Register, semverstep.Register, httpstep.Register, tcpprobestep.Register, filestep.Register, scaffoldstep.Register, tempstep.Register, globstep.Register, watchstep.Register, cachestep.Register, changedstep.Register, requiretoolstep.Register,
+		confirm.Register, assertstep.Register, checkstep.Register, printstep.Register, setstep.Register, transformstep.Register, templatestep.Register, importvarsstep.Register, decodestep.Register, jsonpathstep.Register, editstep.Register, markdowneditstep.Register, textstep.Register, extractstep.Register, semverstep.Register, httpstep.Register, tcpprobestep.Register, filestep.Register, scaffoldstep.Register, tempstep.Register, globstep.Register, watchstep.Register, cachestep.Register, changedstep.Register, requiretoolstep.Register,
 		dockerstep.Register, gitstep.Register, githubprstep.Register, githubactionsstep.Register, githubreleasestep.Register, keyvaluestep.Register, luastep.Register, logwaitstep.Register, multiplexerstep.Register, timestep.Register, shell.Register, processstep.Register, devenvstep.RegisterTask,
 		runworkflowstep.Register,
 	} {

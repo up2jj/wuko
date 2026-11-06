@@ -22,7 +22,7 @@ import (
 // the wuko module: a provider sharing one of those names would silently clobber wuko.args or be
 // clobbered by wuko.http, leaving the root present in templates but missing or wrong in Lua.
 var providerReservedRoots = map[string]struct{}{
-	"inputs": {}, "vars": {}, "env": {}, "steps": {}, "dependencies": {},
+	"inputs": {}, "vars": {}, "env": {}, "steps": {}, "dependencies": {}, "checks": {},
 	"workflow": {}, "run": {}, "secret": {},
 	"batch": {}, "foreach": {}, "matrix": {}, "observe": {}, "finally": {}, "error": {},
 	"cancel_on": {}, "monitors": {}, "result": {}, "poll": {}, "current": {}, "found": {},
@@ -158,6 +158,7 @@ func templateData(definition *Definition, runDir string, environmentLoaders []st
 		"env":          EnvironmentValues(environment),
 		"steps":        steps,
 		"dependencies": CloneDependencies(dependencies),
+		"checks":       []any{},
 		"workflow": map[string]any{
 			"name":     definition.Name,
 			"dir":      definition.Dir,

@@ -1,0 +1,35 @@
+version: 1
+name: doctor
+vars:
+  configured: false
+steps:
+  - id: prerequisites
+    type: check
+    with:
+      checks:
+        - id: configuration
+          expr: vars.configured
+          message: Development configuration is missing
+          fix: wuko run configure
+        - id: runtime
+          expr: run.os != ""
+          message: Host runtime is unavailable
+          severity: warn
+  - id: configure
+    type: set
+    with:
+      variable: configured
+      value: true
+  - id: recheck
+    type: check
+    with:
+      checks:
+        - id: configuration
+          expr: vars.configured
+          message: Development configuration is missing
+          fix: wuko run configure
+finally:
+  - id: report
+    type: print
+    with:
+      message: "Doctor collected {{ len .checks }} findings."

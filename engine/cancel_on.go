@@ -158,7 +158,11 @@ func (e *Engine) executeCancelOn(ctx context.Context, definition *workflow.Defin
 		}
 		outputs["result"] = collection
 	}
-	outcome.result = step.Result{Outputs: outputs}
+	var checks []step.CheckFinding
+	if participants[winner].err == nil {
+		checks = participants[winner].state.checkWrites
+	}
+	outcome.result = step.Result{Outputs: outputs, Checks: checks}
 	finish(StatusSucceeded, nil, cancelOnParticipantStats(participants), cancelOnNestedStats(participants))
 	reportCancelOnFinished(options, definition, workflowStep, startedAt, participants, nil)
 	return outcome

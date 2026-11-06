@@ -388,7 +388,7 @@ func attemptPollMessage(matched bool) string {
 // variable writes reach the workflow only through this value -- never as top-level steps or
 // vars entries. Variables is deliberately empty for the same reason.
 func attemptResult(control *workflow.AttemptControl, private *State, attempts, polls int) step.Result {
-	return step.Result{Outputs: map[string]any{
+	return step.Result{Checks: private.checkWrites, Outputs: map[string]any{
 		"attempts": attempts,
 		"polls":    polls,
 		"steps":    selectedStepOutputs(private, control.Steps),

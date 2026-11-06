@@ -108,7 +108,7 @@ func Open(ctx context.Context, request step.Request, args map[string]any) (*Brid
 	}
 	snapshot := map[string]any{
 		"args": nonNilMap(args), "vars": nonNilMap(request.Vars),
-		"inputs": nonNilMap(request.Inputs), "steps": nonNilMap(request.Steps),
+		"checks": step.CheckValues(request.Checks), "inputs": nonNilMap(request.Inputs), "steps": nonNilMap(request.Steps),
 		"dependencies": nonNilMap(request.Dependencies), "env": nonNilMap(request.Env),
 		"providers": nonNilMap(request.Providers.Values), "bindings": nonNilMap(request.Bindings),
 		"workflow": map[string]any{"name": request.WorkflowName, "dir": request.WorkflowDir, "timezone": request.WorkflowTimezone},

@@ -11,6 +11,7 @@ import (
 	"github.com/up2jj/wuko/correlation"
 	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/process"
+	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/useroutput"
 	"github.com/up2jj/wuko/workflow"
 )
@@ -128,6 +129,8 @@ type RunStats struct {
 // ProgressEvent is delivered synchronously and serialized as execution changes state. Depth is
 // zero for the selected workflow and increases inside concurrent groups and composite actions.
 type ProgressEvent struct {
+	// Checks contains the redacted final findings of a workflow, including failed runs.
+	Checks []step.CheckFinding
 	// Presentation preferences accompany every event; observers retain the full stream.
 	Presentation    workflow.ReporterConfig
 	Quiet           bool

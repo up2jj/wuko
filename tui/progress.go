@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/up2jj/wuko/engine"
+	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/useroutput"
 )
 
@@ -223,6 +224,7 @@ func (progress *Progress) Report(event engine.ProgressEvent) {
 			// The final step's program now owns the terminal; a summary would interleave with it.
 			return
 		}
+		progress.reportChecks(event.Checks, indent)
 		parts := progress.runSummary(event.Stats)
 		label := "Workflow"
 		if event.Depth > 0 {
@@ -233,6 +235,34 @@ func (progress *Progress) Report(event engine.ProgressEvent) {
 			fmt.Fprintf(progress.writer, "%s%s", progress.dim(" · "), strings.Join(parts, progress.dim(" · ")))
 		}
 		fmt.Fprintln(progress.writer)
+	}
+}
+
+func (progress *Progress) reportChecks(findings []step.CheckFinding, indent string) {
+	for _, group := range []struct{ status, title, marker string }{
+		{"fail", "Failed checks", "✗"}, {"warn", "Warnings", "!"}, {"ok", "Passed checks", "✓"},
+	} {
+		heading := false
+		for _, finding := range findings {
+			if finding.Status != group.status {
+				continue
+			}
+			if !heading {
+				fmt.Fprintf(progress.writer, "%s%s:\n", indent, group.title)
+				heading = true
+			}
+			fmt.Fprintf(progress.writer, "%s  %s %s", indent, group.marker, finding.ID)
+			if finding.Status != "ok" {
+				fmt.Fprintf(progress.writer, ": %s", strings.ReplaceAll(finding.Message, "\n", "\n"+indent+"    "))
+			}
+			fmt.Fprintln(progress.writer)
+			if finding.Status != "ok" && finding.Fix != "" {
+				fmt.Fprintf(progress.writer, "%s    Fix:\n", indent)
+				for _, line := range strings.Split(strings.TrimRight(finding.Fix, "\n"), "\n") {
+					fmt.Fprintf(progress.writer, "%s      %s\n", indent, line)
+				}
+			}
+		}
 	}
 }
 

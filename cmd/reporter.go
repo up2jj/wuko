@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -176,6 +177,7 @@ func (reporters *runReporters) complete(ctx context.Context, workflowName string
 	}
 	if terminal != nil && terminal.RunID != "" && terminal.RunID == outcome.RunID {
 		outcome.Values = terminal.Values
+		outcome.Checks = slices.Clone(terminal.Checks)
 	}
 	return reporters.Finish(context.WithoutCancel(ctx), outcome)
 }

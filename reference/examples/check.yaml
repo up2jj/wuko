@@ -1,0 +1,44 @@
+- id: basic
+  title: Collect checks and recheck after a fix
+  description: Multiple checks share a report; a later check step clears a previous failure.
+  workflow: |
+    version: 1
+    name: doctor
+    vars:
+      configured: false
+    steps:
+      - id: prerequisites
+        type: check
+        with:
+          checks:
+            - id: configuration
+              expr: vars.configured
+              message: Development configuration is missing
+              fix: wuko run configure
+            - id: runtime
+              expr: run.os != ""
+              message: Host runtime is unavailable
+              severity: warn
+      - id: configure
+        type: set
+        with:
+          variable: configured
+          value: true
+      - id: recheck
+        type: check
+        with:
+          checks:
+            - id: configuration
+              expr: vars.configured
+              message: Development configuration is missing
+              fix: wuko run configure
+    finally:
+      - id: report
+        type: print
+        with:
+          message: "Doctor collected {{ len .checks }} findings."
+  files: {}
+  prerequisites: []
+  expected: The workflow continues after the initial failed check and succeeds after the configuration recheck.
+  check: 'len(checks) == 2 && all(checks, #.status == "ok")'
+  run: true

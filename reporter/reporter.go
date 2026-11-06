@@ -11,6 +11,7 @@ import (
 	"github.com/up2jj/wuko/correlation"
 	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/engine"
+	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/workflow"
 )
 
@@ -18,6 +19,7 @@ import (
 // invocation. Outputs contains a deep copy of the workflow's declared outputs. Execution inputs
 // and environment are excluded; step outputs and variables arrive only as the redacted Values.
 type Outcome struct {
+	Checks          []step.CheckFinding
 	Presentation    workflow.ReporterConfig
 	InvocationID    correlation.InvocationID
 	RunID           correlation.RunID

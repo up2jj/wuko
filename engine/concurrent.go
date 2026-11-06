@@ -243,11 +243,13 @@ func concurrentReadState(snapshot *State, steps []workflow.Step, outcomes []conc
 		if outcome.state == nil || outcome.err != nil {
 			continue
 		}
+		commitChecks(state, outcome.state.checkWrites)
 		maps.Copy(state.Steps, selectedStepOutputs(outcome.state, []workflow.Step{steps[index]}))
 		for variable := range outcome.state.writtenVars {
 			state.Vars[variable] = cloneAny(outcome.state.Vars[variable])
 		}
 	}
+	state.checkWrites = nil
 	return state
 }
 
@@ -380,6 +382,7 @@ func commitConcurrentBranches(state *State, steps []workflow.Step, outcomes []co
 		if !outcome.started || outcome.state == nil {
 			continue
 		}
+		commitChecks(state, outcome.state.checkWrites)
 		maps.Copy(state.Steps, selectedStepOutputs(outcome.state, []workflow.Step{steps[i]}))
 		for _, variable := range slices.Sorted(maps.Keys(outcome.state.writtenVars)) {
 			state.Vars[variable] = cloneAny(outcome.state.Vars[variable])
@@ -401,7 +404,8 @@ func concurrentBranchLabel(declaration workflow.Step, index int) string {
 func cloneState(state *State) *State {
 	return &State{
 		Inputs: cloneMap(state.Inputs), Vars: cloneMap(state.Vars), Env: maps.Clone(state.Env), EnvironmentLoaders: slices.Clone(state.EnvironmentLoaders),
-		Steps: cloneMap(state.Steps), Outputs: cloneMap(state.Outputs), Dependencies: cloneDependencies(state.Dependencies), Providers: state.Providers.Clone(), Bindings: cloneMap(state.Bindings),
+		Checks: slices.Clone(state.Checks),
+		Steps:  cloneMap(state.Steps), Outputs: cloneMap(state.Outputs), Dependencies: cloneDependencies(state.Dependencies), Providers: state.Providers.Clone(), Bindings: cloneMap(state.Bindings),
 		presetVars: state.presetVars,
 	}
 }

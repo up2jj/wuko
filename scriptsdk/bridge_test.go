@@ -106,6 +106,21 @@ func TestBridgeProtocolPreservesValuesAndStagesResults(t *testing.T) {
 	}
 }
 
+func TestBridgeChecksContextIsFrozen(t *testing.T) {
+	t.Parallel()
+	request := step.Request{Checks: []step.CheckFinding{{ID: "tool", Status: "fail", Message: "missing", Fix: "install"}}}
+	b := openBridge(t, request)
+	request.Checks[0].Status = "ok"
+	result := callBridge(t, b, "context", map[string]any{})
+	if result.Error != nil {
+		t.Fatal(result.Error)
+	}
+	findings := result.Result.(map[string]any)["checks"].([]any)
+	if len(findings) != 1 || findings[0].(map[string]any)["status"] != "fail" {
+		t.Fatalf("checks = %#v", findings)
+	}
+}
+
 func TestBridgeHelpersAndErrors(t *testing.T) {
 	b := openBridge(t, step.Request{
 		Secret: func(reference string) (string, error) { return "resolved:" + reference, nil },

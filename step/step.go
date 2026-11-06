@@ -76,6 +76,7 @@ type Request struct {
 	PresetVars map[string]any
 	Inputs     map[string]any
 	Env        map[string]string
+	Checks     []CheckFinding
 	Steps      map[string]any
 	// Dependencies contains outputs from direct prerequisite workflows keyed by alias.
 	Dependencies map[string]map[string]any
@@ -238,7 +239,7 @@ func (request Request) WorkflowValue() WorkflowValue {
 func (request Request) ExpressionEnvironment(extra map[string]any) map[string]any {
 	environment := map[string]any{
 		"inputs": request.Inputs, "vars": request.Vars, "env": request.Env,
-		"steps": request.Steps, "dependencies": request.Dependencies,
+		"steps": request.Steps, "dependencies": request.Dependencies, "checks": CheckValues(request.Checks),
 		"batch": map[string]any{}, "foreach": map[string]any{}, "matrix": map[string]any{},
 		"observe": map[string]any{}, "finally": map[string]any{}, "error": map[string]any{},
 		"workflow": request.WorkflowValue(), "run": request.RunValue(),
@@ -273,7 +274,7 @@ func (request Request) ExpressionEnvironment(extra map[string]any) map[string]an
 func ExpressionEnvironmentShape(extra map[string]any) map[string]any {
 	shape := map[string]any{
 		"inputs": map[string]any{}, "vars": map[string]any{}, "env": map[string]string{},
-		"steps": map[string]any{}, "dependencies": map[string]map[string]any{},
+		"steps": map[string]any{}, "dependencies": map[string]map[string]any{}, "checks": []map[string]string{},
 		"batch": map[string]any{}, "foreach": map[string]any{}, "matrix": map[string]any{},
 		"observe": map[string]any{}, "finally": map[string]any{}, "error": map[string]any{},
 		"workflow": WorkflowValue{}, "run": RunValue{},
@@ -293,6 +294,8 @@ func ExpressionEnvironmentShape(extra map[string]any) map[string]any {
 // shapes the cloner copies without reflection. A []map[string]any still works, but
 // convert it: every other step does, and it keeps the hot path free of reflect.
 type Result struct {
+	// Checks publishes findings only when the owning step or group commits successfully.
+	Checks    []CheckFinding
 	Outputs   map[string]any
 	Variables map[string]any
 	// Sensitive lists values the step returned that the host must redact wherever it reports

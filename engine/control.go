@@ -200,7 +200,11 @@ func (e *Engine) executeControl(ctx context.Context, definition *workflow.Defini
 		outputs["results"] = results
 	}
 	reportControlFinished(options, definition, workflowStep, kind, iterations, maxConcurrency, failFast, timeout, startedAt, startedIterations, succeededIterations, nil)
-	outcome.result = step.Result{Outputs: outputs}
+	var checks []step.CheckFinding
+	for _, item := range outcomes {
+		checks = append(checks, item.Value.state.checkWrites...)
+	}
+	outcome.result = step.Result{Outputs: outputs, Checks: checks}
 	finish(StatusSucceeded, nil, iterationStats, nested)
 	return outcome
 }

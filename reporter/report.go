@@ -13,6 +13,7 @@ import (
 	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/engine"
 	"github.com/up2jj/wuko/internal/fsutil"
+	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/validation"
 )
 
@@ -23,6 +24,7 @@ const ExecutionReportSchemaVersion = 2
 // It excludes errors, inputs, and environment. Step outputs and variables appear only when the
 // JSON writer was asked to include them, redacted and size-limited.
 type ExecutionReport struct {
+	Checks           []step.CheckFinding      `json:"checks,omitempty"`
 	SchemaVersion    int                      `json:"schema_version"`
 	InvocationID     correlation.InvocationID `json:"invocation_id"`
 	RunID            correlation.RunID        `json:"run_id,omitempty"`
@@ -76,6 +78,7 @@ func NewExecutionReport(outcome Outcome) ExecutionReport {
 		}
 	}
 	report := ExecutionReport{
+		Checks:        append([]step.CheckFinding(nil), outcome.Checks...),
 		SchemaVersion: ExecutionReportSchemaVersion,
 		InvocationID:  outcome.InvocationID,
 		RunID:         outcome.RunID,

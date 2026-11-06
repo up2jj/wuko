@@ -1162,6 +1162,11 @@ for example, GitHub summaries omit quiet successful rows and hidden skipped rows
 failure details and complete aggregate statistics. The engine and reporting session still deliver
 every event. Canonical JSON reports retain their full data and existing schema.
 
+Collected [`check`](steps-data.md#check) findings appear in the optional `checks` array of JSON
+reports, including failed runs. Records contain `id`, `status`, `message`, and `fix`; they are
+redacted independently of `--report-json-include`. Check failures affect the workflow status
+without counting the successful `check` step as an execution failure.
+
 Use `--report-json PATH` independently of the selected reporters to write the canonical execution
 report when the invocation finishes. Relative paths are resolved from the invocation directory,
 the parent directory must exist, and the destination is atomically replaced with a private

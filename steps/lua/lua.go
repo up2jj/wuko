@@ -219,6 +219,7 @@ func (r *runtime) module(state *glua.LState) (*glua.LTable, error) {
 	module.RawSetString("args", args)
 	run := r.request.RunValue()
 	for name, value := range map[string]any{
+		"checks":       step.CheckValues(r.request.Checks),
 		"inputs":       r.request.Inputs,
 		"steps":        r.request.Steps,
 		"dependencies": r.request.Dependencies,

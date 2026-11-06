@@ -58,7 +58,8 @@ func (e *Engine) validateAction(ctx context.Context, definition *workflow.Defini
 	return e.Validate(ctx, inner, Options{
 		InvocationID:  options.InvocationID,
 		quietOverride: options.quietOverride, quiet: options.quiet,
-		inputs: inputs, BaseEnv: state.Env, EnvironmentLoaders: slices.Clone(state.EnvironmentLoaders), RunDir: options.RunDir, Providers: state.Providers.Clone(),
+		initialChecks: state.Checks,
+		inputs:        inputs, BaseEnv: state.Env, EnvironmentLoaders: slices.Clone(state.EnvironmentLoaders), RunDir: options.RunDir, Providers: state.Providers.Clone(),
 		LocalValueDir: actionLocalValueDir(workflowStep, options), GlobalValueDir: options.GlobalValueDir,
 		ElevatedExecutor: options.ElevatedExecutor, ElevationAllowed: actionElevationAllowed(workflowStep, options),
 		Stdin: options.Stdin, Stdout: options.Stdout, Stderr: options.Stderr, Interactive: options.Interactive, Prompts: options.Prompts,
@@ -95,7 +96,8 @@ func (e *Engine) prepareActionExecutor(definition *workflow.Definition, workflow
 		innerState, err := e.Run(ctx, inner, Options{
 			InvocationID:  options.InvocationID,
 			quietOverride: options.quietOverride, quiet: options.quiet,
-			inputs: inputs, BaseEnv: state.Env, EnvironmentLoaders: slices.Clone(state.EnvironmentLoaders), RunDir: options.RunDir, Providers: state.Providers.Clone(),
+			initialChecks: state.Checks,
+			inputs:        inputs, BaseEnv: state.Env, EnvironmentLoaders: slices.Clone(state.EnvironmentLoaders), RunDir: options.RunDir, Providers: state.Providers.Clone(),
 			LocalValueDir: actionLocalValueDir(workflowStep, options), GlobalValueDir: options.GlobalValueDir,
 			ElevatedExecutor: options.ElevatedExecutor, ElevationAllowed: actionElevationAllowed(workflowStep, options),
 			Stdin: options.Stdin, Stdout: options.Stdout, Stderr: options.Stderr,
@@ -113,9 +115,9 @@ func (e *Engine) prepareActionExecutor(definition *workflow.Definition, workflow
 			return step.Result{}, err
 		}
 		if innerState.didReturn {
-			return step.Result{Outputs: cloneMap(innerState.Outputs)}, nil
+			return step.Result{Outputs: cloneMap(innerState.Outputs), Checks: innerState.checkWrites}, nil
 		}
-		environment := map[string]any{"inputs": innerState.Inputs, "vars": innerState.Vars, "steps": innerState.Steps, "env": innerState.Env, "workflow": map[string]any{"name": inner.Name, "dir": inner.Dir, "timezone": inner.Timezone}, "run": step.RunValue{Dir: options.RunDir, EnvironmentLoaders: slices.Clone(state.EnvironmentLoaders), OS: runtime.GOOS, Arch: runtime.GOARCH, Interactive: options.Interactive}}
+		environment := map[string]any{"checks": step.CheckValues(innerState.Checks), "inputs": innerState.Inputs, "vars": innerState.Vars, "steps": innerState.Steps, "env": innerState.Env, "workflow": map[string]any{"name": inner.Name, "dir": inner.Dir, "timezone": inner.Timezone}, "run": step.RunValue{Dir: options.RunDir, EnvironmentLoaders: slices.Clone(state.EnvironmentLoaders), OS: runtime.GOOS, Arch: runtime.GOARCH, Interactive: options.Interactive}}
 		for name, value := range innerState.Providers.Values {
 			environment[name] = cloneMap(value)
 		}
@@ -139,7 +141,7 @@ func (e *Engine) prepareActionExecutor(definition *workflow.Definition, workflow
 			outputs[name] = cloneAny(value)
 		}
 		traceStep(options, definition, workflowStep, diagnostic.PhaseActionOutputs, diagnostic.StatusSucceeded, outputsStarted, "", nil, diagnostic.Attr("outputs", fmt.Sprint(len(outputs))))
-		return step.Result{Outputs: outputs}, nil
+		return step.Result{Outputs: outputs, Checks: innerState.checkWrites}, nil
 	}
 	return execute, cleanup, nil
 }

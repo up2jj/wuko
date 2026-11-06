@@ -154,6 +154,7 @@ type Options struct {
 	workflowInvoker     WorkflowInvoker
 	workflowEnvironment *workflowInvocationEnvironment
 	initialState        *State
+	initialChecks       []step.CheckFinding
 	// openParentReferences relaxes variable reference checks for inline callbacks validated
 	// before the enclosing workflow has run: earlier steps may still write variables.
 	openParentReferences bool
@@ -175,6 +176,7 @@ type Options struct {
 // completed ancestor deltas without sharing the mutable State itself. The validation rules that keep this true live
 // in validateSteps in workflow/types.go.
 type State struct {
+	Checks             []step.CheckFinding
 	Inputs             map[string]any
 	Vars               map[string]any
 	Env                map[string]string
@@ -194,6 +196,7 @@ type State struct {
 	Replaced bool
 	// presetVars is the variable set the run started with. It is fixed once the run
 	// begins and shared by every derived state, so it is never mutated.
+	checkWrites []step.CheckFinding
 	presetVars  map[string]any
 	writtenVars map[string]struct{}
 	returning   bool
@@ -306,10 +309,15 @@ func (e *Engine) run(ctx context.Context, definition *workflow.Definition, optio
 		if options.CaptureValues && options.depth == 0 {
 			values = captureRunValues(state, options.runtime.sensitive.snapshot(), options.secretSession)
 		}
+		var checks []step.CheckFinding
+		if rootRun {
+			checks = reportedChecks(ownChecks(state), options)
+		}
 		report(options, ProgressEvent{
 			Kind: WorkflowFinished, Status: status, Time: finishedAt,
 			WorkflowName: definition.Name, Depth: options.depth, Total: total,
 			Duration: stats.Duration, Error: runErr, Stats: stats, Values: values,
+			Checks:        checks,
 			ChildWorkflow: childWorkflow, Replaced: runErr == nil && rootRun && options.runtime.replaced.Load(),
 		})
 	}()
@@ -331,9 +339,15 @@ func (e *Engine) run(ctx context.Context, definition *workflow.Definition, optio
 		mainErr = joinBackgroundError(mainErr, backgroundErr)
 	}
 	cleanupCtx := context.WithoutCancel(ctx)
-	cleanupErrors := e.executeCleanupScope(cleanupCtx, definition, options.defers, definition.Finally, options, state, &stats, mainErr, stats.Steps, mainTotal+1, total)
+	// Only the run that owns the exit decision presents pending check failures to its finally.
+	cleanupErr := mainErr
+	if cleanupErr == nil && rootRun {
+		cleanupErr = checkFailure(ownChecks(state))
+	}
+	cleanupErrors := e.executeCleanupScope(cleanupCtx, definition, options.defers, definition.Finally, options, state, &stats, cleanupErr, stats.Steps, mainTotal+1, total)
 	if rootRun {
 		cleanupErrors = append(cleanupErrors, options.runtime.cleanups.run(cleanupCtx)...)
+		cleanupErrors = append(cleanupErrors, checkFailure(ownChecks(state)))
 	}
 	runErr = errors.Join(append([]error{mainErr}, cleanupErrors...)...)
 	if runErr != nil {
@@ -891,6 +905,7 @@ func runContained(ctx context.Context, runner step.Runner, request step.Request)
 }
 
 func commitStepResult(state *State, stepID string, result step.Result) {
+	commitChecks(state, result.Checks)
 	if result.Outputs == nil {
 		result.Outputs = make(map[string]any)
 	}
@@ -945,6 +960,7 @@ func initialState(definition *workflow.Definition, options Options) (*State, err
 		return nil, err
 	}
 	return &State{
+		Checks: slices.Clone(options.initialChecks),
 		Inputs: cloneMap(options.inputs), Vars: vars, Env: environment, EnvironmentLoaders: slices.Clone(options.EnvironmentLoaders), Steps: make(map[string]any), Outputs: make(map[string]any),
 		Dependencies: cloneDependencies(options.Dependencies), Providers: options.Providers.Clone(), presetVars: cloneMap(vars),
 	}, nil
@@ -952,6 +968,7 @@ func initialState(definition *workflow.Definition, options Options) (*State, err
 
 func templateData(definition *workflow.Definition, runDir string, interactive bool, state *State) map[string]any {
 	data := workflow.TemplateDataWithProviders(definition, runDir, state.EnvironmentLoaders, interactive, state.Inputs, state.Vars, state.Env, state.Steps, state.Dependencies, state.Bindings, state.Providers)
+	data["checks"] = step.CheckValues(state.Checks)
 	for name, function := range definition.Helpers().Functions(definition.HelperContext()) {
 		data[name] = function
 	}
@@ -982,7 +999,8 @@ func (e *Engine) makeRequest(ctx context.Context, definition *workflow.Definitio
 		WorkflowDirBorrowed: definition.DirBorrowed, WorkflowTimezone: definition.Timezone,
 		RunDir: options.RunDir, EnvironmentLoaders: slices.Clone(state.EnvironmentLoaders), LocalValueDir: options.LocalValueDir, GlobalValueDir: options.GlobalValueDir,
 		Inputs: cloneMap(state.Inputs), Vars: cloneMap(state.Vars), PresetVars: cloneMap(state.presetVars), Env: maps.Clone(state.Env),
-		Steps: cloneMap(state.Steps), Dependencies: cloneDependencies(state.Dependencies), Providers: state.Providers.Clone(), Bindings: cloneMap(state.Bindings), Stdin: options.Stdin, Stdout: options.Stdout,
+		Checks: slices.Clone(state.Checks),
+		Steps:  cloneMap(state.Steps), Dependencies: cloneDependencies(state.Dependencies), Providers: state.Providers.Clone(), Bindings: cloneMap(state.Bindings), Stdin: options.Stdin, Stdout: options.Stdout,
 		Stderr: options.Stderr, Interactive: options.Interactive, Prompts: options.Prompts,
 		Attempt: attempt, MaxAttempts: maxAttempts, OperationID: operationID,
 		TemplateRenderer: newBoundTemplateRenderer(options.renderer, func() map[string]any {

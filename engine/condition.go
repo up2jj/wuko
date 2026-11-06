@@ -41,7 +41,7 @@ func (e *Engine) evaluateCondition(condition workflow.Condition, environment con
 func (e *Engine) conditionEnvironmentShape() conditionEnvironment {
 	shape := conditionEnvironment{
 		"inputs": map[string]any{}, "vars": map[string]any{}, "env": map[string]string{},
-		"steps": map[string]any{}, "dependencies": map[string]map[string]any{},
+		"steps": map[string]any{}, "dependencies": map[string]map[string]any{}, "checks": []map[string]string{},
 		"batch": map[string]any{}, "foreach": map[string]any{}, "matrix": map[string]any{},
 		"finally": map[string]any{}, "error": map[string]any{},
 		"workflow": step.WorkflowValue{}, "run": step.RunValue{},
@@ -67,6 +67,7 @@ func evaluateConditionProgram(program *vm.Program, environment conditionEnvironm
 
 func makeConditionEnvironment(definition *workflow.Definition, runDir string, interactive bool, state *State) conditionEnvironment {
 	environment := conditionEnvironment{
+		"checks":       step.CheckValues(state.Checks),
 		"inputs":       state.Inputs,
 		"vars":         state.Vars,
 		"env":          state.Env,

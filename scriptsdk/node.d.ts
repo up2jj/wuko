@@ -6,6 +6,7 @@ export interface WukoSDK {
   readonly args: Readonly<JSONObject>;
   readonly vars: Readonly<JSONObject>;
   readonly inputs: Readonly<JSONObject>;
+  readonly checks: readonly Readonly<{ id: string; status: "ok" | "warn" | "fail"; message: string; fix: string }>[];
   readonly steps: Readonly<JSONObject>;
   readonly dependencies: Readonly<JSONObject>;
   readonly env: Readonly<Record<string, string>>;

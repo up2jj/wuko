@@ -20,6 +20,7 @@ import (
 	"github.com/up2jj/wuko/diagnostic"
 	"github.com/up2jj/wuko/engine"
 	reporterpkg "github.com/up2jj/wuko/reporter"
+	"github.com/up2jj/wuko/step"
 	"github.com/up2jj/wuko/useroutput"
 	"github.com/up2jj/wuko/validation"
 	"github.com/up2jj/wuko/workflow"
@@ -169,11 +170,14 @@ func (reporter *Reporter) Finish(_ context.Context, outcome reporterpkg.Outcome)
 	}
 	reportedOutcome := outcome
 	reportedOutcome.Stats = stats
+	if redacted {
+		reportedOutcome.Checks = slices.Clone(reporter.finished.Checks)
+	}
 	var finishErrors []error
 	if err := reporter.writeOutputs(reportedOutcome); err != nil {
 		finishErrors = append(finishErrors, err)
 	}
-	if err := reporter.writeSummary(outcome, stats, redacted); err != nil {
+	if err := reporter.writeSummary(reportedOutcome, stats, redacted); err != nil {
 		finishErrors = append(finishErrors, err)
 	}
 	if reporter.commandErr != nil {
@@ -409,6 +413,7 @@ func (reporter *Reporter) writeSummary(outcome reporterpkg.Outcome, stats engine
 	if len(stats.Steps) > 0 {
 		summary += reporter.stepSummary(stats, redacted)
 	}
+	summary += checkSummary(outcome.Checks)
 	file, err := os.OpenFile(reporter.summaryPath, os.O_WRONLY|os.O_APPEND, 0)
 	if err != nil {
 		return fmt.Errorf("opening GITHUB_STEP_SUMMARY file %s: %w", reporter.summaryPath, err)
@@ -421,6 +426,34 @@ func (reporter *Reporter) writeSummary(outcome reporterpkg.Outcome, stats engine
 		return fmt.Errorf("closing GITHUB_STEP_SUMMARY file %s: %w", reporter.summaryPath, err)
 	}
 	return nil
+}
+
+func checkSummary(findings []step.CheckFinding) string {
+	cell := func(value string) string {
+		return strings.ReplaceAll(strings.ReplaceAll(html.EscapeString(value), "|", "&#124;"), "\n", "<br>")
+	}
+	var summary strings.Builder
+	for _, group := range []struct{ status, title string }{{"fail", "Failed checks"}, {"warn", "Warnings"}, {"ok", "Passed checks"}} {
+		heading := false
+		for _, finding := range findings {
+			if finding.Status != group.status {
+				continue
+			}
+			if !heading {
+				fmt.Fprintf(&summary, "#### %s\n\n| Check | Message | Fix |\n| --- | --- | --- |\n", group.title)
+				heading = true
+			}
+			message, fix := "", ""
+			if finding.Status != "ok" {
+				message, fix = finding.Message, finding.Fix
+			}
+			fmt.Fprintf(&summary, "| <code>%s</code> | <code>%s</code> | <code>%s</code> |\n", cell(finding.ID), cell(message), cell(fix))
+		}
+		if heading {
+			summary.WriteString("\n")
+		}
+	}
+	return summary.String()
 }
 
 // stepSummary renders the recorded steps. Redacted reports whether stats came from the engine's

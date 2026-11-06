@@ -25,6 +25,7 @@ var builtinBindingRules = map[string]stepBindingRules{
 	"assert":  {owned: under("message")},
 	"cache":   {},
 	"changed": {},
+	"check":   {},
 	"dashboard": {
 		owned: func(path []string) bool {
 			return slices.ContainsFunc(path, func(component string) bool {
