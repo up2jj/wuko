@@ -1,11 +1,8 @@
 package workflow
 
 import (
-	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/up2jj/wuko/internal/testfs"
 )
 
 func TestValidateStandaloneRejectsDirectoryDependencies(t *testing.T) {
@@ -19,13 +16,13 @@ func TestValidateStandaloneRejectsDirectoryDependencies(t *testing.T) {
 		{name: "required files", source: "version: 1\nrequire:\n  - helper.sh\n", want: "required step files"},
 		{name: "file template", source: "version: 1\n", definition: Definition{Templates: map[string]TemplateDefinition{"banner": {File: "banner.tmpl"}}}, want: `file-backed template "banner"`},
 		{name: "nested local action", source: "version: 1\n", definition: Definition{Steps: []Step{{ID: "group", Concurrent: &ConcurrentGroup{Steps: []Step{{ID: "build", Uses: ActionSource{Path: "./actions/build"}}}}}}}, want: `local action "./actions/build"`},
+		{name: "relative step script", source: "version: 1\n", definition: Definition{Steps: []Step{{ID: "build", Type: "shell", With: map[string]any{"script": "./build.sh"}}}}, want: `relative shell script "./build.sh"`},
+		{name: "relative finally script", source: "version: 1\n", definition: Definition{Finally: []Step{{ID: "clean", Type: "shell", With: map[string]any{"script": "scripts/clean.sh"}}}}, want: `relative shell script "scripts/clean.sh"`},
 		{name: "relative lifecycle script", source: "version: 1\n", definition: Definition{Install: []Step{{ID: "setup", Type: "shell", With: map[string]any{"script": "./setup.sh"}}}}, want: `relative lifecycle script "./setup.sh"`},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "workflow.yaml")
-			testfs.WriteFile(t, path, []byte(test.source), 0o644)
-			err := ValidateStandalone(path, &test.definition)
+			err := ValidateStandalone([]byte(test.source), &test.definition)
 			if test.want == "" {
 				if err != nil {
 					t.Fatal(err)

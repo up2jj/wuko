@@ -355,21 +355,92 @@ Add the shim directory to `PATH` once; `wuko shim install` prints the line when 
 export PATH="$HOME/.wuko/bin:$PATH"
 ```
 
-A discovered `NAME` or `--file` is pinned to its absolute path when you install, so the shim
+A discovered `NAME` or `--file` is pinned to its absolute path when you create or install, so the shim
 works from any directory and keeps working if another project defines a workflow of the same
 name. `--by-name` defers discovery to the directory the shim runs in, which suits a command such
-as `wcheck` that runs each project's own `check`. Remote locators always need `--as`; pin them to a
-tag or commit for reproducible shims.
+as `wcheck` that runs each project's own `check`. Remote locators need `--as` unless `create --output PATH`
+supplies a filename; pin them to a tag or commit for reproducible shims.
 
 The shim calls `wuko run` from `PATH`, so it keeps working after upgrades that move the binary.
 Arguments after `--` are `wuko run` flags placed before the shim's own arguments, which `wuko run`
 receives unchanged: `deploy-staging --dry-run` and `check --var package=./cmd/...` work as usual.
-Baked flags are checked when you install. The workflow runs in the directory you call the shim
+Baked flags are checked when you create or install. The workflow runs in the directory you call the shim
 from, and that directory's `wuko.yml` applies unless the shim bakes in `--no-config`.
 
-`--dir` selects another directory for every `shim` subcommand. Reinstalling a shim requires
-`--force`. Install and uninstall never replace or remove a file that Wuko did not generate, and
+`--dir` selects another directory for `install`, `list`, and `uninstall`. Replacing a shim requires
+`--force`. Create, install, and uninstall never replace or remove a file that Wuko did not generate, and
 `wuko shim list` marks a shim whose pinned workflow file no longer exists.
+
+### Local shims
+
+Generate a local executable without installing it or configuring PATH:
+
+```sh
+wuko shim create check                          # creates ./check
+./check --dry-run
+wuko shim create deploy staging                 # creates ./deploy-staging
+wuko shim create --file ./release.yaml --as ship # creates ./ship
+wuko shim create check --output ./bin/wcheck     # creates executable ./bin/wcheck
+wuko shim create check --output -                # prints only the script to stdout
+wuko shim create lint -- --no-config --var strict=true
+```
+
+Names come from the discovered workflow name or the file's stem, with `-TARGET` appended
+when supplied. `--as` overrides that name. With `--output PATH`, the output filename supplies
+the name instead; `--as` may be supplied only if it matches. Invalid names, including `wuko`,
+are rejected. Parent directories for an explicit output path are created as needed.
+
+Local sources are recorded as absolute paths. A generated script refers to this machine's
+workflow or project; regenerate it after moving the source or cloning elsewhere.
+Existing scripts require `--force` to replace, and files, directories, or symlinks that Wuko
+did not generate are left untouched.
+
+Generated scripts report installation instructions and exit with status 127 if Wuko is
+missing from PATH. Customize that message when creating a script:
+
+```sh
+wuko shim create check --force --missing-message 'Install project tools with: mise install'
+```
+
+The metadata marker lets the existing commands recognize local shims:
+
+```sh
+wuko shim list --dir .
+wuko shim uninstall check --dir .
+```
+
+### Inline workflow shims
+
+Use `--inline` to embed a snapshot of a local workflow in the generated script:
+
+```sh
+wuko shim create check --inline
+wuko shim create --file ./release.yaml staging --inline --output ./ship
+wuko shim create check --inline --output "$HOME/.local/bin/check"
+```
+
+The script contains the YAML and runs even after the source YAML is deleted. Source edits
+take effect only after regenerating with `--force`. Both discovered workflows and `--file`
+are supported, along with targets, baked flags, and `create --output -`. Inline mode cannot
+be combined with `--project`, `--by-name`, or remote workflow locators.
+
+An inline shim keeps the **caller's current directory** as its working directory, including
+when created in a directory on PATH and invoked by name:
+
+```sh
+wuko shim create check --inline --output "$HOME/.local/bin/check"
+cd /path/to/another-project
+check                            # steps run in /path/to/another-project
+```
+
+Stdin remains available to steps and interactive prompts. Only the YAML is embedded, so the
+workflow must be standalone, as for `wuko install`: creation refuses required step files,
+file-backed templates, local actions, and relative shell scripts. Shim the
+workflow file without `--inline` when it needs them. `.workflow.dir` is the directory of the
+script (after resolving a symlink); plain relative paths used by steps resolve from the
+caller's directory.
+Wuko reads the embedded workflow directly from the script without a temporary YAML file.
+`shim list` labels these entries `inline` and does not report their original source as missing.
 
 ### Project shims
 
@@ -394,12 +465,25 @@ pass an absolute path for a file elsewhere. Normal discovery includes parent and
 workflows. Workflow edits take effect immediately; moving the project requires reinstalling
 with `--project NEW_PATH --as mytools --force`.
 
-Project mode requires `--as` and cannot be combined with a workflow selector, target, `--file`,
-`--by-name`, or baked flags after `--`. Pass workflow flags when invoking the installed command.
-The existing `--dir` and `--force` options work for both kinds of shim. `shim list` identifies
-project bindings and marks missing project workflow directories. Help retains Wuko branding;
+Both `create` and `install` infer the project shim name from the project directory's basename;
+`--as` is optional. For example, `wuko shim install --project ./automation` installs `automation`.
+Create a local entry point from inside a project, or choose an explicit filename:
+
+```sh
+wuko shim create --project .                     # creates ./<project-directory-name>
+wuko shim create --project ./automation --output ./dev
+./dev list
+./dev run deploy production
+```
+
+If the inferred output filename already names a directory, choose another name with
+`--as` or `--output`. Project mode cannot be combined with a workflow selector, target,
+`--file`, `--by-name`, or baked flags after `--`. Pass workflow flags when invoking the shim.
+The `--dir` option selects an install directory; `--force` works for both create and install.
+`shim list` identifies project bindings and marks missing project workflow directories. Help retains Wuko branding;
 completion registration under the custom command name is not installed automatically.
 
+Project creation leaves shell startup files and PATH ownership records unchanged.
 Project installations automatically append the shim directory to PATH for the shell identified
 by `SHELL`. Use `--shell bash`, `--shell zsh`, or `--shell fish` to choose a shell explicitly, or
 `--no-path` to leave startup files unchanged. Open a new shell after installation, or invoke

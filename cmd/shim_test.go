@@ -94,7 +94,6 @@ func TestShimInstallProjectRejectsInvalidInputBeforeWriting(t *testing.T) {
 		name string
 		args []string
 	}{
-		{"missing name", []string{"--project", ".", "--no-path"}},
 		{"empty project", []string{"--project", "", "--as", "tool", "--no-path"}},
 		{"missing project", []string{"--project", "missing", "--as", "tool", "--no-path"}},
 		{"workflow selector", []string{"--project", ".", "check", "--as", "tool", "--no-path"}},

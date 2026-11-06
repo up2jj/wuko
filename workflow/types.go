@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -16,6 +17,7 @@ import (
 	"github.com/up2jj/wuko/internal/yamlstrict"
 	workflowschedule "github.com/up2jj/wuko/schedule"
 	"github.com/up2jj/wuko/secret"
+	"github.com/up2jj/wuko/shim"
 	"github.com/up2jj/wuko/validation"
 	"go.yaml.in/yaml/v3"
 )
@@ -590,6 +592,23 @@ func loadLocalWithDiagnosticsAndHelpers(ctx context.Context, path string, report
 	if err != nil {
 		traceFinish(reporter, loadStarted, diagnostic.PhaseDecode, diagnostic.StatusFailed, diagnostic.Location{Source: displaySource}, "", "", "", "", err)
 		return nil, fmt.Errorf("reading workflow %s: %w", path, err)
+	}
+	// Inline shims are executable workflow files. Decode their comment block while
+	// retaining the script's path, resolved through a symlink on PATH, as the base for
+	// workflow-relative resources.
+	if bytes.HasPrefix(data, []byte("#!")) {
+		content, inline, err := shim.InlineWorkflow(data)
+		if err != nil {
+			return nil, fmt.Errorf("reading inline workflow %s: %w", path, err)
+		}
+		if inline {
+			data = content
+			if info, err := os.Lstat(path); err == nil && info.Mode()&os.ModeSymlink != 0 {
+				if path, err = filepath.EvalSymlinks(path); err != nil {
+					return nil, fmt.Errorf("resolving inline workflow %s: %w", displaySource, err)
+				}
+			}
+		}
 	}
 	return decodeWorkflowData(data, workflowDecodeSource{
 		path: path, display: displaySource, sourceRoot: sourceRoot, sourceLabel: sourceLabel,

@@ -2,65 +2,66 @@ package workflow
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
 )
 
-// ValidateStandalone checks that the workflow at path can be installed as a single file. An
-// installed copy loses its directory, so it may not depend on required step files, file-backed
-// templates, local actions or relative scripts that would be left behind.
-func ValidateStandalone(path string, definition *Definition) error {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return fmt.Errorf("reading workflow source %s: %w", path, err)
-	}
+// ValidateStandalone checks that a workflow, given as its source YAML and decoded definition,
+// works as a single file. A copy loses its directory, so it may not depend on required step
+// files, file-backed templates, local actions or relative scripts that would be left behind.
+func ValidateStandalone(data []byte, definition *Definition) error {
 	var document yaml.Node
 	if err := yaml.Unmarshal(data, &document); err != nil {
-		return fmt.Errorf("checking workflow source %s: %w", path, err)
+		return fmt.Errorf("checking workflow source: %w", err)
 	}
 	if yamlNodeHasKey(&document, "require") {
-		return fmt.Errorf("installing local workflow %s: standalone workflows cannot use required step files", path)
+		return fmt.Errorf("standalone workflows cannot use required step files")
 	}
 	for name, template := range definition.Templates {
 		if template.File != "" {
-			return fmt.Errorf("installing local workflow %s: standalone workflows cannot use file-backed template %q", path, name)
+			return fmt.Errorf("standalone workflows cannot use file-backed template %q", name)
 		}
 	}
 	if reference := localActionReference(definition.Steps); reference != "" {
-		return fmt.Errorf("installing local workflow %s: standalone workflows cannot use local action %q", path, reference)
+		return fmt.Errorf("standalone workflows cannot use local action %q", reference)
 	}
 	if reference := localActionReference(definition.Finally); reference != "" {
-		return fmt.Errorf("installing local workflow %s: standalone workflows cannot use local action %q", path, reference)
+		return fmt.Errorf("standalone workflows cannot use local action %q", reference)
 	}
 	for name, target := range definition.Targets {
 		if reference := localActionReference(target.Steps); reference != "" {
-			return fmt.Errorf("installing local workflow %s: target %q cannot use local action %q", path, name, reference)
+			return fmt.Errorf("target %q cannot use local action %q", name, reference)
 		}
 		if reference := localActionReference(target.Finally); reference != "" {
-			return fmt.Errorf("installing local workflow %s: target %q cannot use local action %q", path, name, reference)
+			return fmt.Errorf("target %q cannot use local action %q", name, reference)
 		}
 	}
 	if reference := localActionReference(definition.Install); reference != "" {
-		return fmt.Errorf("installing local workflow %s: standalone workflows cannot use local action %q", path, reference)
+		return fmt.Errorf("standalone workflows cannot use local action %q", reference)
 	}
 	if reference := localActionReference(definition.Uninstall); reference != "" {
-		return fmt.Errorf("installing local workflow %s: standalone workflows cannot use local action %q", path, reference)
+		return fmt.Errorf("standalone workflows cannot use local action %q", reference)
+	}
+	if script := relativeShellScript(definition.Steps); script != "" {
+		return fmt.Errorf("standalone workflows cannot use relative shell script %q", script)
+	}
+	if script := relativeShellScript(definition.Finally); script != "" {
+		return fmt.Errorf("standalone workflows cannot use relative shell script %q", script)
 	}
 	if script := relativeShellScript(definition.Install); script != "" {
-		return fmt.Errorf("installing local workflow %s: standalone workflows cannot use relative lifecycle script %q", path, script)
+		return fmt.Errorf("standalone workflows cannot use relative lifecycle script %q", script)
 	}
 	if script := relativeShellScript(definition.Uninstall); script != "" {
-		return fmt.Errorf("installing local workflow %s: standalone workflows cannot use relative lifecycle script %q", path, script)
+		return fmt.Errorf("standalone workflows cannot use relative lifecycle script %q", script)
 	}
 	for name, target := range definition.Targets {
 		if script := relativeShellScript(target.Steps); script != "" {
-			return fmt.Errorf("installing local workflow %s: target %q cannot use relative shell script %q", path, name, script)
+			return fmt.Errorf("target %q cannot use relative shell script %q", name, script)
 		}
 		if script := relativeShellScript(target.Finally); script != "" {
-			return fmt.Errorf("installing local workflow %s: target %q cannot use relative shell script %q", path, name, script)
+			return fmt.Errorf("target %q cannot use relative shell script %q", name, script)
 		}
 	}
 	return nil

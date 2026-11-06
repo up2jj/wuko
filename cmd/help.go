@@ -268,7 +268,8 @@ func commandBehavior(command *cobra.Command) string {
 		return "Writes a shell completion script to stdout. Does not load local configuration."
 	}
 	if behavior, ok := map[string]string{
-		" shim install":               "Writes an executable shell script to ~/.wuko/bin, or --dir, that calls wuko on PATH. A discovered NAME or --file is pinned to its absolute path; --by-name resolves NAME where the shim runs. Flags after -- are baked into workflow shims. --project DIR --as NAME binds the full CLI to a project and configures PATH for Bash, Zsh, or Fish unless --no-path is supplied. Refuses replacement without --force and never replaces a file Wuko did not generate. Does not run workflows.",
+		" shim create":                "Writes an executable shell script to ./NAME, or --output PATH; --output - writes only the script to stdout. Infers the name from the workflow, file stem, or project directory; --as overrides it, while an explicit output filename supplies the name. Local bindings use absolute paths; regenerate after moving the source. --inline embeds local YAML; steps keep the caller's working directory and workflow resources resolve beside the script. --by-name discovers NAME where the shim runs. Flags after -- are checked and baked into workflow shims. Does not configure PATH or run workflows. Requires --force to replace a Wuko shim and leaves other files untouched. --missing-message customizes the generated script's missing-Wuko diagnostic.",
+		" shim install":               "Writes an executable shell script to ~/.wuko/bin, or --dir, that calls wuko on PATH. A discovered NAME or --file is pinned to its absolute path; --by-name resolves NAME where the shim runs. Flags after -- are baked into workflow shims. --project DIR binds the full CLI to a project, infers the command name from its directory unless --as is supplied, and configures PATH for Bash, Zsh, or Fish unless --no-path is supplied. Refuses replacement without --force and never replaces a file Wuko did not generate. Does not run workflows.",
 		" shim list":                  "Lists Wuko shims in ~/.wuko/bin, or --dir, with their workflow or project binding. Marks missing workflow files and project workflow directories. Ignores other files. Does not run workflows.",
 		" agent install":              "Installs the bundled skills into the selected available agent's skill directory. Omitting AGENT installs for all supported agents found on PATH. Writes an installation summary to stdout.",
 		" install":                    "Installs a workflow into the local directory or the home-global directory with --global. Marketplace sources may prompt for package selection; repeated --package flags select packages explicitly. Installation can run declared workflow lifecycle steps.",
@@ -317,7 +318,8 @@ func commandExamples(command *cobra.Command) []string {
 		"git hook uninstall": {"wuko git hook uninstall pre-commit"},
 		"git hook status":    {"wuko git hook status"}, "git hook run": {"wuko git hook run pre-commit"},
 		"completion":   {"wuko completion bash", "wuko completion zsh"},
-		"shim":         {"wuko shim install check", "wuko shim install --project ./automation --as mytools", "wuko shim list"},
+		"shim":         {"wuko shim create check", "wuko shim install check", "wuko shim install --project ./automation", "wuko shim list"},
+		"shim create":  {"wuko shim create check", "wuko shim create check --inline", "wuko shim create --project . --output ./dev", "wuko shim create --file ./release.yaml staging --output ./ship", "wuko shim create check --output -"},
 		"shim install": {"wuko shim install check", "wuko shim install deploy staging --as deploy-staging", "wuko shim install lint -- --no-config", "wuko shim install --project ./automation --as mytools"},
 		"shim list":    {"wuko shim list"}, "shim uninstall": {"wuko shim uninstall check"},
 	}

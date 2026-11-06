@@ -276,9 +276,9 @@ func prepareInstallSource(command *cobra.Command, deps dependencies, invocation 
 		return nil, fmt.Errorf("reading workflow source %s: %w", sourceDefinition.Path, err)
 	}
 	if !workflow.IsRemoteLocator(source) {
-		if err := workflow.ValidateStandalone(sourceDefinition.Path, sourceDefinition); err != nil {
+		if err := workflow.ValidateStandalone(data, sourceDefinition); err != nil {
 			cleanup()
-			return nil, err
+			return nil, fmt.Errorf("installing local workflow %s: %w", sourceDefinition.Path, err)
 		}
 	}
 	return &preparedInstallSource{definition: sourceDefinition, data: data, cleanup: cleanup, source: source, elevationAllowed: !workflow.IsRemoteLocator(source)}, nil
